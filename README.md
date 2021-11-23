@@ -15,3 +15,8 @@ The conda environment file is created with:
 conda env export --from-history > conda/tf26_usbmd.yml
 ```
 the use of the `--from-history` flag leaves out dependencies and creates a cleaner export file.  Also, the environment file will work across different platforms as a result of this.
+
+## Documentation
+In order to document the code properly, please follow [these](docs/example_google_docstrings.py) docstring style guides when adding code to the repository.
+
+In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
