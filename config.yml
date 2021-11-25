@@ -1,0 +1,16 @@
+model:
+  beamformer:
+    type: 'das'
+data:
+  file_path: null
+  local: false
+  dataset_name: 'PICMUS'
+  dtype: 'iq'
+  demodulate: false
+  
+device:
+  cuda: true
+  gpu_ids: [null]
+
+plot:
+  save: true
