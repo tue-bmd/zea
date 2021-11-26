@@ -1,6 +1,24 @@
 # Ultrasound-BMd
 Collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
 
+## Datastructure
+This repository can support multiply datastructures [TODO: insert which], but the preferred way makes use of the `hdf5` file format and is structured as follows:
+```
+data_file.hdf5                [unit], [array shape] 
+└── US
+    ├── data
+    │   ├── real              [-], [n_angles, n_elem, n_ax]
+    │   └── imag              [-], [n_angles, n_elem, n_ax] 
+    │	
+    ├── angles                [m], [n_angles]
+    ├── initial_time          [s]
+    ├── modulation_frequency  [Hz] 
+    ├── probe_geometry        [m], [n_elem, 3]
+    ├── sampling_frequency    [Hz]
+    ├── sound_speed           [m/s]
+    ├── PRF (optional)        [Hz]
+    └── ... (other optional parameters)
+```
 
 ## Environment
 Install anaconda from [here](https://www.anaconda.com/products/individual#windows).
