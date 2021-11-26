@@ -20,6 +20,10 @@ data_file.hdf5                [unit], [array shape]
     └── ... (other optional parameters)
 ```
 
+## Data paths
+In order to use this repository and point to the correct data paths, you can enter the location of your dataset in the [`common.py`](common.py) file. It is possible to add multiple devices / platforms per user by means of if statements.
+The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
+
 ## Environment
 Install anaconda from [here](https://www.anaconda.com/products/individual#windows).
 
