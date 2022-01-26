@@ -3,14 +3,12 @@ model:
     type: 'das'
 data:
   file_path: null
-  local: false
-  dataset_name: 'PICMUS'
+  local: true
+  dataset_name: 'verasonics'
   dtype: 'iq'
   demodulate: false
   
-device:
-  cuda: true
-  gpu_ids: [null]
+device: 'gpu'
 
 plot:
   save: true
