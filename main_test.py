@@ -1,9 +1,8 @@
 import tensorflow as tf
 import numpy as np
+
+import importlib
 import tensorflow_ultrasound as tfu
-
-
-
 
 
 
@@ -43,7 +42,7 @@ ui = tfu.dataloader.DataLoaderUI(cfg)
 
 
 #create GPU model for training
-model = tfu.models.ABLE.get_model(cfg)
+model = tfu.models.DAS.get_model(cfg)
 
 # Create separate cpu model for "full size" inference, to save GPU memory
 with tf.device():
