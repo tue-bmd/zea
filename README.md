@@ -19,6 +19,14 @@ data_file.hdf5                [unit], [array shape]
     ├── PRF (optional)        [Hz]
     └── ... (other optional parameters)
 ```
+## Data flow
+The following terminology is used in the code when referring to different data types.
+- `raw_data` --> The raw channel data, storing the time-samples from each distinct ultrasound transducer.
+- `aligned_data` --> Time-of-flight (TOF) corrected data. This is the data that is time aligned with respect to the array geometry.
+- `beamformed_data` --> Beamformed or also known as beamsummed data. Aligned data is coherently summed together along the elements. The data has now been transformed from the aperture domain to the spatial domain.
+- `envelope_data` --> The envelope of the signal is here detected and the center frequency is removed from the signal.
+- `image` --> After log compression of the envelope data, the image is formed.
+- `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
 
 ## Data paths
 In order to use this repository and point to the correct data paths, you can enter the location of your dataset in the [`common.py`](common.py) file. It is possible to add multiple devices / platforms per user by means of if statements.
