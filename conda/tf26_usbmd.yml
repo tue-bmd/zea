@@ -2,7 +2,6 @@ name: tf26_usbmd
 channels:
   - defaults
 dependencies:
-  - spyder
   - matplotlib
   - numpy
   - scipy
@@ -10,6 +9,7 @@ dependencies:
   - scikit-image
   - hdf5
   - pandas
+  - pip
   - pip:
     - tensorflow-gpu==2.6.0
     - keras==2.6.0
