@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 
 # make sure you have Pip installed usbmd (see README)
 import usbmd.tensorflow_ultrasound as usbmd_tf
@@ -27,11 +28,16 @@ try:
 except ValueError:
     print(f'Dataset already exists in {destination_folder}')
 
+RUN_EAGERLY = True # for debugging set to true
+image_shape = (1249, 387)
+epochs = 10
+learning_rate = 0.001
+
 # initiate dataloader
 dataloader = DataLoader(
     destination_folder,
     batch_size=1,
-    image_shape=(1249, 387),
+    image_shape=image_shape,
     shuffle=True,
 )
 
@@ -51,5 +57,13 @@ dataset.probe = probe
 dataset.plot(image, image_range=dataloader.normalization, save=False)
 
 
-model = lista.Unfolding_model((64, 64))
+model = lista.Unfolding_model(image_shape)
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+    loss='mse',
+    run_eagerly=RUN_EAGERLY,
+)
+
 model.summary()
+
+model.fit(dataloader, epochs=epochs)
