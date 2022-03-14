@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 
 # make sure you have Pip installed usbmd (see README)
 import usbmd.tensorflow_ultrasound as usbmd_tf
@@ -6,11 +7,12 @@ from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.tensorflow_ultrasound.dataloader import (
     setup, get_dataset, get_probe, DataLoader, GenerateDataSet,
 )
+from usbmd.tensorflow_ultrasound.models import lista
 
 # choose gpu
 set_gpu_usage(gpu_ids=0)
 
-# choose config file
+# # choose config file
 path_to_config_file = 'configs/config_picmus.yml'
 config = setup(path_to_config_file)
 
@@ -18,19 +20,24 @@ config = setup(path_to_config_file)
 destination_folder = 'D:/data/ultrasound/PICMUS/picmus_image'
 try:
     gen = GenerateDataSet(
-        config, 
-        destination_folder=destination_folder, 
+        config,
+        destination_folder=destination_folder,
         retain_folder_structure=False,
     )
     gen.generate()
 except ValueError:
     print(f'Dataset already exists in {destination_folder}')
 
+RUN_EAGERLY = True # for debugging set to true
+image_shape = (1249, 387)
+epochs = 10
+learning_rate = 0.001
+
 # initiate dataloader
 dataloader = DataLoader(
-    destination_folder, 
-    batch_size=1, 
-    image_shape=(1249, 387), 
+    destination_folder,
+    batch_size=1,
+    image_shape=image_shape,
     shuffle=True,
 )
 
@@ -49,8 +56,14 @@ dataset.probe = probe
 # plot image using dataset properties
 dataset.plot(image, image_range=dataloader.normalization, save=False)
 
-'''
-model = ...
-model.fit()
 
-'''
+model = lista.Unfolding_model(image_shape)
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+    loss='mse',
+    run_eagerly=RUN_EAGERLY,
+)
+
+model.summary()
+
+model.fit(dataloader, epochs=epochs)
