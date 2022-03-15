@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 # make sure you have Pip installed usbmd (see README)
 import usbmd.tensorflow_ultrasound as usbmd_tf
@@ -13,7 +14,7 @@ from usbmd.tensorflow_ultrasound.models import lista
 set_gpu_usage(gpu_ids=0)
 
 # # choose config file
-path_to_config_file = 'configs/config_picmus.yml'
+path_to_config_file = 'configs/config_picmus.yaml'
 config = setup(path_to_config_file)
 
 # generate image dataset from raw data
@@ -48,13 +49,9 @@ image = np.squeeze(batch[0])
 # get a dataset object for plotting
 dataset = get_dataset(config.data.dataset_name)(config=config.data)
 
-# ugly, probe should be defined in init somewhere probably
-# but probe is necessary for plot function currently
-probe = get_probe(config, dataset)
-dataset.probe = probe
-
-# plot image using dataset properties
-dataset.plot(image, image_range=dataloader.normalization, save=False)
+# plot image
+batch = dataloader[0]
+plt.imshow(np.squeeze(batch[0]), cmap='gray')
 
 
 model = lista.Unfolding_model(image_shape)
