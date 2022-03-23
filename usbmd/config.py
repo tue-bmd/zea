@@ -14,12 +14,13 @@ class Config(dict):
         super().__init__(dictionary)
 
         for key, value in self.items():
-            assert(key not in ['keys', 'values', 'items']), 'The configuration contains the following key {key} which is reserved already as a standard attribute of a dict.'
+            assert(key not in ['keys', 'values', 'items']), \
+                'The configuration contains the following key {key} which is '\
+                'reserved already as a standard attribute of a dict.'
             
             # Change the key: TODO: now only string keys are supported.
             # new_key = str(key).replace('-', '_')
             #self.update({new_key, self.pop(key)})
-            
             
             if isinstance(value, list) or isinstance(value, tuple):
                 detected_dict = 0
