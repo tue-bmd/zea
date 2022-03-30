@@ -29,12 +29,6 @@ To reproduce the environment on your own machine perform:
 conda env create -f conda/tf26_usbmd.yaml
 ```
 
-The conda environment file is created with:
-```bash
-conda env export --from-history > conda/tf26_usbmd.yaml
-```
-the use of the `--from-history` flag leaves out dependencies and creates a cleaner export file.  Also, the environment file will work across different platforms as a result of this.
-
 ## Data
 
 ### Data paths
@@ -59,6 +53,10 @@ data_file.hdf5                [unit], [array shape]
     ├── PRF (optional)        [Hz]
     └── ... (other optional parameters)
 ```
+
+### Data Flow Diagram
+![Data Flow](/diagrams_dataflow.png?raw=true "Data Flow")
+
 ### Data flow
 The following terminology is used in the code when referring to different data types.
 - `raw_data` --> The raw channel data, storing the time-samples from each distinct ultrasound transducer.
