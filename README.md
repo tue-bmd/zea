@@ -33,7 +33,7 @@ conda env create -f conda/tf26_usbmd.yaml
 ```
 
 ### Getting started
-In order to get started, you can run [`./usbmd/ui.py`](ui.py), which runs the "user interface" 
+In order to get started, you can run [`ui.py`](usbmd/ui.py), which runs the "user interface" 
 tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder. 
 Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image.
 
