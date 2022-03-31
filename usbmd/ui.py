@@ -87,9 +87,6 @@ class DataLoaderUI:
         
         data = self.dataset[file_idx]
         
-        # Extract relevant Tx's
-        data = data[self.probe.n_angles]
-        
         return data
     
     def plot(self, image, image_range=None, save=False):
