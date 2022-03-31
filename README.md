@@ -40,7 +40,7 @@ Second, you can navigate to the appropriate datafile (make sure it is in the dat
 ## Data
 
 ### Data paths
-In order to use this repository and point to the correct data paths, you can enter the location of your dataroot in the [`common.py`](common.py) file. It is possible to add multiple devices / platforms per user by means of if statements.
+In order to use this repository and point to the correct data paths, you can enter the location of your dataroot in the [`common.py`](usbmd/common.py) file. It is possible to add multiple devices / platforms per user by means of if statements.
 The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
 
 ### Datastructure
