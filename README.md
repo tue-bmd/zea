@@ -1,5 +1,8 @@
 # Ultrasound-BMd
-Collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
+Ultrasound-BMd (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
+The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox.
+
+In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 
 ## Table of contents
 * [Setup](#setup)
@@ -9,7 +12,7 @@ Collection of ultrasound tools (Python) such as beamforming code, visualization 
 ## Setup
 ### usbmd installation
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`Ultrasound-BMd`) where the `setup.py` file is located and run the following command from terminal:
+Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](setup.py) file is located and run the following command from terminal:
 ```bash
 python -m pip install -e .
 ```
@@ -28,6 +31,11 @@ To reproduce the environment on your own machine perform:
 ```bash
 conda env create -f conda/tf26_usbmd.yaml
 ```
+
+### Getting started
+In order to get started, you can run [`ui.py`](ui.py), which runs the "user interface" 
+tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder. 
+Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image.
 
 ## Data
 
@@ -68,5 +76,3 @@ The following terminology is used in the code when referring to different data t
 
 ## Documentation
 In order to document the code properly, please follow [these](docs/example_google_docstrings.py) docstring style guides when adding code to the repository.
-
-In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
