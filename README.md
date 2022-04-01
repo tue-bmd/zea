@@ -63,7 +63,7 @@ data_file.hdf5                [unit], [array shape]
 ```
 
 ### Data Flow Diagram
-![Data Flow](/diagrams_dataflow.png?raw=true "Data Flow")
+![Data Flow](docs/diagrams_dataflow.png?raw=true "Data Flow")
 
 ### Data flow
 The following terminology is used in the code when referring to different data types.
@@ -74,5 +74,5 @@ The following terminology is used in the code when referring to different data t
 - `image` --> After log compression of the envelope data, the image is formed.
 - `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
 
-## Documentation
-In order to document the code properly, please follow [these](docs/example_google_docstrings.py) docstring style guides when adding code to the repository.
+## How to contribute
+Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.

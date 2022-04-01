@@ -53,7 +53,7 @@ image = np.squeeze(batch[0])
 plt.figure()
 plt.imshow(image, cmap='gray')
 
-model = lista.Unfolding_model(image_shape)
+model = lista.UnfoldingModel(image_shape)
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
     loss='mse',
