@@ -1,12 +1,14 @@
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # make sure you have Pip installed usbmd (see README)
 import usbmd.tensorflow_ultrasound as usbmd_tf
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
+from usbmd.ui import setup
 from usbmd.tensorflow_ultrasound.dataloader import (
-    setup, get_dataset, get_probe, DataLoader, GenerateDataSet,
+    DataLoader, GenerateDataSet,
 )
 from usbmd.tensorflow_ultrasound.models import lista
 
@@ -18,7 +20,7 @@ path_to_config_file = 'configs/config_picmus.yaml'
 config = setup(path_to_config_file)
 
 # generate image dataset from raw data
-destination_folder = 'D:/data/ultrasound/PICMUS/picmus_image'
+destination_folder = Path.cwd() / 'lista_test'
 try:
     gen = GenerateDataSet(
         config,
@@ -51,7 +53,7 @@ image = np.squeeze(batch[0])
 plt.figure()
 plt.imshow(image, cmap='gray')
 
-model = lista.Unfolding_model(image_shape)
+model = lista.UnfoldingModel(image_shape)
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
     loss='mse',

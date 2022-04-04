@@ -10,6 +10,7 @@ dependencies:
   - hdf5
   - pandas
   - pip
+  - spyder
   - pip:
     - tensorflow-gpu==2.6.0
     - keras==2.6.0
