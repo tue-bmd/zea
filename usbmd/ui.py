@@ -35,9 +35,10 @@ class DataLoaderUI:
     
     """
     
-    def __init__(self, config=None):
+    def __init__(self, config=None, verbose=True):
         self.config = config
-        
+        self.verbose = verbose
+
         # intialize dataset
         self.dataset = get_dataset(self.config.data.dataset_name)(config=config.data)
         
@@ -76,14 +77,15 @@ class DataLoaderUI:
                 filetypes=(filtetype, '*.' + filtetype), 
                 initialdir=initialdir,
             )
-            
-        print(f'Selected {self.file_path}')
+        
+        if self.verbose:
+            print(f'Selected {self.file_path}')
         
         # find file in dataset
         if self.file_path in self.dataset.file_paths:
             file_idx = self.dataset.file_paths.index(self.file_path) 
         else:
-            raise ValueError('Chosen datafile does not exist in dataset!')
+            raise ValueError(f'Chosen datafile {self.file_path} does not exist in dataset!')
         
         data = self.dataset[file_idx]
         
@@ -136,6 +138,8 @@ class DataLoaderUI:
             
         plt.show()
         
+        return fig
+        
     def save_image(self, fig, path=None):
         """Save image to disk.
 
@@ -148,8 +152,9 @@ class DataLoaderUI:
             filename = ui.file_path.stem + '.png'
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
-        plt.savefig(path, transparent=True)
-        print('Image saved to {}'.format(path))
+        fig.savefig(path, transparent=True)
+        if self.verbose:
+            print('Image saved to {}'.format(path))
 
 
 def check_config_file(config):
