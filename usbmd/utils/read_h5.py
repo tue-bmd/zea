@@ -118,5 +118,4 @@ class ReadH5:
         Returns:
             void
         """
-
         self.h5f.close()
