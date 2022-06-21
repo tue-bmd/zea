@@ -109,7 +109,8 @@ class ReadH5:
         return key_name
     
     def __len__(self):
-        raise NotImplementedError()
+        key = self.get_largest_group_name()
+        return len(self.h5f[key])
     
     def close(self):
         """Close the .h5 HDF5 file for reading.
@@ -117,5 +118,4 @@ class ReadH5:
         Returns:
             void
         """
-
         self.h5f.close()
