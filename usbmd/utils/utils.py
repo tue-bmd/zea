@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
+import matplotlib.pyplot as plt
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
     """ Get filename through dialog window
@@ -122,3 +123,8 @@ def find_key(dictionary, contains, case_sensitive=False):
         key = [k for k in dictionary.keys() if contains in k.lower()]
     return key[0]
     
+def plt_window_has_been_closed(ax):
+    """Checks whether matplotlib plot window is closed"""
+    fig = ax.figure.canvas.manager
+    active_fig_managers = plt._pylab_helpers.Gcf.figs.values()
+    return fig not in active_fig_managers
