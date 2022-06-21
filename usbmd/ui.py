@@ -80,7 +80,7 @@ class DataLoaderUI:
             initialdir = self.dataset.data_root
             self.file_path = filename_from_window_dialog(
                 f'Choose .{filtetype} file', 
-                filetypes=(filtetype, '*.' + filtetype), 
+                filetypes=((filtetype, '*.' + filtetype),), 
                 initialdir=initialdir,
             )
             self.config.data.file_path = self.file_path
@@ -176,25 +176,6 @@ class DataLoaderUI:
                 cv2.waitKey(1)
                 if plt_window_has_been_closed(self.ax):
                     return self.image
-        
-    # def add_slider(self):
-    #     # adjust the main plot to make room for the sliders
-    #     self.fig.subplots_adjust(bottom=0.25)
-
-    #     # Make a horizontal slider to control the frequency.
-    #     axfreq = plt.axes([0.25, 0.1, 0.65, 0.03])
-    #     from matplotlib.widgets import Slider
-    #     vmin, vmax = self.config.data.dynamic_range
-    #     dr_slider = Slider(
-    #         ax=axfreq,
-    #         label='Dynamic range',
-    #         valmin=2 * vmin,
-    #         valmax=vmax,
-    #         valinit=vmin,
-    #     )
-    #     def update(val):
-    #         vmin = dr_slider.val
-    #     dr_slider.on_changed(update)
             
     def save_image(self, fig, path=None):
         """Save image to disk.
@@ -262,7 +243,7 @@ def setup(file=None):
             filetype = 'yaml'
             config_file = filename_from_window_dialog(
                 f'Choose .{filetype} file', 
-                filetypes=(filetype, '*.' + filetype), 
+                filetypes=((filetype, '*.' + filetype),), 
                 initialdir='./configs',
             )
         else:

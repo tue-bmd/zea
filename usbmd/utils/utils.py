@@ -10,11 +10,16 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     """ Get filename through dialog window
     Args:
         window_name: string with name of window
+        filetypes: tuple of tuples containing (name, filetypes)
+            example: 
+                (('mat or h5 or whatever you want', '*.mat *.hdf5 *'), (ckpt, *.ckpt))
+        initialdir: path to directory where window will start
     Returns:
         filename: string containing path to selected file
+        
     """
     if filetypes is None:
-        filetypes = ('all files', '*.*')
+        filetypes = (('all files', '*.*'),)
         
     root = Tk()
     # open in foreground
@@ -25,7 +30,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     filename = askopenfilename(
         parent=root, 
         title=window_name, 
-        filetypes=(filetypes,), 
+        filetypes=filetypes, 
         initialdir=initialdir,
     )
     # check whether a file was selected
