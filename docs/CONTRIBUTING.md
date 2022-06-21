@@ -26,7 +26,7 @@ The style of our code will be continuously checked via pylint when you submit a 
 
 ### Docstrings (Google)
 
-For docstrings we'll rely on the Google style described [here](docs/example_google_docstrings.py). Your IDE is also able to automatically populate docstrings in our style of choice, so it's a good idea to configure this too (see this [example in PyCharm](https://www.jetbrains.com/help/pycharm/settings-tools-python-integrated-tools.html)).
+For docstrings we'll rely on the Google style described [here](example_google_docstrings.py). Your IDE is also able to automatically populate docstrings in our style of choice, so it's a good idea to configure this too (see this [example in PyCharm](https://www.jetbrains.com/help/pycharm/settings-tools-python-integrated-tools.html)).
 
 ## Pull Requests (PR)
 
