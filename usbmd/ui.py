@@ -18,11 +18,12 @@ sys.path.append(str(wd))
 
 from pathlib import Path
 import argparse
+import cv2
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from usbmd.processing import Process
-from usbmd.utils.utils import filename_from_window_dialog
+from usbmd.utils.utils import filename_from_window_dialog, plt_window_has_been_closed
 from usbmd.utils.config import load_config_from_yaml
 import usbmd.utils.git_info as git
 from usbmd.datasets import get_dataset, _DATASETS
@@ -35,9 +36,10 @@ class DataLoaderUI:
     
     """
     
-    def __init__(self, config=None):
+    def __init__(self, config=None, verbose=True):
         self.config = config
-        
+        self.verbose = verbose
+
         # intialize dataset
         self.dataset = get_dataset(self.config.data.dataset_name)(config=config.data)
         
@@ -49,11 +51,16 @@ class DataLoaderUI:
         
     def run(self, plot=True):
         """Run ui. Will retrieve, process and plot data if set to True."""
-        self.data = self.get_data()
+        if self.config.data.frame_no == 'all':
+            self.run_movie()
+        else:
+            self.data = self.get_data()
+
         self.image = self.process.run(self.data, dtype=self.config.data.dtype)
-        
+
         if plot:
-            self.plot(self.image, save=self.config.plot.save)
+            self.plot(self.image, save=self.config.plot.save, block=True)
+
         return self.image
     
     def get_data(self):
@@ -76,20 +83,25 @@ class DataLoaderUI:
                 filetypes=(filtetype, '*.' + filtetype), 
                 initialdir=initialdir,
             )
-            
-        print(f'Selected {self.file_path}')
+            self.config.data.file_path = self.file_path
+        
+        if self.verbose:
+            print(f'Selected {self.file_path}')
         
         # find file in dataset
         if self.file_path in self.dataset.file_paths:
             file_idx = self.dataset.file_paths.index(self.file_path) 
         else:
-            raise ValueError('Chosen datafile does not exist in dataset!')
+            raise ValueError(f'Chosen datafile {self.file_path} does not exist in dataset!')
         
+        if self.config.data.get('frame_no') == 'all':
+            print('Will run all frames as `all` was chosen in config...')
+
         data = self.dataset[file_idx]
         
         return data
     
-    def plot(self, image, image_range=None, save=False):
+    def plot(self, image, image_range=None, save=False, movie=False, block=True):
         """Plot image.
         
         Args:
@@ -100,42 +112,90 @@ class DataLoaderUI:
             save (bool): wheter to save the image to disk.
 
         """
-        fig, ax = plt.subplots()
+        if not movie:
+            self.fig, self.ax = plt.subplots()
         
-        extent = [
-            self.probe.xlims[0] * 1e3,
-            self.probe.xlims[1] * 1e3,
-            self.probe.zlims[1] * 1e3,
-            self.probe.zlims[0] * 1e3,
-        ]
-        
-        if image_range is None:
-            vmin, vmax = self.config.data.dynamic_range
-        else:
-            vmin, vmax = image_range
+            extent = [
+                self.probe.xlims[0] * 1e3,
+                self.probe.xlims[1] * 1e3,
+                self.probe.zlims[1] * 1e3,
+                self.probe.zlims[0] * 1e3,
+            ]
             
+            if image_range is None:
+                vmin, vmax = self.config.data.dynamic_range
+            else:
+                vmin, vmax = image_range
+
         if self.probe.probe_type == 'phased':
             image = self.process.run(image, dtype='image', to_dtype='image_sc')
             
-        im = ax.imshow(
-            image, cmap='gray', vmin=vmin, vmax=vmax, 
-            origin='upper', extent=extent, interpolation='none',
-        )
+        if movie:
+            self.im.set_data(image)
+            self.fig.canvas.draw_idle()
+        else:
+            self.im = self.ax.imshow(
+                image, cmap='gray', vmin=vmin, vmax=vmax, 
+                origin='upper', extent=extent, interpolation='none',
+            )
         
-        ax.set_xlabel('Lateral Width (mm)')
-        ax.set_ylabel('Axial length (mm)')
-        divider = make_axes_locatable(ax)
-        
-        cax = divider.append_axes('right', size='5%', pad=0.05)
-        plt.colorbar(im, cax=cax)
-        
-        fig.tight_layout()
-        
-        if save:
-            self.save_image(fig)
+            self.ax.set_xlabel('Lateral Width (mm)')
+            self.ax.set_ylabel('Axial length (mm)')
+            divider = make_axes_locatable(self.ax)
             
-        plt.show()
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            plt.colorbar(self.im, cax=cax)
+            
+            self.fig.tight_layout()
         
+            if save:
+                self.save_image(self.fig)
+            
+            plt.show(block=block)
+        
+        return self.fig
+
+    def run_movie(self):
+        """Run all frames in file in sequence"""
+
+        print('Playing video, press "q" to exit...')
+        self.config.data.frame_no = 0
+        self.data = self.get_data()
+        n_frames = len(self.dataset.h5object)
+        self.image = self.process.run(self.data, dtype=self.config.data.dtype)
+        self.plot(self.image, save=self.config.plot.save, block=False)
+        
+        self.verbose = False
+        while True:
+            for i in range(1, n_frames):
+                self.config.data.frame_no = i
+                self.data = self.get_data()
+                image = self.process.run(self.data, dtype=self.config.data.dtype)
+                self.plot(image, movie=True)
+                print(f'frame {i}', end='\r')
+                cv2.waitKey(1)
+                if plt_window_has_been_closed(self.ax):
+                    return self.image
+        
+    # def add_slider(self):
+    #     # adjust the main plot to make room for the sliders
+    #     self.fig.subplots_adjust(bottom=0.25)
+
+    #     # Make a horizontal slider to control the frequency.
+    #     axfreq = plt.axes([0.25, 0.1, 0.65, 0.03])
+    #     from matplotlib.widgets import Slider
+    #     vmin, vmax = self.config.data.dynamic_range
+    #     dr_slider = Slider(
+    #         ax=axfreq,
+    #         label='Dynamic range',
+    #         valmin=2 * vmin,
+    #         valmax=vmax,
+    #         valinit=vmin,
+    #     )
+    #     def update(val):
+    #         vmin = dr_slider.val
+    #     dr_slider.on_changed(update)
+            
     def save_image(self, fig, path=None):
         """Save image to disk.
 
@@ -148,8 +208,9 @@ class DataLoaderUI:
             filename = ui.file_path.stem + '.png'
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
-        plt.savefig(path, transparent=True)
-        print('Image saved to {}'.format(path))
+        fig.savefig(path, transparent=True)
+        if self.verbose:
+            print('Image saved to {}'.format(path))
 
 
 def check_config_file(config):
