@@ -4,16 +4,22 @@ import numpy as np
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
+import matplotlib.pyplot as plt
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
     """ Get filename through dialog window
     Args:
         window_name: string with name of window
+        filetypes: tuple of tuples containing (name, filetypes)
+            example: 
+                (('mat or h5 or whatever you want', '*.mat *.hdf5 *'), (ckpt, *.ckpt))
+        initialdir: path to directory where window will start
     Returns:
         filename: string containing path to selected file
+        
     """
     if filetypes is None:
-        filetypes = ('all files', '*.*')
+        filetypes = (('all files', '*.*'),)
         
     root = Tk()
     # open in foreground
@@ -24,7 +30,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     filename = askopenfilename(
         parent=root, 
         title=window_name, 
-        filetypes=(filetypes,), 
+        filetypes=filetypes, 
         initialdir=initialdir,
     )
     # check whether a file was selected
@@ -122,3 +128,8 @@ def find_key(dictionary, contains, case_sensitive=False):
         key = [k for k in dictionary.keys() if contains in k.lower()]
     return key[0]
     
+def plt_window_has_been_closed(ax):
+    """Checks whether matplotlib plot window is closed"""
+    fig = ax.figure.canvas.manager
+    active_fig_managers = plt._pylab_helpers.Gcf.figs.values()
+    return fig not in active_fig_managers
