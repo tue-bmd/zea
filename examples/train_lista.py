@@ -16,7 +16,7 @@ from usbmd.tensorflow_ultrasound.models import lista
 set_gpu_usage(gpu_ids=0)
 
 # # choose config file
-path_to_config_file = 'configs/config_picmus.yaml'
+path_to_config_file = Path.cwd() / 'configs/config_picmus.yaml'
 config = setup(path_to_config_file)
 
 # generate image dataset from raw data
@@ -53,7 +53,7 @@ image = np.squeeze(batch[0])
 plt.figure()
 plt.imshow(image, cmap='gray')
 
-model = lista.UnfoldingModel(image_shape)
+model = lista.UnfoldingModel(image_shape, activation='relu')
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
     loss='mse',
@@ -76,3 +76,5 @@ for ax in axs.ravel():
     ax.axis('off')
     
 fig.tight_layout()
+
+plt.show()
