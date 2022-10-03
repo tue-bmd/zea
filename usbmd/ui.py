@@ -51,7 +51,7 @@ class DataLoaderUI:
         
     def run(self, plot=True):
         """Run ui. Will retrieve, process and plot data if set to True."""
-        if self.config.data.frame_no == 'all':
+        if self.config.data.get('frame_no') == 'all':
             self.run_movie()
         else:
             self.data = self.get_data()
