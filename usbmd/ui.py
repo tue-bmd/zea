@@ -22,13 +22,42 @@ import cv2
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from usbmd.processing import Process
+from usbmd.processing import Process, _DATA_TYPES, _BEAMFORMER_TYPES, _MOD_TYPES
 from usbmd.utils.utils import filename_from_window_dialog, plt_window_has_been_closed
 from usbmd.utils.config import load_config_from_yaml
 import usbmd.utils.git_info as git
 from usbmd.datasets import get_dataset, _DATASETS
 from usbmd.probes import get_probe
 
+
+def check_config_file(config):
+    """Check config file for inconsistencies in set parameters.    
+
+    Add necessary assertion checks for each parameter to be able to check 
+    its validity.
+    
+    Args:
+        config (dict): config file.
+
+    Returns:
+        config (dict): config file.
+
+    """
+    config.data.dataset_name = config.data.dataset_name.lower()
+    assert config.data.dataset_name in _DATASETS, \
+        f'Dataset {config.data.dataset_name} does not exist,'\
+        f'should be in:\n{_DATASETS}'
+    assert config.data.dtype in _DATA_TYPES, \
+        f'Dtype {config.data.dtype} does not exist,' \
+        f'should be in:\n{_DATA_TYPES}'
+    assert config.data.get('modtype') in _MOD_TYPES, \
+        'Modulation type does not exist,' \
+        f'should be in:\n{_MOD_TYPES}'
+    assert config.model.beamformer.type in _BEAMFORMER_TYPES, \
+        f'Beamformer {config.model.beamformer.type} does not exist,' \
+        f'should be in:\n{_BEAMFORMER_TYPES}'
+    
+    return config
 class DataLoaderUI:
     """UI for selecting / loading / processing single ultrasound images.
     
@@ -193,33 +222,6 @@ class DataLoaderUI:
         if self.verbose:
             print('Image saved to {}'.format(path))
 
-
-def check_config_file(config):
-    """Check config file for inconsistencies in set parameters.    
-
-    Add necessary assertion checks for each parameter to be able to check 
-    its validity.
-    
-    Args:
-        config (dict): config file.
-
-    Returns:
-        config (dict): config file.
-
-    """
-    config.data.dataset_name = config.data.dataset_name.lower()
-    assert config.data.dataset_name in _DATASETS, \
-        f'Dataset {config.data.dataset_name} does not exist'
-    assert config.data.dtype in [
-        'raw_data', 'aligned_data', 'beamformed_data', 
-        'envelope_data', 'image', 'image_sc',
-    ], f'Dtype {config.data.dtype} does not exist'
-    assert config.data.get('modtype') in [None, 'rf', 'iq'], \
-        'Modulation type does not exist'
-    assert config.model.beamformer.type in [None, 'das', 'mv'], \
-        f'Beamformer {config.model.beamformer.type} does not exist'
-    
-    return config
 
 def setup(file=None):
     """Setup function. Retrieves config file and checks for validity.
