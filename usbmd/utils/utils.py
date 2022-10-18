@@ -133,3 +133,9 @@ def plt_window_has_been_closed(ax):
     fig = ax.figure.canvas.manager
     active_fig_managers = plt._pylab_helpers.Gcf.figs.values()
     return fig not in active_fig_managers
+
+def print_clear_line():
+    """Clears line. Helpful when printing in a loop on the same line."""
+    LINE_UP = '\033[1A'
+    LINE_CLEAR = '\x1b[2K'
+    print(LINE_UP, end=LINE_CLEAR)

@@ -10,24 +10,25 @@
     
 ==============================================================================
 """
-
 import sys
 from pathlib import Path
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from pathlib import Path
 import argparse
+
 import cv2
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from usbmd.processing import Process, _DATA_TYPES, _BEAMFORMER_TYPES, _MOD_TYPES
-from usbmd.utils.utils import filename_from_window_dialog, plt_window_has_been_closed
-from usbmd.utils.config import load_config_from_yaml
 import usbmd.utils.git_info as git
-from usbmd.datasets import get_dataset, _DATASETS
+from usbmd.datasets import _DATASETS, get_dataset
 from usbmd.probes import get_probe
+from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES,
+                              Process)
+from usbmd.utils.config import load_config_from_yaml
+from usbmd.utils.utils import (filename_from_window_dialog,
+                               plt_window_has_been_closed)
 
 
 def check_config_file(config):
@@ -88,7 +89,8 @@ class DataLoaderUI:
         self.image = self.process.run(self.data, dtype=self.config.data.dtype)
 
         if plot:
-            self.plot(self.image, save=self.config.plot.save, block=True)
+            save = self.config.get('plot', {}).get('save')
+            self.plot(self.image, save=save, block=True)
 
         return self.image
     
@@ -205,6 +207,8 @@ class DataLoaderUI:
                 cv2.waitKey(1)
                 if plt_window_has_been_closed(self.ax):
                     return self.image
+            # clear line, frame number
+            print('\x1b[2K', end='\r')
             
     def save_image(self, fig, path=None):
         """Save image to disk.
