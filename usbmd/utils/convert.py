@@ -1,9 +1,12 @@
-import h5py
-import numpy as np
-import scipy.io as sio
+"""
+Convert utilities. Converting between h5, mat and dictionary.
+"""
 import argparse
 from pathlib import Path
 
+import h5py
+import numpy as np
+import scipy.io as sio
 from usbmd.utils.utils import filename_from_window_dialog
 
 parser = argparse.ArgumentParser()
@@ -70,10 +73,10 @@ def load_mat(filename):
 
 def save_dict_to_file(filename, dic):
     """Save dict to .mat or .h5"""
-    
+
     filetype = Path(filename).suffix
     assert filetype in ['.mat', '.h5']
-    
+
     if filetype == '.h5':
         with h5py.File(filename, 'w') as h5file:
             recursively_save_dict_contents_to_group(h5file, '/', dic)
@@ -92,7 +95,7 @@ def load_dict_from_file(filename, squeeze=True):
     """dict from file"""
     filetype = Path(filename).suffix
     assert filetype in ['.mat', '.h5']
-    
+
     v_7_3 = False
     if filetype == '.mat':
         try:
@@ -121,14 +124,14 @@ if __name__ == '__main__':
     data = {}
     if args.file is None:
         file = filename_from_window_dialog(
-                        f'Choose .mat or .h5 file', 
-                        filetypes=(
-                            ('mat or h5', '*.mat *.hdf5 *.h5'), 
-                        ),
-                    )
+            'Choose .mat or .h5 file',
+            filetypes=(
+                ('mat or h5', '*.mat *.hdf5 *.h5'),
+            ),
+        )
     else:
         file = Path(args.file)
-    
+
     dic = load_dict_from_file(file)
     if file.suffix == '.mat':
         save_dict_to_file(dic, file.with_suffix('.h5'))
@@ -155,5 +158,3 @@ if __name__ == '__main__':
     #     raise ValueError('filename must ends with .h5, .hdf5 or .mat')
 
     print(f'Succesfully converted {file}')
-
-
