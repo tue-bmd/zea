@@ -1,27 +1,31 @@
+"""
+Utility functions
+"""
 import os
-import tqdm
-import numpy as np
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
+
 import matplotlib.pyplot as plt
+import numpy as np
+import tqdm
 from PIL import Image
+
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
     """ Get filename through dialog window
     Args:
         window_name: string with name of window
         filetypes: tuple of tuples containing (name, filetypes)
-            example: 
+            example:
                 (('mat or h5 or whatever you want', '*.mat *.hdf5 *'), (ckpt, *.ckpt))
         initialdir: path to directory where window will start
     Returns:
         filename: string containing path to selected file
-        
     """
     if filetypes is None:
         filetypes = (('all files', '*.*'),)
-        
+    
     root = Tk()
     # open in foreground
     root.wm_attributes('-topmost', 1)
@@ -41,35 +45,35 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
         raise Exception('No file selected.')
 
 def translate(array, range_from, range_to):
-    """ Map values in array from one range to other. 
-    
+    """ Map values in array from one range to other.
+
     Args:
         array (ndarray): input array.
         range_from (Tuple): lower and upper bound of original array.
         range_to (Tuple): lower and upper bound to which array should be mapped.
-        
+
     Returns:
         (ndarray): translated array
     """
-    leftMin, leftMax = range_from
-    rightMin, rightMax = range_to
-    if leftMin == leftMax: 
-        return np.ones_like(array) * rightMax
-    
+    left_min, left_max = range_from
+    right_min, right_max = range_to
+    if left_min == left_max:
+        return np.ones_like(array) * right_max
+
     # Convert the left range into a 0-1 range (float)
-    valueScaled = (array - leftMin) / (leftMax - leftMin)
+    value_scaled = (array - left_min) / (left_max - left_min)
 
     # Convert the 0-1 range into a value in the right range.
-    return rightMin + (valueScaled * (rightMax - rightMin))
+    return right_min + (value_scaled * (right_max - right_min))
 
 def search_file_tree(directory, filetypes=None, write=True):
     """Lists all files in directory and sub-directories.
 
     If file_paths.txt is detected in the directory, that file is read and used.
-    
+
     Args:
         directory (str): path to directory.
-        filetypes (Tuple of strings, optional): filetypes. 
+        filetypes (Tuple of strings, optional): filetypes.
             Defaults to image types (.png etc.).
         write (bool, optional): Whether to write to file. Useful has searching
             the tree takes quite a while. Defaults to True.
@@ -82,32 +86,31 @@ def search_file_tree(directory, filetypes=None, write=True):
     if (directory / 'file_paths.txt').is_file():
         print('Using pregenerated txt file in the following directory for reading file paths: ')
         print(directory)
-        with open(directory / 'file_paths.txt') as file:
-            file_paths = file.read().splitlines() 
+        with open(directory / 'file_paths.txt', encoding='utf-8') as file:
+            file_paths = file.read().splitlines()
         return file_paths
-    
+
     # set default file type
     if filetypes is None:
         filetypes = ('jpg', 'jpeg', 'JPEG', 'png', 'PNG')
-    
+
     file_paths = []
-    
+
     # Traverse file tree to index all dicom files
     for dirpath, _, filenames in tqdm.tqdm(os.walk(directory), desc='Searching file tree'):
         for file in filenames:
             # Append to file_paths if it is a filetype file
             if file.endswith(filetypes):
                 file_paths.append(str(Path(dirpath)/Path(file)))
-    
+
     print(f'\nFound {len(file_paths)} image files in .\\{Path(directory)}\n')
     assert len(file_paths) > 0, 'ERROR: No image files were found'
-    
+
     if write:
-        # np.savetxt(directory / 'file_paths.txt', file_paths, delimiter='\n', fmt='%s')
-        with open(directory / 'file_paths.txt', 'w') as file:
+        with open(directory / 'file_paths.txt', 'w', encoding='utf-8') as file:
             file_paths = [file + '\n' for file in file_paths]
             file.writelines(file_paths)
-            
+
     return file_paths
 
 def find_key(dictionary, contains, case_sensitive=False):
@@ -128,38 +131,36 @@ def find_key(dictionary, contains, case_sensitive=False):
     else:
         key = [k for k in dictionary.keys() if contains in k.lower()]
     return key[0]
-    
-def plt_window_has_been_closed(ax):
+
+def plt_window_has_been_closed(fig):
     """Checks whether matplotlib plot window is closed"""
-    fig = ax.figure.canvas.manager
-    active_fig_managers = plt._pylab_helpers.Gcf.figs.values()
-    return fig not in active_fig_managers
+    return not plt.fignum_exists(fig.number)
 
 def print_clear_line():
     """Clears line. Helpful when printing in a loop on the same line."""
-    LINE_UP = '\033[1A'
-    LINE_CLEAR = '\x1b[2K'
-    print(LINE_UP, end=LINE_CLEAR)
+    line_up = '\033[1A'
+    line_clear = '\x1b[2K'
+    print(line_up, end=line_clear)
 
-def to_image(image, range: tuple=None, pillow: bool=True):
+def to_image(image, value_range: tuple=None, pillow: bool=True):
     """Convert numpy array to uint8 image format.
 
     Args:
         image (ndarray): input array image
-        range (tuple, optional): assumed range of input data. 
+        value_range (tuple, optional): assumed range of input data.
             Defaults to None.
-        pillow (bool, optional): whether to convert the image 
+        pillow (bool, optional): whether to convert the image
             array to pillow object. Defaults to True.
 
     Returns:
-        image: output image array uint8 [0, 255] 
+        image: output image array uint8 [0, 255]
             (pillow if set to True)
     """
-    if range:
+    if value_range:
         image = translate(
-            np.clip(image, *range), range, (0, 255)
+            np.clip(image, *value_range), value_range, (0, 255)
         )
-    
+
     image = image.astype(np.uint8)
     if pillow:
         image = Image.fromarray(image)

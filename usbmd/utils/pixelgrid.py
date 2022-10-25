@@ -1,6 +1,7 @@
-# File:       PixelGrid.py
-# Author:     Dongwoon Hyun (dongwoon.hyun@stanford.edu)
-# Created on: 2020-04-03
+"""
+Author:     Dongwoon Hyun (dongwoon.hyun@stanford.edu)
+Created on: 2020-04-03
+"""
 import numpy as np
 
 eps = 1e-10
@@ -9,7 +10,7 @@ def make_pixel_grid(xlims, zlims, dx, dz):
     """
     Generate a Cartesian pixel grid based on input parameters.
     The output has shape (nx, nz, 3).
-    
+
     INPUTS
     xlims   Azimuthal limits of pixel grid ([xmin, xmax])
     zlims   Depth limits of pixel grid ([zmin, zmax])
