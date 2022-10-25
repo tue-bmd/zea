@@ -11,7 +11,9 @@
 ==============================================================================
 """
 import sys
+from multiprocessing.sharedctypes import Value
 from pathlib import Path
+
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
@@ -20,6 +22,7 @@ import argparse
 import cv2
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from PIL import Image
 
 import usbmd.utils.git_info as git
 from usbmd.datasets import _DATASETS, get_dataset
@@ -28,7 +31,7 @@ from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES,
                               Process)
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.utils import (filename_from_window_dialog,
-                               plt_window_has_been_closed)
+                               plt_window_has_been_closed, to_image)
 
 
 def check_config_file(config):
@@ -83,6 +86,7 @@ class DataLoaderUI:
         """Run ui. Will retrieve, process and plot data if set to True."""
         if self.config.data.get('frame_no') == 'all':
             self.run_movie()
+            return
         else:
             self.data = self.get_data()
 
@@ -90,7 +94,8 @@ class DataLoaderUI:
 
         if plot:
             save = self.config.get('plot', {}).get('save')
-            self.plot(self.image, save=save, block=True)
+            axis = self.config.get('plot', {}).get('axis', True)
+            self.plot(self.image, block=True, save=save, axis=axis)
 
         return self.image
     
@@ -132,18 +137,38 @@ class DataLoaderUI:
         
         return data
     
-    def plot(self, image, image_range=None, save=False, movie=False, block=True):
+    def plot(
+        self, 
+        image,
+        image_range: tuple=None,
+        save: bool=False,
+        movie: bool=False,
+        block: bool=True,
+        axis: bool=True,
+    ):
         """Plot image.
         
         Args:
             image (ndarray): Log compressed enveloped detected image.
-
+            image_range (tuple, optional): dynamic range of plot. Defaults to None,
+                in that case the dynamic range in config is used.
+            save (bool): wheter to save the image to disk.
+            movie (bool, optional): if True it will assume a figure object 
+                already exists and will overwrite the frame (to create a movie). 
+                If False will just create a new figure with each call. Defaults to False.
+            block (bool, optional): halt program after plotting. Defaults to True.
+            axis (bool, optional): type of plotting, with or without axis.
+                axis set to `True` will result in matplotlib plot with axis.
+                axis set to `False` will result in png image without axis and will
+                use opencv for video rendering. Defaults to True.
         Returns:
             fig (fig): figure object.
-            save (bool): wheter to save the image to disk.
-
+            
         """
-        if not movie:
+        if self.probe.probe_type == 'phased':
+            image = self.process.run(image, dtype='image', to_dtype='image_sc')
+
+        if not movie and axis:
             self.fig, self.ax = plt.subplots()
         
             extent = [
@@ -158,55 +183,73 @@ class DataLoaderUI:
             else:
                 vmin, vmax = image_range
 
-        if self.probe.probe_type == 'phased':
-            image = self.process.run(image, dtype='image', to_dtype='image_sc')
-            
         if movie:
-            self.im.set_data(image)
-            self.fig.canvas.draw_idle()
+            if axis:
+                self.im.set_data(image)
+                self.fig.canvas.draw_idle()
+                return self.fig
+            else:
+                image = to_image(image, self.config.data.dynamic_range, pillow=False)
+                cv2.imshow('frame', image)
+                return
         else:
-            self.im = self.ax.imshow(
-                image, cmap='gray', vmin=vmin, vmax=vmax, 
-                origin='upper', extent=extent, interpolation='none',
-            )
-        
-            self.ax.set_xlabel('Lateral Width (mm)')
-            self.ax.set_ylabel('Axial length (mm)')
-            divider = make_axes_locatable(self.ax)
+            if axis:
+                self.im = self.ax.imshow(
+                    image, cmap='gray', vmin=vmin, vmax=vmax, 
+                    origin='upper', extent=extent, interpolation='none',
+                )
             
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            plt.colorbar(self.im, cax=cax)
+                self.ax.set_xlabel('Lateral Width (mm)')
+                self.ax.set_ylabel('Axial length (mm)')
+                divider = make_axes_locatable(self.ax)
+                
+                cax = divider.append_axes('right', size='5%', pad=0.05)
+                plt.colorbar(self.im, cax=cax)
+                
+                self.fig.tight_layout()
             
-            self.fig.tight_layout()
-        
-            if save:
-                self.save_image(self.fig)
-            
-            plt.show(block=block)
-        
-        return self.fig
+                if save:
+                    self.save_image(self.fig)
+                
+                plt.show(block=block)
+                return self.fig
+
+            else:
+                image = to_image(image, self.config.data.dynamic_range)
+                image.show()
+                self.save_image(image)
+                return
 
     def run_movie(self):
         """Run all frames in file in sequence"""
 
         print('Playing video, press "q" to exit...')
+        axis = self.config.get('plot', {}).get('axis', True)
         self.config.data.frame_no = 0
         self.data = self.get_data()
         n_frames = len(self.dataset.h5object)
+
+        # plot initial frame
         self.image = self.process.run(self.data, dtype=self.config.data.dtype)
-        self.plot(self.image, save=self.config.plot.save, block=False)
+        if axis:
+            self.plot(self.image, axis=axis, block=False)
+        else:
+            self.plot(self.image, movie=True, axis=axis, block=False)
         
+        # plot remaining frames in a loop
         self.verbose = False
         while True:
             for i in range(1, n_frames):
                 self.config.data.frame_no = i
                 self.data = self.get_data()
                 image = self.process.run(self.data, dtype=self.config.data.dtype)
-                self.plot(image, movie=True)
+                self.plot(image, movie=True, axis=axis)
                 print(f'frame {i}', end='\r')
-                cv2.waitKey(1)
-                if plt_window_has_been_closed(self.ax):
-                    return self.image
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    return
+                if axis:
+                    if plt_window_has_been_closed(self.ax):
+                        return
             # clear line, frame number
             print('\x1b[2K', end='\r')
             
@@ -219,10 +262,21 @@ class DataLoaderUI:
 
         """
         if path is None:
-            filename = ui.file_path.stem + '.png'
+            if hasattr(self.dataset, 'frame_no'):
+                filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + '.png'
+            else:
+                filename = self.file_path.stem + '.png'
+
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
-        fig.savefig(path, transparent=True)
+
+        if isinstance(fig, plt.Figure):
+            fig.savefig(path, transparent=True)
+        elif isinstance(fig, Image.Image):
+            fig.save(path)
+        else:
+            raise ValueError('Figure is not PIL image or matplotlib figure object.')
+
         if self.verbose:
             print('Image saved to {}'.format(path))
 

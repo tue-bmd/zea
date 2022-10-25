@@ -5,6 +5,7 @@ from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 import matplotlib.pyplot as plt
+from PIL import Image
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
     """ Get filename through dialog window
@@ -48,7 +49,7 @@ def translate(array, range_from, range_to):
         range_to (Tuple): lower and upper bound to which array should be mapped.
         
     Returns:
-        (ndarray): translated array 
+        (ndarray): translated array
     """
     leftMin, leftMax = range_from
     rightMin, rightMax = range_to
@@ -139,3 +140,27 @@ def print_clear_line():
     LINE_UP = '\033[1A'
     LINE_CLEAR = '\x1b[2K'
     print(LINE_UP, end=LINE_CLEAR)
+
+def to_image(image, range: tuple=None, pillow: bool=True):
+    """Convert numpy array to uint8 image format.
+
+    Args:
+        image (ndarray): input array image
+        range (tuple, optional): assumed range of input data. 
+            Defaults to None.
+        pillow (bool, optional): whether to convert the image 
+            array to pillow object. Defaults to True.
+
+    Returns:
+        image: output image array uint8 [0, 255] 
+            (pillow if set to True)
+    """
+    if range:
+        image = translate(
+            np.clip(image, *range), range, (0, 255)
+        )
+    
+    image = image.astype(np.uint8)
+    if pillow:
+        image = Image.fromarray(image)
+    return image
