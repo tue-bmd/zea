@@ -3,7 +3,7 @@ numpy
 scipy
 pillow
 scikit-image
-hdf5
+h5py
 pandas
 tensorflow-gpu==2.6.0
 keras==2.6.0
