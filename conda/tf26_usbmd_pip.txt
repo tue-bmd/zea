@@ -13,3 +13,4 @@ tensorflow-addons
 tensorflow-datasets
 tensorflow-estimator
 wandb
+pylint
