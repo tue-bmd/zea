@@ -1,18 +1,24 @@
-import h5py
+"""
+Read functionality
+"""
 from pathlib import Path
+
+import h5py
 import numpy as np
 
+
 class ReadH5:
+    """Read H5 files object class"""
     def __init__(self, file_path):
         """Open a .h5 file for reading.
 
         Args:
             file_path :  path to the .h5 HDF5 file
 
-        """     
+        """
         self.file_path = Path(file_path)
         self.h5f = h5py.File(self.file_path, 'r')
-        
+
     def get_extension(self):
         """Get file extension
 
@@ -27,16 +33,18 @@ class ReadH5:
             return self._get(i=i, group=self.h5f)
         else:
             return self._get_from_keys(i=i, keys=keys, group=self.h5f)
-    
-    def _get_from_keys(self, i, keys, group=None):
+
+    @staticmethod
+    def _get_from_keys(i, keys, group):
         alist = list()
         for key in keys:
             alist.append(group[key][i])
         return alist
-            
+
     def get_all(self):
+        """Get all data (for all indices) in h5f"""
         return self._get(i=None, group=self.h5f)
-    
+
     def _get(self, i=None, group=None):
         alist = []
         for key in group.keys():
@@ -52,8 +60,8 @@ class ReadH5:
             else:
                 raise ValueError(f'{type(group)}')
             alist.append(output)
-        return alist        
-    
+        return alist
+
     def keys(self):
         """Return all keys in the hdf5 object.
 
@@ -62,15 +70,16 @@ class ReadH5:
 
         """
         return self.h5f.keys()
-    
+
     def summary(self):
+        """Summary of the hdf5 object"""
         self.h5f.visititems(print)
         # self.h5f.visititems(self._visit_func)
-    
+
     @staticmethod
-    def _visit_func(name, node):
+    def _visit_func(_, node):
         print(f'{node.name}: ')
-    
+
     def frame_as_first(self, frames):
         """permute the dataset to have the frame indices as the first dimension
 
@@ -79,20 +88,20 @@ class ReadH5:
 
         Returns:
             frames (ndarray): array of shape num_frames x ....
-        """        
-        
-        # always start with frame dim: 
+        """
+
+        # always start with frame dim:
         last_dim = len(np.shape(frames)) - 1
         order = (last_dim,) + tuple(np.arange(0, last_dim))
-        frames = np.array(frames).transpose(order) 
+        frames = np.array(frames).transpose(order)
         return frames
-    
+
     def get_largest_group_name(self):
         """Returns key which contains a value with most number of elements.
-        
-        Usefull when the key is different in each data file, but you would 
+
+        Usefull when the key is different in each data file, but you would
         like to retrieve the main data and not the metadata.
-        
+
         Returns:
             key_name (str): key name.
 
@@ -102,16 +111,16 @@ class ReadH5:
             if isinstance(node, h5py.Dataset):
                 n_elements = np.prod(np.array(node.shape, dtype=np.float64))
                 group_info.append((name, n_elements))
-                
+
         self.h5f.visititems(visit_func)
         idx = np.argmax([gi[1] for gi in group_info])
-        key_name, n_elements = group_info[idx]
+        key_name, _ = group_info[idx]
         return key_name
-    
+
     def __len__(self):
         key = self.get_largest_group_name()
         return len(self.h5f[key])
-    
+
     def close(self):
         """Close the .h5 HDF5 file for reading.
 

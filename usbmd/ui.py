@@ -7,67 +7,109 @@
 
     Author(s)     : Tristan Stevens
     Date          : Thu Nov 18 2021
-    
+
 ==============================================================================
 """
-
-import sys
-from pathlib import Path
-wd = Path(__file__).parent.resolve()
-sys.path.append(str(wd))
-
-from pathlib import Path
 import argparse
+import sys
+
+from pathlib import Path
+
 import cv2
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from PIL import Image
 
-from usbmd.processing import Process
-from usbmd.utils.utils import filename_from_window_dialog, plt_window_has_been_closed
-from usbmd.utils.config import load_config_from_yaml
+wd = Path(__file__).parent.resolve()
+sys.path.append(str(wd))
+
 import usbmd.utils.git_info as git
-from usbmd.datasets import get_dataset, _DATASETS
+from usbmd.datasets import _DATASETS, get_dataset
 from usbmd.probes import get_probe
+from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES,
+                              Process)
+from usbmd.utils.config import load_config_from_yaml
+from usbmd.utils.utils import (filename_from_window_dialog,
+                               plt_window_has_been_closed, to_image)
 
+
+def check_config_file(config):
+    """Check config file for inconsistencies in set parameters.
+
+    Add necessary assertion checks for each parameter to be able to check
+    its validity.
+
+    Args:
+        config (dict): config file.
+
+    Returns:
+        config (dict): config file.
+
+    """
+    config.data.dataset_name = config.data.dataset_name.lower()
+    assert config.data.dataset_name in _DATASETS, \
+        f'Dataset {config.data.dataset_name} does not exist,'\
+        f'should be in:\n{_DATASETS}'
+    assert config.data.dtype in _DATA_TYPES, \
+        f'Dtype {config.data.dtype} does not exist,' \
+        f'should be in:\n{_DATA_TYPES}'
+    assert config.data.get('modtype') in _MOD_TYPES, \
+        'Modulation type does not exist,' \
+        f'should be in:\n{_MOD_TYPES}'
+    assert config.model.beamformer.type in _BEAMFORMER_TYPES, \
+        f'Beamformer {config.model.beamformer.type} does not exist,' \
+        f'should be in:\n{_BEAMFORMER_TYPES}'
+
+    return config
 class DataLoaderUI:
     """UI for selecting / loading / processing single ultrasound images.
-    
+
     Useful for inspecting datasets and single ultrasound images.
-    
+
     """
-    
+
     def __init__(self, config=None, verbose=True):
         self.config = config
         self.verbose = verbose
 
         # intialize dataset
         self.dataset = get_dataset(self.config.data.dataset_name)(config=config.data)
-        
+
         self.probe = get_probe(config, self.dataset)
         self.dataset.probe = self.probe
-        
+
         # intialize process class
         self.process = Process(config, self.probe)
-        
+
+        self.data = None
+        self.image = None
+        self.file_path = None
+        self.mpl_img = None
+        self.fig = None
+        self.ax = None
+
     def run(self, plot=True):
         """Run ui. Will retrieve, process and plot data if set to True."""
-        if self.config.data.frame_no == 'all':
+        if self.config.data.get('frame_no') == 'all':
             self.run_movie()
+            return
         else:
             self.data = self.get_data()
 
         self.image = self.process.run(self.data, dtype=self.config.data.dtype)
 
         if plot:
-            self.plot(self.image, save=self.config.plot.save, block=True)
+            save = self.config.get('plot', {}).get('save')
+            axis = self.config.get('plot', {}).get('axis', True)
+            self.plot(self.image, block=True, save=save, axis=axis)
 
         return self.image
-    
+
     def get_data(self):
         """Get data. Chosen datafile should be listed in the dataset.
-        
+
         Using either file specified in config or if None, the ui window.
-        
+
         """
         if self.config.data.file_path:
             path = Path(self.config.data.file_path)
@@ -79,104 +121,146 @@ class DataLoaderUI:
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
             self.file_path = filename_from_window_dialog(
-                f'Choose .{filtetype} file', 
-                filetypes=((filtetype, '*.' + filtetype),), 
+                f'Choose .{filtetype} file',
+                filetypes=((filtetype, '*.' + filtetype),),
                 initialdir=initialdir,
             )
             self.config.data.file_path = self.file_path
-        
+
         if self.verbose:
             print(f'Selected {self.file_path}')
-        
+
         # find file in dataset
         if self.file_path in self.dataset.file_paths:
-            file_idx = self.dataset.file_paths.index(self.file_path) 
+            file_idx = self.dataset.file_paths.index(self.file_path)
         else:
             raise ValueError(f'Chosen datafile {self.file_path} does not exist in dataset!')
-        
+
         if self.config.data.get('frame_no') == 'all':
             print('Will run all frames as `all` was chosen in config...')
 
         data = self.dataset[file_idx]
-        
+
         return data
-    
-    def plot(self, image, image_range=None, save=False, movie=False, block=True):
+
+    def plot(
+        self,
+        image,
+        image_range: tuple=None,
+        save: bool=False,
+        movie: bool=False,
+        block: bool=True,
+        axis: bool=True,
+    ):
         """Plot image.
-        
+
         Args:
             image (ndarray): Log compressed enveloped detected image.
-
+            image_range (tuple, optional): dynamic range of plot. Defaults to None,
+                in that case the dynamic range in config is used.
+            save (bool): wheter to save the image to disk.
+            movie (bool, optional): if True it will assume a figure object
+                already exists and will overwrite the frame (to create a movie).
+                If False will just create a new figure with each call. Defaults to False.
+            block (bool, optional): halt program after plotting. Defaults to True.
+            axis (bool, optional): type of plotting, with or without axis.
+                axis set to `True` will result in matplotlib plot with axis.
+                axis set to `False` will result in png image without axis and will
+                use opencv for video rendering. Defaults to True.
         Returns:
             fig (fig): figure object.
-            save (bool): wheter to save the image to disk.
 
         """
-        if not movie:
+        if self.probe.probe_type == 'phased':
+            image = self.process.run(image, dtype='image', to_dtype='image_sc')
+
+        if not movie and axis:
             self.fig, self.ax = plt.subplots()
-        
+
             extent = [
                 self.probe.xlims[0] * 1e3,
                 self.probe.xlims[1] * 1e3,
                 self.probe.zlims[1] * 1e3,
                 self.probe.zlims[0] * 1e3,
             ]
-            
+
             if image_range is None:
                 vmin, vmax = self.config.data.dynamic_range
             else:
                 vmin, vmax = image_range
 
-        if self.probe.probe_type == 'phased':
-            image = self.process.run(image, dtype='image', to_dtype='image_sc')
-            
         if movie:
-            self.im.set_data(image)
-            self.fig.canvas.draw_idle()
+            if axis:
+                if self.mpl_img is None:
+                    raise ValueError('First run plot function without movie.')
+                self.mpl_img.set_data(image)
+                self.fig.canvas.draw_idle()
+                return self.fig
+            else:
+                image = to_image(image, self.config.data.dynamic_range, pillow=False)
+                cv2.imshow('frame', image)
+                return
         else:
-            self.im = self.ax.imshow(
-                image, cmap='gray', vmin=vmin, vmax=vmax, 
-                origin='upper', extent=extent, interpolation='none',
-            )
-        
-            self.ax.set_xlabel('Lateral Width (mm)')
-            self.ax.set_ylabel('Axial length (mm)')
-            divider = make_axes_locatable(self.ax)
-            
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            plt.colorbar(self.im, cax=cax)
-            
-            self.fig.tight_layout()
-        
-            if save:
-                self.save_image(self.fig)
-            
-            plt.show(block=block)
-        
-        return self.fig
+            if axis:
+                self.mpl_img = self.ax.imshow(
+                    image, cmap='gray', vmin=vmin, vmax=vmax,
+                    origin='upper', extent=extent, interpolation='none',
+                )
+
+                self.ax.set_xlabel('Lateral Width (mm)')
+                self.ax.set_ylabel('Axial length (mm)')
+                divider = make_axes_locatable(self.ax)
+
+                cax = divider.append_axes('right', size='5%', pad=0.05)
+                plt.colorbar(self.mpl_img, cax=cax)
+
+                self.fig.tight_layout()
+
+                if save:
+                    self.save_image(self.fig)
+
+                plt.show(block=block)
+                return self.fig
+
+            else:
+                image = to_image(image, self.config.data.dynamic_range)
+                image.show()
+                self.save_image(image)
+                return image
 
     def run_movie(self):
         """Run all frames in file in sequence"""
 
         print('Playing video, press "q" to exit...')
+        axis = self.config.get('plot', {}).get('axis', True)
         self.config.data.frame_no = 0
         self.data = self.get_data()
         n_frames = len(self.dataset.h5object)
+
+        # plot initial frame
         self.image = self.process.run(self.data, dtype=self.config.data.dtype)
-        self.plot(self.image, save=self.config.plot.save, block=False)
-        
+        if axis:
+            self.plot(self.image, axis=axis, block=False)
+        else:
+            self.plot(self.image, movie=True, axis=axis, block=False)
+
+        # plot remaining frames in a loop
         self.verbose = False
         while True:
             for i in range(1, n_frames):
                 self.config.data.frame_no = i
                 self.data = self.get_data()
                 image = self.process.run(self.data, dtype=self.config.data.dtype)
-                self.plot(image, movie=True)
+                self.plot(image, movie=True, axis=axis)
                 print(f'frame {i}', end='\r')
-                cv2.waitKey(1)
-                if plt_window_has_been_closed(self.ax):
-                    return self.image
-            
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    return
+                if axis:
+                    if plt_window_has_been_closed(self.fig):
+                        return
+            # clear line, frame number
+            print('\x1b[2K', end='\r')
+
     def save_image(self, fig, path=None):
         """Save image to disk.
 
@@ -186,40 +270,24 @@ class DataLoaderUI:
 
         """
         if path is None:
-            filename = ui.file_path.stem + '.png'
+            if self.dataset.frame_no is not None:
+                filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + '.png'
+            else:
+                filename = self.file_path.stem + '.png'
+
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
-        fig.savefig(path, transparent=True)
+
+        if isinstance(fig, plt.Figure):
+            fig.savefig(path, transparent=True)
+        elif isinstance(fig, Image.Image):
+            fig.save(path)
+        else:
+            raise ValueError('Figure is not PIL image or matplotlib figure object.')
+
         if self.verbose:
-            print('Image saved to {}'.format(path))
+            print(f'Image saved to {path}')
 
-
-def check_config_file(config):
-    """Check config file for inconsistencies in set parameters.    
-
-    Add necessary assertion checks for each parameter to be able to check 
-    its validity.
-    
-    Args:
-        config (dict): config file.
-
-    Returns:
-        config (dict): config file.
-
-    """
-    config.data.dataset_name = config.data.dataset_name.lower()
-    assert config.data.dataset_name in _DATASETS, \
-        f'Dataset {config.data.dataset_name} does not exist'
-    assert config.data.dtype in [
-        'raw_data', 'aligned_data', 'beamformed_data', 
-        'envelope_data', 'image', 'image_sc',
-    ], f'Dtype {config.data.dtype} does not exist'
-    assert config.data.get('modtype') in [None, 'rf', 'iq'], \
-        'Modulation type does not exist'
-    assert config.model.beamformer.type in [None, 'das', 'mv'], \
-        f'Beamformer {config.model.beamformer.type} does not exist'
-    
-    return config
 
 def setup(file=None):
     """Setup function. Retrieves config file and checks for validity.
@@ -242,20 +310,20 @@ def setup(file=None):
         if args.config is None:
             filetype = 'yaml'
             config_file = filename_from_window_dialog(
-                f'Choose .{filetype} file', 
-                filetypes=((filetype, '*.' + filetype),), 
+                f'Choose .{filetype} file',
+                filetypes=((filetype, '*.' + filetype),),
                 initialdir='./configs',
             )
         else:
             config_file = args.config
     else:
         config_file = file
-        
+
     config = load_config_from_yaml(Path(config_file))
     config = check_config_file(config)
-    
+
     print(f'Using config file: {config_file}')
-    
+
     ## git
     cwd = Path.cwd().stem
     if cwd == 'Ultrasound-BMd' or cwd == 'usbmd':
@@ -263,11 +331,11 @@ def setup(file=None):
             print('Git branch and commit: ')
             config['git'] = git.get_git_branch() + '=' + git.get_git_commit_hash()
             print(config['git'])
-        except:
+        except Exception:
             print('Cannot find Git')
-        
+
     return config
-    
+
 if __name__ == '__main__':
     config = setup()
     ui = DataLoaderUI(config)
