@@ -79,7 +79,8 @@ disable=wrong-import-position,
 		self-assigning-variable,
 		too-many-instance-attributes,
 		invalid-name,
-		no-name-in-module
+		no-name-in-module,
+		duplicate-code
 		
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
