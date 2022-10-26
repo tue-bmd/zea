@@ -25,7 +25,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     """
     if filetypes is None:
         filetypes = (('all files', '*.*'),)
-    
+
     root = Tk()
     # open in foreground
     root.wm_attributes('-topmost', 1)
@@ -33,9 +33,9 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     root.withdraw()
     # show an "Open" dialog box and return the path to the selected file
     filename = askopenfilename(
-        parent=root, 
-        title=window_name, 
-        filetypes=filetypes, 
+        parent=root,
+        title=window_name,
+        filetypes=filetypes,
         initialdir=initialdir,
     )
     # check whether a file was selected
@@ -119,7 +119,7 @@ def find_key(dictionary, contains, case_sensitive=False):
     Args:
         dictionary (dict): Dictionary to find key in.
         contains (str): String which the key should .
-        case_sensitive (bool, optional): Whether the search is case sensitive. 
+        case_sensitive (bool, optional): Whether the search is case sensitive.
             Defaults to False.
 
     Returns:
