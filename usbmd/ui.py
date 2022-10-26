@@ -15,7 +15,7 @@ import sys
 
 from pathlib import Path
 
-from cv2 import cv2
+import cv2
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from PIL import Image
@@ -80,6 +80,13 @@ class DataLoaderUI:
 
         # intialize process class
         self.process = Process(config, self.probe)
+
+        self.data = None
+        self.image = None
+        self.file_path = None
+        self.mpl_img = None
+        self.fig = None
+        self.ax = None
 
     def run(self, plot=True):
         """Run ui. Will retrieve, process and plot data if set to True."""
@@ -184,10 +191,9 @@ class DataLoaderUI:
 
         if movie:
             if axis:
-                if not hasattr(self, 'im'):
-                    self.im = None
+                if self.mpl_img is None:
                     raise ValueError('First run plot function without movie.')
-                self.im.set_data(image)
+                self.mpl_img.set_data(image)
                 self.fig.canvas.draw_idle()
                 return self.fig
             else:
@@ -196,7 +202,7 @@ class DataLoaderUI:
                 return
         else:
             if axis:
-                self.im = self.ax.imshow(
+                self.mpl_img = self.ax.imshow(
                     image, cmap='gray', vmin=vmin, vmax=vmax,
                     origin='upper', extent=extent, interpolation='none',
                 )
@@ -206,7 +212,7 @@ class DataLoaderUI:
                 divider = make_axes_locatable(self.ax)
 
                 cax = divider.append_axes('right', size='5%', pad=0.05)
-                plt.colorbar(self.im, cax=cax)
+                plt.colorbar(self.mpl_img, cax=cax)
 
                 self.fig.tight_layout()
 
@@ -264,7 +270,7 @@ class DataLoaderUI:
 
         """
         if path is None:
-            if hasattr(self.dataset, 'frame_no'):
+            if self.dataset.frame_no is not None:
                 filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + '.png'
             else:
                 filename = self.file_path.stem + '.png'
