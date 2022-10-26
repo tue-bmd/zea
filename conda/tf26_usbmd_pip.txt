@@ -1,0 +1,15 @@
+matplotlib
+numpy
+scipy
+pillow
+scikit-image
+hdf5
+pandas
+tensorflow-gpu==2.6.0
+keras==2.6.0
+opencv-python
+pydicom
+tensorflow-addons
+tensorflow-datasets
+tensorflow-estimator
+wandb
