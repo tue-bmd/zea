@@ -1,5 +1,10 @@
+"""
+Git utilities
+"""
+
 import subprocess
 import sys
+
 
 def get_git_commit_hash():
     """Gets git commit hash of current branch.
