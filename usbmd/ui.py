@@ -326,7 +326,7 @@ def setup(file=None):
 
     ## git
     cwd = Path.cwd().stem
-    if cwd == 'Ultrasound-BMd' or cwd == 'usbmd':
+    if cwd in ('Ultrasound-BMd', 'usbmd'):
         try:
             print('Git branch and commit: ')
             config['git'] = git.get_git_branch() + '=' + git.get_git_commit_hash()

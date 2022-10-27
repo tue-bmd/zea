@@ -26,7 +26,7 @@ class Config(dict):
             # new_key = str(key).replace('-', '_')
             #self.update({new_key, self.pop(key)})
 
-            if isinstance(value, list) or isinstance(value, tuple):
+            if isinstance(value, (list, tuple)):
                 detected_dict = 0
                 for idx, val in enumerate(value):
                     if isinstance(val, dict):
@@ -73,7 +73,8 @@ class Config(dict):
 
 def load_config_from_yaml(path):
     """Load config object from yaml file"""
-    dictionary = yaml.load(open(Path(path), encoding='utf-8'), Loader=yaml.FullLoader)
+    with open(Path(path), 'r', encoding='utf-8') as file:
+        dictionary = yaml.load(file, Loader=yaml.FullLoader)
     if dictionary:
         return Config(dictionary)
     else:

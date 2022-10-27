@@ -80,7 +80,8 @@ class ReadH5:
     def _visit_func(_, node):
         print(f'{node.name}: ')
 
-    def frame_as_first(self, frames):
+    @staticmethod
+    def frame_as_first(frames):
         """permute the dataset to have the frame indices as the first dimension
 
         Args:
