@@ -36,7 +36,7 @@ class ReadH5:
 
     @staticmethod
     def _get_from_keys(i, keys, group):
-        alist = list()
+        alist = []
         for key in keys:
             alist.append(group[key][i])
         return alist

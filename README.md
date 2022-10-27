@@ -33,8 +33,8 @@ conda env create -f conda/tf26_usbmd.yaml
 ```
 
 ### Getting started
-In order to get started, you can run [`ui.py`](usbmd/ui.py), which runs the "user interface" 
-tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder. 
+In order to get started, you can run [`ui.py`](usbmd/ui.py), which runs the "user interface"
+tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder.
 Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image.
 
 ## Data
@@ -46,15 +46,15 @@ The default location is `Z:\Ultrasound-BMd\data` which is the path to the data o
 ### Datastructure
 This repository can support multiply datastructures [TODO: insert which], but the preferred way makes use of the `hdf5` file format and is structured as follows:
 ```
-data_file.hdf5                [unit], [array shape] 
+data_file.hdf5                [unit], [array shape]
 └── US
     ├── data
     │   ├── real              [-], [n_angles, n_elem, n_ax]
-    │   └── imag              [-], [n_angles, n_elem, n_ax] 
-    │	
+    │   └── imag              [-], [n_angles, n_elem, n_ax]
+    │
     ├── angles                [m], [n_angles]
     ├── initial_time          [s]
-    ├── modulation_frequency  [Hz] 
+    ├── modulation_frequency  [Hz]
     ├── probe_geometry        [m], [n_elem, 3]
     ├── sampling_frequency    [Hz]
     ├── sound_speed           [m/s]
@@ -76,3 +76,8 @@ The following terminology is used in the code when referring to different data t
 
 ## How to contribute
 Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.
+Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory
+```bash
+pylint usbmd
+```
+Currently this is only required for the develop / main branch.
