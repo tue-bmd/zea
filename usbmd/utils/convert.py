@@ -103,7 +103,7 @@ def load_dict_from_file(filename, squeeze=True):
         except:
             v_7_3 = True
 
-    if (filetype == '.h5') or (v_7_3 == True):
+    if (filetype == '.h5') or (v_7_3 is True):
         with h5py.File(filename, 'r') as h5file:
             return recursively_load_dict_contents_from_group(h5file, '/', squeeze)
 
