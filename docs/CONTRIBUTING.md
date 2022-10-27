@@ -24,6 +24,10 @@ To keep our code consistent and ease collaboration, we all follow the PEP 8 styl
 
 The style of our code will be continuously checked via pylint when you submit a Pull Request to merge code to branch `main`. Any inconsistency will be flagged and will block the pull request until it is resolved. It's recommended to set up your IDE to automatically enforce  PEP 8 style. For instance, PyCharm can automatically reformat your code to be PEP 8 compliant (see [here](https://www.jetbrains.com/help/pycharm/reformat-and-rearrange-code.html)).
 
+To check if pylint runs succesfully run the following in the root directory
+```bash
+pylint usbmd
+```
 ### Docstrings (Google)
 
 For docstrings we'll rely on the Google style described [here](example_google_docstrings.py). Your IDE is also able to automatically populate docstrings in our style of choice, so it's a good idea to configure this too (see this [example in PyCharm](https://www.jetbrains.com/help/pycharm/settings-tools-python-integrated-tools.html)).
@@ -58,7 +62,7 @@ The typical PR workflow to make changes to the code will look as follows:
    ```shell
       git checkout -b <your_feature_branch_name>
       ```
-      
+
    Try to use a descriptive name. A good convention is to use your initials followed by a concise description for what you will implement, for instance:
    ```shell
       git checkout -b feature/ts_unet_sr_network
@@ -86,14 +90,14 @@ The typical PR workflow to make changes to the code will look as follows:
    ```shell
       git merge origin/main
       ```
-      
+
 8. Push your branch to the GitHub remote repository:
    ```shell
       git push origin <your_feature_branch_name>
       ```
-      
+
    Your PR will now be available on GitHub. A url will show in the console output that can take you directly to it.
-   
+
 9. In GitHub, send a PR to merge your feature branch into the main branch.
 
 10. Wait for a reviewer to review your PR. After it's accepted, proceed with the merge.
