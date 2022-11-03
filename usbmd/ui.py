@@ -12,7 +12,6 @@
 """
 import argparse
 import sys
-
 from pathlib import Path
 
 import cv2
@@ -28,9 +27,10 @@ from usbmd.datasets import _DATASETS, get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES,
                               Process)
+from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.utils import (filename_from_window_dialog,
-                               plt_window_has_been_closed, to_image)
+                               plt_window_has_been_closed, strtobool, to_image)
 
 
 def check_config_file(config):
@@ -90,18 +90,20 @@ class DataLoaderUI:
 
     def run(self, plot=True):
         """Run ui. Will retrieve, process and plot data if set to True."""
+
         if self.config.data.get('frame_no') == 'all':
+            ## run movie
             self.run_movie()
-            return
         else:
+            ## plot single frame
             self.data = self.get_data()
 
-        self.image = self.process.run(self.data, dtype=self.config.data.dtype)
+            self.image = self.process.run(self.data, dtype=self.config.data.dtype)
 
-        if plot:
-            save = self.config.get('plot', {}).get('save')
-            axis = self.config.get('plot', {}).get('axis', True)
-            self.plot(self.image, block=True, save=save, axis=axis)
+            if plot:
+                save = self.config.get('plot', {}).get('save')
+                axis = self.config.get('plot', {}).get('axis', True)
+                self.plot(self.image, block=True, save=save, axis=axis)
 
         return self.image
 
@@ -302,10 +304,6 @@ def setup(file=None):
 
     """
     if file is None:
-        # argparse option
-        parser = argparse.ArgumentParser(description='Process ultrasound data.')
-        parser.add_argument('-c', '--config', type=str, default=None, help='path to config file.')
-        args = parser.parse_args()
         # if no argument is provided resort to UI window
         if args.config is None:
             filetype = 'yaml'
@@ -336,7 +334,32 @@ def setup(file=None):
 
     return config
 
+def get_args():
+    """Command line argument parser"""
+    parser = argparse.ArgumentParser(description='Process ultrasound data.')
+    parser.add_argument('-c', '--config', type=str, default=None, help='path to config file.')
+    parser.add_argument('-t', '--task',
+        default='run', choices=['run', 'generate'],  type=str,
+        help='which task to run')
+    args = parser.parse_args()
+    return args
+
 if __name__ == '__main__':
+    args = get_args()
     config = setup()
-    ui = DataLoaderUI(config)
-    image = ui.run()
+
+    if args.task == 'run':
+        ui = DataLoaderUI(config)
+        image = ui.run()
+    elif args.task == 'generate':
+        destination_folder = input('Give destination folder path: ')
+        to_dtype = input(f'Specify data type \n{_DATA_TYPES}: ')
+        retain_folder_structure = input('Retain folder structure? (Y/N): ')
+        retain_folder_structure = strtobool(retain_folder_structure)
+        generator = GenerateDataSet(
+            config,
+            to_dtype=to_dtype,
+            destination_folder=destination_folder,
+            retain_folder_structure=retain_folder_structure,
+        )
+        generator.generate()

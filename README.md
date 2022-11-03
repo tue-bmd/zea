@@ -7,7 +7,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 ## Table of contents
 * [Setup](#setup)
 * [Data](#data)
-* [Documentation](#documentation)
+* [How to contribute](#how-to-contribute)
 
 ## Setup
 ### usbmd installation
