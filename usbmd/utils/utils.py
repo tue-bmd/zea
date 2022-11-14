@@ -18,7 +18,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
         window_name: string with name of window
         filetypes: tuple of tuples containing (name, filetypes)
             example:
-                (('mat or h5 or whatever you want', '*.mat *.hdf5 *'), (ckpt, *.ckpt))
+                (('mat or hdf5 or whatever you want', '*.mat *.hdf5 *'), (ckpt, *.ckpt))
         initialdir: path to directory where window will start
     Returns:
         filename: string containing path to selected file

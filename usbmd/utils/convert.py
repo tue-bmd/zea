@@ -1,5 +1,5 @@
 """
-Convert utilities. Converting between h5, mat and dictionary.
+Convert utilities. Converting between hdf5, mat and dictionary.
 """
 import argparse
 from pathlib import Path
@@ -8,10 +8,6 @@ import h5py
 import numpy as np
 import scipy.io as sio
 from usbmd.utils.utils import filename_from_window_dialog
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--file', default=None, help='h5 file or mat file')
-args = parser.parse_args()
 
 
 def load_mat(filename):
@@ -72,12 +68,12 @@ def load_mat(filename):
     return _check_vars(data)
 
 def save_dict_to_file(filename, dic):
-    """Save dict to .mat or .h5"""
+    """Save dict to .mat or .hdf5"""
 
     filetype = Path(filename).suffix
-    assert filetype in ['.mat', '.h5']
+    assert filetype in ['.mat', '.hdf5']
 
-    if filetype == '.h5':
+    if filetype == '.hdf5':
         with h5py.File(filename, 'w') as h5file:
             recursively_save_dict_contents_to_group(h5file, '/', dic)
     elif filetype == '.mat':
@@ -94,7 +90,7 @@ def recursively_save_dict_contents_to_group(h5file, path, dic):
 def load_dict_from_file(filename, squeeze=True):
     """dict from file"""
     filetype = Path(filename).suffix
-    assert filetype in ['.mat', '.h5']
+    assert filetype in ['.mat', '.hdf5']
 
     v_7_3 = False
     if filetype == '.mat':
@@ -103,7 +99,7 @@ def load_dict_from_file(filename, squeeze=True):
         except:
             v_7_3 = True
 
-    if (filetype == '.h5') or (v_7_3 is True):
+    if (filetype == '.hdf5') or (v_7_3 is True):
         with h5py.File(filename, 'r') as h5file:
             return recursively_load_dict_contents_from_group(h5file, '/', squeeze)
 
@@ -120,13 +116,29 @@ def recursively_load_dict_contents_from_group(h5file, path, squeeze=True):
             ans[key] = recursively_load_dict_contents_from_group(h5file, path + key + '/')
     return ans
 
+def strip_matfile_keys(dic):
+    """Strip some unecessary .mat keys"""
+    new_dic = {}
+    for key, val in dic.items():
+        if key not in ['__globals__',  '__header__', '__version__']:
+            new_dic[key] = np.squeeze(val)
+    return new_dic
+
+def get_args():
+    """Command line argument parser"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--file', default=None, help='hdf5 file or mat file')
+    args = parser.parse_args()
+    return args
+
 if __name__ == '__main__':
+    args = get_args()
     data = {}
     if args.file is None:
         file = filename_from_window_dialog(
-            'Choose .mat or .h5 file',
+            'Choose .mat or .hdf5 file',
             filetypes=(
-                ('mat or h5', '*.mat *.hdf5 *.h5'),
+                ('mat or hdf5', '*.mat *.hdf5 *.h5'),
             ),
         )
     else:
@@ -134,27 +146,10 @@ if __name__ == '__main__':
 
     dic = load_dict_from_file(file)
     if file.suffix == '.mat':
-        save_dict_to_file(dic, file.with_suffix('.h5'))
+        dic = strip_matfile_keys(dic)
+        save_dict_to_file(file.with_suffix('.hdf5'), dic)
 
-    elif (file.suffix == '.h5') or (file.suffix == '.hdf5'):
-        save_dict_to_file(dic, file.with_suffix('.mat'))
-
-    # if (file.suffix == '.h5') or (file.suffix == '.hdf5'):
-    #     with h5py.File(file) as fd:
-    #         for i in fd.keys():
-    #             data[i] = fd[i][...]
-    #     sio.savemat(file.with_suffix('.mat'), data)
-    # elif (file.suffix == '.mat'):
-    #     try:
-    #         data = sio.loadmat(file)
-    #     except:
-    #         with h5py.File(file, 'r') as fd:
-    #             data = fd[...]
-    #     with h5py.File(file.with_suffix('.h5'), 'w') as fd:
-    #         for i in data.keys():
-    #             if i not in ['__globals__',  '__header__', '__version__']:
-    #                 fd[i] = np.squeeze(data[i])
-    # else:
-    #     raise ValueError('filename must ends with .h5, .hdf5 or .mat')
+    elif file.suffix in ['.h5', '.hdf5']:
+        save_dict_to_file(file.with_suffix('.mat'), dic)
 
     print(f'Succesfully converted {file}')

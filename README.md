@@ -44,28 +44,34 @@ In order to use this repository and point to the correct data paths, you can ent
 The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
 
 ### Datastructure
-This repository can support multiply datastructures [TODO: insert which], but the preferred way makes use of the `hdf5` file format and is structured as follows:
-```
-data_file.hdf5                [unit], [array shape]
-└── US
-    ├── data
-    │   ├── real              [-], [n_angles, n_elem, n_ax]
-    │   └── imag              [-], [n_angles, n_elem, n_ax]
-    │
-    ├── angles                [m], [n_angles]
-    ├── initial_time          [s]
-    ├── modulation_frequency  [Hz]
-    ├── probe_geometry        [m], [n_elem, 3]
-    ├── sampling_frequency    [Hz]
-    ├── sound_speed           [m/s]
-    ├── PRF (optional)        [Hz]
-    └── ... (other optional parameters)
+This repository can support custom datastructures by implementing your own [Dataset](./usbmd/datasets.py) class, but the preferred way makes use of the `.hdf5` file format and is structured as follows:
+```c
+data_file.hdf5                  // [unit], [array shape]
+├── data
+│    │  (see data types)
+│    └── `dtype`                // [-], [n_frames, n_angles, n_ax, n_elem]
+│       (... optional ...)
+│        ├── real               // [-], [n_frames, n_angles, n_ax, n_elem]
+│        └── imag               // [-], [n_frames, n_angles, n_ax, n_elem]
+│
+│  (all other settings go here)
+├── angles                      // [m], [n_angles]
+├── initial_time                // [s]
+├── modulation_frequency        // [Hz]
+├── probe_geometry              // [m], [n_elem, 3]
+├── sampling_frequency          // [Hz]
+├── sound_speed                 // [m/s]
+├── PRF                         // [Hz]
+└── ... (other optional parameters)
 ```
 
 ### Data Flow Diagram
-![Data Flow](docs/diagrams_dataflow.png?raw=true "Data Flow")
 
-### Data flow
+<p align="left">
+<img src="docs/diagrams_dataflow.png" alt="Data Flow" width="800"/>
+</p>
+
+### Data types
 The following terminology is used in the code when referring to different data types.
 - `raw_data` --> The raw channel data, storing the time-samples from each distinct ultrasound transducer.
 - `aligned_data` --> Time-of-flight (TOF) corrected data. This is the data that is time aligned with respect to the array geometry.

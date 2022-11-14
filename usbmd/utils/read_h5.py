@@ -122,8 +122,14 @@ class ReadH5:
         key = self.get_largest_group_name()
         return len(self.h5f[key])
 
+    @property
+    def shape(self):
+        """Return shape of largest group in dataset"""
+        key = self.get_largest_group_name()
+        return self.h5f[key].shape
+
     def close(self):
-        """Close the .h5 HDF5 file for reading.
+        """Close the .hdf5 HDF5 file for reading.
 
         Returns:
             void
