@@ -7,6 +7,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 ## Table of contents
 * [Setup](#setup)
 * [Data](#data)
+* [How to use with Verasonics](#how-to-use-with-verasonics)
 * [How to contribute](#how-to-contribute)
 
 ## Setup
@@ -54,15 +55,16 @@ data_file.hdf5                  // [unit], [array shape]
 │        ├── real               // [-], [n_frames, n_angles, n_ax, n_elem]
 │        └── imag               // [-], [n_frames, n_angles, n_ax, n_elem]
 │
-│  (all other settings go here)
-├── angles                      // [m], [n_angles]
-├── initial_time                // [s]
-├── modulation_frequency        // [Hz]
-├── probe_geometry              // [m], [n_elem, 3]
-├── sampling_frequency          // [Hz]
-├── sound_speed                 // [m/s]
-├── PRF                         // [Hz]
-└── ... (other optional parameters)
+│  (all settings go here)
+├── settings
+│    │── angles                 // [rad], [n_angles]
+│    │── initial_time           // [s]
+│    │── modulation_frequency   // [Hz]
+│    │── probe_geometry         // [m], [n_elem, 3]
+│    │── sampling_frequency     // [Hz]
+│    │── sound_speed            // [m/s]
+│    │── PRF                    // [Hz]
+│    └── ... (other optional parameters)
 ```
 
 ### Data Flow Diagram
@@ -80,6 +82,8 @@ The following terminology is used in the code when referring to different data t
 - `image` --> After log compression of the envelope data, the image is formed.
 - `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
 
+## How to use with Verasonics
+TODO
 ## How to contribute
 Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory
