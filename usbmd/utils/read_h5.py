@@ -1,5 +1,5 @@
-"""
-Read functionality
+"""Read functionality
+Author(s): Tristan Stevens
 """
 from pathlib import Path
 

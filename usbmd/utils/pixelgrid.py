@@ -1,5 +1,5 @@
-"""
-Author:     Dongwoon Hyun (dongwoon.hyun@stanford.edu)
+"""Pixel grid calculation for beamforming
+Author(s): Dongwoon Hyun (dongwoon.hyun@stanford.edu)
 Created on: 2020-04-03
 """
 import numpy as np

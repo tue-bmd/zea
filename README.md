@@ -83,7 +83,8 @@ The following terminology is used in the code when referring to different data t
 - `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
 
 ## How to use with Verasonics
-TODO
+Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](usbmd/verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](./usbmd/datasets.py), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](usbmd/ui.py) script and select your newly generated datafile to visualize the data.
+
 ## How to contribute
 Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory

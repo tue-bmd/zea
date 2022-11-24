@@ -1,5 +1,6 @@
-"""
-Convert utilities. Converting between hdf5, mat and dictionary.
+"""Convert utilities.
+Converting between hdf5, mat and dictionary.
+Author(s): Tristan Stevens
 """
 import argparse
 from pathlib import Path

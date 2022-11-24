@@ -1,5 +1,5 @@
-"""
-Convert verasonics files to usbmd format
+"""Convert verasonics files to usbmd format
+Author(s): Tristan Stevens
 """
 from pathlib import Path
 import numpy as np
@@ -10,6 +10,11 @@ from usbmd.utils.utils import filename_from_window_dialog
 
 
 def save_to_usbmd_format(filename):
+    """Save mat / hdf5 file to usbmd format (hdf5).
+
+    Args:
+        filename (str): path to .mat / .hdf5 file
+    """
     filename = Path(filename)
     file = ReadH5(filename)
 
@@ -17,7 +22,7 @@ def save_to_usbmd_format(filename):
 
     data = file[:]
     data = data[0][1]
-    N_frames, N_el, N_samples = data.shape
+    N_frames, N_el, _ = data.shape
 
     # hardcoded for now
     N_ax = 8192

@@ -1,5 +1,5 @@
-"""
-Utility functions
+"""Utility functions
+Author(s): Tristan Stevens
 """
 import os
 from pathlib import Path
