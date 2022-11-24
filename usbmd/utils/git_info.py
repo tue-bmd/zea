@@ -1,5 +1,5 @@
-"""
-Git utilities
+"""Git utilities
+Author(s): Tristan Stevens, Iris Huijben
 """
 
 import subprocess
