@@ -6,6 +6,23 @@ import numpy as np
 
 eps = 1e-10
 
+
+def get_grid(cfg, probe):
+    xlims = getattr(cfg.scan, 'xlims')
+    zlims = getattr(cfg.scan, 'zlims')
+
+    Nx = cfg.scan.get('Nx')
+    Nz = cfg.scan.get('Nz')
+
+    if Nx and Nz:
+        return make_pixel_grid_v2(xlims, zlims, Nx, Nz)
+    else:
+        wvln = probe.c / probe.fc
+        dx = wvln / 3
+        dz = dx
+        return make_pixel_grid(xlims, zlims, dx, dz)
+
+
 def make_pixel_grid(xlims, zlims, dx, dz):
     """
     Generate a Cartesian pixel grid based on input parameters.

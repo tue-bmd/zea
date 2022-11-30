@@ -1,0 +1,37 @@
+model:
+  beamformer:
+    type: nmap
+  patch_shape: [128, 128]
+
+scan:
+  xlims: [-0.019, 0.019] 
+  zlims: [0, 0.063]
+
+
+data:
+  data_path: Z:\data\ben\
+  dataset: 'US_Data'
+  input_type: 'input'
+  target_type: 'output_11pw_mv_preenvelope'
+  env_detect_pred: false
+  env_detect_target: true
+  batch_size: 1
+  file_path: null
+  local: false
+  dataset_name: 'abledata'
+  dtype: 'raw_data'
+  modtype: 'rf'
+  dynamic_range: [-60, 0]
+  n_angles: 1
+  batch_size: 1
+  input_noise: 0
+  probe_type: L11-4v
+  angles: [5]
+  Nx: None # If set to None, a square pixel grid of lambda/3 is generated (TODO)
+  Nz: None
+  IQ: True
+  
+device: 'gpu'
+
+plot:
+  save: true
