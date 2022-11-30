@@ -16,8 +16,6 @@ from usbmd.tensorflow_ultrasound.losses import smsle
 
 from examples.deep_beamforming.dataloader import get_dataloader
 
-tf.config.run_functions_eagerly(True)
-
 # def create_sim_data(Nx = 256, Nz = 256, batch_size=1 , fc=1*10**6, c=1540, points=[]):
 
 #   Nx = 256
@@ -78,7 +76,6 @@ tf.config.run_functions_eagerly(True)
 #     yield s_i.T,y_i,t,x,z,a
 
 
-
 def train(config):
 
     probe = get_probe(config)
@@ -102,7 +99,7 @@ def train(config):
     model.compile(optimizer=optimizer,
                     loss=smsle,
                     metrics=smsle,
-                    run_eagerly=True)
+                    run_eagerly=False)
 
 
     # Create TF dataloader
