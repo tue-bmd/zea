@@ -110,8 +110,6 @@ def train(config):
                                                                 tf.TensorShape(model.outputs[0].shape[1:]))
     ).batch(config.data.batch_size)
 
-    _ = next(dataloader.load_batches())
-
     model.fit(tf_train_gen,
               steps_per_epoch = N_batches,
               epochs = 10,
@@ -119,6 +117,11 @@ def train(config):
               max_queue_size=10,
               workers=1,
               verbose=1)
+
+
+    # Visualize network output
+    pred = model(x_test)
+    
 
     return model
 
