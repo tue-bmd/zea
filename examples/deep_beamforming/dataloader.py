@@ -9,31 +9,31 @@ import cv2
 
 eps = 1e-10
 
-def get_dataloader(cfg, probe, grid):
+def get_dataloader(config, probe, grid):
 
-    if cfg.data.dataset == 'US_Data':
-        return Dataloader_L114v(cfg, probe, grid)
+    if config.data.dataset == 'US_Data':
+        return Dataloader_L114v(config, probe, grid)
 
-    if cfg.data.dataset == 'LifeTec2022_test':
-        return Dataloader_S51(cfg, probe, grid)
+    if config.data.dataset == 'LifeTec2022_test':
+        return Dataloader_S51(config, probe, grid)
 
 
 class Dataloader():
     
-    def __init__(self, cfg, probe, grid):
-        self.cfg = cfg
+    def __init__(self, config, probe, grid):
+        self.config = config
         self.probe = probe
         self.grid = grid
-        self.data_root = cfg.data.data_path
-        self.dataset = cfg.data.dataset
-        self.target_type = cfg.data.target_type
-        self.input_type = cfg.data.input_type
+        self.data_root = config.data.data_path
+        self.dataset = config.data.dataset
+        self.target_type = config.data.target_type
+        self.input_type = config.data.input_type
 
-        self.input_paths = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'train', cfg.data.input_type)))
-        self.target_paths = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'train', cfg.data.target_type)))
+        self.input_paths = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'train', config.data.input_type)))
+        self.target_paths = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'train', config.data.target_type)))
         
-        self.input_paths_test = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'test', cfg.data.input_type)))
-        self.target_paths_test = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'test', cfg.data.target_type)))
+        self.input_paths_test = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'test', config.data.input_type)))
+        self.target_paths_test = sorted(glob('%s/%s/%s/%s/*' % (self.data_root, self.dataset, 'test', config.data.target_type)))
         
         self.x_train, self.x_val, self.y_train, self.y_val = train_test_split(self.input_paths, 
                                                                               self.target_paths, 
@@ -42,10 +42,10 @@ class Dataloader():
         
         print('Found %d train samples, %d validation samples, %d test samples.' % (len(self.x_train),len(self.x_val), len(self.target_paths_test))) 
 
-        self.demodulate = cfg.data.get('IQ')
-        self.angles = getattr(cfg.data, 'angles')
-        self.env_detect_target = cfg.data.get('env_detect_targets')
-        self.patch_shape = cfg.model.get('patch_shape') #getattr(cfg, 'patch_shape', None) #If not patch size is given, use full gridgrid.shape[:2]
+        self.demodulate = config.data.get('IQ')
+        self.angles = getattr(config.data, 'angles')
+        self.env_detect_target = config.data.get('env_detect_targets')
+        self.patch_shape = config.model.get('patch_shape') #getattr(config, 'patch_shape', None) #If not patch size is given, use full gridgrid.shape[:2]
         self.Nx = grid.shape[1]
         self.Nz = grid.shape[0]
         
@@ -83,7 +83,8 @@ class Dataloader():
                 target_data, grid = self.get_patch(target_data)
                 
                 yield ((input_data, grid), target_data)
-                    
+            
+            # Loop over stored data if store_in_memory == True
             while store_in_memory:
                 for input_data, target_data in zip(inputs_buffer,targets_buffer):
                     input_data, target_data = aug([input_data, target_data])
@@ -125,44 +126,27 @@ class Dataloader():
             qdata = np.imag(hilbert(idata, axis=2))
             input_data = np.concatenate((idata,qdata),axis=3)
 
-            #input_data = input_data[:,:,::4,:] ################################## REMOVE!!!!
+        if self.target_type == 'output_11pw_mv_preenvelope':
+            key = 'mv_pre_envelope_11pw'
+        elif self.target_type == 'output_1pw_mv_preenvelope':
+            key = 'mv_pre_envelope_1pw'
 
-        
-        #Select PW inputs        
+        #Load target data
+        matfile = sio.loadmat(target_path)           
+        target_data = np.array(matfile[key], dtype='float32')
+        target_data = np.squeeze(target_data)
 
-        if self.dataset == 'MRI2US': # If simulated MRI to US data
-            input_data = input_data/input_data.max(axis=(1,2,3), keepdims=True)
+        if self.env_detect_target:
+            target_data = np.abs(hilbert(target_data))
 
-            target_data = matfile['im']
-            target_data = cv2.resize(target_data.T, (self.Nx, self.Nz))
+        # reshape if needed
+        target_shape = target_data.shape
+        network_shape = self.grid.shape[:2]
 
-            return input_data[self.angles,:,:,:], target_data
+        if not target_shape == network_shape:
+            target_data = cv2.resize(target_data, dsize=network_shape[::-1])
 
-        else: #if normal US data
-
-            #messy fix, better to change .mat files later on
-            if self.target_type == 'output_11pw_mv_preenvelope':
-                key = 'mv_pre_envelope_11pw'
-            elif self.target_type == 'output_1pw_mv_preenvelope':
-                key = 'mv_pre_envelope_1pw'
-
-            #Load target data
-            matfile = sio.loadmat(target_path)           
-            target_data = np.array(matfile[key], dtype='float32')
-            target_data = np.squeeze(target_data)
-    
-            if self.env_detect_target:
-                target_data = np.abs(hilbert_tf(target_data))
-
-            # reshape if needed
-            target_shape = target_data.shape
-            network_shape = self.grid.shape[:2]
-
-            if not target_shape == network_shape:
-                target_data = cv2.resize(target_data, dsize=network_shape[::-1])
-
-             
-            return input_data[self.angles,:,:,:]/2**15, target_data/2**15
+        return input_data[self.angles,:,:,:]/2**15, target_data/2**15
         
     
     def get_patch(self, target):
@@ -193,15 +177,15 @@ class Dataloader():
 
 class Dataloader_L114v(Dataloader):
     
-    def __init__(self, cfg, probe, grid):
-        super().__init__(cfg, probe, grid)
+    def __init__(self, config, probe, grid):
+        super().__init__(config, probe, grid)
 
     
 
 class Dataloader_S51(Dataloader):
 
-    def __init__(self, cfg, probe, grid):
-        super().__init__(cfg, probe, grid)
+    def __init__(self, config, probe, grid):
+        super().__init__(config, probe, grid)
 
 
     def process_mat(self, input_path, target_path):
