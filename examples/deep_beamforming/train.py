@@ -3,97 +3,38 @@ Example script for training deep learning based beamforming
 """
 from pathlib import Path
 import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
 
 # make sure you have Pip installed usbmd (see README)
-# import usbmd.tensorflow_ultrasound as usbmd_tf
-# from usbmd.tensorflow_ultrasound.dataloader import DataLoader, GenerateDataSet
+from usbmd.tensorflow_ultrasound.dataloader import UltrasoundLoader 
 from usbmd.tensorflow_ultrasound.layers.beamformers_v2 import create_beamformer
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
 from usbmd.utils.pixelgrid import get_grid
 from usbmd.probes import get_probe
 from usbmd.tensorflow_ultrasound.losses import smsle
-
-from examples.deep_beamforming.dataloader import get_dataloader
-
-# def create_sim_data(Nx = 256, Nz = 256, batch_size=1 , fc=1*10**6, c=1540, points=[]):
-
-#   Nx = 256
-#   Nz = 256
-
-#   lambda0 = c/fc
-#   dx = lambda0/8
-#   a = dx*np.arange(0,Nx,4) # array spacing: lambda
-
-#   max_scatterers = 30
-
-#   Nt = 2*(Nz)*dx/c
-#   dt = (1/fc)/4 
-#   t = dt*np.arange(0,np.round(Nt/dt)) 
-#   x  = dx*np.arange(0,Nx) 
-#   z  = dx*np.arange(0,Nz) 
-
-#   sig = 1*10**(-6)
-#   pulse = lambda tau: np.exp(-0.5*((t-tau)/sig)**2)*np.sin(2*np.pi*fc*(t-tau))
-#   sig_x = 1*dx
-#   xg,zg = np.meshgrid(x,z)
-#   loc =  lambda x0,z0: np.exp(-0.5*(((xg-x0)/sig_x)**2+((zg-z0)/sig_x)**2))
-
-#   if points == []:
-#     while 1:
-#         inp = []
-#         tar = []
-#         for i in range(0,batch_size):
-#           scatterers = np.random.randint(1,1+max_scatterers)
-#           points_x = dx*Nx*np.random.rand(scatterers)
-#           points_z = dx*Nz*np.random.rand(scatterers)
-#           s_i = 0
-#           y_i = 0
-#           for j in range(0,scatterers):
-#             d_trans = points_z[j]/c
-#             tau_j = d_trans + np.sqrt(((points_x[j]-a)/c)**2 + (points_z[j]/c)**2)
-#             s_i = s_i + np.array([pulse(tau_j[k]) for k in range(0,len(tau_j))])
-#             y_i = y_i + loc(points_x[j],points_z[j])
-#           inp.append(s_i.T)
-#           tar.append(y_i)
-
-#         yield np.array(inp),np.array(tar)
-      
-#   else:
-#     points = dx*np.array(points)
-#     points_x = points[:,0]
-#     points_z = points[:,1]
-#     scatterers = len(points_x)
-
-#     s_i = 0
-#     y_i = 0
-#     for j in range(0,scatterers):
-#       d_trans = points_z[j]/c
-#       tau_j = d_trans + np.sqrt(((points_x[j]-a)/c)**2 + (points_z[j]/c)**2)
-#       s_i = s_i + np.array([pulse(tau_j[k]) for k in range(0,len(tau_j))])
-#       y_i = y_i + loc(points_x[j],points_z[j])
-
-#     yield s_i.T,y_i,t,x,z,a
+from usbmd.processing import Process
 
 
 def train(config):
 
+    ## Initialization
+    # Load the probe and grid based on config
     probe = get_probe(config)
     grid = get_grid(config, probe)
 
-
-    # Will parameterize this
+    # Set number of channels (RF/IQ)
+    # This will be added to the probe class later on
     probe.N_ch = 2 if config.data.get('IQ') else 1
     probe.N_tx = 1
 
-    model = create_beamformer(probe, grid, config, aux_inputs=['grid'])
-
-    # Data loading
-    dataloader = get_dataloader(config, probe, grid)
-    N_batches = len(dataloader.x_train)
-
-    #Load test data
-    x_test, y_test = dataloader.load_test()
+    ## Create the beamforming model
+    # A grid is added as "auxiallary input" such that we can train on different grid patches
+    model = create_beamformer(probe,
+        grid,
+        config,
+        aux_inputs=['grid'])
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
     model.compile(optimizer=optimizer,
@@ -101,15 +42,23 @@ def train(config):
                     metrics=smsle,
                     run_eagerly=False)
 
+    ## Data loading
+    dataloader = UltrasoundLoader(config,
+        probe,
+        grid)
+
+    N_batches = len(dataloader.x_train)
+    x_test, y_test = dataloader.load_test()
 
     # Create TF dataloader
     tf_train_gen = tf.data.Dataset.from_generator(dataloader.load_batches,
                                                 output_types = ((tf.float32, tf.float32), tf.float32),
-                                                output_shapes = ((tf.TensorShape(model.inputs[0].shape[1:]), 
+                                                output_shapes = ((tf.TensorShape(model.inputs[0].shape[1:]),
                                                                 tf.TensorShape(model.inputs[1].shape[1:])),
                                                                 tf.TensorShape(model.outputs[0].shape[1:]))
     ).batch(config.data.batch_size)
 
+    ## Train the model
     model.fit(tf_train_gen,
               steps_per_epoch = N_batches,
               epochs = 10,
@@ -118,10 +67,19 @@ def train(config):
               workers=1,
               verbose=1)
 
+    ## Inference
 
-    # Visualize network output
-    pred = model(x_test)
+    # Create full-image inference model, not aux grid input needed here
+    config.model.patch_shape = (grid.shape[0], grid.shape[1])
+    infer_model = create_beamformer(probe, grid, config)
+    infer_model.set_weights(model.get_weights())
+    pred = infer_model([np.expand_dims(x_test[0],0), np.expand_dims(grid,0)])
     
+    proc = Process(None, probe=probe)
+    proc.downsample_factor = 1
+    img = proc.run(pred['beamformed'], dtype='beamformed_data', to_dtype='image')
+    plt.imshow(img[0].T, cmap='gray')
+    plt.show()
 
     return model
 
@@ -129,10 +87,10 @@ def train(config):
 
 if __name__ == '__main__':
 
-    # choose gpu
+    # Choose gpu, or select automatically
     set_gpu_usage(gpu_ids=0)
 
-    # # choose config file
+    # Load config file
     path_to_config_file = Path.cwd() / 'examples/deep_beamforming/example_config.yaml'
     config = setup(path_to_config_file)
 
