@@ -1,5 +1,5 @@
 """Pixel grid calculation for beamforming
-Author(s): Dongwoon Hyun (dongwoon.hyun@stanford.edu)
+Author(s): Dongwoon Hyun, Ben Luijten
 Created on: 2020-04-03
 """
 import numpy as np
@@ -8,6 +8,7 @@ eps = 1e-10
 
 
 def get_grid(cfg, probe):
+    """Creates a pixelgrid based on config and probe settings"""
     xlims = getattr(cfg.scan, 'xlims')
     zlims = getattr(cfg.scan, 'zlims')
 
