@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # make sure you have Pip installed usbmd (see README)
-from usbmd.tensorflow_ultrasound.dataloader import UltrasoundLoader 
+from usbmd.tensorflow_ultrasound.dataloader import UltrasoundLoader
 from usbmd.tensorflow_ultrasound.layers.beamformers_v2 import create_beamformer
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
@@ -18,6 +18,7 @@ from usbmd.processing import Process
 
 
 def train(config):
+    """Loads parameters and data, and trains the model"""
 
     ## Initialization
     # Load the probe and grid based on config
@@ -54,42 +55,46 @@ def train(config):
     x_test, y_test = dataloader.load_test()
 
     # Create TF dataloader
-    tf_train_gen = tf.data.Dataset.from_generator(dataloader.load_batches,
-                                                output_types = ((tf.float32, tf.float32), tf.float32),
-                                                output_shapes = ((tf.TensorShape(model.inputs[0].shape[1:]),
-                                                                tf.TensorShape(model.inputs[1].shape[1:])),
-                                                                tf.TensorShape(model.outputs[0].shape[1:]))
+    tf_train_gen = tf.data.Dataset.from_generator(
+        dataloader.load_batches,
+        output_types = ((tf.float32, tf.float32), tf.float32),
+        output_shapes = ((tf.TensorShape(model.inputs[0].shape[1:]),
+                        tf.TensorShape(model.inputs[1].shape[1:])),
+                        tf.TensorShape(model.outputs[0].shape[1:]))
     ).batch(config.model.batch_size)
 
     ## Train the model
     model.fit(tf_train_gen,
               steps_per_epoch = N_batches,
-              epochs = 10,
+              epochs = 20,
               callbacks=[],
               max_queue_size=10,
               workers=1,
               verbose=1)
 
     ## Inference
-    data = next(iter(tf_train_gen))
-    pred = model(data[0])['beamformed']
 
-    fig, axs = plt.subplots(1,2)
-    axs[0].imshow(pred[0])
-    axs[1].imshow(data[1][0])
-    plt.show()
+    test_ix = 10
 
-    # Create full-image inference model, not aux grid input needed here
+    # Create full-image inference model, no aux grid input needed here
     config.model.patch_shape = (grid.shape[0], grid.shape[1])
     infer_model = create_beamformer(probe, grid, config)
     infer_model.set_weights(model.get_weights())
-    pred = infer_model([np.expand_dims(x_test[10],0), np.expand_dims(grid,0)])
-    
+    y_pred = infer_model([np.expand_dims(x_test[test_ix],0), np.expand_dims(grid,0)])
+
+    # Convert to images
     proc = Process(None, probe=probe)
     proc.downsample_factor = 1
-    img = proc.run(pred['beamformed'], dtype='beamformed_data', to_dtype='image')
-    plt.imshow(img[0].T, cmap='gray')
-    plt.show()
+    y_pred_img = proc.run(y_pred['beamformed'][0], dtype='beamformed_data', to_dtype='image')
+    y_test_img = proc.run(y_test[test_ix], dtype='envelope_data', to_dtype='image')
+
+    # Show an example of the test data
+    fig, axs = plt.subplots(1,2)
+    axs[0].imshow(y_pred_img.T, cmap='gray')
+    axs[0].set_title('Deep Learning')
+    axs[1].imshow(y_test_img, cmap='gray')
+    axs[1].set_title('Target')
+    fig.show()
 
     return model
 
@@ -100,7 +105,7 @@ if __name__ == '__main__':
     set_gpu_usage(gpu_ids=0)
 
     # Load config file
-    path_to_config_file = Path.cwd() / 'examples/deep_beamforming/example_config.yaml'
+    path_to_config_file = Path.cwd() / 'examples/deep_beamforming/example_config_ABLE.yaml'
     config = setup(path_to_config_file)
 
     model = train(config)

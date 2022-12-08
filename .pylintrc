@@ -98,6 +98,7 @@ disable=import-error, 		# E, but not reliable in pylint
 		fixme,
 		inconsistent-return-statements,
 		unnecessary-dict-index-lookup,
+		unsubscriptable-object 
 		
 		
 # Enable the message, report, category or checker with the given id(s). You can
