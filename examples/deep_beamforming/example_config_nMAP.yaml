@@ -1,9 +1,9 @@
 model:
   beamformer:
     type: nmap
-    folds: 1
-    end_with_prox: false
-    proxtype: None
+    folds: 4
+    end_with_prox: true
+    proxtype: wavelet
     kernel_size: 1
   patch_shape: [128, 128]
   batch_size: 1
@@ -11,8 +11,8 @@ model:
 scan:
   xlims: [-0.019, 0.019] 
   zlims: [0, 0.063]
-  Nx: 128 # If set to None, a square pixel grid of lambda/3 is generated (TODO)
-  Nz: 256
+  Nx: null # If set to "null", a square pixel grid of lambda/3 is generated (TODO)
+  Nz: null
 
 data:
   data_path: Z:\data\ben\
