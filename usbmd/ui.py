@@ -61,6 +61,7 @@ def check_config_file(config):
         f'should be in:\n{_BEAMFORMER_TYPES}'
 
     return config
+
 class DataLoaderUI:
     """UI for selecting / loading / processing single ultrasound images.
 
