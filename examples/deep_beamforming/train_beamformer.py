@@ -108,6 +108,7 @@ def train(config, dataset_directory):
 
 
 if __name__ == '__main__':
+    # pylint: disable=no-member
     # Choose gpu, or select automatically
     set_gpu_usage()
 
