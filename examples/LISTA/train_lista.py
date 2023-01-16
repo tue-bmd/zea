@@ -1,14 +1,16 @@
-"""
-Example script for training unfolded LISTA.
+"""Example script for training unfolded LISTA.
+Author(s): Tristan Stevens
+Date: 09/12/2022
 """
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+
 # make sure you have Pip installed usbmd (see README)
 # import usbmd.tensorflow_ultrasound as usbmd_tf
-from usbmd.tensorflow_ultrasound.dataloader import DataLoader, GenerateDataSet
+from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet, ImageLoader
 from usbmd.tensorflow_ultrasound.models import lista
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
@@ -38,7 +40,7 @@ epochs = 100
 learning_rate = 0.001
 
 # initiate dataloader
-dataloader = DataLoader(
+dataloader = ImageLoader(
     destination_folder,
     destination_folder,
     batch_size=1,
