@@ -1,4 +1,4 @@
-name: tf29_usbmd
+name: tf26_usbmd
 channels:
   - defaults
 dependencies:
@@ -14,8 +14,8 @@ dependencies:
   - pylint
   - pytest
   - pip:
-    - tensorflow-gpu==2.9.3
-    - keras==2.9.3
+    - tensorflow-gpu==2.6.0
+    - keras==2.6.0
     - opencv-python
     - pydicom
     - tensorflow-addons
