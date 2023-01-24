@@ -9,7 +9,9 @@ import pytest
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from usbmd.processing import companding, companding_tf
+from usbmd.processing import companding
+from usbmd.tensorflow_ultrasound.processing import companding_tf
+
 
 @pytest.mark.parametrize('comp_type, size, lib', [
     ('a', (2, 1, 128, 32), 'numpy'),
