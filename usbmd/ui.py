@@ -22,11 +22,14 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
+import warnings
+
 import usbmd.utils.git_info as git
+from usbmd.common import set_data_paths
 from usbmd.datasets import _DATASETS, get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES,
-                              Process)
+                              Process, multi_band_pass_filter)
 from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.utils import (filename_from_window_dialog,
@@ -89,17 +92,31 @@ class DataLoaderUI:
         self.fig = None
         self.ax = None
 
-    def run(self, plot=True):
+    def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
+        to_dtype = 'image' if to_dtype is None else to_dtype
+
         if self.config.data.get('frame_no') == 'all':
+            if to_dtype != 'image':
+                warnings.warn(
+                    f'Image to_dtype: {to_dtype} not yet supported for movies.\
+                        falling back to  to_dtype: `image`')
             ## run movie
             self.run_movie()
         else:
             ## plot single frame
             self.data = self.get_data()
 
-            self.image = self.process.run(self.data, dtype=self.config.data.dtype)
+            if self.config.data.dtype == 'beamformed_data' and \
+                to_dtype in {None, 'image'}:
+                print('BPF!!')
+                self.image = multi_band_pass_filter(self.data, self.process)
+            else:
+                self.image = self.process.run(
+                    self.data,
+                    dtype=self.config.data.dtype,
+                    to_dtype=to_dtype)
 
             if plot:
                 save = self.config.get('plot', {}).get('save')
@@ -253,7 +270,12 @@ class DataLoaderUI:
             for i in range(1, n_frames):
                 self.config.data.frame_no = i
                 self.data = self.get_data()
-                image = self.process.run(self.data, dtype=self.config.data.dtype)
+
+                if self.config.data.dtype == 'beamformed_data':
+                    image = multi_band_pass_filter(self.data, self.process)
+                else:
+                    image = self.process.run(self.data, dtype=self.config.data.dtype)
+
                 self.plot(image, movie=True, axis=axis)
                 print(f'frame {i}', end='\r')
                 if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -347,6 +369,7 @@ def get_args():
 
 if __name__ == '__main__':
     args = get_args()
+    set_data_paths()
     config = setup()
 
     if args.task == 'run':
