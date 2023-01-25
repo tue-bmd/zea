@@ -1,7 +1,9 @@
 """Test the pytorch implementation of the beamformers.
 """
 # pylint: skip-file
+import sys
 import torch
+from pathlib import Path
 
 from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
 from usbmd.probes import get_probe
@@ -10,6 +12,9 @@ from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid_v2
 from usbmd.processing import Process
 
+# Add project folder to path to find config files
+wd = Path(__file__).parent.parent
+sys.path.append(str(wd))
 
 def test_das_beamforming():
     """
