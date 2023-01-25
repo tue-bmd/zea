@@ -19,11 +19,6 @@ python -m pip install -e .
 ```
 The -e option stands for editable, which is important because it allows you to change the source code of the package without reinstalling it. You can leave it out, but changing the code in the repository won't change the installation (which is OK if you do not need to change it).
 
-To install all requirements except pytorch and tensorflow run:
-```bash
-pip install -r requirements.txt
-```
-
 You can use the package as follows:
 ```Python
 # Local imports
