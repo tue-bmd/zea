@@ -26,12 +26,9 @@ def test_das_beamforming():
 
     # Ensure DAS beamforming even if the config were to change
     config.model.type = 'das'
+    config.data.dataset_name = 'abledata'
 
-    dataset = PICMUS(config.data)
-
-    probe = get_probe(config, dataset)
-
-    dataset.probe = probe
+    probe = get_probe(config)
 
     # Perform the beamforming on a small grid to ensure the test runs quickly
     grid = make_pixel_grid_v2(
