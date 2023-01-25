@@ -22,4 +22,4 @@ dependencies:
     - tensorflow-datasets
     - tensorflow-estimator
     - wandb
-    - pytorch==1.13.1
+    - pytorch
