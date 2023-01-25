@@ -1,3 +1,6 @@
+"""Test the pytorch implementation of the beamformers.
+"""
+# pylint: skip-file
 import torch
 
 from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
