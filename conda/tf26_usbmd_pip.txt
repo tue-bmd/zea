@@ -16,4 +16,4 @@ tensorflow-estimator
 wandb
 pylint
 pytest
-pytorch
+torch==1.13.1
