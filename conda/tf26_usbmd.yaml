@@ -22,3 +22,4 @@ dependencies:
     - tensorflow-datasets
     - tensorflow-estimator
     - wandb
+    - torch
