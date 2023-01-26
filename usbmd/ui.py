@@ -12,28 +12,30 @@
 """
 import argparse
 import sys
+import warnings
 from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from PIL import Image
 
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-import warnings
-
 import usbmd.utils.git_info as git
 from usbmd.common import set_data_paths
 from usbmd.datasets import _DATASETS, get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES,
-                              Process, multi_band_pass_filter)
+                              Process, apply_multi_band_pass_filter,
+                              get_contrast_boost_func)
 from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.utils import (filename_from_window_dialog,
-                               plt_window_has_been_closed, strtobool, to_image)
+                               plt_window_has_been_closed, save_to_gif,
+                               strtobool, to_image)
 
 
 def check_config_file(config):
@@ -92,10 +94,15 @@ class DataLoaderUI:
         self.fig = None
         self.ax = None
 
+        if 'contrast_boost' in self.config.postprocess:
+            self.contrast_boost = get_contrast_boost_func()
+
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
         to_dtype = 'image' if to_dtype is None else to_dtype
+        save = self.config.get('plot', {}).get('save')
+        axis = self.config.get('plot', {}).get('axis', True)
 
         if self.config.data.get('frame_no') == 'all':
             if to_dtype != 'image':
@@ -103,15 +110,14 @@ class DataLoaderUI:
                     f'Image to_dtype: {to_dtype} not yet supported for movies.\
                         falling back to  to_dtype: `image`')
             ## run movie
-            self.run_movie()
+            self.run_movie(save=save)
         else:
             ## plot single frame
             self.data = self.get_data()
 
             if self.config.data.dtype == 'beamformed_data' and \
                 to_dtype in {None, 'image'}:
-                print('BPF!!')
-                self.image = multi_band_pass_filter(self.data, self.process)
+                self.image = apply_multi_band_pass_filter(self.data, self.process)
             else:
                 self.image = self.process.run(
                     self.data,
@@ -119,8 +125,6 @@ class DataLoaderUI:
                     to_dtype=to_dtype)
 
             if plot:
-                save = self.config.get('plot', {}).get('save')
-                axis = self.config.get('plot', {}).get('axis', True)
                 self.plot(self.image, block=True, save=save, axis=axis)
 
         return self.image
@@ -162,6 +166,19 @@ class DataLoaderUI:
         data = self.dataset[file_idx]
 
         return data
+
+    def postprocess(self, image):
+        if 'contrast_boost' in self.config.postprocess:
+            if self.config.data.dtype not in ['raw_data', 'aligned_data']:
+                warnings.warn(f'contrast boost not possible with {self.config.data.dtype}')
+                return image
+            apodization = self.config.data.apodization
+            self.config.data.apodization = 'checkerboard'
+            noise = self.process.run(self.data, dtype=self.config.data.dtype)
+            self.config.data.apodization = apodization
+            image = self.contrast_boost(image, noise, **self.config.postprocess.contrast_boost)
+
+        return image
 
     def plot(
         self,
@@ -219,7 +236,7 @@ class DataLoaderUI:
             else:
                 image = to_image(image, self.config.data.dynamic_range, pillow=False)
                 cv2.imshow('frame', image)
-                return
+                return image
         else:
             if axis:
                 self.mpl_img = self.ax.imshow(
@@ -248,7 +265,7 @@ class DataLoaderUI:
                 self.save_image(image)
                 return image
 
-    def run_movie(self):
+    def run_movie(self, save: bool=False):
         """Run all frames in file in sequence"""
 
         print('Playing video, press "q" to exit...')
@@ -265,23 +282,39 @@ class DataLoaderUI:
             self.plot(self.image, movie=True, axis=axis, block=False)
 
         # plot remaining frames in a loop
+        images = []
         self.verbose = False
         while True:
             for i in range(1, n_frames):
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
-                if self.config.data.dtype == 'beamformed_data':
-                    image = multi_band_pass_filter(self.data, self.process)
+                if self.config.data.dtype in ['raw_data', 'aligned_data', 'beamformed_data']:
+                    if 'multi_bpf' in self.config.preprocess:
+                        beamformed_data = self.process.run(
+                            self.data, dtype=self.config.data.dtype, to_dtype='beamformed_data')
+                        image = apply_multi_band_pass_filter(beamformed_data, self.process)
+                    else:
+                        image = self.process.run(self.data, dtype=self.config.data.dtype)
                 else:
                     image = self.process.run(self.data, dtype=self.config.data.dtype)
 
-                self.plot(image, movie=True, axis=axis)
+                if 'postprocess' in self.config:
+                    image = self.postprocess(image)
+
+                image = self.plot(image, movie=True, axis=axis)
                 print(f'frame {i}', end='\r')
+
+                if save:
+                    if len(images) < n_frames:
+                        images.append(image)
+
                 if cv2.waitKey(1) & 0xFF == ord('q'):
+                    self.save_video(images)
                     return
                 if axis:
                     if plt_window_has_been_closed(self.fig):
+                        self.save_video(images)
                         return
             # clear line, frame number
             print('\x1b[2K', end='\r')
@@ -313,6 +346,32 @@ class DataLoaderUI:
         if self.verbose:
             print(f'Image saved to {path}')
 
+    def save_video(self, images, path=None):
+        """Save image to disk.
+
+        Args:
+            images (list): list of images.
+            path (str, optional): path to save image to. Defaults to None.
+
+        TODO: can only save giv and not mp4
+        TODO: plt figures (axis=true in config) are not supported with save_video
+
+        """
+        if path is None:
+            filename = self.file_path.stem + '.gif'
+
+            path = Path('./figures', filename)
+            Path('./figures').mkdir(parents=True, exist_ok=True)
+
+        if isinstance(images[0], plt.Figure):
+            raise NotImplementedError
+        elif isinstance(images[0], np.ndarray):
+            save_to_gif(images, path, fps=20)
+        else:
+            raise ValueError('Figure is not a numpy array or matplotlib figure object.')
+
+        if self.verbose:
+            print(f'Video saved to {path}')
 
 def setup(file=None):
     """Setup function. Retrieves config file and checks for validity.
