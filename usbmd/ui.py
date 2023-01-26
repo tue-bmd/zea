@@ -97,7 +97,7 @@ class DataLoaderUI:
         self.ax = None
 
         # initialize post processing tools
-        if not 'postprocess' in self.config:
+        if 'postprocess' in self.config:
             if 'contrast_boost' in self.config.postprocess:
                 self.contrast_boost = get_contrast_boost_func()
             if 'lista' in self.config.postprocess:
@@ -365,8 +365,9 @@ class DataLoaderUI:
 
         if isinstance(images[0], plt.Figure):
             raise NotImplementedError
-        elif isinstance(images[0], np.ndarray):
-            save_to_gif(images, path, fps=20)
+        if isinstance(images[0], np.ndarray):
+            fps = self.config.get('save', {}).get('fps', 50)
+            save_to_gif(images, path, fps=fps)
         else:
             raise ValueError('Figure is not a numpy array or matplotlib figure object.')
 
