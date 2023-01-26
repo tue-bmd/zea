@@ -81,12 +81,14 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data.dataset_name)(config=config.data)
 
+        # initialize probe class
         self.probe = get_probe(config, self.dataset)
         self.dataset.probe = self.probe
 
         # intialize process class
         self.process = Process(config, self.probe)
 
+        # initialize attributes for UI class
         self.data = None
         self.image = None
         self.file_path = None
@@ -94,8 +96,14 @@ class DataLoaderUI:
         self.fig = None
         self.ax = None
 
-        if 'contrast_boost' in self.config.postprocess:
-            self.contrast_boost = get_contrast_boost_func()
+        # initialize post processing tools
+        if not 'postprocess' in self.config:
+            if 'contrast_boost' in self.config.postprocess:
+                self.contrast_boost = get_contrast_boost_func()
+            if 'lista' in self.config.postprocess:
+                # initialize neural network
+                pass
+            # etc...
 
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
@@ -115,14 +123,10 @@ class DataLoaderUI:
             ## plot single frame
             self.data = self.get_data()
 
-            if self.config.data.dtype == 'beamformed_data' and \
-                to_dtype in {None, 'image'}:
-                self.image = apply_multi_band_pass_filter(self.data, self.process)
-            else:
-                self.image = self.process.run(
-                    self.data,
-                    dtype=self.config.data.dtype,
-                    to_dtype=to_dtype)
+            self.image = self.process.run(
+                self.data,
+                dtype=self.config.data.dtype,
+                to_dtype=to_dtype)
 
             if plot:
                 self.plot(self.image, block=True, save=save, axis=axis)
@@ -168,6 +172,10 @@ class DataLoaderUI:
         return data
 
     def postprocess(self, image):
+        """Post processing in image domain."""
+        if not 'postprocess' in self.config:
+            return image
+
         if 'contrast_boost' in self.config.postprocess:
             if self.config.data.dtype not in ['raw_data', 'aligned_data']:
                 warnings.warn(f'contrast boost not possible with {self.config.data.dtype}')
@@ -289,15 +297,7 @@ class DataLoaderUI:
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
-                if self.config.data.dtype in ['raw_data', 'aligned_data', 'beamformed_data']:
-                    if 'multi_bpf' in self.config.preprocess:
-                        beamformed_data = self.process.run(
-                            self.data, dtype=self.config.data.dtype, to_dtype='beamformed_data')
-                        image = apply_multi_band_pass_filter(beamformed_data, self.process)
-                    else:
-                        image = self.process.run(self.data, dtype=self.config.data.dtype)
-                else:
-                    image = self.process.run(self.data, dtype=self.config.data.dtype)
+                image = self.process.run(self.data, dtype=self.config.data.dtype)
 
                 if 'postprocess' in self.config:
                     image = self.postprocess(image)
@@ -347,13 +347,13 @@ class DataLoaderUI:
             print(f'Image saved to {path}')
 
     def save_video(self, images, path=None):
-        """Save image to disk.
+        """Save video to disk.
 
         Args:
             images (list): list of images.
             path (str, optional): path to save image to. Defaults to None.
 
-        TODO: can only save giv and not mp4
+        TODO: can only save gif and not mp4
         TODO: plt figures (axis=true in config) are not supported with save_video
 
         """
