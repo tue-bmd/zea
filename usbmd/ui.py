@@ -24,15 +24,14 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-import usbmd.utils.git_info as git
 from usbmd.common import set_data_paths
 from usbmd.datasets import _DATASETS, get_dataset
 from usbmd.probes import get_probe
-from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES,
-                              Process, apply_multi_band_pass_filter,
-                              get_contrast_boost_func)
+from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES, _ML_LIBRARIES,
+                              Process, get_contrast_boost_func)
 from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
 from usbmd.utils.config import load_config_from_yaml
+from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.utils import (filename_from_window_dialog,
                                plt_window_has_been_closed, save_to_gif,
                                strtobool, to_image)
@@ -64,7 +63,9 @@ def check_config_file(config):
     assert config.model.beamformer.type in _BEAMFORMER_TYPES, \
         f'Beamformer {config.model.beamformer.type} does not exist,' \
         f'should be in:\n{_BEAMFORMER_TYPES}'
-
+    assert config.get('ml_library') in _ML_LIBRARIES, \
+        f'Beamformer {config.ml_library} does not exist,' \
+        f'should be in:\n{_ML_LIBRARIES}'
     return config
 
 class DataLoaderUI:
@@ -408,12 +409,7 @@ def setup(file=None):
     ## git
     cwd = Path.cwd().stem
     if cwd in ('Ultrasound-BMd', 'usbmd'):
-        try:
-            print('Git branch and commit: ')
-            config['git'] = git.get_git_branch() + '=' + git.get_git_commit_hash()
-            print(config['git'])
-        except Exception:
-            print('Cannot find Git')
+        config['git'] = get_git_summary()
 
     return config
 
