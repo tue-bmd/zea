@@ -80,7 +80,7 @@ class DataLoaderUI:
         self.verbose = verbose
 
         # intialize dataset
-        self.dataset = get_dataset(self.config.data.dataset_name)(config=config.data)
+        self.dataset = get_dataset(self.config.data)
 
         # initialize probe class
         self.probe = get_probe(config, self.dataset)
