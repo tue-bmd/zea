@@ -89,6 +89,7 @@ Record plane wave data using the Verasonics system, for instance using your favo
 Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 ```bash
+pip install pylint
 pylint usbmd
 ```
 Also make sure all the pytest tests are running succesfully (100%) by running the following command in the root directory:
