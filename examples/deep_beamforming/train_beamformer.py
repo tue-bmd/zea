@@ -73,13 +73,13 @@ def train(config, dataset_directory):
     ).batch(config.model.batch_size)
 
     # Train the model
-    # model.fit(tf_train_gen,
-    #           steps_per_epoch=N_batches,
-    #           epochs=20,
-    #           callbacks=[],
-    #           max_queue_size=10,
-    #           workers=1,
-    #           verbose=1)
+    model.fit(tf_train_gen,
+              steps_per_epoch=N_batches,
+              epochs=20,
+              callbacks=[],
+              max_queue_size=10,
+              workers=1,
+              verbose=1)
 
     # Inference
 
