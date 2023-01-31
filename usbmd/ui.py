@@ -24,11 +24,11 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
+from configs.config_validation import check_config
 from usbmd.common import set_data_paths
-from usbmd.datasets import _DATASETS, get_dataset
+from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES, _ML_LIBRARIES,
-                              Process, get_contrast_boost_func)
+from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
 from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.git_info import get_git_summary
@@ -36,37 +36,6 @@ from usbmd.utils.utils import (filename_from_window_dialog,
                                plt_window_has_been_closed, save_to_gif,
                                strtobool, to_image)
 
-
-def check_config_file(config):
-    """Check config file for inconsistencies in set parameters.
-
-    Add necessary assertion checks for each parameter to be able to check
-    its validity.
-
-    Args:
-        config (dict): config file.
-
-    Returns:
-        config (dict): config file.
-
-    """
-    config.data.dataset_name = config.data.dataset_name.lower()
-    assert config.data.dataset_name in _DATASETS, \
-        f'Dataset {config.data.dataset_name} does not exist,'\
-        f'should be in:\n{_DATASETS}'
-    assert config.data.dtype in _DATA_TYPES, \
-        f'Dtype {config.data.dtype} does not exist,' \
-        f'should be in:\n{_DATA_TYPES}'
-    assert config.data.get('modtype') in _MOD_TYPES, \
-        'Modulation type does not exist,' \
-        f'should be in:\n{_MOD_TYPES}'
-    assert config.model.beamformer.type in _BEAMFORMER_TYPES, \
-        f'Beamformer {config.model.beamformer.type} does not exist,' \
-        f'should be in:\n{_BEAMFORMER_TYPES}'
-    assert config.get('ml_library') in _ML_LIBRARIES, \
-        f'Beamformer {config.ml_library} does not exist,' \
-        f'should be in:\n{_ML_LIBRARIES}'
-    return config
 
 class DataLoaderUI:
     """UI for selecting / loading / processing single ultrasound images.
@@ -402,7 +371,7 @@ def setup(file=None):
         config_file = file
 
     config = load_config_from_yaml(Path(config_file))
-    config = check_config_file(config)
+    check_config(config.serialize())
 
     print(f'Using config file: {config_file}')
 
