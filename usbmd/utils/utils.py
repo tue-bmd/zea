@@ -27,7 +27,13 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     if filetypes is None:
         filetypes = (('all files', '*.*'),)
 
-    root = Tk()
+    try:
+        root = Tk()
+    except Exception as error:
+        raise ValueError(
+            'Cannot run USBMD GUI on a server, ' \
+            'unless a X11 server is properly setup') from error
+
     # open in foreground
     root.wm_attributes('-topmost', 1)
     # we don't want a full GUI, so keep the root window from appearing
