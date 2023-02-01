@@ -1,6 +1,6 @@
 # Ultrasound-BMd
 Ultrasound-BMd (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
-The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox.
+The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox. This repository is being maintained by researchers from the [BM/d lab](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab/) at Eindhoven University of Technology. Currently for [internal](LICENSE) use only.
 
 In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 
@@ -89,6 +89,7 @@ Record plane wave data using the Verasonics system, for instance using your favo
 Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 ```bash
+pip install pylint
 pylint usbmd
 ```
 Also make sure all the pytest tests are running succesfully (100%) by running the following command in the root directory:
