@@ -7,7 +7,7 @@ from pathlib import Path
 
 from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
 from usbmd.probes import get_probe
-from usbmd.datasets import PICMUS
+from usbmd.datasets import DummyDataset
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid_v2
 from usbmd.processing import Process
@@ -44,8 +44,13 @@ def test_das_beamforming():
     # Ensure reproducible results
     torch.random.manual_seed(0)
 
-    # Generate pseudorandom input tensor
-    input_data = torch.randn((1, 75, 128, 3328, 1), device=device)
+    dataset = DummyDataset()
+
+    # Get dummy data from dataset and add batch dimension
+    input_data = dataset[0][None]
+
+    # Convert to tensor
+    input_data = torch.from_numpy(input_data).to(device)
 
     # Perform beamforming and convert to numpy array
     beamformer(input_data)['beamformed'].cpu().numpy()
