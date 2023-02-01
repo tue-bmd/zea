@@ -21,7 +21,7 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-def test_das_beamforming():
+def test_das_beamforming(debug=False):
     """
     Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
@@ -57,17 +57,18 @@ def test_das_beamforming():
 
 
     # plot results
-    # import matplotlib.pyplot as plt
-    # fig, axs = plt.subplots(1,3)
+    if debug:
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(1,3)
 
-    # aspect_ratio = (data[1].shape[1]/data[1].shape[2])/(data[0].shape[1]/data[0].shape[2])
-    # axs[0].imshow(np.abs(input.squeeze().T), aspect=aspect_ratio)
-    # axs[0].set_title('RF data') 
-    # axs[1].imshow(np.squeeze(output))
-    # axs[1].set_title('Beamformed')
-    # axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
-    # axs[2].set_title('Ground Truth')
-    # fig.show()
+        aspect_ratio = (data[1].shape[1]/data[1].shape[2])/(data[0].shape[1]/data[0].shape[2])
+        axs[0].imshow(np.abs(input.squeeze().T), aspect=aspect_ratio)
+        axs[0].set_title('RF data') 
+        axs[1].imshow(np.squeeze(output))
+        axs[1].set_title('Beamformed')
+        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
+        axs[2].set_title('Ground Truth')
+        fig.show()
 
     y_true = cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT)
     y_pred = np.squeeze(output)
@@ -88,4 +89,4 @@ def test_das_beamforming():
 
 
 if __name__ == '__main__':
-    test_das_beamforming()
+    test_das_beamforming(debug=True)
