@@ -24,13 +24,13 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.utils.config_validation import check_config
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
 from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
-from usbmd.utils.config import load_config_from_yaml
+from usbmd.utils.config import Config, load_config_from_yaml
+from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.utils import (filename_from_window_dialog,
                                plt_window_has_been_closed, save_to_gif,
@@ -79,8 +79,8 @@ class DataLoaderUI:
         """Run ui. Will retrieve, process and plot data if set to True."""
 
         to_dtype = 'image' if to_dtype is None else to_dtype
-        save = self.config.get('plot', {}).get('save')
-        axis = self.config.get('plot', {}).get('axis', True)
+        save = self.config.plot.save
+        axis = self.config.plot.axis
 
         if self.config.data.get('frame_no') == 'all':
             if to_dtype != 'image':
@@ -247,7 +247,7 @@ class DataLoaderUI:
         """Run all frames in file in sequence"""
 
         print('Playing video, press "q" to exit...')
-        axis = self.config.get('plot', {}).get('axis', True)
+        axis = self.config.plot.axis
         self.config.data.frame_no = 0
         self.data = self.get_data()
         n_frames = len(self.dataset.h5object)
@@ -336,7 +336,7 @@ class DataLoaderUI:
         if isinstance(images[0], plt.Figure):
             raise NotImplementedError
         if isinstance(images[0], np.ndarray):
-            fps = self.config.get('save', {}).get('fps', 50)
+            fps = self.config.plot.fps
             save_to_gif(images, path, fps=fps)
         else:
             raise ValueError('Figure is not a numpy array or matplotlib figure object.')
@@ -371,9 +371,9 @@ def setup(file=None):
         config_file = file
 
     config = load_config_from_yaml(Path(config_file))
-    check_config(config.serialize())
-
     print(f'Using config file: {config_file}')
+    config = check_config(config.serialize())
+    config = Config(config)
 
     ## git
     cwd = Path.cwd().stem
