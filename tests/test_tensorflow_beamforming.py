@@ -1,24 +1,24 @@
-"""Test the tensorflow implementation of the beamformers.
+"""Test the tf implementation of the beamformers.
 """
+# pylint: skip-file
 import sys
-from pathlib import Path
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+from pathlib import Path
+import pytest
+import cv2
 
-from usbmd.tensorflow_ultrasound.layers.beamformers_v2 import create_beamformer
-from usbmd.probes import get_probe
+from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
+from usbmd.probes import get_probe, Verasonics_l11_4v
 from usbmd.datasets import PICMUS
 from usbmd.utils.config import load_config_from_yaml
-from usbmd.utils.pixelgrid import make_pixel_grid_v2
+from usbmd.utils.pixelgrid import make_pixel_grid, make_pixel_grid_v2
 from usbmd.processing import Process
+from usbmd.utils.simulator import Ultrasound_Simulator
 
 # Add project folder to path to find config files
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
-
-
-
-
 
 
 def test_das_beamforming():
@@ -31,26 +31,60 @@ def test_das_beamforming():
 
     # Ensure DAS beamforming even if the config were to change
     config.model.type = 'das'
+    config.data.dataset_name = 'picmus'
 
-    probe = get_probe(config)
+    probe = Verasonics_l11_4v(config)
+    probe.N_ax = 2046
+    wvln = probe.c/probe.fc
+    grid = make_pixel_grid([-19e-3, 19e-3], [0, 63e-3], wvln/4, wvln/4)
 
-    # Perform the beamforming on a small grid to ensure the test runs quickly
-    grid = make_pixel_grid_v2(
-        config.scan.xlims,
-        config.scan.zlims,
-        config.get('Nx', 64),
-        config.get('Nz', 32))
-
+    simulator = Ultrasound_Simulator(probe, grid)
+    
     beamformer = create_beamformer(probe, grid, config)
 
     # Ensure reproducible results
     tf.random.set_seed(0)
+    np.random.seed(0)
 
     # Generate pseudorandom input tensor
-    input_data = np.random.rand((1, 75, 128, 3328, 1))
+    data = simulator.generate()
+
+    input = np.expand_dims(data[0], axis=(1,-1))
+    input = np.transpose(input, axes=(0,1,3,2,4))
 
     # Perform beamforming and convert to numpy array
-    beamformer(input_data)['beamformed'].cpu().numpy()
+    output = beamformer(input)
+
+
+    # plot results
+    # import matplotlib.pyplot as plt
+    # fig, axs = plt.subplots(1,3)
+
+    # aspect_ratio = (data[1].shape[1]/data[1].shape[2])/(data[0].shape[1]/data[0].shape[2])
+    # axs[0].imshow(np.abs(input.squeeze().T), aspect=aspect_ratio)
+    # axs[0].set_title('RF data') 
+    # axs[1].imshow(np.squeeze(output))
+    # axs[1].set_title('Beamformed')
+    # axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
+    # axs[2].set_title('Ground Truth')
+    # fig.show()
+
+    y_true = cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT)
+    y_pred = np.squeeze(output)
+
+    y_true = y_true/y_true.max()
+    y_pred = y_pred/y_pred.max()
+
+    MSE = np.mean(np.square(y_true-y_pred))
+
+    if MSE < 0.001:
+        print(f"""MSE between the beamformed and target image is {MSE}. \n
+        The beamformer is most likely working correctly""")
+        return True
+    else:
+        print(f"""MSE between the beamformed and target image is {MSE}. \n
+        The beamformer is most likely not working correctly""")
+        return False
 
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 # make sure you have Pip installed usbmd (see README)
 from usbmd.tensorflow_ultrasound.dataloader import UltrasoundLoader
-from usbmd.tensorflow_ultrasound.layers.beamformers_v2 import create_beamformer
+from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
