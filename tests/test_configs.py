@@ -10,7 +10,7 @@ import pytest
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from configs.config_validation import config_schema
+from usbmd.utils.config_validation import config_schema
 
 @pytest.mark.parametrize('file', list(Path('./configs').glob('*.yaml')))
 def test_config(file):

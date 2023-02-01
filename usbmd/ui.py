@@ -24,7 +24,7 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from configs.config_validation import check_config
+from usbmd.utils.config_validation import check_config
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
