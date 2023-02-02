@@ -32,6 +32,7 @@ def test_das_beamforming(debug=False):
     # Ensure DAS beamforming even if the config were to change
     config.model.type = 'das'
     config.data.dataset_name = 'picmus'
+    config.data.n_angles = 1
 
     probe = Verasonics_l11_4v(config)
     probe.N_ax = 2046
