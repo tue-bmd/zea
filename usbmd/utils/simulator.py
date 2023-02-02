@@ -20,6 +20,8 @@ import cv2
 from usbmd.utils.pixelgrid import make_pixel_grid
 
 class Ultrasound_Simulator:
+    """A lightweight ultrasound simulator tool, intended for testing purposes.
+    """
 
     def __init__(
         self,
@@ -29,8 +31,21 @@ class Ultrasound_Simulator:
         batch_size=1,
         fc=6.25e6,
         c = 1540,
-        N_scatterers = [20, 40]
+        N_scatterers = (20, 40)
     ):
+        """_summary_
+
+        Args:
+            probe (UltrasoundProbe, optional): Class containing probe parameters
+            Providing a probe class overrides all other acquisition paremters. Defaults to None.
+            grid (_type_, optional): Beamforming grid. Defaults to None.
+            ele_pos (_type_, optional): Array geometry. Defaults to None.
+            batch_size (int, optional): Number of batches. Defaults to 1.
+            fc (_type_, optional): Center frequency. Defaults to 6.25e6.
+            c (int, optional): Speed-of-Sound. Defaults to 1540.
+            N_scatterers (tuple, optional): [min, max] number of point scatterers.
+            Will be used when no specific points are provided. Defaults to [20, 40].
+        """
 
         # Set acquisition parameters
         if probe:
