@@ -16,7 +16,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 
-
 from usbmd.utils.pixelgrid import make_pixel_grid
 
 class Ultrasound_Simulator:
@@ -94,12 +93,17 @@ class Ultrasound_Simulator:
         self.x  = self.dx*np.arange(0,self.Nx)
         self.z  = self.dz*np.arange(0,self.Nz)
 
+    def pulse(self, tau):
+        """Transmit pulse"""
         sig = 2e-7
+        return np.exp(
+            -0.5*((self.t-tau)/sig)**2)*np.sin(2*np.pi*self.fc*(self.t-tau))
+
+    def loc(self, x0, z0):
+        """todo"""
         sig_x = 1*self.dx
         xg,zg = np.meshgrid(self.x,self.z)
-        self.pulse = lambda tau: np.exp(-0.5*((self.t-tau)/sig)**2)*np.sin(2*np.pi*self.fc*(self.t-tau))
-        self.loc =  lambda x0,z0: np.exp(-0.5*(((xg-x0)/sig_x)**2+((zg-z0)/sig_x)**2))
-
+        return np.exp(-0.5*(((xg-x0)/sig_x)**2+((zg-z0)/sig_x)**2))
 
     def generate(self, points=None):
         """generates pairs of input/target RF data"""
@@ -155,4 +159,3 @@ if __name__ == '__main__':
     fig.show()
 
     print(data)
-    
