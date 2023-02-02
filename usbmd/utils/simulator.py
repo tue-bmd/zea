@@ -29,6 +29,7 @@ class Ultrasound_Simulator:
         batch_size=1,
         fc=6.25e6,
         c = 1540,
+        N_scatterers = [20, 40]
     ):
 
         # Set acquisition parameters
@@ -65,8 +66,8 @@ class Ultrasound_Simulator:
         self.dx = self.grid[0,1,0]-self.grid[0,0,0]
         self.dz = self.grid[1,0,2]-self.grid[0,0,2]
 
-        self.min_scatterers = 30
-        self.max_scatterers = 40
+        self.min_scatterers = N_scatterers[0]
+        self.max_scatterers = N_scatterers[1]
 
         self.Nx = self.grid.shape[1]
         self.Nz = self.grid.shape[0]
@@ -93,12 +94,15 @@ class Ultrasound_Simulator:
         for i in range(self.batch_size):
 
             # Get positions of point scatterers
-            if points:
+            if isinstance(points, list):
                 scatterers = len(points[i])
                 points_x = points[i, 0]
                 points_z = points[i, 1]
             else:
-                scatterers = np.random.randint(self.min_scatterers, self.max_scatterers)
+                if isinstance(points, int):
+                    scatterers = points
+                else:
+                    scatterers = np.random.randint(self.min_scatterers, self.max_scatterers)
                 points_x = self.dx*self.Nx*np.random.rand(scatterers)
                 points_z = self.dx*self.Nz*np.random.rand(scatterers)
 

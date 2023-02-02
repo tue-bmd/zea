@@ -47,7 +47,7 @@ def test_das_beamforming(debug=False):
     np.random.seed(0)
 
     # Generate pseudorandom input tensor
-    data = simulator.generate()
+    data = simulator.generate(20)
 
     input = np.expand_dims(data[0], axis=(1,-1))
     input = np.transpose(input, axes=(0,1,3,2,4))
@@ -78,14 +78,7 @@ def test_das_beamforming(debug=False):
 
     MSE = np.mean(np.square(y_true-y_pred))
 
-    if MSE < 0.001:
-        print(f"""MSE between the beamformed and target image is {MSE}. \n
-        The beamformer is most likely working correctly""")
-        return True
-    else:
-        print(f"""MSE between the beamformed and target image is {MSE}. \n
-        The beamformer is most likely not working correctly""")
-        return False
+    assert MSE < 0.001
 
 
 if __name__ == '__main__':
