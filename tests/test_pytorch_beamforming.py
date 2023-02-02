@@ -6,8 +6,8 @@ import torch
 from pathlib import Path
 
 from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
-from usbmd.probes import get_probe
-from usbmd.datasets import PICMUS
+from usbmd.probes import Verasonics_l11_4v
+from usbmd.datasets import DummyDataset
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid_v2
 from usbmd.processing import Process
@@ -16,7 +16,7 @@ from usbmd.processing import Process
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-def test_das_beamforming():
+def test_das_beamforming(debug=False):
     """
     Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
@@ -26,9 +26,11 @@ def test_das_beamforming():
 
     # Ensure DAS beamforming even if the config were to change
     config.model.type = 'das'
-    config.data.dataset_name = 'abledata'
+    config.data.dataset_name = 'picmus'
+    config.data.n_angles = 1
 
-    probe = get_probe(config)
+    #probe = get_probe(config)
+    probe = Verasonics_l11_4v(config)
 
     # Perform the beamforming on a small grid to ensure the test runs quickly
     grid = make_pixel_grid_v2(
@@ -44,8 +46,17 @@ def test_das_beamforming():
     # Ensure reproducible results
     torch.random.manual_seed(0)
 
-    # Generate pseudorandom input tensor
-    input_data = torch.randn((1, 75, 128, 3328, 1), device=device)
+    dataset = DummyDataset()
+
+    # Get dummy data from dataset and add batch dimension
+    input_data = dataset[0][None]
+
+    # Convert to tensor
+    input_data = torch.from_numpy(input_data).to(device)
 
     # Perform beamforming and convert to numpy array
     beamformer(input_data)['beamformed'].cpu().numpy()
+
+
+if __name__ == '__main__':
+    test_das_beamforming(debug=True)
