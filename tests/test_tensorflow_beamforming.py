@@ -10,7 +10,7 @@ import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
-from usbmd.utils.config import load_config_from_yaml
+from usbmd.utils.config import load_config_from_yaml, Config
 from usbmd.utils.pixelgrid import make_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
 
@@ -25,12 +25,7 @@ def test_das_beamforming(debug=False):
     not check correctness of the output.
     """
 
-    config = load_config_from_yaml(r'./configs/config_picmus.yaml')
-
-    # Ensure DAS beamforming even if the config were to change
-    config.model.type = 'das'
-    config.data.dataset_name = 'picmus'
-    config.data.n_angles = 1
+    config = load_config_from_yaml(r'./configs/config_test.yaml')
 
     probe = Verasonics_l11_4v(config)
     probe.N_ax = 2046
@@ -59,7 +54,7 @@ def test_das_beamforming(debug=False):
         fig, axs = plt.subplots(1,3)
         aspect_ratio = (data[1].shape[1]/data[1].shape[2])/(data[0].shape[1]/data[0].shape[2])
         axs[0].imshow(np.abs(inputs.squeeze().T), aspect=aspect_ratio)
-        axs[0].set_title('RF data') 
+        axs[0].set_title('RF data')
         axs[1].imshow(np.squeeze(outputs))
         axs[1].set_title('Beamformed')
         axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
