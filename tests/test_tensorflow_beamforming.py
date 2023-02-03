@@ -1,0 +1,77 @@
+"""Test the tf implementation of the beamformers.
+"""
+import sys
+from pathlib import Path
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import tensorflow as tf
+
+from usbmd.probes import Verasonics_l11_4v
+from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
+from usbmd.utils.config import load_config_from_yaml
+from usbmd.utils.pixelgrid import make_pixel_grid
+from usbmd.utils.simulator import UltrasoundSimulator
+
+# Add project folder to path to find config files
+wd = Path(__file__).parent.parent
+sys.path.append(str(wd))
+
+
+def test_das_beamforming(debug=False):
+    """
+    Performs DAS beamforming on random data to verify that no errors occur. Does
+    not check correctness of the output.
+    """
+
+    config = load_config_from_yaml(r'./configs/config_test.yaml')
+
+    probe = Verasonics_l11_4v(config)
+    probe.N_ax = 2046
+    wvln = probe.c/probe.fc
+    grid = make_pixel_grid([-19e-3, 19e-3], [0, 63e-3], wvln/4, wvln/4)
+
+    simulator = UltrasoundSimulator(probe, grid)
+    beamformer = create_beamformer(probe, grid, config)
+
+    # Ensure reproducible results
+    tf.random.set_seed(0)
+    np.random.seed(0)
+
+    # Generate pseudorandom input tensor
+    data = simulator.generate(20)
+
+    inputs = np.expand_dims(data[0], axis=(1,-1))
+    inputs = np.transpose(inputs, axes=(0,1,3,2,4))
+
+    # Perform beamforming and convert to numpy array
+    outputs = beamformer(inputs)
+
+
+    # plot results
+    if debug:
+        fig, axs = plt.subplots(1,3)
+        aspect_ratio = (data[1].shape[1]/data[1].shape[2])/(data[0].shape[1]/data[0].shape[2])
+        axs[0].imshow(np.abs(inputs.squeeze().T), aspect=aspect_ratio)
+        axs[0].set_title('RF data')
+        axs[1].imshow(np.squeeze(outputs))
+        axs[1].set_title('Beamformed')
+        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
+        axs[2].set_title('Ground Truth')
+        fig.show()
+
+    y_true = cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT)
+    y_pred = np.squeeze(outputs)
+
+    y_true = y_true/y_true.max()
+    y_pred = y_pred/y_pred.max()
+
+    MSE = np.mean(np.square(y_true-y_pred))
+
+    assert MSE < 0.001
+
+
+if __name__ == '__main__':
+    test_das_beamforming(debug=True)
+    
