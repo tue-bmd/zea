@@ -10,7 +10,7 @@ import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
-from usbmd.utils.config import load_config_from_yaml, Config
+from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
 
