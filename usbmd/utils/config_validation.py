@@ -50,8 +50,8 @@ config_schema = Schema({
         Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
         Optional("input_range", default=None): Or(None, list_of_size_two),
         Optional("apodization", default=None): Or(None, str),
-        Optional("modtype", default="rf"): Or(*_MOD_TYPES),
-        Optional("from_modtype", default="rf"): Or(*_MOD_TYPES),
+        Optional("modtype", default=None): Or(*_MOD_TYPES),
+        Optional("from_modtype", default=None): Or(*_MOD_TYPES),
         Optional("downsample", default=None): positive_integer,
         Optional("n_angles", default=None): Or(None, int, list),
     },
@@ -64,7 +64,7 @@ config_schema = Schema({
     Optional("preprocess", default=preprocess_schema.validate({})): preprocess_schema,
     Optional("scan", default=scan_schema.validate({})): scan_schema,
 
-    Optional("device", default="cpu"): Or("cpu", "gpu"),
+    Optional("device", default="cpu"): Or("cpu", "gpu", "cuda"),
     Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES),
 })
 
