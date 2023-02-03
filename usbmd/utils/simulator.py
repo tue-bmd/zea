@@ -18,7 +18,7 @@ import cv2
 
 from usbmd.utils.pixelgrid import make_pixel_grid
 
-class Ultrasound_Simulator:
+class UltrasoundSimulator:
     """A lightweight ultrasound simulator tool, intended for testing purposes.
     """
 
@@ -141,7 +141,7 @@ class Ultrasound_Simulator:
         return np.array(inp), np.array(tar)
 
 if __name__ == '__main__':
-    sim = Ultrasound_Simulator()
+    sim = UltrasoundSimulator()
     data = sim.generate()
 
     img1 = abs(data[0].squeeze())
