@@ -49,7 +49,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     if filename:
         return Path(filename)
     else:
-        raise Exception('No file selected.')
+        raise ValueError('No file selected.')
 
 def translate(array, range_from, range_to):
     """ Map values in array from one range to other.
