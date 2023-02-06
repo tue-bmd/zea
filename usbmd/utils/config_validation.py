@@ -31,6 +31,15 @@ preprocess_schema = Schema({
     Optional("multi_bpf", default=False): bool,
 })
 
+postprocess_schema = Schema({
+    Optional("contrast_boost", default=None): {
+        "k_p": float,
+        "k_n": float,
+        "threshold": float,
+        },
+    Optional("lista", default=None): bool,
+})
+
 scan_schema = Schema({
     Optional("xlims", default=None): list_of_size_two,
     Optional("zlims", default=None): list_of_size_two,
@@ -59,9 +68,12 @@ config_schema = Schema({
         "save": bool,
         "axis": bool,
         Optional("fps", default=20): int,
+        Optional("tag", default=None): str,
+        Optional("headless", default=None): bool,
     },
     Optional("model", default=model_schema.validate({})): model_schema,
     Optional("preprocess", default=preprocess_schema.validate({})): preprocess_schema,
+    Optional("postprocess", default=postprocess_schema.validate({})): postprocess_schema,
     Optional("scan", default=scan_schema.validate({})): scan_schema,
 
     Optional("device", default="cpu"): Or("cpu", "gpu", "cuda"),
