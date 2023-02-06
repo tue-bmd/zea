@@ -65,6 +65,7 @@ class DataLoaderUI:
         self.mpl_img = None
         self.fig = None
         self.ax = None
+        self.headless = False
 
         # initialize post processing tools
         if 'postprocess' in self.config:
@@ -74,6 +75,23 @@ class DataLoaderUI:
                 # initialize neural network
                 pass
             # etc...
+
+        self.check_for_display()
+
+    def check_for_display(self):
+        """check if in headless mode (no monitor available)"""
+        # first read from config, headless could be an option
+        if self.config.plot.headless is not None:
+            self.headless = self.config.plot.headless
+        else:
+            self.headles = False
+        # check if non headless mode is possible
+        if self.headless is False:
+            if plt.rcParams['backend'].lower() == 'agg':
+                self.headless = True
+                warnings.warn('Could not connect to display, running headless.')
+        else:
+            print('Running in headless mode as set by config.')
 
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
@@ -210,10 +228,12 @@ class DataLoaderUI:
                     raise ValueError('First run plot function without movie.')
                 self.mpl_img.set_data(image)
                 self.fig.canvas.draw_idle()
+                self.fig.canvas.flush_events()
                 return self.fig
             else:
                 image = to_image(image, self.config.data.dynamic_range, pillow=False)
-                cv2.imshow('frame', image)
+                if not self.headless:
+                    cv2.imshow('frame', image)
                 return image
         else:
             if axis:
@@ -233,8 +253,8 @@ class DataLoaderUI:
 
                 if save:
                     self.save_image(self.fig)
-
-                plt.show(block=block)
+                if not self.headless:
+                    plt.show(block=block)
                 return self.fig
 
             else:
@@ -286,6 +306,12 @@ class DataLoaderUI:
                     if plt_window_has_been_closed(self.fig):
                         self.save_video(images)
                         return
+
+                if self.headless:
+                    if len(images) == n_frames:
+                        self.save_video(images)
+                        return
+
             # clear line, frame number
             print('\x1b[2K', end='\r')
 
@@ -298,10 +324,15 @@ class DataLoaderUI:
 
         """
         if path is None:
-            if self.dataset.frame_no is not None:
-                filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + '.png'
+            if self.config.plot.tag:
+                tag = '_' + self.config.plot.tag
             else:
-                filename = self.file_path.stem + '.png'
+                tag = ''
+
+            if self.dataset.frame_no is not None:
+                filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + tag + '.png'
+            else:
+                filename = self.file_path.stem + tag + '.png'
 
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
@@ -328,13 +359,18 @@ class DataLoaderUI:
 
         """
         if path is None:
-            filename = self.file_path.stem + '.gif'
+            if self.config.plot.tag:
+                tag = '_' + self.config.plot.tag
+            else:
+                tag = ''
+            filename = self.file_path.stem + tag + '.gif'
 
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
 
         if isinstance(images[0], plt.Figure):
-            raise NotImplementedError
+            raise NotImplementedError('Saving videos using matplotlib '\
+                                      '(`axis = True` in config) not yet supported')
         if isinstance(images[0], np.ndarray):
             fps = self.config.plot.fps
             save_to_gif(images, path, fps=fps)
@@ -360,11 +396,16 @@ def setup(file=None):
         # if no argument is provided resort to UI window
         if args.config is None:
             filetype = 'yaml'
-            config_file = filename_from_window_dialog(
-                f'Choose .{filetype} file',
-                filetypes=((filetype, '*.' + filetype),),
-                initialdir='./configs',
-            )
+            try:
+                config_file = filename_from_window_dialog(
+                    f'Choose .{filetype} file',
+                    filetypes=((filetype, '*.' + filetype),),
+                    initialdir='./configs',
+                )
+            except Exception as e:
+                raise ValueError (
+                    'Please specify the path to a config file through --config flag ' \
+                    'if GUI is not working (usually on headless servers).') from e
         else:
             config_file = args.config
     else:
