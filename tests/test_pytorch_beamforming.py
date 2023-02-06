@@ -23,7 +23,7 @@ def test_das_beamforming():
     not check correctness of the output.
     """
 
-    config = load_config_from_yaml(r'./configs/config_picmus.yaml')
+    config = load_config_from_yaml(r'./tests/config_test.yaml')
 
     # Ensure DAS beamforming even if the config were to change
     config.model.type = 'das'
