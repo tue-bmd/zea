@@ -25,7 +25,7 @@ def test_das_beamforming(debug=False):
     not check correctness of the output.
     """
 
-    config = load_config_from_yaml(r'./configs/config_test.yaml')
+    config = load_config_from_yaml(r'./tests/config_test.yaml')
 
     probe = Verasonics_l11_4v(config)
     probe.N_ax = 2046
@@ -47,7 +47,6 @@ def test_das_beamforming(debug=False):
 
     # Perform beamforming and convert to numpy array
     outputs = beamformer(inputs)
-
 
     # plot results
     if debug:
@@ -74,4 +73,3 @@ def test_das_beamforming(debug=False):
 
 if __name__ == '__main__':
     test_das_beamforming(debug=True)
-    
