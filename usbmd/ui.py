@@ -26,9 +26,9 @@ sys.path.append(str(wd))
 
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
+from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
-from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
 from usbmd.utils.config import Config, load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
