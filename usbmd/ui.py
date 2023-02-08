@@ -394,25 +394,20 @@ def setup(file=None):
     """
     if file is None:
         # if no argument is provided resort to UI window
-        if args.config is None:
-            filetype = 'yaml'
-            try:
-                config_file = filename_from_window_dialog(
-                    f'Choose .{filetype} file',
-                    filetypes=((filetype, '*.' + filetype),),
-                    initialdir='./configs',
-                )
-            except Exception as e:
-                raise ValueError (
-                    'Please specify the path to a config file through --config flag ' \
-                    'if GUI is not working (usually on headless servers).') from e
-        else:
-            config_file = args.config
-    else:
-        config_file = file
+        filetype = 'yaml'
+        try:
+            file = filename_from_window_dialog(
+                f'Choose .{filetype} file',
+                filetypes=((filetype, '*.' + filetype),),
+                initialdir='./configs',
+            )
+        except Exception as e:
+            raise ValueError (
+                'Please specify the path to a config file through --config flag ' \
+                'if GUI is not working (usually on headless servers).') from e
 
-    config = load_config_from_yaml(Path(config_file))
-    print(f'Using config file: {config_file}')
+    config = load_config_from_yaml(Path(file))
+    print(f'Using config file: {file}')
     config = check_config(config.serialize())
     config = Config(config)
 
@@ -433,14 +428,16 @@ def get_args():
     args = parser.parse_args()
     return args
 
-if __name__ == '__main__':
+def main():
+    """main entrypoint for UI script USBMD"""
     args = get_args()
     set_data_paths()
-    config = setup()
+    config = setup(file=args.config)
 
     if args.task == 'run':
         ui = DataLoaderUI(config)
         image = ui.run()
+        return image
     elif args.task == 'generate':
         destination_folder = input('Give destination folder path: ')
         to_dtype = input(f'Specify data type \n{_DATA_TYPES}: ')
@@ -453,3 +450,6 @@ if __name__ == '__main__':
             retain_folder_structure=retain_folder_structure,
         )
         generator.generate()
+
+if __name__ == '__main__':
+    main()
