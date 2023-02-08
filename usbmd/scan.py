@@ -5,7 +5,10 @@ from usbmd.probes import get_probe
 
 
 def initialize_scan_from_probe(probe):
-    """Initializes a Scan object based on the default scan parameters of the given probe. Any parameters for which no default values are defined in the probe class are initialized with the default arguments in the Scan constructor.
+    """
+    Initializes a Scan object based on the default scan parameters of the given
+    probe. Any parameters for which no default values are defined in the probe
+    class are initialized with the default arguments in the Scan constructor.
 
     Args:
         probe (Probe or str): A probe object or probe name.
@@ -21,10 +24,13 @@ def initialize_scan_from_probe(probe):
     scan = Scan(**default_parameters)
     return scan
 
+def initialize_scan_from_config(config):
+    raise NotImplementedError
+
 
 class Scan:
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
-                 zlims=(0, 0.04), f_c=7e6, f_s=28e6, c=1540, modtype='rf',
+                 zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=256, N_lat=128):
         """
         Initializes a Scan object representing the number and type of transmits,
@@ -41,9 +47,9 @@ class Scan:
             Defaults to (0, 0).
             zlim (tuple, optional): The z-limits in the beamforming grid.
             Defaults to (0,0.04).
-            f_c (float, optional): The modulation carrier frequency.
+            fc (float, optional): The modulation carrier frequency.
             Defaults to 7e6.
-            f_s (float, optional): The sampling rate to sample rf- or
+            fs (float, optional): The sampling rate to sample rf- or
             iq-signals with. Defaults to 28e6.
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
             modtype(string, optional): The modulation type. ('rf' or 'iq').
@@ -62,15 +68,15 @@ class Scan:
         self.xlims = xlims
         self.ylims = ylims
         self.zlims = zlims
-        self.f_c = f_c
-        self.f_s = f_s
+        self.fc = fc
+        self.fs = fs
         self.c = c
         self.modtype = modtype
         self.N_ax = N_ax
         self.N_lat = N_lat
         self.time_zero = np.zeros((N_tx,))
-        self.fdemod = self.f_c if modtype == 'iq' else 0.
-        self.wvln = self.c / self.f_c
+        self.fdemod = self.fc if modtype == 'iq' else 0.
+        self.wvln = self.c / self.fc
         self.grid = None
 
         # !!! TODO, implement this such that no aliasing occurs
@@ -91,9 +97,9 @@ class FocussedScan(Scan):
     """
 
     def __init__(self, probe=None, N_tx=75, xlim=(-0.01, 0.01), ylim=(0, 0),
-                 zlim=(0, 0.04), f_c=7e6, f_s=28e6, N_ax=None, N_lat=None, origins=None,
+                 zlim=(0, 0.04), fc=7e6, fs=28e6, N_ax=None, N_lat=None, origins=None,
                  focus_distances=None, angles=None):
-        super().__init__(probe, N_tx, xlim, ylim, zlim, f_c, f_s, N_ax, N_lat)
+        super().__init__(probe, N_tx, xlim, ylim, zlim, fc, fs, N_ax, N_lat)
 
         self.origins = origins
         self.focus_distances = focus_distances
@@ -106,18 +112,18 @@ class PlaneWaveScan(Scan):
     """
 
     def __init__(self, probe=None, N_tx=75, xlim=(-0.01, 0.01), ylim=(0, 0),
-                 zlim=(0, 0.04), f_c=7e6, f_s=28e6, N_ax=None, N_lat=None, angles=None):
+                 zlim=(0, 0.04), fc=7e6, fs=28e6, N_ax=None, N_lat=None, angles=None):
 
-        super().__init__(probe, N_tx, xlim, ylim, zlim, f_c, f_s, N_ax, N_lat)
+        super().__init__(probe, N_tx, xlim, ylim, zlim, fc, fs, N_ax, N_lat)
 
         self.angles = angles
 
 
 class CircularWaveScan(Scan):
     def __init__(self, probe=None, N_tx=75, xlim=(-0.01, 0.01), ylim=(0, 0),
-                 zlim=(0, 0.04), f_c=7e6, f_s=28e6, N_ax=None, N_lat=None, focus=None):
+                 zlim=(0, 0.04), fc=7e6, fs=28e6, N_ax=None, N_lat=None, focus=None):
 
-        super().__init__(probe, N_tx, xlim, ylim, zlim, f_c, f_s, N_ax, N_lat)
+        super().__init__(probe, N_tx, xlim, ylim, zlim, fc, fs, N_ax, N_lat)
         raise NotImplementedError('CircularWaveScan has not been implemented.')
 
 
