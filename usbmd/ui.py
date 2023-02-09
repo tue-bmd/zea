@@ -24,13 +24,13 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from configs.config_validation import check_config
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
+from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
-from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet
-from usbmd.utils.config import load_config_from_yaml
+from usbmd.utils.config import Config, load_config_from_yaml
+from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.utils import (filename_from_window_dialog,
                                plt_window_has_been_closed, save_to_gif,
@@ -65,6 +65,7 @@ class DataLoaderUI:
         self.mpl_img = None
         self.fig = None
         self.ax = None
+        self.headless = False
 
         # initialize post processing tools
         if 'postprocess' in self.config:
@@ -75,12 +76,29 @@ class DataLoaderUI:
                 pass
             # etc...
 
+        self.check_for_display()
+
+    def check_for_display(self):
+        """check if in headless mode (no monitor available)"""
+        # first read from config, headless could be an option
+        if self.config.plot.headless is not None:
+            self.headless = self.config.plot.headless
+        else:
+            self.headles = False
+        # check if non headless mode is possible
+        if self.headless is False:
+            if plt.rcParams['backend'].lower() == 'agg':
+                self.headless = True
+                warnings.warn('Could not connect to display, running headless.')
+        else:
+            print('Running in headless mode as set by config.')
+
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
         to_dtype = 'image' if to_dtype is None else to_dtype
-        save = self.config.get('plot', {}).get('save')
-        axis = self.config.get('plot', {}).get('axis', True)
+        save = self.config.plot.save
+        axis = self.config.plot.axis
 
         if self.config.data.get('frame_no') == 'all':
             if to_dtype != 'image':
@@ -210,10 +228,12 @@ class DataLoaderUI:
                     raise ValueError('First run plot function without movie.')
                 self.mpl_img.set_data(image)
                 self.fig.canvas.draw_idle()
+                self.fig.canvas.flush_events()
                 return self.fig
             else:
                 image = to_image(image, self.config.data.dynamic_range, pillow=False)
-                cv2.imshow('frame', image)
+                if not self.headless:
+                    cv2.imshow('frame', image)
                 return image
         else:
             if axis:
@@ -233,8 +253,8 @@ class DataLoaderUI:
 
                 if save:
                     self.save_image(self.fig)
-
-                plt.show(block=block)
+                if not self.headless:
+                    plt.show(block=block)
                 return self.fig
 
             else:
@@ -247,7 +267,7 @@ class DataLoaderUI:
         """Run all frames in file in sequence"""
 
         print('Playing video, press "q" to exit...')
-        axis = self.config.get('plot', {}).get('axis', True)
+        axis = self.config.plot.axis
         self.config.data.frame_no = 0
         self.data = self.get_data()
         n_frames = len(self.dataset.h5object)
@@ -286,6 +306,12 @@ class DataLoaderUI:
                     if plt_window_has_been_closed(self.fig):
                         self.save_video(images)
                         return
+
+                if self.headless:
+                    if len(images) == n_frames:
+                        self.save_video(images)
+                        return
+
             # clear line, frame number
             print('\x1b[2K', end='\r')
 
@@ -298,10 +324,15 @@ class DataLoaderUI:
 
         """
         if path is None:
-            if self.dataset.frame_no is not None:
-                filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + '.png'
+            if self.config.plot.tag:
+                tag = '_' + self.config.plot.tag
             else:
-                filename = self.file_path.stem + '.png'
+                tag = ''
+
+            if self.dataset.frame_no is not None:
+                filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + tag + '.png'
+            else:
+                filename = self.file_path.stem + tag + '.png'
 
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
@@ -328,15 +359,20 @@ class DataLoaderUI:
 
         """
         if path is None:
-            filename = self.file_path.stem + '.gif'
+            if self.config.plot.tag:
+                tag = '_' + self.config.plot.tag
+            else:
+                tag = ''
+            filename = self.file_path.stem + tag + '.gif'
 
             path = Path('./figures', filename)
             Path('./figures').mkdir(parents=True, exist_ok=True)
 
         if isinstance(images[0], plt.Figure):
-            raise NotImplementedError
+            raise NotImplementedError('Saving videos using matplotlib '\
+                                      '(`axis = True` in config) not yet supported')
         if isinstance(images[0], np.ndarray):
-            fps = self.config.get('save', {}).get('fps', 50)
+            fps = self.config.plot.fps
             save_to_gif(images, path, fps=fps)
         else:
             raise ValueError('Figure is not a numpy array or matplotlib figure object.')
@@ -358,22 +394,22 @@ def setup(file=None):
     """
     if file is None:
         # if no argument is provided resort to UI window
-        if args.config is None:
-            filetype = 'yaml'
-            config_file = filename_from_window_dialog(
+        filetype = 'yaml'
+        try:
+            file = filename_from_window_dialog(
                 f'Choose .{filetype} file',
                 filetypes=((filetype, '*.' + filetype),),
                 initialdir='./configs',
             )
-        else:
-            config_file = args.config
-    else:
-        config_file = file
+        except Exception as e:
+            raise ValueError (
+                'Please specify the path to a config file through --config flag ' \
+                'if GUI is not working (usually on headless servers).') from e
 
-    config = load_config_from_yaml(Path(config_file))
-    check_config(config.serialize())
-
-    print(f'Using config file: {config_file}')
+    config = load_config_from_yaml(Path(file))
+    print(f'Using config file: {file}')
+    config = check_config(config.serialize())
+    config = Config(config)
 
     ## git
     cwd = Path.cwd().stem
@@ -392,14 +428,16 @@ def get_args():
     args = parser.parse_args()
     return args
 
-if __name__ == '__main__':
+def main():
+    """main entrypoint for UI script USBMD"""
     args = get_args()
     set_data_paths()
-    config = setup()
+    config = setup(file=args.config)
 
     if args.task == 'run':
         ui = DataLoaderUI(config)
         image = ui.run()
+        return image
     elif args.task == 'generate':
         destination_folder = input('Give destination folder path: ')
         to_dtype = input(f'Specify data type \n{_DATA_TYPES}: ')
@@ -412,3 +450,6 @@ if __name__ == '__main__':
             retain_folder_structure=retain_folder_structure,
         )
         generator.generate()
+
+if __name__ == '__main__':
+    main()
