@@ -1,28 +1,29 @@
 """Test the pytorch implementation of the beamformers.
 """
-# pylint: skip-file
+# pylint: disable=no-member
 import sys
-import torch
 from pathlib import Path
 
-from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
-from usbmd.probes import Verasonics_l11_4v
+import torch
+
 from usbmd.datasets import DummyDataset
+from usbmd.probes import Verasonics_l11_4v
+from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
+from usbmd.pytorch_ultrasound.processing import on_device_torch
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid_v2
-from usbmd.processing import Process
 
 # Add project folder to path to find config files
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-def test_das_beamforming(debug=False):
+def test_das_beamforming():
     """
     Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
     """
 
-    config = load_config_from_yaml(r'./configs/config_picmus.yaml')
+    config = load_config_from_yaml(r'./tests/config_test.yaml')
 
     # Ensure DAS beamforming even if the config were to change
     config.model.type = 'das'
@@ -41,7 +42,7 @@ def test_das_beamforming(debug=False):
 
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
-    beamformer = create_beamformer(probe, grid, config).to(device)
+    beamformer = create_beamformer(probe, grid, config)
 
     # Ensure reproducible results
     torch.random.manual_seed(0)
@@ -51,12 +52,9 @@ def test_das_beamforming(debug=False):
     # Get dummy data from dataset and add batch dimension
     input_data = dataset[0][None]
 
-    # Convert to tensor
-    input_data = torch.from_numpy(input_data).to(device)
-
-    # Perform beamforming and convert to numpy array
-    beamformer(input_data)['beamformed'].cpu().numpy()
+    # Perform beamforming on device
+    on_device_torch(beamformer, input_data, device=device, return_numpy=True)
 
 
 if __name__ == '__main__':
-    test_das_beamforming(debug=True)
+    test_das_beamforming()
