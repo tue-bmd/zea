@@ -1,6 +1,6 @@
 # Ultrasound-BMd
 Ultrasound-BMd (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
-The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox.
+The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox. This repository is being maintained by researchers from the [BM/d lab](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab/) at Eindhoven University of Technology. Currently for [internal](LICENSE) use only.
 
 In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 
@@ -17,14 +17,28 @@ Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](s
 ```bash
 python -m pip install -e .
 ```
-The -e option stands for editable, which is important because it allows you to change the source code of the package without reinstalling it. You can leave it out, but changing the code in the repository won't change the installation (which is OK if you do not need to change it).
+The -e option stands for editable, which is important because it allows you to change the source code of the package without reinstalling it. You can leave it out, but changing the code in the repository won't change the installation (which is OK if you do not need to change it). Furthermore it installs all required dependencies, except for the Tensorflow and Pytorch libaries. This allows people to have a quick install of usbmd, if they do not need the ML tools. Also, often these installations for ML libraries are more involved and differ from system to system.
 
 You can use the package as follows:
 ```Python
-# Local imports
+# import usbmd package
+import usbmd
+# or if you want to use the Tensorflow tools
 from usbmd import tensorflow_ultrasound as usmbd_tf
+# or if you want to use the Pytorch tools
+from usbmd import pytorch_ultrasound as usbmd_torch
 ```
 
+### installation ML libararies
+Please have a look at the following sources if you would like to use the ML tools.
+
+Tensorflow installation:
+- requirement >= 2.8
+- [installation guide](https://www.tensorflow.org/install/pip#linux)
+
+Pytorch installation:
+- requirement >= 1.13
+- [installation guide](https://pytorch.org/get-started/locally/)
 ### Conda environment
 Install anaconda from [here](https://www.anaconda.com/products/individual#windows).
 
@@ -36,7 +50,11 @@ conda env create -f conda/tf26_usbmd.yaml
 ### Getting started
 In order to get started, you can run [`ui.py`](usbmd/ui.py), which runs the "user interface"
 tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder.
-Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image.
+Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
+
+```bash
+python usbmd/ui.py --config configs/config_picmus.yaml
+```
 
 ## Data
 
@@ -89,6 +107,7 @@ Record plane wave data using the Verasonics system, for instance using your favo
 Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 ```bash
+pip install pylint
 pylint usbmd
 ```
 Also make sure all the pytest tests are running succesfully (100%) by running the following command in the root directory:
