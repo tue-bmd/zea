@@ -1,0 +1,24 @@
+model:
+  batch_size: 1
+  beamformer:
+    type: das
+data:
+  file_path: null
+  local: false
+  dataset_name: 'simulation'
+  dtype: 'raw_data'
+  modtype: 'rf'
+  from_modtype: 'rf'
+  dynamic_range: [-60, 0]
+  n_angles: 1
+
+scan:
+  xlims: [-0.019, 0.019]
+  zlims: [0, 0.063]
+
+device: 'gpu'
+ml_library: null
+
+plot:
+  save: true
+  axis: true
