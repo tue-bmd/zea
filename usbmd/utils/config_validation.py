@@ -79,7 +79,7 @@ config_schema = Schema({
 
     Optional("device", default="cpu"): \
         Or("cpu", "gpu", "cuda", Regex(r"cuda:\d+"), Regex(r"gpu:\d+")),
-    Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES),
+    Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, 'disable'),
 })
 
 def check_config(config: dict):
