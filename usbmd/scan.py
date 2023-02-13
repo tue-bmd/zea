@@ -106,7 +106,7 @@ class FocussedScan(Scan):
 
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, N_lat=128, origins=None,focus_distances=None,
+                 N_ax=256, origins=None,focus_distances=None,
                  angles=None, Nx=128, Nz=128):
         super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
 
