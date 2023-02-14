@@ -16,7 +16,7 @@ def initialize_scan_from_probe(probe):
     Returns:
         Scan: A Scan object that is compatible with the probe.
     """
-    if type(probe) == str:
+    if isinstance(probe, str):
         probe = get_probe(probe)
 
     default_parameters = probe.get_default_scan_parameters()
@@ -25,10 +25,21 @@ def initialize_scan_from_probe(probe):
     return scan
 
 def initialize_scan_from_config(config):
+    """
+    Defines a scan based on parameters in a config.
+
+    Args:
+        config (Config): The config object to read parameters from.
+
+    Raises:
+        NotImplementedError: This method is not implemented and always raises
+        this error.
+    """
     raise NotImplementedError
 
 
 class Scan:
+    """Scan base class."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=3328, N_rec_el=128, Nx=128, Nz=128):
@@ -56,11 +67,14 @@ class Scan:
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
             modtype(string, optional): The modulation type. ('rf' or 'iq').
             Defaults to 'rf'
-            N_ax (int, optional): The number of samples per in a receive recording per channel.
+            N_ax (int, optional): The number of samples per in a receive
+            recording per channel.
             Defaults to None.
-            N_x (int, optional): The number of pixels in the lateral direction in the beamforming grid.
+            N_x (int, optional): The number of pixels in the lateral direction
+            in the beamforming grid.
             Defaults to None.
-            N_z (int, optional): The number of pixels in the axial direction in the beamforming grid.
+            N_z (int, optional): The number of pixels in the axial direction in
+            the beamforming grid.
             Defaults to None.
 
         Raises:
@@ -132,11 +146,13 @@ class PlaneWaveScan(Scan):
 
 
 class CircularWaveScan(Scan):
+    """Class representing a scan with diverging wave transmits."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=256, Nx=128, Nz=128, focus=None):
 
         super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
+        self.focus = focus
         raise NotImplementedError('CircularWaveScan has not been implemented.')
 
 

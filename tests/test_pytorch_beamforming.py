@@ -1,4 +1,5 @@
-"""Test the pytorch implementation of the beamformers.
+"""
+Test the pytorch implementation of the beamformers.
 """
 # pylint: disable=no-member
 import sys
@@ -12,7 +13,6 @@ from usbmd.probes import Verasonics_l11_4v
 from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
 from usbmd.pytorch_ultrasound.processing import on_device_torch
 from usbmd.utils.config import load_config_from_yaml
-from usbmd.utils.pixelgrid import make_pixel_grid_v2
 from usbmd.scan import PlaneWaveScan
 
 # Add project folder to path to find config files
@@ -34,7 +34,7 @@ def test_das_beamforming():
 
     #probe = get_probe(config)
     probe = Verasonics_l11_4v()
-    
+
     scan = PlaneWaveScan(angles=np.linspace(-0.27, 0.27, 75), Nx=32, Nz=64)
 
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'

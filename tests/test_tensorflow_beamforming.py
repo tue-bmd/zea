@@ -9,7 +9,7 @@ import numpy as np
 import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
-from usbmd.scan import initialize_scan_from_probe, PlaneWaveScan
+from usbmd.scan import PlaneWaveScan
 from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid
@@ -66,7 +66,7 @@ def test_das_beamforming(debug=False):
         axs[1].set_title('Beamformed')
         axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
         axs[2].set_title('Ground Truth')
-        plt.show()
+        fig.show()
 
     y_true = cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT)
     y_pred = np.squeeze(outputs)
