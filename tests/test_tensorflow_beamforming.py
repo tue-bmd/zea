@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
+from usbmd.scan import initialize_scan_from_probe, PlaneWaveScan
 from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid
@@ -27,13 +28,20 @@ def test_das_beamforming(debug=False):
 
     config = load_config_from_yaml(r'./tests/config_test.yaml')
 
-    probe = Verasonics_l11_4v(config)
-    probe.N_ax = 2046
-    wvln = probe.c/probe.fc
-    grid = make_pixel_grid([-19e-3, 19e-3], [0, 63e-3], wvln/4, wvln/4)
+    probe = Verasonics_l11_4v()
+    probe_parameters = probe.get_default_scan_parameters()
+    scan = PlaneWaveScan(N_tx=1,
+                         xlims=(-19e-3, 19e-3),
+                         zlims=(0, 63e-3),
+                         N_ax=2046,
+                         fs=probe_parameters['fs'],
+                         fc=probe_parameters['fc'],
+                         angles=np.array([0,]))
 
-    simulator = UltrasoundSimulator(probe, grid)
-    beamformer = create_beamformer(probe, grid, config)
+    scan.grid = make_pixel_grid(scan.xlims, scan.zlims, scan.wvln/4, scan.wvln/4)
+
+    simulator = UltrasoundSimulator(probe, scan)
+    beamformer = create_beamformer(probe, scan, config)
 
     # Ensure reproducible results
     tf.random.set_seed(0)
@@ -58,7 +66,7 @@ def test_das_beamforming(debug=False):
         axs[1].set_title('Beamformed')
         axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
         axs[2].set_title('Ground Truth')
-        fig.show()
+        plt.show()
 
     y_true = cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT)
     y_pred = np.squeeze(outputs)
