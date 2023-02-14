@@ -52,7 +52,7 @@ class DataLoaderUI:
         self.dataset = get_dataset(self.config.data)
 
         # initialize probe class
-        self.probe = get_probe(config, self.dataset)
+        self.probe = get_probe(config)
         self.dataset.probe = self.probe
 
         # intialize process class
