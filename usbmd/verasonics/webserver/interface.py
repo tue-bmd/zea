@@ -57,7 +57,7 @@ class WebServer:
         time_out = 1,
         buffer_size = 2**16,
         probe = 'L114',
-        dummy_mode = False):
+        dummy_mode = True):
         """_summary_
 
         Args:
@@ -84,8 +84,8 @@ class WebServer:
             buffer_size=30)
 
         #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
-        self.model_dict, grid = get_models()
-        self.grid = grid
+        self.model_dict, self.grid = get_models()
+
 
         ## State-parameters (perhaps move this to a separate class/state handler in the future?)
         self.bf_type = 'DAS' # Set beamformer type to DAS by default
@@ -112,10 +112,10 @@ class WebServer:
         self.show_fps = False
         self.upscaling = False
 
-        self.width = grid[:,:,0].max()-grid[:,:,0].min()
-        self.height = grid[:,:,2].max()-grid[:,:,2].min()
+        self.width = self.grid[:,:,0].max()-self.grid[:,:,0].min()
+        self.height = self.grid[:,:,2].max()-self.grid[:,:,2].min()
         self.aspect_ratio = self.width/self.height
-        self.aspect_fx = (grid.shape[0]/grid.shape[1])*self.aspect_ratio
+        self.aspect_fx = (self.grid.shape[0]/self.grid.shape[1])*self.aspect_ratio
         self.scaling = 2
 
         ## Buffers
@@ -334,16 +334,16 @@ class WebServer:
                 BF = np.squeeze(BF).T
                 BF = self.scan_converter.convert(BF)
 
-                if self.upscaling:
-                    BF = np.expand_dims(BF,-1)
-                    BF = cv2.merge((BF, BF, BF))
-                    BF = np.expand_dims(BF, 0)
-                    BF = self.sr_model(BF/255)
-                    BF = np.squeeze(BF)*255
+                # if self.upscaling:
+                #     BF = np.expand_dims(BF,-1)
+                #     BF = cv2.merge((BF, BF, BF))
+                #     BF = np.expand_dims(BF, 0)
+                #     BF = self.sr_model(BF/255)
+                #     BF = np.squeeze(BF)*255
 
                 # WRITE
                 self.time_display.append(datetime.now())
-                # Display the resulting frame
+                #Display the resulting frame
                 BF = cv2.resize(
                     BF,
                     dsize=(
@@ -361,14 +361,6 @@ class WebServer:
                 self.beamformer_elapsed_time.append(executionTimeBF)
             except:
                 time.sleep(0.0001)  # wait for new data
-
-    def submit_frame(self, terminate_signal):
-        """Function that sends the frame to the webserver"""
-        while not terminate_signal.is_set():
-            try:
-                yield self.encode_img(self.bf_display)
-            except:
-                time.sleep(0.001)  # wait for new data
 
     def get_frame(self):
         """Function that generates new image frames for the web interface"""
@@ -427,16 +419,15 @@ class WebServer:
                     buffer = collections.deque([], maxlen=30)  # buffer for reading/writing
                     terminate_signal = threading.Event()  # shared signa
 
-                    with ThreadPoolExecutor(3) as executor:
+                    with ThreadPoolExecutor(2) as executor:
                         _ = executor.submit(self.read_update, connection, buffer, terminate_signal)
                         _ = executor.submit(self.process_data, buffer, terminate_signal)
-                        _ = executor.submit(self.submit_frame, terminate_signal)
-
-                        # while not terminate_signal.is_set():
-                        #     try:
-                        #         yield self.encode_img(self.bf_display)
-                        #     except:
-                        #         time.sleep(0.001)  # wait for new data
+                        
+                        while not terminate_signal.is_set():
+                            try:
+                                yield self.encode_img(self.bf_display)
+                            except:
+                                time.sleep(0.001)  # wait for new data
 
                     print('Saving results...')
                     #self.save()

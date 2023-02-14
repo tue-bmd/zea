@@ -73,8 +73,8 @@ def load_saved_model(path):
 def get_models():
     model_dict = {}
     model_dict['DAS_1PW'], grid = create_DAS_1PW()
-    model_dict['DAS_5PW'] = create_DAS_5PW()
-    model_dict['DAS_11PW'] = create_DAS_11PW()
+    #model_dict['DAS_5PW'] = create_DAS_5PW()
+    #model_dict['DAS_11PW'] = create_DAS_11PW()
     # model_dict['ABLE_1PW'] = create_ABLE_1PW()
     # model_dict['ABLE_5PW'] = create_ABLE_5PW()
     # model_dict['ABLE_11PW'] = create_ABLE_11PW()
@@ -108,17 +108,20 @@ def model_from_file(path):
 #     return model_dict, grid
 
 def create_DAS_1PW():
-    cfg = load_config_from_yaml('python/configs/inference/l11-4v_DAS_1PW.yaml')
+    cfg = load_config_from_yaml('configs/config_abledata.yaml')
+    cfg.data.modtype = 'iq'
+    cfg.data.n_angles = 1
     probe = get_probe(cfg)
+    probe.N_ax = 576
     grid = get_grid(cfg, probe) 
     model = create_beamformer(probe, grid, cfg)
     model = trt_opt(model, name = 'DAS_1PW')
-
     #model.compile(jit_compile=True)
     return model, grid
 
 def create_DAS_5PW():
-    cfg = load_config_from_yaml('python/configs/inference/l11-4v_DAS_5PW.yaml')
+    cfg = load_config_from_yaml('configs/config_abledata.yaml')
+    cfg.data.n_angles = 5
     probe = get_probe(cfg)
     grid = get_grid(cfg, probe) 
     model = create_beamformer(probe, grid, cfg)
@@ -127,7 +130,7 @@ def create_DAS_5PW():
     return model
 
 def create_DAS_11PW():
-    cfg = load_config_from_yaml('python/configs/inference/l11-4v_DAS_11PW.yaml')
+    cfg = load_config_from_yaml('configs/config_abledata.yaml')
     probe = get_probe(cfg)
     grid = get_grid(cfg, probe) 
     model = create_beamformer(probe, grid, cfg)
@@ -135,37 +138,37 @@ def create_DAS_11PW():
     #model.compile(jit_compile=False)
     return model
 
-def create_ABLE_1PW():
-    cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_1PW.yaml')
-    probe = get_probe(cfg)
-    grid = get_grid(cfg, probe) 
-    model = create_beamformer(probe, grid, cfg)
-    model.load_weights(cfg.model_path)
+# def create_ABLE_1PW():
+#     cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_1PW.yaml')
+#     probe = get_probe(cfg)
+#     grid = get_grid(cfg, probe) 
+#     model = create_beamformer(probe, grid, cfg)
+#     model.load_weights(cfg.model_path)
 
-    model = trt_opt(model, name = 'ABLE_1PW')
+#     model = trt_opt(model, name = 'ABLE_1PW')
 
-    #model.compile(jit_compile=False)
-    return model
+#     #model.compile(jit_compile=False)
+#     return model
 
-def create_ABLE_5PW():
-    cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_5PW.yaml')
-    probe = get_probe(cfg)
-    grid = get_grid(cfg, probe)
-    model = create_beamformer(probe, grid, cfg)
-    model.load_weights(cfg.model_path)
-    model = trt_opt(model, name = 'ABLE_5PW')
-    #model.compile(jit_compile=False)
-    return model
+# def create_ABLE_5PW():
+#     cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_5PW.yaml')
+#     probe = get_probe(cfg)
+#     grid = get_grid(cfg, probe)
+#     model = create_beamformer(probe, grid, cfg)
+#     model.load_weights(cfg.model_path)
+#     model = trt_opt(model, name = 'ABLE_5PW')
+#     #model.compile(jit_compile=False)
+#     return model
 
-def create_ABLE_11PW():
-    cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_11PW.yaml')
-    probe = get_probe(cfg)
-    grid = get_grid(cfg, probe) 
-    model = create_beamformer(probe, grid, cfg)
-    model.load_weights(cfg.model_path)
-    model = trt_opt(model, name = 'ABLE_11PW')
-    #model.compile(jit_compile=False)
-    return model
+# def create_ABLE_11PW():
+#     cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_11PW.yaml')
+#     probe = get_probe(cfg)
+#     grid = get_grid(cfg, probe) 
+#     model = create_beamformer(probe, grid, cfg)
+#     model.load_weights(cfg.model_path)
+#     model = trt_opt(model, name = 'ABLE_11PW')
+#     #model.compile(jit_compile=False)
+#     return model
     
 
 def distributed_model(cfg, probe, grid, gpus):
