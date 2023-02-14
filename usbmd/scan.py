@@ -86,6 +86,8 @@ class Scan:
         self.ylims = ylims
         self.zlims = zlims
         self.grid = None
+        self.Nx = Nx
+        self.Nz = Nz
 
         # !!! TODO, implement this such that no aliasing occurs
         if self.fdemod == 0:
