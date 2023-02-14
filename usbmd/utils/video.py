@@ -63,18 +63,18 @@ class Scan_converter():
 
     def normalize(self, img):
         "Normalization function"
-        max_val = np.maximum(input.max(), 1e-9)
-        self.max_buffer.append(input.max())
+        max_val = np.maximum(img.max(), 1e-9)
+        self.max_buffer.append(img.max())
         self.max_buffer = self.max_buffer[-self.buffer_size::]
 
         if self.norm_mode == 'normal':
-            img = input/max_val
+            img = img/max_val
         elif self.norm_mode == 'smoothnormal':
-            img = input/np.mean(self.max_buffer)
+            img = img/np.mean(self.max_buffer)
         elif self.norm_mode == 'fixed':
-            img = input/self.norm_factor
+            img = img/self.norm_factor
         else:
-            img = input/max_val
+            img = img/max_val
 
         return img
 
