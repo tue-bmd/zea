@@ -132,8 +132,8 @@ class FocussedScan(Scan):
 
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, origins=None,focus_distances=None,
-                 angles=None, Nx=128, Nz=128):
+                 N_ax=256, origins=None,focus_distances=None, Nx=128, Nz=128,
+                 angles=None):
         super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
 
         self.origins = origins
@@ -148,11 +148,83 @@ class PlaneWaveScan(Scan):
 
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=128, Nz=128, angles=None):
+                 N_ax=256, Nx=128, Nz=128, angles=None, n_angles=None):
+        """
+        Initializes a PlaneWaveScan object.
+
+        Args:
+            N_tx (int, optional): The number of planewave transmits. Defaults
+                to 75.
+            xlims (tuple, optional): The min and max x value in beamforming
+                grid. Defaults to (-0.01, 0.01).
+            ylims (tuple, optional): _description_. Defaults to (0, 0).
+            zlims (tuple, optional): _description_. Defaults to (0, 0.04).
+            fc (float, int, optional): The carrier frequency. Defaults to 7e6.
+            fs (float, int, optional): The sampling rate. Defaults to 28e6.
+            c (int, optional): The assumed speed of sound. Defaults to 1540.
+            modtype (str, optional): The modulation type (rf or iq). Defaults
+                to 'rf'.
+            N_ax (int, optional): The number of axial samples per element per
+                transmit. Defaults to 256.
+            Nx (int, optional): The number of pixels in the x direction in the
+                beamforming grid. Defaults to 128.
+            Nz (int, optional): The number of pixels in the z direction in the
+                beamforming grid. Defaults to 128.
+            angles (list, optional): The angles of the planewaves. Defaults to
+                None.
+            n_angles (int, list, optional): The number of angles to use for
+                beamforming. The angles will be sampled evenly from the angles
+                list. Alternatively n_angles can contain a list of indices to
+                use. Defaults to None.
+
+        Raises:
+            ValueError: If n_angles has an invalid value.
+        """
 
         super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
+
         assert angles is not None
         self.angles = angles
+        if n_angles:
+            if isinstance(n_angles, list):
+                try:
+                    self.n_angles = n_angles
+                    self.angles = self.angles[n_angles]
+                except Exception as exc:
+                    raise ValueError(
+                        'Angle indexing does not match the number of '\
+                        'recorded angles') from exc
+            elif n_angles > len(self.angles):
+                raise ValueError(
+                    f'Number of angles {n_angles} specified supersedes '\
+                    f'number of recorded angles {len(self.angles)}.'
+                )
+            else:
+                # Compute n_angles evenly spaced indices for reduced angles
+                angle_indices = np.linspace(0, len(self.angles)-1, n_angles)
+                # Round the computed angles to integers and turn into list
+                angle_indices = list(np.rint(angle_indices).astype('int'))
+                # Store the values and indices in the object
+                self.n_angles = angle_indices
+                self.angles = self.angles[angle_indices]
+
+    @classmethod
+    def select_angles_subset(cls, angles, n_angles):
+        if isinstance(n_angles, list):
+            try:
+                return angles[n_angles]
+            except:
+                raise ValueError(
+                    'Angle indexing does not match the number of '\
+                    'recorded angles')
+        elif n_angles > len(angles):
+            raise ValueError(
+                f'Number of angles {n_angles} specified supersedes '\
+                f'number of recorded angles {len(angles)}.'
+            )
+        else:
+            n_angles = list(np.rint(np.linspace(0,len(angles)-1, n_angles)).astype('int'))
+            return angles[n_angles]
 
 
 class CircularWaveScan(Scan):
