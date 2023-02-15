@@ -43,6 +43,9 @@ postprocess_schema = Schema({
 scan_schema = Schema({
     Optional("xlims", default=None): list_of_size_two,
     Optional("zlims", default=None): list_of_size_two,
+    Optional("n_angles", default=None): Or(None, int, list),
+    Optional("Nx", default=None): Or(None, int),
+    Optional("Nz", default=None): Or(None, int),
 })
 
 # top level schema
@@ -62,7 +65,6 @@ config_schema = Schema({
         Optional("modtype", default=None): Or(*_MOD_TYPES),
         Optional("from_modtype", default=None): Or(*_MOD_TYPES),
         Optional("downsample", default=None): positive_integer,
-        Optional("n_angles", default=None): Or(None, int, list),
     },
     "plot": {
         "save": bool,
