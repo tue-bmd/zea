@@ -53,7 +53,7 @@ class DataLoaderUI:
         self.dataset = get_dataset(self.config.data)
 
         # Initialize scan based on dataset
-        self.scan = PlaneWaveScan(**self.dataset.get_default_scan_parameters())
+        self.scan = PlaneWaveScan(**self.dataset.get_default_scan_parameters(), n_angles=config.data.n_angles)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
