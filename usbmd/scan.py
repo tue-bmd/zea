@@ -1,7 +1,7 @@
 import numpy as np
 
-from usbmd.utils.pixelgrid import make_pixel_grid, make_pixel_grid_v2
 from usbmd.probes import get_probe
+from usbmd.utils.pixelgrid import make_pixel_grid, make_pixel_grid_v2
 
 
 def initialize_scan_from_probe(probe):
@@ -51,31 +51,28 @@ class Scan:
 
         Args:
             probe (Probe, str, optional): Probe object to read values from or
-            probe name to initialize. Defaults to None.
+                probe name to initialize. Defaults to None.
             N_tx (int, optional): The number of transmits to produce a single
-            frame. Defaults to 75.
+                frame. Defaults to 75.
             xlim (tuple, optional): The x-limits in the beamforming grid.
-            Defaults to (-0.01, 0.01).
+                Defaults to (-0.01, 0.01).
             ylim (tuple, optional): The y-limits in the beamforming grid.
-            Defaults to (0, 0).
+                Defaults to (0, 0).
             zlim (tuple, optional): The z-limits in the beamforming grid.
-            Defaults to (0,0.04).
+                Defaults to (0,0.04).
             fc (float, optional): The modulation carrier frequency.
-            Defaults to 7e6.
+                Defaults to 7e6.
             fs (float, optional): The sampling rate to sample rf- or
-            iq-signals with. Defaults to 28e6.
+                iq-signals with. Defaults to 28e6.
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
-            modtype(string, optional): The modulation type. ('rf' or 'iq').
-            Defaults to 'rf'
+                modtype(string, optional): The modulation type. ('rf' or 'iq').
+                Defaults to 'rf'
             N_ax (int, optional): The number of samples per in a receive
-            recording per channel.
-            Defaults to None.
+                recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
-            in the beamforming grid.
-            Defaults to None.
+                in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
-            the beamforming grid.
-            Defaults to None.
+                the beamforming grid. Defaults to None.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -112,7 +109,6 @@ class Scan:
             dx = self.wvln / pixels_per_wavelength
             dz = dx
             self.grid = make_pixel_grid(self.xlims, self.zlims, dx, dz)
-
 
 class FocussedScan(Scan):
     """
