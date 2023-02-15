@@ -79,7 +79,7 @@ def model_from_file(path):
     return wrapped_model
 
 def create_DAS_1PW():
-    cfg = load_config_from_yaml('configs/config_abledata.yaml')
+    cfg = load_config_from_yaml('configs/config_webserver.yaml')
     cfg.data.modtype = 'iq'
     cfg.data.n_angles = 1
     probe = get_probe(cfg)
@@ -91,7 +91,7 @@ def create_DAS_1PW():
     return model, grid
 
 def create_DAS_5PW():
-    cfg = load_config_from_yaml('configs/config_abledata.yaml')
+    cfg = load_config_from_yaml('configs/config_webserver.yaml')
     cfg.data.n_angles = 5
     probe = get_probe(cfg)
     probe.N_ax = 576
@@ -102,7 +102,7 @@ def create_DAS_5PW():
     return model
 
 def create_DAS_11PW():
-    cfg = load_config_from_yaml('configs/config_abledata.yaml')
+    cfg = load_config_from_yaml('configs/config_webserver.yaml')
     probe = get_probe(cfg)
     probe.N_ax = 576
     probe.fs = probe.fs/4
