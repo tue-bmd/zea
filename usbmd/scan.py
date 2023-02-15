@@ -70,10 +70,10 @@ class Scan:
             N_ax (int, optional): The number of samples per in a receive
             recording per channel.
             Defaults to None.
-            N_x (int, optional): The number of pixels in the lateral direction
+            Nx (int, optional): The number of pixels in the lateral direction
             in the beamforming grid.
             Defaults to None.
-            N_z (int, optional): The number of pixels in the axial direction in
+            Nz (int, optional): The number of pixels in the axial direction in
             the beamforming grid.
             Defaults to None.
 
