@@ -28,7 +28,6 @@ from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.scan import PlaneWaveScan
 from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
 from usbmd.utils.config import Config, load_config_from_yaml
 from usbmd.utils.config_validation import check_config
@@ -53,7 +52,13 @@ class DataLoaderUI:
         self.dataset = get_dataset(self.config.data)
 
         # Initialize scan based on dataset
-        self.scan = PlaneWaveScan(**self.dataset.get_default_scan_parameters(), n_angles=config.data.n_angles)
+        scan_class = self.dataset.get_scan_class()
+        default_scan_params = self.dataset.get_default_scan_parameters()
+        config_scan_params = self.config.scan
+
+        # dict merging python > 3.9: default_scan_params | config_scan_params
+        scan_params = {**default_scan_params, **config_scan_params}
+        self.scan = scan_class(**scan_params)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
