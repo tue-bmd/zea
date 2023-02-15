@@ -330,8 +330,7 @@ class WebServer:
                         model = self.model_dict['ABLE_1PW']
 
                 BF = model(IQ)
-                #BF = IQ[0,0, :, :,0]
-                BF = np.squeeze(BF).T
+                BF = np.squeeze(BF)
                 BF = self.scan_converter.convert(BF)
 
                 # if self.upscaling:
@@ -341,7 +340,6 @@ class WebServer:
                 #     BF = self.sr_model(BF/255)
                 #     BF = np.squeeze(BF)*255
 
-                # WRITE
                 self.time_display.append(datetime.now())
                 #Display the resulting frame
                 BF = cv2.resize(
@@ -352,7 +350,7 @@ class WebServer:
                     fx=self.aspect_fx
                     )
 
-                # fps counter
+                # FPS counter
                 if self.show_fps:
                     BF = self.fps_counter.overlay(BF)
 

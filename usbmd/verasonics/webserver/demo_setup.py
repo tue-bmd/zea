@@ -1,22 +1,15 @@
 # pylint: skip-file
 
-from time import perf_counter
-
 import numpy as np
 import tensorflow as tf
-from usbmd.probes import get_probe
-from usbmd.utils.config import load_config_from_yaml
 
+from usbmd.probes import get_probe
 from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
+from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import get_grid
 
-#tf.config.run_functions_eagerly(True)
 set_gpu_usage()
-
-
-# def trt_opt(model, name=None):
-#     return model
 
 def trt_opt(model, name=None):
 
@@ -41,13 +34,7 @@ def trt_opt(model, name=None):
         converter.summary()
         _ = trt_model(dummy_input[0])
         tf.saved_model.save(trt_model, modelname)
-        # from time import perf_counter
-        # for i in range(100):
-        #     start = perf_counter()
-        #     _ = trt_model(dummy_input[0])
-        #     end = perf_counter()
-        #     print(end-start)
-    
+
         if name:
             trt_model = tf.saved_model.load(modelname)
 
@@ -73,8 +60,8 @@ def load_saved_model(path):
 def get_models():
     model_dict = {}
     model_dict['DAS_1PW'], grid = create_DAS_1PW()
-    #model_dict['DAS_5PW'] = create_DAS_5PW()
-    #model_dict['DAS_11PW'] = create_DAS_11PW()
+    model_dict['DAS_5PW'] = create_DAS_5PW()
+    model_dict['DAS_11PW'] = create_DAS_11PW()
     # model_dict['ABLE_1PW'] = create_ABLE_1PW()
     # model_dict['ABLE_5PW'] = create_ABLE_5PW()
     # model_dict['ABLE_11PW'] = create_ABLE_11PW()
@@ -84,28 +71,12 @@ def get_models():
 def model_from_file(path):
 
     trt_model = tf.saved_model.load(path)
-
-    dummy_input = [tf.zeros(input.shape) for input in trt_model.inputs]
-    
     
     def wrapped_model(input_data):
             output = trt_model(tf.convert_to_tensor(input_data, dtype='float32'))
             return list(output.values())[0]
 
-    #_ = wrapped_model(dummy_input[0])
-
     return wrapped_model
-
-# def get_models():
-#     model_dict = {}
-#     _, grid = create_DAS_1PW()
-#     model_dict['DAS_1PW'] = model_from_file('models/DAS_1PW')
-#     model_dict['DAS_5PW'] = model_from_file('models/DAS_5PW')
-#     model_dict['DAS_11PW'] = model_from_file('models/DAS_11PW')
-#     model_dict['ABLE_1PW'] = model_from_file('models/ABLE_1PW')
-#     model_dict['ABLE_5PW'] = model_from_file('models/DAS_5PW')
-#     model_dict['ABLE_11PW'] = model_from_file('models/DAS_11PW')
-#     return model_dict, grid
 
 def create_DAS_1PW():
     cfg = load_config_from_yaml('configs/config_abledata.yaml')
@@ -113,29 +84,31 @@ def create_DAS_1PW():
     cfg.data.n_angles = 1
     probe = get_probe(cfg)
     probe.N_ax = 576
+    probe.fs = probe.fs/4
     grid = get_grid(cfg, probe) 
     model = create_beamformer(probe, grid, cfg)
     model = trt_opt(model, name = 'DAS_1PW')
-    #model.compile(jit_compile=True)
     return model, grid
 
 def create_DAS_5PW():
     cfg = load_config_from_yaml('configs/config_abledata.yaml')
     cfg.data.n_angles = 5
     probe = get_probe(cfg)
+    probe.N_ax = 576
+    probe.fs = probe.fs/4
     grid = get_grid(cfg, probe) 
     model = create_beamformer(probe, grid, cfg)
     model = trt_opt(model, name = 'DAS_5PW')
-    #model.compile(jit_compile=False)
     return model
 
 def create_DAS_11PW():
     cfg = load_config_from_yaml('configs/config_abledata.yaml')
     probe = get_probe(cfg)
+    probe.N_ax = 576
+    probe.fs = probe.fs/4
     grid = get_grid(cfg, probe) 
     model = create_beamformer(probe, grid, cfg)
     model = trt_opt(model, name = 'DAS_11PW')
-    #model.compile(jit_compile=False)
     return model
 
 # def create_ABLE_1PW():
@@ -191,7 +164,7 @@ def distributed_model(cfg, probe, grid, gpus):
     subgrid_outputs = []
     for gpu, subgrid in zip(gpus, subgrids):
         with tf.device(gpu.name.strip('/physical_device:')):
-            subgrid_outputs.append(create_beamformer_RT(probe, subgrid, cfg)(inputs))
+            subgrid_outputs.append(create_beamformer(probe, subgrid, cfg)(inputs))
 
     outputs = tf.concat(subgrid_outputs, axis=1)
 
