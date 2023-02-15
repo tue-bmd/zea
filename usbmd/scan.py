@@ -208,7 +208,8 @@ class PlaneWaveScan(Scan):
                 # Store the values and indices in the object
                 self.n_angles = angle_indices
                 self.angles = self.angles[angle_indices]
-
+        else:
+            self.n_angles = [n for n in range(len(self.angles))]
 
 class CircularWaveScan(Scan):
     """Class representing a scan with diverging wave transmits."""
