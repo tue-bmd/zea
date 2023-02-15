@@ -60,8 +60,8 @@ def load_saved_model(path):
 def get_models():
     model_dict = {}
     model_dict['DAS_1PW'], grid = create_DAS_1PW()
-    model_dict['DAS_5PW'] = create_DAS_5PW()
-    model_dict['DAS_11PW'] = create_DAS_11PW()
+    #model_dict['DAS_5PW'] = create_DAS_5PW()
+    #model_dict['DAS_11PW'] = create_DAS_11PW()
     # model_dict['ABLE_1PW'] = create_ABLE_1PW()
     # model_dict['ABLE_5PW'] = create_ABLE_5PW()
     # model_dict['ABLE_11PW'] = create_ABLE_11PW()
@@ -92,7 +92,7 @@ def create_DAS_1PW():
 
 def create_DAS_5PW():
     cfg = load_config_from_yaml('configs/config_webserver.yaml')
-    cfg.data.n_angles = 5
+    cfg.data.n_angles = [1,3,5,7,9]
     probe = get_probe(cfg)
     probe.N_ax = 576
     probe.fs = probe.fs/4
@@ -103,6 +103,7 @@ def create_DAS_5PW():
 
 def create_DAS_11PW():
     cfg = load_config_from_yaml('configs/config_webserver.yaml')
+    cfg.data.n_angles = [0,1,2,3,4,5,6,7,8,9,10]
     probe = get_probe(cfg)
     probe.N_ax = 576
     probe.fs = probe.fs/4
