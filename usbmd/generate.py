@@ -54,7 +54,7 @@ class GenerateDataSet:
         self.dataset = get_dataset(self.config.data)
 
         # Initialize scan based on dataset
-        self.scan = Scan(self.dataset.get_default_scan_parameters())
+        self.scan = Scan(**self.dataset.get_default_scan_parameters())
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
