@@ -1,3 +1,18 @@
+"""
+==============================================================================
+    Eindhoven University of Technology
+==============================================================================
+
+    Source Name   : scan.py
+
+    Author(s)     : Vincent van de Schaft
+    Date          : Wed Feb 15 2024
+
+    Class structures containing parameters defining an ultrasound scan and the
+    beamforming grid.
+
+==============================================================================
+"""
 import numpy as np
 
 from usbmd.probes import get_probe
