@@ -19,31 +19,31 @@ import cv2
 from usbmd.utils.pixelgrid import make_pixel_grid
 
 class UltrasoundSimulator:
-    """A lightweight ultrasound simulator tool, intended for testing purposes.
-    """
-
+    """A lightweight ultrasound simulator tool, intended for testing purposes."""
     def __init__(
         self,
-        probe = None,
-        grid = None,
-        ele_pos = None,
+        probe=None,
+        grid=None,
+        ele_pos=None,
         batch_size=1,
         fc=6.25e6,
-        c = 1540,
-        N_scatterers = (20, 40)
+        c=1540,
+        N_scatterers=(20, 40),
     ):
-        """_summary_
+        """Initialize ultrasound simulator
 
         Args:
             probe (UltrasoundProbe, optional): Class containing probe parameters
-            Providing a probe class overrides all other acquisition paremters. Defaults to None.
-            grid (_type_, optional): Beamforming grid. Defaults to None.
-            ele_pos (_type_, optional): Array geometry. Defaults to None.
+                Providing a probe class overrides all other acquisition paremters.
+                Defaults to None.
+            grid (ndarray, optional): Beamforming grid. Defaults to None.
+            ele_pos (ndarray, optional): Array geometry. Defaults to None.
             batch_size (int, optional): Number of batches. Defaults to 1.
-            fc (_type_, optional): Center frequency. Defaults to 6.25e6.
+            fc (float, optional): Center frequency. Defaults to 6.25e6.
             c (int, optional): Speed-of-Sound. Defaults to 1540.
             N_scatterers (tuple, optional): [min, max] number of point scatterers.
-            Will be used when no specific points are provided. Defaults to [20, 40].
+                Will be used when no specific points are provided.
+                Defaults to [20, 40].
         """
 
         # Set acquisition parameters
@@ -62,9 +62,9 @@ class UltrasoundSimulator:
             else:
                 self.ele_pos = np.stack([
                     np.linspace(
-                    -19.e-3,19.e-3,128).T,
-                    np.zeros((128,)),
-                    np.zeros((128,))
+                        -19.e-3,19.e-3,128).T,
+                        np.zeros((128,)),
+                        np.zeros((128,))
                     ], axis=1)
 
         self.batch_size = batch_size
@@ -100,7 +100,7 @@ class UltrasoundSimulator:
             -0.5*((self.t-tau)/sig)**2)*np.sin(2*np.pi*self.fc*(self.t-tau))
 
     def loc(self, x0, z0):
-        """todo"""
+        """TODO: add docstring"""
         sig_x = 1*self.dx
         xg,zg = np.meshgrid(self.x,self.z)
         return np.exp(-0.5*(((xg-x0)/sig_x)**2+((zg-z0)/sig_x)**2))
@@ -156,6 +156,4 @@ if __name__ == '__main__':
     axs[1].imshow(img2)
     axs[2].imshow(img2)
     axs[2].imshow(res_img1/res_img1.max() + img2/img2.max())
-    fig.show()
-
-    print(data)
+    plt.show()
