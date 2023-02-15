@@ -27,7 +27,6 @@ import time
 from datetime import datetime
 
 import cv2
-import keras
 import numpy as np
 import scipy.io
 from demo_setup import get_models
@@ -181,7 +180,6 @@ class WebServer:
 
                         # PID CONTROLLER
                         # TODO: Implement this as a separate class
-                        #u(k) = u(k-1) + (Kd+Kp+Ki)*e(k) + (Ki-Kp-2Kd)*e(k-1) + Kd*e(k-2)
                         Kp = 0.05 # Proportional
                         Kd = 0 # Derivative
                         Ki = 0.001 # Integral
@@ -360,6 +358,47 @@ class WebServer:
             except:
                 time.sleep(0.0001)  # wait for new data
 
+
+    def open_connection(self):
+        """Handles the opening and handshaking with the Verasonics"""
+        # Open connection
+        connection, client_address = self.vera_socket.accept()
+        print('Connected by', client_address)
+        # READ INITIALIZATION PARAMETERS
+        total = 0
+        msg = bytearray()
+
+        while total < 7: # Ensure to receive the complete data
+            #For best match with hardware and network realities,
+            # the value of bufsize should be a relatively small power of 2,
+            # for example, 4096.
+            data = connection.recv(self.buffer_size)
+            if not data:
+                break
+            total = total + len(data)
+            msg += data
+
+        initializationParameters = array.array('h', msg)
+
+        self.n_ax = initializationParameters[0]
+        self.n_el = initializationParameters[1]
+        self.na_transmit = initializationParameters[2]
+        self.na_read = self.na_transmit
+
+        self.returnToMatlabFreq = initializationParameters[3]
+        self.bytesPerElementSent = initializationParameters[4]
+        self.bytesPerElementRead = initializationParameters[5]
+        self.numTunableParameters = initializationParameters[6]
+
+        # ACK INITIALIZATION COMPLETED
+        ack = [1]
+        ack_bytes = bytearray(struct.pack(f'{len(ack)}B', *ack))
+        connection.sendall(ack_bytes)
+
+        logging.debug('Initialization completed')
+
+        return connection
+
     def get_frame(self):
         """Function that generates new image frames for the web interface"""
         connection = None
@@ -368,45 +407,7 @@ class WebServer:
                 if (connection is None) and (not self.dummy_mode):
                     print('Waiting for connection...')
                     try:
-                        # Open connection
-                        connection, client_address = self.vera_socket.accept()
-                        print('Connected by', client_address)
-                        # READ INITIALIZATION PARAMETERS
-                        total = 0
-                        msg = bytearray()
-
-                        while total < 7: # Ensure to receive the complete data
-                            #For best match with hardware and network realities,
-                            # the value of bufsize should be a relatively small power of 2,
-                            # for example, 4096.
-                            data = connection.recv(self.buffer_size)
-                            if not data:
-                                break
-                            total = total + len(data)
-                            msg += data
-
-                        initializationParameters = array.array('h', msg)
-
-                        self.n_ax = initializationParameters[0]
-                        self.n_el = initializationParameters[1]
-                        self.na_transmit = initializationParameters[2]
-                        self.na_read = self.na_transmit
-
-                        self.returnToMatlabFreq = initializationParameters[3]
-                        self.bytesPerElementSent = initializationParameters[4]
-                        self.bytesPerElementRead = initializationParameters[5]
-                        self.numTunableParameters = initializationParameters[6]
-
-                        # # NOTE THIS SHOULD BE CHANGED. INSTEAD OF DEFINING CONFIG
-                        # USE PARAMETERS ABOVE DEFINED
-                        # config = 'configs/training/default.yaml'
-
-                        # ACK INITIALIZATION COMPLETED
-                        ack = [1]
-                        ack_bytes = bytearray(struct.pack(f'{len(ack)}B', *ack))
-                        connection.sendall(ack_bytes)
-
-                        logging.debug('Initialization completed')
+                        connection = self.open_connection()
                     except:
                         img = cv2.imread('python/templates/nofeed.jpg')
                         yield self.encode_img(img)
@@ -420,7 +421,7 @@ class WebServer:
                     with ThreadPoolExecutor(2) as executor:
                         _ = executor.submit(self.read_update, connection, buffer, terminate_signal)
                         _ = executor.submit(self.process_data, buffer, terminate_signal)
-                        
+
                         while not terminate_signal.is_set():
                             try:
                                 yield self.encode_img(self.bf_display)
