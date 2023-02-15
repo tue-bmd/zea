@@ -214,10 +214,10 @@ class DataLoaderUI:
             self.fig, self.ax = plt.subplots()
 
             extent = [
-                self.probe.xlims[0] * 1e3,
-                self.probe.xlims[1] * 1e3,
-                self.probe.zlims[1] * 1e3,
-                self.probe.zlims[0] * 1e3,
+                self.scan.xlims[0] * 1e3,
+                self.scan.xlims[1] * 1e3,
+                self.scan.zlims[1] * 1e3,
+                self.scan.zlims[0] * 1e3,
             ]
 
             if image_range is None:
