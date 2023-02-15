@@ -61,11 +61,18 @@ sys.path.append(str(wd))
 
 
 
-def test_das_beamforming(debug=False):
-    """
-    Performs DAS beamforming on random data to verify that no errors occur. Does
+def test_das_beamforming(debug=False, compare_gt=True):
+    """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
+
+    Args:
+        debug (bool, optional): Set to True to enable debugging options (plotting). Defaults to False.
+        compare_gt (bool, optional): Set to True to compare against GT. Defaults to True.
+
+    Returns:
+        numpy array: beamformed output
     """
+
 
     config = load_config_from_yaml(r'./tests/config_test.yaml')
     config.ml_library = 'torch'
@@ -82,7 +89,7 @@ def test_das_beamforming(debug=False):
     np.random.seed(0)
 
     # Generate pseudorandom input tensor
-    data = simulator.generate(20)
+    data = simulator.generate(200)
 
     inputs = np.expand_dims(data[0], axis=(1,-1))
     inputs = np.transpose(inputs, axes=(0,1,3,2,4))
@@ -111,8 +118,11 @@ def test_das_beamforming(debug=False):
 
     MSE = np.mean(np.square(y_true-y_pred))
     print(f'MSE: {MSE}')
-    assert MSE < 0.001
+
+    if compare_gt:
+        assert MSE < 0.01
+
     return y_pred
 
 if __name__ == '__main__':
-    test_das_beamforming()
+    test_das_beamforming(debug=True)

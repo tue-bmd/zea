@@ -10,8 +10,8 @@ from tests.test_tensorflow_beamforming import test_das_beamforming as test_tf
 def test_compare_beamformers():
     """Compares Torch and Tensorflow outputs, and checks if they are (almost) equal"""
 
-    output_torch = test_torch()
-    output_tf = test_tf()
+    output_torch = test_torch(compare_gt=False)
+    output_tf = test_tf(compare_gt=False)
     MSE = np.mean(np.square(output_torch-output_tf))
     print(f'MSE: {MSE}')
     np.testing.assert_almost_equal(output_torch, output_tf, decimal=4)
