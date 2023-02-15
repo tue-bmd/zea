@@ -124,6 +124,7 @@ class Scan:
             dz = dx
             self.grid = make_pixel_grid(self.xlims, self.zlims, dx, dz)
 
+
 class FocussedScan(Scan):
     """
     Class representing a focussed beam scan where every transmit has a beam
@@ -207,24 +208,6 @@ class PlaneWaveScan(Scan):
                 # Store the values and indices in the object
                 self.n_angles = angle_indices
                 self.angles = self.angles[angle_indices]
-
-    @classmethod
-    def select_angles_subset(cls, angles, n_angles):
-        if isinstance(n_angles, list):
-            try:
-                return angles[n_angles]
-            except:
-                raise ValueError(
-                    'Angle indexing does not match the number of '\
-                    'recorded angles')
-        elif n_angles > len(angles):
-            raise ValueError(
-                f'Number of angles {n_angles} specified supersedes '\
-                f'number of recorded angles {len(angles)}.'
-            )
-        else:
-            n_angles = list(np.rint(np.linspace(0,len(angles)-1, n_angles)).astype('int'))
-            return angles[n_angles]
 
 
 class CircularWaveScan(Scan):
