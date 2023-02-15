@@ -154,9 +154,3 @@ class CircularWaveScan(Scan):
         super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
         self.focus = focus
         raise NotImplementedError('CircularWaveScan has not been implemented.')
-
-
-if __name__ == '__main__':
-    scan = initialize_scan_from_probe('verasonics_l11_4v')
-
-    print('fpmje')
