@@ -26,7 +26,7 @@ def test_das_beamforming(debug=False):
     """
 
     config = load_config_from_yaml(r'./tests/config_test.yaml')
-
+    config.ml_library = 'tensorflow'
     probe = Verasonics_l11_4v(config)
     probe.N_ax = 2046
     wvln = probe.c/probe.fc
@@ -67,8 +67,9 @@ def test_das_beamforming(debug=False):
     y_pred = y_pred/y_pred.max()
 
     MSE = np.mean(np.square(y_true-y_pred))
-
+    print(f'MSE: {MSE}')
     assert MSE < 0.001
+    return y_pred
 
 
 if __name__ == '__main__':
