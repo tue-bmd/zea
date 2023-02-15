@@ -43,6 +43,8 @@ postprocess_schema = Schema({
 scan_schema = Schema({
     Optional("xlims", default=None): list_of_size_two,
     Optional("zlims", default=None): list_of_size_two,
+    Optional("N_x", default=None): positive_integer,
+    Optional("N_z", default=None): positive_integer,
 })
 
 # top level schema
