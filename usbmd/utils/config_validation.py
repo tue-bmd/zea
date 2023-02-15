@@ -10,9 +10,10 @@ missing (if optional) parameters to default values. When adding functionality
 that needs parameters from the config file, make sure to add those paremeters here.
 Also if that parameter is optional, add a default value.
 """
-from schema import And, Optional, Or, Schema
+from schema import And, Optional, Or, Regex, Schema
 
-from usbmd.processing import _BEAMFORMER_TYPES, _DATA_TYPES, _MOD_TYPES, _ML_LIBRARIES
+from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
+                              _MOD_TYPES)
 
 # predefined checks, later used in schema to check validity of parameter
 list_of_size_two = And(list, lambda l: len(l) == 2)
@@ -76,8 +77,9 @@ config_schema = Schema({
     Optional("postprocess", default=postprocess_schema.validate({})): postprocess_schema,
     Optional("scan", default=scan_schema.validate({})): scan_schema,
 
-    Optional("device", default="cpu"): Or("cpu", "gpu", "cuda"),
-    Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES),
+    Optional("device", default="cpu"): \
+        Or("cpu", "gpu", "cuda", Regex(r"cuda:\d+"), Regex(r"gpu:\d+")),
+    Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, 'disable'),
 })
 
 def check_config(config: dict):
