@@ -42,7 +42,7 @@ class Scan:
     """Scan base class."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=3328, N_rec_el=128, Nx=128, Nz=128):
+                 N_ax=3328, Nx=128, Nz=128):
         """
         Initializes a Scan object representing the number and type of transmits,
         and the target pixels to beamform to.
@@ -86,7 +86,6 @@ class Scan:
         self.c = c
         self.modtype = modtype
         self.N_ax = N_ax
-        self.N_rec_el = N_rec_el
         self.time_zero = np.zeros((N_tx,))
         self.fdemod = self.fc if modtype == 'iq' else 0.
         self.N_ch = 2 if modtype == 'iq' else 1
