@@ -28,6 +28,7 @@ from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
+from usbmd.scan import PlaneWaveScan
 from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
 from usbmd.utils.config import Config, load_config_from_yaml
 from usbmd.utils.config_validation import check_config
@@ -51,12 +52,14 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # initialize probe class
-        self.probe = get_probe(config)
-        self.dataset.probe = self.probe
+        # Initialize scan based on dataset
+        self.scan = PlaneWaveScan(**self.dataset.get_default_scan_parameters())
+
+        # initialize probe
+        self.probe = get_probe(self.dataset.get_probe_name())
 
         # intialize process class
-        self.process = Process(config, self.probe)
+        self.process = Process(config, self.scan, self.probe)
 
         # initialize attributes for UI class
         self.data = None
