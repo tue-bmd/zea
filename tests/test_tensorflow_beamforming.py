@@ -77,7 +77,8 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     if compare_gt:
         assert MSE < 0.01
-    return y_pred
+    else:
+        return y_pred
 
 
 if __name__ == '__main__':
