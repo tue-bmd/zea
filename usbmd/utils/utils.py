@@ -210,3 +210,21 @@ def save_to_gif(images, filename, fps=20):
         loop=0, duration=duration, interlace=False, optimize=False,
     )
     return print(f'Succesfully saved GIF to -> {filename}')
+
+def update_dictionary(dict1: dict, dict2: dict, keep_none: bool=False) -> dict:
+    """Updates dict1 with values dict2
+
+    Args:
+        dict1 (dict): base dictionary
+        dict2 (dict): update dictionary
+        keep_none (bool, optional): whether to keep keys
+            with None values in dict2. Defaults to False.
+
+    Returns:
+        dict: updated dictionary
+    """
+    if not keep_none:
+        dict2 = {k: v for k, v in dict2.items() if v is not None}
+    # dict merging python > 3.9: default_scan_params | config_scan_params
+    dict_out = {**dict1, **dict2}
+    return dict_out

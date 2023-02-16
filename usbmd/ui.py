@@ -34,7 +34,7 @@ from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.utils import (filename_from_window_dialog,
                                plt_window_has_been_closed, save_to_gif,
-                               strtobool, to_image)
+                               strtobool, to_image, update_dictionary)
 
 
 class DataLoaderUI:
@@ -57,7 +57,7 @@ class DataLoaderUI:
         config_scan_params = self.config.scan
 
         # dict merging python > 3.9: default_scan_params | config_scan_params
-        scan_params = {**default_scan_params, **config_scan_params}
+        scan_params = update_dictionary(default_scan_params, config_scan_params)
         self.scan = scan_class(**scan_params)
 
         # initialize probe

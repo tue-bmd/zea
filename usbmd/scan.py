@@ -114,6 +114,9 @@ class Scan:
         self.Nx = Nx
         self.Nz = Nz
 
+        # TODO: maybe we can define all axis here?
+        self.z_axis = np.linspace(*zlims, N_ax)
+
         # !!! TODO, implement this such that no aliasing occurs
         if self.fdemod == 0:
             self.grid = make_pixel_grid_v2(
