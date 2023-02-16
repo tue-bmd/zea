@@ -14,7 +14,8 @@ def test_compare_beamformers():
     output_tf = test_tf(compare_gt=False)
     MSE = np.mean(np.square(output_torch-output_tf))
     print(f'MSE: {MSE}')
-    np.testing.assert_almost_equal(output_torch, output_tf, decimal=4)
+    assert MSE < 1e-9
+    np.testing.assert_almost_equal(output_torch, output_tf, decimal=3)
 
 if __name__ == '__main__':
     test_compare_beamformers()
