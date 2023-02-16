@@ -24,8 +24,8 @@ def test_das_beamforming(debug=False, compare_gt=True):
     not check correctness of the output.
 
     Args:
-        debug (bool, optional): Set to True to enable debugging options (plotting). Defaults to False.
-        compare_gt (bool, optional): Set to True to compare against GT. Defaults to True.
+        debug (bool, optional): Set to True to enable debugging options (plotting). Defaults to
+        False. compare_gt (bool, optional): Set to True to compare against GT. Defaults to True.
 
     Returns:
         numpy array: beamformed output
