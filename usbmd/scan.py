@@ -57,7 +57,7 @@ class Scan:
     """Scan base class."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=3328, Nx=128, Nz=128):
+                 N_ax=3328, Nx=128, Nz=128, tzero_correct=True):
         """
         Initializes a Scan object representing the number and type of transmits,
         and the target pixels to beamform to.
@@ -88,6 +88,9 @@ class Scan:
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
+            tzero_correct (bool, optional): Set to False to disable tzero
+                correction. This is useful for datasets that have this
+                correction in the raw data already. Defaults to True.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -101,10 +104,10 @@ class Scan:
         self.c = c
         self.modtype = modtype
         self.N_ax = N_ax
-        self.time_zero = np.zeros((N_tx,))
         self.fdemod = self.fc if modtype == 'iq' else 0.
         self.N_ch = 2 if modtype == 'iq' else 1
         self.wvln = self.c / self.fc
+        self.tzero_correct = tzero_correct
 
         # Beamforming grid related attributes
         self.xlims = xlims
@@ -127,6 +130,23 @@ class Scan:
             dz = dx
             self.grid = make_pixel_grid(self.xlims, self.zlims, dx, dz)
 
+    def get_time_zero(self, element_positions, c=1540, offset=0):
+        """Returns an ndarray with the delay between the first element firing
+        and that element firing.
+
+        Args:
+            element_positions (ndarray): The element positions as specified in
+                the Probe object.
+            c (int, float): The assumed speed of sound.
+            offset (float, optional): Additional offset to add. Defaults to 0.
+
+        Returns:
+            ndarray: The delays
+        """
+        if self.tzero_correct:
+            return np.ones(self.N_tx)*offset
+        else:
+            return np.zeros(self.N_tx)
 
 class FocussedScan(Scan):
     """
@@ -137,8 +157,9 @@ class FocussedScan(Scan):
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=256, origins=None,focus_distances=None, Nx=128, Nz=128,
-                 angles=None):
-        super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
+                 tzero_correct=True, angles=None):
+        super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax,
+                         Nx, Nz, tzero_correct)
 
         self.origins = origins
         self.focus_distances = focus_distances
@@ -152,7 +173,8 @@ class PlaneWaveScan(Scan):
 
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=128, Nz=128, angles=None, n_angles=None):
+                 N_ax=256, Nx=128, Nz=128, tzero_correct=True, angles=None,
+                 n_angles=None):
         """
         Initializes a PlaneWaveScan object.
 
@@ -174,6 +196,9 @@ class PlaneWaveScan(Scan):
                 beamforming grid. Defaults to 128.
             Nz (int, optional): The number of pixels in the z direction in the
                 beamforming grid. Defaults to 128.
+            tzero_correct (bool, optional): Set to False to disable tzero
+                correction. This is useful for datasets that have this
+                correction in the raw data already. Defaults to True.
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
             n_angles (int, list, optional): The number of angles to use for
@@ -185,7 +210,8 @@ class PlaneWaveScan(Scan):
             ValueError: If n_angles has an invalid value.
         """
 
-        super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
+        super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax,
+                         Nx, Nz, tzero_correct)
 
         assert angles is not None
         self.angles = angles
@@ -214,11 +240,30 @@ class PlaneWaveScan(Scan):
         else:
             self.n_angles = list(range(len(self.angles)))
 
+    def get_time_zero(self, element_positions, c=1540, offset=0):
+        """Returns an ndarray with the delay between the first element firing
+        and that element firing.
+
+        Args:
+            element_positions (ndarray): The element positions as specified in
+                the Probe object.
+            c (int, float): The assumed speed of sound.
+            offset (float, optional): Additional offset to add. Defaults to 0.
+
+        Returns:
+            ndarray: The delays
+        """
+        if self.tzero_correct:
+            return np.abs(np.sin(self.angles)) * element_positions.max() / c
+        else:
+            return np.zeros((self.N_tx,))
+
+
 class CircularWaveScan(Scan):
     """Class representing a scan with diverging wave transmits."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=128, Nz=128, focus=None):
+                 N_ax=256, Nx=128, Nz=128, tzero_correct=True, focus=None):
 
         super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
         self.focus = focus
