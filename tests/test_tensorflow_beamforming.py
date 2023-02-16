@@ -18,7 +18,6 @@ from usbmd.utils.simulator import UltrasoundSimulator
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-
 def test_das_beamforming(debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
