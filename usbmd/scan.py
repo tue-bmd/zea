@@ -143,6 +143,7 @@ class Scan:
         Returns:
             ndarray: The delays
         """
+        # pylint: disable=unused-argument
         if self.tzero_correct:
             return np.ones(self.N_tx)*offset
         else:
@@ -253,6 +254,7 @@ class PlaneWaveScan(Scan):
         Returns:
             ndarray: The delays
         """
+        # pylint: disable=unused-argument
         if self.tzero_correct:
             return np.abs(np.sin(self.angles)) * element_positions.max() / c
         else:
