@@ -19,7 +19,9 @@ from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
 
-# optional sub schemas go here to allow for nested defaults
+# optional sub schemas go here, to allow for nested defaults
+
+# models
 model_schema = Schema({
     Optional("batch_size", default=8): positive_integer,
     Optional("beamformer", default=None): {
@@ -27,11 +29,14 @@ model_schema = Schema({
     }
 })
 
+# preprocessing
 preprocess_schema = Schema({
     Optional("elevation_compounding", default="max"): Or(int, "max", "mean"),
     Optional("multi_bpf", default=False): bool,
+    Optional("demodulation", default='manual'): Or('manual', 'hilbert', 'gabor'),
 })
 
+# postprocessing
 postprocess_schema = Schema({
     Optional("contrast_boost", default=None): {
         "k_p": float,
@@ -41,6 +46,7 @@ postprocess_schema = Schema({
     Optional("lista", default=None): bool,
 })
 
+# scan attributes
 scan_schema = Schema({
     Optional("xlims", default=None): list_of_size_two,
     Optional("zlims", default=None): list_of_size_two,
@@ -82,8 +88,9 @@ config_schema = Schema({
     Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, 'disable'),
 })
 
-def check_config(config: dict):
+def check_config(config: dict, verbose: bool=False):
     """Check a config given dictionary"""
     config = config_schema.validate(dict(config))
-    print('Config is correct')
+    if verbose:
+        print('Config is correct')
     return config
