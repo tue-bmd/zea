@@ -1,21 +1,19 @@
 """Basic testing
 """
-# import sys
-# from pathlib import Path
+import sys
+from pathlib import Path
 
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
-# wd = Path(__file__).parent.parent
-# sys.path.append(str(wd))
+wd = Path(__file__).parent.parent
+sys.path.append(str(wd))
 
-# from usbmd import ui
+from usbmd import ui
 
-
-# def test_ui_initialization():
-#     """Test ui initialization function"""
-
-#     config = ui.setup('./configs/config_picmus.yaml')
-#     _ui = ui.DataLoaderUI(config)
-#     image = _ui.run()
-#     plt.close()
-#     return image
+def test_ui_initialization():
+    """Test ui initialization function"""
+    config = ui.setup('./tests/config_test.yaml')
+    dataloader_ui = ui.DataLoaderUI(config)
+    image = dataloader_ui.run()
+    plt.close()
+    return image
