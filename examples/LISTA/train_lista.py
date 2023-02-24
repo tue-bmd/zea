@@ -17,7 +17,7 @@ from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
 
 # choose gpu
-set_gpu_usage(gpu_ids=0)
+set_gpu_usage(device=0)
 
 # # choose config file
 path_to_config_file = Path.cwd() / 'configs/config_picmus.yaml'
