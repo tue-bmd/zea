@@ -30,6 +30,7 @@ class GenerateDataSet:
         to_dtype: str='image',
         destination_folder: str=None,
         retain_folder_structure: bool=True,
+        filetype: str='hdf5',
     ):
         """
         Args:
@@ -48,6 +49,15 @@ class GenerateDataSet:
         self.config = config
         self.to_dtype = to_dtype
         self.retain_folder_structure = retain_folder_structure
+        self.filetype = filetype
+        assert self.filetype in ['hdf5', 'png'], \
+            ValueError(f'Unsupported filteype: {self.filetype}.')
+
+        if self.to_dtype != 'image' and self.filetype == 'png':
+            raise ValueError(
+                'Cannot save to png if to_dtype is not image. '
+                'Please set filetype to hdf5.'
+            )
 
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
@@ -76,7 +86,7 @@ class GenerateDataSet:
         """Generate the dataset."""
         for idx in tqdm.tqdm(
             range(len(self.dataset)),
-            desc=f'Generating dataset ({self.to_dtype})',
+            desc=f'Generating dataset ({self.to_dtype}, {self.filetype})',
         ):
             data = self.dataset[idx]
             if len(data.shape) == 2:
@@ -87,7 +97,7 @@ class GenerateDataSet:
 
             base_name = self.dataset.file_paths[idx]
 
-            if self.to_dtype == 'image':
+            if self.filetype == 'png':
                 for i, image in enumerate(data):
                     if single_frame:
                         name = base_name
@@ -98,7 +108,8 @@ class GenerateDataSet:
 
                     image = self.process.run(image, self.config.data.dtype, self.to_dtype)
                     self.save_image(image, path)
-            else:
+
+            elif self.filetype == 'hdf5':
                 data_list = []
                 for d in data:
                     d = self.process.run(d, self.config.data.dtype, self.to_dtype)
