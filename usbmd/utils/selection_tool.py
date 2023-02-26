@@ -4,14 +4,17 @@ Author(s): Tristan Stevens
 Date: 24/02/2023
 """
 
+from collections.abc import Iterable
+
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Rectangle
 from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector, RectangleSelector
-from matplotlib.patches import Rectangle
-import numpy as np
 
 from usbmd.utils.metrics import get_metric
-from usbmd.utils.utils import translate
+from usbmd.utils.utils import filename_from_window_dialog, translate
+
 
 def crop_array(array, value=None):
     """Crop an array to remove all rows and columns containing only a given value."""
@@ -23,7 +26,7 @@ def crop_array(array, value=None):
     return array
 
 
-def interactive_selector(data, ax, selector='rectangle', extent=None):
+def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=True):
     """Interactively select part of an array displayed as an image with matplotlib.
 
     Args:
@@ -31,6 +34,9 @@ def interactive_selector(data, ax, selector='rectangle', extent=None):
         ax (plt.ax): existing matplotlib figure ax to select region on.
         selector (str, optional): type of selector. Defaults to 'rectangle'. For `lasso`,
             use `LassoSelector`; for `rectangle`, use `RectangleSelector`.
+        extent (list): extent of axis where selection is made. Used to transform
+            coordinates back to pixel values. Defaults to None.
+        verbose (bool): verbosity of print statements. Defaults to False.
 
     Returns:
         patches (list): list of selected parts of data
@@ -41,9 +47,9 @@ def interactive_selector(data, ax, selector='rectangle', extent=None):
         np.arange(data.shape[0], dtype=int))
     pix = np.vstack((x.flatten(), y.flatten())).T
 
-    selected_data = np.zeros_like(data)
     mask = np.tile(False, data.shape)
     masks = []
+    select_idx = 0
 
     def _translate_coordinates(x, y):
         if extent:
@@ -52,17 +58,24 @@ def interactive_selector(data, ax, selector='rectangle', extent=None):
         return x, y
 
     def _onselect_lasso(verts):
+        nonlocal select_idx
+        if verbose:
+            print(f'Selection {select_idx} done')
+        select_idx += 1
         verts = np.array(verts)
         # if axis is drawn with extent argument, first translate coordinates to pixels
         verts = np.array(_translate_coordinates(*verts.T)).T
         p = Path(verts)
         ind = p.contains_points(pix, radius=1)
-        selected_data.flat[ind] = data.flat[ind]
         mask.flat[ind] = True
         masks.append(np.copy(mask))
         mask.flat[ind] = False
 
     def _onselect_rectangle(start, end):
+        nonlocal select_idx
+        if verbose:
+            print(f'Selection {select_idx} done')
+        select_idx += 1
         # if axis is drawn with extent argument, first translate coordinates to pixels
         start.xdata, start.ydata = _translate_coordinates(start.xdata, start.ydata)
         end.xdata, end.ydata = _translate_coordinates(end.xdata, end.ydata)
@@ -73,7 +86,6 @@ def interactive_selector(data, ax, selector='rectangle', extent=None):
                           [end.xdata, start.ydata]], int)
         p = Path(verts)
         ind = p.contains_points(pix, radius=1)
-        selected_data.flat[ind] = data.flat[ind]
         mask.flat[ind] = True
         masks.append(np.copy(mask))
         mask.flat[ind] = False
@@ -87,58 +99,144 @@ def interactive_selector(data, ax, selector='rectangle', extent=None):
                    RectangleSelector: {'interactive': True}}
 
     lasso = selector(ax, onselect_dict[selector], **kwargs_dict[selector])
-    plt.show(block=True)
+    # if verbose:
+    #     print('...Close plot to finish selection...')
+    # plt.show(block=True)
+    plt.show(block=False)
+    input("Press Enter to continue (don't close plot)...\n")
 
     lasso.disconnect_events()
+    lasso.set_visible(False)
+    lasso.update()
 
     patches = []
     for mask in masks:
-        patches.append(crop_array(selected_data * mask, value=0))
+        patches.append(crop_array(data * mask, value=0))
 
     return patches, masks
 
+def add_rectangle_from_mask(ax, mask, **kwargs):
+    """add a rectangle box to axis from mask array.
+
+    Args:
+        ax (plt.ax): matplotlib axis
+        mask (ndarray): numpy array with rectangle non-zero
+            box defining the region of interest.
+
+    Returns:
+        plt.ax: matplotlib axis with rectangle added
+    """
+    # Create a Rectangle patch
+    y1, y2 = np.where(np.diff(mask, axis=0).sum(axis=1))[0]
+    x1, x2 = np.where(np.diff(mask, axis=1).sum(axis=0))[0]
+    rect = Rectangle(
+        (x1, y1), (x2 - x1), (y2 - y1), linewidth=1,
+        edgecolor='r', facecolor='none', **kwargs)
+
+    # Add the patch to the Axes
+    ax.add_patch(rect)
+    return ax
+
 def interactive_selector_with_plot_and_metric(
-    data, ax, selector='rectangle', metric=None, **kwargs):
-    """Wrapper for interactive_selector to plot the selected regions."""
-    patches, masks = interactive_selector(data, ax, selector, **kwargs)
+    data, ax=None, selector='rectangle', metric=None, cmap='gray', mask_plot=True, **kwargs):
+    """Wrapper for interactive_selector to plot the selected regions.
 
+    Args:
+        data (ndarray or list of ndarray): input data.
+        ax (plt.ax or list of plt.ax, optional): axis corresponding to input data.
+            Defaults to None. In that case function plots data first to create axis.
+        selector (str, optional): type of selection tool. Defaults to 'rectangle'.
+        metric (str, optional): metric to compute. Defaults to None.
+        cmap (str, optional): color map to display data in. Defaults to 'gray'.
+        mask_plot (bool, optional): whether to also plot the masks in a separate plot.
+            Can be useful to isolate the patches and see the selections more clearly.
+            Defaults to True.
+
+    Raises:
+        ValueError: Can only select two patches to compute metric with. More patches
+            don't make sense in this context.
+    """
+    if not isinstance(data, list):
+        data = [data]
+
+    if ax is None:
+        fig, axs = plt.subplots(1, len(data))
+        for _data, ax in zip(data, axs):
+            ax.imshow(_data, cmap=cmap, aspect='auto')
+
+    if not isinstance(ax, Iterable):
+        ax = [ax]
+
+    # create selector for first axis only
+    patches, masks = interactive_selector(data[0], ax[0], selector, **kwargs)
+
+    if len(patches) != 2:
+        raise ValueError(
+            'exactly 2 patches are required for using this wrapper function')
+
+    # get patches for all data in data list using the selection made
+    patches = []
+    for image in data:
+        patches.extend(
+            [crop_array(image * mask, value=0) for mask in masks])
+
+    # compute metrics
     if metric:
-        score = get_metric(metric)(patches[0], patches[1])
-        print(f'{metric}: {score:.3f}')
+        scores = []
+        for i in range(len(data)):
+            idx = i * len(masks)
+            score = get_metric(metric)(patches[idx], patches[idx + 1])
+            scores.append(score)
+            print(f'{metric}: {score:.3f}')
 
-    fig, axs = plt.subplots(len(masks), 3)
-    for ax_new, patch, mask in zip(axs, patches, masks):
-        ax_new[0].imshow(data)
-        ax_new[1].imshow(patch)
-        ax_new[2].imshow(mask)
+    # plot on top of existing plot
+    if selector == 'rectangle':
+        for _ax, score in zip(ax, scores):
+            title = _ax.get_title()
+            _ax.set_title(title + '\n' + f'{metric}: {score:.3f}')
+            for mask in masks:
+                add_rectangle_from_mask(_ax, mask)
+        plt.tight_layout()
 
-        if selector == 'rectangle':
-            # Create a Rectangle patch
-            y1, y2 = np.where(np.diff(mask, axis=0).sum(axis=1))[0]
-            x1, x2 = np.where(np.diff(mask, axis=1).sum(axis=0))[0]
-            rect = Rectangle(
-                (x1, y1), (x2 - x1), (y2 - y1), linewidth=1,
-                edgecolor='r', facecolor="none")
+    # plot patches and masks
+    if mask_plot:
+        fig, axs = plt.subplots(len(masks), 3)
+        for i, (ax_new, patch, mask) in enumerate(zip(axs, patches, masks)):
+            if i == 0:
+                ax_base = ax_new[0]
+                ax_base.imshow(data[0], cmap=cmap)
+            ax_new[1].imshow(patch, cmap=cmap)
+            ax_new[2].imshow(mask)
 
-            # Add the patch to the Axes
-            ax_new[0].add_patch(rect)
-        for _ax in ax_new:
-            _ax.axis('off')
-    if metric:
-        fig.suptitle(f'{metric}: {score:.3f}')
+            if selector == 'rectangle':
+                add_rectangle_from_mask(ax_base, mask)
+
+            for _ax in ax_new:
+                _ax.axis('off')
+
+        fig.tight_layout()
+
+def main():
+    """Main function for interactive selector on two images."""
+    file1 = filename_from_window_dialog('Choose image file 1')
+    file2 = filename_from_window_dialog('Choose image file 2')
+
+    image1 = plt.imread(file1)
+    image2 = plt.imread(file2)
+
+    fig, axs = plt.subplots(1, 2)
+
+    axs[0].imshow(image1, cmap='gray', aspect='auto')
+    axs[1].imshow(image2, cmap='gray', aspect='auto')
+    axs[0].set_title('image 1')
+    axs[1].set_title('image 2')
+
     fig.tight_layout()
-    plt.show(block=True)
-
-if __name__ == '__main__':
-    from skimage.data import coins
-
-    data = coins()
-
-    fig = plt.figure()
-    ax = fig.gca()
-    ax.imshow(data)
 
     interactive_selector_with_plot_and_metric(
-        data, ax, selector='rectangle', metric='gcnr')
+        [image1, image2], axs, selector='rectangle', metric='gcnr')
 
     plt.show()
+
+if __name__ == '__main__':
+    main()

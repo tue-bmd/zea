@@ -32,6 +32,8 @@ from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
 from usbmd.utils.config import Config, load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
+from usbmd.utils.selection_tool import \
+    interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (filename_from_window_dialog,
                                plt_window_has_been_closed, save_to_gif,
                                strtobool, to_image)
@@ -164,7 +166,7 @@ class DataLoaderUI:
         if not 'postprocess' in self.config:
             return image
 
-        if 'contrast_boost' in self.config.postprocess:
+        if self.config.postprocess.contrast_boost is not None:
             if self.config.data.dtype not in ['raw_data', 'aligned_data']:
                 warnings.warn(f'contrast boost not possible with {self.config.data.dtype}')
                 return image
@@ -250,6 +252,12 @@ class DataLoaderUI:
                 plt.colorbar(self.mpl_img, cax=cax)
 
                 self.fig.tight_layout()
+
+                if self.config.plot.selector:
+                    interactive_selector_with_plot_and_metric(
+                        image, self.ax, extent=extent,
+                        selector=self.config.plot.selector,
+                        metric=self.config.plot.selector_metric)
 
                 if save:
                     self.save_image(self.fig)
@@ -439,15 +447,17 @@ def main():
         image = ui.run()
         return image
     elif args.task == 'generate':
-        destination_folder = input('Give destination folder path: ')
-        to_dtype = input(f'Specify data type \n{_DATA_TYPES}: ')
-        retain_folder_structure = input('Retain folder structure? (Y/N): ')
+        destination_folder = input('>> Give destination folder path: ')
+        to_dtype = input(f'>> Specify data type \n{_DATA_TYPES}: ')
+        retain_folder_structure = input('>> Retain folder structure? (Y/N): ')
         retain_folder_structure = strtobool(retain_folder_structure)
+        filetype = input('>> Filetype (hdf5, png): ')
         generator = GenerateDataSet(
             config,
             to_dtype=to_dtype,
             destination_folder=destination_folder,
             retain_folder_structure=retain_folder_structure,
+            filetype=filetype,
         )
         generator.generate()
 

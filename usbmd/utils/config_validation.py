@@ -14,6 +14,7 @@ from schema import And, Optional, Or, Regex, Schema
 
 from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
                               _MOD_TYPES)
+from usbmd.utils.metrics import _METRICS
 
 # predefined checks, later used in schema to check validity of parameter
 list_of_size_two = And(list, lambda l: len(l) == 2)
@@ -77,6 +78,8 @@ config_schema = Schema({
         Optional("fps", default=20): int,
         Optional("tag", default=None): str,
         Optional("headless", default=None): bool,
+        Optional("selector", default=None): Or('rectangle', 'lasso'),
+        Optional("selector_metric", default=None): Or(*_METRICS),
     },
     Optional("model", default=model_schema.validate({})): model_schema,
     Optional("preprocess", default=preprocess_schema.validate({})): preprocess_schema,
