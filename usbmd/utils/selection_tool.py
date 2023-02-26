@@ -4,6 +4,7 @@ Author(s): Tristan Stevens
 Date: 24/02/2023
 """
 
+import sys
 from collections.abc import Iterable
 
 import matplotlib.pyplot as plt
@@ -217,24 +218,30 @@ def interactive_selector_with_plot_and_metric(
         fig.tight_layout()
 
 def main():
-    """Main function for interactive selector on two images."""
-    file1 = filename_from_window_dialog('Choose image file 1')
-    file2 = filename_from_window_dialog('Choose image file 2')
+    """Main function for interactive selector on multiple images."""
+    print('Select as many images as you like, and close window to continue...')
+    images = []
+    try:
+        while True:
+            file = filename_from_window_dialog('Choose image file')
+            image = plt.imread(file)
+            images.append(image)
+    except:
+        # pylint disable=raise-missing-from
+        if len(images) == 0:
+            sys.exit('Please select 1 or more images')
 
-    image1 = plt.imread(file1)
-    image2 = plt.imread(file2)
-
-    fig, axs = plt.subplots(1, 2)
-
-    axs[0].imshow(image1, cmap='gray', aspect='auto')
-    axs[1].imshow(image2, cmap='gray', aspect='auto')
-    axs[0].set_title('image 1')
-    axs[1].set_title('image 2')
+    fig, axs = plt.subplots(1, len(images))
+    if not isinstance(axs, Iterable):
+        axs = [axs]
+    for i, (ax, image) in enumerate(zip(axs, images)):
+        ax.imshow(image, cmap='gray', aspect='auto')
+        ax.set_title(f'image {i}')
 
     fig.tight_layout()
 
     interactive_selector_with_plot_and_metric(
-        [image1, image2], axs, selector='rectangle', metric='gcnr')
+        images, axs, selector='rectangle', metric='gcnr')
 
     plt.show()
 
