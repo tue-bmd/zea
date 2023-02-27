@@ -227,7 +227,7 @@ def main():
             image = plt.imread(file)
             images.append(image)
     except:
-        # pylint disable=raise-missing-from
+        # pylint: disable=raise-missing-from
         if len(images) == 0:
             sys.exit('Please select 1 or more images')
 
