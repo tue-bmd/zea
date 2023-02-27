@@ -161,9 +161,9 @@ def interactive_selector_with_plot_and_metric(
         data = [data]
 
     if ax is None:
-        fig, axs = plt.subplots(1, len(data))
-        for _data, ax in zip(data, axs):
-            ax.imshow(_data, cmap=cmap, aspect='auto')
+        fig, ax = plt.subplots(1, len(data))
+        for _data, _ax in zip(data, ax):
+            _ax.imshow(_data, cmap=cmap, aspect='auto')
 
     if not isinstance(ax, Iterable):
         ax = [ax]
@@ -205,9 +205,9 @@ def interactive_selector_with_plot_and_metric(
         for i, (ax_new, patch, mask) in enumerate(zip(axs, patches, masks)):
             if i == 0:
                 ax_base = ax_new[0]
-                ax_base.imshow(data[0], cmap=cmap)
-            ax_new[1].imshow(patch, cmap=cmap)
-            ax_new[2].imshow(mask)
+                ax_base.imshow(data[0], cmap=cmap, aspect='auto')
+            ax_new[1].imshow(patch, cmap=cmap, aspect='auto')
+            ax_new[2].imshow(mask, aspect='auto')
 
             if selector == 'rectangle':
                 add_rectangle_from_mask(ax_base, mask)
