@@ -139,7 +139,8 @@ def add_rectangle_from_mask(ax, mask, **kwargs):
     return ax
 
 def interactive_selector_with_plot_and_metric(
-    data, ax=None, selector='rectangle', metric=None, cmap='gray', mask_plot=True, **kwargs):
+    data, ax=None, selector='rectangle', metric=None, cmap='gray',
+    plot=True, mask_plot=True, selection_axis=0, **kwargs):
     """Wrapper for interactive_selector to plot the selected regions.
 
     Args:
@@ -149,9 +150,12 @@ def interactive_selector_with_plot_and_metric(
         selector (str, optional): type of selection tool. Defaults to 'rectangle'.
         metric (str, optional): metric to compute. Defaults to None.
         cmap (str, optional): color map to display data in. Defaults to 'gray'.
+        plot (bool, optional): whether to plot selections / metrics on top of axis.
+            Defaults to True.
         mask_plot (bool, optional): whether to also plot the masks in a separate plot.
             Can be useful to isolate the patches and see the selections more clearly.
             Defaults to True.
+        selection_axis (int, optional): axis on which to make selection. Defaults to 0.
 
     Raises:
         ValueError: Can only select two patches to compute metric with. More patches
@@ -169,7 +173,8 @@ def interactive_selector_with_plot_and_metric(
         ax = [ax]
 
     # create selector for first axis only
-    patches, masks = interactive_selector(data[0], ax[0], selector, **kwargs)
+    patches, masks = interactive_selector(
+        data[selection_axis], ax[selection_axis], selector, **kwargs)
 
     if len(patches) != 2:
         raise ValueError(
@@ -182,8 +187,8 @@ def interactive_selector_with_plot_and_metric(
             [crop_array(image * mask, value=0) for mask in masks])
 
     # compute metrics
+    scores = []
     if metric:
-        scores = []
         for i in range(len(data)):
             idx = i * len(masks)
             score = get_metric(metric)(patches[idx], patches[idx + 1])
@@ -191,21 +196,22 @@ def interactive_selector_with_plot_and_metric(
             print(f'{metric}: {score:.3f}')
 
     # plot on top of existing plot
-    if selector == 'rectangle':
+    if plot:
         for _ax, score in zip(ax, scores):
             title = _ax.get_title()
             _ax.set_title(title + '\n' + f'{metric}: {score:.3f}')
-            for mask in masks:
-                add_rectangle_from_mask(_ax, mask)
-        plt.tight_layout()
+            if selector == 'rectangle':
+                for mask in masks:
+                    add_rectangle_from_mask(_ax, mask)
+            plt.tight_layout()
 
     # plot patches and masks
     if mask_plot:
         fig, axs = plt.subplots(len(masks), 3)
         for i, (ax_new, patch, mask) in enumerate(zip(axs, patches, masks)):
             if i == 0:
-                ax_base = ax_new[0]
-                ax_base.imshow(data[0], cmap=cmap, aspect='auto')
+                ax_base = ax_new[selection_axis]
+                ax_base.imshow(data[selection_axis], cmap=cmap, aspect='auto')
             ax_new[1].imshow(patch, cmap=cmap, aspect='auto')
             ax_new[2].imshow(mask, aspect='auto')
 
@@ -216,6 +222,8 @@ def interactive_selector_with_plot_and_metric(
                 _ax.axis('off')
 
         fig.tight_layout()
+
+    return scores
 
 def main():
     """Main function for interactive selector on multiple images."""

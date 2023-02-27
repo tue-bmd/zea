@@ -14,6 +14,5 @@ def test_ui_initialization():
     """Test ui initialization function"""
     config = ui.setup('./tests/config_test.yaml')
     dataloader_ui = ui.DataLoaderUI(config)
-    image = dataloader_ui.run()
+    dataloader_ui.run()
     plt.close()
-    return image
