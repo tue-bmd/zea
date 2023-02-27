@@ -12,13 +12,44 @@
       margin: 4px 2px;
       cursor: pointer;
     }
+
+    .toggle{
+      position: relative;
+      display: inline-block;
+    }
+    .toggle input{opacity: 0; position: absolute; left: 0; top: 0}
+    .toggle i{
+      position: relative;
+      background: #fff;
+      color: #000;
+      height: 34px; 
+      width: 200px;
+      display: flex;
+      font-style: normal;
+      justify-content: center;
+      align-items: center;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      transition: 350ms;
+    }
+    .toggle input:checked ~ i{
+      background: blue;
+      border: 1px solid blue;
+      color: #fff;
+    }
+    .toggle i:before{
+      content: attr(data-swchoff-text);
+    }
+    .toggle input:checked ~ i:before{
+      content: attr(data-swchon-text);
+    }
     </style>
 
   
 
 <body style="background-color:rgb(102, 102, 102);">
 
-  <div style="width: 500px; float: left;">
+  <div style="width: 600px; float: left;">
     <h1>Streaming</h1>
     <img src="{{ url_for('vid') }}"> 
   </div>
@@ -26,19 +57,27 @@
 
   <div style="width: 400px; float: left;"> 
 
-    <h3>Beamforming mode</h3>
-      <button onclick="setDAS()">DAS</button> 
-      <button onclick="setABLE()">ABLE</button>  
-      <button onclick="setNeuralMAP()">neuralMAP</button>  
+    <h3>Image Settings</h3>
+    <fieldset id="group1"></fieldset> 
+      <input type="radio" value="option1" name="group1" checked="checked" onclick="setDAS()"> DAS </input><br>
+      <input type="radio" value="option2" name="group1" onclick="setABLE()"> ABLE </input><br>
+      <input type="radio" value="option3" name="group1" onclick= "setNeuralMAP()"> neuralMAP</input><br>
+      <input type="radio" value="option4" name="group1" onclick= "setRawData()"> Raw data (center)</input><br>
+  </fieldset>  
 
     <h3>Firing Angles</h3>
-      <button onclick="set1PW()">1 PW</button> 
-      <button onclick="set11PWs()">11 PWs</button>  
+      <fieldset id="group3"></fieldset> 
+         <input type="radio" value="option1" name="group3" checked="checked" onclick="set1PW()"> 1 PW </input><br>
+         <input type="radio" value="option2" name="group3" onclick="set5PWs()"> 5 PWs </input><br>
+         <input type="radio" value="option2" name="group3" onclick="set11PWs()"> 11 PWs </input><br>
+      </fieldset> 
 
     <h3>Scaling mode</h3>
-        <button onclick="setScaleNormal()">Normalized</button> 
-        <button onclick="setScaleSmoothNormal()">Smooth Normalized</button>  
-        <button onclick="setScaleFixed()">Fixed</button>
+    <fieldset id="group2"></fieldset> 
+      <input type="radio" value="option1" name="group2" checked="checked" onclick="setScaleNormal()"> Normalized </input><br>
+      <input type="radio" value="option2" name="group2" onclick="setScaleSmoothNormal()"> Smooth Normalized </input><br>
+      <input type="radio" value="option3" name="group2" onclick= "setScaleFixed()"> Fixed </input><br>
+  </fieldset> 
       
     <h3>Transmit voltage (V)</h3>
       <div class="container" id="control_panel_1">
@@ -52,12 +91,37 @@
         </form>
       </div>
 
+    <h3>Speed-of-sound (V)</h3>
+      <div class="container" id="control_panel_2">
+        <form action="/" method ="post" enctype="multipart/form-data" id="form">
+          <div class="row">
+            <div class="col">
+              <input id="slide_sos" type="range" min="1400" max="1700" step="1" value="1540" name="slide_sos">
+              <div id="sliderAmount"></div>
+            </div> 
+          </div>
+        </form>
+      </div>
+
+
   <h3>Display settings</h3>
-    <input type="checkbox"  class='toggle' data-toggle="toggle_fps" onclick="change_status('.fps')">
-    <div>Toggle FPS</div>
-    <input type="checkbox"  class='toggle' data-toggle="toggle_upscaling" onclick="change_status('.upscaling')">
-    <div>Toggle AI Upscaling</div>
-  </div>      
+  <label class="toggle">
+    <input type="checkbox" name="screen" value="Profile" actionname="Profile" onclick="change_status_autotuning()">
+    <i data-swchoff-text="Autotuning" data-swchon-text="Autotuning"></i>
+  </label>  
+
+
+  <label class="toggle">
+    <input type="checkbox" name="screen" value="Profile" actionname="Profile" onclick="change_status_upscaling()">
+    <i data-swchoff-text="AI Upscaling" data-swchon-text="AI Upscaling"></i>
+  </label>  
+  
+  <label class="toggle">
+    <input type="checkbox" name="screen" value="Profile" actionname="Profile" onclick="change_status_fps()">
+    <i data-swchoff-text="FPS" data-swchon-text="FPS"></i>
+  </label>
+
+
 </body>
 
   
@@ -87,6 +151,14 @@
                   data: {"beamformer" : "NeuralMAP"},
               })
       }
+
+      function setRawData() {
+          $.ajax({
+                  type: "POST",
+                  url: "{{ url_for('create_file') }}",
+                  data: {"beamformer" : "RAW"},
+              })
+      }
       
       
       function setScaleNormal() {
@@ -114,29 +186,40 @@
       }
       
       
-       function change_status(status_class) {
-           $.ajax({
-               url: "{{ url_for('create_file') }}",
-               type: "POST",
-               data: {fps: true},
-                 success: function(response) {
-                 $(status_class).html(response);
-                         },
-               error: function(xhr) {
-               }
-           });
-       }
+      function change_status_autotuning() {
+          $.ajax({
+                url: "{{ url_for('create_file') }}",
+                type: "POST",
+                data: {"intensityAuto": "True"}
+              })
+      }
+
+      function change_status_upscaling() {
+          $.ajax({
+                url: "{{ url_for('create_file') }}",
+                type: "POST",
+                data: {"upscaling": "True"}
+              })
+      }
+
+      function change_status_fps() {
+          $.ajax({
+                url: "{{ url_for('create_file') }}",
+                type: "POST",
+                data: {"fps": "True"}
+              })
+      }
        
       var slide = document.getElementById('slide'),
-        sliderDiv = document.getElementById("sliderAmount");
+      sliderDiv = document.getElementById("sliderAmount");
 
-    slide.onchange = function() {
-        sliderDiv.innerHTML = this.value;
-        $.post({
-                url: "{{ url_for('create_file') }}",
-                data: $('form').serialize(),
-            });
-    }
+      slide.onchange = function() {
+          sliderDiv.innerHTML = this.value;
+          $.post({
+                  url: "{{ url_for('create_file') }}",
+                  data: $('form').serialize(),
+              });
+      }
     
           
       
@@ -153,6 +236,14 @@
                   type: "POST",
                   url: "{{ url_for('create_file') }}",
                   data: {"na" : "11"},
+              })
+      }
+
+      function set5PWs() {
+          $.ajax({
+                  type: "POST",
+                  url: "{{ url_for('create_file') }}",
+                  data: {"na" : "5"},
               })
       }
     
