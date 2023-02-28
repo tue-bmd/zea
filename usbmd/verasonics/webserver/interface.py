@@ -1,383 +1,536 @@
-# pylint: skip-file
+
 # -*- coding: utf-8 -*-
 """
-TCP 
+TCP
 
-Receive Raw Data From Verasonics 
+Receive Raw Data From Verasonics
     format: int16
     width: depends on probe (e.g. L11 4v has 128 channels)
     height: depends on sample mode (e.g. BS100BW provides 4096/2 samples per acquisition)
 
 Return intensity parameter AND na_transmit as soon as data are received
-    format: 2 elements as double 
-    
+    format: 2 elements as double
+
 Return Beamformed image to flask/webAPP
     format:JPEG
-    
+
 """
 
-from flask import Flask, render_template, Response, request, session
-import cv2
-import sys
-import numpy
-
-import socket
-import numpy as np
-import signal
-import sys
-import time
 import array
-import matplotlib.pyplot as plt
-
-from predict import get_rt_model, load_saved_model
-from demo_setup import get_models
-import threading
-import functools
+import collections
+import logging
+import socket
 import struct
-import scipy.io
+import sys
+import threading
+import time
 from datetime import datetime
-from utils.video import FPS_counter, Scan_converter
 
-#FUNCTIONS
-def sigint_handler(signal, frame):
-    print ('KeyboardInterrupt is caught')
-    connection.close()
-    save()
-    # Close  
-    sys.exit(0)
-    
-    
-signal.signal(signal.SIGINT, sigint_handler)
+import cv2
+import numpy as np
+import scipy.io
+from demo_setup import get_models
+from flask import Flask, Response, render_template, request
+from futures3.thread import ThreadPoolExecutor
+
+from usbmd.utils.video import FPS_counter, Scan_converter
 
 
-global beamformer
-beamformer = 'DAS'
-global intensity
-intensity = 2.0
-global na_transmit
-na_transmit = 1
-global updateIntensity, updateBeamformer, update_na_transmit
-updateIntensity = False
-updateBeamformer = False
-update_na_transmit = False
+## HELPER FUNCTIONS
+def debugger_is_active() -> bool:
+    """Return if the debugger is currently active"""
+    return hasattr(sys, 'gettrace') and sys.gettrace() is not None
+##
 
-global na_read
-na_read = 1
-returnToMatlabFreq = 1
-
-global flag
-flag = 0
-
-DUMMY_MODE = False
-global show_fps
-show_fps = False
+# Set logger
+if debugger_is_active():
+    logging.basicConfig(level=logging.DEBUG)
 
 
-fps_counter = FPS_counter()
-global scan_converter
-scan_converter = Scan_converter(norm_mode='smoothnormal', env_mode='abs', buffer_size=30)
+class WebServer:
+    """Webserver class that interfaces with the Verasonics, and handles data processing"""
+    def __init__(
+        self,
+        host = '',
+        tcp_port = 30000,
+        time_out = 1,
+        buffer_size = 2**16,
+        probe = 'L114',
+        dummy_mode = True):
+        """_summary_
 
-trcvElapsedTime = []
-tproElapsedTime = []
-tsbElapsedTime = []
-treadElapsedTime = [] #INCLUDE receive and processing
-tIQDeodulationElapsedTime = []
-tBeamformerElapsedTime = []
-tReadPreProcessElapsedTime = []
-tPreProcessElapsedTime = []
+        Args:
+            host (str, optional): Server adress. If empty we will host locally. Defaults to ''.
+            tcp_port (int, optional): TCP port for Verasonics communication. Defaults to 30000.
+            time_out (int, optional): . Defaults to 1.
+            buffer_size (int, optional): Buffer size (bytes) of the websocket. Defaults to 2**16.
+            probe (str, optional): Probe settings. Defaults to 'L114'.
+            dummy_mode (bool, optional): If True, random test data is generated. Defaults to False.
+        """
 
-host = ''  # client: 131.155.127.59
-port_tcp = 30000 #TCP
-server_address_tcp = (host, port_tcp) 
-timeOut = 1
-bufferSize = 65500
+        ## Network settings
+        self.host = host
+        self.tcp_server_address = (host, tcp_port)
+        self.time_out = 1
+        self.buffer_size = 65500
+        self.vera_socket = self.start_tcp_server(self.tcp_server_address, time_out, buffer_size)
 
-probe = 'L114'
+        ## Objects
+        self.fps_counter = FPS_counter()
+        self.scan_converter = Scan_converter(
+            norm_mode='smoothnormal',
+            env_mode='abs',
+            buffer_size=30)
 
-if probe == 'S51':
-    Nax = 1152
-    Nel = 80
-    config = 'configs/training/default_S51.yaml'
-elif probe == 'L114':
-    Nax = 1024
-    Nel = 128
-    config = 'configs/training/default.yaml'
-
-# Model
-#OLD FORMAT
-# models_folder = 'trained_models/'
-# model_name = '0911_1805_realtime_ABLE_1PW_MV'
-# model, probe, grid = load_saved_model(models_folder+model_name)
-
-#NEW FORMAT
-
-model_dict, grid = get_models()
-
-WIDTH = grid[:,:,0].max()-grid[:,:,0].min()
-HEIGHT = grid[:,:,2].max()-grid[:,:,2].min()
-ASPECT_RATIO = WIDTH/HEIGHT
-SCALE = 2
-
-aspect_fx = (grid.shape[0]/grid.shape[1])*ASPECT_RATIO
+        #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
+        self.model_dict, self.grid = get_models()
 
 
-bytesPerElementSent = 1 #uint8
-T = 2
-bytesPerElementRead = 2 #int16
+        ## State-parameters (perhaps move this to a separate class/state handler in the future?)
+        self.bf_type = 'DAS' # Set beamformer type to DAS by default
+        self.intensity = 2.0 # Transmit voltage
+        self.na_transmit = 1 # Number of transmits (PWs/DWs)
+        self.na_read = self.na_transmit
+        self.update_intensity = False
+        self.update_beamformer = False
+        self.update_na_transmit = False
+        self.flag = 0
+        self.auto_update_intensity = False
+        self.ref_amp = 80
+        self.dummy_mode = dummy_mode
 
-temp = 0
+        # Probe settings
+        if probe == 'S51':
+            self.n_ax = 1152
+            self.n_el = 80
+        elif probe == 'L114':
+            self.n_ax = 1152
+            self.n_el = 128
 
-        
+        # Display Settings
+        self.show_fps = False
+        self.upscaling = False
+
+        self.width = self.grid[:,:,0].max()-self.grid[:,:,0].min()
+        self.height = self.grid[:,:,2].max()-self.grid[:,:,2].min()
+        self.aspect_ratio = self.width/self.height
+        self.aspect_fx = (self.grid.shape[0]/self.grid.shape[1])*self.aspect_ratio
+        self.scaling = 2
+
+        ## Buffers
+        self.bf_display = 0 #BF_display
+        self.bf_previous = 0
+
+        # Benchmark variables
+        self.beamformer_elapsed_time = []
+        self.read_preprocess_elapsed_time = []
+        self.update_elapsed_time = []
+        self.time_display= []
+
+        # Other (to be organized)
+        self.meanAmp_history = []
+        self.err_history = []
+        self.hv_history = []
+        self.returnToMatlabFreq = None
+        self.bytesPerElementRead = None
+        self.bytesPerElementSent = None
+        self.numTunableParameters = None
+
+    @staticmethod
+    def start_tcp_server(tcp_server_address, time_out, buffer_size):
+        "Function that starts the TCP server which listens for Verasonics data"
+        vera_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        socket.setdefaulttimeout(time_out)
+        vera_socket.settimeout(time_out)
+        vera_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buffer_size)
+        vera_socket.bind(tcp_server_address)
+        vera_socket.listen(1)
+        logging.info('TCP server is running ...')
+        return vera_socket
 
 
-     
+    def read_update(self, connection, buffer, terminate_signal):
+        """Retrieves new data from the client"""
+        while not terminate_signal.is_set(): #True:
+            try:
+                logging.debug('Start updating and reading')
+                start_time_update = time.time()
+
+                if self.dummy_mode:
+                    IQ = 2**9*np.random.rand(1, self.na_transmit, self.n_el, int(self.n_ax/2), 2)
+                    buffer.append(IQ)
+                else:
+                    # SEND UPDATE AS SOON AS READING FINISHES
+                    #startTimeSB = time.time()
+
+                    if self.update_intensity:
+                        #logging.debug('Intensity: %f', self.intensity)
+                        self.update_intensity = False
+                        tsb_lst = [self.intensity]
+                    elif self.auto_update_intensity:
+                        logging.debug('Entered updateIntensityAuto')
+
+                        abs_signal = np.absolute(np.array(self.bf_previous))
+                        meanAmp = np.mean(abs_signal)
+                        self.meanAmp_history.append(meanAmp)
+                        logging.debug('Mean RF amplitude: %f', meanAmp)
+                        err = self.ref_amp - meanAmp
+                        self.err_history.append(err)
+                        logging.debug('Error in intensity: %f', err)
+
+                        # PID CONTROLLER
+                        # TODO: Implement this as a separate class
+                        Kp = 0.05 # Proportional
+                        Kd = 0 # Derivative
+                        Ki = 0.001 # Integral
+                        delta_hv = (Kd+Kp+Ki)*self.err_history[-1] + \
+                                    (Ki-Kp-2*Kd)*self.err_history[-2] + \
+                                    Kd*self.err_history[-3]
+
+                        if len(self.hv_history) >= 1:
+                            hv = self.hv_history[-1] + delta_hv
+                        else:
+                            hv = float(self.intensity) + delta_hv
+
+                        #check value within range
+                        hv = np.minimum(hv, 40)
+                        hv = np.maximum(hv, 1.6)
+
+                        self.hv_history.append(hv)
+                        tsb_lst =[hv]
+                    else:
+                        tsb_lst =[0]
+
+                    if self.update_na_transmit:
+
+                        self.flag = self.returnToMatlabFreq
+                        print('Update firing angles: ', self.na_transmit)
+                        self.update_na_transmit = False
+                        tsb_lst.append(self.na_transmit)
+                        self.na_read = self.na_transmit
+                    else:
+                        tsb_lst.append(0)
+
+                    if len(tsb_lst) != self.numTunableParameters:
+                        print('Length of the to-sent-back (tsb) list different from expected')
+
+                    # SEND UPDATE as DOUBLE
+                    tsb_lst = list(map(np.double, tsb_lst))
+                    tsb_bytes = bytearray(struct.pack(f'{len(tsb_lst)}d', *tsb_lst))
+                    connection.sendall(tsb_bytes)
+
+                    executionTimeUPD = time.time() - start_time_update
+                    self.update_elapsed_time.append(executionTimeUPD)
+
+                    ############################################
+                    startTimeREADPRO = time.time()
+                    # READ CHANNEL DATA as INT16
+                    total = 0
+                    signal = bytearray()
+
+                    # Ensure to receive the complete data
+                    while total < self.na_read*self.n_ax*self.n_el*self.bytesPerElementRead:
+                        #For best match with hardware and network realities, the value of bufsize
+                        #should be a relatively small power of 2, for example, 4096.
+                        data = connection.recv(self.buffer_size)
+                        if not data:
+                            break
+                        total = total + len(data)
+                        signal += data
+
+                    dataToBeProcessed = array.array('h', signal)
+                    dataToBeProcessed = np.reshape(
+                                                dataToBeProcessed,
+                                                (self.n_ax*self.na_read, self.n_el),
+                                                order='F')
+                    RFData = np.array_split(dataToBeProcessed, self.na_read)
+                    RFData = np.stack(RFData, axis=2)  # Nax, Nel, na_transmit
+                    RFData = np.transpose(RFData, (2, 1, 0))
+
+                    # FROM RF DATA TO IQ
+                    I = []
+                    Q = []
+                    for i in zip(RFData[:, :, ::2], RFData[:, :, 1::2]):
+                        I.append(i[1])
+                        Q.append(i[0])
+
+                    I = np.reshape(I, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
+                    Q = np.reshape(Q, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
+
+                    IQ = np.concatenate([I, Q], axis=-1)
+                    buffer.append(IQ)
+
+                    executionTimeREADPRO =  time.time() -startTimeREADPRO
+                    self.read_preprocess_elapsed_time.append(executionTimeREADPRO)
+
+            except:
+                logging.debug('set terminate signal...')
+                terminate_signal.set()  # signal writer that we are done
+
+    def save(self):
+        """Function that saves benchmark data to .mat file"""
+        displayInterFramePeriod = []
+        for k in range(len(self.time_display)-1):
+            c = self.time_display[k+1] - self.time_display[k]
+            displayInterFramePeriod.append(c.total_seconds())
+
+        d = {
+            f"""displayIFP_na{int(self.na_transmit)}
+            _proc{self.bf_type}
+            _autotun{str(self.auto_update_intensity)}""": displayInterFramePeriod,
+
+            f"""tBeamformerElapsedTime_na{int(self.na_transmit)}
+            _proc{self.bf_type}
+            _autotun{str(self.auto_update_intensity)}""": self.beamformer_elapsed_time,
+
+            f"""tUpdateElapsedTime_na{int(self.na_transmit)}
+            _proc{self.bf_type}
+            _autotun{str(self.auto_update_intensity)}""": self.update_elapsed_time,
+
+            f"""tReadPreProcessElapsedTime_na{int(self.na_transmit)}
+            _proc{self.bf_type}
+            _autotun{str(self.auto_update_intensity)}""": self.read_preprocess_elapsed_time,
+        }
+        scipy.io.savemat(
+            f"""L114v_na{int(self.na_transmit)}
+            _proc{self.bf_type}
+            _autotun{str(self.auto_update_intensity)}
+            _pyt_{int(time.time())}.mat""",
+            mdict=d)
+
+    def process_data(self, buffer, terminate_signal):
+        """Function that handles data processing (e.g. beamforming)"""
+        while not terminate_signal.is_set():
+            logging.debug('start processing')
+            try:
+                IQ = buffer.pop() #expected: 2, na, 128, 1024, 1
+                buffer.clear()
+
+                startTimeBF = time.time()
+
+                # Select correct model from dictionary
+                if self.bf_type == 'RAW':
+                    model = lambda x: x[0,0, :, :,0]
+                elif IQ.shape[1] == 11:
+                    if self.bf_type == 'DAS':
+                        model = self.model_dict['DAS_11PW']
+                    elif self.bf_type == 'ABLE':
+                        model = self.model_dict['ABLE_11PW']
+                elif IQ.shape[1] == 5:
+                    if self.bf_type == 'DAS':
+                        model = self.model_dict['DAS_5PW']
+                    elif self.bf_type == 'ABLE':
+                        model = self.model_dict['ABLE_5PW']
+                elif IQ.shape[1] == 1:
+                    if self.bf_type == 'DAS':
+                        model = self.model_dict['DAS_1PW']
+                    elif self.bf_type == 'ABLE':
+                        model = self.model_dict['ABLE_1PW']
+
+                BF = model(IQ)
+                BF = np.squeeze(BF)
+                BF = self.scan_converter.convert(BF)
+
+                # if self.upscaling:
+                #     BF = np.expand_dims(BF,-1)
+                #     BF = cv2.merge((BF, BF, BF))
+                #     BF = np.expand_dims(BF, 0)
+                #     BF = self.sr_model(BF/255)
+                #     BF = np.squeeze(BF)*255
+
+                self.time_display.append(datetime.now())
+                #Display the resulting frame
+                BF = cv2.resize(
+                    BF,
+                    dsize=(
+                    int(self.scaling*self.grid.shape[1]*self.aspect_fx),
+                    int(self.scaling*self.grid.shape[0])),
+                    fx=self.aspect_fx
+                    )
+
+                # FPS counter
+                if self.show_fps:
+                    BF = self.fps_counter.overlay(BF)
+
+                self.bf_display = BF
+                executionTimeBF = time.time() - startTimeBF
+                self.beamformer_elapsed_time.append(executionTimeBF)
+            except:
+                time.sleep(0.0001)  # wait for new data
+
+
+    def open_connection(self):
+        """Handles the opening and handshaking with the Verasonics"""
+        # Open connection
+        connection, client_address = self.vera_socket.accept()
+        print('Connected by', client_address)
+        # READ INITIALIZATION PARAMETERS
+        total = 0
+        msg = bytearray()
+
+        while total < 7: # Ensure to receive the complete data
+            #For best match with hardware and network realities,
+            # the value of bufsize should be a relatively small power of 2,
+            # for example, 4096.
+            data = connection.recv(self.buffer_size)
+            if not data:
+                break
+            total = total + len(data)
+            msg += data
+
+        initializationParameters = array.array('h', msg)
+
+        self.n_ax = initializationParameters[0]
+        self.n_el = initializationParameters[1]
+        self.na_transmit = initializationParameters[2]
+        self.na_read = self.na_transmit
+
+        self.returnToMatlabFreq = initializationParameters[3]
+        self.bytesPerElementSent = initializationParameters[4]
+        self.bytesPerElementRead = initializationParameters[5]
+        self.numTunableParameters = initializationParameters[6]
+
+        # ACK INITIALIZATION COMPLETED
+        ack = [1]
+        ack_bytes = bytearray(struct.pack(f'{len(ack)}B', *ack))
+        connection.sendall(ack_bytes)
+
+        logging.debug('Initialization completed')
+
+        return connection
+
+    def get_frame(self):
+        """Function that generates new image frames for the web interface"""
+        connection = None
+        while True:
+            try:
+                if (connection is None) and (not self.dummy_mode):
+                    print('Waiting for connection...')
+                    try:
+                        connection = self.open_connection()
+                    except:
+                        img = cv2.imread('python/templates/nofeed.jpg')
+                        yield self.encode_img(img)
+
+                else:
+                    logging.debug('Entered the image formation loop.')
+
+                    buffer = collections.deque([], maxlen=30)  # buffer for reading/writing
+                    terminate_signal = threading.Event()  # shared signa
+
+                    with ThreadPoolExecutor(2) as executor:
+                        _ = executor.submit(self.read_update, connection, buffer, terminate_signal)
+                        _ = executor.submit(self.process_data, buffer, terminate_signal)
+
+                        while not terminate_signal.is_set():
+                            try:
+                                yield self.encode_img(self.bf_display)
+                            except:
+                                time.sleep(0.001)  # wait for new data
+
+                    print('Saving results...')
+                    #self.save()
+                    connection = None
+                    print(connection)
+
+            except:
+                if connection is not None:
+                    print('TCP server closes...')
+                    connection.close()
+                    connection = None
+                    print('Saving results...')
+                    #self.save()
+
+    @staticmethod
+    def encode_img(img):
+        """Function that encodes the input image to jpeg and prepares the HTML package"""
+        imgencode=cv2.imencode('.jpg',img)[1]
+        stringData=imgencode.tobytes()
+        return (
+            b'--frame\r\n'
+            b'Content-Type: text/plain\r\n\r\n'+stringData+b'\r\n'
+            )
+
+    def update_settings(self):
+        """Function that updates setting states of the webserver class"""
+        if request.method == 'POST':
+            if request.form.get('beamformer') is not None:
+                self.update_beamformer = True
+                self.bf_type = request.form.get('beamformer')
+                logging.debug(self.bf_type)
+
+            if request.form.get('norm_mode') is not None:
+                norm_mode = request.form.get('norm_mode')
+                setattr(self.scan_converter, 'norm_mode', norm_mode)
+                logging.debug(norm_mode)
+
+            if request.form.get('na') is not None:
+
+
+                self.save()
+                self.beamformer_elapsed_time = []
+                self.read_preprocess_elapsed_time = []
+                self.update_elapsed_time = []
+                self.time_display = []
+
+                self.update_na_transmit = True
+                self.na_transmit = int(request.form.get('na'))
+                logging.debug(self.na_transmit)
+
+            if request.form.get('intensityAuto') is not None:
+
+                self.save()
+                self.beamformer_elapsed_time = []
+                self.read_preprocess_elapsed_time = []
+                self.update_elapsed_time = []
+                self.time_display = []
+
+                self.auto_update_intensity = not self.auto_update_intensity
+                logging.debug(self.auto_update_intensity)
+                if self.auto_update_intensity:
+                    self.meanAmp_history = []
+                    self.err_history = [0,0]
+                    self.hv_history = []
+
+            if (request.form.get('slide') is not None) and not self.auto_update_intensity:
+                self.update_intensity = True
+                self.intensity = float(request.form.get('slide'))
+                logging.debug(self.intensity)
+
+            if request.form.get('fps') is not None:
+                self.show_fps = not self.show_fps
+                logging.debug(self.show_fps)
+
+            if request.form.get('upscaling') is not None:
+                self.upscaling = not self.upscaling
+                logging.debug(self.upscaling)
+
+
+        return ('', 204)
+
+
+# Initialize Flask server
 app = Flask(__name__)
 app.secret_key = 'Secret'
 app.config["SESSION_PERMANENT"] = False
 
-
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-socket.setdefaulttimeout(timeOut)
-#s.setblocking(False)
-s.settimeout(timeOut)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, bufferSize)    
-s.bind(server_address_tcp)
-s.listen(1)   
-print('TCP server is running ...')
-
-timeDisplay = []
-
-import scipy.io
-
-def save():
-    diff = []
-    for k in range(len(timeDisplay)-1):
-        c = timeDisplay[k+1] - timeDisplay[k]
-        diff.append(c.total_seconds())
-    d = {"interFrameSeconds1": diff, "tBeamformerElapsedTime1": tBeamformerElapsedTime, 
-         "tPreProcessElapsedTime1": tPreProcessElapsedTime, "tReadPreProcessElapsedTime1": tReadPreProcessElapsedTime,}
-    scipy.io.savemat('L114v_na1_GUIflask_python_displayRF.mat', mdict=d, format='5')
-
-def get_frame():
-    
-        connection = None
-
-        
-        while True:
-            
-            try:
-                
-                if (connection == None) and (not DUMMY_MODE):
-                                  
-                    print('Waiting for connection...')
-                    try: 
-                        # Open connection
-                        connection, client_address = s.accept()
-                        print('Connected by', client_address)
-                    except:
-                        img = cv2.imread('python/templates/nofeed.jpg')
-                        imgencode=cv2.imencode('.jpg',img)[1]
-                        stringData=imgencode.tobytes()
-                        yield (b'--frame\r\n'
-                            b'Content-Type: text/plain\r\n\r\n'+stringData+b'\r\n')
-            
-                else:
-                    global intensity, updateIntensity, update_na_transmit, na_transmit, flag, na_read
-
-                    if DUMMY_MODE:
-                        IQ = 2**9*np.random.rand(1, na_transmit, Nel, int(Nax/2), 2)
-                    else:
-                        
-                        # SEND UPDATE AS SOON AS READING FINISHES
-                        #startTimeSB = time.time()
-                        startTimeREADPRO = time.time()
-
-                        if updateIntensity:
-                            print('Intensity: ', intensity)
-                            updateIntensity = False
-                            tsb_lst = [intensity]
-                        else:
-                            tsb_lst =[0]
-                    
-                        if update_na_transmit:
-                            flag = returnToMatlabFreq
-                            print('Update firing angles: ', na_transmit)
-                            update_na_transmit = False
-                            tsb_lst.append(na_transmit)
-                            
-                        else:
-                            tsb_lst.append(0)
-                            
-                            
-                        if flag != 0:
-                            flag -= 1
-                        elif flag == 0:
-                            na_read = na_transmit
-                            #print('Number of firing angles: ', na_read)
-                    
-                        
-                        # READ as INT16
-                        total = 0
-                        signal = bytearray()
-                                            
-                        while total < na_read*Nax*Nel*bytesPerElementRead: # Ensure to receive the complete data
-                            data = connection.recv(bufferSize) #For best match with hardware and network realities, the value of bufsize should be a relatively small power of 2, for example, 4096.
-                            if not data: break
-                            #elif data: 
-                                #if total == 0: startTimeRCV = time.time()
-                            total = total + len(data)
-                            signal += data
-                        
-                        # UPDATE INTENSITY
-                        tsb_lst = list(map(np.double, tsb_lst))    
-                        tsb_bytes = bytearray(struct.pack('%sd' % len(tsb_lst), *tsb_lst))
-                        connection.sendall(tsb_bytes)
-                        
-                        
-                        startTimePRO = time.time()
-                        dataToBeProcessed = array.array('h', signal)
-                    
-                        
-                        dataToBeProcessed = np.reshape(dataToBeProcessed, (Nax*na_read, Nel), order='F')
-                        RFData = np.array_split(dataToBeProcessed, na_read)
-                        RFData = np.stack(RFData, axis=2)  # Nax, Nel, na_transmit
-                        RFData = np.transpose(RFData, (2, 1, 0))
-                        
-                        
-                        # FROM RF DATA TO IQ
-                        I = []
-                        Q = []
-                        for i in zip(RFData[:, :, ::2], RFData[:, :, 1::2]):
-                            I.append(i[0])
-                            Q.append(- i[1])
-                                                
-                        I = np.reshape(I, (1, na_read, Nel, int(Nax/2), 1))
-                        Q = np.reshape(Q, (1, na_read, Nel, int(Nax/2), 1)) #expected: 1, na, 128, 1024, 1
-                        
-                        IQ = np.concatenate([I, Q], axis=-1)
-                    
-                        executionTimePRO = (time.time() - startTimePRO)
-                        tPreProcessElapsedTime.append(executionTimePRO)
-                        
-                        executionTimeREADPRO =  (time.time() -startTimeREADPRO)
-                        tReadPreProcessElapsedTime.append(executionTimeREADPRO)
-                    
-                    #IQ[:,:,:,:1,:] = np.zeros((1,1,128,1,2))
-                    
-                    startTimeBF = time.time()
-                    
-                    
-                    # Select correct model from dictionary
-                    try:
-                        if na_transmit == 11:
-                            if beamformer == 'DAS':
-                                model = model_dict['DAS_11PW']
-                            elif beamformer == 'ABLE':
-                                model = model_dict['ABLE_11PW']
-                        else:
-                            if beamformer == 'DAS':
-                                model = model_dict['DAS_1PW']
-                            elif beamformer == 'ABLE':
-                                model = model_dict['ABLE_1PW']
-
-
-                        BF = model(IQ) #shape: 1,128,256
-        
-                        # if beamformer == 'DAS':
-                        #     BF = BF[1]
-                        # else:
-                        #     BF = BF[0]
-        
-                        BF = np.squeeze(BF).T    
-                    
-                        BF = scan_converter.convert(BF)
-                        
-                        # RFT = np.transpose(RFData, (0, 2, 1))
-                        # BF = RFT[0, :, :]
-        
-                        executionTimeBF = (time.time() - startTimeBF)
-                        #print(executionTimeBF)
-                        tBeamformerElapsedTime.append(executionTimeBF)
-                        
-                        # WRITE 
-                        timeDisplay.append(datetime.now())                                    
-                        # Display the resulting frame
-                        BF = cv2.resize(BF, dsize=(int(SCALE*grid.shape[1]*aspect_fx), int(SCALE*grid.shape[0])), fx=aspect_fx)
-
-                        # fps counter
-                        if show_fps:
-                            BF = fps_counter.overlay(BF)
-                        
-                        imgencode=cv2.imencode('.jpg',BF)[1]
-                        stringData=imgencode.tobytes()
-                        yield (b'--frame\r\n'
-                            b'Content-Type: text/plain\r\n\r\n'+stringData+b'\r\n')
-                    except:
-                        pass
-                    
-                          
-            except:
-                if connection != None:
-                    print('TCP server closes...')
-                    connection.close()
-                    connection = None
-                    save()
-                    
-                             
-                    
-
-
 @app.route('/')
 def index():
+    """Creates the HTML page"""
     return render_template('indexJQUERY.html')
- 
+
 @app.route('/create_file', methods=['POST'])
 def create_file():
-    if request.method == 'POST':
-                
-        if request.form.get('beamformer') != None:    
-            global beamformer, updateBeamformer
-            updateBeamformer = True
-            beamformer = request.form.get('beamformer')
+    """Function that updates server settings based on user input"""
+    return web_server.update_settings()
 
-        if request.form.get('norm_mode') != None:    
-            global scan_converter
-            norm_mode = request.form.get('norm_mode')
-            setattr(scan_converter, 'norm_mode', norm_mode)
-        
-        if request.form.get('slide') != None:    
-            global intensity, updateIntensity
-            updateIntensity = True
-            intensity = request.form.get('slide')
-
-        if request.form.get('fps') != None:
-            global show_fps
-            show_fps = not show_fps
-            
-        if request.form.get('na') != None:
-            global na_transmit, update_na_transmit
-            update_na_transmit = True
-            na_transmit = int(request.form.get('na'))
-            print(na_transmit)
-        
-        return ('', 204)
-    
-    
-
-#@app.route('/vid/')
-#@app.route('/vid/<connection>') #video feed
 @app.route('/vid/')
 def vid():
-    return Response(get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')
-    
-  
-    
+    """ Video Feed"""
+    return Response(web_server.get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# Initialize Verasonics webserver
+web_server = WebServer()
+
 if __name__ == '__main__':
-        
-    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
-        
-        
-        
-            
-    
-        
+    app.run(host='0.0.0.0', port=5000, debug=debugger_is_active(), use_reloader=False)
