@@ -48,8 +48,8 @@ scan_schema = Schema({
     # TODO: n_angles and N_tx are overlapping parameters
     Optional("n_angles", default=None): Or(None, int, list),
     Optional("N_tx", default=None): Or(None, int),
-    Optional("Nx", default=None): Or(None, int),
-    Optional("Nz", default=None): Or(None, int),
+    Optional("Nx", default=None): Or(None, positive_integer),
+    Optional("Nz", default=None): Or(None, positive_integer),
     Optional("N_ax", default=None): Or(None, int),
     Optional("fc", default=None): Or(None, float),
     Optional("fs", default=None): Or(None, float),

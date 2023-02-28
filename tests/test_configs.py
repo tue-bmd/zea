@@ -21,3 +21,7 @@ def test_config(file):
         config_schema.validate(dict(configuration))
     except SchemaError as se:
         raise ValueError(f'Error in config {f}') from se
+
+if __name__ == '__main__':
+    for file in list(Path('./configs').glob('*.yaml')):
+        test_config(file)
