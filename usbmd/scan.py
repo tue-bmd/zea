@@ -52,7 +52,6 @@ def initialize_scan_from_config(config):
     """
     raise NotImplementedError
 
-
 class Scan:
     """Scan base class."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
@@ -217,7 +216,8 @@ class PlaneWaveScan(Scan):
         super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax,
                          Nx, Nz, tzero_correct)
 
-        assert angles is not None
+        assert angles is not None, \
+            'Please provide angles at which plane wave dataset was recorded'
         self.angles = angles
         if n_angles:
             if isinstance(n_angles, list):

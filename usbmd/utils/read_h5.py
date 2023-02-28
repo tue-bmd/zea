@@ -135,3 +135,19 @@ class ReadH5:
             void
         """
         self.h5f.close()
+
+def recursively_load_dict_contents_from_group(
+    h5file: h5py._hl.files.File, path: str, squeeze=True) -> dict:
+    """Load dict from contents of group"""
+    ans = {}
+    for key, item in h5file[path].items():
+        if isinstance(item, h5py._hl.dataset.Dataset):
+            if squeeze:
+                ans[key] = np.squeeze(item[()])
+                if ans[key].shape == ():
+                    ans[key] = float(ans[key])
+            else:
+                ans[key] = item[()]
+        elif isinstance(item, h5py._hl.group.Group):
+            ans[key] = recursively_load_dict_contents_from_group(h5file, path + key + '/')
+    return ans

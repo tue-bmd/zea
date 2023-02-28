@@ -44,9 +44,16 @@ postprocess_schema = Schema({
 scan_schema = Schema({
     Optional("xlims", default=None): list_of_size_two,
     Optional("zlims", default=None): list_of_size_two,
+    Optional("ylims", default=None): list_of_size_two,
+    # TODO: n_angles and N_tx are overlapping parameters
     Optional("n_angles", default=None): Or(None, int, list),
+    Optional("N_tx", default=None): Or(None, int),
     Optional("Nx", default=None): Or(None, int),
     Optional("Nz", default=None): Or(None, int),
+    Optional("N_ax", default=None): Or(None, int),
+    Optional("fc", default=None): Or(None, float),
+    Optional("fs", default=None): Or(None, float),
+    Optional("tzero_correct", default=None): Or(None, bool),
 })
 
 # top level schema
