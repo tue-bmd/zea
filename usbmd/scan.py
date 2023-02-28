@@ -112,13 +112,16 @@ class Scan:
         # Beamforming grid related attributes
         self.xlims = xlims
         self.ylims = ylims
-        self.zlims = zlims
+        if zlims:
+            self.zlims = zlims
+        else:
+            self.zlims = [0, self.c * self.N_ax / self.fs / 2]
+            print(self.zlims)
         self.grid = None
         self.Nx = Nx
         self.Nz = Nz
 
-        # TODO: maybe we can define all axis here?
-        self.z_axis = np.linspace(*zlims, N_ax)
+        self.z_axis = np.linspace(*self.zlims, N_ax)
 
         # !!! TODO, implement this such that no aliasing occurs
         if self.fdemod == 0:
