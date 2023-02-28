@@ -19,8 +19,8 @@ from PIL import Image
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.scan import Scan
 from usbmd.processing import Process
+from usbmd.scan import Scan
 
 
 class GenerateDataSet:
