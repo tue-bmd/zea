@@ -3,11 +3,11 @@
 import numpy as np
 import tensorflow as tf
 
-from usbmd.probes import get_probe
+from usbmd.probes import Verasonics_l11_4v
+from usbmd.scan import PlaneWaveScan
 from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.config import load_config_from_yaml
-from usbmd.utils.pixelgrid import get_grid
 
 set_gpu_usage()
 
@@ -48,20 +48,12 @@ def trt_opt(model, name=None):
         print('Model was not optimized using TRT')
         return model
 
-def load_saved_model(path):
-    cfg = load_config_from_yaml(path+'/config.yaml')
-    probe = get_probe(cfg)
-    grid = get_grid(cfg, probe) 
-    model = create_beamformer(probe, grid, cfg)
-    model.load_weights(path+'/model')
-    model.compile(jit_compile=False)
-    return model, probe, grid
 
 def get_models():
     model_dict = {}
     model_dict['DAS_1PW'], grid = create_DAS_1PW()
-    #model_dict['DAS_5PW'] = create_DAS_5PW()
-    #model_dict['DAS_11PW'] = create_DAS_11PW()
+    # model_dict['DAS_5PW'] = create_DAS_5PW()
+    # model_dict['DAS_11PW'] = create_DAS_11PW()
     # model_dict['ABLE_1PW'] = create_ABLE_1PW()
     # model_dict['ABLE_5PW'] = create_ABLE_5PW()
     # model_dict['ABLE_11PW'] = create_ABLE_11PW()
@@ -79,38 +71,45 @@ def model_from_file(path):
     return wrapped_model
 
 def create_DAS_1PW():
-    cfg = load_config_from_yaml('configs/config_webserver.yaml')
-    cfg.data.modtype = 'iq'
-    cfg.data.n_angles = 1
-    probe = get_probe(cfg)
-    probe.N_ax = 576
-    probe.fs = probe.fs/4
-    grid = get_grid(cfg, probe) 
-    model = create_beamformer(probe, grid, cfg)
+    config = load_config_from_yaml('configs/config_webserver.yaml')
+    config.data.n_angles = 1
+    probe = Verasonics_l11_4v()
+    probe_parameters = probe.get_default_scan_parameters()
+
+    scan = PlaneWaveScan(N_tx=1,
+                         xlims=(-19e-3, 19e-3),
+                         zlims=(0, 63e-3),
+                         N_ax=576,
+                         fs=6.25e6,
+                         fc=6.25e6,
+                         angles=np.array([0,]),
+                         modtype=config.data.modtype)
+
+    model = create_beamformer(probe, scan, config)
     model = trt_opt(model, name = 'DAS_1PW')
-    return model, grid
+    return model, scan.grid
 
-def create_DAS_5PW():
-    cfg = load_config_from_yaml('configs/config_webserver.yaml')
-    cfg.data.n_angles = [1,3,5,7,9]
-    probe = get_probe(cfg)
-    probe.N_ax = 576
-    probe.fs = probe.fs/4
-    grid = get_grid(cfg, probe) 
-    model = create_beamformer(probe, grid, cfg)
-    model = trt_opt(model, name = 'DAS_5PW')
-    return model
+# def create_DAS_5PW():
+#     cfg = load_config_from_yaml('configs/config_webserver.yaml')
+#     cfg.data.n_angles = [1,3,5,7,9]
+#     probe = get_probe(cfg)
+#     probe.N_ax = 576
+#     probe.fs = probe.fs/4
+#     grid = get_grid(cfg, probe) 
+#     model = create_beamformer(probe, grid, cfg)
+#     model = trt_opt(model, name = 'DAS_5PW')
+#     return model
 
-def create_DAS_11PW():
-    cfg = load_config_from_yaml('configs/config_webserver.yaml')
-    cfg.data.n_angles = [0,1,2,3,4,5,6,7,8,9,10]
-    probe = get_probe(cfg)
-    probe.N_ax = 576
-    probe.fs = probe.fs/4
-    grid = get_grid(cfg, probe) 
-    model = create_beamformer(probe, grid, cfg)
-    model = trt_opt(model, name = 'DAS_11PW')
-    return model
+# def create_DAS_11PW():
+#     cfg = load_config_from_yaml('configs/config_webserver.yaml')
+#     cfg.data.n_angles = [0,1,2,3,4,5,6,7,8,9,10]
+#     probe = get_probe(cfg)
+#     probe.N_ax = 576
+#     probe.fs = probe.fs/4
+#     grid = get_grid(cfg, probe) 
+#     model = create_beamformer(probe, grid, cfg)
+#     model = trt_opt(model, name = 'DAS_11PW')
+#     return model
 
 # def create_ABLE_1PW():
 #     cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_1PW.yaml')

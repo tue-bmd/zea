@@ -19,6 +19,7 @@ from PIL import Image
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
+from usbmd.scan import Scan
 from usbmd.processing import Process
 
 
@@ -62,12 +63,14 @@ class GenerateDataSet:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
+        # Initialize scan based on dataset
+        self.scan = Scan(**self.dataset.get_default_scan_parameters())
+
         # initialize probe
-        self.probe = get_probe(config, self.dataset)
-        self.dataset.probe = self.probe
+        self.probe = get_probe(self.dataset.get_probe_name())
 
         # intialize process class
-        self.process = Process(config, self.probe)
+        self.process = Process(config, self.scan, self.probe)
 
         if destination_folder is None:
             self.destination_folder = self.dataset.datafolder.parent / \

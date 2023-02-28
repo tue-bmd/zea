@@ -23,7 +23,7 @@ class UltrasoundSimulator:
     def __init__(
         self,
         probe=None,
-        grid=None,
+        scan=None,
         ele_pos=None,
         batch_size=1,
         fc=6.25e6,
@@ -33,10 +33,11 @@ class UltrasoundSimulator:
         """Initialize ultrasound simulator
 
         Args:
-            probe (UltrasoundProbe, optional): Class containing probe parameters
+            probe (Probe, optional): Class containing probe parameters
                 Providing a probe class overrides all other acquisition paremters.
                 Defaults to None.
-            grid (ndarray, optional): Beamforming grid. Defaults to None.
+            scan (Scan, optional): Scan object containing parameters and
+                beamforming grid. Defaults to None.
             ele_pos (ndarray, optional): Array geometry. Defaults to None.
             batch_size (int, optional): Number of batches. Defaults to 1.
             fc (float, optional): Center frequency. Defaults to 6.25e6.
@@ -47,10 +48,10 @@ class UltrasoundSimulator:
         """
 
         # Set acquisition parameters
-        if probe:
-            print("Probe class recognized, ignoring manual parameters")
-            self.fc = probe.fc
-            self.c = probe.c
+        if scan and probe:
+            print("Probe and scanclass recognized, ignoring manual parameters")
+            self.fc = scan.fc
+            self.c = scan.c
             self.ele_pos = probe.ele_pos
 
         else:
@@ -68,12 +69,12 @@ class UltrasoundSimulator:
                     ], axis=1)
 
         self.batch_size = batch_size
-        self.wvln = c/fc
+        self.wvln = scan.wvln
         self.ele_pos = self.ele_pos[:,0]-np.min(self.ele_pos[0,0])
 
         # Set grid
-        if grid is not None:
-            self.grid = grid
+        if scan is not None:
+            self.grid = scan.grid
         else:
             self.grid = make_pixel_grid([-19e-3, 19e-3], [0, 63e-3], self.wvln/8, self.wvln/8)
 
