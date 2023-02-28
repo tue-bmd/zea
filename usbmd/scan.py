@@ -244,6 +244,8 @@ class PlaneWaveScan(Scan):
         else:
             self.n_angles = list(range(len(self.angles)))
 
+        self.N_tx = len(self.angles)
+
     def get_time_zero(self, element_positions, c=1540, offset=0):
         """Returns an ndarray with the delay between the first element firing
         and that element firing.
