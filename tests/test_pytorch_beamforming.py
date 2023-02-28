@@ -1,4 +1,5 @@
-"""Test the pytorch implementation of the beamformers.
+"""
+Test the pytorch implementation of the beamformers.
 """
 # pylint: disable=no-member
 import sys
@@ -10,8 +11,10 @@ import numpy as np
 import torch
 
 from usbmd.probes import Verasonics_l11_4v
+
 from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
 from usbmd.pytorch_ultrasound.processing import on_device_torch
+from usbmd.scan import PlaneWaveScan
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
@@ -32,16 +35,23 @@ def test_das_beamforming(debug=False, compare_gt=True):
         numpy array: beamformed output
     """
 
-
+    #probe = get_probe(config)
     config = load_config_from_yaml(r'./tests/config_test.yaml')
     config.ml_library = 'torch'
-    probe = Verasonics_l11_4v(config)
-    probe.N_ax = 2046
-    wvln = probe.c/probe.fc
-    grid = make_pixel_grid([-19e-3, 19e-3], [0, 63e-3], wvln/4, wvln/4)
 
-    simulator = UltrasoundSimulator(probe, grid)
-    beamformer = create_beamformer(probe, grid, config)
+    probe = Verasonics_l11_4v()
+    probe_parameters = probe.get_default_scan_parameters()
+    scan = PlaneWaveScan(N_tx=1,
+                         xlims=(-19e-3, 19e-3),
+                         zlims=(0, 63e-3),
+                         N_ax=2046,
+                         fs=probe_parameters['fs'],
+                         fc=probe_parameters['fc'],
+                         angles=np.array([0,]))
+
+    scan.grid = make_pixel_grid(scan.xlims, scan.zlims, scan.wvln/4, scan.wvln/4)
+    simulator = UltrasoundSimulator(probe, scan)
+    beamformer = create_beamformer(probe, scan, config)
 
     # Ensure reproducible results
     torch.random.manual_seed(0)
