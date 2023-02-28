@@ -34,7 +34,7 @@ from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.utils import (filename_from_window_dialog,
                                plt_window_has_been_closed, save_to_gif,
-                               strtobool, to_image)
+                               strtobool, to_image, update_dictionary)
 
 
 class DataLoaderUI:
@@ -51,12 +51,20 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # initialize probe class
-        self.probe = get_probe(config, self.dataset)
-        self.dataset.probe = self.probe
+        # Initialize scan based on dataset
+        scan_class = self.dataset.get_scan_class()
+        default_scan_params = self.dataset.get_default_scan_parameters()
+        config_scan_params = self.config.scan
+
+        # dict merging of manual config and dataset default scan parameters
+        scan_params = update_dictionary(default_scan_params, config_scan_params)
+        self.scan = scan_class(**scan_params)
+
+        # initialize probe
+        self.probe = get_probe(self.dataset.get_probe_name())
 
         # intialize process class
-        self.process = Process(config, self.probe)
+        self.process = Process(config, self.scan, self.probe)
 
         # initialize attributes for UI class
         self.data = None
@@ -164,7 +172,7 @@ class DataLoaderUI:
         if not 'postprocess' in self.config:
             return image
 
-        if 'contrast_boost' in self.config.postprocess:
+        if self.config.postprocess.contrast_boost is not None:
             if self.config.data.dtype not in ['raw_data', 'aligned_data']:
                 warnings.warn(f'contrast boost not possible with {self.config.data.dtype}')
                 return image
@@ -211,10 +219,10 @@ class DataLoaderUI:
             self.fig, self.ax = plt.subplots()
 
             extent = [
-                self.probe.xlims[0] * 1e3,
-                self.probe.xlims[1] * 1e3,
-                self.probe.zlims[1] * 1e3,
-                self.probe.zlims[0] * 1e3,
+                self.scan.xlims[0] * 1e3,
+                self.scan.xlims[1] * 1e3,
+                self.scan.zlims[1] * 1e3,
+                self.scan.zlims[0] * 1e3,
             ]
 
             if image_range is None:
