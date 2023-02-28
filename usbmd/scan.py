@@ -217,7 +217,7 @@ class PlaneWaveScan(Scan):
                          Nx, Nz, tzero_correct)
 
         assert angles is not None, \
-            'Please provide angles at which plane wave dataset was recorded'
+            'Please provide the angles at which plane wave dataset was recorded'
         self.angles = angles
         if n_angles:
             if isinstance(n_angles, list):
