@@ -58,7 +58,7 @@ class DataLoaderUI:
         default_scan_params = self.dataset.get_default_scan_parameters()
         config_scan_params = self.config.scan
 
-        # dict merging python > 3.9: default_scan_params | config_scan_params
+        # dict merging of manual config and dataset default scan parameters
         scan_params = update_dictionary(default_scan_params, config_scan_params)
         self.scan = scan_class(**scan_params)
 
