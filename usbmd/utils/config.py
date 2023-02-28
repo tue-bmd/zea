@@ -57,8 +57,6 @@ class Config(dict):
         for key, value in self.items():
             if isinstance(value, Config):
                 dictionary[key] = value.serialize()
-            # elif isinstance(value, list) or isinstance(value,tuple):
-            #     for idx,
             else:
                 dictionary[key] = value
         return dictionary

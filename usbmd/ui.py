@@ -56,7 +56,7 @@ class DataLoaderUI:
         default_scan_params = self.dataset.get_default_scan_parameters()
         config_scan_params = self.config.scan
 
-        # dict merging python > 3.9: default_scan_params | config_scan_params
+        # dict merging of manual config and dataset default scan parameters
         scan_params = update_dictionary(default_scan_params, config_scan_params)
         self.scan = scan_class(**scan_params)
 
@@ -172,7 +172,7 @@ class DataLoaderUI:
         if not 'postprocess' in self.config:
             return image
 
-        if 'contrast_boost' in self.config.postprocess:
+        if self.config.postprocess.contrast_boost is not None:
             if self.config.data.dtype not in ['raw_data', 'aligned_data']:
                 warnings.warn(f'contrast boost not possible with {self.config.data.dtype}')
                 return image
