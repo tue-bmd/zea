@@ -2,6 +2,7 @@
 Author(s): Ben Luijten
 """
 
+from collections import deque
 from time import perf_counter
 
 import cv2
@@ -49,8 +50,8 @@ class Scan_converter():
         self.env_mode = env_mode
         self.buffer_size = buffer_size
         self.norm_factor = norm_factor
-        self.img_buffer = []
-        self.max_buffer = list(np.zeros((buffer_size,)))
+        self.img_buffer = deque(maxlen=buffer_size)
+        self.max_buffer = deque(maxlen=buffer_size)
 
     def convert(self, img):
         """Conversion function that applies all transformations"""
@@ -59,6 +60,12 @@ class Scan_converter():
         img = self.compression(img)
         img = np.clip(img, -60, 0)
         img = ((img + 60)*(255/60)).astype('uint8')
+        return img
+    
+    def persistance(self, img):
+        """Function that applies persistance to the image"""
+        self.img_buffer.append(img)
+        img = np.mean(self.img_buffer, axis=0)
         return img
 
     def normalize(self, img):
@@ -92,3 +99,15 @@ class Scan_converter():
     def set_value(self, key, val):
         """Function for setting parameters"""
         setattr(self, key, val)
+
+    def update_buffer_size(self, buffer_size):
+        """Function for updating the buffer size"""
+        self.buffer_size = buffer_size
+        self.img_buffer = deque(maxlen=buffer_size)
+        self.max_buffer = deque(maxlen=buffer_size)
+
+    def apply_contrast_curve(self, img, curve):
+        """Function for applying a contrast curve"""
+        img = np.interp(img, (0, 255), curve)
+        return img
+
