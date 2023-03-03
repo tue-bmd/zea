@@ -55,13 +55,12 @@ class Scan_converter():
 
     def convert(self, img):
         """Conversion function that applies all transformations"""
-        img = self.normalize(img)
         img = self.envelope(img)
+        img = self.normalize(img)
         img = self.compression(img)
-        img = np.clip(img, -60, 0)
-        img = ((img + 60)*(255/60)).astype('uint8')
+        img = self.persistance(img)
         return img
-    
+
     def persistance(self, img):
         """Function that applies persistance to the image"""
         self.img_buffer.append(img)
@@ -82,6 +81,9 @@ class Scan_converter():
             img = img/self.norm_factor
         else:
             img = img/max_val
+
+        img = np.clip(img, -60, 0)
+        img = ((img + 60)*(255/60)).astype('uint8')
 
         return img
 
@@ -111,3 +113,12 @@ class Scan_converter():
         img = np.interp(img, (0, 255), curve)
         return img
 
+    def apply_gamma(self, img, gamma):
+        """Function for applying gamma correction"""
+        img = np.power(img/255, gamma)*255
+        return img
+
+    def apply_color_map(self, img, cmap):
+        """Function for applying a color map"""
+        img = cv2.applyColorMap(img, cmap)
+        return img

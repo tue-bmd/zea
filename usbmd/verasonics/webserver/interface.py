@@ -517,7 +517,7 @@ app.config["SESSION_PERMANENT"] = False
 @app.route('/')
 def index():
     """Creates the HTML page"""
-    return render_template('indexJQUERY.html')
+    return render_template('index.html')
 
 @app.route('/create_file', methods=['POST'])
 def create_file():
