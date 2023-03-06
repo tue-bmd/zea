@@ -98,6 +98,7 @@ class WebServer:
         self.flag = 0
         self.auto_update_intensity = False
         self.ref_amp = 80
+        self.c = 1540 # Speed of sound
 
         # Probe settings
         if probe == 'S51':
@@ -310,7 +311,10 @@ class WebServer:
 
                 # Select correct model from dictionary
                 if self.bf_type == 'RAW':
-                    model = lambda x: x[0,0, :, :,0]
+                    def return_IQ(*args, **kwargs):
+                        ix = int(np.floor(IQ.shape[1]/2))
+                        return IQ[0,ix, :, :,0]
+                    model = return_IQ
                 elif IQ.shape[1] == 11:
                     if self.bf_type == 'DAS':
                         model = self.model_dict['DAS_11PW']
@@ -327,7 +331,9 @@ class WebServer:
                     elif self.bf_type == 'ABLE':
                         model = self.model_dict['ABLE_1PW']
 
-                BF = model(IQ)
+               
+                c_input = np.expand_dims(self.c, (0,1))
+                BF = model([c_input, IQ])
                 BF = np.squeeze(BF)
                 BF = self.scan_converter.convert(BF)
 
@@ -504,6 +510,10 @@ class WebServer:
                 self.scan_converter.alpha = float(request.form.get('slide_alpha'))
                 logging.debug(self.scan_converter.alpha)
             
+            if request.form.get('slide_sos') is not None:
+                self.c = float(request.form.get('slide_sos'))
+                logging.debug(self.c)
+
             if request.form.get('persistence_mode') is not None:
                 mode = request.form.get('persistence_mode')
                 self.scan_converter.persistence_mode = mode

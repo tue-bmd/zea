@@ -89,7 +89,12 @@ def create_DAS_1PW():
         Nz = config.scan.get('Nz')
         )
 
-    model = create_beamformer(probe, scan, config)
+    model = create_beamformer(
+        probe,
+        scan,
+        config,
+        aux_inputs=config.model.beamformer.get('aux_inputs')
+    )
     model = trt_opt(model, name = 'DAS_1PW')
     return model, scan.grid
 
