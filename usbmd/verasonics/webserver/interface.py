@@ -80,7 +80,8 @@ class WebServer:
         self.scan_converter = Scan_converter(
             norm_mode='smoothnormal',
             env_mode='abs',
-            buffer_size=30)
+            img_buffer_size=1,
+            max_buffer_size=30)
 
         #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
         self.model_dict, self.grid = get_models()
@@ -465,8 +466,6 @@ class WebServer:
                 logging.debug(norm_mode)
 
             if request.form.get('na') is not None:
-
-
                 self.save()
                 self.beamformer_elapsed_time = []
                 self.read_preprocess_elapsed_time = []
@@ -492,10 +491,18 @@ class WebServer:
                     self.err_history = [0,0]
                     self.hv_history = []
 
-            if (request.form.get('slide') is not None) and not self.auto_update_intensity:
+            if (request.form.get('slide_voltage') is not None) and not self.auto_update_intensity:
                 self.update_intensity = True
-                self.intensity = float(request.form.get('slide'))
+                self.intensity = float(request.form.get('slide_voltage'))
                 logging.debug(self.intensity)
+
+            if request.form.get('slide_persistence') is not None:
+                val_persistence = int(request.form.get('slide_persistence'))
+                self.scan_converter.resize_deque_buffer(
+                    old_buffer_name = "img_buffer",
+                    new_buffer_size = val_persistence
+                )
+                logging.debug(val_persistence)
 
             if request.form.get('fps') is not None:
                 self.show_fps = not self.show_fps

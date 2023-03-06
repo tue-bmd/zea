@@ -77,27 +77,40 @@
       <input type="radio" value="option1" name="group2" checked="checked" onclick="setScaleNormal()"> Normalized </input><br>
       <input type="radio" value="option2" name="group2" onclick="setScaleSmoothNormal()"> Smooth Normalized </input><br>
       <input type="radio" value="option3" name="group2" onclick= "setScaleFixed()"> Fixed </input><br>
-  </fieldset> 
-      
+    </fieldset> 
+
+
     <h3>Transmit voltage (V)</h3>
-      <div class="container" id="control_panel_1">
+      <div class="container">
         <form action="/" method ="post" enctype="multipart/form-data" id="form">
           <div class="row">
             <div class="col">
-              <input id="slide" type="range" min="2" max="40" step="0.5" value="10" name="slide">
-              <div id="sliderAmount"></div>
+              <input id="slide_voltage" type="range" min="2" max="40" step="0.5" value="10" name="slide_voltage">
+              <div id="label_voltage">10</div>
             </div> 
           </div>
         </form>
       </div>
 
     <h3>Speed-of-sound (V)</h3>
-      <div class="container" id="control_panel_2">
+      <div class="container">
         <form action="/" method ="post" enctype="multipart/form-data" id="form">
           <div class="row">
             <div class="col">
               <input id="slide_sos" type="range" min="1400" max="1700" step="1" value="1540" name="slide_sos">
-              <div id="sliderAmount"></div>
+              <div id="label_sos">1540</div>
+            </div> 
+          </div>
+        </form>
+      </div>
+
+    <h3>Persistence</h3>
+      <div class="container">
+        <form action="/" method ="post" enctype="multipart/form-data" id="form">
+          <div class="row">
+            <div class="col">
+              <input id="slide_persistence" type="range" min="1" max="30" step="1" value="1" name="slide_persistence">
+              <div id="label_persistence">1</div>
             </div> 
           </div>
         </form>
@@ -210,19 +223,37 @@
               })
       }
        
-      var slide = document.getElementById('slide'),
-      sliderDiv = document.getElementById("sliderAmount");
 
-      slide.onchange = function() {
-          sliderDiv.innerHTML = this.value;
+      var slide_voltage = document.getElementById('slide_voltage'),
+      label_voltage = document.getElementById("label_voltage");
+      slide_voltage.onchange = function() {
+          label_voltage.innerHTML = this.value;
           $.post({
                   url: "{{ url_for('create_file') }}",
                   data: $('form').serialize(),
               });
       }
-    
+
+      var slide_sos = document.getElementById('slide_sos'),
+      label_sos = document.getElementById("label_sos");
+      slide_sos.onchange = function() {
+          label_sos.innerHTML = this.value;
+          $.post({
+                  url: "{{ url_for('create_file') }}",
+                  data: $('form').serialize(),
+              });
+      }
+
+      var slide_persistence = document.getElementById('slide_persistence'),
+      label_persistence = document.getElementById("label_persistence");
+      slide_persistence.onchange = function() {
+          label_persistence.innerHTML = this.value;
+          $.post({
+                  url: "{{ url_for('create_file') }}",
+                  data: $('form').serialize(),
+              });
+      }
           
-      
       function set1PW() {
           $.ajax({
                   type: "POST",
