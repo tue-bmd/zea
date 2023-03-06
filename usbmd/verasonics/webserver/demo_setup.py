@@ -76,14 +76,18 @@ def create_DAS_1PW():
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
 
-    scan = PlaneWaveScan(N_tx=1,
-                         xlims=(-19e-3, 19e-3),
-                         zlims=(0, 63e-3),
-                         N_ax=576,
-                         fs=6.25e6,
-                         fc=6.25e6,
-                         angles=np.array([0,]),
-                         modtype=config.data.modtype)
+    scan = PlaneWaveScan(
+        N_tx=1,
+        xlims=(-19e-3, 19e-3),
+        zlims=(0, 63e-3),
+        N_ax=576,
+        fs=6.25e6,
+        fc=6.25e6,
+        angles=np.array([0,]),
+        modtype=config.data.modtype,
+        Nx = config.scan.get('Nx'),
+        Nz = config.scan.get('Nz')
+        )
 
     model = create_beamformer(probe, scan, config)
     model = trt_opt(model, name = 'DAS_1PW')

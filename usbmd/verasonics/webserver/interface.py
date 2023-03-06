@@ -116,7 +116,7 @@ class WebServer:
         self.height = self.grid[:,:,2].max()-self.grid[:,:,2].min()
         self.aspect_ratio = self.width/self.height
         self.aspect_fx = (self.grid.shape[0]/self.grid.shape[1])*self.aspect_ratio
-        self.scaling = 2
+        self.scaling = 3
 
         ## Buffers
         self.bf_display = 0 #BF_display
@@ -346,7 +346,7 @@ class WebServer:
                     dsize=(
                     int(self.scaling*self.grid.shape[1]*self.aspect_fx),
                     int(self.scaling*self.grid.shape[0])),
-                    fx=self.aspect_fx
+                    fx=self.scaling*self.aspect_fx
                     )
 
                 # FPS counter

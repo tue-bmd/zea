@@ -60,6 +60,8 @@ class Scan_converter():
         self.img_buffer = deque(maxlen=img_buffer_size)
         self.max_buffer = deque(maxlen=max_buffer_size)
 
+        self.alpha = 0.5
+
     def convert(self, img):
         """Conversion function that applies all transformations"""
         img = self.envelope(img)
@@ -67,16 +69,21 @@ class Scan_converter():
         img = self.compression(img)
 
         self.img_buffer.append(img)
-        img = self.persistance(img)
+        img = self.persistance_MA(img)
  
         img = np.clip(img, -60, 0)
         img = ((img + 60)*(255/60)).astype('uint8')
 
         return img
 
-    def persistance(self, img):
-        """Function that applies persistance to the image"""
+    def persistance_MA(self):
+        """Function that applies moving average persistance to the image"""
         img = np.mean(self.img_buffer, axis=0)
+        return img
+    
+    def persistance_AR(self, img):
+        """Function that applies autoregressive persistance to the image"""
+        img = self.alpha*img + (1-self.alpha)*self.img_buffer[-1]
         return img
 
     def normalize(self, img):
