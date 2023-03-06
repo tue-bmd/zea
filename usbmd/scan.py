@@ -123,7 +123,7 @@ class Scan:
         self.z_axis = np.linspace(*self.zlims, N_ax)
 
         # !!! TODO, implement this such that no aliasing occurs
-        if self.fdemod == 0:
+        if self.Nx or self.Nz:
             self.grid = make_pixel_grid_v2(
                 self.xlims, self.zlims, Nx, Nz)
         else:
