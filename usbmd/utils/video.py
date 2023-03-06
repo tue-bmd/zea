@@ -70,6 +70,7 @@ class Scan_converter():
         img = self.normalize(img)
         img = self.compression(img)
 
+        img = self.remove_nan_and_inf(img)
         img = self.persistence(img)
 
         img = np.clip(img, -60, 0)
@@ -156,3 +157,10 @@ class Scan_converter():
         for i in range(np.minimum(new_buffer_size, old_buffer_size)):
             new_buffer.append(old_buffer[i])
         setattr(self, old_buffer_name, new_buffer)
+
+    @staticmethod
+    def remove_nan_and_inf(img):
+        """Function for removing nan and inf values"""
+        img[np.isnan(img)] = -60
+        img[np.isinf(img)] = -60
+        return img
