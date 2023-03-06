@@ -55,8 +55,7 @@ class WebServer:
         tcp_port = 30000,
         time_out = 1,
         buffer_size = 2**16,
-        probe = 'L114',
-        dummy_mode = True):
+        probe = 'L114'):
         """_summary_
 
         Args:
@@ -74,13 +73,14 @@ class WebServer:
         self.time_out = 1
         self.buffer_size = 65500
         self.vera_socket = self.start_tcp_server(self.tcp_server_address, time_out, buffer_size)
+        self.source = 'verasonics'
 
         ## Objects
         self.fps_counter = FPS_counter()
         self.scan_converter = Scan_converter(
             norm_mode='smoothnormal',
             env_mode='abs',
-            img_buffer_size=1,
+            img_buffer_size=30,
             max_buffer_size=30)
 
         #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
@@ -98,7 +98,6 @@ class WebServer:
         self.flag = 0
         self.auto_update_intensity = False
         self.ref_amp = 80
-        self.dummy_mode = dummy_mode
 
         # Probe settings
         if probe == 'S51':
@@ -157,7 +156,7 @@ class WebServer:
                 logging.debug('Start updating and reading')
                 start_time_update = time.time()
 
-                if self.dummy_mode:
+                if self.source == 'dummy':
                     IQ = 2**9*np.random.rand(1, self.na_transmit, self.n_el, int(self.n_ax/2), 2)
                     buffer.append(IQ)
                 else:
@@ -405,12 +404,12 @@ class WebServer:
         connection = None
         while True:
             try:
-                if (connection is None) and (not self.dummy_mode):
+                if (connection is None) and (self.source != 'dummy'):
                     print('Waiting for connection...')
                     try:
                         connection = self.open_connection()
                     except:
-                        img = cv2.imread('python/templates/nofeed.jpg')
+                        img = cv2.imread('usbmd/verasonics/webserver/templates/nofeed.jpg')
                         yield self.encode_img(img)
 
                 else:
@@ -498,11 +497,17 @@ class WebServer:
 
             if request.form.get('slide_persistence') is not None:
                 val_persistence = int(request.form.get('slide_persistence'))
-                self.scan_converter.resize_deque_buffer(
-                    old_buffer_name = "img_buffer",
-                    new_buffer_size = val_persistence
-                )
+                self.scan_converter.n_persistence = val_persistence
                 logging.debug(val_persistence)
+            
+            if request.form.get('slide_alpha') is not None:
+                self.scan_converter.alpha = float(request.form.get('slide_alpha'))
+                logging.debug(self.scan_converter.alpha)
+            
+            if request.form.get('persistence_mode') is not None:
+                mode = request.form.get('persistence_mode')
+                self.scan_converter.persistence_mode = mode
+                logging.debug(self.scan_converter.persistence_mode)
 
             if request.form.get('fps') is not None:
                 self.show_fps = not self.show_fps
@@ -511,6 +516,10 @@ class WebServer:
             if request.form.get('upscaling') is not None:
                 self.upscaling = not self.upscaling
                 logging.debug(self.upscaling)
+
+            if request.form.get('source') is not None:
+                self.source = request.form.get('source')
+                logging.debug(self.source)
 
 
         return ('', 204)

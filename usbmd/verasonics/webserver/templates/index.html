@@ -57,6 +57,22 @@
 
   <div style="width: 400px; float: left;"> 
 
+    <h3>Source</h3>
+    <fieldset id="source_control">
+      <input type="radio" value="option1" name="group0" checked="checked" onclick="set_source('verasonics')">Verasonics</input><br>
+      <input type="radio" value="option2" name="group0" onclick="set_source('dummy')">Dummy Data</input><br>
+    </fieldset>
+
+    <script>
+      function set_source(source){
+        $.ajax({
+                  type: "POST",
+                  url: "{{ url_for('create_file') }}",
+                  data: {"source" : source},
+              })
+      }
+    </script>
+
     <h3>Image Settings</h3>
     <fieldset id="group1"></fieldset> 
       <input type="radio" value="option1" name="group1" checked="checked" onclick="setDAS()"> DAS </input><br>
@@ -104,7 +120,11 @@
         </form>
       </div>
 
-    <h3>Persistence</h3>
+
+    <button type="button" onclick="change_persistance_mode('persistence_MA','persistence_AR');">Persistence Mode</button>
+    
+    <div id="persistence_MA" style="display: block;">
+      <h3>MA Persistence</h3>
       <div class="container">
         <form action="/" method ="post" enctype="multipart/form-data" id="form">
           <div class="row">
@@ -115,7 +135,52 @@
           </div>
         </form>
       </div>
+    </div>
 
+    <div id="persistence_AR" style="display: none;">
+      <h3>AR Persistence</h3>
+      <div class="container">
+        <form action="/" method ="post" enctype="multipart/form-data" id="form">
+          <div class="row">
+            <div class="col">
+              <input id="slide_alpha" type="range" min="0" max="0.99" step="0.01" value="0" name="slide_alpha">
+              <div id="label_alpha">0</div>
+            </div> 
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+    function change_persistance_mode(id1,id2) {
+      var e = document.getElementById(id1);
+      var f = document.getElementById(id2);
+      var mode
+      if (e.style.display == 'block') {
+        e.style.display = 'none';
+        mode = 'AR';
+      }
+      else {
+        e.style.display = 'block';
+        mode = 'MA';
+      }
+      if (f.style.display == 'block') {
+        f.style.display = 'none';
+        mode = 'MA';
+      }
+      else {
+        f.style.display = 'block';
+        mode = 'AR';
+      }
+
+      $.ajax({
+              type: "POST",
+              url: "{{ url_for('create_file') }}",
+              data: {"persistence_mode" : mode},
+          })
+    }
+    </script>
+    
 
   <h3>Display settings</h3>
   <label class="toggle">
@@ -248,6 +313,16 @@
       label_persistence = document.getElementById("label_persistence");
       slide_persistence.onchange = function() {
           label_persistence.innerHTML = this.value;
+          $.post({
+                  url: "{{ url_for('create_file') }}",
+                  data: $('form').serialize(),
+              });
+      }
+
+      var slide_alpha = document.getElementById('slide_alpha'),
+      label_alpha = document.getElementById("label_alpha");
+      slide_alpha.onchange = function() {
+          label_alpha.innerHTML = this.value;
           $.post({
                   url: "{{ url_for('create_file') }}",
                   data: $('form').serialize(),

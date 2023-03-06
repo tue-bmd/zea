@@ -39,7 +39,7 @@ class Scan_converter():
             self,
             norm_mode='max',
             env_mode = 'abs',
-            img_buffer_size = 1,
+            img_buffer_size = 30,
             max_buffer_size = 10,
             norm_factor=2**14):
         """_summary_
@@ -60,7 +60,9 @@ class Scan_converter():
         self.img_buffer = deque(maxlen=img_buffer_size)
         self.max_buffer = deque(maxlen=max_buffer_size)
 
-        self.alpha = 0.5
+        self.persistence_mode = 'MA'
+        self.n_persistence = 1 # Number of frames to average over for MA persistence
+        self.alpha = 0.5 # AR persistance parameter
 
     def convert(self, img):
         """Conversion function that applies all transformations"""
@@ -68,22 +70,35 @@ class Scan_converter():
         img = self.normalize(img)
         img = self.compression(img)
 
-        self.img_buffer.append(img)
-        img = self.persistance_MA(img)
- 
+        img = self.persistence(img)
+
         img = np.clip(img, -60, 0)
         img = ((img + 60)*(255/60)).astype('uint8')
 
         return img
 
-    def persistance_MA(self):
-        """Function that applies moving average persistance to the image"""
-        img = np.mean(self.img_buffer, axis=0)
+    def persistence(self, img):
+        """Function that applies persistance to the image"""
+        if self.persistence_mode == 'MA':
+            self.img_buffer.append(img)
+            img = self.persistence_MA()
+        elif self.persistence_mode == 'AR':
+            img = self.persistence_AR(img)
+            self.img_buffer.append(img)
+        return img
+
+    def persistence_MA(self):
+        """Function that applies moving average persistence to the image"""
+        if self.n_persistence > 1:
+            max_index = np.minimum(len(self.img_buffer), self.n_persistence)
+            img = np.mean(np.array([self.img_buffer[i] for i in range(max_index)]), axis=0)
+        else:
+            img = self.img_buffer[0]
         return img
     
-    def persistance_AR(self, img):
-        """Function that applies autoregressive persistance to the image"""
-        img = self.alpha*img + (1-self.alpha)*self.img_buffer[-1]
+    def persistence_AR(self, img):
+        """Function that applies autoregressive persistence to the image"""
+        img = (1-self.alpha)*img + (self.alpha)*self.img_buffer[0]
         return img
 
     def normalize(self, img):
