@@ -25,9 +25,14 @@ positive_integer = And(int, lambda i: i > 0)
 # models
 model_schema = Schema({
     Optional("batch_size", default=8): positive_integer,
+    Optional("patch_shape", default=8): list_of_size_two,
     Optional("beamformer", default=None): {
         "type": Or(None, *_BEAMFORMER_TYPES),
-    }
+        Optional("folds", default=None): positive_integer,
+        Optional("end_with_prox", default=None): bool,
+        Optional("proxtype", default=None): Or("wavelet", "softthres", "fourier", "neural"),
+        Optional("kernel_size", default=None): positive_integer,
+    },
 })
 
 # preprocessing

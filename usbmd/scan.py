@@ -15,14 +15,14 @@
 """
 import numpy as np
 
-from usbmd.utils.pixelgrid import make_pixel_grid, make_pixel_grid_v2
+from usbmd.utils.pixelgrid import get_grid
 
 
 class Scan:
     """Scan base class."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=3328, Nx=128, Nz=128, tzero_correct=True):
+                 N_ax=3328, Nx=128, Nz=128, pixels_per_wvln=3, tzero_correct=True):
         """
         Initializes a Scan object representing the number and type of transmits,
         and the target pixels to beamform to.
@@ -53,6 +53,9 @@ class Scan:
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
+            pixels_per_wvln (int, optional): The number of pixels per wavelength
+                to use in the beamforming grid. Only used when Nx and Nz are not
+                defined. Defaults to 3.
             tzero_correct (bool, optional): Set to False to disable tzero
                 correction. This is useful for datasets that have this
                 correction in the raw data already. Defaults to True.
@@ -72,6 +75,7 @@ class Scan:
         self.fdemod = self.fc if modtype == 'iq' else 0.
         self.N_ch = 2 if modtype == 'iq' else 1
         self.wvln = self.c / self.fc
+        self.pixels_per_wavelength = pixels_per_wvln
         self.tzero_correct = tzero_correct
 
         # Beamforming grid related attributes
@@ -82,21 +86,13 @@ class Scan:
         else:
             self.zlims = [0, self.c * self.N_ax / self.fs / 2]
             print(self.zlims)
-        self.grid = None
+
         self.Nx = Nx
         self.Nz = Nz
 
         self.z_axis = np.linspace(*self.zlims, N_ax)
 
-        # !!! TODO, implement this such that no aliasing occurs
-        if self.fdemod == 0:
-            self.grid = make_pixel_grid_v2(
-                self.xlims, self.zlims, Nx, Nz)
-        else:
-            pixels_per_wavelength = 3
-            dx = self.wvln / pixels_per_wavelength
-            dz = dx
-            self.grid = make_pixel_grid(self.xlims, self.zlims, dx, dz)
+        self.grid = get_grid(self)
 
     def get_time_zero(self, element_positions, c=1540, offset=0):
         """Returns an ndarray with the delay between the first element firing

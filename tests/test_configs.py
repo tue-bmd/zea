@@ -12,7 +12,11 @@ sys.path.append(str(wd))
 
 from usbmd.utils.config_validation import config_schema
 
-@pytest.mark.parametrize('file', list(Path('./configs').glob('*.yaml')))
+@pytest.mark.parametrize('file', [
+        *list(Path('./configs').rglob('*.yaml')),
+        *list(Path('./examples').rglob('*.yaml')),
+    ]
+)
 def test_config(file):
     """Test if configs are valide according to schema"""
     with open(file, 'r', encoding='utf-8') as f:
