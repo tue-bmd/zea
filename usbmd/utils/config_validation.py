@@ -14,12 +14,15 @@ from schema import And, Optional, Or, Regex, Schema
 
 from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
                               _MOD_TYPES)
+from usbmd.utils.metrics import _METRICS
 
 # predefined checks, later used in schema to check validity of parameter
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
 
-# optional sub schemas go here to allow for nested defaults
+# optional sub schemas go here, to allow for nested defaults
+
+# models
 model_schema = Schema({
     Optional("batch_size", default=8): positive_integer,
     Optional("beamformer", default=None): {
@@ -27,11 +30,14 @@ model_schema = Schema({
     }
 })
 
+# preprocessing
 preprocess_schema = Schema({
     Optional("elevation_compounding", default="max"): Or(int, "max", "mean"),
     Optional("multi_bpf", default=False): bool,
+    Optional("demodulation", default='manual'): Or('manual', 'hilbert', 'gabor'),
 })
 
+# postprocessing
 postprocess_schema = Schema({
     Optional("contrast_boost", default=None): {
         "k_p": float,
@@ -41,6 +47,7 @@ postprocess_schema = Schema({
     Optional("lista", default=None): bool,
 })
 
+# scan attributes
 scan_schema = Schema({
     Optional("xlims", default=None): list_of_size_two,
     Optional("zlims", default=None): list_of_size_two,
@@ -48,8 +55,8 @@ scan_schema = Schema({
     # TODO: n_angles and N_tx are overlapping parameters
     Optional("n_angles", default=None): Or(None, int, list),
     Optional("N_tx", default=None): Or(None, int),
-    Optional("Nx", default=None): Or(None, int),
-    Optional("Nz", default=None): Or(None, int),
+    Optional("Nx", default=None): Or(None, positive_integer),
+    Optional("Nz", default=None): Or(None, positive_integer),
     Optional("N_ax", default=None): Or(None, int),
     Optional("fc", default=None): Or(None, float),
     Optional("fs", default=None): Or(None, float),
@@ -80,6 +87,8 @@ config_schema = Schema({
         Optional("fps", default=20): int,
         Optional("tag", default=None): str,
         Optional("headless", default=None): bool,
+        Optional("selector", default=None): Or('rectangle', 'lasso'),
+        Optional("selector_metric", default=None): Or(*_METRICS),
     },
     Optional("model", default=model_schema.validate({})): model_schema,
     Optional("preprocess", default=preprocess_schema.validate({})): preprocess_schema,
@@ -91,8 +100,9 @@ config_schema = Schema({
     Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, 'disable'),
 })
 
-def check_config(config: dict):
+def check_config(config: dict, verbose: bool=False):
     """Check a config given dictionary"""
     config = config_schema.validate(dict(config))
-    print('Config is correct')
+    if verbose:
+        print('Config is correct')
     return config
