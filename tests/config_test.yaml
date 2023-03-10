@@ -3,22 +3,21 @@ model:
   beamformer:
     type: das
 data:
-  file_path: null
-  local: false
-  dataset_name: 'simulation'
+  file_path: 'dummy_file'
+  dataset_name: 'dummy'
   dtype: 'raw_data'
   modtype: 'rf'
   from_modtype: 'rf'
   dynamic_range: [-60, 0]
-  n_angles: 1
 
 scan:
   xlims: [-0.019, 0.019]
   zlims: [0, 0.063]
+  n_angles: 1
 
-device: 'gpu'
-ml_library: null
+device: 'cpu'
+ml_library: 'torch'
 
 plot:
-  save: true
+  save: false
   axis: true
