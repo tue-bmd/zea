@@ -8,3 +8,5 @@ h5py
 pandas
 opencv-python
 schema
+tqdm
+yaml
