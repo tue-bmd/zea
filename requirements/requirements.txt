@@ -9,4 +9,4 @@ pandas
 opencv-python
 schema
 tqdm
-yaml
+pyyaml

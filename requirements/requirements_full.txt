@@ -9,7 +9,7 @@ pandas
 opencv-python
 schema
 tqdm
-yaml
+pyyaml
 
 tensorflow-gpu<2.11
 --extra-index-url https://download.pytorch.org/whl/cu117
