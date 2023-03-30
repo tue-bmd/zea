@@ -115,8 +115,11 @@ python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')
 ```
 
 To install Pytorch >= 1.13 ([installation guide](https://pytorch.org/get-started/locally/))
-```
+```bash
 conda install pytorch pytorch-cuda=11.7 -c pytorch -c nvidia
+conda install cudatoolkit
+# Verify install:
+python -c "import torch; print(torch.cuda.is_available())"
 ```
 
 ## How to contribute
