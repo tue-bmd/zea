@@ -48,7 +48,7 @@ postprocess_schema = Schema({
         "k_p": float,
         "k_n": float,
         "threshold": float,
-        },
+    },
     Optional("lista", default=None): bool,
 })
 
@@ -66,6 +66,7 @@ scan_schema = Schema({
     Optional("fc", default=None): Or(None, float),
     Optional("fs", default=None): Or(None, float),
     Optional("tzero_correct", default=None): Or(None, bool),
+    Optional("downsample", default=None): positive_integer,
 })
 
 # top level schema
@@ -84,7 +85,6 @@ config_schema = Schema({
         Optional("apodization", default=None): Or(None, str),
         Optional("modtype", default=None): Or(*_MOD_TYPES),
         Optional("from_modtype", default=None): Or(*_MOD_TYPES),
-        Optional("downsample", default=None): positive_integer,
     },
     "plot": {
         "save": bool,
