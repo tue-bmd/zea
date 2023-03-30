@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
@@ -26,7 +27,13 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     if filetypes is None:
         filetypes = (('all files', '*.*'),)
 
-    root = Tk()
+    try:
+        root = Tk()
+    except Exception as error:
+        raise ValueError(
+            'Cannot run USBMD GUI on a server, ' \
+            'unless a X11 server is properly setup') from error
+
     # open in foreground
     root.wm_attributes('-topmost', 1)
     # we don't want a full GUI, so keep the root window from appearing
@@ -42,7 +49,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     if filename:
         return Path(filename)
     else:
-        raise Exception('No file selected.')
+        raise ValueError('No file selected.')
 
 def translate(array, range_from, range_to):
     """ Map values in array from one range to other.
@@ -180,3 +187,44 @@ def strtobool(val: str):
         return False
     else:
         raise ValueError(f'invalid truth value {val}')
+
+def save_to_gif(images, filename, fps=20):
+    """ Saves a sequence of images to .gif file.
+    Args:
+        images: list of images (numpy arrays).
+        filename: string containing filename to which data should be written.
+        fps: frames per second of rendered format.
+    """
+    duration = 1 / (fps) * 1000 # milliseconds per frame
+
+    # convert grayscale images to RGB
+    if len(images[0].shape) == 2:
+        images = [cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) for img in images]
+
+    pillow_img, *pillow_imgs = [
+        Image.fromarray(img) for img in images
+    ]
+
+    pillow_img.save(
+        fp=filename, format='GIF', append_images=pillow_imgs, save_all=True,
+        loop=0, duration=duration, interlace=False, optimize=False,
+    )
+    return print(f'Succesfully saved GIF to -> {filename}')
+
+def update_dictionary(dict1: dict, dict2: dict, keep_none: bool=False) -> dict:
+    """Updates dict1 with values dict2
+
+    Args:
+        dict1 (dict): base dictionary
+        dict2 (dict): update dictionary
+        keep_none (bool, optional): whether to keep keys
+            with None values in dict2. Defaults to False.
+
+    Returns:
+        dict: updated dictionary
+    """
+    if not keep_none:
+        dict2 = {k: v for k, v in dict2.items() if v is not None}
+    # dict merging python > 3.9: default_scan_params | config_scan_params
+    dict_out = {**dict1, **dict2}
+    return dict_out
