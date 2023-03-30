@@ -10,13 +10,14 @@ import tensorflow as tf
 
 # make sure you have Pip installed usbmd (see README)
 # import usbmd.tensorflow_ultrasound as usbmd_tf
-from usbmd.tensorflow_ultrasound.dataloader import GenerateDataSet, ImageLoader
+from usbmd.generate import GenerateDataSet
+from usbmd.tensorflow_ultrasound.dataloader import ImageLoader
 from usbmd.tensorflow_ultrasound.models import lista
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
 
 # choose gpu
-set_gpu_usage(gpu_ids=0)
+set_gpu_usage(device=0)
 
 # # choose config file
 path_to_config_file = Path.cwd() / 'configs/config_picmus.yaml'
@@ -34,7 +35,7 @@ try:
 except ValueError:
     print(f'Dataset already exists in {destination_folder}')
 
-RUN_EAGERLY = True # for debugging set to true
+RUN_EAGERLY = False # for debugging set to true
 image_shape = (1249, 387)
 epochs = 100
 learning_rate = 0.001

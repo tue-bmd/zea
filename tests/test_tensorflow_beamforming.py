@@ -1,20 +1,16 @@
+"""Test the tf implementation of the beamformers.
 """
-Test the pytorch implementation of the beamformers.
-"""
-# pylint: disable=no-member
 import sys
 from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
+import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
-
-from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
-from usbmd.pytorch_ultrasound.processing import on_device_torch
 from usbmd.scan import PlaneWaveScan
+from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import make_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
@@ -35,9 +31,8 @@ def test_das_beamforming(debug=False, compare_gt=True):
         numpy array: beamformed output
     """
 
-    #probe = get_probe(config)
     config = load_config_from_yaml(r'./tests/config_test.yaml')
-    config.ml_library = 'torch'
+    config.ml_library = 'tensorflow'
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
@@ -54,7 +49,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
     beamformer = create_beamformer(probe, scan, config)
 
     # Ensure reproducible results
-    torch.random.manual_seed(0)
+    tf.random.set_seed(0)
     np.random.seed(0)
 
     # Generate pseudorandom input tensor
@@ -64,8 +59,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
     inputs = np.transpose(inputs, axes=(0,1,3,2,4))
 
     # Perform beamforming and convert to numpy array
-    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    outputs = on_device_torch(beamformer, inputs, device=device, return_numpy=True)
+    outputs = beamformer(inputs)
 
     # plot results
     if debug:
@@ -92,6 +86,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
         assert MSE < 0.01
     else:
         return y_pred
+
 
 if __name__ == '__main__':
     test_das_beamforming(debug=True)
