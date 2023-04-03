@@ -5,21 +5,23 @@ The idea of this toolbox is that it is self-sustained, meaning ultrasound resear
 In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 
 ## Table of contents
-* [Setup](#setup)
+* [Quick setup](#quick-setup)
 * [Data](#data)
 * [How to use with Verasonics](#how-to-use-with-verasonics)
+* [Detailed installation guide](#detailed-installation-guide)
 * [How to contribute](#how-to-contribute)
 
-## Setup
-### usbmd installation
+## Quick setup
+#### usbmd installation
 This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](setup.py) file is located and run the following command from terminal:
 ```bash
 python -m pip install -e .
 ```
-The -e option stands for editable, which is important because it allows you to change the source code of the package without reinstalling it. You can leave it out, but changing the code in the repository won't change the installation (which is OK if you do not need to change it). Furthermore it installs all required dependencies, except for the Tensorflow and Pytorch libaries. This allows people to have a quick install of usbmd, if they do not need the ML tools. Also, often these installations for ML libraries are more involved and differ from system to system.
+For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide).
 
-You can use the package as follows:
+#### usbmd import
+You can use the package as follows in your own project:
 ```Python
 # import usbmd package
 import usbmd
@@ -29,40 +31,22 @@ from usbmd import tensorflow_ultrasound as usmbd_tf
 from usbmd import pytorch_ultrasound as usbmd_torch
 ```
 
-### installation ML libararies
-Please have a look at the following sources if you would like to use the ML tools.
-
-Tensorflow installation:
-- requirement >= 2.8
-- [installation guide](https://www.tensorflow.org/install/pip#linux)
-
-Pytorch installation:
-- requirement >= 1.13
-- [installation guide](https://pytorch.org/get-started/locally/)
-### Conda environment
-Install anaconda from [here](https://www.anaconda.com/products/individual#windows).
-
-To reproduce the environment on your own machine perform:
-```bash
-conda env create -f conda/tf26_usbmd.yaml
-```
-
-### Getting started
-In order to get started, you can run [`ui.py`](usbmd/ui.py), which runs the "user interface"
-tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder.
-Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
+#### Getting started
+In order to get started with usbmd stand-alone, you can run [`ui.py`](usbmd/ui.py), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
 
 ```bash
 python usbmd/ui.py --config configs/config_picmus.yaml
 ```
 
+If you make your own config, make sure it can be validated using the [config validation](usbmd/utils/config_validation.py) schema. This ensures it has the correct structure and all required parameters are present.
+
 ## Data
 
-### Data paths
+#### Data paths
 In order to use this repository and point to the correct data paths, you can enter the location of your dataroot in the [`common.py`](usbmd/common.py) file. It is possible to add multiple devices / platforms per user by means of if statements.
 The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
 
-### Datastructure
+#### Datastructure
 This repository can support custom datastructures by implementing your own [Dataset](./usbmd/datasets.py) class, but the preferred way makes use of the `.hdf5` file format and is structured as follows:
 ```c
 data_file.hdf5                  // [unit], [array shape]
@@ -85,13 +69,13 @@ data_file.hdf5                  // [unit], [array shape]
 │    └── ... (other optional parameters)
 ```
 
-### Data Flow Diagram
+#### Data Flow Diagram
 
 <p align="left">
 <img src="docs/diagrams_dataflow.png" alt="Data Flow" width="800"/>
 </p>
 
-### Data types
+#### Data types
 The following terminology is used in the code when referring to different data types.
 - `raw_data` --> The raw channel data, storing the time-samples from each distinct ultrasound transducer.
 - `aligned_data` --> Time-of-flight (TOF) corrected data. This is the data that is time aligned with respect to the array geometry.
@@ -102,6 +86,41 @@ The following terminology is used in the code when referring to different data t
 
 ## How to use with Verasonics
 Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](usbmd/verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](./usbmd/datasets.py), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](usbmd/ui.py) script and select your newly generated datafile to visualize the data.
+
+## Detailed installation guide
+Recommended is to run in an anaconda environment.
+Install anaconda from [here](https://docs.conda.io/en/latest/miniconda.html).
+
+To reproduce the environment on your own machine run the following commands:
+```bash
+conda create -n usbmd python=3.9
+conda activate usbmd
+python -m pip install --upgrade pip
+
+# Install usbmd
+cd "<repo_root>" # e.g. cd "C:\Users\Projects\Ultrasound-BMd"
+python -m pip install -e .
+# which runs the following under the hood as well:
+# pip install -r requirements.txt
+```
+The -e option stands for editable, which is important because it allows you to change the source code of the package without reinstalling it. You can leave it out, but changing the code in the repository won't change the installation (which is OK if you do not need to change it). Furthermore it installs all required dependencies, except for the Tensorflow and Pytorch libaries. This allows people to have a quick install of usbmd, if they do not need the ML tools. Also, often these installations for ML libraries are more involved and differ from system to system.
+
+#### ML libraries installation
+To install Tensorflow >= 2.8 ([installation guide](https://www.tensorflow.org/install/pip))
+```bash
+conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
+python -m pip install "tensorflow<2.11"
+# Verify install:
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```
+
+To install Pytorch >= 1.13 ([installation guide](https://pytorch.org/get-started/locally/))
+```bash
+conda install pytorch pytorch-cuda=11.7 -c pytorch -c nvidia
+conda install cudatoolkit
+# Verify install:
+python -c "import torch; print(torch.cuda.is_available())"
+```
 
 ## How to contribute
 Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.

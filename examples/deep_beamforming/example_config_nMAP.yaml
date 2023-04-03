@@ -13,26 +13,27 @@ scan:
   zlims: [0, 0.063]
   Nx: null # If set to "null", a square pixel grid of lambda/3 is generated (TODO)
   Nz: null
+  n_angles: 11
 
 data:
   local: false
-  dataset: 'ben/US_Data/'
-  input_type: 'input'
-  target_type: 'output_1pw_mv_preenvelope'
-  env_detect_pred: false # Currently not used
-  env_detect_target: true
+  # dataset: 'ben/US_Data/'
+  # input_type: 'input'
+  # target_type: 'output_1pw_mv_preenvelope'
+  # env_detect_pred: false # Currently not used
+  # env_detect_target: true
   file_path: null
   dataset_name: 'abledata'
   dtype: 'raw_data'
   modtype: 'iq'
   dynamic_range: [-60, 0]
-  n_angles: 11
-  input_noise: 0
-  probe_type: L11-4v
-  angles: [0,1,2,3,4,5,6,7,8,9,10]
-  IQ: true
+  # input_noise: 0
+  # probe_type: L11-4v
+  # angles: [0,1,2,3,4,5,6,7,8,9,10]
+  # IQ: true
 
 device: 'gpu'
 
 plot:
   save: true
+  axis: true

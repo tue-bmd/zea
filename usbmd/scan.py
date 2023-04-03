@@ -15,48 +15,15 @@
 """
 import numpy as np
 
-from usbmd.probes import get_probe
-from usbmd.utils.pixelgrid import make_pixel_grid, make_pixel_grid_v2
+from usbmd.utils.pixelgrid import get_grid
 
-
-def initialize_scan_from_probe(probe):
-    """
-    Initializes a Scan object based on the default scan parameters of the given
-    probe. Any parameters for which no default values are defined in the probe
-    class are initialized with the default arguments in the Scan constructor.
-
-    Args:
-        probe (Probe or str): A probe object or probe name.
-
-    Returns:
-        Scan: A Scan object that is compatible with the probe.
-    """
-    if isinstance(probe, str):
-        probe = get_probe(probe)
-
-    default_parameters = probe.get_default_scan_parameters()
-
-    scan = Scan(**default_parameters)
-    return scan
-
-def initialize_scan_from_config(config):
-    """
-    Defines a scan based on parameters in a config.
-
-    Args:
-        config (Config): The config object to read parameters from.
-
-    Raises:
-        NotImplementedError: This method is not implemented and always raises
-        this error.
-    """
-    raise NotImplementedError
 
 class Scan:
     """Scan base class."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=3328, Nx=128, Nz=128, tzero_correct=True):
+                 N_ax=3328, Nx=128, Nz=128, pixels_per_wvln=3,
+                 tzero_correct=True, downsample=1):
         """
         Initializes a Scan object representing the number and type of transmits,
         and the target pixels to beamform to.
@@ -87,9 +54,14 @@ class Scan:
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
+            pixels_per_wvln (int, optional): The number of pixels per wavelength
+                to use in the beamforming grid. Only used when Nx and Nz are not
+                defined. Defaults to 3.
             tzero_correct (bool, optional): Set to False to disable tzero
                 correction. This is useful for datasets that have this
                 correction in the raw data already. Defaults to True.
+            downsample (int, optional): Decimation factor applied after downconverting
+                data to baseband (RF to IQ). Defaults to 1.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -102,10 +74,11 @@ class Scan:
         self.fs = fs
         self.c = c
         self.modtype = modtype
-        self.N_ax = N_ax
+        self.N_ax = N_ax // downsample
         self.fdemod = self.fc if modtype == 'iq' else 0.
         self.N_ch = 2 if modtype == 'iq' else 1
         self.wvln = self.c / self.fc
+        self.pixels_per_wavelength = pixels_per_wvln
         self.tzero_correct = tzero_correct
 
         # Beamforming grid related attributes
@@ -116,21 +89,13 @@ class Scan:
         else:
             self.zlims = [0, self.c * self.N_ax / self.fs / 2]
             print(self.zlims)
-        self.grid = None
+
         self.Nx = Nx
         self.Nz = Nz
 
         self.z_axis = np.linspace(*self.zlims, N_ax)
 
-        # !!! TODO, implement this such that no aliasing occurs
-        if self.fdemod == 0:
-            self.grid = make_pixel_grid_v2(
-                self.xlims, self.zlims, Nx, Nz)
-        else:
-            pixels_per_wavelength = 3
-            dx = self.wvln / pixels_per_wavelength
-            dz = dx
-            self.grid = make_pixel_grid(self.xlims, self.zlims, dx, dz)
+        self.grid = get_grid(self)
 
     def get_time_zero(self, element_positions, c=1540, offset=0):
         """Returns an ndarray with the delay between the first element firing
@@ -160,14 +125,15 @@ class FocussedScan(Scan):
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=256, origins=None,focus_distances=None, Nx=128, Nz=128,
-                 tzero_correct=True, angles=None):
-        super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax,
-                         Nx, Nz, tzero_correct)
+                 tzero_correct=True, angles=None, downsample=1):
+        super().__init__(
+            N_tx=N_tx, xlims=xlims, ylims=ylims, zlims=zlims, fc=fc, fs=fs, c=c,
+            modtype=modtype, N_ax=N_ax, Nx=Nx, Nz=Nz,
+            tzero_correct=tzero_correct, downsample=downsample)
 
         self.origins = origins
         self.focus_distances = focus_distances
         self.angles = angles
-
 
 class PlaneWaveScan(Scan):
     """
@@ -176,8 +142,8 @@ class PlaneWaveScan(Scan):
 
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=128, Nz=128, tzero_correct=True, angles=None,
-                 n_angles=None):
+                 N_ax=256, Nx=128, Nz=128, tzero_correct=True, downsample=1,
+                 angles=None, n_angles=None):
         """
         Initializes a PlaneWaveScan object.
 
@@ -213,8 +179,10 @@ class PlaneWaveScan(Scan):
             ValueError: If n_angles has an invalid value.
         """
 
-        super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax,
-                         Nx, Nz, tzero_correct)
+        super().__init__(
+            N_tx=N_tx, xlims=xlims, ylims=ylims, zlims=zlims, fc=fc, fs=fs, c=c,
+            modtype=modtype, N_ax=N_ax, Nx=Nx, Nz=Nz,
+            tzero_correct=tzero_correct, downsample=downsample)
 
         assert angles is not None, \
             'Please provide angles at which plane wave dataset was recorded'
@@ -270,8 +238,12 @@ class CircularWaveScan(Scan):
     """Class representing a scan with diverging wave transmits."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=128, Nz=128, tzero_correct=True, focus=None):
+                 N_ax=256, Nx=128, Nz=128, tzero_correct=True, downsample=1, focus=None):
 
-        super().__init__(N_tx, xlims, ylims, zlims, fc, fs, c, modtype, N_ax, Nx, Nz)
+        super().__init__(
+            N_tx=N_tx, xlims=xlims, ylims=ylims, zlims=zlims, fc=fc, fs=fs, c=c,
+            modtype=modtype, N_ax=N_ax, Nx=Nx, Nz=Nz,
+            tzero_correct=tzero_correct, downsample=downsample)
+
         self.focus = focus
         raise NotImplementedError('CircularWaveScan has not been implemented.')
