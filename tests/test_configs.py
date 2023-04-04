@@ -105,7 +105,7 @@ def test_recursive_config(dictionary):
     dictionary except for the dictionaries, which are converted to Configs.
     """
     config = Config(dictionary=dictionary)
-    config_check_type_recursive(config, dictionary)
+    config_check_equal_recursive(config, dictionary)
 
 @pytest.mark.parametrize('dictionary', config_initializers)
 def test_yaml_saving_loading(request, dictionary):
@@ -137,40 +137,36 @@ def test_yaml_saving_loading(request, dictionary):
         raise AssertionError('Config is not the same after saving and '
                              'loading') from exc
 
+@pytest.mark.parametrize('dictionary', config_initializers)
+def test_serialize(dictionary):
+    """Tests if the config can be serialized and deserialized without changing its contents."""
+    config = Config(dictionary=dictionary)
 
-def config_check_type_recursive(config, dictionary):
-    """Recursively check if all values in config are of the correct type as the
-    corresponding key in the config.
+    # Serialize the config
+    serialized = config.serialize()
 
-    Args:
-        config (Config): The config to check.
-        dictionary (dict): The dictionary to check against.
+    # Check if the config is the same
+    config_check_equal_recursive(config, serialized)
 
-    Raises:
-        AssertionError: If the types do not match.
-    """
-    for value1, value2 in zip(config.values(), dictionary.values()):
-        if isinstance(value1, Config):
-            config_check_type_recursive(value1, value2)
-        else:
-            assert isinstance(value1, type(value2))
 
 def config_check_equal_recursive(config, dictionary):
-    """Recursively check if all values in config are of the correct type as the
-    corresponding key in the config.
+    """Recursively check if all values in config are of the correct type and
+    equal as to corresponding key in the config.
 
     Args:
         config (Config): The config to check.
         dictionary (dict): The dictionary to check against.
 
     Raises:
-        AssertionError: If the types do not match.
+        AssertionError: If the types or values do not match.
     """
     for value1, value2 in zip(config.values(), dictionary.values()):
         if isinstance(value1, Config):
-            config_check_type_recursive(value1, value2)
+            config_check_equal_recursive(value1, value2)
         else:
             assert value1 == value2, 'All values must be the same'
+            assert isinstance(value1, type(value2)), ('All types must be the '
+                                                      'same')
 
 
 def test_check_equal():
@@ -185,7 +181,7 @@ def test_check_equal():
     config4.a = 2
     # The same config but with a value changed
     config5 = Config(dictionary=simple_dict)
-    config5.b = 3
+    config5.b = '3'
 
     config_check_equal_recursive(config, config2)
     with pytest.raises(AssertionError):
