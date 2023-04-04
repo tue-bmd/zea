@@ -1,3 +1,4 @@
+"""Tests for the probes module."""
 import pytest
 import numpy as np
 
