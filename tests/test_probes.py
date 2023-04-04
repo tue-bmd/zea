@@ -1,0 +1,42 @@
+import pytest
+import numpy as np
+
+from usbmd.registry import _PROBES
+from usbmd.probes import get_probe, Probe
+
+probe_names = list(_PROBES.keys())
+
+@pytest.mark.parametrize('probe_name', probe_names)
+def test_get_probe(probe_name):
+    """Tests the get_probe function by calling it on all registered probes and
+    checking that it returns a probe object."""
+    probe = get_probe(probe_name)
+
+    assert isinstance(probe, Probe), 'get_probe must return a Probe object'
+
+@pytest.mark.parametrize('probe_name', probe_names)
+def test_get_default_scan_paramters(probe_name):
+    """Tests the get_probe function by calling it on all registered probes and
+    calling their get_default_scan_parameters method."""
+    probe = get_probe(probe_name)
+
+    probe.get_default_scan_parameters()
+
+@pytest.mark.parametrize('probe_name', probe_names)
+def test_probe_attributes(probe_name):
+    """Tests the get_probe function by calling it on all registered probes and
+    checking that
+    1. the element positions are of the correct shape
+    2. the probe type is either 'linear' or 'phased'
+    """
+
+    probe = get_probe(probe_name)
+
+    assert isinstance(probe.ele_pos, np.ndarray), ('Element positions must be'
+                                                   ' a numpy array')
+    assert probe.ele_pos.shape == (probe.N_el, 3), ('Element positions must be'
+                                                    ' of shape (N_el, 3)')
+    # assert probe.bandwidth is not None, 'Probe must have a bandwidth'
+    assert probe.probe_type in ('linear', 'phased'), ('Probe type must be'
+                                                      ' either "linear" or'
+                                                      ' "phased"')
