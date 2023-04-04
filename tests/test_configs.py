@@ -1,23 +1,56 @@
-"""Test configs
-"""
+"""Test configs"""
 import sys
 from pathlib import Path
-
-import yaml
+import shutil
 from schema import SchemaError
 import pytest
+import yaml
+
 
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 from usbmd.utils.config_validation import config_schema
+from usbmd.utils.config import Config, load_config_from_yaml
+
+# Define some dictionaries to test the Config class
+simple_dict = {
+    'a': 1,
+    'b': 2,
+    'c': 3
+}
+nested_dict = {
+    'a': 1,
+    'nested_dictionary': {
+        'b': 2,
+        'c': 3
+    }
+}
+doubly_nested_dict = {
+    'a': 1,
+    'nested_dictionary': {
+        'b': 2,
+        'doubly_nested_dictionary': 4
+    }
+}
+dict_strings = {
+    'a': 'first',
+    'b': 'second'
+}
+dict_none = {
+    'a': 1,
+    'b': None,
+    'c': 3
+}
+# Bundle all dictionaries in a list
+config_initializers = [simple_dict, nested_dict, doubly_nested_dict, dict_strings, dict_none]
 
 @pytest.mark.parametrize('file', [
         *list(Path('./configs').rglob('*.yaml')),
         *list(Path('./examples').rglob('*.yaml')),
     ]
 )
-def test_config(file):
+def test_all_configs_valid(file):
     """Test if configs are valide according to schema"""
     with open(file, 'r', encoding='utf-8') as f:
         configuration = yaml.load(f, Loader=yaml.FullLoader)
@@ -26,6 +59,143 @@ def test_config(file):
     except SchemaError as se:
         raise ValueError(f'Error in config {f}') from se
 
+@pytest.mark.parametrize('dictionary', config_initializers)
+def test_getitem(dictionary):
+    """Tests if the getitem method works for simple dictionaries."""
+    config = Config(dictionary=dictionary)
+    for key, value in dictionary.items():
+        assert config[key] == value
+
+    # Check if config raises an error when indexing a missing key
+    with pytest.raises(KeyError):
+        print(config['key_not_in_config'])
+
+def test_dot_indexing():
+    """Tests if the dot indexing works for simple dictionaries."""
+    dictionary = {
+        'a': 3,
+        'b': 4
+    }
+    config = Config(dictionary=dictionary)
+    assert config.a == 3
+    assert config.b == 4
+    # Check if config raises an error when indexing key_not_in_config
+    with pytest.raises(KeyError):
+        print(config.key_not_in_config)
+
+def test_nested_dot_indexing():
+    """Tests if the dot indexing works for nested dictionaries."""
+    dictionary = {
+        'a': 3,
+        'subdict': {
+            'b': 4,
+            'c': 5
+        }
+    }
+    config = Config(dictionary=dictionary)
+    assert config.subdict.b == 4
+    assert config.subdict.c == 5
+    # Check if config raises an error when indexing key_not_in_config
+    with pytest.raises(KeyError):
+        print(config.subdict.key_not_in_config)
+
+@pytest.mark.parametrize('dictionary', config_initializers)
+def test_recursive_config(dictionary):
+    """Tests if all types in the config correspond to the ones in the
+    dictionary except for the dictionaries, which are converted to Configs.
+    """
+    config = Config(dictionary=dictionary)
+    config_check_type_recursive(config, dictionary)
+
+@pytest.mark.parametrize('dictionary', config_initializers)
+def test_yaml_saving_loading(request, dictionary):
+    """Tests if the config can be saved to a yaml file."""
+    config = Config(dictionary=dictionary)
+
+    # Get a uique name for every parameter set/run to avoid tests interfering
+    test_id = request.node.name
+
+    # Define the save path
+    path = Path(f'temp_{test_id}', 'config.yaml')
+
+    # Create the directory if it does not exist
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save the config to a yaml file
+    config.save_to_yaml(path)
+
+    # Load the config from the yaml file
+    config2 = load_config_from_yaml(path)
+
+    # Delete the directory and file
+    shutil.rmtree(path.parent)
+
+    try:
+        # Check if the config is the same
+        config_check_equal_recursive(config, config2)
+    except AssertionError as exc:
+        raise AssertionError('Config is not the same after saving and '
+                             'loading') from exc
+
+
+def config_check_type_recursive(config, dictionary):
+    """Recursively check if all values in config are of the correct type as the
+    corresponding key in the config.
+
+    Args:
+        config (Config): The config to check.
+        dictionary (dict): The dictionary to check against.
+
+    Raises:
+        AssertionError: If the types do not match.
+    """
+    for value1, value2 in zip(config.values(), dictionary.values()):
+        if isinstance(value1, Config):
+            config_check_type_recursive(value1, value2)
+        else:
+            assert isinstance(value1, type(value2))
+
+def config_check_equal_recursive(config, dictionary):
+    """Recursively check if all values in config are of the correct type as the
+    corresponding key in the config.
+
+    Args:
+        config (Config): The config to check.
+        dictionary (dict): The dictionary to check against.
+
+    Raises:
+        AssertionError: If the types do not match.
+    """
+    for value1, value2 in zip(config.values(), dictionary.values()):
+        if isinstance(value1, Config):
+            config_check_type_recursive(value1, value2)
+        else:
+            assert value1 == value2, 'All values must be the same'
+
+
+def test_check_equal():
+    """Tests the config_check_equal_recursive function."""
+    # Two configs with the same values
+    config = Config(dictionary=simple_dict)
+    config2 = Config(dictionary=simple_dict)
+    # A different config
+    config3 = Config(dictionary=nested_dict)
+    # The same config but with a value changed
+    config4 = Config(dictionary=simple_dict)
+    config4.a = 2
+    # The same config but with a value changed
+    config5 = Config(dictionary=simple_dict)
+    config5.b = 3
+
+    config_check_equal_recursive(config, config2)
+    with pytest.raises(AssertionError):
+        config_check_equal_recursive(config, config3)
+    with pytest.raises(AssertionError):
+        config_check_equal_recursive(config, config4)
+    with pytest.raises(AssertionError):
+        config_check_equal_recursive(config, config5)
+
+
 if __name__ == '__main__':
     for file in list(Path('./configs').glob('*.yaml')):
-        test_config(file)
+        test_all_configs_valid(file)
