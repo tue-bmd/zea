@@ -15,6 +15,12 @@ def test_get_probe(probe_name):
 
     assert isinstance(probe, Probe), 'get_probe must return a Probe object'
 
+def test_get_probe_error():
+    """Tests the get_probe function by calling it on a probe name that is not
+    registered and checking that it raises a NotImplementedError."""
+    with pytest.raises(NotImplementedError):
+        get_probe('nonexistent_probe')
+
 @pytest.mark.parametrize('probe_name', probe_names)
 def test_get_default_scan_paramters(probe_name):
     """Tests the get_probe function by calling it on all registered probes and
