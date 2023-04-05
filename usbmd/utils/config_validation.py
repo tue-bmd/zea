@@ -19,6 +19,7 @@ from usbmd.utils.metrics import _METRICS
 # predefined checks, later used in schema to check validity of parameter
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
+list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
 
 # optional sub schemas go here, to allow for nested defaults
 
@@ -38,7 +39,12 @@ model_schema = Schema({
 # preprocessing
 preprocess_schema = Schema({
     Optional("elevation_compounding", default="max"): Or(int, "max", "mean"),
-    Optional("multi_bpf", default=False): bool,
+    Optional("multi_bpf", default=None): {
+        "num_taps": positive_integer,
+        "freqs": list_of_floats,
+        "bandwidths": list_of_floats,
+        # Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
+    },
     Optional("demodulation", default='manual'): Or('manual', 'hilbert', 'gabor'),
 })
 
@@ -48,6 +54,8 @@ postprocess_schema = Schema({
         "k_p": float,
         "k_n": float,
         "threshold": float,
+        Optional("snr_min", default=None): float,
+        Optional("snr_max", default=None): float,
     },
     Optional("lista", default=None): bool,
 })
