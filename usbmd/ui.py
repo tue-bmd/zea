@@ -136,6 +136,8 @@ class DataLoaderUI:
 
         Using either file specified in config or if None, the ui window.
 
+        Returns:
+            data (np.ndarray): data array of shape (N_tx, N_el, N_ax, N_ch)
         """
         if self.config.data.file_path:
             path = Path(self.config.data.file_path)
