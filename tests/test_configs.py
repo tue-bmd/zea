@@ -190,8 +190,3 @@ def test_check_equal():
         config_check_equal_recursive(config, config4)
     with pytest.raises(AssertionError):
         config_check_equal_recursive(config, config5)
-
-
-if __name__ == '__main__':
-    for file in list(Path('./configs').glob('*.yaml')):
-        test_all_configs_valid(file)
