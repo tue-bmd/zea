@@ -37,7 +37,7 @@ model_schema = Schema({
 
 # preprocessing
 preprocess_schema = Schema({
-    Optional("elevation_compounding", default="max"): Or(int, "max", "mean"),
+    Optional("elevation_compounding", default=None): Or(int, "max", "mean", None),
     Optional("multi_bpf", default=False): bool,
     Optional("demodulation", default='manual'): Or('manual', 'hilbert', 'gabor'),
 })
