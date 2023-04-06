@@ -1,4 +1,4 @@
-name: Pylint and Pytest
+name: Pylint, Pytest, Pydoc
 
 on:
   pull_request:
@@ -19,12 +19,9 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements/requirements_full.txt
     - name: Install pdoc3
       run: |
+        python -m pip install --upgrade pip
         python -m pip install pdoc3
     - name: Build the docs
       run: |
@@ -35,7 +32,11 @@ jobs:
         git config --global user.name "GitHub Actions"
         git add docs/**/*.html
         git commit -m "Update docs"
-        git push
+        git push origin HEAD:${{ github.head_ref }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements/requirements_full.txt
     - name: Analysing the code with pylint
       run: |
         pylint $(git ls-files '*.py')
