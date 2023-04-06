@@ -14,7 +14,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 ## Quick setup
 #### usbmd installation
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](setup.py) file is located and run the following command from terminal:
+Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](setup.html) file is located and run the following command from terminal:
 ```bash
 python -m pip install -e .
 ```
@@ -32,22 +32,22 @@ from usbmd import pytorch_ultrasound as usbmd_torch
 ```
 
 #### Getting started
-In order to get started with usbmd stand-alone, you can run [`ui.py`](usbmd/ui.py), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
+In order to get started with usbmd stand-alone, you can run [`ui.py`](ui.html), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
 
 ```bash
-python usbmd/ui.py --config configs/config_picmus.yaml
+python ui.py --config configs/config_picmus.yaml
 ```
 
-If you make your own config, make sure it can be validated using the [config validation](usbmd/utils/config_validation.py) schema. This ensures it has the correct structure and all required parameters are present.
+If you make your own config, make sure it can be validated using the [config validation](utils/config_validation.html) schema. This ensures it has the correct structure and all required parameters are present.
 
 ## Data
 
 #### Data paths
-In order to use this repository and point to the correct data paths, you can enter the location of your dataroot in the [`common.py`](usbmd/common.py) file. It is possible to add multiple devices / platforms per user by means of if statements.
+In order to use this repository and point to the correct data paths, you can enter the location of your dataroot in the [`common.py`](common.html) file. It is possible to add multiple devices / platforms per user by means of if statements.
 The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
 
 #### Datastructure
-This repository can support custom datastructures by implementing your own [Dataset](./usbmd/datasets.py) class, but the preferred way makes use of the `.hdf5` file format and is structured as follows:
+This repository can support custom datastructures by implementing your own [Dataset](datasets.html) class, but the preferred way makes use of the `.hdf5` file format and is structured as follows:
 ```c
 data_file.hdf5                  // [unit], [array shape]
 ├── data
@@ -72,7 +72,7 @@ data_file.hdf5                  // [unit], [array shape]
 #### Data Flow Diagram
 
 <p align="left">
-<img src="docs/diagrams_dataflow.png" alt="Data Flow" width="800"/>
+<img src="diagrams_dataflow.png" alt="Data Flow" width="800"/>
 </p>
 
 #### Data types
@@ -85,7 +85,7 @@ The following terminology is used in the code when referring to different data t
 - `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
 
 ## How to use with Verasonics
-Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](usbmd/verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](./usbmd/datasets.py), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](usbmd/ui.py) script and select your newly generated datafile to visualize the data.
+Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](datasets.html), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](ui.html) script and select your newly generated datafile to visualize the data.
 
 ## Detailed installation guide
 Recommended is to run in an anaconda environment.
@@ -123,7 +123,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 ```
 
 ## How to contribute
-Please see [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) on guidelines to contribute to this repository.
+Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 ```bash
 pip install pylint
