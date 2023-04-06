@@ -1,4 +1,4 @@
-name: Pylint, Pytest & Pydoc
+name: Pylint, Pytest
 
 on:
   pull_request:
@@ -8,36 +8,8 @@ on:
     - develop
 
 jobs:
-  build_docs:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9"]
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        repository: ${{ github.event.pull_request.head.repo.full_name }}
-        ref: ${{ github.event.pull_request.head.ref }}
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install pdoc3
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install pdoc3
-    - name: Build the docs
-      run: |
-        pdoc3 usbmd --html --output-dir docs --force --skip-errors
-    - name: Commit the docs
-      run: |
-        git config --global user.email "<>"
-        git config --global user.name "GitHub Actions"
-        git add docs/usbmd/\*.html
-        git commit -m "Update docs"
-        git push
-		
   run_tests:
+    name: tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
