@@ -30,10 +30,9 @@ jobs:
       run: |
         git config --global user.email "<>"
         git config --global user.name "GitHub Actions"
-        git pull origin ${{ github.head_ref }}
         git add docs/**/*.html
         git commit -m "Update docs"
-        git push origin HEAD:${{ github.head_ref }}
+        git push origin HEAD
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
