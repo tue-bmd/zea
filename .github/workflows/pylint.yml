@@ -22,7 +22,20 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r conda/tf26_usbmd_pip.txt
+        pip install -r requirements/requirements_full.txt
+    - name: Install pdoc3
+      run: |
+        python -m pip install pdoc3
+    - name: Build the docs
+      run: |
+        pdoc3 usbmd --html --output-dir docs --force --skip-errors
+    - name: Commit the docs
+      run: |
+        git config --global user.email "
+        git config --global user.name "GitHub Actions"
+        git add docs/**/*.html
+        git commit -m "Update docs"
+        git push
     - name: Analysing the code with pylint
       run: |
         pylint $(git ls-files '*.py')
