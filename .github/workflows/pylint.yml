@@ -31,7 +31,7 @@ jobs:
         pdoc3 usbmd --html --output-dir docs --force --skip-errors
     - name: Commit the docs
       run: |
-        git config --global user.email "
+        git config --global user.email "<>"
         git config --global user.name "GitHub Actions"
         git add docs/**/*.html
         git commit -m "Update docs"
