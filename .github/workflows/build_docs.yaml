@@ -25,16 +25,15 @@ jobs:
     - name: Build the docs
       run: |
         pdoc3 usbmd --html --output-dir docs --force --skip-errors
-    - name: Check for changes in docs folder (else do nothing)
-      run: |
-        if ! git status --porcelain | grep "docs/usbmd/"; then
-          echo "No changes in docs folder"
-          exit 0
-        fi
     - name: Commit the docs
       run: |
-        git config --global user.email "<>"
-        git config --global user.name "GitHub Actions"
-        git add docs/usbmd/\*.html
-        git commit -m "Update docs"
-        git push
+        # Check for changes in docs folder (else do nothing)
+        if ! git status --porcelain | grep "docs/usbmd/"; then
+          echo "No changes in docs folder"
+        else
+          git config --global user.email "<>"
+          git config --global user.name "GitHub Actions"
+          git add docs/usbmd/\*.html
+          git commit -m "Update docs"
+          git push
+        fi
