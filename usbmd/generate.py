@@ -19,7 +19,7 @@ from PIL import Image
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.processing import Process, _DATA_TYPES
+from usbmd.processing import Process, to_8bit, _DATA_TYPES
 from usbmd.utils.utils import update_dictionary
 
 
@@ -151,7 +151,7 @@ class GenerateDataSet:
             image (ndarray): input image
             path (str): file path
         """
-        image = self.process.to_8bit(image)
+        image = to_8bit(image)
         image = Image.fromarray(image)
         image.save(path)
 
