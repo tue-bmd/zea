@@ -24,7 +24,7 @@ jobs:
         pip install -r requirements/requirements_full.txt
     - name: Build the docs
       run: |
-        pdoc3 usbmd --html --output-dir docs --force --skip-errors
+        pdoc3 usbmd --html --output-dir docs --force --skip-errors --template-dir docs/usbmd/templates
     - name: Commit the docs
       run: |
         git config --global user.email "<>"
