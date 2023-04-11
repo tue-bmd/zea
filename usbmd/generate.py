@@ -89,6 +89,7 @@ class GenerateDataSet:
         """Generate the dataset.
 
         Generates a dataset based on `filetype` that is being set during initalization.
+        Either a png or hdf5 dataset.
 
         Returns:
             bool: if succesfull returns `True`.
