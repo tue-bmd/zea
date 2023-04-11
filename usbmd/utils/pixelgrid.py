@@ -7,19 +7,18 @@ import numpy as np
 eps = 1e-10
 
 
-def get_grid(cfg, probe):
-    """Creates a pixelgrid based on config and probe settings"""
-    xlims = getattr(cfg.scan, 'xlims')
-    zlims = getattr(cfg.scan, 'zlims')
-
-    Nx = cfg.scan.get('Nx')
-    Nz = cfg.scan.get('Nz')
+def get_grid(scan):
+    """Creates a pixelgrid based on scan class parameters."""
+    xlims = scan.xlims
+    zlims = scan.zlims
+    Nx = scan.Nx
+    Nz = scan.Nz
 
     if Nx and Nz:
         return make_pixel_grid_v2(xlims, zlims, Nx, Nz)
     else:
-        wvln = probe.c / probe.fc
-        dx = wvln / 3
+        wvln = scan.c / scan.fc
+        dx = wvln / scan.pixels_per_wavelength
         dz = dx
         return make_pixel_grid(xlims, zlims, dx, dz)
 
