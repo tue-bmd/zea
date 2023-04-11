@@ -1,0 +1,2 @@
+# this line will prevent automatically generated html (for docs) to show up as a diff in PRs
+docs/usbmd/\*.html linguist-generated=true
