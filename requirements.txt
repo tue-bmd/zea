@@ -1,0 +1,14 @@
+matplotlib
+numpy
+scipy
+pillow
+scikit-image
+scikit-learn
+h5py
+pandas
+opencv-python
+schema
+Flask
+futures3
+PyYAML
+tqdm
