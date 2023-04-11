@@ -70,10 +70,12 @@ class RegisterDecorator:
         def _register(cls, name=name):
             self.registry[name] = cls
 
-            for regname, value in call_kwargs.items():
+            for regname, value in call_kwargs:
                 # If there is an additional registry with name regname,
                 # register the value to the class.
-                if regname in self.additional_registries.keys():
+                if regname in self.additional_registries:
+                    # Add the class as key In the additional registry with
+                    # name regname and the value as value
                     self.additional_registries[regname][cls] = value
 
             return cls
