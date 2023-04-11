@@ -1,5 +1,5 @@
 import pytest
-from usbmd.utils.registration import RegisterDecorator
+from usbmd.utils.registry import RegisterDecorator
 
 def test_names():
     """Test the register decorator"""
