@@ -86,7 +86,14 @@ class GenerateDataSet:
             )
 
     def generate(self):
-        """Generate the dataset."""
+        """Generate the dataset.
+
+        Generates a dataset based on `filetype` that is being set during initalization.
+
+        Returns:
+            bool: if succesfull returns `True`.
+
+        """
         for idx in tqdm.tqdm(
             range(len(self.dataset)),
             desc=f'Generating dataset ({self.to_dtype}, {self.filetype})',
