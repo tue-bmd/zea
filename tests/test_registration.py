@@ -1,3 +1,4 @@
+"""Test the registration decorator"""
 import pytest
 from usbmd.utils.registry import RegisterDecorator
 
@@ -7,11 +8,11 @@ def test_names():
 
     @registry('A')
     class ClassA:
-        pass
+        """Test class A."""
 
     @registry(name='B')
     class ClassB:
-        pass
+        """Test class B."""
 
     assert registry['A'] == ClassA, 'ClassA should be registered as A'
     assert registry['B'] == ClassB, 'ClassB should be registered as B'
@@ -24,7 +25,7 @@ def test_getitem():
 
     @registry('A')
     class ClassA:
-        pass
+        """Test class A."""
 
 
     assert registry['A'] == ClassA, 'Key should have linked to class'
@@ -37,22 +38,25 @@ def test_duplicate_name():
     already registered."""
     registry = RegisterDecorator()
 
+    #pylint: disable=unused-variable
     @registry('test')
     class TestClass:
-        pass
+        """Test class."""
 
+    #pylint: disable=unused-variable
     with pytest.raises(AssertionError):
         @registry('test')
         class TestClass2:
-            pass
+            """Test class 2."""
 
 def test_additional_parameters():
     """Test if the decorator can register additional parameters"""
     registry = RegisterDecorator(['lucky_number'])
 
+    #pylint: disable=unused-variable
     @registry('A', lucky_number=8)
     class ClassA:
-        pass
+        """Test class A."""
 
     assert registry.get_parameter('A', 'lucky_number') == 8, ('Failed to '\
         'retrieve additional parameter')
@@ -62,9 +66,10 @@ def test_requesting_nonexistent_parameter():
     that was not registered."""
     registry = RegisterDecorator()
 
+    #pylint: disable=unused-variable
     @registry('A')
     class ClassA:
-        pass
+        """Test class A."""
 
     with pytest.raises(KeyError):
         registry.get_parameter('A', 'lucky_number')
