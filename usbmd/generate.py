@@ -19,8 +19,8 @@ from PIL import Image
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.processing import Process
-from usbmd.scan import Scan
+from usbmd.processing import Process, to_8bit, _DATA_TYPES
+from usbmd.utils.utils import update_dictionary
 
 
 class GenerateDataSet:
@@ -49,6 +49,8 @@ class GenerateDataSet:
         """
         self.config = config
         self.to_dtype = to_dtype
+        assert self.to_dtype in _DATA_TYPES, \
+            ValueError(f'Unsupported dtype: {self.to_dtype}.')
         self.retain_folder_structure = retain_folder_structure
         self.filetype = filetype
         assert self.filetype in ['hdf5', 'png'], \
@@ -64,7 +66,13 @@ class GenerateDataSet:
         self.dataset = get_dataset(self.config.data)
 
         # Initialize scan based on dataset
-        self.scan = Scan(**self.dataset.get_default_scan_parameters())
+        scan_class = self.dataset.get_scan_class()
+        default_scan_params = self.dataset.get_default_scan_parameters()
+        config_scan_params = self.config.scan
+
+        # dict merging of manual config and dataset default scan parameters
+        scan_params = update_dictionary(default_scan_params, config_scan_params)
+        self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -143,7 +151,7 @@ class GenerateDataSet:
             image (ndarray): input image
             path (str): file path
         """
-        image = self.process.to_8bit(image)
+        image = to_8bit(image)
         image = Image.fromarray(image)
         image.save(path)
 
