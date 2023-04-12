@@ -17,8 +17,11 @@ from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
 from usbmd.utils.metrics import _METRICS
 
 # predefined checks, later used in schema to check validity of parameter
+any_number = Or(int, float)
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
+list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
+percentage = And(any_number, lambda f: 0 <= f <= 100)
 
 # optional sub schemas go here, to allow for nested defaults
 
@@ -37,8 +40,13 @@ model_schema = Schema({
 
 # preprocessing
 preprocess_schema = Schema({
-    Optional("elevation_compounding", default="max"): Or(int, "max", "mean"),
-    Optional("multi_bpf", default=False): bool,
+    Optional("elevation_compounding", default=None): Or(int, "max", "mean", None),
+    Optional("multi_bpf", default=None): {
+        "num_taps": positive_integer,
+        "freqs": list_of_floats,
+        "bandwidths": list_of_floats,
+        # Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
+    },
     Optional("demodulation", default='manual'): Or('manual', 'hilbert', 'gabor'),
 })
 
@@ -48,6 +56,15 @@ postprocess_schema = Schema({
         "k_p": float,
         "k_n": float,
         "threshold": float,
+        Optional("snr_min", default=None): any_number,
+        Optional("snr_max", default=None): any_number,
+    },
+    Optional("thresholding", default=None): {
+        Optional("percentile", default=None): percentage,
+        Optional("threshold", default=None): any_number,
+        Optional("fill_value", default="min"): Or("min", "max", "threshold", any_number),
+        Optional("below_threshold", default=True): bool,
+        Optional("threshold_type", default="hard"): "hard",
     },
     Optional("lista", default=None): bool,
 })

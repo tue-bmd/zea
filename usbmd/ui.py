@@ -28,7 +28,8 @@ from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
+from usbmd.processing import (_DATA_TYPES, Process, get_contrast_boost_func,
+                              threshold_signal)
 from usbmd.utils.config import Config, load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
@@ -185,6 +186,9 @@ class DataLoaderUI:
             noise = self.process.run(self.data, dtype=self.config.data.dtype)
             self.config.data.apodization = apodization
             image = self.contrast_boost(image, noise, **self.config.postprocess.contrast_boost)
+
+        if self.config.postprocess.thresholding is not None:
+            image = threshold_signal(image, **self.config.postprocess.thresholding)
 
         return image
 
