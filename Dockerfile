@@ -1,6 +1,7 @@
 # For more information, please refer to https://aka.ms/vscode-docker-python
 FROM tensorflow/tensorflow:2.10.1-gpu
 
+# Install ffmpeg for video processing with OpenCV
 RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
 
 # Keeps Python from generating .pyc files in the container

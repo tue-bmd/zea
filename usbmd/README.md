@@ -18,7 +18,30 @@ Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](s
 ```bash
 python -m pip install -e .
 ```
-For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide).
+For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide). 
+
+
+#### Running the code with Docker
+
+This package also includes a Dockerfile that you can use to run the code in a containerized environment. If you are using VSCode, you can use the [Remote - Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers). This extension will automatically build and run the Docker container for you (ctrl+shift+p --> reopen in container). If you are not using VSCode, you can follow the steps below to run the code in a Docker container:
+
+1. Install Docker on your machine. You can download Docker from the official website: https://www.docker.com/get-started.
+
+2. Build the Docker image by running the following command from the root folder 
+
+```
+docker build -t ultrasound-bmd .
+```
+This command will build a Docker image named ultrasound-bmd.
+
+3. Run the Docker container by running the following command:
+
+```
+docker run -it --rm -v /path/to/your/data:/data ultrasound-bmd
+```
+This command will start a Docker container from the `ultrasound-bmd image`. The `-v` flag mounts the `/path/to/your/data` folder on your machine to the `/data` folder inside the container. This way, you can access the data from inside the container, and open an interactive shell inside the container (-it option). The --rm option ensures that the container is automatically removed when it stops.
+Note that you need to replace `<local_path_to_data>` with the absolute path to the directory on your local machine that contains the input data that you want to process.
+
 
 #### usbmd import
 You can use the package as follows in your own project:
