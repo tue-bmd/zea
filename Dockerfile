@@ -11,13 +11,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Set working directory
-WORKDIR /app
-COPY . /app
+WORKDIR /usbmd
+COPY . /usbmd
 
 # Creates a non-root user with an explicit UID and adds permission to access the /app folder
-RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
+RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /usbmd
 USER appuser
 
 # Install USBMD module
 RUN python -m pip install --upgrade pip
-RUN python -m pip install -e .
+RUN python -m pip install -e .[extra]
