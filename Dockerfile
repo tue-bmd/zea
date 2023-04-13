@@ -19,4 +19,5 @@ RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /
 USER appuser
 
 # Install USBMD module
+RUN python -m pip install --upgrade pip
 RUN python -m pip install -e .
