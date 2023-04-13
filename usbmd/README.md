@@ -110,10 +110,11 @@ The -e option stands for editable, which is important because it allows you to c
 
 This package also includes a Dockerfile that you can use to run the code in a containerized environment. 
 
-If you are using VSCode, you can use the [Remote - Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers). This extension will automatically build and run the Docker container for you. You can start the docker container via [ctrl+shift+p] --> [Dev Containers: Reopen in container]. Similarly, you can close the session via [ctrl+shift+p] --> [Dev Containers: Reopen folder locally]. 
-If you are not using VSCode, you can follow the steps below to run the code in a Docker container:
-
 1. Install Docker on your machine. You can download Docker from the official website: https://www.docker.com/get-started.
+
+If you are using VSCode, you can use the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension. This extension will automatically build and run the Docker container for you. You can start the docker container via [ctrl+shift+p] --> [Dev Containers: Reopen in container]. Similarly, you can close the session via [ctrl+shift+p] --> [Dev Containers: Reopen folder locally]. 
+
+If you are not using VSCode, you can follow the steps below to run the code in a Docker container:
 
 2. Build the Docker image by running the following command from the root folder 
 
