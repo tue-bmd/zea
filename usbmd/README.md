@@ -19,7 +19,7 @@ Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](s
 python -m pip install -e .
 ```
  For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide).
- Alternatively, you can run this code via [Docker using included Dockerfile](#running-the-code-with-docker).
+ Alternatively, you can [run this code via Docker](#running-the-code-with-docker) using included [Dockerfile](Dockerfile.html).
 
 #### usbmd import
 You can use the package as follows in your own project:
@@ -108,7 +108,7 @@ The -e option stands for editable, which is important because it allows you to c
 
 ## Running the code with Docker
 
-This package also includes a Dockerfile that you can use to run the code in a containerized environment. 
+This package also includes a [Dockerfile](Dockerfile.html) that you can use to run the code in a containerized environment. 
 
 1. Install Docker on your machine. You can download Docker from the official website: https://www.docker.com/get-started.
 
