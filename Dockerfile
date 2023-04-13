@@ -21,3 +21,9 @@ USER appuser
 # Install USBMD module
 RUN python -m pip install --upgrade pip
 RUN python -m pip install -e .[test,linter,torch]
+
+# These ports should be exposed by the container
+# Note that you should still use the -p flag to map these ports to the host, define these in the 
+# .devcontainer.json file, or use the "forwardPorts" option in docker-compose.yml
+EXPOSE 5000
+EXPOSE 30000/tcp

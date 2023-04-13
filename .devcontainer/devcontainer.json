@@ -10,8 +10,9 @@
 	},
 
 	"extensions": ["ms-python.python"],
-	"runArgs": [ "--gpus", "all"],
-	"forwardPorts": [5000, 30000],
+	"runArgs": ["--gpus", "all"],
+	// "forwardPorts": [5000, 30000],
+	"appPort": ["5000:5000", "30000:30000"],
 	"workspaceMount": "source=${localWorkspaceFolder},target=/usbmd,type=bind",
 	"workspaceFolder": "/usbmd"
 
