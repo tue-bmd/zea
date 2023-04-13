@@ -20,4 +20,4 @@ USER appuser
 
 # Install USBMD module
 RUN python -m pip install --upgrade pip
-RUN python -m pip install -e .[extra]
+RUN python -m pip install -e .[test,linter,torch]
