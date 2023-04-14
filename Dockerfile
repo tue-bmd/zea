@@ -3,6 +3,8 @@ FROM tensorflow/tensorflow:2.10.1-gpu
 
 # Install ffmpeg for video processing with OpenCV
 RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
+# Install tkinter
+RUN apt-get install -y python3-tk
 
 # Keeps Python from generating .pyc files in the container
 ENV PYTHONDONTWRITEBYTECODE=1
