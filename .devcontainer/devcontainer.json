@@ -13,8 +13,8 @@
 	"runArgs": ["--gpus", "all"],
 	// "forwardPorts": [5000, 30000],
 	"appPort": ["5000:5000", "30000:30000"],
-	"workspaceMount": "source=${localWorkspaceFolder},target=/usbmd,type=bind",
-	"workspaceFolder": "/usbmd"
+	"workspaceMount": "source=${localWorkspaceFolder},target=/ultrasound-bmd,type=bind",
+	"workspaceFolder": "/ultrasound-bmd"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
