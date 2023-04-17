@@ -206,20 +206,23 @@ def test_complex_to_channels(size, axis):
     """Test complex to channels and back"""
     data = np.random.random(size) + 1j * np.random.random(size)
     _data = complex_to_channels(data, axis=axis)
-    _data = channels_to_complex(_data, axis=axis)
-    np.testing.assert_almost_equal(data, _data)
+    __data = channels_to_complex(_data, axis=axis)
+    np.testing.assert_almost_equal(data, __data)
+    return _data
 
 @pytest.mark.parametrize('size, axis', [
     ((222, 1, 2, 32), (2)),
     ((512, 512, 2), (-1)),
     ((2, 1, 128, 32), (0)),
 ])
+@equality_libs_processing
 def test_channels_to_complex(size, axis):
     """Test channels to complex and back"""
     data = np.random.random(size)
     _data = channels_to_complex(data, axis=axis)
-    _data = complex_to_channels(_data, axis=axis)
-    np.testing.assert_almost_equal(data, _data)
+    __data = complex_to_channels(_data, axis=axis)
+    np.testing.assert_almost_equal(data, __data)
+    return _data
 
 @pytest.mark.parametrize('factor, batch_size', [
     (1, 2), (6, 1), (2, 3),
@@ -252,6 +255,6 @@ def test_up_and_down_conversion(factor, batch_size):
 
     _data = demodulate(data, fs=fs, fc=fc, bandwidth=None, filter_coeff=None)
     _data = downsample(_data, factor=factor, axis=-2)
-    _data = upmix(_data, fs=fs, fc=fc, upsampling_rate=factor)
+    _data = upmix(_data, fs=fs / factor, fc=fc, upsampling_rate=factor)
     # TODO: add check if equal. due to filtering / decimation hard to do.
     # np.testing.assert_almost_equal(data, _data)
