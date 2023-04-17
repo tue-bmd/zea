@@ -1,41 +1,127 @@
 """Tests for the processing module."""
+import random
+
+import decorator
 import numpy as np
 import pytest
+import tensorflow as tf
+import torch
 
+from usbmd import processing
 from usbmd.probes import get_probe
-from usbmd.processing import (channels_to_complex, companding,
-                              complex_to_channels, demodulate, downsample,
-                              normalize, project_to_cartesian_grid,
-                              scan_convert, to_8bit, to_image, upmix)
+from usbmd.processing import (channels_to_complex, complex_to_channels,
+                              demodulate, downsample, normalize,
+                              project_to_cartesian_grid, scan_convert, to_8bit,
+                              to_image, upmix)
+from usbmd.pytorch_ultrasound import processing as processing_torch
 from usbmd.scan import PlaneWaveScan
-from usbmd.tensorflow_ultrasound.processing import companding_tf
+from usbmd.tensorflow_ultrasound import processing as processing_tf
 from usbmd.utils.simulator import UltrasoundSimulator
 
 
-@pytest.mark.parametrize('comp_type, size, lib', [
-    ('a', (2, 1, 128, 32), 'numpy'),
-    ('a', (512, 512), 'numpy'),
-    ('mu', (2, 1, 128, 32), 'numpy'),
-    ('mu', (512, 512), 'numpy'),
-    ('a', (2, 1, 128, 32), 'tensorflow'),
-    ('a', (512, 512), 'tensorflow'),
-    ('mu', (2, 1, 128, 32), 'tensorflow'),
-    ('mu', (512, 512), 'tensorflow'),
+def set_random_seed(seed=None):
+    """ Set random seed to all random generators. """
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
+    random.seed(seed)
+    torch.random.manual_seed(seed)
+    return seed
+
+def equality_libs_processing(test_func):
+    """Test the processing functions of different libraries
+
+    Check if np / tf / torch processing funcs produce equal output.
+
+    Example:
+        ```python
+            @pytest.mark.parametrize('some_keys', [some_values])
+            @equality_libs_processing # <-- add as inner most decorator
+            def test_my_processing_func(some_arguments):
+                # Do some processing
+                output = my_processing_func(some_arguments)
+                return output
+        ```
+        To make it work with the @equality_libs_processing decorator,
+        the name of the processing function should reappear in the
+        torch / tensorflow modules:
+        my_processing_func ->
+            - my_processing_func_torch
+            - my_processing_func_tf
+            - test_my_processing_func
+    """
+    # @functools.wraps(test_func)
+    def wrapper(test_func, *args, **kwargs):
+        # Set random seed
+        seed = np.random.randint(0, 1000)
+        set_random_seed(seed)
+
+        # Extract function name from test function
+        func_name = test_func.__name__.split("test_", 1)[-1]
+
+        # Run the test function with the original processing module
+        original_output = test_func(*args, **kwargs)
+
+        # Get the original processing function
+        original_processing_func = getattr(processing, func_name)
+
+        # Run the test function with processing_tf module
+        tf_output = None
+        if hasattr(processing_tf, func_name + "_tf"):
+            processing_func_tf = getattr(processing_tf, func_name + "_tf")
+            setattr(processing, func_name, processing_func_tf)
+            set_random_seed(seed)
+            tf_output = np.array(test_func(*args, **kwargs))
+
+        # Run the test function with processing_torch module
+        torch_output = None
+        if hasattr(processing_torch, func_name + "_torch"):
+            processing_func_torch = getattr(processing_torch, func_name + "_torch")
+            setattr(processing, func_name, processing_func_torch)
+            set_random_seed(seed)
+            torch_output = np.array(test_func(*args, **kwargs))
+
+        # Check if the outputs from the individual test functions are equal
+        if tf_output is not None:
+            np.testing.assert_almost_equal(
+                original_output, tf_output, decimal=6,
+                err_msg=f'Function {func_name} failed with tensorflow processing.')
+            print(f'Function {func_name} passed with tensorflow output.')
+        if torch_output is not None:
+            np.testing.assert_almost_equal(
+                original_output, torch_output, decimal=6,
+                err_msg=f'Function {func_name} failed with pytorch processing.')
+            print(f'Function {func_name} passed with pytorch output.')
+        if tf_output is not None and torch_output is not None:
+            np.testing.assert_almost_equal(
+                tf_output, torch_output, decimal=6,
+                err_msg=f'Function {func_name} failed, tensorflow ' \
+                         'and pytorch output not the same.')
+
+        # Reset the processing function to the original implementation
+        setattr(processing, func_name, original_processing_func)
+
+    return decorator.decorator(wrapper, test_func)
+
+
+@pytest.mark.parametrize('comp_type, size', [
+    ('a', (2, 1, 128, 32)),
+    ('a', (512, 512)),
+    ('mu', (2, 1, 128, 32)),
+    ('mu', (512, 512)),
 ])
-def test_companding(comp_type, size, lib):
+@equality_libs_processing
+def test_companding(comp_type, size):
     """Test companding function"""
     signal = np.clip((np.random.random(size) - 0.5) *2, -1, 1)
     signal = signal.astype(np.float32)
 
-    if lib == 'tensorflow':
-        compand_func = companding_tf
-    elif lib == 'numpy':
-        compand_func = companding
+    signal_out = processing.companding(signal, expand=False, comp_type=comp_type)
+    assert np.any(np.not_equal(signal, signal_out)), \
+        'Companding failed, arrays should not be equal'
+    signal_out = processing.companding(signal_out, expand=True, comp_type=comp_type)
 
-    signal_out = compand_func(signal, expand=False, comp_type=comp_type)
-    signal_out = compand_func(signal_out, expand=True, comp_type=comp_type)
-
-    return np.testing.assert_almost_equal(signal, signal_out, decimal=6)
+    np.testing.assert_almost_equal(signal, signal_out, decimal=6)
+    return signal_out
 
 @pytest.mark.parametrize('size, dynamic_range, input_range', [
     ((2, 1, 128, 32), (-30, -5), None),
