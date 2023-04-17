@@ -10,7 +10,7 @@ import numpy as np
 
 
 class FPS_counter():
-    """ An FPS counter class that overlays a frames-per-second count on an image stream"""
+    """An FPS counter class that overlays a frames-per-second count on an image stream"""
 
     def __init__(self, buffer_size = 30):
         """_summary_
