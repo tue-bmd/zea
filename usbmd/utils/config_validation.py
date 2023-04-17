@@ -17,7 +17,9 @@ from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
 from usbmd.utils.metrics import _METRICS
 
 # predefined checks, later used in schema to check validity of parameter
-any_number = Or(int, float)
+any_number = Or(int, float,
+    error='Must be a number, scientific notation should be of form x.xe+xx, '\
+          'otherwise interpreted as string')
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
 list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
@@ -25,7 +27,7 @@ percentage = And(any_number, lambda f: 0 <= f <= 100)
 
 # optional sub schemas go here, to allow for nested defaults
 
-# models
+# model
 model_schema = Schema({
     Optional("batch_size", default=8): positive_integer,
     Optional("patch_shape", default=8): list_of_size_two,
@@ -38,7 +40,7 @@ model_schema = Schema({
     },
 })
 
-# preprocessing
+# preprocess
 preprocess_schema = Schema({
     Optional("elevation_compounding", default=None): Or(int, "max", "mean", None),
     Optional("multi_bpf", default=None): {
@@ -50,7 +52,7 @@ preprocess_schema = Schema({
     Optional("demodulation", default='manual'): Or('manual', 'hilbert', 'gabor'),
 })
 
-# postprocessing
+# postprocess
 postprocess_schema = Schema({
     Optional("contrast_boost", default=None): {
         "k_p": float,
@@ -67,7 +69,7 @@ postprocess_schema = Schema({
     Optional("lista", default=None): bool,
 })
 
-# scan attributes
+# scan
 scan_schema = Schema({
     Optional("xlims", default=None): list_of_size_two,
     Optional("zlims", default=None): list_of_size_two,
@@ -78,8 +80,8 @@ scan_schema = Schema({
     Optional("Nx", default=None): Or(None, positive_integer),
     Optional("Nz", default=None): Or(None, positive_integer),
     Optional("N_ax", default=None): Or(None, int),
-    Optional("fc", default=None): Or(None, float),
-    Optional("fs", default=None): Or(None, float),
+    Optional("fc", default=None): Or(None, any_number),
+    Optional("fs", default=None): Or(None, any_number),
     Optional("tzero_correct", default=None): Or(None, bool),
     Optional("downsample", default=None): positive_integer,
 })
