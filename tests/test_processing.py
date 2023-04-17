@@ -255,5 +255,3 @@ def test_up_and_down_conversion(factor, batch_size):
     _data = upmix(_data, fs=fs, fc=fc, upsampling_rate=factor)
     # TODO: add check if equal. due to filtering / decimation hard to do.
     # np.testing.assert_almost_equal(data, _data)
-
-test_companding('mu', (512,512))
