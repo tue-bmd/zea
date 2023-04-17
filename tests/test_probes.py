@@ -2,12 +2,10 @@
 import pytest
 import numpy as np
 
-from usbmd.registry import _PROBES
+from usbmd.registry import probe_registry
 from usbmd.probes import get_probe, Probe
 
-probe_names = list(_PROBES.keys())
-
-@pytest.mark.parametrize('probe_name', probe_names)
+@pytest.mark.parametrize('probe_name', probe_registry.registered_names())
 def test_get_probe(probe_name):
     """Tests the get_probe function by calling it on all registered probes and
     checking that it returns a probe object."""
@@ -21,7 +19,7 @@ def test_get_probe_error():
     with pytest.raises(NotImplementedError):
         get_probe('nonexistent_probe')
 
-@pytest.mark.parametrize('probe_name', probe_names)
+@pytest.mark.parametrize('probe_name', probe_registry.registered_names())
 def test_get_default_scan_paramters(probe_name):
     """Tests the get_probe function by calling it on all registered probes and
     calling their get_default_scan_parameters method."""
@@ -29,7 +27,7 @@ def test_get_default_scan_paramters(probe_name):
 
     probe.get_default_scan_parameters()
 
-@pytest.mark.parametrize('probe_name', probe_names)
+@pytest.mark.parametrize('probe_name', probe_registry.registered_names())
 def test_probe_attributes(probe_name):
     """Tests the get_probe function by calling it on all registered probes and
     checking that
