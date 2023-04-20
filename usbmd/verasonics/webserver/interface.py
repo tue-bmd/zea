@@ -24,7 +24,6 @@ import struct
 import sys
 import threading
 import time
-from datetime import datetime
 
 import cv2
 import numpy as np
@@ -34,20 +33,23 @@ from flask import Flask, Response, render_template, request
 from futures3.thread import ThreadPoolExecutor
 import tensorflow as tf
 
-from usbmd.utils.video import FPS_counter, ScanConverterTF, ScanConverter
+from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.control import PIDController
 
-## HELPER FUNCTIONS
+# HELPER FUNCTIONS
+
+
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
+
 
 # Set logger
 if debugger_is_active():
     logging.basicConfig(level=logging.DEBUG)
 
 
-## TODO use batch dimension to process multiple PW angles such that we can dynamically change
+# TODO use batch dimension to process multiple PW angles such that we can dynamically change
 # the number of PW angles
 
 # check input types, dummy data is currently different from real data and model needs to
@@ -55,13 +57,14 @@ if debugger_is_active():
 
 class UltrasoundProcessingServer:
     """ Class for handling ultrasound data processing and communication with the Verasonics"""
+
     def __init__(
-        self,
-        host = '',
-        tcp_port = 30000,
-        time_out = 0.5,
-        buffer_size = 2**16,
-        probe = 'L114'):
+            self,
+            host='',
+            tcp_port=30000,
+            time_out=0.5,
+            buffer_size=2**16,
+            probe='L114'):
         """_summary_
 
         Args:
@@ -73,19 +76,20 @@ class UltrasoundProcessingServer:
             dummy_mode (bool, optional): If True, random test data is generated. Defaults to False.
         """
 
-        ## Network settings
+        # Network settings
         self.host = host
         self.tcp_server_address = (host, tcp_port)
         self.time_out = time_out
         self.buffer_size = 65500
-        self.vera_socket = self.start_tcp_server(self.tcp_server_address, self.time_out, buffer_size)
+        self.vera_socket = self.start_tcp_server(
+            self.tcp_server_address, self.time_out, buffer_size)
         self.source = 'verasonics'
 
         #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
         self.model_dict, self.grid = get_models()
         self.active_model = self.model_dict['DAS_1PW']
 
-        ## Objects
+        # Objects
         self.fps_counter = FPS_counter()
         self.scan_converter = ScanConverterTF(
             self.grid,
@@ -94,10 +98,10 @@ class UltrasoundProcessingServer:
             img_buffer_size=30,
             max_buffer_size=30)
 
-        ## State-parameters (perhaps move this to a separate class/state handler in the future?)
-        self.bf_type = 'DAS' # Set beamformer type to DAS by default
-        self.intensity = 2.0 # Transmit voltage
-        self.na_transmit = 1 # Number of transmits (PWs/DWs)
+        # State-parameters (perhaps move this to a separate class/state handler in the future?)
+        self.bf_type = 'DAS'  # Set beamformer type to DAS by default
+        self.intensity = 2.0  # Transmit voltage
+        self.na_transmit = 1  # Number of transmits (PWs/DWs)
         self.na_read = self.na_transmit
         self.update_intensity = False
         self.update_beamformer = False
@@ -106,18 +110,18 @@ class UltrasoundProcessingServer:
         self.auto_update_intensity = False
         self.ref_amp = 80
         self.voltage_controller = PIDController(
-            Kp = 0.05,
-            Ki =  0,
-            Kd = 0.001,
-            setpoint = self.ref_amp,
-            min_val = 1.6,
-            max_val = 40
-            )
+            Kp=0.05,
+            Ki=0,
+            Kd=0.001,
+            setpoint=self.ref_amp,
+            min_val=1.6,
+            max_val=40
+        )
 
-        self.c_ref = 1540 # Reference speed of sound
-        self.c = 1540 # Speed of sound
-        self.fs = 6.25e6 # Sampling frequency
-        self.fc = 6.25e6 # Center frequency
+        self.c_ref = 1540  # Reference speed of sound
+        self.c = 1540  # Speed of sound
+        self.fs = 6.25e6  # Sampling frequency
+        self.fc = 6.25e6  # Center frequency
 
         # Stores inputs for the beamformer model
         self.inputs = {}
@@ -134,21 +138,22 @@ class UltrasoundProcessingServer:
         self.show_fps = False
         self.upscaling = False
 
-        self.width = self.grid[:,:,0].max()-self.grid[:,:,0].min()
-        self.height = self.grid[:,:,2].max()-self.grid[:,:,2].min()
+        self.width = self.grid[:, :, 0].max()-self.grid[:, :, 0].min()
+        self.height = self.grid[:, :, 2].max()-self.grid[:, :, 2].min()
         self.aspect_ratio = self.width/self.height
-        self.aspect_fx = (self.grid.shape[0]/self.grid.shape[1])*self.aspect_ratio
+        self.aspect_fx = (
+            self.grid.shape[0]/self.grid.shape[1])*self.aspect_ratio
         self.scaling = 3
 
-        ## Buffers
-        self.bf_display = 0 #BF_display
+        # Buffers
+        self.bf_display = 0  # BF_display
         self.bf_previous = 0
 
         # Benchmark variables
         self.beamformer_elapsed_time = []
         self.read_preprocess_elapsed_time = []
         self.update_elapsed_time = []
-        self.time_display= []
+        self.time_display = []
 
         # Other (to be organized)
         self.meanAmp_history = []
@@ -173,7 +178,8 @@ class UltrasoundProcessingServer:
         vera_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         socket.setdefaulttimeout(time_out)
         vera_socket.settimeout(time_out)
-        vera_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buffer_size)
+        vera_socket.setsockopt(
+            socket.SOL_SOCKET, socket.SO_SNDBUF, buffer_size)
         vera_socket.bind(tcp_server_address)
         vera_socket.listen(1)
         logging.info('TCP server is running ...')
@@ -191,24 +197,34 @@ class UltrasoundProcessingServer:
         """Function that starts the main processing loop"""
         print('Starting processing in background...')
         connection = None
-        connection_indicator = self.indicator('Waiting for connection to Verasonics ')
+        connection_indicator = self.indicator(
+            'Waiting for connection to Verasonics ')
         while True:
-
             try:
-                if ((connection is None) or (connection.fileno() == -1)) and (self.source != 'dummy'):
+                if (((connection is None) or (connection.fileno() == -1)) and
+                        (self.source != 'dummy')):
                     print(next(connection_indicator), flush=True, end='\r')
                     try:
                         connection = self.open_connection()
                         time.sleep(0.5)
                     except:
-                        img = cv2.imread('usbmd/verasonics/webserver/templates/nofeed.jpg')
+                        img = cv2.imread(
+                            'usbmd/verasonics/webserver/templates/nofeed.jpg')
                         self.bf_display = img
                 else:
                     logging.debug('Entered the image formation loop.')
-                    buffer = collections.deque([], maxlen=10)  # buffer for reading/writing
+                    # buffer for reading/writing
+                    buffer = collections.deque([], maxlen=10)
                     with ThreadPoolExecutor(2) as executor:
-                        _ = executor.submit(self.read_update, connection, buffer, self.terminate_signal)
-                        _ = executor.submit(self.process_data, buffer, self.terminate_signal)
+                        _ = executor.submit(
+                            self.read_update,
+                            connection,
+                            buffer,
+                            self.terminate_signal)
+                        _ = executor.submit(
+                            self.process_data,
+                            buffer,
+                            self.terminate_signal)
 
                     self.terminate_signal.clear()
 
@@ -220,8 +236,12 @@ class UltrasoundProcessingServer:
 
     def prepare_inputs(self, buffer):
         """Function that prepares the inputs for the beamformer model"""
-        ## Prepare inputs for the beamforming model
-        IQ = buffer.pop()
+        # Prepare inputs for the beamforming model
+        if buffer:
+            IQ = buffer.pop()
+        else:
+            return None
+
         buffer.clear()
         inputs = {}
 
@@ -242,12 +262,11 @@ class UltrasoundProcessingServer:
                     )
                 else:
                     inputs[varname] = tf.convert_to_tensor(
-                        np.expand_dims(getattr(self, varname), axis=(0,1)),
+                        np.expand_dims(getattr(self, varname), axis=(0, 1)),
                         dtype=inp.dtype
                     )
 
         return inputs
-
 
     def read_update(self, connection, buffer, terminate_signal):
         """Retrieves new data from the client"""
@@ -260,9 +279,10 @@ class UltrasoundProcessingServer:
                     IQ = np.random.randint(
                         low=-1000,
                         high=1000,
-                        size=(1, self.na_transmit, self.n_el, int(self.n_ax/2), 2),
+                        size=(1, self.na_transmit, self.n_el,
+                              int(self.n_ax/2), 2),
                         dtype=np.int16
-                        )
+                    )
                     buffer.append(IQ)
                 else:
                     #startTimeSB = time.perf_counter()
@@ -282,7 +302,7 @@ class UltrasoundProcessingServer:
                         self.hv_history.append(hv)
                         tsb_lst = [hv]
                     else:
-                        tsb_lst =[0]
+                        tsb_lst = [0]
 
                     if self.update_na_transmit:
                         self.flag = self.returnToMatlabFreq
@@ -294,11 +314,13 @@ class UltrasoundProcessingServer:
                         tsb_lst.append(0)
 
                     if len(tsb_lst) != self.numTunableParameters:
-                        print('Length of the to-sent-back (tsb) list different from expected')
+                        print(
+                            'Length of the to-sent-back (tsb) list different from expected')
 
                     # SEND UPDATE as DOUBLE
                     tsb_lst = list(map(np.double, tsb_lst))
-                    tsb_bytes = bytearray(struct.pack(f'{len(tsb_lst)}d', *tsb_lst))
+                    tsb_bytes = bytearray(struct.pack(
+                        f'{len(tsb_lst)}d', *tsb_lst))
                     connection.sendall(tsb_bytes)
                     executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
@@ -308,8 +330,8 @@ class UltrasoundProcessingServer:
 
                     # Ensure to receive the complete data
                     while total < self.na_read*self.n_ax*self.n_el*self.bytesPerElementRead:
-                        #For best match with hardware and network realities, the value of bufsize
-                        #should be a relatively small power of 2, for example, 4096.
+                        # For best match with hardware and network realities, the value of bufsize
+                        # should be a relatively small power of 2, for example, 4096.
                         data = connection.recv(self.buffer_size)
                         if not data:
                             break
@@ -317,12 +339,14 @@ class UltrasoundProcessingServer:
                         signal += data
 
                     #received_serial_data = array.array('h', signal)
-                    received_serial_data = np.frombuffer(signal, dtype=np.int16)
+                    received_serial_data = np.frombuffer(
+                        signal, dtype=np.int16)
                     received_reshaped_data = np.reshape(
                         received_serial_data,
                         (self.n_ax*self.na_read, self.n_el),
                         order='F')
-                    RFData = np.array_split(received_reshaped_data, self.na_read)
+                    RFData = np.array_split(
+                        received_reshaped_data, self.na_read)
                     RFData = np.stack(RFData, axis=2)  # Nax, Nel, na_transmit
                     RFData = np.transpose(RFData, (2, 1, 0))
 
@@ -333,14 +357,17 @@ class UltrasoundProcessingServer:
                         I.append(i[1])
                         Q.append(i[0])
 
-                    I = np.reshape(I, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
-                    Q = np.reshape(Q, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
+                    I = np.reshape(
+                        I, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
+                    Q = np.reshape(
+                        Q, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
 
                     IQ = np.concatenate([I, Q], axis=-1)
                     buffer.append(IQ)
 
-                    executionTimeREADPRO =  time.perf_counter() -startTimeREADPRO
-                    self.read_preprocess_elapsed_time.append(executionTimeREADPRO)
+                    executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
+                    self.read_preprocess_elapsed_time.append(
+                        executionTimeREADPRO)
 
             except:
                 logging.debug('set terminate signal...')
@@ -350,34 +377,27 @@ class UltrasoundProcessingServer:
                 connection = None
                 buffer.clear()
 
-        else:
-            buffer.clear()
-
+        buffer.clear()  # clear buffer if while loop is terminated
 
     def save(self):
         """Function that saves benchmark data to .mat file"""
-        # displayInterFramePeriod = []
 
         # difference of time_display list
         displayInterFramePeriod = np.diff(self.time_display)
         self.time_display = []
 
-        # for k in range(len(self.time_display)-1):
-        #     c = self.time_display[k+1] - self.time_display[k]
-        #     displayInterFramePeriod.append(c.total_seconds())
-
         d = {
-            f"displayIFP_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": displayInterFramePeriod,
-            f"tBeamformerElapsedTime_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": self.beamformer_elapsed_time,
-            f"tUpdateElapsedTime_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": self.update_elapsed_time,
-            f"tReadPreProcessElapsedTime_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": self.read_preprocess_elapsed_time,
+            "displayIFP_na": displayInterFramePeriod,
+            "tBeamformerElapsedTime_na": self.beamformer_elapsed_time,
+            "tUpdateElapsedTime_na": self.update_elapsed_time,
+            "tReadPreProcessElapsedTime_na": self.read_preprocess_elapsed_time,
         }
 
         filename = (
-        f"L114v_na{int(self.na_transmit)}"
-        f"_proc{self.bf_type}"
-        f"_autotun{str(self.auto_update_intensity)}"
-        f"_pyt_{int(time.time())}.mat"
+            f"L114v_na{int(self.na_transmit)}"
+            f"_proc{self.bf_type}"
+            f"_autotun{str(self.auto_update_intensity)}"
+            f"_pyt_{int(time.time())}.mat"
         )
 
         scipy.io.savemat(filename, mdict=d)
@@ -391,23 +411,22 @@ class UltrasoundProcessingServer:
 
                 #t0 = time.perf_counter()
                 inputs = self.prepare_inputs(buffer)
-                #t1 = time.perf_counter()
-                #print(f"prepare_inputs: {t1 - t0:0.4f} seconds")
 
-                BF = self.active_model(inputs)[0]
-                img = self.scan_converter.convert(BF)
-                img = np.array(img)
+                if inputs:
+                    BF = self.active_model(inputs)[0]
+                    img = self.scan_converter.convert(BF)
+                    img = np.array(img)
 
-                # FPS counter
-                if self.show_fps:
-                    img = self.fps_counter.overlay(img)
+                    # FPS counter
+                    if self.show_fps:
+                        img = self.fps_counter.overlay(img)
 
-                self.bf_display = img
+                    self.bf_display = img
 
-                # Saving parameters
-                self.time_display.append(time.perf_counter())
-                executionTimeBF = time.perf_counter() - startTimeBF
-                self.beamformer_elapsed_time.append(executionTimeBF)
+                    # Saving parameters
+                    self.time_display.append(time.perf_counter())
+                    executionTimeBF = time.perf_counter() - startTimeBF
+                    self.beamformer_elapsed_time.append(executionTimeBF)
             except:
                 buffer.clear()
                 time.sleep(0.001)  # wait for new data
@@ -423,8 +442,8 @@ class UltrasoundProcessingServer:
         total = 0
         msg = bytearray()
 
-        while total < 7: # Ensure to receive the complete data
-            #For best match with hardware and network realities,
+        while total < 7:  # Ensure to receive the complete data
+            # For best match with hardware and network realities,
             # the value of bufsize should be a relatively small power of 2,
             # for example, 4096.
             data = connection.recv(self.buffer_size)
@@ -466,12 +485,12 @@ class UltrasoundProcessingServer:
     @staticmethod
     def encode_img(img):
         """Function that encodes the input image to jpeg and prepares the HTML package"""
-        imgencode=cv2.imencode('.jpg',img)[1]
-        stringData=imgencode.tobytes()
+        imgencode = cv2.imencode('.jpg', img)[1]
+        stringData = imgencode.tobytes()
         return (
             b'--frame\r\n'
             b'Content-Type: text/plain\r\n\r\n'+stringData+b'\r\n'
-            )
+        )
 
     def select_model(self, bf_type, na_transmit):
         """Function that selects the correct model for the beamformer"""
@@ -481,7 +500,7 @@ class UltrasoundProcessingServer:
                 IQ = inputs['data']
                 #IQ = inputs
                 ix = int(np.floor(IQ.shape[1]/2))
-                return tf.transpose(IQ[:,ix, :, :,0], perm=(0,2,1))
+                return tf.transpose(IQ[:, ix, :, :, 0], perm=(0, 2, 1))
             model = return_IQ
         if bf_type == 'DAS':
             key = 'DAS_' + str(na_transmit) + 'PW'
@@ -494,7 +513,7 @@ class UltrasoundProcessingServer:
 
     def update_settings(self):
         """Function that updates setting states of the webserver class"""
-        self.terminate_signal.set() # Terminate data processing while updating settings
+        self.terminate_signal.set()  # Terminate data processing while updating settings
 
         if request.method == 'POST':
             if request.form.get('beamformer') is not None:
@@ -502,7 +521,8 @@ class UltrasoundProcessingServer:
                 self.update_beamformer = True
                 self.bf_type = request.form.get('beamformer')
                 # Update model
-                self.active_model = self.select_model(self.bf_type, self.na_transmit)
+                self.active_model = self.select_model(
+                    self.bf_type, self.na_transmit)
                 logging.debug(self.bf_type)
 
             if request.form.get('norm_mode') is not None:
@@ -520,7 +540,8 @@ class UltrasoundProcessingServer:
                 self.update_na_transmit = True
                 self.na_transmit = int(request.form.get('na'))
                 # Update model
-                self.active_model = self.select_model(self.bf_type, self.na_transmit)
+                self.active_model = self.select_model(
+                    self.bf_type, self.na_transmit)
                 logging.debug(self.na_transmit)
 
             if request.form.get('intensityAuto') is not None:
@@ -535,7 +556,7 @@ class UltrasoundProcessingServer:
                 logging.debug(self.auto_update_intensity)
                 if self.auto_update_intensity:
                     self.meanAmp_history = []
-                    self.err_history = [0,0]
+                    self.err_history = [0, 0]
                     self.hv_history = []
 
             if (request.form.get('slide_voltage') is not None) and not self.auto_update_intensity:
@@ -549,14 +570,15 @@ class UltrasoundProcessingServer:
                 logging.debug(val_persistence)
 
             if request.form.get('slide_alpha') is not None:
-                self.scan_converter.alpha = float(request.form.get('slide_alpha'))
+                self.scan_converter.alpha = float(
+                    request.form.get('slide_alpha'))
                 logging.debug(self.scan_converter.alpha)
 
             if request.form.get('slide_sos') is not None:
                 self.c = float(request.form.get('slide_sos'))
 
                 # rescale grid
-                self.grid[:,:,2] = self.grid[:,:,2] * self.c/self.c_ref
+                self.grid[:, :, 2] = self.grid[:, :, 2] * self.c/self.c_ref
 
                 logging.debug(self.c)
 
@@ -587,7 +609,7 @@ class UltrasoundProcessingServer:
 
         time.sleep(0.2)
 
-        self.terminate_signal.clear() # Resume data processing
+        self.terminate_signal.clear()  # Resume data processing
 
         return ('', 204)
 
@@ -597,34 +619,34 @@ app = Flask(__name__)
 app.secret_key = 'Secret'
 app.config["SESSION_PERMANENT"] = False
 
+
 @app.route('/')
 def index():
-    """Creates the HTML page"""
+    """Creates the main HTML page"""
     return render_template('index.html')
+
 
 @app.route('/video')
 def video():
+    """Creates the video HTML page"""
     return render_template('video.html')
+
 
 @app.route('/create_file', methods=['POST'])
 def create_file():
     """Function that updates server settings based on user input"""
     return usp.update_settings()
 
+
 @app.route('/vid/')
 def vid():
     """ Video Feed"""
     return Response(usp.get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/qr')
-def qr():
-    """Function that returns a QR code containing the IP address of the server"""
-
-    return None
 
 
 # Initialize Verasonics webserver
 usp = UltrasoundProcessingServer()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=debugger_is_active(), use_reloader=False)
+    app.run(host='0.0.0.0', port=5000,
+            debug=debugger_is_active(), use_reloader=False)

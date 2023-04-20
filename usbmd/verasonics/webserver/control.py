@@ -1,8 +1,5 @@
 """Control module for ultrasound image processing"""
 
-import numpy as np
-
-
 class PIDController:
     """PID controller for ultrasound image processing"""
     def __init__(self, Kp, Ki, Kd, setpoint, min_val, max_val, metric=None):

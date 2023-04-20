@@ -1,3 +1,8 @@
+# pylint: disable=no-member
+
+"""This module contains the function to initialize the models for the webserver demo."""
+
+
 import os
 
 import numpy as np
@@ -45,7 +50,8 @@ def trt_opt(model, name=None):
             trt_model = tf.saved_model.load(modelname)
 
         def wrapped_model(input_data):
-            output = trt_model(tf.convert_to_tensor(input_data, dtype='float32'))
+            output = trt_model(tf.convert_to_tensor(
+                input_data, dtype='float32'))
             return list(output.values())[0]
 
         return wrapped_model
@@ -59,11 +65,15 @@ def get_models():
     """Function that creates all models, will be replaced in later versions"""
     model_dict = {}
     model_dict['DAS_1PW'], grid = create_DAS([5])
-    model_dict['DAS_5PW'], grid = create_DAS([1,3,5,7,9])
-    model_dict['DAS_11PW'], grid = create_DAS([0,1,2,3,4,5,6,7,8,9,10])
-    model_dict['ABLE_1PW'], grid = create_ABLE('configs/inference/l11-4v_ABLE_1PW.yaml')
-    model_dict['ABLE_5PW'], grid = create_ABLE('configs/inference/l11-4v_ABLE_5PW.yaml')
-    model_dict['ABLE_11PW'], grid = create_ABLE('configs/inference/l11-4v_ABLE_11PW.yaml')
+    model_dict['DAS_5PW'], grid = create_DAS([1, 3, 5, 7, 9])
+    model_dict['DAS_11PW'], grid = create_DAS(
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    model_dict['ABLE_1PW'], grid = create_ABLE(
+        'configs/inference/l11-4v_ABLE_1PW.yaml')
+    model_dict['ABLE_5PW'], grid = create_ABLE(
+        'configs/inference/l11-4v_ABLE_5PW.yaml')
+    model_dict['ABLE_11PW'], grid = create_ABLE(
+        'configs/inference/l11-4v_ABLE_11PW.yaml')
     return model_dict, grid
 
 
@@ -72,15 +82,10 @@ def model_from_file(path):
     trt_model = tf.saved_model.load(path)
 
     def wrapped_model(input_data):
-            output = trt_model(tf.convert_to_tensor(input_data, dtype='float32'))
-            return list(output.values())[0]
+        output = trt_model(tf.convert_to_tensor(input_data, dtype='float32'))
+        return list(output.values())[0]
 
     return wrapped_model
-
-
-def crapFUnctionss(a,b,c):
-    # way too many lines of code but i just want to show you how to use the function and how it works and now i have to write a lot of code to show you that
-    return b
 
 def create_DAS(n_angles):
     """Creates a delay-and-sum model with n_angles PWs"""
@@ -97,9 +102,9 @@ def create_DAS(n_angles):
         fc=6.25e6,
         angles=np.deg2rad(np.linspace(-18, 18, 11)[config.data.n_angles]),
         modtype=config.data.modtype,
-        Nx = config.scan.get('Nx'),
-        Nz = config.scan.get('Nz')
-        )
+        Nx=config.scan.get('Nx'),
+        Nz=config.scan.get('Nz')
+    )
 
     model = create_beamformer(
         probe,
@@ -107,15 +112,16 @@ def create_DAS(n_angles):
         config,
         aux_inputs=config.model.beamformer.get('aux_inputs')
     )
-    model = tf.function(model, reduce_retracing=True, jit_compile=True)
+    model = tf.function(model, jit_compile=True)
 
     # build model by passing a dictionary of dummy data with correct dtype.
     # Use the input name as key. Use dictionary comprehension
     dummy_input = {
         inp.name.strip('_input'): tf.zeros(inp.shape, dtype=inp.dtype) for inp in model.inputs
-        }
+    }
     _ = model(dummy_input)
     return model, scan.grid
+
 
 def create_ABLE(config_path):
     """creates an ABLE model from a config file"""
@@ -131,9 +137,9 @@ def create_ABLE(config_path):
         fc=6.25e6,
         angles=np.deg2rad(np.linspace(-18, 18, 11)[config.scan.n_angles]),
         modtype=config.data.modtype,
-        Nx = config.scan.get('Nx'),
-        Nz = config.scan.get('Nz')
-        )
+        Nx=config.scan.get('Nx'),
+        Nz=config.scan.get('Nz')
+    )
 
     model = create_beamformer(
         probe,
@@ -149,14 +155,14 @@ def create_ABLE(config_path):
         model.load_weights(path, by_name=False)
     except FileNotFoundError as e:
         raise e
-    model = tf.function(model, reduce_retracing=True, jit_compile=True)
+    model = tf.function(model, jit_compile=True)
 
-    # build model by passing a dictionary of dummy data with correct dtype. Use the input name as key. Use dictionary comprehension
     dummy_input = {
         inp.name.strip('_input'): tf.zeros(inp.shape, dtype=inp.dtype) for inp in model.inputs
-        }
+    }
     _ = model(dummy_input)
     return model, scan.grid
+
 
 def distributed_model(probe, scan, config, gpus):
     """ Funtion that splits the beamforming in N grids, to be distributed across multiple GPU's
@@ -191,7 +197,7 @@ def distributed_model(probe, scan, config, gpus):
                 aux_inputs=config.model.beamformer.get('aux_inputs')
             ))
 
-    #Full model inputs
+    # Full model inputs
     inputs = {}
     for inp in sub_beamformers[0].inputs:
 
@@ -200,16 +206,18 @@ def distributed_model(probe, scan, config, gpus):
         else:
             shape = inp.shape[1:]
 
-        inputs[inp.name.strip('input_')] = tf.keras.Input(shape=shape, name=inp.name, batch_size=1)
+        inputs[inp.name.strip('input_')] = tf.keras.Input(
+            shape=shape, name=inp.name, batch_size=1)
 
     for i, sub_beamformer in enumerate(sub_beamformers):
         with tf.device(gpus[i].name.strip('/physical_device:')):
             sub_inputs = inputs.copy()
             if 'grid' in sub_inputs:
-                sub_inputs['grid'] = sub_inputs['grid'][:, :, i*scan.Nx:(i+1)*scan.Nx, :]
+                sub_inputs['grid'] = sub_inputs['grid'][:,
+                                                        :, i*scan.Nx:(i+1)*scan.Nx, :]
             subgrid_outputs.append(sub_beamformer(sub_inputs))
 
-    outputs = tf.concat(subgrid_outputs, axis=-1)
+    outputs = tf.concat(subgrid_outputs, -1)
 
     return tf.keras.models.Model(inputs=inputs, outputs=outputs)
 
