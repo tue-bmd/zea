@@ -56,8 +56,6 @@ postprocess_schema = Schema({
         "k_p": float,
         "k_n": float,
         "threshold": float,
-        Optional("snr_min", default=None): any_number,
-        Optional("snr_max", default=None): any_number,
     },
     Optional("thresholding", default=None): {
         Optional("percentile", default=None): percentage,
