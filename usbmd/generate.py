@@ -144,7 +144,8 @@ class GenerateDataSet:
         path = path.with_suffix(suffix)
         return path
 
-    def save_image(self, image, path):
+    @staticmethod
+    def save_image(image, path):
         """Save images to disk
 
         Args:

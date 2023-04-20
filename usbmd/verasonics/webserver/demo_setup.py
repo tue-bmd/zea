@@ -1,5 +1,3 @@
-# pylint: skip-file
-
 import numpy as np
 import tensorflow as tf
 
@@ -43,7 +41,7 @@ def trt_opt(model, name=None):
             return list(output.values())[0]
 
         return wrapped_model
-        
+
     except RuntimeError:
         print('Model was not optimized using TRT')
         return model
@@ -63,7 +61,7 @@ def get_models():
 def model_from_file(path):
 
     trt_model = tf.saved_model.load(path)
-    
+
     def wrapped_model(input_data):
             output = trt_model(tf.convert_to_tensor(input_data, dtype='float32'))
             return list(output.values())[0]
@@ -104,7 +102,7 @@ def create_DAS_1PW():
 #     probe = get_probe(cfg)
 #     probe.N_ax = 576
 #     probe.fs = probe.fs/4
-#     grid = get_grid(cfg, probe) 
+#     grid = get_grid(cfg, probe)
 #     model = create_beamformer(probe, grid, cfg)
 #     model = trt_opt(model, name = 'DAS_5PW')
 #     return model
@@ -115,7 +113,7 @@ def create_DAS_1PW():
 #     probe = get_probe(cfg)
 #     probe.N_ax = 576
 #     probe.fs = probe.fs/4
-#     grid = get_grid(cfg, probe) 
+#     grid = get_grid(cfg, probe)
 #     model = create_beamformer(probe, grid, cfg)
 #     model = trt_opt(model, name = 'DAS_11PW')
 #     return model
@@ -123,7 +121,7 @@ def create_DAS_1PW():
 # def create_ABLE_1PW():
 #     cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_1PW.yaml')
 #     probe = get_probe(cfg)
-#     grid = get_grid(cfg, probe) 
+#     grid = get_grid(cfg, probe)
 #     model = create_beamformer(probe, grid, cfg)
 #     model.load_weights(cfg.model_path)
 
@@ -145,30 +143,30 @@ def create_DAS_1PW():
 # def create_ABLE_11PW():
 #     cfg = load_config_from_yaml('python/configs/inference/l11-4v_ABLE_11PW.yaml')
 #     probe = get_probe(cfg)
-#     grid = get_grid(cfg, probe) 
+#     grid = get_grid(cfg, probe)
 #     model = create_beamformer(probe, grid, cfg)
 #     model.load_weights(cfg.model_path)
 #     model = trt_opt(model, name = 'ABLE_11PW')
 #     #model.compile(jit_compile=False)
 #     return model
-    
+
 
 def distributed_model(cfg, probe, grid, gpus):
     """ Funtion that splits the beamforming in N grids, to be distributed across multiple GPU's
 
     Args:
-        cfg: 
+        cfg:
         probe:
-        grid: 
-        gpus: 
+        grid:
+        gpus:
     """
 
     N = len(gpus)
 
     subgrids = np.split(grid, N, axis=1)
-    inputs = tf.keras.layers.Input((probe.N_tx, probe.N_el, probe.N_ax, probe.N_ch), 
+    inputs = tf.keras.layers.Input((probe.N_tx, probe.N_el, probe.N_ax, probe.N_ch),
                             batch_size=cfg['batch_size'],
-                            name='input_data') 
+                            name='input_data')
 
     subgrid_outputs = []
     for gpu, subgrid in zip(gpus, subgrids):
@@ -179,6 +177,6 @@ def distributed_model(cfg, probe, grid, gpus):
 
     return tf.keras.models.Model(inputs=inputs, outputs=outputs)
 
-    
+
 if __name__ == '__main__':
     model_dict = get_models()
