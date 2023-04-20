@@ -32,28 +32,34 @@ import scipy.io
 from demo_setup import get_models
 from flask import Flask, Response, render_template, request
 from futures3.thread import ThreadPoolExecutor
+import tensorflow as tf
 
-from usbmd.utils.video import FPS_counter, Scan_converter
-
+from usbmd.utils.video import FPS_counter, ScanConverterTF, ScanConverter
+from usbmd.verasonics.webserver.control import PIDController
 
 ## HELPER FUNCTIONS
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
-##
 
 # Set logger
 if debugger_is_active():
     logging.basicConfig(level=logging.DEBUG)
 
 
-class WebServer:
-    """Webserver class that interfaces with the Verasonics, and handles data processing"""
+## TODO use batch dimension to process multiple PW angles such that we can dynamically change
+# the number of PW angles
+
+# check input types, dummy data is currently different from real data and model needs to
+# recompile. Same holds for aux inputs.
+
+class UltrasoundProcessingServer:
+    """ Class for handling ultrasound data processing and communication with the Verasonics"""
     def __init__(
         self,
         host = '',
         tcp_port = 30000,
-        time_out = 1,
+        time_out = 0.5,
         buffer_size = 2**16,
         probe = 'L114'):
         """_summary_
@@ -70,22 +76,23 @@ class WebServer:
         ## Network settings
         self.host = host
         self.tcp_server_address = (host, tcp_port)
-        self.time_out = 1
+        self.time_out = time_out
         self.buffer_size = 65500
-        self.vera_socket = self.start_tcp_server(self.tcp_server_address, time_out, buffer_size)
+        self.vera_socket = self.start_tcp_server(self.tcp_server_address, self.time_out, buffer_size)
         self.source = 'verasonics'
+
+        #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
+        self.model_dict, self.grid = get_models()
+        self.active_model = self.model_dict['DAS_1PW']
 
         ## Objects
         self.fps_counter = FPS_counter()
-        self.scan_converter = Scan_converter(
+        self.scan_converter = ScanConverterTF(
+            self.grid,
             norm_mode='smoothnormal',
             env_mode='abs',
             img_buffer_size=30,
             max_buffer_size=30)
-
-        #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
-        self.model_dict, self.grid = get_models()
-
 
         ## State-parameters (perhaps move this to a separate class/state handler in the future?)
         self.bf_type = 'DAS' # Set beamformer type to DAS by default
@@ -98,7 +105,22 @@ class WebServer:
         self.flag = 0
         self.auto_update_intensity = False
         self.ref_amp = 80
+        self.voltage_controller = PIDController(
+            Kp = 0.05,
+            Ki =  0,
+            Kd = 0.001,
+            setpoint = self.ref_amp,
+            min_val = 1.6,
+            max_val = 40
+            )
+
+        self.c_ref = 1540 # Reference speed of sound
         self.c = 1540 # Speed of sound
+        self.fs = 6.25e6 # Sampling frequency
+        self.fc = 6.25e6 # Center frequency
+
+        # Stores inputs for the beamformer model
+        self.inputs = {}
 
         # Probe settings
         if probe == 'S51':
@@ -137,6 +159,14 @@ class WebServer:
         self.bytesPerElementSent = None
         self.numTunableParameters = None
 
+        main_thread = threading.Thread(target=self.start_processing)
+        main_thread.daemon = True
+        main_thread.start()
+        print('Main thread started')
+
+        # Termination signal for child threads
+        self.terminate_signal = threading.Event()
+
     @staticmethod
     def start_tcp_server(tcp_server_address, time_out, buffer_size):
         "Function that starts the TCP server which listens for Verasonics data"
@@ -149,61 +179,112 @@ class WebServer:
         logging.info('TCP server is running ...')
         return vera_socket
 
+    @staticmethod
+    def indicator(message):
+        """ Waiting indicator for the console"""
+        symbols = ['|', '/', '-', '\\']
+        while True:
+            for symbol in symbols:
+                yield message + symbol
+
+    def start_processing(self):
+        """Function that starts the main processing loop"""
+        print('Starting processing in background...')
+        connection = None
+        connection_indicator = self.indicator('Waiting for connection to Verasonics ')
+        while True:
+
+            try:
+                if ((connection is None) or (connection.fileno() == -1)) and (self.source != 'dummy'):
+                    print(next(connection_indicator), flush=True, end='\r')
+                    try:
+                        connection = self.open_connection()
+                        time.sleep(0.5)
+                    except:
+                        img = cv2.imread('usbmd/verasonics/webserver/templates/nofeed.jpg')
+                        self.bf_display = img
+                else:
+                    logging.debug('Entered the image formation loop.')
+                    buffer = collections.deque([], maxlen=10)  # buffer for reading/writing
+                    with ThreadPoolExecutor(2) as executor:
+                        _ = executor.submit(self.read_update, connection, buffer, self.terminate_signal)
+                        _ = executor.submit(self.process_data, buffer, self.terminate_signal)
+
+                    self.terminate_signal.clear()
+
+            except:
+                if connection is not None:
+                    print('TCP server closes...')
+                    connection.close()
+                    connection = None
+
+    def prepare_inputs(self, buffer):
+        """Function that prepares the inputs for the beamformer model"""
+        ## Prepare inputs for the beamforming model
+        IQ = buffer.pop()
+        buffer.clear()
+        inputs = {}
+
+        if self.bf_type == 'RAW':
+            inputs['data'] = tf.convert_to_tensor(IQ, dtype=tf.float32)
+        else:
+            for inp in self.active_model.inputs:
+                varname = inp.name.strip('_input')
+
+                if varname == 'data':
+                    inputs[varname] = tf.convert_to_tensor(IQ, dtype=inp.dtype)
+                elif varname == 'grid':
+                    #rescaled_grid = self.grid.copy()
+                    #rescaled_grid[:,:,2] = rescaled_grid[:,:,2] * self.c/self.c_ref
+                    inputs[varname] = tf.convert_to_tensor(
+                        np.expand_dims(self.grid, 0),
+                        dtype=inp.dtype
+                    )
+                else:
+                    inputs[varname] = tf.convert_to_tensor(
+                        np.expand_dims(getattr(self, varname), axis=(0,1)),
+                        dtype=inp.dtype
+                    )
+
+        return inputs
+
 
     def read_update(self, connection, buffer, terminate_signal):
         """Retrieves new data from the client"""
-        while not terminate_signal.is_set(): #True:
+        while not terminate_signal.is_set():
             try:
                 logging.debug('Start updating and reading')
-                start_time_update = time.time()
+                start_time_update = time.perf_counter()
 
                 if self.source == 'dummy':
-                    IQ = 2**9*np.random.rand(1, self.na_transmit, self.n_el, int(self.n_ax/2), 2)
+                    IQ = np.random.randint(
+                        low=-1000,
+                        high=1000,
+                        size=(1, self.na_transmit, self.n_el, int(self.n_ax/2), 2),
+                        dtype=np.int16
+                        )
                     buffer.append(IQ)
                 else:
-                    # SEND UPDATE AS SOON AS READING FINISHES
-                    #startTimeSB = time.time()
+                    #startTimeSB = time.perf_counter()
 
                     if self.update_intensity:
                         #logging.debug('Intensity: %f', self.intensity)
                         self.update_intensity = False
                         tsb_lst = [self.intensity]
                     elif self.auto_update_intensity:
+                        time.sleep(0.0001)
                         logging.debug('Entered updateIntensityAuto')
 
                         abs_signal = np.absolute(np.array(self.bf_previous))
                         meanAmp = np.mean(abs_signal)
-                        self.meanAmp_history.append(meanAmp)
-                        logging.debug('Mean RF amplitude: %f', meanAmp)
-                        err = self.ref_amp - meanAmp
-                        self.err_history.append(err)
-                        logging.debug('Error in intensity: %f', err)
-
-                        # PID CONTROLLER
-                        # TODO: Implement this as a separate class
-                        Kp = 0.05 # Proportional
-                        Kd = 0 # Derivative
-                        Ki = 0.001 # Integral
-                        delta_hv = (Kd+Kp+Ki)*self.err_history[-1] + \
-                                    (Ki-Kp-2*Kd)*self.err_history[-2] + \
-                                    Kd*self.err_history[-3]
-
-                        if len(self.hv_history) >= 1:
-                            hv = self.hv_history[-1] + delta_hv
-                        else:
-                            hv = float(self.intensity) + delta_hv
-
-                        #check value within range
-                        hv = np.minimum(hv, 40)
-                        hv = np.maximum(hv, 1.6)
+                        hv = self.voltage_controller.update(meanAmp)
 
                         self.hv_history.append(hv)
-                        tsb_lst =[hv]
+                        tsb_lst = [hv]
                     else:
                         tsb_lst =[0]
 
                     if self.update_na_transmit:
-
                         self.flag = self.returnToMatlabFreq
                         print('Update firing angles: ', self.na_transmit)
                         self.update_na_transmit = False
@@ -219,13 +300,9 @@ class WebServer:
                     tsb_lst = list(map(np.double, tsb_lst))
                     tsb_bytes = bytearray(struct.pack(f'{len(tsb_lst)}d', *tsb_lst))
                     connection.sendall(tsb_bytes)
-
-                    executionTimeUPD = time.time() - start_time_update
+                    executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
-
-                    ############################################
-                    startTimeREADPRO = time.time()
-                    # READ CHANNEL DATA as INT16
+                    startTimeREADPRO = time.perf_counter()
                     total = 0
                     signal = bytearray()
 
@@ -239,12 +316,13 @@ class WebServer:
                         total = total + len(data)
                         signal += data
 
-                    dataToBeProcessed = array.array('h', signal)
-                    dataToBeProcessed = np.reshape(
-                                                dataToBeProcessed,
-                                                (self.n_ax*self.na_read, self.n_el),
-                                                order='F')
-                    RFData = np.array_split(dataToBeProcessed, self.na_read)
+                    #received_serial_data = array.array('h', signal)
+                    received_serial_data = np.frombuffer(signal, dtype=np.int16)
+                    received_reshaped_data = np.reshape(
+                        received_serial_data,
+                        (self.n_ax*self.na_read, self.n_el),
+                        order='F')
+                    RFData = np.array_split(received_reshaped_data, self.na_read)
                     RFData = np.stack(RFData, axis=2)  # Nax, Nel, na_transmit
                     RFData = np.transpose(RFData, (2, 1, 0))
 
@@ -261,109 +339,80 @@ class WebServer:
                     IQ = np.concatenate([I, Q], axis=-1)
                     buffer.append(IQ)
 
-                    executionTimeREADPRO =  time.time() -startTimeREADPRO
+                    executionTimeREADPRO =  time.perf_counter() -startTimeREADPRO
                     self.read_preprocess_elapsed_time.append(executionTimeREADPRO)
 
             except:
                 logging.debug('set terminate signal...')
                 terminate_signal.set()  # signal writer that we are done
+                print('TCP server closes...')
+                connection.close()
+                connection = None
+                buffer.clear()
+
+        else:
+            buffer.clear()
+
 
     def save(self):
         """Function that saves benchmark data to .mat file"""
-        displayInterFramePeriod = []
-        for k in range(len(self.time_display)-1):
-            c = self.time_display[k+1] - self.time_display[k]
-            displayInterFramePeriod.append(c.total_seconds())
+        # displayInterFramePeriod = []
+
+        # difference of time_display list
+        displayInterFramePeriod = np.diff(self.time_display)
+        self.time_display = []
+
+        # for k in range(len(self.time_display)-1):
+        #     c = self.time_display[k+1] - self.time_display[k]
+        #     displayInterFramePeriod.append(c.total_seconds())
 
         d = {
-            f"""displayIFP_na{int(self.na_transmit)}
-            _proc{self.bf_type}
-            _autotun{str(self.auto_update_intensity)}""": displayInterFramePeriod,
-
-            f"""tBeamformerElapsedTime_na{int(self.na_transmit)}
-            _proc{self.bf_type}
-            _autotun{str(self.auto_update_intensity)}""": self.beamformer_elapsed_time,
-
-            f"""tUpdateElapsedTime_na{int(self.na_transmit)}
-            _proc{self.bf_type}
-            _autotun{str(self.auto_update_intensity)}""": self.update_elapsed_time,
-
-            f"""tReadPreProcessElapsedTime_na{int(self.na_transmit)}
-            _proc{self.bf_type}
-            _autotun{str(self.auto_update_intensity)}""": self.read_preprocess_elapsed_time,
+            f"displayIFP_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": displayInterFramePeriod,
+            f"tBeamformerElapsedTime_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": self.beamformer_elapsed_time,
+            f"tUpdateElapsedTime_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": self.update_elapsed_time,
+            f"tReadPreProcessElapsedTime_na{int(self.na_transmit)}_proc{self.bf_type}_autotun{str(self.auto_update_intensity)}": self.read_preprocess_elapsed_time,
         }
-        scipy.io.savemat(
-            f"""L114v_na{int(self.na_transmit)}
-            _proc{self.bf_type}
-            _autotun{str(self.auto_update_intensity)}
-            _pyt_{int(time.time())}.mat""",
-            mdict=d)
+
+        filename = (
+        f"L114v_na{int(self.na_transmit)}"
+        f"_proc{self.bf_type}"
+        f"_autotun{str(self.auto_update_intensity)}"
+        f"_pyt_{int(time.time())}.mat"
+        )
+
+        scipy.io.savemat(filename, mdict=d)
 
     def process_data(self, buffer, terminate_signal):
         """Function that handles data processing (e.g. beamforming)"""
         while not terminate_signal.is_set():
             logging.debug('start processing')
             try:
-                IQ = buffer.pop() #expected: 2, na, 128, 1024, 1
-                buffer.clear()
+                startTimeBF = time.perf_counter()
 
-                startTimeBF = time.time()
+                #t0 = time.perf_counter()
+                inputs = self.prepare_inputs(buffer)
+                #t1 = time.perf_counter()
+                #print(f"prepare_inputs: {t1 - t0:0.4f} seconds")
 
-                # Select correct model from dictionary
-                if self.bf_type == 'RAW':
-                    def return_IQ(*args, **kwargs):
-                        ix = int(np.floor(IQ.shape[1]/2))
-                        return IQ[0,ix, :, :,0]
-                    model = return_IQ
-                elif IQ.shape[1] == 11:
-                    if self.bf_type == 'DAS':
-                        model = self.model_dict['DAS_11PW']
-                    elif self.bf_type == 'ABLE':
-                        model = self.model_dict['ABLE_11PW']
-                elif IQ.shape[1] == 5:
-                    if self.bf_type == 'DAS':
-                        model = self.model_dict['DAS_5PW']
-                    elif self.bf_type == 'ABLE':
-                        model = self.model_dict['ABLE_5PW']
-                elif IQ.shape[1] == 1:
-                    if self.bf_type == 'DAS':
-                        model = self.model_dict['DAS_1PW']
-                    elif self.bf_type == 'ABLE':
-                        model = self.model_dict['ABLE_1PW']
-
-               
-                c_input = np.expand_dims(self.c, (0,1))
-                BF = model([c_input, IQ])
-                BF = np.squeeze(BF)
-                BF = self.scan_converter.convert(BF)
-
-                # if self.upscaling:
-                #     BF = np.expand_dims(BF,-1)
-                #     BF = cv2.merge((BF, BF, BF))
-                #     BF = np.expand_dims(BF, 0)
-                #     BF = self.sr_model(BF/255)
-                #     BF = np.squeeze(BF)*255
-
-                self.time_display.append(datetime.now())
-                #Display the resulting frame
-                BF = cv2.resize(
-                    BF,
-                    dsize=(
-                    int(self.scaling*self.grid.shape[1]*self.aspect_fx),
-                    int(self.scaling*self.grid.shape[0])),
-                    fx=self.scaling*self.aspect_fx
-                    )
+                BF = self.active_model(inputs)[0]
+                img = self.scan_converter.convert(BF)
+                img = np.array(img)
 
                 # FPS counter
                 if self.show_fps:
-                    BF = self.fps_counter.overlay(BF)
+                    img = self.fps_counter.overlay(img)
 
-                self.bf_display = BF
-                executionTimeBF = time.time() - startTimeBF
+                self.bf_display = img
+
+                # Saving parameters
+                self.time_display.append(time.perf_counter())
+                executionTimeBF = time.perf_counter() - startTimeBF
                 self.beamformer_elapsed_time.append(executionTimeBF)
             except:
-                time.sleep(0.0001)  # wait for new data
+                buffer.clear()
+                time.sleep(0.001)  # wait for new data
 
+        buffer.clear()
 
     def open_connection(self):
         """Handles the opening and handshaking with the Verasonics"""
@@ -407,45 +456,12 @@ class WebServer:
 
     def get_frame(self):
         """Function that generates new image frames for the web interface"""
-        connection = None
         while True:
             try:
-                if (connection is None) and (self.source != 'dummy'):
-                    print('Waiting for connection...')
-                    try:
-                        connection = self.open_connection()
-                    except:
-                        img = cv2.imread('usbmd/verasonics/webserver/templates/nofeed.jpg')
-                        yield self.encode_img(img)
-
-                else:
-                    logging.debug('Entered the image formation loop.')
-
-                    buffer = collections.deque([], maxlen=30)  # buffer for reading/writing
-                    terminate_signal = threading.Event()  # shared signa
-
-                    with ThreadPoolExecutor(2) as executor:
-                        _ = executor.submit(self.read_update, connection, buffer, terminate_signal)
-                        _ = executor.submit(self.process_data, buffer, terminate_signal)
-
-                        while not terminate_signal.is_set():
-                            try:
-                                yield self.encode_img(self.bf_display)
-                            except:
-                                time.sleep(0.001)  # wait for new data
-
-                    print('Saving results...')
-                    #self.save()
-                    connection = None
-                    print(connection)
-
+                yield self.encode_img(self.bf_display)
             except:
-                if connection is not None:
-                    print('TCP server closes...')
-                    connection.close()
-                    connection = None
-                    print('Saving results...')
-                    #self.save()
+                time.sleep(0.001)  # wait for new data
+                return
 
     @staticmethod
     def encode_img(img):
@@ -457,12 +473,36 @@ class WebServer:
             b'Content-Type: text/plain\r\n\r\n'+stringData+b'\r\n'
             )
 
+    def select_model(self, bf_type, na_transmit):
+        """Function that selects the correct model for the beamformer"""
+
+        if self.bf_type == 'RAW':
+            def return_IQ(inputs):
+                IQ = inputs['data']
+                #IQ = inputs
+                ix = int(np.floor(IQ.shape[1]/2))
+                return tf.transpose(IQ[:,ix, :, :,0], perm=(0,2,1))
+            model = return_IQ
+        if bf_type == 'DAS':
+            key = 'DAS_' + str(na_transmit) + 'PW'
+            model = self.model_dict[key]
+        elif bf_type == 'ABLE':
+            key = 'ABLE_' + str(na_transmit) + 'PW'
+            model = self.model_dict[key]
+
+        return model
+
     def update_settings(self):
         """Function that updates setting states of the webserver class"""
+        self.terminate_signal.set() # Terminate data processing while updating settings
+
         if request.method == 'POST':
             if request.form.get('beamformer') is not None:
+                self.save()
                 self.update_beamformer = True
                 self.bf_type = request.form.get('beamformer')
+                # Update model
+                self.active_model = self.select_model(self.bf_type, self.na_transmit)
                 logging.debug(self.bf_type)
 
             if request.form.get('norm_mode') is not None:
@@ -479,6 +519,8 @@ class WebServer:
 
                 self.update_na_transmit = True
                 self.na_transmit = int(request.form.get('na'))
+                # Update model
+                self.active_model = self.select_model(self.bf_type, self.na_transmit)
                 logging.debug(self.na_transmit)
 
             if request.form.get('intensityAuto') is not None:
@@ -505,14 +547,26 @@ class WebServer:
                 val_persistence = int(request.form.get('slide_persistence'))
                 self.scan_converter.n_persistence = val_persistence
                 logging.debug(val_persistence)
-            
+
             if request.form.get('slide_alpha') is not None:
                 self.scan_converter.alpha = float(request.form.get('slide_alpha'))
                 logging.debug(self.scan_converter.alpha)
-            
+
             if request.form.get('slide_sos') is not None:
                 self.c = float(request.form.get('slide_sos'))
+
+                # rescale grid
+                self.grid[:,:,2] = self.grid[:,:,2] * self.c/self.c_ref
+
                 logging.debug(self.c)
+
+            if request.form.get('slide_fs') is not None:
+                self.fs = float(request.form.get('slide_fs'))*1e6
+                logging.debug(self.fs)
+
+            if request.form.get('slide_fc') is not None:
+                self.fc = float(request.form.get('slide_fc'))*1e6
+                logging.debug(self.fc)
 
             if request.form.get('persistence_mode') is not None:
                 mode = request.form.get('persistence_mode')
@@ -531,6 +585,9 @@ class WebServer:
                 self.source = request.form.get('source')
                 logging.debug(self.source)
 
+        time.sleep(0.2)
+
+        self.terminate_signal.clear() # Resume data processing
 
         return ('', 204)
 
@@ -545,18 +602,29 @@ def index():
     """Creates the HTML page"""
     return render_template('index.html')
 
+@app.route('/video')
+def video():
+    return render_template('video.html')
+
 @app.route('/create_file', methods=['POST'])
 def create_file():
     """Function that updates server settings based on user input"""
-    return web_server.update_settings()
+    return usp.update_settings()
 
 @app.route('/vid/')
 def vid():
     """ Video Feed"""
-    return Response(web_server.get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(usp.get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/qr')
+def qr():
+    """Function that returns a QR code containing the IP address of the server"""
+
+    return None
+
 
 # Initialize Verasonics webserver
-web_server = WebServer()
+usp = UltrasoundProcessingServer()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=debugger_is_active(), use_reloader=False)
