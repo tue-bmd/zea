@@ -17,6 +17,7 @@ import numpy as np
 
 from usbmd.utils.pixelgrid import get_grid
 
+_MOD_TYPES = [None, 'rf', 'iq']
 
 class Scan:
     """Scan base class."""
@@ -66,7 +67,7 @@ class Scan:
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
         """
-        assert modtype in ['rf', 'iq'], "modtype must be either 'rf' or 'iq'."
+        assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
 
         # Attributes concerning channel data
         self.N_tx = N_tx
