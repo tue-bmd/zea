@@ -116,18 +116,13 @@ def ncc(x, y):
 
 @register_metric(name='image_entropy')
 def image_entropy(image):
-    """
-    Calculate the entropy of the image
+    """Calculate the entropy of the image
 
-    Parameters
-    ----------
-    image : ndarray
-        The image for which the entropy is calculated
+    Args:
+    image (ndarray): The image for which the entropy is calculated
 
-    Returns
-    -------
-    entropy : float
-        The entropy of the image
+    Returns:
+    float: The entropy of the image
     """
     marg = np.histogramdd(np.ravel(image), bins = 256)[0]/image.size
     marg = list(filter(lambda p: p > 0, np.ravel(marg)))
@@ -136,18 +131,13 @@ def image_entropy(image):
 
 @register_metric(name='image_sharpness')
 def image_sharpness(image):
-    """
-    Calculate the sharpness of the image
-    
-    Parameters
-    ----------
-    image : ndarray
-        The image for which the sharpness is calculated
+    """Calculate the sharpness of the image
 
-    Returns
-    -------
-    sharpness : float
-        The sharpness of the image
+    Args:
+    image (ndarray): The image for which the sharpness is calculated
+
+    Returns:
+    float: The sharpness of the image
     """
     return np.mean(np.abs(np.gradient(image)))
 
