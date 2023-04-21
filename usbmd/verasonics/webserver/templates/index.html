@@ -74,13 +74,12 @@
     <h1>Streaming</h1>
     <p style="text-align:center;"><img src="{{ url_for('vid') }}"> </p>
 
-
-    <button onclick="goToVideoPage()">Fullscreen</button>
+    <!-- <button onclick="goToVideoPage()">Fullscreen</button>
     <script>
       function goToVideoPage() {
         window.location.href = '/video';
       }
-    </script>
+    </script> -->
 
   </div>
 
@@ -178,6 +177,11 @@
         </form>
       </div>
 
+      <div>
+        <input type="checkbox" id="link_sliders" name="link_sliders">
+        <label for="link_sliders">Link sliders</label>
+      </div>
+
       <h3>Sampling frequency</h3>
       <div class="container">
         <form action="/" method="post" enctype="multipart/form-data" id="form">
@@ -189,6 +193,37 @@
           </div>
         </form>
       </div>
+
+      <script>
+        const slideFc = document.getElementById("slide_fc");
+        const slideFs = document.getElementById("slide_fs");
+        const labelFc = document.getElementById("label_fc");
+        const labelFs = document.getElementById("label_fs");
+        const linkSliders = document.getElementById("link_sliders");
+
+        linkSliders.addEventListener("change", function () {
+          if (linkSliders.checked) {
+            slideFs.value = slideFc.value;
+            labelFs.innerHTML = slideFc.value;
+          }
+        });
+
+        slideFc.addEventListener("input", function () {
+          labelFc.innerHTML = slideFc.value;
+          if (linkSliders.checked) {
+            slideFs.value = slideFc.value;
+            labelFs.innerHTML = slideFc.value;
+          }
+        });
+
+        slideFs.addEventListener("input", function () {
+          labelFs.innerHTML = slideFs.value;
+          if (linkSliders.checked) {
+            slideFc.value = slideFs.value;
+            labelFc.innerHTML = slideFs.value;
+          }
+        });
+      </script>
 
       <button type="button" onclick="change_persistance_mode('persistence_MA','persistence_AR');">Persistence
         Mode</button>

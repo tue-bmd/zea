@@ -28,16 +28,18 @@ import time
 import cv2
 import numpy as np
 import scipy.io
+import tensorflow as tf
 from demo_setup import get_models
 from flask import Flask, Response, render_template, request
 from futures3.thread import ThreadPoolExecutor
-import tensorflow as tf
 
 from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.control import PIDController
 
 # HELPER FUNCTIONS
 
+
+SAVING = False
 
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
@@ -164,6 +166,7 @@ class UltrasoundProcessingServer:
         self.bytesPerElementSent = None
         self.numTunableParameters = None
 
+        self.should_exit = False
         main_thread = threading.Thread(target=self.start_processing)
         main_thread.daemon = True
         main_thread.start()
@@ -193,46 +196,43 @@ class UltrasoundProcessingServer:
             for symbol in symbols:
                 yield message + symbol
 
+
+    @staticmethod
+    def is_connection_open(connection):
+        """Check if the given WebSocket connection is open."""
+        return connection is not None and connection.fileno() != -1
+
+
     def start_processing(self):
-        """Function that starts the main processing loop"""
+        """Start the main processing loop."""
         print('Starting processing in background...')
         connection = None
-        connection_indicator = self.indicator(
-            'Waiting for connection to Verasonics ')
-        while True:
-            try:
-                if (((connection is None) or (connection.fileno() == -1)) and
-                        (self.source != 'dummy')):
-                    print(next(connection_indicator), flush=True, end='\r')
-                    try:
-                        connection = self.open_connection()
-                        time.sleep(0.5)
-                    except:
-                        img = cv2.imread(
-                            'usbmd/verasonics/webserver/templates/nofeed.jpg')
-                        self.bf_display = img
-                else:
-                    logging.debug('Entered the image formation loop.')
-                    # buffer for reading/writing
-                    buffer = collections.deque([], maxlen=10)
-                    with ThreadPoolExecutor(2) as executor:
-                        _ = executor.submit(
-                            self.read_update,
-                            connection,
-                            buffer,
-                            self.terminate_signal)
-                        _ = executor.submit(
-                            self.process_data,
-                            buffer,
-                            self.terminate_signal)
+        waiting_for_connection = self.indicator('Waiting for connection to Verasonics ')
 
-                    self.terminate_signal.clear()
+        while not self.should_exit:
+            # Try to establish connection if none exists
+            if not self.is_connection_open(connection) and self.source != 'dummy':
+                print(next(waiting_for_connection), flush=True, end='\r')
+                try:
+                    connection = self.open_connection()
+                    time.sleep(0.5)
+                except:
+                    img = cv2.imread('usbmd/verasonics/webserver/templates/nofeed.jpg')
+                    self.bf_display = img
 
-            except:
-                if connection is not None:
-                    print('TCP server closes...')
-                    connection.close()
-                    connection = None
+            # Process data if connection is open
+            if self.is_connection_open(connection) or self.source == 'dummy':
+                logging.debug('Entered the image formation loop.')
+                buffer = collections.deque([], maxlen=10)
+                with ThreadPoolExecutor(2) as executor:
+                    executor.submit(self.read_update, connection, buffer, self.terminate_signal)
+                    executor.submit(self.process_data, buffer, self.terminate_signal)
+                self.terminate_signal.clear()
+
+        # Close connection if it exists
+        if connection:
+            print('Closing connection...')
+            connection.close()
 
     def prepare_inputs(self, buffer):
         """Function that prepares the inputs for the beamformer model"""
@@ -254,8 +254,6 @@ class UltrasoundProcessingServer:
                 if varname == 'data':
                     inputs[varname] = tf.convert_to_tensor(IQ, dtype=inp.dtype)
                 elif varname == 'grid':
-                    #rescaled_grid = self.grid.copy()
-                    #rescaled_grid[:,:,2] = rescaled_grid[:,:,2] * self.c/self.c_ref
                     inputs[varname] = tf.convert_to_tensor(
                         np.expand_dims(self.grid, 0),
                         dtype=inp.dtype
@@ -271,6 +269,8 @@ class UltrasoundProcessingServer:
     def read_update(self, connection, buffer, terminate_signal):
         """Retrieves new data from the client"""
         while not terminate_signal.is_set():
+            if (self.source != 'dummy') and (connection is None):
+                break
             try:
                 logging.debug('Start updating and reading')
                 start_time_update = time.perf_counter()
@@ -284,7 +284,7 @@ class UltrasoundProcessingServer:
                         dtype=np.int16
                     )
                     buffer.append(IQ)
-                else:
+                elif connection.fileno() != -1:
                     #startTimeSB = time.perf_counter()
 
                     if self.update_intensity:
@@ -292,7 +292,6 @@ class UltrasoundProcessingServer:
                         self.update_intensity = False
                         tsb_lst = [self.intensity]
                     elif self.auto_update_intensity:
-                        time.sleep(0.0001)
                         logging.debug('Entered updateIntensityAuto')
 
                         abs_signal = np.absolute(np.array(self.bf_previous))
@@ -325,11 +324,12 @@ class UltrasoundProcessingServer:
                     executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
                     startTimeREADPRO = time.perf_counter()
+
                     total = 0
                     signal = bytearray()
-
-                    # Ensure to receive the complete data
-                    while total < self.na_read*self.n_ax*self.n_el*self.bytesPerElementRead:
+                    total_size = self.na_read*self.n_ax*self.n_el*self.bytesPerElementRead
+                    # Ensure that the complete data is received
+                    while total < total_size:
                         # For best match with hardware and network realities, the value of bufsize
                         # should be a relatively small power of 2, for example, 4096.
                         data = connection.recv(self.buffer_size)
@@ -338,29 +338,19 @@ class UltrasoundProcessingServer:
                         total = total + len(data)
                         signal += data
 
-                    #received_serial_data = array.array('h', signal)
-                    received_serial_data = np.frombuffer(
-                        signal, dtype=np.int16)
-                    received_reshaped_data = np.reshape(
-                        received_serial_data,
-                        (self.n_ax*self.na_read, self.n_el),
-                        order='F')
-                    RFData = np.array_split(
-                        received_reshaped_data, self.na_read)
+                    received_serial_data = np.frombuffer(signal, dtype=np.int16)
+                    received_reshaped_data = np.reshape(received_serial_data, (self.n_ax * self.na_read, self.n_el), order='F')
+
+                    RFData = np.array_split(received_reshaped_data, self.na_read)
                     RFData = np.stack(RFData, axis=2)  # Nax, Nel, na_transmit
                     RFData = np.transpose(RFData, (2, 1, 0))
 
                     # FROM RF DATA TO IQ
-                    I = []
-                    Q = []
-                    for i in zip(RFData[:, :, ::2], RFData[:, :, 1::2]):
-                        I.append(i[1])
-                        Q.append(i[0])
+                    I = RFData[:, :, np.arange(1, RFData.shape[2], 2)]
+                    Q = RFData[:, :, np.arange(0, RFData.shape[2], 2)]
 
-                    I = np.reshape(
-                        I, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
-                    Q = np.reshape(
-                        Q, (1, self.na_read, self.n_el, int(self.n_ax/2), 1))
+                    I = I.reshape((1, self.na_read, self.n_el, int(self.n_ax / 2), 1))
+                    Q = Q.reshape((1, self.na_read, self.n_el, int(self.n_ax / 2), 1))
 
                     IQ = np.concatenate([I, Q], axis=-1)
                     buffer.append(IQ)
@@ -381,26 +371,26 @@ class UltrasoundProcessingServer:
 
     def save(self):
         """Function that saves benchmark data to .mat file"""
+        if SAVING:
+            # difference of time_display list
+            displayInterFramePeriod = np.diff(self.time_display)
+            self.time_display = []
 
-        # difference of time_display list
-        displayInterFramePeriod = np.diff(self.time_display)
-        self.time_display = []
+            d = {
+                "displayIFP_na": displayInterFramePeriod,
+                "tBeamformerElapsedTime_na": self.beamformer_elapsed_time,
+                "tUpdateElapsedTime_na": self.update_elapsed_time,
+                "tReadPreProcessElapsedTime_na": self.read_preprocess_elapsed_time,
+            }
 
-        d = {
-            "displayIFP_na": displayInterFramePeriod,
-            "tBeamformerElapsedTime_na": self.beamformer_elapsed_time,
-            "tUpdateElapsedTime_na": self.update_elapsed_time,
-            "tReadPreProcessElapsedTime_na": self.read_preprocess_elapsed_time,
-        }
+            filename = (
+                f"L114v_na{int(self.na_transmit)}"
+                f"_proc{self.bf_type}"
+                f"_autotun{str(self.auto_update_intensity)}"
+                f"_pyt_{int(time.time())}.mat"
+            )
 
-        filename = (
-            f"L114v_na{int(self.na_transmit)}"
-            f"_proc{self.bf_type}"
-            f"_autotun{str(self.auto_update_intensity)}"
-            f"_pyt_{int(time.time())}.mat"
-        )
-
-        scipy.io.savemat(filename, mdict=d)
+            scipy.io.savemat(filename, mdict=d)
 
     def process_data(self, buffer, terminate_signal):
         """Function that handles data processing (e.g. beamforming)"""
@@ -408,8 +398,6 @@ class UltrasoundProcessingServer:
             logging.debug('start processing')
             try:
                 startTimeBF = time.perf_counter()
-
-                #t0 = time.perf_counter()
                 inputs = self.prepare_inputs(buffer)
 
                 if inputs:
@@ -429,7 +417,7 @@ class UltrasoundProcessingServer:
                     self.beamformer_elapsed_time.append(executionTimeBF)
             except:
                 buffer.clear()
-                time.sleep(0.001)  # wait for new data
+                time.sleep(0.0001)  # wait for new data
 
         buffer.clear()
 
@@ -471,6 +459,11 @@ class UltrasoundProcessingServer:
 
         logging.debug('Initialization completed')
 
+        # Set socket to non-blocking to allow application to perform other tasks while
+        # waiting for data
+        connection.setblocking(True)
+
+
         return connection
 
     def get_frame(self):
@@ -479,7 +472,7 @@ class UltrasoundProcessingServer:
             try:
                 yield self.encode_img(self.bf_display)
             except:
-                time.sleep(0.001)  # wait for new data
+                time.sleep(0.0001)  # wait for new data
                 return
 
     @staticmethod
@@ -575,11 +568,11 @@ class UltrasoundProcessingServer:
                 logging.debug(self.scan_converter.alpha)
 
             if request.form.get('slide_sos') is not None:
+                c_prev = self.c
                 self.c = float(request.form.get('slide_sos'))
 
                 # rescale grid
-                self.grid[:, :, 2] = self.grid[:, :, 2] * self.c/self.c_ref
-
+                self.grid[:, :, 2] = self.grid[:, :, 2] * self.c/c_prev
                 logging.debug(self.c)
 
             if request.form.get('slide_fs') is not None:
@@ -608,8 +601,9 @@ class UltrasoundProcessingServer:
                 logging.debug(self.source)
 
         time.sleep(0.2)
-
         self.terminate_signal.clear()  # Resume data processing
+
+
 
         return ('', 204)
 
