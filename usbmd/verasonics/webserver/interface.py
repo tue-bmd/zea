@@ -41,6 +41,7 @@ from usbmd.verasonics.webserver.control import PIDController
 
 SAVING = False
 
+
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
@@ -56,6 +57,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 # check input types, dummy data is currently different from real data and model needs to
 # recompile. Same holds for aux inputs.
+
 
 class UltrasoundProcessingServer:
     """ Class for handling ultrasound data processing and communication with the Verasonics"""
@@ -196,18 +198,17 @@ class UltrasoundProcessingServer:
             for symbol in symbols:
                 yield message + symbol
 
-
     @staticmethod
     def is_connection_open(connection):
         """Check if the given WebSocket connection is open."""
         return connection is not None and connection.fileno() != -1
 
-
     def start_processing(self):
         """Start the main processing loop."""
         print('Starting processing in background...')
         connection = None
-        waiting_for_connection = self.indicator('Waiting for connection to Verasonics ')
+        waiting_for_connection = self.indicator(
+            'Waiting for connection to Verasonics ')
 
         while not self.should_exit:
             # Try to establish connection if none exists
@@ -217,7 +218,8 @@ class UltrasoundProcessingServer:
                     connection = self.open_connection()
                     time.sleep(0.5)
                 except:
-                    img = cv2.imread('usbmd/verasonics/webserver/templates/nofeed.jpg')
+                    img = cv2.imread(
+                        'usbmd/verasonics/webserver/templates/nofeed.jpg')
                     self.bf_display = img
 
             # Process data if connection is open
@@ -225,9 +227,11 @@ class UltrasoundProcessingServer:
                 logging.debug('Entered the image formation loop.')
                 buffer = collections.deque([], maxlen=10)
                 with ThreadPoolExecutor() as executor:
-                    executor.submit(self.read_update, connection, buffer, self.terminate_signal)
-                    executor.submit(self.process_data, buffer, self.terminate_signal)
-                self.terminate_signal.clear()
+                    executor.submit(self.read_update, connection,
+                                    buffer, self.terminate_signal)
+                    executor.submit(self.process_data, buffer,
+                                    self.terminate_signal)
+                self.terminate_signal.clear()  # Reset the termination signal
 
         # Close connection if it exists
         if connection:
@@ -338,21 +342,16 @@ class UltrasoundProcessingServer:
                         total = total + len(data)
                         signal += data
 
-                    received_serial_data = np.frombuffer(signal, dtype=np.int16)
-                    received_reshaped_data = np.reshape(received_serial_data, (self.n_ax * self.na_read, self.n_el), order='F')
+                    received_serial_data = np.frombuffer(
+                        signal, dtype=np.int16)
+                    RF = received_serial_data.reshape(
+                        self.n_ax, self.na_read, self.n_el, order='F')
+                    RF = np.transpose(RF, (1, 2, 0))
+                    IQ = np.empty((1, self.na_read, self.n_el, self.n_ax//2, 2))
 
-                    RFData = np.array_split(received_reshaped_data, self.na_read)
-                    RFData = np.stack(RFData, axis=2)  # Nax, Nel, na_transmit
-                    RFData = np.transpose(RFData, (2, 1, 0))
-
-                    # FROM RF DATA TO IQ
-                    I = RFData[:, :, np.arange(1, RFData.shape[2], 2)]
-                    Q = RFData[:, :, np.arange(0, RFData.shape[2], 2)]
-
-                    I = I.reshape((1, self.na_read, self.n_el, int(self.n_ax / 2), 1))
-                    Q = Q.reshape((1, self.na_read, self.n_el, int(self.n_ax / 2), 1))
-
-                    IQ = np.concatenate([I, Q], axis=-1)
+                    # Extract I and Q componenets from RF
+                    IQ[:, :, :, :, 0] = RF[:, :, 1::2]
+                    IQ[:, :, :, :, 1] = RF[:, :, ::2]
                     buffer.append(IQ)
 
                     executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
@@ -367,6 +366,7 @@ class UltrasoundProcessingServer:
                 connection = None
                 buffer.clear()
 
+        terminate_signal.set()
         buffer.clear()  # clear buffer if while loop is terminated
 
     def save(self):
@@ -462,8 +462,7 @@ class UltrasoundProcessingServer:
 
         # Set socket to non-blocking to allow application to perform other tasks while
         # waiting for data
-        #connection.setblocking(False)
-
+        # connection.setblocking(False)
 
         return connection
 
@@ -600,11 +599,6 @@ class UltrasoundProcessingServer:
             if request.form.get('source') is not None:
                 self.source = request.form.get('source')
                 logging.debug(self.source)
-
-        time.sleep(0.2)
-        self.terminate_signal.clear()  # Resume data processing
-
-
 
         return ('', 204)
 
