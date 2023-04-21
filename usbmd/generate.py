@@ -19,7 +19,7 @@ from PIL import Image
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.processing import Process, to_8bit, _DATA_TYPES
+from usbmd.processing import _DATA_TYPES, Process, to_8bit
 from usbmd.utils.utils import update_dictionary
 
 
@@ -144,7 +144,8 @@ class GenerateDataSet:
         path = path.with_suffix(suffix)
         return path
 
-    def save_image(self, image, path):
+    @staticmethod
+    def save_image(image, path):
         """Save images to disk
 
         Args:
