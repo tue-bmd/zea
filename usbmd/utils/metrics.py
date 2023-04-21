@@ -114,6 +114,33 @@ def ncc(x, y):
     """Normalized cross correlation"""
     return (x * y).sum() / np.sqrt((x ** 2).sum() * (y ** 2).sum())
 
+@register_metric(name='image_entropy')
+def image_entropy(image):
+    """Calculate the entropy of the image
+
+    Args:
+        image (ndarray): The image for which the entropy is calculated
+
+    Returns:
+        float: The entropy of the image
+    """
+    marg = np.histogramdd(np.ravel(image), bins=256)[0] / image.size
+    marg = list(filter(lambda p: p > 0, np.ravel(marg)))
+    entropy = -np.sum(np.multiply(marg, np.log2(marg)))
+    return entropy
+
+@register_metric(name='image_sharpness')
+def image_sharpness(image):
+    """Calculate the sharpness of the image
+
+    Args:
+        image (ndarray): The image for which the sharpness is calculated
+
+    Returns:
+        float: The sharpness of the image
+    """
+    return np.mean(np.abs(np.gradient(image)))
+
 
 if __name__ == "__main__":
     x = np.random.rayleigh(2, (80, 50))

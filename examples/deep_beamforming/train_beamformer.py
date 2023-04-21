@@ -9,7 +9,8 @@ import numpy as np
 import tensorflow as tf
 
 from usbmd.common import set_data_paths
-from usbmd.probes import get_probe
+from usbmd.initialization import (get_probe_from_config,
+                                  initialize_scan_from_probe)
 from usbmd.processing import Process
 # make sure you have Pip installed usbmd (see README)
 from usbmd.tensorflow_ultrasound.dataloader import UltrasoundLoader
@@ -17,7 +18,6 @@ from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
-from usbmd.utils.pixelgrid import get_grid
 
 
 def train(config, dataset_directory):
@@ -25,8 +25,9 @@ def train(config, dataset_directory):
 
     # Initialization
     # Load the probe and grid based on config
-    probe = get_probe(config)
-    grid = get_grid(config, probe)
+    probe = get_probe_from_config(config)
+    scan = initialize_scan_from_probe(probe)
+    grid = scan.grid
 
     # Set number of channels (RF/IQ)
     # This will be added to the probe class later on
@@ -39,10 +40,7 @@ def train(config, dataset_directory):
 
     # Create the beamforming model
     # A grid is added as "auxiallary input" such that we can train on different grid patches
-    model = create_beamformer(probe,
-                              grid,
-                              config,
-                              aux_inputs=['grid'])
+    model = create_beamformer(probe, scan, config, aux_inputs=['grid'])
 
     model.summary()
 
@@ -69,7 +67,7 @@ def train(config, dataset_directory):
         output_types=((tf.float32, tf.float32), tf.float32),
         output_shapes=((tf.TensorShape(model.inputs[0].shape[1:]),
                         tf.TensorShape(model.inputs[1].shape[1:])),
-                       tf.TensorShape(model.outputs[0].shape[1:]))
+                        tf.TensorShape(model.outputs[0].shape[1:]))
     ).batch(config.model.batch_size)
 
     # Train the model
@@ -82,15 +80,14 @@ def train(config, dataset_directory):
               verbose=1)
 
     # Inference
-
-    test_ix = 2
+    test_idx = 2
 
     # Create full-image inference model, no aux grid input needed here
     config.model.patch_shape = (grid.shape[0], grid.shape[1])
     infer_model = create_beamformer(probe, grid, config)
     infer_model.set_weights(model.get_weights())
     y_pred = infer_model(
-        [np.expand_dims(x_test[test_ix], 0), np.expand_dims(grid, 0)])
+        [np.expand_dims(x_test[test_idx], 0), np.expand_dims(grid, 0)])
 
     # Convert to images
     proc = Process(None, probe=probe)
@@ -98,7 +95,7 @@ def train(config, dataset_directory):
     y_pred_img = proc.run(y_pred['beamformed'][0].numpy(),
                           dtype='envelope_data', to_dtype='image')
     y_test_img = proc.run(
-        y_test[test_ix], dtype='envelope_data', to_dtype='image')
+        y_test[test_idx], dtype='envelope_data', to_dtype='image')
 
     # Show an example of the test data
     aspect = (grid.shape[1]/grid.shape[0])/(np.diff(config.scan.xlims)/np.diff(config.scan.zlims))
@@ -122,7 +119,7 @@ if __name__ == '__main__':
     path_to_config_file = Path.cwd() / 'examples/deep_beamforming/example_config_nMAP.yaml'
     config = setup(path_to_config_file)
 
-    data_root = set_data_paths(config.data.local)['data_root']
+    data_root = set_data_paths(local=config.data.local)['data_root']
     dataset_directory = data_root / config.data.dataset
 
     model = train(config, dataset_directory)

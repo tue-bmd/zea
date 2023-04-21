@@ -9,7 +9,7 @@ import numpy as np
 
 
 class FPS_counter():
-    """ An FPS counter class that overlays a frames-per-second count on an image stream"""
+    """An FPS counter class that overlays a frames-per-second count on an image stream"""
 
     def __init__(self, buffer_size = 30):
         """_summary_
@@ -35,7 +35,7 @@ class FPS_counter():
 class Scan_converter():
     """Class that handles visualization of ultrasound images"""
     def __init__(self, norm_mode='max', env_mode = 'abs', buffer_size = 30, norm_factor=2**14):
-        """_summary_
+        """Scan convert class. TODO: update with usbmd funcs.
 
         Args:
             norm_mode (str, optional): Normalization mode ('max', 'smoothnormal', 'fixed').

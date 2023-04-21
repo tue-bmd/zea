@@ -1,0 +1,22 @@
+matplotlib
+numpy
+scipy
+pillow
+scikit-image
+scikit-learn
+h5py
+pandas
+opencv-python
+schema
+tqdm
+pyyaml
+decorator
+
+tensorflow-gpu<2.11
+--extra-index-url https://download.pytorch.org/whl/cu117
+torch
+torchvision
+torchaudio
+
+pylint
+pytest
