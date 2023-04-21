@@ -19,9 +19,9 @@ from PIL import Image
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.scan import Scan
-from usbmd.processing import Process
-
+from usbmd.processing import _DATA_TYPES, Process, to_8bit
+from usbmd.utils.utils import update_dictionary
+from usbmd.utils.config import Config
 
 class GenerateDataSet:
     """Class for generating and saving ultrasound dataset to disk."""
@@ -32,6 +32,7 @@ class GenerateDataSet:
         destination_folder: str=None,
         retain_folder_structure: bool=True,
         filetype: str='hdf5',
+        overwrite: bool=False,
     ):
         """
         Args:
@@ -45,10 +46,13 @@ class GenerateDataSet:
             retain_folder_structure (bool, optional): Whether to exactly copy
                 the folder structure of the original dataset or put all output
                 files in one folder. Defaults to True.
+            overwrite (bool, optional): Whether to overwrite existing files.
 
         """
-        self.config = config
+        self.config = Config(config)
         self.to_dtype = to_dtype
+        assert self.to_dtype in _DATA_TYPES, \
+            ValueError(f'Unsupported dtype: {self.to_dtype}.')
         self.retain_folder_structure = retain_folder_structure
         self.filetype = filetype
         assert self.filetype in ['hdf5', 'png'], \
@@ -64,13 +68,22 @@ class GenerateDataSet:
         self.dataset = get_dataset(self.config.data)
 
         # Initialize scan based on dataset
-        self.scan = Scan(**self.dataset.get_default_scan_parameters())
+        scan_class = self.dataset.get_scan_class()
+        default_scan_params = self.dataset.get_default_scan_parameters()
+        config_scan_params = self.config.scan
+
+        # dict merging of manual config and dataset default scan parameters
+        scan_params = update_dictionary(default_scan_params, config_scan_params)
+        self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
 
         # intialize process class
         self.process = Process(config, self.scan, self.probe)
+
+        if self.dataset.datafolder is None:
+            self.dataset.datafolder = Path('.')
 
         if destination_folder is None:
             self.destination_folder = self.dataset.datafolder.parent / \
@@ -81,9 +94,10 @@ class GenerateDataSet:
                 self.destination_folder = self.dataset.datafolder.parent / self.destination_folder
 
         if self.destination_folder.exists():
-            raise ValueError(
-                f'Cannot create dataset in {self.destination_folder}, folder already exists!'
-            )
+            if not overwrite:
+                raise ValueError(
+                    f'Cannot create dataset in {self.destination_folder}, folder already exists!'
+                )
 
     def generate(self):
         """Generate the dataset."""
@@ -92,6 +106,8 @@ class GenerateDataSet:
             desc=f'Generating dataset ({self.to_dtype}, {self.filetype})',
         ):
             data = self.dataset[idx]
+            data = np.squeeze(data)
+
             if len(data.shape) == 2:
                 data = np.expand_dims(data, axis=0)
                 single_frame = True
@@ -136,14 +152,15 @@ class GenerateDataSet:
         path = path.with_suffix(suffix)
         return path
 
-    def save_image(self, image, path):
+    @staticmethod
+    def save_image(image, path):
         """Save images to disk
 
         Args:
             image (ndarray): input image
             path (str): file path
         """
-        image = self.process.to_8bit(image)
+        image = to_8bit(image)
         image = Image.fromarray(image)
         image.save(path)
 

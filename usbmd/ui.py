@@ -28,7 +28,8 @@ from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.processing import _DATA_TYPES, Process, get_contrast_boost_func
+from usbmd.processing import (_DATA_TYPES, Process, get_contrast_boost_func,
+                              threshold_signal)
 from usbmd.utils.config import Config, load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
@@ -47,7 +48,7 @@ class DataLoaderUI:
     """
 
     def __init__(self, config=None, verbose=True):
-        self.config = config
+        self.config = Config(config)
         self.verbose = verbose
 
         # intialize dataset
@@ -60,7 +61,7 @@ class DataLoaderUI:
 
         # dict merging of manual config and dataset default scan parameters
         scan_params = update_dictionary(default_scan_params, config_scan_params)
-        self.scan = scan_class(**scan_params)
+        self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -136,6 +137,8 @@ class DataLoaderUI:
 
         Using either file specified in config or if None, the ui window.
 
+        Returns:
+            data (np.ndarray): data array of shape (N_tx, N_el, N_ax, N_ch)
         """
         if self.config.data.file_path:
             path = Path(self.config.data.file_path)
@@ -171,7 +174,7 @@ class DataLoaderUI:
 
     def postprocess(self, image):
         """Post processing in image domain."""
-        if not 'postprocess' in self.config:
+        if 'postprocess' not in self.config:
             return image
 
         if self.config.postprocess.contrast_boost is not None:
@@ -183,6 +186,9 @@ class DataLoaderUI:
             noise = self.process.run(self.data, dtype=self.config.data.dtype)
             self.config.data.apodization = apodization
             image = self.contrast_boost(image, noise, **self.config.postprocess.contrast_boost)
+
+        if self.config.postprocess.thresholding is not None:
+            image = threshold_signal(image, **self.config.postprocess.thresholding)
 
         return image
 
@@ -447,8 +453,8 @@ def get_args():
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
-    set_data_paths()
     config = setup(file=args.config)
+    config.data.user = set_data_paths(local=config.data.local)
 
     if args.task == 'run':
         ui = DataLoaderUI(config)
