@@ -47,9 +47,9 @@ def debugger_is_active() -> bool:
 
 
 # Set logger
-if debugger_is_active():
-    logging.basicConfig(level=logging.DEBUG)
-
+# if debugger_is_active():
+#     logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 
 # TODO use batch dimension to process multiple PW angles such that we can dynamically change
 # the number of PW angles
@@ -224,7 +224,7 @@ class UltrasoundProcessingServer:
             if self.is_connection_open(connection) or self.source == 'dummy':
                 logging.debug('Entered the image formation loop.')
                 buffer = collections.deque([], maxlen=10)
-                with ThreadPoolExecutor(2) as executor:
+                with ThreadPoolExecutor() as executor:
                     executor.submit(self.read_update, connection, buffer, self.terminate_signal)
                     executor.submit(self.process_data, buffer, self.terminate_signal)
                 self.terminate_signal.clear()
@@ -396,6 +396,7 @@ class UltrasoundProcessingServer:
         """Function that handles data processing (e.g. beamforming)"""
         while not terminate_signal.is_set():
             logging.debug('start processing')
+            time.sleep(0.)
             try:
                 startTimeBF = time.perf_counter()
                 inputs = self.prepare_inputs(buffer)
@@ -461,7 +462,7 @@ class UltrasoundProcessingServer:
 
         # Set socket to non-blocking to allow application to perform other tasks while
         # waiting for data
-        connection.setblocking(True)
+        #connection.setblocking(False)
 
 
         return connection
