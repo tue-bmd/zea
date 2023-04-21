@@ -174,7 +174,7 @@ class DataLoaderUI:
 
     def postprocess(self, image):
         """Post processing in image domain."""
-        if not 'postprocess' in self.config:
+        if 'postprocess' not in self.config:
             return image
 
         if self.config.postprocess.contrast_boost is not None:
