@@ -75,9 +75,11 @@ class ScanConverter():
         self.Nz = self.grid.shape[0]
         self.width = self.grid[:,:,0].max()-self.grid[:,:,0].min()
         self.height = self.grid[:,:,2].max()-self.grid[:,:,2].min()
-        self.scale = 500/self.Nx # viewport width divided by number of horizontal pixels
         self.aspect_ratio = self.width/self.height
         self.aspect_scaling_x = self.aspect_ratio/(self.Nx/self.Nz)
+
+        # viewport width divided by number of horizontal pixels after aspect scaling
+        self.scale = 500/(self.Nx*self.aspect_scaling_x)
 
 
     def convert(self, img):
@@ -99,8 +101,8 @@ class ScanConverter():
         img = cv2.resize(
             img,
             dsize=(
-                int(self.scale * self.Nz),
-                int(self.scale * self.Nx * self.aspect_scaling_x)
+                int(self.scale * self.Nx * self.aspect_scaling_x),
+                int(self.scale * self.Nz)
             )
         )
         return img
@@ -216,7 +218,7 @@ class ScanConverterTF(ScanConverter):
             img,
             size=(
                 int(self.scale * self.Nz),
-                int(self.scale * self.Nx * self.aspect_scaling_x)
+                int(self.scale * self.Nx  * self.aspect_scaling_x)
             )
         )
         img = tf.squeeze(img, axis=-1)
