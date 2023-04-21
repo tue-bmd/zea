@@ -20,7 +20,13 @@ def get_grid(scan):
         wvln = scan.c / scan.fc
         dx = wvln / scan.pixels_per_wavelength
         dz = dx
-        return make_pixel_grid(xlims, zlims, dx, dz)
+
+        grid = make_pixel_grid(xlims, zlims, dx, dz)
+        print(
+            f"""Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]},
+            using {scan.pixels_per_wavelength} pixels per wavelength. \n"""
+        )
+        return grid
 
 
 def make_pixel_grid(xlims, zlims, dx, dz):
