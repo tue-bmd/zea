@@ -119,7 +119,7 @@ if __name__ == '__main__':
     path_to_config_file = Path.cwd() / 'examples/deep_beamforming/example_config_nMAP.yaml'
     config = setup(path_to_config_file)
 
-    data_root = set_data_paths(config.data.local)['data_root']
+    data_root = set_data_paths(local=config.data.local)['data_root']
     dataset_directory = data_root / config.data.dataset
 
     model = train(config, dataset_directory)

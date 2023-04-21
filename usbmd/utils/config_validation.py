@@ -30,7 +30,7 @@ percentage = And(any_number, lambda f: 0 <= f <= 100)
 # model
 model_schema = Schema({
     Optional("batch_size", default=8): positive_integer,
-    Optional("patch_shape", default=8): list_of_size_two,
+    Optional("patch_shape", default=None): Or(None, list_of_size_two),
     Optional("beamformer", default=None): {
         "type": Or(None, *_BEAMFORMER_TYPES),
         Optional("folds", default=None): positive_integer,
@@ -102,6 +102,7 @@ config_schema = Schema({
         Optional("apodization", default=None): Or(None, str),
         Optional("modtype", default=None): Or(*_MOD_TYPES),
         Optional("from_modtype", default=None): Or(*_MOD_TYPES),
+        Optional("user", default=None): dict,
     },
     "plot": {
         "save": bool,
