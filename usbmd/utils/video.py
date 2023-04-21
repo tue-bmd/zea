@@ -8,9 +8,11 @@ from time import perf_counter
 import cv2
 import numpy as np
 
+import tensorflow as tf
+
 
 class FPS_counter():
-    """An FPS counter class that overlays a frames-per-second count on an image stream"""
+    """ An FPS counter class that overlays a frames-per-second count on an image stream"""
 
     def __init__(self, buffer_size = 30):
         """_summary_
@@ -32,11 +34,12 @@ class FPS_counter():
         cv2.putText(img, f'{fps:.1f}', (7, 70), self.font, 1, (100, 255, 0), 3, cv2.LINE_AA)
         return img
 
-#TODO: This class is currently used during streaming, but will be replaced with USBMD functions.
-class Scan_converter():
+
+class ScanConverter():
     """Class that handles visualization of ultrasound images"""
     def __init__(
             self,
+            grid,
             norm_mode='max',
             env_mode = 'abs',
             img_buffer_size = 30,
@@ -59,23 +62,47 @@ class Scan_converter():
         self.norm_factor = norm_factor
         self.img_buffer = deque(maxlen=img_buffer_size)
         self.max_buffer = deque(maxlen=max_buffer_size)
+        self.dynamic_range = 60
 
         self.persistence_mode = 'MA'
         self.n_persistence = 1 # Number of frames to average over for MA persistence
         self.alpha = 0.5 # AR persistance parameter
+
+
+        # Scaling settings
+        self.grid = grid
+        self.Nx = self.grid.shape[1]
+        self.Nz = self.grid.shape[0]
+        self.width = self.grid[:,:,0].max()-self.grid[:,:,0].min()
+        self.height = self.grid[:,:,2].max()-self.grid[:,:,2].min()
+        self.scale = 500/self.Nx # viewport width divided by number of horizontal pixels
+        self.aspect_ratio = self.width/self.height
+        self.aspect_scaling_x = self.aspect_ratio/(self.Nx/self.Nz)
+
 
     def convert(self, img):
         """Conversion function that applies all transformations"""
         img = self.envelope(img)
         img = self.normalize(img)
         img = self.compression(img)
-
         img = self.remove_nan_and_inf(img)
-        img = self.persistence(img)
-
+        #img = self.resize(img)
+        #img = self.persistence(img)
         img = np.clip(img, -60, 0)
         img = ((img + 60)*(255/60)).astype('uint8')
 
+        return img
+
+
+    def resize(self, img):
+        """Function that resizes the image"""
+        img = cv2.resize(
+            img,
+            dsize=(
+                int(self.scale * self.Nz),
+                int(self.scale * self.Nx * self.aspect_scaling_x)
+            )
+        )
         return img
 
     def persistence(self, img):
@@ -96,7 +123,7 @@ class Scan_converter():
         else:
             img = self.img_buffer[0]
         return img
-    
+
     def persistence_AR(self, img):
         """Function that applies autoregressive persistence to the image"""
         img = (1-self.alpha)*img + (self.alpha)*self.img_buffer[0]
@@ -120,15 +147,15 @@ class Scan_converter():
         return img
 
     @staticmethod
-    def envelope(data):
+    def envelope(img):
         """Envelope detection"""
-        env = np.abs(data)
+        env = np.abs(img)
         return env
 
     @staticmethod
-    def compression(data):
+    def compression(img):
         """Logarithmic compression"""
-        return 20*np.log10(data)
+        return 20*np.log10(img)
 
     def set_value(self, key, val):
         """Function for setting parameters"""
@@ -148,7 +175,7 @@ class Scan_converter():
         """Function for applying a color map"""
         img = cv2.applyColorMap(img, cmap)
         return img
-    
+
     def resize_deque_buffer(self, old_buffer_name, new_buffer_size):
         """Function for resizing a deque buffer"""
         old_buffer = getattr(self, old_buffer_name)
@@ -158,9 +185,73 @@ class Scan_converter():
             new_buffer.append(old_buffer[i])
         setattr(self, old_buffer_name, new_buffer)
 
+    def remove_nan_and_inf(self, img):
+        """Function for removing nan and inf values"""
+        img[np.isnan(img)] = -self.dynamic_range
+        img[np.isinf(img)] = -self.dynamic_range
+        return img
+
+
+class ScanConverterTF(ScanConverter):
+    """ScanConverter class for converting raw data to images using tensorflow"""
+
+    #@tf.function(jit_compile=True)
+    def convert(self, img):
+        """Conversion function that applies all transformations"""
+        img = self.envelope(img)
+        img = self.normalize(img)
+        img = self.compression(img)
+        img = self.remove_nan_and_inf(img)
+        img = self.resize(img)
+        #img = self.persistence(img)
+        img = tf.clip_by_value(img, -self.dynamic_range, 0)
+        img = tf.cast((img + self.dynamic_range)*(255./self.dynamic_range), tf.uint8)
+
+        return img
+
+    def resize(self, img):
+        """Function that resizes the image"""
+        img = tf.expand_dims(img, axis=-1)
+        img = tf.image.resize(
+            img,
+            size=(
+                int(self.scale * self.Nz),
+                int(self.scale * self.Nx * self.aspect_scaling_x)
+            )
+        )
+        img = tf.squeeze(img, axis=-1)
+        return img
+
     @staticmethod
     def remove_nan_and_inf(img):
         """Function for removing nan and inf values"""
-        img[np.isnan(img)] = -60
-        img[np.isinf(img)] = -60
+        img = tf.where(tf.math.is_nan(img), -60., img)
+        img = tf.where(tf.math.is_inf(img), -60., img)
+        return img
+
+    @staticmethod
+    def compression(img):
+        """Logarithmic compression"""
+        return 20*tf.math.log(img)/tf.math.log(10.)
+
+    @staticmethod
+    def envelope(img):
+        """Envelope detection"""
+        env = tf.abs(img)
+        return env
+
+    def normalize(self, img):
+        "Normalization function"
+        max_val = tf.reduce_max(img)
+        self.max_buffer.append(max_val)
+
+        if self.norm_mode == 'normal':
+            img = img/max_val
+        elif self.norm_mode == 'smoothnormal':
+            img = img/tf.reduce_mean(list(self.max_buffer))
+        elif self.norm_mode == 'fixed':
+            img = img/self.norm_factor
+        else:
+            img = img/max_val
+
         return img
