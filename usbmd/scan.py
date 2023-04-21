@@ -96,6 +96,8 @@ class Scan:
         self.z_axis = np.linspace(*self.zlims, N_ax)
 
         self.grid = get_grid(self)
+        self.Nx = self.grid.shape[0] if not self.Nx else self.Nx
+        self.Nz = self.grid.shape[1] if not self.Nz else self.Nz
 
     def get_time_zero(self, element_positions, c=1540, offset=0):
         """Returns an ndarray with the delay between the first element firing
