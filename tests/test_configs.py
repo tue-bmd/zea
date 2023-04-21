@@ -1,17 +1,17 @@
 """Test configs"""
+import shutil
 import sys
 from pathlib import Path
-import shutil
-from schema import SchemaError
+
 import pytest
 import yaml
-
+from schema import SchemaError
 
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from usbmd.utils.config_validation import config_schema
 from usbmd.utils.config import Config, load_config_from_yaml
+from usbmd.utils.config_validation import config_schema
 
 # Define some dictionaries to test the Config class
 simple_dict = {

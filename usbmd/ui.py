@@ -48,7 +48,7 @@ class DataLoaderUI:
     """
 
     def __init__(self, config=None, verbose=True):
-        self.config = config
+        self.config = Config(config)
         self.verbose = verbose
 
         # intialize dataset
@@ -174,7 +174,7 @@ class DataLoaderUI:
 
     def postprocess(self, image):
         """Post processing in image domain."""
-        if not 'postprocess' in self.config:
+        if 'postprocess' not in self.config:
             return image
 
         if self.config.postprocess.contrast_boost is not None:
@@ -453,8 +453,8 @@ def get_args():
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
-    set_data_paths()
     config = setup(file=args.config)
+    config.data.user = set_data_paths(local=config.data.local)
 
     if args.task == 'run':
         ui = DataLoaderUI(config)
