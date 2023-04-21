@@ -23,8 +23,8 @@ def get_grid(scan):
 
         grid = make_pixel_grid(xlims, zlims, dx, dz)
         print(
-            f"""Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]},
-            using {scan.pixels_per_wavelength} pixels per wavelength. \n"""
+            f'Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, '
+            f'using {scan.pixels_per_wavelength} pixels per wavelength.'
         )
         return grid
 

@@ -459,11 +459,6 @@ class UltrasoundProcessingServer:
         connection.sendall(ack_bytes)
 
         logging.debug('Initialization completed')
-
-        # Set socket to non-blocking to allow application to perform other tasks while
-        # waiting for data
-        # connection.setblocking(False)
-
         return connection
 
     def get_frame(self):
