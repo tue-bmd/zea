@@ -14,12 +14,12 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 ## Quick setup
 #### usbmd installation
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](setup.html) file is located and run the following command from terminal:
+Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](../../setup.py) file is located and run the following command from terminal:
 ```bash
 python -m pip install -e .
 ```
  For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide).
- Alternatively, you can [run this code via Docker](#running-the-code-with-docker) using included [Dockerfile](Dockerfile.html).
+ Alternatively, you can [run this code via Docker](#running-the-code-with-docker) using included [Dockerfile](../../Dockerfile).
 
 #### usbmd import
 You can use the package as follows in your own project:
@@ -33,7 +33,7 @@ from usbmd import pytorch_ultrasound as usbmd_torch
 ```
 
 #### Getting started
-In order to get started with usbmd stand-alone, you can run [`ui.py`](ui.html), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
+In order to get started with usbmd stand-alone, you can run [`ui.py`](ui.html), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](../../configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
 
 ```bash
 python ui.py --config configs/config_picmus.yaml
@@ -86,7 +86,7 @@ The following terminology is used in the code when referring to different data t
 - `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
 
 ## How to use with Verasonics
-Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](datasets.html), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](ui.html) script and select your newly generated datafile to visualize the data.
+Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](../../usbmd/verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](datasets.html), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](ui.html) script and select your newly generated datafile to visualize the data.
 
 ## Detailed installation guide
 Recommended is to run in an anaconda environment.
@@ -108,15 +108,15 @@ The -e option stands for editable, which is important because it allows you to c
 
 ## Running the code with Docker
 
-This package also includes a [Dockerfile](Dockerfile.html) that you can use to run the code in a containerized environment. 
+This package also includes a [Dockerfile](Dockerfile.html) that you can use to run the code in a containerized environment.
 
 1. Install Docker on your machine. You can download Docker from the official website: https://www.docker.com/get-started.
 
-If you are using VSCode, you can use the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension. This extension will automatically build and run the Docker container for you. You can start the docker container via [ctrl+shift+p] --> [Dev Containers: Reopen in container]. Similarly, you can close the session via [ctrl+shift+p] --> [Dev Containers: Reopen folder locally]. 
+If you are using VSCode, you can use the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension. This extension will automatically build and run the Docker container for you. You can start the docker container via [ctrl+shift+p] --> [Dev Containers: Reopen in container]. Similarly, you can close the session via [ctrl+shift+p] --> [Dev Containers: Reopen folder locally].
 
 If you are not using VSCode, you can follow the steps below to run the code in a Docker container:
 
-2. Build the Docker image by running the following command from the root folder 
+2. Build the Docker image by running the following command from the root folder
 
 ```
 docker build -t ultrasound-bmd .
@@ -149,7 +149,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 ```
 
 ## How to contribute
-Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) on guidelines to contribute to this repository.
+Please see [`CONTRIBUTING.md`](../CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 ```bash
 pip install pylint
