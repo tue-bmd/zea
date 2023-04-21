@@ -21,7 +21,7 @@ from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import _DATA_TYPES, Process, to_8bit
 from usbmd.utils.utils import update_dictionary
-
+from usbmd.utils.config import Config
 
 class GenerateDataSet:
     """Class for generating and saving ultrasound dataset to disk."""
@@ -32,6 +32,7 @@ class GenerateDataSet:
         destination_folder: str=None,
         retain_folder_structure: bool=True,
         filetype: str='hdf5',
+        overwrite: bool=False,
     ):
         """
         Args:
@@ -45,9 +46,10 @@ class GenerateDataSet:
             retain_folder_structure (bool, optional): Whether to exactly copy
                 the folder structure of the original dataset or put all output
                 files in one folder. Defaults to True.
+            overwrite (bool, optional): Whether to overwrite existing files.
 
         """
-        self.config = config
+        self.config = Config(config)
         self.to_dtype = to_dtype
         assert self.to_dtype in _DATA_TYPES, \
             ValueError(f'Unsupported dtype: {self.to_dtype}.')
@@ -80,6 +82,9 @@ class GenerateDataSet:
         # intialize process class
         self.process = Process(config, self.scan, self.probe)
 
+        if self.dataset.datafolder is None:
+            self.dataset.datafolder = Path('.')
+
         if destination_folder is None:
             self.destination_folder = self.dataset.datafolder.parent / \
                 f'{self.dataset.config.dataset_name}_image'
@@ -89,9 +94,10 @@ class GenerateDataSet:
                 self.destination_folder = self.dataset.datafolder.parent / self.destination_folder
 
         if self.destination_folder.exists():
-            raise ValueError(
-                f'Cannot create dataset in {self.destination_folder}, folder already exists!'
-            )
+            if not overwrite:
+                raise ValueError(
+                    f'Cannot create dataset in {self.destination_folder}, folder already exists!'
+                )
 
     def generate(self):
         """Generate the dataset."""
@@ -100,6 +106,8 @@ class GenerateDataSet:
             desc=f'Generating dataset ({self.to_dtype}, {self.filetype})',
         ):
             data = self.dataset[idx]
+            data = np.squeeze(data)
+
             if len(data.shape) == 2:
                 data = np.expand_dims(data, axis=0)
                 single_frame = True
