@@ -1,1 +1,1 @@
-Ultrasound-BMd (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the [`usbmd/README.md`](usbmd/README.md) or the documentation.
+Ultrasound-BMd (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the documentation by opening [index.html](docs/usbmd/index.html) locally in your browser.
