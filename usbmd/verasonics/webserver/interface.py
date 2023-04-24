@@ -1,19 +1,24 @@
 
-# -*- coding: utf-8 -*-
-"""
-TCP
+""" Server module for handling cloud based ultrasound data processing and communication with the
+Verasonics Vantage system. This module contains:
 
-Receive Raw Data From Verasonics
-    format: int16
-    width: depends on probe (e.g. L11 4v has 128 channels)
-    height: depends on sample mode (e.g. BS100BW provides 4096/2 samples per acquisition)
+- a Flask server that hostst a web application which can be used to visualize the
+processed data and send commands to the Verasonics system.
+- a class for handling ultrasound data processing and communication with the Verasonics system.
 
-Return intensity parameter AND na_transmit as soon as data are received
-    format: 2 elements as double
+Usage:
+- Start the server by running this module as a script. The webserver will be started on port 5000
+of the host machine. The web application can be accessed locally via localhost:5000 or externally
+via the external IP address of the host machine (e.g. 131.155.125.231:5000)
+-On the Verasonics machine, run the setup script and start the modified VSX script, VSX_demo.m.
+- By default the server will start listening on port 30000 for incoming data from the Verasonics.
+Alternatively, one can select to generate dummy data (random noise) by selecting the 'Dummy data'
+option in the web application. This can be helpfull for testing the web application without having
+access to the Verasonics system.
+- The configuration of the server is currently hard coded in the demo_setup.py module. This includes
+the probe settings and beamforming parameters.
 
-Return Beamformed image to flask/webAPP
-    format:JPEG
-
+Authors: Beatrice Federici, Ben Luijten
 """
 
 import array
@@ -45,9 +50,6 @@ def debugger_is_active() -> bool:
 #Set logger
 if debugger_is_active():
     logging.basicConfig(level=logging.DEBUG)
-
-# TODO use batch dimension to process multiple PW angles such that we can dynamically change
-# the number of PW angles
 
 class UltrasoundProcessingServer:
     """ Class for handling ultrasound data processing and communication with the Verasonics"""
