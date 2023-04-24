@@ -480,7 +480,7 @@ class UltrasoundProcessingServer:
                 IQ = inputs['data']
                 #IQ = inputs
                 ix = int(np.floor(IQ.shape[1]/2))
-                return tf.transpose(IQ[:, ix, :, :, 0], perm=(0, 2, 1))
+                return tf.transpose(IQ[:, ix, :, :, :], perm=(0, 2, 1, 3))
             model = return_IQ
         if bf_type == 'DAS':
             key = 'DAS_' + str(na_transmit) + 'PW'
