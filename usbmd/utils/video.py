@@ -153,10 +153,9 @@ class ScanConverter():
     def envelope(self, img):
         """Envelope detection"""
         if self.dtype == 'iq':
-            img = np.linalg.norm(img, axis=-1)
+            return np.linalg.norm(img, axis=-1)
         else:
             raise NotImplementedError
-        return env
 
     @staticmethod
     def compression(img):
