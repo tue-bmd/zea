@@ -14,7 +14,7 @@ import tensorflow as tf
 class FPS_counter():
     """ An FPS counter class that overlays a frames-per-second count on an image stream"""
 
-    def __init__(self, buffer_size = 30):
+    def __init__(self, buffer_size=30):
         """_summary_
 
         Args:
@@ -31,19 +31,21 @@ class FPS_counter():
         self.time_buffer = self.time_buffer[-self.buffer_size::]
         fps = 1/np.mean(np.diff(self.time_buffer))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        cv2.putText(img, f'{fps:.1f}', (7, 70), self.font, 1, (100, 255, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, f'{fps:.1f}', (7, 70), self.font,
+                    1, (100, 255, 0), 3, cv2.LINE_AA)
         return img
 
 
 class ScanConverter():
     """Class that handles visualization of ultrasound images"""
+
     def __init__(
             self,
             grid,
             norm_mode='max',
-            env_mode = 'abs',
-            img_buffer_size = 30,
-            max_buffer_size = 10,
+            env_mode='abs',
+            img_buffer_size=30,
+            max_buffer_size=10,
             norm_factor=2**14):
         """_summary_
 
@@ -65,22 +67,20 @@ class ScanConverter():
         self.dynamic_range = 60
 
         self.persistence_mode = 'MA'
-        self.n_persistence = 1 # Number of frames to average over for MA persistence
-        self.alpha = 0.5 # AR persistance parameter
-
+        self.n_persistence = 1  # Number of frames to average over for MA persistence
+        self.alpha = 0.5  # AR persistance parameter
 
         # Scaling settings
         self.grid = grid
         self.Nx = self.grid.shape[1]
         self.Nz = self.grid.shape[0]
-        self.width = self.grid[:,:,0].max()-self.grid[:,:,0].min()
-        self.height = self.grid[:,:,2].max()-self.grid[:,:,2].min()
+        self.width = self.grid[:, :, 0].max()-self.grid[:, :, 0].min()
+        self.height = self.grid[:, :, 2].max()-self.grid[:, :, 2].min()
         self.aspect_ratio = self.width/self.height
         self.aspect_scaling_x = self.aspect_ratio/(self.Nx/self.Nz)
 
         # viewport width divided by number of horizontal pixels after aspect scaling
         self.scale = 500/(self.Nx*self.aspect_scaling_x)
-
 
     def convert(self, img):
         """Conversion function that applies all transformations"""
@@ -94,7 +94,6 @@ class ScanConverter():
         img = ((img + 60)*(255/60)).astype('uint8')
 
         return img
-
 
     def resize(self, img):
         """Function that resizes the image"""
@@ -121,7 +120,8 @@ class ScanConverter():
         """Function that applies moving average persistence to the image"""
         if self.n_persistence > 1:
             max_index = np.minimum(len(self.img_buffer), self.n_persistence)
-            img = np.mean(np.array([self.img_buffer[i] for i in range(max_index)]), axis=0)
+            img = np.mean(np.array([self.img_buffer[i]
+                          for i in range(max_index)]), axis=0)
         else:
             img = self.img_buffer[0]
         return img
@@ -163,17 +163,20 @@ class ScanConverter():
         """Function for setting parameters"""
         setattr(self, key, val)
 
-    def apply_contrast_curve(self, img, curve):
+    @staticmethod
+    def apply_contrast_curve(img, curve):
         """Function for applying a contrast curve"""
         img = np.interp(img, (0, 255), curve)
         return img
 
-    def apply_gamma(self, img, gamma):
+    @staticmethod
+    def apply_gamma(img, gamma):
         """Function for applying gamma correction"""
         img = np.power(img/255, gamma)*255
         return img
 
-    def apply_color_map(self, img, cmap):
+    @staticmethod
+    def apply_color_map(img, cmap):
         """Function for applying a color map"""
         img = cv2.applyColorMap(img, cmap)
         return img
@@ -197,7 +200,7 @@ class ScanConverter():
 class ScanConverterTF(ScanConverter):
     """ScanConverter class for converting raw data to images using tensorflow"""
 
-    #@tf.function(jit_compile=True)
+    # @tf.function(jit_compile=True)
     def convert(self, img):
         """Conversion function that applies all transformations"""
         img = self.envelope(img)
@@ -207,7 +210,8 @@ class ScanConverterTF(ScanConverter):
         img = self.resize(img)
         #img = self.persistence(img)
         img = tf.clip_by_value(img, -self.dynamic_range, 0)
-        img = tf.cast((img + self.dynamic_range)*(255./self.dynamic_range), tf.uint8)
+        img = tf.cast((img + self.dynamic_range) *
+                      (255./self.dynamic_range), tf.uint8)
 
         return img
 
@@ -218,7 +222,7 @@ class ScanConverterTF(ScanConverter):
             img,
             size=(
                 int(self.scale * self.Nz),
-                int(self.scale * self.Nx  * self.aspect_scaling_x)
+                int(self.scale * self.Nx * self.aspect_scaling_x)
             )
         )
         img = tf.squeeze(img, axis=-1)
