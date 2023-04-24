@@ -21,6 +21,9 @@ the probe settings and beamforming parameters.
 Authors: Beatrice Federici, Ben Luijten
 """
 
+print('!!!!!!!!!! ADD FRAME ID !!!!!!!!!!!!!!!')
+
+
 import array
 import collections
 import logging
@@ -40,6 +43,7 @@ from futures3.thread import ThreadPoolExecutor
 
 from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.control import PIDController
+from usbmd.verasonics.webserver.benchmarking import BenchmarkTool
 
 SAVING = False
 
@@ -146,6 +150,8 @@ class UltrasoundProcessingServer:
         self.bf_previous = 0
 
         # Benchmark variables
+        self.benchmark_tool = BenchmarkTool('benchmarks')
+
         self.beamformer_elapsed_time = []
         self.read_preprocess_elapsed_time = []
         self.update_elapsed_time = []
@@ -235,10 +241,10 @@ class UltrasoundProcessingServer:
         # Prepare inputs for the beamforming model
         if buffer:
             IQ = buffer.pop()
+            buffer.clear()
         else:
             return None
 
-        buffer.clear()
         inputs = {}
 
         if self.bf_type == 'RAW':
@@ -345,6 +351,11 @@ class UltrasoundProcessingServer:
                     IQ[:, :, :, :, 0] = RF[:, :, 1::2]
                     IQ[:, :, :, :, 1] = RF[:, :, ::2]
                     buffer.append(IQ)
+
+                    # swtich to processing
+                    # do tf stuf
+                    # record processing IFP
+
 
                     executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
                     self.read_preprocess_elapsed_time.append(
@@ -493,6 +504,12 @@ class UltrasoundProcessingServer:
 
     def update_settings(self):
         """Function that updates setting states of the webserver class"""
+
+        if self.benchmark_tool.is_running:
+            print("WARNING: Benchmark is running. Do not update settings!")
+            return ('', 204) # Do not update settings while benchmark is running
+
+
         self.terminate_signal.set()  # Terminate data processing while updating settings
 
         if request.method == 'POST':
@@ -587,7 +604,16 @@ class UltrasoundProcessingServer:
                 self.source = request.form.get('source')
                 logging.debug(self.source)
 
+            if request.form.get('benchmark') is not None:
+                if request.form.get('benchmark'):
+                    self.benchmark_tool.run()
+                else:
+
+
+
         return ('', 204)
+
+
 
 
 # Initialize Flask server
@@ -619,6 +645,10 @@ def vid():
     """ Video Feed"""
     return Response(usp.get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/start_benchmark', methods=['POST'])
+def start_benchmark():
+    """Function that starts the benchmark tool"""
+    return usp.benchmark_tool.run()
 
 # Initialize Verasonics webserver
 usp = UltrasoundProcessingServer()

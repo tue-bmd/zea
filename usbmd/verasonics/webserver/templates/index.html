@@ -128,6 +128,11 @@
         <i data-swchoff-text="Autotuning" data-swchon-text="Autotuning"></i>
       </label>
 
+      <label class="toggle">
+        <input type="checkbox" name="screen" value="Profile" actionname="Profile" onclick="change_status_benchmark()">
+        <i data-swchoff-text="Start benchmark" data-swchon-text="Benchmark is running"></i>
+      </label>
+
     </div>
 
 
@@ -473,6 +478,14 @@
       url: "{{ url_for('create_file') }}",
       type: "POST",
       data: { "intensityAuto": "True" }
+    })
+  }
+
+  function change_status_benchmark() {
+    $.ajax({
+      url: "{{ url_for('create_file') }}",
+      type: "POST",
+      data: { "benchmark": "True" }
     })
   }
 
