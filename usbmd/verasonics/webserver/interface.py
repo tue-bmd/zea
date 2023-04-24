@@ -36,28 +36,18 @@ from futures3.thread import ThreadPoolExecutor
 from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.control import PIDController
 
-# HELPER FUNCTIONS
-
-
 SAVING = False
-
 
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
 
-
-# Set logger
-# if debugger_is_active():
-#     logging.basicConfig(level=logging.DEBUG)
-logging.basicConfig(level=logging.DEBUG)
+#Set logger
+if debugger_is_active():
+    logging.basicConfig(level=logging.DEBUG)
 
 # TODO use batch dimension to process multiple PW angles such that we can dynamically change
 # the number of PW angles
-
-# check input types, dummy data is currently different from real data and model needs to
-# recompile. Same holds for aux inputs.
-
 
 class UltrasoundProcessingServer:
     """ Class for handling ultrasound data processing and communication with the Verasonics"""
