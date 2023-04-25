@@ -25,7 +25,7 @@ class BenchmarkTool:
                      'processing_time',#
                      'read_time', #
                      'update_time', #
-                     'processing_clock'#
+                     'processing_clock',#
                      'read_clock', #
                      'update_clock',#
                      'display_clock'#
@@ -57,19 +57,24 @@ class BenchmarkTool:
         print('Starting benchmark')
 
         for name, params in self.config.items():
-            self.current_benchmark = name
-
             # Let the server know this request is sent from the benchmark tool
             params['sent_from'] = 'benchmark_tool'
 
             # Update server settings
-            requests.post('http://localhost:5000/create_file', json=params)
+            response = requests.post('http://localhost:5000/create_file', json=params)
 
-            # Wait for the specified amount of time
-            time.sleep(params['duration'])
+            if response.status_code == 204:
+                self.current_benchmark = name
+                self.clear()
+                # Wait for the specified amount of time
+                time.sleep(params['duration'])
 
-            # Save the benchmark data
-            self.save(name, format='xlsx')
+                # Save the benchmark data
+                self.current_benchmark = None
+                self.save(name, format='xlsx')
+                self.clear()
+
+
 
         self.is_running = False
         print('Benchmark finished')
@@ -77,17 +82,24 @@ class BenchmarkTool:
     def save(self, name, format='csv'):
         """Saves the benchmark data to a file"""
 
+        snapshot = self.data.copy()
+
+        snapshot_condensed = self.data.copy()
+
         savepath = os.path.join(self.output_folder, name)
 
         if format == 'csv':
-            self.data.to_csv(savepath+'.csv')
+            snapshot.to_csv(savepath+'.csv')
         elif format == 'xlsx':
-            self.data.to_excel(savepath+'.xlsx')
+            snapshot.to_excel(savepath+'.xlsx')
         elif format == 'mat':
             raise NotImplementedError('Saving to .mat not yet implemented')
         else:
             raise ValueError('format must be csv, xlsx or mat')
 
         print(f'Saved benchmark data to {savepath}.{format}')
-        # clear the dataframe
+
+
+    def clear(self):
+        """Clears the benchmark data"""
         self.data = pd.DataFrame(columns=self.data.columns)

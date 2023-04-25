@@ -44,11 +44,7 @@ from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.benchmarking import BenchmarkTool
 from usbmd.verasonics.webserver.control import PIDController
 
-print('!!!!!!!!!! ADD FRAME ID !!!!!!!!!!!!!!!')
-
-
-SAVING = False
-
+SAVING = True
 
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
@@ -151,7 +147,7 @@ class UltrasoundProcessingServer:
         self.scaling = 3
 
         # Buffers
-        self.bf_display = 0  # BF_display
+        self.bf_display = None  # BF_display
         self.bf_previous = 0
 
         # Benchmark variables
@@ -164,6 +160,7 @@ class UltrasoundProcessingServer:
         self.read_preprocess_elapsed_time = []
         self.update_elapsed_time = []
         self.time_display = []
+        self.read_id = []
 
         # Other (to be organized)
         self.meanAmp_history = []
@@ -389,6 +386,7 @@ class UltrasoundProcessingServer:
                     executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
                     self.read_preprocess_elapsed_time.append(
                         executionTimeREADPRO)
+                    self.read_id = id
 
 
                     self.benchmark_tool.set_value(
@@ -422,6 +420,7 @@ class UltrasoundProcessingServer:
                 "tBeamformerElapsedTime_na": self.beamformer_elapsed_time,
                 "tUpdateElapsedTime_na": self.update_elapsed_time,
                 "tReadPreProcessElapsedTime_na": self.read_preprocess_elapsed_time,
+                "read_id": self.read_id,
             }
 
             filename = (
@@ -535,14 +534,17 @@ class UltrasoundProcessingServer:
         """Function that generates new image frames for the web interface"""
         while True:
             try:
+                encoded = self.encode_img(self.bf_display)
+                self.bf_display = None
+
                 self.benchmark_tool.set_value(
                     'display_clock',
                     time.perf_counter()
                     )
-                yield self.encode_img(self.bf_display)
+
+                yield encoded
             except:
-                time.sleep(0.0001)  # wait for new data
-                return
+                time.sleep(0.001)  # wait for new data
 
     @staticmethod
     def encode_img(img):
