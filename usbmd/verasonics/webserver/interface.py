@@ -309,6 +309,22 @@ class UltrasoundProcessingServer:
                     else:
                         tsb_lst.append(0)
 
+                    if self.update_beamformer:
+                        match self.bf_type:
+                            case 'RAW'
+                                tsb_lst.append(1)
+                            case 'DAS'
+                                tsb_lst.append(2)
+                            case 'ABLE'
+                                tsb_lst.append(3)
+                            case _:
+                                logging.ERROR('Beamformer type does not match.') 
+
+                            self.update_beamformer = False
+                    else:
+                        tsb_lst.append(0)
+                    
+
                     if len(tsb_lst) != self.numTunableParameters:
                         print(
                             'Length of the to-sent-back (tsb) list different from expected')
@@ -446,6 +462,17 @@ class UltrasoundProcessingServer:
         self.bytesPerElementRead = initializationParameters[5]
         self.numTunableParameters = initializationParameters[6]
 
+        match initializationParameters[7]: 
+            case 1:
+                self.bf_type = 'RAW'
+            case 2:
+                self.bf_type = 'DAS'
+            case 3:
+                self.bf_type = 'ABLE'
+            case _:
+                logging.ERROR('Beamformer type does not match.') 
+
+
         # ACK INITIALIZATION COMPLETED
         ack = [1]
         ack_bytes = bytearray(struct.pack(f'{len(ack)}B', *ack))
@@ -499,6 +526,11 @@ class UltrasoundProcessingServer:
         if request.method == 'POST':
             if request.form.get('beamformer') is not None:
                 self.save()
+                self.beamformer_elapsed_time = []
+                self.read_preprocess_elapsed_time = []
+                self.update_elapsed_time = []
+                self.time_display = []
+                
                 self.update_beamformer = True
                 self.bf_type = request.form.get('beamformer')
                 # Update model
