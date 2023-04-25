@@ -337,7 +337,7 @@ class UltrasoundProcessingServer:
                         elif matchcase == 'ABLE':
                             tsb_lst.append(3)
                         else:
-                            logging.ERROR('Beamformer type does not match.')
+                            logging.error('Beamformer type does not match.')
 
                         self.update_beamformer = False
                     else:
@@ -549,7 +549,7 @@ class UltrasoundProcessingServer:
         elif matchcase == 3:
             self.bf_type = 'ABLE'
         else:
-            logging.ERROR('Beamformer type does not match.')
+            logging.error('Beamformer type does not match.')
 
 
         # ACK INITIALIZATION COMPLETED
@@ -767,7 +767,6 @@ def vid():
 def start_benchmark():
     """Function that starts the benchmark tool"""
     return usp.benchmark_tool.run()
-
 
 # Initialize Verasonics webserver
 usp = UltrasoundProcessingServer()

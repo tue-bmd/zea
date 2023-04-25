@@ -1,32 +1,46 @@
 
 
-
 DAS1PW:
-  duration: 30
+  duration: 5
   beamformer: DAS
   na: 1
 
 DAS5PW:
-  duration: 30
+  duration: 5
   beamformer: DAS
   na: 5
 
 DAS11PW:
-  duration: 30
+  duration: 5
   beamformer: DAS
   na: 11
 
-# ABLE1PW:
-#   duration: 30
-#   beamformer: ABLE
-#   na: 1
+ABLE1PW:
+  duration: 5
+  beamformer: ABLE
+  na: 1
 
-# ABLE5PW:
-#   duration: 30
-#   beamformer: ABLE
-#   na: 5
+ABLE5PW:
+  duration: 5
+  beamformer: ABLE
+  na: 5
 
-# ABLE11PW:
-#   duration: 30
-#   beamformer: ABLE
-#   na: 11
+ABLE11PW:
+  duration: 5
+  beamformer: ABLE
+  na: 11
+
+RAW1PW:
+  duration: 5
+  beamformer: RAW
+  na: 1
+
+RAW5PW:
+  duration: 5
+  beamformer: RAW
+  na: 5
+
+RAW11PW:
+  duration: 5
+  beamformer: RAW
+  na: 11
