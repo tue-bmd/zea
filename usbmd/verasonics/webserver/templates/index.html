@@ -32,6 +32,11 @@
     top: 0
   }
 
+  .toggle.clicked {
+    background-color: #e6e6e6;
+    border: 1px solid #ccc;
+  }
+
   .toggle i {
     position: relative;
     background: #fff;
@@ -45,6 +50,12 @@
     border: 1px solid #ccc;
     border-radius: 4px;
     transition: 350ms;
+  }
+
+  .toggle.active {
+    background: blue;
+    border: 1px solid blue;
+    color: #fff;
   }
 
   .toggle input:checked~i {
@@ -83,9 +94,9 @@
 
   </div>
 
-  <div style="width: 600px; float: left;">
+  <div style="width: 500px; float: left;">
 
-    <div style="width: 300px; float: left">
+    <div style="width: 250px; float: left">
       <h2>Acquisition control</h2>
       <h3>Source</h3>
       <fieldset id="source_control">
@@ -128,15 +139,26 @@
         <i data-swchoff-text="Autotuning" data-swchon-text="Autotuning"></i>
       </label>
 
-      <label class="toggle">
-        <input type="checkbox" name="screen" value="Profile" actionname="Profile" onclick="change_status_benchmark()">
-        <i data-swchoff-text="Start benchmark" data-swchon-text="Benchmark is running"></i>
+      <label class="toggle" id="benchmark-button" onclick="start_benchmark()">
+        <i>Start benchmark</i>
       </label>
+
+      <script>
+        var button = document.getElementById('benchmark-button');
+
+        button.addEventListener('mousedown', function () {
+          button.classList.add('active'); // Add the "active" class on mousedown
+        });
+
+        button.addEventListener('mouseup', function () {
+          button.classList.remove('active'); // Remove the "active" class on mouseup
+        });
+      </script>
 
     </div>
 
 
-    <div style="width: 300px; float: right">
+    <div style="width: 250px; float: right">
       <h2>Reconstruction control</h2>
 
       <h3>Image Settings</h3>
@@ -481,7 +503,7 @@
     })
   }
 
-  function change_status_benchmark() {
+  function start_benchmark() {
     $.ajax({
       url: "{{ url_for('create_file') }}",
       type: "POST",
