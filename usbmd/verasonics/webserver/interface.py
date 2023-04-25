@@ -1,6 +1,6 @@
 
-""" Server module for handling cloud based ultrasound data processing and communication with the
-Verasonics Vantage system. This module contains:
+""" Server module for handling cloud based ultrasound data processing (HOST) and communication with the
+Verasonics Vantage system (CLIENT). This module contains:
 
 - a Flask server that hostst a web application which can be used to visualize the
 processed data and send commands to the Verasonics system.
@@ -10,7 +10,8 @@ Usage:
 - Start the server by running this module as a script. The webserver will be started on port 5000
 of the host machine. The web application can be accessed locally via localhost:5000 or externally
 via the external IP address of the host machine (e.g. 131.155.125.231:5000)
--On the Verasonics machine, run the setup script and start the modified VSX script, VSX_demo.m.
+-On the Verasonics machine, run the setup script and start the modified VSX script, VSX_demo.m. Make
+sure that the IPv4 address of the host machine is entered correctly in the setup script.
 - By default the server will start listening on port 30000 for incoming data from the Verasonics.
 Alternatively, one can select to generate dummy data (random noise) by selecting the 'Dummy data'
 option in the web application. This can be helpfull for testing the web application without having
