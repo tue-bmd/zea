@@ -14,7 +14,7 @@ import tensorflow as tf
 class FPS_counter():
     """ An FPS counter class that overlays a frames-per-second count on an image stream"""
 
-    def __init__(self, buffer_size = 30):
+    def __init__(self, buffer_size = 5):
         """_summary_
 
         Args:
@@ -23,16 +23,27 @@ class FPS_counter():
 
         self.buffer_size = buffer_size
         self.font = cv2.FONT_HERSHEY_SIMPLEX
-        self.time_buffer = list(np.zeros((buffer_size,)))
+        self.time_buffer = list(np.zeros((10,)))
+        self.fps_value = 0
+        self.update_interval = 0.1 # Update interval in seconds
+        self.last_update_time = perf_counter()
 
     def overlay(self, img):
         """Function that overlays the FPS count on a provided image"""
-        self.time_buffer.append(perf_counter())
+        curr_time = perf_counter()
+        elapsed_time = curr_time - self.last_update_time
+
+        self.time_buffer.append(curr_time)
         self.time_buffer = self.time_buffer[-self.buffer_size::]
-        fps = 1/np.mean(np.diff(self.time_buffer))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        cv2.putText(img, f'{fps:.1f}', (7, 70), self.font, 1, (100, 255, 0), 3, cv2.LINE_AA)
+
+        if elapsed_time > self.update_interval:
+            fps = 1/np.mean(np.diff(self.time_buffer))
+            self.fps_value = fps
+            self.last_update_time = curr_time
+
+        cv2.putText(img, f'{self.fps_value:.1f}', (7, 50), self.font, 0.8, (50, 255, 0, 255), 2, cv2.LINE_AA)
         return img
+
 
 
 class ScanConverter():
