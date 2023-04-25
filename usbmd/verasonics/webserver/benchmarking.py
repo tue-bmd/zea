@@ -7,10 +7,14 @@ import threading
 import requests
 
 
+# Use this benchmark as basis for pytest
+
+
 class BenchmarkTool:
     """ Class that handles benchmarking of the cloud based ultrasound system"""
     def __init__(self, output_folder):
         self.output_folder = output_folder
+
         self.data = pd.DataFrame(
             columns=['id',
                      'processing_time',
@@ -33,8 +37,6 @@ class BenchmarkTool:
         benchmark_thread = threading.Thread(target=self.benchmark)
         benchmark_thread.daemon = True
         benchmark_thread.start()
-
-        benchmark_thread.wait()
         return
 
 
@@ -54,13 +56,18 @@ class BenchmarkTool:
         print('4 second sleep done')
         time.sleep(1)
 
+        self.save('test', format='csv')
+
         self.is_running = False
         print('Benchmark finished')
 
-    def save(self, format='csv'):
+    def save(self, name, format='csv'):
         """Saves the benchmark data to a file"""
 
-        savepath = os.path.join(self.output_folder, datetime.now().strftime('%Y%m%d_%H%M%S'))
+
+        savepath = os.path.join(self.output_folder, datetime.now().strftime('%Y%m%d_%H%M%S') + name)
+
+
 
         if format == 'csv':
             self.data.to_csv(os.path.join(savepath, 'benchmark.csv'))

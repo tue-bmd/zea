@@ -22,39 +22,39 @@ the probe settings and beamforming parameters.
 Authors: Beatrice Federici, Ben Luijten
 """
 
+from usbmd.verasonics.webserver.benchmarking import BenchmarkTool
+from usbmd.verasonics.webserver.control import PIDController
+from usbmd.utils.video import FPS_counter, ScanConverterTF
+from futures3.thread import ThreadPoolExecutor
+from flask import Flask, Response, render_template, request
+from demo_setup import get_models
+import tensorflow as tf
+import scipy.io
+import numpy as np
+import cv2
+import time
+import threading
+import sys
+import struct
+import socket
+import logging
+import collections
+import array
 print('!!!!!!!!!! ADD FRAME ID !!!!!!!!!!!!!!!')
 
 
-import array
-import collections
-import logging
-import socket
-import struct
-import sys
-import threading
-import time
-
-import cv2
-import numpy as np
-import scipy.io
-import tensorflow as tf
-from demo_setup import get_models
-from flask import Flask, Response, render_template, request
-from futures3.thread import ThreadPoolExecutor
-
-from usbmd.utils.video import FPS_counter, ScanConverterTF
-from usbmd.verasonics.webserver.control import PIDController
-from usbmd.verasonics.webserver.benchmarking import BenchmarkTool
-
 SAVING = False
+
 
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
 
-#Set logger
+
+# Set logger
 if debugger_is_active():
     logging.basicConfig(level=logging.DEBUG)
+
 
 class UltrasoundProcessingServer:
     """ Class for handling ultrasound data processing and communication with the Verasonics"""
@@ -346,7 +346,8 @@ class UltrasoundProcessingServer:
                     RF = received_serial_data.reshape(
                         self.n_ax, self.na_read, self.n_el, order='F')
                     RF = np.transpose(RF, (1, 2, 0))
-                    IQ = np.empty((1, self.na_read, self.n_el, self.n_ax//2, 2))
+                    IQ = np.empty(
+                        (1, self.na_read, self.n_el, self.n_ax//2, 2))
 
                     # Extract I and Q componenets from RF
                     IQ[:, :, :, :, 0] = RF[:, :, 1::2]
@@ -356,7 +357,6 @@ class UltrasoundProcessingServer:
                     # swtich to processing
                     # do tf stuf
                     # record processing IFP
-
 
                     executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
                     self.read_preprocess_elapsed_time.append(
@@ -508,8 +508,8 @@ class UltrasoundProcessingServer:
 
         if self.benchmark_tool.is_running:
             print("WARNING: Benchmark is running. Do not update settings!")
-            return ('', 204) # Do not update settings while benchmark is running
-
+            # Do not update settings while benchmark is running
+            return ('', 204)
 
         self.terminate_signal.set()  # Terminate data processing while updating settings
 
@@ -609,12 +609,9 @@ class UltrasoundProcessingServer:
                 if request.form.get('benchmark'):
                     self.benchmark_tool.run()
                 else:
-
-
+                    pass
 
         return ('', 204)
-
-
 
 
 # Initialize Flask server
@@ -646,10 +643,12 @@ def vid():
     """ Video Feed"""
     return Response(usp.get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+
 @app.route('/start_benchmark', methods=['POST'])
 def start_benchmark():
     """Function that starts the benchmark tool"""
     return usp.benchmark_tool.run()
+
 
 # Initialize Verasonics webserver
 usp = UltrasoundProcessingServer()
