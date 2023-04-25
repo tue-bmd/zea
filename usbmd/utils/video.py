@@ -44,8 +44,6 @@ class FPS_counter():
         cv2.putText(img, f'{self.fps_value:.1f}', (7, 50), self.font, 0.8, (50, 255, 0, 255), 2, cv2.LINE_AA)
         return img
 
-
-
 class ScanConverter():
     """Class that handles visualization of ultrasound images"""
     def __init__(
