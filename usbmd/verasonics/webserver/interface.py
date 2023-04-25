@@ -46,6 +46,7 @@ from usbmd.verasonics.webserver.control import PIDController
 
 SAVING = True
 
+
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
@@ -86,7 +87,7 @@ class UltrasoundProcessingServer:
             self.tcp_server_address, self.time_out, buffer_size)
         self.source = 'verasonics'
 
-        #self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
+        # self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
         self.model_dict, self.grid = get_models()
         self.active_model = self.model_dict['DAS_1PW']
 
@@ -152,8 +153,8 @@ class UltrasoundProcessingServer:
 
         # Benchmark variables
         self.benchmark_tool = BenchmarkTool(
-            output_folder = 'benchmarks',
-            benchmark_config = 'usbmd/verasonics/webserver/benchmark_config.yaml'
+            output_folder='benchmarks',
+            benchmark_config='usbmd/verasonics/webserver/benchmark_config.yaml'
             )
 
         self.beamformer_elapsed_time = []
@@ -299,10 +300,10 @@ class UltrasoundProcessingServer:
                     self.id += 1
                     buffer.append(buf)
                 elif connection.fileno() != -1:
-                    #startTimeSB = time.perf_counter()
+                    # startTimeSB = time.perf_counter()
 
                     if self.update_intensity:
-                        #logging.debug('Intensity: %f', self.intensity)
+                        # logging.debug('Intensity: %f', self.intensity)
                         self.update_intensity = False
                         tsb_lst = [self.intensity]
                     elif self.auto_update_intensity:
@@ -325,6 +326,23 @@ class UltrasoundProcessingServer:
                         self.na_read = self.na_transmit
                     else:
                         tsb_lst.append(0)
+
+                    if self.update_beamformer:
+
+                        matchcase = self.bf_type
+                        if matchcase == 'RAW':
+                            tsb_lst.append(1)
+                        elif matchcase == 'DAS':
+                            tsb_lst.append(2)
+                        elif matchcase == 'ABLE':
+                            tsb_lst.append(3)
+                        else:
+                            logging.ERROR('Beamformer type does not match.')
+
+                        self.update_beamformer = False
+                    else:
+                        tsb_lst.append(0)
+
 
                     if len(tsb_lst) != self.numTunableParameters:
                         print(
@@ -522,6 +540,18 @@ class UltrasoundProcessingServer:
         self.bytesPerElementRead = initializationParameters[5]
         self.numTunableParameters = initializationParameters[6]
 
+        matchcase = initializationParameters[7]
+
+        if matchcase == 1:
+            self.bf_type = 'RAW'
+        elif matchcase == 2:
+            self.bf_type = 'DAS'
+        elif matchcase == 3:
+            self.bf_type = 'ABLE'
+        else:
+            logging.ERROR('Beamformer type does not match.')
+
+
         # ACK INITIALIZATION COMPLETED
         ack = [1]
         ack_bytes = bytearray(struct.pack(f'{len(ack)}B', *ack))
@@ -598,6 +628,11 @@ class UltrasoundProcessingServer:
         if request.method == 'POST':
             if request.form.get('beamformer') is not None:
                 update_flag = True
+                self.beamformer_elapsed_time = []
+                self.read_preprocess_elapsed_time = []
+                self.update_elapsed_time = []
+                self.time_display = []
+
                 self.update_beamformer = True
                 self.bf_type = request.form.get('beamformer')
                 # Update model

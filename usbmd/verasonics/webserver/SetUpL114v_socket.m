@@ -13,11 +13,21 @@ interAcqPeriod = 160; %160 us
 interFramePeriod = 10000; %10 ms --> acquisition frame rate: 100 fps
 na = 11; % no.plane waves
 na_transmit = 1;
+
+bf_type = 'DAS'
+switch bf_type
+    case 'RAW'
+        bf_idx = 1
+    case 'DAS'
+        bf_idx = 2
+    case 'ABLE'
+        bf_idx = 3
+
 %Nax %added by VSX automatically from Receive structure
 Nel = 128; 
 bytesPerElementSent = 2; % write channel data as int16
 bytesPerElementRead = 8; % read updated parameters as double
-numTunableParameters = 2; %intensity and na
+numTunableParameters = 3; %[intensity, na, bf_type]
 
 % Define Server Address and Port
 %IPV4 = '131.155.34.167';
@@ -486,6 +496,7 @@ function updateFromServer()
     t = evalin('base','t'); % tcp socket
     na = evalin('base', 'na');
     na_transmit = evalin ('base', 'na_transmit');
+    bf_idx = evalin ('base', 'bf_idx');
     TPC = evalin('base', 'TPC');
     bytesPerElementRead = evalin('base', 'bytesPerElementRead'); % read updated parameters as double
     numTunableParameters = evalin('base', 'numTunableParameters');
@@ -532,13 +543,28 @@ function updateFromServer()
     
     if tsb(2) ~= 0 && tsb(2) <= na
        %keyboard
-       % save performance with previous number of firing angles
-       saveStructures(na_transmit, timeExtFuncEndUpdate_vect, saved_UpdatingTime, saved_WritingTime, timeExtFuncStartWrite_vect);
+       %save performance with previous number of firing angles
+       saveStructures(na_transmit, bf_idx, timeExtFuncEndUpdate_vect, saved_UpdatingTime, saved_WritingTime, timeExtFuncStartWrite_vect);
        
        a = fprintf('Firing angles: %d', tsb(2));
        disp(a);
        
        assignin('base', 'na_transmit', tsb(2));
+    end
+
+    if tsb(3) ~= 0:
+       %keyboard
+       %save performance with previous number of firing angles
+       saveStructures(na_transmit, bf_idx, timeExtFuncEndUpdate_vect, saved_UpdatingTime, saved_WritingTime, timeExtFuncStartWrite_vect);
+       
+       switch tsb(3)
+        case 1 
+            bf_idx = 1
+        case 2
+            bf_idx = 2
+        case 3 
+            bf_idx = 3
+
     end
 
     if tsb(1) ~= 0
@@ -578,15 +604,26 @@ function updateFromServer()
 end
 
 
-function saveStructures(na_transmit, timeExtFuncEndUpdate_vect, saved_UpdatingTime, saved_WritingTime, timeExtFuncStartWrite_vect)
+function saveStructures(na_transmit, bf_idx, timeExtFuncEndUpdate_vect, saved_UpdatingTime, saved_WritingTime, timeExtFuncStartWrite_vect)
+    
+    switch bf_idx
+        case 1
+            bf_type = 'RAW'
+        case 2
+            bf_type = 'DAS'
+        case 3
+            bf_type = 'ABLE'
+
+
 
     switch na_transmit
+        
         case 1
             timeExtFuncEndUpdate_vect1 = timeExtFuncEndUpdate_vect; 
             saved_UpdatingTime1 = saved_UpdatingTime; 
             saved_WritingTime1 = saved_WritingTime;  
             timeExtFuncStartWrite_vect1 = timeExtFuncStartWrite_vect;
-            filename =  strcat('L114v_na1_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
+            filename =  strcat('L114v_na1_', bf_type, '_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
             save(filename, 'timeExtFuncEndUpdate_vect1', 'saved_UpdatingTime1', ...
                 'saved_WritingTime1',  'timeExtFuncStartWrite_vect1')
 
@@ -595,7 +632,7 @@ function saveStructures(na_transmit, timeExtFuncEndUpdate_vect, saved_UpdatingTi
             saved_UpdatingTime5 = saved_UpdatingTime; 
             saved_WritingTime5 = saved_WritingTime;  
             timeExtFuncStartWrite_vect5 = timeExtFuncStartWrite_vect;
-            filename =  strcat('L114v_na5_matlab',extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
+            filename =  strcat('L114v_na5_', bf_type, '_matlab',extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
             save(filename, 'timeExtFuncEndUpdate_vect5', 'saved_UpdatingTime5', ...
                 'saved_WritingTime5',  'timeExtFuncStartWrite_vect5')
 
@@ -604,7 +641,7 @@ function saveStructures(na_transmit, timeExtFuncEndUpdate_vect, saved_UpdatingTi
             saved_UpdatingTime11 = saved_UpdatingTime; 
             saved_WritingTime11 = saved_WritingTime;  
             timeExtFuncStartWrite_vect11 = timeExtFuncStartWrite_vect;
-            filename =  strcat('L114v_na11_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
+            filename =  strcat('L114v_na11_', bf_type, '_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
             save(filename, 'timeExtFuncEndUpdate_vect11', 'saved_UpdatingTime11', ...
                 'saved_WritingTime11',  'timeExtFuncStartWrite_vect11')
     end

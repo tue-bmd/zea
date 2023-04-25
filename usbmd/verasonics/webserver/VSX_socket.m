@@ -3120,7 +3120,7 @@ disp('Writing settings over network')
 Nax = Receive(1).endSample;
 %NOTE: bytesPerElementRead and Sent is opposed to the server 
 % values as what is wirtten in matl is read in python
-msg = [Nax, Nel, na_transmit, returnToMatlabFreq, bytesPerElementRead, bytesPerElementSent, numTunableParameters];
+msg = [Nax, Nel, na_transmit, returnToMatlabFreq, bytesPerElementRead, bytesPerElementSent, numTunableParameters, bf_idx];
 
 % write as int16
 write(t,msg,'int16');
