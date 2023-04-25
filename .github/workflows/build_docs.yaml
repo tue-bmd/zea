@@ -24,6 +24,7 @@ jobs:
         pip install -r requirements/requirements_full.txt
     - name: Build the docs
       run: |
+        find ./docs/usbmd/ -name "*.html" -type f -delete
         pdoc3 usbmd --html --output-dir docs --force --skip-errors --template-dir docs/usbmd/templates
     - name: Commit the docs
       run: |
