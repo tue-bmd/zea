@@ -21,7 +21,7 @@ class BenchmarkTool:
             output_folder, datetime.now().strftime('%Y%m%d_%H%M%S'))
         os.makedirs(self.output_folder, exist_ok=True)
         self.data = pd.DataFrame(
-            columns=['id',
+            columns=['frame_id',
                      'processing_time',#
                      'read_time', #
                      'update_time', #
@@ -34,6 +34,8 @@ class BenchmarkTool:
         self.is_running = False
         self.current_benchmark = None
 
+        self.data_buffer = []
+
         # Load benchmark config
         self.config = load_config_from_yaml(benchmark_config)
 
@@ -41,7 +43,15 @@ class BenchmarkTool:
 
     def set_value(self, column, value):
         """append a value to the dataframe in the specified column"""
-        self.data.loc[len(self.data), column] = value
+        #self.data.loc[len(self.data), column] = value
+        self.data_buffer.append([column, value])
+
+    def purge_to_dataframe(self):
+        """Append the data in the buffer to the dataframe"""
+        for column, value in self.data_buffer:
+            self.data.loc[len(self.data), column] = value
+
+        self.data_buffer = []
 
     def run(self):
         """Starts the benchmarking process"""
@@ -82,9 +92,8 @@ class BenchmarkTool:
     def save(self, name, format='csv'):
         """Saves the benchmark data to a file"""
 
+        self.purge_to_dataframe()
         snapshot = self.data.copy()
-
-        snapshot_condensed = self.data.copy()
 
         savepath = os.path.join(self.output_folder, name)
 
@@ -102,4 +111,5 @@ class BenchmarkTool:
 
     def clear(self):
         """Clears the benchmark data"""
+        self.data_buffer = []
         self.data = pd.DataFrame(columns=self.data.columns)

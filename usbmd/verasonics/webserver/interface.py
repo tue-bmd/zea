@@ -1,6 +1,6 @@
 
-""" Server module for handling cloud based ultrasound data processing (HOST) and communication with the
-Verasonics Vantage system (CLIENT). This module contains:
+""" Server module for handling cloud based ultrasound data processing (HOST) and communication with
+the Verasonics Vantage system (CLIENT). This module contains:
 
 - a Flask server that hostst a web application which can be used to visualize the
 processed data and send commands to the Verasonics system.
@@ -24,7 +24,6 @@ Authors: Beatrice Federici, Ben Luijten
 
 import array
 import collections
-import json
 import logging
 import socket
 import struct
@@ -37,7 +36,7 @@ import numpy as np
 import scipy.io
 import tensorflow as tf
 from demo_setup import get_models
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, render_template, request
 from futures3.thread import ThreadPoolExecutor
 
 from usbmd.utils.video import FPS_counter, ScanConverterTF
@@ -364,14 +363,14 @@ class UltrasoundProcessingServer:
                     executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
 
-                    # self.benchmark_tool.set_value(
-                    #     'update_clock',
-                    #     time.perf_counter()
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'update_time',
-                    #      executionTimeUPD
-                    #      )
+                    self.benchmark_tool.set_value(
+                        'update_clock',
+                        time.perf_counter()
+                    )
+                    self.benchmark_tool.set_value(
+                        'update_time',
+                         executionTimeUPD
+                         )
 
 
                     startTimeREADPRO = time.perf_counter()
@@ -415,12 +414,12 @@ class UltrasoundProcessingServer:
                     self.read_id.append(self.frame_id)
 
 
-                    # self.benchmark_tool.set_value(
-                    #     'read_clock', time.perf_counter()
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'read_time', executionTimeREADPRO
-                    #     )
+                    self.benchmark_tool.set_value(
+                        'read_clock', time.perf_counter()
+                    )
+                    self.benchmark_tool.set_value(
+                        'read_time', executionTimeREADPRO
+                        )
 
 
             except:
@@ -513,18 +512,18 @@ class UltrasoundProcessingServer:
                     self.beamformer_elapsed_time.append(executionTimeBF)
 
 
-                    # self.benchmark_tool.set_value(
-                    #     'frame_id',
-                    #     frame_id
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'processing_clock',
-                    #     time.perf_counter()
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'processing_time',
-                    #     executionTimeBF
-                    # )
+                    self.benchmark_tool.set_value(
+                        'frame_id',
+                        frame_id
+                    )
+                    self.benchmark_tool.set_value(
+                        'processing_clock',
+                        time.perf_counter()
+                    )
+                    self.benchmark_tool.set_value(
+                        'processing_time',
+                        executionTimeBF
+                    )
 
                     print('end of processing function')
             except:
@@ -593,10 +592,10 @@ class UltrasoundProcessingServer:
 
                 self.display_clock.append(time.perf_counter())
 
-                # self.benchmark_tool.set_value(
-                #     'display_clock',
-                #     time.perf_counter()
-                #     )
+                self.benchmark_tool.set_value(
+                    'display_clock',
+                    time.perf_counter()
+                    )
 
                 yield encoded
             except:
