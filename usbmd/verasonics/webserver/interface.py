@@ -352,7 +352,10 @@ class UltrasoundProcessingServer:
                     tsb_lst = list(map(np.double, tsb_lst))
                     tsb_bytes = bytearray(struct.pack(
                         f'{len(tsb_lst)}d', *tsb_lst))
+                    print('going to send tsb now')
                     connection.sendall(tsb_bytes)
+                    print('this is the tsb list: ', tsb_lst)
+
                     executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
 
@@ -463,7 +466,6 @@ class UltrasoundProcessingServer:
                     BF = self.active_model(inputs)[0]
                     img = self.scan_converter.convert(BF)
                     img = np.array(img)
-
 
                     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
