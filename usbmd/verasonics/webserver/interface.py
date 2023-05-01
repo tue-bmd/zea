@@ -161,8 +161,7 @@ class UltrasoundProcessingServer:
         self.update_elapsed_time = []
         self.time_display = []
         self.display_clock = []
-        self.read_id = []
-        self.read_id = []
+        self.processing_id = []
 
         # Other (to be organized)
         self.meanAmp_history = []
@@ -347,7 +346,6 @@ class UltrasoundProcessingServer:
                     else:
                         tsb_lst.append(0)
 
-
                     if len(tsb_lst) != self.numTunableParameters:
                         print(
                             'Length of the to-sent-back (tsb) list different from expected')
@@ -404,15 +402,9 @@ class UltrasoundProcessingServer:
                     self.frame_id += 1
                     buffer.append(buf)
 
-                    # swtich to processing
-                    # do tf stuf
-                    # record processing IFP
-
                     executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
                     self.read_preprocess_elapsed_time.append(
                         executionTimeREADPRO)
-                    self.read_id.append(self.frame_id)
-
 
                     self.benchmark_tool.set_value(
                         'read_clock', time.perf_counter()
@@ -447,7 +439,7 @@ class UltrasoundProcessingServer:
                 "tUpdateElapsedTime_na": self.update_elapsed_time,
                 "tReadPreProcessElapsedTime_na": self.read_preprocess_elapsed_time,
                 "diplayClock": self.display_clock,
-                "read_id": self.read_id,
+                "processing_id": self.processing_id,
             }
 
             filename = (
@@ -465,7 +457,7 @@ class UltrasoundProcessingServer:
             self.update_elapsed_time = []
             self.time_display = []
             self.display_clock = []
-            self.read_id = []
+            self.processing_id = []
             self.frame_id = 0
 
     def process_data(self, buffer, terminate_signal):
@@ -512,8 +504,10 @@ class UltrasoundProcessingServer:
                     self.beamformer_elapsed_time.append(executionTimeBF)
 
 
+                    self.processing_id.append(self.frame_id)
+
                     self.benchmark_tool.set_value(
-                        'frame_id',
+                        'processing_id',
                         frame_id
                     )
                     self.benchmark_tool.set_value(
@@ -528,7 +522,7 @@ class UltrasoundProcessingServer:
                     print('end of processing function')
             except:
                 buffer.clear()
-                time.sleep(0.0002)  # wait for new data
+                time.sleep(0.0001)  # wait for new data
 
         buffer.clear()
 
@@ -599,7 +593,7 @@ class UltrasoundProcessingServer:
 
                 yield encoded
             except:
-                time.sleep(0.002)  # wait for new data
+                time.sleep(0.001)  # wait for new data
 
     @staticmethod
     def encode_img(img):

@@ -21,7 +21,7 @@ class BenchmarkTool:
             output_folder, datetime.now().strftime('%Y%m%d_%H%M%S'))
         os.makedirs(self.output_folder, exist_ok=True)
         self.data = pd.DataFrame(
-            columns=['frame_id',
+            columns=['processing_id',
                      'processing_time',#
                      'read_time', #
                      'update_time', #
