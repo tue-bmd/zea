@@ -68,12 +68,12 @@ def get_models():
     model_dict['DAS_5PW'], grid = create_DAS([1, 3, 5, 7, 9])
     model_dict['DAS_11PW'], grid = create_DAS(
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-    # model_dict['ABLE_1PW'], grid = create_ABLE(
-    #     'configs/inference/l11-4v_ABLE_1PW.yaml')
-    # model_dict['ABLE_5PW'], grid = create_ABLE(
-    #     'configs/inference/l11-4v_ABLE_5PW.yaml')
-    # model_dict['ABLE_11PW'], grid = create_ABLE(
-    #     'configs/inference/l11-4v_ABLE_11PW.yaml')
+    model_dict['ABLE_1PW'], grid = create_ABLE(
+        'configs/inference/l11-4v_ABLE_1PW.yaml')
+    model_dict['ABLE_5PW'], grid = create_ABLE(
+        'configs/inference/l11-4v_ABLE_5PW.yaml')
+    model_dict['ABLE_11PW'], grid = create_ABLE(
+        'configs/inference/l11-4v_ABLE_11PW.yaml')
     return model_dict, grid
 
 
@@ -150,7 +150,7 @@ def create_ABLE(config_path):
 
     try:
         path = 'trained_models/0911_1805_realtime_ABLE_1PW_MV/model'
-        if not os.path.isfile(path):
+        if not os.path.isdir(path):
             raise FileNotFoundError(f"Could not find file: {path}")
         model.load_weights(path, by_name=False)
     except FileNotFoundError as e:
