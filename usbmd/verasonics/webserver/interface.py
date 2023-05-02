@@ -160,10 +160,11 @@ class UltrasoundProcessingServer:
         self.beamformer_elapsed_time = []
         self.read_preprocess_elapsed_time = []
         self.update_elapsed_time = []
-        self.time_display = []
+        self.processing_clock = []
         self.display_clock = []
-        self.read_id = []
-        self.read_id = []
+        self.reading_clock = []
+        self.processed_id = []
+        #self.read_id = []
 
         # Other (to be organized)
         self.meanAmp_history = []
@@ -304,6 +305,7 @@ class UltrasoundProcessingServer:
                     buf = {'data': IQ, 'frame_id': self.frame_id}
                     self.frame_id += 1
                     buffer.append(buf)
+
                 elif connection.fileno() != -1:
                     # startTimeSB = time.perf_counter()
 
@@ -324,7 +326,7 @@ class UltrasoundProcessingServer:
                         tsb_lst = [0]
 
                     if self.update_na_transmit:
-                        self.flag = self.returnToMatlabFreq
+                        #self.flag = self.returnToMatlabFreq
                         print('Update firing angles: ', self.na_transmit)
                         self.update_na_transmit = False
                         tsb_lst.append(self.na_transmit)
@@ -392,6 +394,9 @@ class UltrasoundProcessingServer:
 
                     received_serial_data = np.frombuffer(
                         signal, dtype=np.int16)
+                    
+                    self.reading_clock.append(time.perf_counter())
+
                     RF = received_serial_data.reshape(
                         self.n_ax, self.na_read, self.n_el, order='F')
                     RF = np.transpose(RF, (1, 2, 0))
@@ -412,7 +417,7 @@ class UltrasoundProcessingServer:
                     executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
                     self.read_preprocess_elapsed_time.append(
                         executionTimeREADPRO)
-                    self.read_id.append(self.frame_id)
+                    #self.read_id.append(self.frame_id)
 
 
                     # self.benchmark_tool.set_value(
@@ -431,24 +436,29 @@ class UltrasoundProcessingServer:
                 connection = None
                 buffer.clear()
 
-        time.sleep(0.01)  # sleep for 1 ms
+        time.sleep(0.001)  # sleep for 1 ms
         terminate_signal.set()
         buffer.clear()  # clear buffer if while loop is terminated
 
     def save(self):
         """Function that saves benchmark data to .mat file"""
         if SAVING:
-            # difference of time_display list
-            displayInterFramePeriod = np.diff(self.time_display)
-            self.time_display = []
-
+            # difference of clock list
+            processingInterFramePeriod = np.diff(self.processing_clock)
+            displayInterFramePeriod = np.diff(self.display_clock)
+            readingInterFramePeriod = np.diff(self.reading_clock)
+            
             d = {
-                "displayIFP_na": displayInterFramePeriod,
-                "tBeamformerElapsedTime_na": self.beamformer_elapsed_time,
-                "tUpdateElapsedTime_na": self.update_elapsed_time,
-                "tReadPreProcessElapsedTime_na": self.read_preprocess_elapsed_time,
-                "diplayClock": self.display_clock,
-                "read_id": self.read_id,
+                f"displayIFP_{int(self.na_transmit)}": displayInterFramePeriod,
+                f"readingIFP_{int(self.na_transmit)}": readingInterFramePeriod,
+                f"processingIFP_{int(self.na_transmit)}": processingInterFramePeriod,
+                f"tBeamformerElapsedTime_{int(self.na_transmit)}": self.beamformer_elapsed_time,
+                f"tUpdateElapsedTime_{int(self.na_transmit)}": self.update_elapsed_time,
+                f"tReadPreProcessElapsedTime_{int(self.na_transmit)}": self.read_preprocess_elapsed_time,
+                f"diplayClock_{int(self.na_transmit)}": self.display_clock,
+                f"processingClock_{int(self.na_transmit)}": self.processing_clock,
+                f"readingClock_{int(self.na_transmit)}": self.reading_clock,
+                f"processed_id_{int(self.na_transmit)}": self.processed_id,
             }
 
             filename = (
@@ -464,19 +474,21 @@ class UltrasoundProcessingServer:
             self.beamformer_elapsed_time = []
             self.read_preprocess_elapsed_time = []
             self.update_elapsed_time = []
-            self.time_display = []
+            self.processing_clock = []
             self.display_clock = []
-            self.read_id = []
+            self.reading_clock
+            self.processed_id = []
             self.frame_id = 0
 
     def process_data(self, buffer, terminate_signal):
         """Function that handles data processing (e.g. beamforming)"""
         while not terminate_signal.is_set():
             logging.debug('start processing')
-            time.sleep(0.)
+            #time.sleep(0.)
             try:
                 startTimeBF = time.perf_counter()
                 inputs, frame_id = self.prepare_inputs(buffer)
+                self.processed_id.append(frame_id)
 
                 if inputs:
                     print('start beamforming')
@@ -508,7 +520,7 @@ class UltrasoundProcessingServer:
                     self.bf_display = img
 
                     # Saving parameters
-                    self.time_display.append(time.perf_counter())
+                    self.processing_clock.append(time.perf_counter())
                     executionTimeBF = time.perf_counter() - startTimeBF
                     self.beamformer_elapsed_time.append(executionTimeBF)
 
@@ -528,10 +540,11 @@ class UltrasoundProcessingServer:
 
                     print('end of processing function')
             except:
-                buffer.clear()
-                time.sleep(0.0002)  # wait for new data
+                pass
+                #buffer.clear()
+                #time.sleep(0.0002)  # wait for new data
 
-        buffer.clear()
+        #buffer.clear()
 
     def open_connection(self):
         """Handles the opening and handshaking with the Verasonics"""
@@ -731,6 +744,17 @@ class UltrasoundProcessingServer:
 
             if request.form.get('source') is not None:
                 self.source = request.form.get('source')
+
+                # clear lists
+                self.beamformer_elapsed_time = []
+                self.read_preprocess_elapsed_time = []
+                self.update_elapsed_time = []
+                self.processing_clock = []
+                self.display_clock = []
+                self.reading_clock
+                self.processed_id = []
+                self.frame_id = 0
+
                 logging.debug(self.source)
 
             if request.form.get('benchmark') is not None:
