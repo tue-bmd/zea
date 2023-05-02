@@ -43,9 +43,6 @@ from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.benchmarking import BenchmarkTool
 from usbmd.verasonics.webserver.control import PIDController
 
-SAVING = True
-
-
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
@@ -65,7 +62,8 @@ class UltrasoundProcessingServer:
             tcp_port=30000,
             time_out=0.5,
             buffer_size=2**16,
-            probe='L114'):
+            probe='L114',
+            saving=False):
         """_summary_
 
         Args:
@@ -75,6 +73,8 @@ class UltrasoundProcessingServer:
             buffer_size (int, optional): Buffer size (bytes) of the websocket. Defaults to 2**16.
             probe (str, optional): Probe settings. Defaults to 'L114'.
             dummy_mode (bool, optional): If True, random test data is generated. Defaults to False.
+            saving (bool, optional): If True, benchmark timings saved to disk. Defaults to False.
+            This is currently working alongside the benchmarking tool.
         """
 
         # Network settings
@@ -85,6 +85,7 @@ class UltrasoundProcessingServer:
         self.vera_socket = self.start_tcp_server(
             self.tcp_server_address, self.time_out, buffer_size)
         self.source = 'verasonics'
+        self.saving = saving
 
         # self.sr_model = keras.models.load_model('trained_models/SR02122022/generator.h5')
         self.model_dict, self.grid = get_models()
@@ -434,7 +435,7 @@ class UltrasoundProcessingServer:
 
     def save(self):
         """Function that saves benchmark data to .mat file"""
-        if SAVING:
+        if self.saving:
             # difference of clock list
             processingInterFramePeriod = np.diff(self.processing_clock)
             displayInterFramePeriod = np.diff(self.display_clock)
