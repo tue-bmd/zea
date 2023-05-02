@@ -1,6 +1,6 @@
 
-""" Server module for handling cloud based ultrasound data processing (HOST) and communication with the
-Verasonics Vantage system (CLIENT). This module contains:
+""" Server module for handling cloud based ultrasound data processing (HOST) and communication with
+the Verasonics Vantage system (CLIENT). This module contains:
 
 - a Flask server that hostst a web application which can be used to visualize the
 processed data and send commands to the Verasonics system.
@@ -24,7 +24,6 @@ Authors: Beatrice Federici, Ben Luijten
 
 import array
 import collections
-import json
 import logging
 import socket
 import struct
@@ -37,7 +36,7 @@ import numpy as np
 import scipy.io
 import tensorflow as tf
 from demo_setup import get_models
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, render_template, request
 from futures3.thread import ThreadPoolExecutor
 
 from usbmd.utils.video import FPS_counter, ScanConverterTF
@@ -163,8 +162,8 @@ class UltrasoundProcessingServer:
         self.processing_clock = []
         self.display_clock = []
         self.reading_clock = []
-        self.processed_id = []
-        #self.read_id = []
+        self.processing_id = []
+        self.global_id = 0
 
         # Other (to be organized)
         self.meanAmp_history = []
@@ -184,7 +183,7 @@ class UltrasoundProcessingServer:
         # Termination signal for child threads
         self.terminate_signal = threading.Event()
 
-        self.frame_id = 0
+
 
     @staticmethod
     def start_tcp_server(tcp_server_address, time_out, buffer_size):
@@ -302,8 +301,8 @@ class UltrasoundProcessingServer:
                               int(self.n_ax/2), 2),
                         dtype=np.int16
                     )
-                    buf = {'data': IQ, 'frame_id': self.frame_id}
-                    self.frame_id += 1
+                    buf = {'data': IQ, 'frame_id': self.global_id}
+                    self.global_id += 1
                     buffer.append(buf)
 
                 elif connection.fileno() != -1:
@@ -350,7 +349,6 @@ class UltrasoundProcessingServer:
                     else:
                         tsb_lst.append(0)
 
-
                     if len(tsb_lst) != self.numTunableParameters:
                         print(
                             'Length of the to-sent-back (tsb) list different from expected')
@@ -366,14 +364,14 @@ class UltrasoundProcessingServer:
                     executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
 
-                    # self.benchmark_tool.set_value(
-                    #     'update_clock',
-                    #     time.perf_counter()
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'update_time',
-                    #      executionTimeUPD
-                    #      )
+                    self.benchmark_tool.set_value(
+                        'update_clock',
+                        time.perf_counter()
+                    )
+                    self.benchmark_tool.set_value(
+                        'update_time',
+                         executionTimeUPD
+                         )
 
 
                     startTimeREADPRO = time.perf_counter()
@@ -394,7 +392,7 @@ class UltrasoundProcessingServer:
 
                     received_serial_data = np.frombuffer(
                         signal, dtype=np.int16)
-                    
+
                     self.reading_clock.append(time.perf_counter())
 
                     RF = received_serial_data.reshape(
@@ -406,26 +404,20 @@ class UltrasoundProcessingServer:
                     # Extract I and Q componenets from RF
                     IQ[:, :, :, :, 0] = RF[:, :, 1::2]
                     IQ[:, :, :, :, 1] = RF[:, :, ::2]
-                    buf = {'data': IQ, 'frame_id': self.frame_id}
-                    self.frame_id += 1
+                    buf = {'data': IQ, 'frame_id': self.global_id}
+                    self.global_id += 1
                     buffer.append(buf)
-
-                    # swtich to processing
-                    # do tf stuf
-                    # record processing IFP
 
                     executionTimeREADPRO = time.perf_counter() - startTimeREADPRO
                     self.read_preprocess_elapsed_time.append(
                         executionTimeREADPRO)
-                    #self.read_id.append(self.frame_id)
 
-
-                    # self.benchmark_tool.set_value(
-                    #     'read_clock', time.perf_counter()
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'read_time', executionTimeREADPRO
-                    #     )
+                    self.benchmark_tool.set_value(
+                        'read_clock', time.perf_counter()
+                    )
+                    self.benchmark_tool.set_value(
+                        'read_time', executionTimeREADPRO
+                        )
 
 
             except:
@@ -447,7 +439,7 @@ class UltrasoundProcessingServer:
             processingInterFramePeriod = np.diff(self.processing_clock)
             displayInterFramePeriod = np.diff(self.display_clock)
             readingInterFramePeriod = np.diff(self.reading_clock)
-            
+
             d = {
                 f"displayIFP_{int(self.na_transmit)}": displayInterFramePeriod,
                 f"readingIFP_{int(self.na_transmit)}": readingInterFramePeriod,
@@ -458,7 +450,7 @@ class UltrasoundProcessingServer:
                 f"diplayClock_{int(self.na_transmit)}": self.display_clock,
                 f"processingClock_{int(self.na_transmit)}": self.processing_clock,
                 f"readingClock_{int(self.na_transmit)}": self.reading_clock,
-                f"processed_id_{int(self.na_transmit)}": self.processed_id,
+                f"processing_id_{int(self.na_transmit)}": self.processing_id,
             }
 
             filename = (
@@ -477,8 +469,8 @@ class UltrasoundProcessingServer:
             self.processing_clock = []
             self.display_clock = []
             self.reading_clock
-            self.processed_id = []
-            self.frame_id = 0
+            self.processing_id = []
+            self.global_id = 0
 
     def process_data(self, buffer, terminate_signal):
         """Function that handles data processing (e.g. beamforming)"""
@@ -488,7 +480,6 @@ class UltrasoundProcessingServer:
             try:
                 startTimeBF = time.perf_counter()
                 inputs, frame_id = self.prepare_inputs(buffer)
-                self.processed_id.append(frame_id)
 
                 if inputs:
                     print('start beamforming')
@@ -523,26 +514,25 @@ class UltrasoundProcessingServer:
                     self.processing_clock.append(time.perf_counter())
                     executionTimeBF = time.perf_counter() - startTimeBF
                     self.beamformer_elapsed_time.append(executionTimeBF)
+                    self.processing_id.append(frame_id)
 
-
-                    # self.benchmark_tool.set_value(
-                    #     'frame_id',
-                    #     frame_id
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'processing_clock',
-                    #     time.perf_counter()
-                    # )
-                    # self.benchmark_tool.set_value(
-                    #     'processing_time',
-                    #     executionTimeBF
-                    # )
+                    self.benchmark_tool.set_value(
+                        'processing_id',
+                        frame_id
+                    )
+                    self.benchmark_tool.set_value(
+                        'processing_clock',
+                        time.perf_counter()
+                    )
+                    self.benchmark_tool.set_value(
+                        'processing_time',
+                        executionTimeBF
+                    )
 
                     print('end of processing function')
             except:
-                pass
-                #buffer.clear()
-                #time.sleep(0.0002)  # wait for new data
+                buffer.clear()
+                time.sleep(0.0001)  # wait for new data
 
         #buffer.clear()
 
@@ -606,14 +596,14 @@ class UltrasoundProcessingServer:
 
                 self.display_clock.append(time.perf_counter())
 
-                # self.benchmark_tool.set_value(
-                #     'display_clock',
-                #     time.perf_counter()
-                #     )
+                self.benchmark_tool.set_value(
+                    'display_clock',
+                    time.perf_counter()
+                    )
 
                 yield encoded
             except:
-                time.sleep(0.002)  # wait for new data
+                time.sleep(0.001)  # wait for new data
 
     @staticmethod
     def encode_img(img):
@@ -752,8 +742,8 @@ class UltrasoundProcessingServer:
                 self.processing_clock = []
                 self.display_clock = []
                 self.reading_clock
-                self.processed_id = []
-                self.frame_id = 0
+                self.processing_id = []
+                self.global_id = 0
 
                 logging.debug(self.source)
 
