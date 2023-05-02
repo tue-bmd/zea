@@ -46,11 +46,20 @@ class BenchmarkTool:
         #self.data.loc[len(self.data), column] = value
         self.data_buffer.append([column, value])
 
+    # def purge_to_dataframe(self):
+    #     """Append the data in the buffer to the dataframe"""
+    #     for column, value in self.data_buffer:
+    #         self.data.loc[len(self.data), column] = value
+
+    #     self.data_buffer = []
+
     def purge_to_dataframe(self):
         """Append the data in the buffer to the dataframe"""
-        for column, value in self.data_buffer:
-            self.data.loc[len(self.data), column] = value
+        list_of_dicts = []
+        for col, val in self.data_buffer:
+            list_of_dicts.append({col: val})
 
+        self.data = self.data.append(list_of_dicts, ignore_index=True)
         self.data_buffer = []
 
     def run(self):

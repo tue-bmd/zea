@@ -428,7 +428,7 @@ class UltrasoundProcessingServer:
                 connection = None
                 buffer.clear()
 
-        time.sleep(0.001)  # sleep for 1 ms
+        #time.sleep(0.0001)  # sleep for 1 ms
         terminate_signal.set()
         buffer.clear()  # clear buffer if while loop is terminated
 
@@ -476,16 +476,13 @@ class UltrasoundProcessingServer:
         """Function that handles data processing (e.g. beamforming)"""
         while not terminate_signal.is_set():
             logging.debug('start processing')
-            #time.sleep(0.)
+            time.sleep(0.)
             try:
                 startTimeBF = time.perf_counter()
                 inputs, frame_id = self.prepare_inputs(buffer)
 
                 if inputs:
-                    print('start beamforming')
                     BF = self.active_model(inputs)[0]
-                    print('done beamforming')
-                    print('start postprocessing')
                     img = self.scan_converter.convert(BF)
                     img = np.array(img)
 
@@ -505,8 +502,6 @@ class UltrasoundProcessingServer:
                                     1,
                                     cv2.LINE_AA
                                     )
-
-                    print('done postprocessing')
 
                     self.bf_display = img
 
@@ -528,11 +523,9 @@ class UltrasoundProcessingServer:
                         'processing_time',
                         executionTimeBF
                     )
-
-                    print('end of processing function')
             except:
                 buffer.clear()
-                time.sleep(0.0001)  # wait for new data
+                #time.sleep(0.0001)  # wait for new data
 
         #buffer.clear()
 
@@ -603,7 +596,8 @@ class UltrasoundProcessingServer:
 
                 yield encoded
             except:
-                time.sleep(0.001)  # wait for new data
+                pass
+                #time.sleep(0.0001)  # wait for new data
 
     @staticmethod
     def encode_img(img):

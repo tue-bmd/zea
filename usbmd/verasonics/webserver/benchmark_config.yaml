@@ -1,4 +1,8 @@
 
+init:
+  duration: 1
+  beamformer: RAW
+  na: 11
 
 DAS1PW:
   duration: 60
