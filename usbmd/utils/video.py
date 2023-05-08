@@ -185,17 +185,20 @@ class ScanConverter():
         """Function for setting parameters"""
         setattr(self, key, val)
 
-    def apply_contrast_curve(self, img, curve):
+    @staticmethod
+    def apply_contrast_curve(img, curve):
         """Function for applying a contrast curve"""
         img = np.interp(img, (0, 255), curve)
         return img
 
-    def apply_gamma(self, img, gamma):
+    @staticmethod
+    def apply_gamma(img, gamma):
         """Function for applying gamma correction"""
         img = np.power(img/255, gamma)*255
         return img
 
-    def apply_color_map(self, img, cmap):
+    @staticmethod
+    def apply_color_map(img, cmap):
         """Function for applying a color map"""
         img = cv2.applyColorMap(img, cmap)
         return img
@@ -209,7 +212,6 @@ class ScanConverter():
             new_buffer.append(old_buffer[i])
         setattr(self, old_buffer_name, new_buffer)
 
-    @staticmethod
     def remove_nan_and_inf(self, img):
         """Function for removing nan and inf values"""
         img[np.isnan(img)] = -self.dynamic_range

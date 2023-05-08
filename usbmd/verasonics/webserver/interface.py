@@ -447,7 +447,8 @@ class UltrasoundProcessingServer:
                 f"processingIFP_{int(self.na_transmit)}": processingInterFramePeriod,
                 f"tBeamformerElapsedTime_{int(self.na_transmit)}": self.beamformer_elapsed_time,
                 f"tUpdateElapsedTime_{int(self.na_transmit)}": self.update_elapsed_time,
-                f"tReadPreProcessElapsedTime_{int(self.na_transmit)}": self.read_preprocess_elapsed_time,
+                f"tReadPreProcessElapsedTime_{int(self.na_transmit)}":
+                self.read_preprocess_elapsed_time,
                 f"diplayClock_{int(self.na_transmit)}": self.display_clock,
                 f"processingClock_{int(self.na_transmit)}": self.processing_clock,
                 f"readingClock_{int(self.na_transmit)}": self.reading_clock,
@@ -469,7 +470,7 @@ class UltrasoundProcessingServer:
             self.update_elapsed_time = []
             self.processing_clock = []
             self.display_clock = []
-            self.reading_clock
+            self.reading_clock = []
             self.processing_id = []
             self.global_id = 0
 
@@ -632,6 +633,7 @@ class UltrasoundProcessingServer:
         """Function that updates setting states of the webserver class"""
 
         # Hacky fix, in the future lets handle all requests as json
+        # pylint: disable=assigning-non-slot
         if request.is_json:
             json_data = request.get_json()
             request.form = json_data # convert json string to dict
@@ -736,7 +738,7 @@ class UltrasoundProcessingServer:
                 self.update_elapsed_time = []
                 self.processing_clock = []
                 self.display_clock = []
-                self.reading_clock
+                self.reading_clock = []
                 self.processing_id = []
                 self.global_id = 0
 

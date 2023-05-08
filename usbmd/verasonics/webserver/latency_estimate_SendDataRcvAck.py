@@ -3,20 +3,17 @@
 LOOP TCP RCV INT16 - TSB INT16
 """
 
-import socket
-import matplotlib.pyplot as plt
 import signal
-import sys
-import array
-import numpy as np
-import time
-#import matlab
+import socket
 import struct
-import scipy.io
+import sys
 
-#FUNCTIONS
-def sigint_handler(signal, frame):
-    print ('KeyboardInterrupt is caught')
+import numpy as np
+
+
+def sigint_handler():
+    """signal interrupt handler"""
+    print('KeyboardInterrupt is caught')
 
     # Clean up the connection
     connection.close()
@@ -24,38 +21,32 @@ def sigint_handler(signal, frame):
     # Close
     sys.exit(0)
 
-###############################################################################
-###############################################################################
-
-
-
-
 signal.signal(signal.SIGINT, sigint_handler)
 
 
 trcvElapsedTime = []
 tproElapsedTime = []
 tsbElapsedTime = []
-treadElapsedTime = [] #INCLUDE receive and processing
+treadElapsedTime = []  # INCLUDE receive and processing
 trcvRate = []
 tsbRate = []
-treadRate = [] #INCLUDE receive and processing
+treadRate = []  # INCLUDE receive and processing
 
 host = ''  # client: 131.155.127.59
-port_tcp = 30000 #TCP
+port_tcp = 30000  # TCP
 bufferSize = 65536
 #'2048', '4096', '8192', '16384', '32768', 65536, 131072
 
 server_address_tcp = (host, port_tcp)
 timeOut = 30
 na = 11
-L = 128*1024*na # 524288
+L = 128*1024*na  # 524288
 T = L
-readSize = 65507 #bytes (4096)
+readSize = 65507  # bytes (4096)
 
 
 bytesPerElementSent = 2
-bytesPerElementRead = 2 #int16
+bytesPerElementRead = 2  # int16
 chunkSize = []
 # Define your connection
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -65,12 +56,10 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.bind(server_address_tcp)
     s.listen(1)
 
-
     # Open connection
     print('TCP server is running ...')
     connection, client_address = s.accept()
-    #s.setblocking(0)
-
+    # s.setblocking(0)
 
     with connection:
 
@@ -82,43 +71,49 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             while True:
 
                 iteration = iteration + 1
-                total = 0;
+                total = 0
                 signal = bytearray()
 
-                while total < L*bytesPerElementRead: # Ensure to receive the complete data
-                    data = connection.recv(readSize) #For best match with hardware and network realities, the value of bufsize should be a relatively small power of 2, for example, 4096.
-                    if not data: break
-                    #elif data:
-                        #print('Data Chunk size: '+ str(len(data)) + 'bytes') # length signal
-                        #chunkSize.append(len(data))
-                        #if total == 0: startTimeRCV = time.time()
+                while total < L*bytesPerElementRead:  # Ensure to receive the complete data
+                    # For best match with hardware and network realities, the value of bufsize
+                    # should be a relatively small power of 2, for example, 4096.
+                    data = connection.recv(readSize)
+                    if not data:
+                        break
+                    # elif data:
+                       # print('Data Chunk size: '+ str(len(data)) + 'bytes') # length signal
+                       # chunkSize.append(len(data))
+                       #if total == 0: startTimeRCV = time.time()
                     total = total + len(data)
                     signal += data
                 #executionTimeRCV = (time.time() - startTimeRCV)
-                print('Received data size: '+ str(total) + 'bytes') # length signal
-
+                print('Received data size: ' +
+                      str(total) + 'bytes')  # length signal
 
                 #t0 = time.perf_counter()
                 dataToBeProcessed = np.frombuffer(signal, dtype=np.int16)
                 #t1 = time.perf_counter()
-                #print('Processing time np: '+ str(t1-t0) + 's') # length signal
+                # print('Processing time np: '+ str(t1-t0) + 's') # length signal
 
                 # t0 = time.perf_counter()
                 # dataToBeProcessed = array.array('h', signal)
                 # t1 = time.perf_counter()
                 # print('Processing time array: '+ str(t1-t0) + 's') # length signal
 
-                print('Received data size: '+ str(len(dataToBeProcessed)) + 'elements') # length signal
+                # length signal
+                print('Received data size: ' +
+                      str(len(dataToBeProcessed)) + 'elements')
 
                 tsb_lst = np.random.rand(1)
                 print(tsb_lst)
                 #tsb_lst = list(map(np.double, tsb_lst))
-                tsb_bytes = bytearray(struct.pack('%sd' % len(tsb_lst), *tsb_lst))
+                tsb_bytes = bytearray(struct.pack(
+                    '%sd' % len(tsb_lst), *tsb_lst))
                 connection.sendall(tsb_bytes)
-        #except KeyboardInterrupt:
+        # except KeyboardInterrupt:
             #print("Caught keyboard interrupt, exiting")
         except:
             rcvBuff = s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
-            sndBuff =s.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
+            sndBuff = s.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
             print('TCP server closes...')
             connection.close()

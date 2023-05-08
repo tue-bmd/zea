@@ -1,16 +1,16 @@
-import numpy as np
-import pandas as pd
+"""This module contains the benchmarking tool for the cloud based ultrasound system """
+
+
 import os
+import threading
 import time
 from datetime import datetime
-import threading
+
+import pandas as pd
 import requests
-import json
 
 from usbmd.utils.config import load_config_from_yaml
 
-
-# Use this benchmark as basis for pytest
 
 class BenchmarkTool:
     """ Class that handles benchmarking of the cloud based ultrasound system"""
@@ -67,12 +67,10 @@ class BenchmarkTool:
         benchmark_thread = threading.Thread(target=self.benchmark)
         benchmark_thread.daemon = True
         benchmark_thread.start()
-        return
 
     def benchmark(self):
         """Runs the benchmark"""
         self.is_running = True
-        """Runs a single benchmark"""
         print('Starting benchmark')
 
         for name, params in self.config.items():
@@ -80,7 +78,9 @@ class BenchmarkTool:
             params['sent_from'] = 'benchmark_tool'
 
             # Update server settings
-            response = requests.post('http://localhost:5000/create_file', json=params)
+            response = requests.post('http://localhost:5000/create_file',
+                                     json=params,
+                                     timeout=5)
 
             if response.status_code == 204:
                 self.current_benchmark = name
@@ -90,7 +90,7 @@ class BenchmarkTool:
 
                 # Save the benchmark data
                 self.current_benchmark = None
-                self.save(name, format='xlsx')
+                self.save(name, filetype='xlsx')
                 self.clear()
 
 
@@ -98,7 +98,7 @@ class BenchmarkTool:
         self.is_running = False
         print('Benchmark finished')
 
-    def save(self, name, format='csv'):
+    def save(self, name, filetype='csv'):
         """Saves the benchmark data to a file"""
 
         self.purge_to_dataframe()
@@ -106,16 +106,16 @@ class BenchmarkTool:
 
         savepath = os.path.join(self.output_folder, name)
 
-        if format == 'csv':
+        if filetype == 'csv':
             snapshot.to_csv(savepath+'.csv')
-        elif format == 'xlsx':
+        elif filetype == 'xlsx':
             snapshot.to_excel(savepath+'.xlsx')
-        elif format == 'mat':
+        elif filetype == 'mat':
             raise NotImplementedError('Saving to .mat not yet implemented')
         else:
-            raise ValueError('format must be csv, xlsx or mat')
+            raise ValueError('filetype must be csv, xlsx or mat')
 
-        print(f'Saved benchmark data to {savepath}.{format}')
+        print(f'Saved benchmark data to {savepath}.{filetype}')
 
 
     def clear(self):
