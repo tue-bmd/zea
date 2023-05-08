@@ -41,7 +41,17 @@ class FPS_counter():
             self.fps_value = fps
             self.last_update_time = curr_time
 
-        cv2.putText(img, f'{self.fps_value:.1f}', (7, 50), self.font, 0.8, (50, 255, 0, 255), 2, cv2.LINE_AA)
+        cv2.putText(
+            img,
+            f'{self.fps_value:.1f}',
+            (7, 50),
+            self.font,
+            0.8,
+            (50, 255, 0, 255),
+            2,
+            cv2.LINE_AA
+            )
+
         return img
 
 class ScanConverter():
@@ -199,6 +209,7 @@ class ScanConverter():
             new_buffer.append(old_buffer[i])
         setattr(self, old_buffer_name, new_buffer)
 
+    @staticmethod
     def remove_nan_and_inf(self, img):
         """Function for removing nan and inf values"""
         img[np.isnan(img)] = -self.dynamic_range
@@ -216,9 +227,11 @@ class ScanConverterTF(ScanConverter):
         img = self.normalize(img)
         img = self.compression(img)
         img = self.remove_nan_and_inf(img)
-        img = self.resize(img)
-        #img = self.persistence(img)
+
         img = tf.clip_by_value(img, -self.dynamic_range, 0)
+
+        img = self.resize(img)
+
         img = tf.cast((img + self.dynamic_range)*(255./self.dynamic_range), tf.uint8)
 
         return img
@@ -236,11 +249,10 @@ class ScanConverterTF(ScanConverter):
         img = tf.squeeze(img, axis=-1)
         return img
 
-    @staticmethod
-    def remove_nan_and_inf(img):
+    def remove_nan_and_inf(self, img):
         """Function for removing nan and inf values"""
-        img = tf.where(tf.math.is_nan(img), -60., img)
-        img = tf.where(tf.math.is_inf(img), -60., img)
+        img = tf.where(tf.math.is_nan(img), -self.dynamic_range, img)
+        img = tf.where(tf.math.is_inf(img), -self.dynamic_range, img)
         return img
 
     @staticmethod
