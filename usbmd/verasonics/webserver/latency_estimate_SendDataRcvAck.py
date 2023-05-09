@@ -24,97 +24,99 @@ def sigint_handler():
 signal.signal(signal.SIGINT, sigint_handler)
 
 
-trcvElapsedTime = []
-tproElapsedTime = []
-tsbElapsedTime = []
-treadElapsedTime = []  # INCLUDE receive and processing
-trcvRate = []
-tsbRate = []
-treadRate = []  # INCLUDE receive and processing
+if __name__ == '__main__':
+    trcvElapsedTime = []
+    tproElapsedTime = []
+    tsbElapsedTime = []
+    treadElapsedTime = []  # INCLUDE receive and processing
+    trcvRate = []
+    tsbRate = []
+    treadRate = []  # INCLUDE receive and processing
 
-host = ''  # client: 131.155.127.59
-port_tcp = 30000  # TCP
-bufferSize = 65536
-#'2048', '4096', '8192', '16384', '32768', 65536, 131072
+    host = ''  # client: 131.155.127.59
+    port_tcp = 30000  # TCP
+    bufferSize = 65536
+    #'2048', '4096', '8192', '16384', '32768', 65536, 131072
 
-server_address_tcp = (host, port_tcp)
-timeOut = 30
-na = 11
-L = 128*1024*na  # 524288
-T = L
-readSize = 65507  # bytes (4096)
+    server_address_tcp = (host, port_tcp)
+    timeOut = 30
+    na = 11
+    L = 128*1024*na  # 524288
+    T = L
+    readSize = 65507  # bytes (4096)
 
 
-bytesPerElementSent = 2
-bytesPerElementRead = 2  # int16
-chunkSize = []
-# Define your connection
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    socket.setdefaulttimeout(timeOut)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, bufferSize)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, bufferSize)
-    s.bind(server_address_tcp)
-    s.listen(1)
+    bytesPerElementSent = 2
+    bytesPerElementRead = 2  # int16
+    chunkSize = []
+    # Define your connection
 
-    # Open connection
-    print('TCP server is running ...')
-    connection, client_address = s.accept()
-    # s.setblocking(0)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        socket.setdefaulttimeout(timeOut)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, bufferSize)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, bufferSize)
+        s.bind(server_address_tcp)
+        s.listen(1)
 
-    with connection:
+        # Open connection
+        print('TCP server is running ...')
+        connection, client_address = s.accept()
+        # s.setblocking(0)
 
-        print('Connected by', client_address)
+        with connection:
 
-        try:
-            iteration = 0
+            print('Connected by', client_address)
 
-            while True:
+            try:
+                iteration = 0
 
-                iteration = iteration + 1
-                total = 0
-                signal = bytearray()
+                while True:
 
-                while total < L*bytesPerElementRead:  # Ensure to receive the complete data
-                    # For best match with hardware and network realities, the value of bufsize
-                    # should be a relatively small power of 2, for example, 4096.
-                    data = connection.recv(readSize)
-                    if not data:
-                        break
-                    # elif data:
-                       # print('Data Chunk size: '+ str(len(data)) + 'bytes') # length signal
-                       # chunkSize.append(len(data))
-                       #if total == 0: startTimeRCV = time.time()
-                    total = total + len(data)
-                    signal += data
-                #executionTimeRCV = (time.time() - startTimeRCV)
-                print('Received data size: ' +
-                      str(total) + 'bytes')  # length signal
+                    iteration = iteration + 1
+                    total = 0
+                    signal = bytearray()
 
-                #t0 = time.perf_counter()
-                dataToBeProcessed = np.frombuffer(signal, dtype=np.int16)
-                #t1 = time.perf_counter()
-                # print('Processing time np: '+ str(t1-t0) + 's') # length signal
+                    while total < L*bytesPerElementRead:  # Ensure to receive the complete data
+                        # For best match with hardware and network realities, the value of bufsize
+                        # should be a relatively small power of 2, for example, 4096.
+                        data = connection.recv(readSize)
+                        if not data:
+                            break
+                        # elif data:
+                        # print('Data Chunk size: '+ str(len(data)) + 'bytes') # length signal
+                        # chunkSize.append(len(data))
+                        #if total == 0: startTimeRCV = time.time()
+                        total = total + len(data)
+                        signal += data
+                    #executionTimeRCV = (time.time() - startTimeRCV)
+                    print('Received data size: ' +
+                        str(total) + 'bytes')  # length signal
 
-                # t0 = time.perf_counter()
-                # dataToBeProcessed = array.array('h', signal)
-                # t1 = time.perf_counter()
-                # print('Processing time array: '+ str(t1-t0) + 's') # length signal
+                    #t0 = time.perf_counter()
+                    dataToBeProcessed = np.frombuffer(signal, dtype=np.int16)
+                    #t1 = time.perf_counter()
+                    # print('Processing time np: '+ str(t1-t0) + 's') # length signal
 
-                # length signal
-                print('Received data size: ' +
-                      str(len(dataToBeProcessed)) + 'elements')
+                    # t0 = time.perf_counter()
+                    # dataToBeProcessed = array.array('h', signal)
+                    # t1 = time.perf_counter()
+                    # print('Processing time array: '+ str(t1-t0) + 's') # length signal
 
-                tsb_lst = np.random.rand(1)
-                print(tsb_lst)
-                #tsb_lst = list(map(np.double, tsb_lst))
+                    # length signal
+                    print('Received data size: ' +
+                        str(len(dataToBeProcessed)) + 'elements')
 
-                tsb_bytes = bytearray(struct.pack(
-                    f'{tsb_lst}d', *tsb_lst))
-                connection.sendall(tsb_bytes)
-        # except KeyboardInterrupt:
-            #print("Caught keyboard interrupt, exiting")
-        except:
-            rcvBuff = s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
-            sndBuff = s.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
-            print('TCP server closes...')
-            connection.close()
+                    tsb_lst = np.random.rand(1)
+                    print(tsb_lst)
+                    #tsb_lst = list(map(np.double, tsb_lst))
+
+                    tsb_bytes = bytearray(struct.pack(
+                        f'{tsb_lst}d', *tsb_lst))
+                    connection.sendall(tsb_bytes)
+            # except KeyboardInterrupt:
+                #print("Caught keyboard interrupt, exiting")
+            except:
+                rcvBuff = s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+                sndBuff = s.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
+                print('TCP server closes...')
+                connection.close()
