@@ -107,8 +107,9 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 tsb_lst = np.random.rand(1)
                 print(tsb_lst)
                 #tsb_lst = list(map(np.double, tsb_lst))
+
                 tsb_bytes = bytearray(struct.pack(
-                    '%sd' % len(tsb_lst), *tsb_lst))
+                    f'{tsb_lst}d', *tsb_lst))
                 connection.sendall(tsb_bytes)
         # except KeyboardInterrupt:
             #print("Caught keyboard interrupt, exiting")
