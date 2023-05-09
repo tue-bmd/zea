@@ -248,3 +248,89 @@ class CircularWaveScan(Scan):
 
         self.focus = focus
         raise NotImplementedError('CircularWaveScan has not been implemented.')
+
+
+def compute_t0_delays_planewave(ele_pos, polar_angle, azimuth_angle=0, c=1540):
+    """Computes the transmit delays for a planewave, shifted such that the
+    first element fires at t=0.
+
+    Args:
+        ele_pos (np.ndarray): The positions of the elements in the array of
+            shape (element, 3).
+        polar_angle (float): The polar angle of the planewave in radians.
+        azimuth_angle (float, optional): The azimuth angle of the planewave
+            in radians. Defaults to 0.
+        c (float, optional): The speed of sound. Defaults to 1540.
+
+    Returns:
+        np.ndarray: The transmit delays for each element of shape (element,).
+    """
+    # The wave vector of the planewave of shape (1, 3)
+    v = np.stack([np.sin(polar_angle)*np.cos(azimuth_angle),
+                  np.sin(polar_angle)*np.sin(azimuth_angle),
+                  np.cos(polar_angle)])[None]
+
+    # Compute the projection of the element positions onto the wave vector
+    projection = np.sum(ele_pos*v, axis=1)
+
+    # Convert from distance to time to compute the transmit delays.
+    t0_delays_not_zero_algined = projection/c
+
+    # The smallest (possibly negative) time corresponds to the moment when
+    # the first element fires.
+    t_first_fire = np.min(projection)/c
+
+    # The transmit delays are the projection minus the offset. This ensures
+    # that the first element fires at t=0.
+    t0_delays = t0_delays_not_zero_algined-t_first_fire
+
+    return t0_delays
+
+
+def compute_t0_delays_focused(origin, focus_distance, ele_pos, polar_angle,
+                              azimuth_angle=0, c=1540):
+    """Computes the transmit delays for a focused transmit, shifted such that
+    the first element fires at t=0.
+
+    Args:
+        origin (np.ndarray): The origin of the focused transmit of shape (3,).
+        focus_distance (float): The distance to the focus.
+        ele_pos (np.ndarray): The positions of the elements in the array of
+            shape (element, 3).
+        polar_angle (float): The polar angle of the planewave in radians.
+        azimuth_angle (float, optional): The azimuth angle of the planewave
+            in radians. Defaults to 0.
+        c (float, optional): The speed of sound. Defaults to 1540.
+
+    Returns:
+        np.ndarray: The transmit delays for each element of shape (element,).
+    """
+    # Compute the wave vector of shape (1, 3)
+    v = np.stack([np.sin(polar_angle)*np.cos(azimuth_angle),
+                  np.sin(polar_angle)*np.sin(azimuth_angle),
+                  np.cos(polar_angle)])
+
+    # Compute the location of the virtual source by adding the focus distance
+    # to the origin along the wave vector.
+    virtual_source = origin + focus_distance*v
+
+    # Add a dummy dimension for the element dimension
+    virtual_source = virtual_source[None]
+
+    # Compute the distance between the virtual source and each element
+    dist = np.linalg.norm(virtual_source-ele_pos, axis=1)
+
+    dist *= -np.sign(focus_distance)
+
+    # Convert from distance to time to compute the
+    # transmit delays/travel times.
+    travel_times = dist/c
+
+    # The smallest (possibly negative) time corresponds to the moment when
+    # the first element fires.
+    t_first_fire = np.min(travel_times, axis=0)
+
+    # Shift the transmit delays such that the first element fires at t=0.
+    t0_delays = travel_times-t_first_fire
+
+    return t0_delays
