@@ -1,14 +1,11 @@
 """
-==============================================================================
-    Eindhoven University of Technology
-==============================================================================
+The UI module is an easy way to run the entire pipeline and visualize the
+results.
 
     Source Name   : ui.py
 
     Author(s)     : Tristan Stevens
     Date          : Thu Nov 18 2021
-
-==============================================================================
 """
 import argparse
 import sys
