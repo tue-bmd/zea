@@ -71,7 +71,7 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
     Args:
         path (str): The path to write the dataset to.
         raw_data (np.ndarray): The raw data of the ultrasound measurement of
-            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+            shape (n_frames, n_tx, n_el, n_ax, n_ch).
         add_optional_fields (bool, optional): Whether to add optional fields to
             the dataset. Defaults to False.
 
@@ -92,13 +92,13 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
 
     n_frames = raw_data.shape[0]
     n_tx = raw_data.shape[1]
-    n_ax = raw_data.shape[2]
-    n_el = raw_data.shape[3]
+    n_el = raw_data.shape[2]
+    n_ax = raw_data.shape[3]
     n_ch = raw_data.shape[4]
 
     # Write data group
     data_group = dataset.create_group('data')
-    data_shape = (n_frames, n_tx, n_ax, n_el, n_ch)
+    data_shape = (n_frames, n_tx, n_el, n_ax, n_ch)
     assert raw_data.shape == data_shape, \
         f'The raw_data has the wrong shape. Expected {data_shape}, ' \
         f'got {raw_data.shape}.'
@@ -106,7 +106,7 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
     add_dataset(group=data_group,
                 name='raw_data',
                 data=raw_data.astype(np.float32),
-                description='The raw_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).',
+                description='The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).',
                 unit='unitless')
 
     # Write settings group
@@ -245,7 +245,7 @@ def validate_dataset(path):
         'beamformed_data',
         'envelope_data',
         'image',
-        'image_sc']
+        'image_sc']# TODO: Add initial_times?
     for key in dataset['data'].keys():
         assert key in allowed_data_keys, \
             'The data group contains an unexpected key.'
@@ -257,10 +257,10 @@ def validate_dataset(path):
                 'The raw_data group does not have a shape of length 5.'
             assert data_shape[1] == dataset['settings']['n_tx'][()], \
                 'n_tx does not match the second dimension of raw_data.'
-            assert data_shape[2] == dataset['settings']['n_ax'][()], \
-                'n_ax does not match the third dimension of raw_data.'
-            assert data_shape[3] == dataset['settings']['n_el'][()], \
-                'n_el does not match the fourth dimension of raw_data.'
+            assert data_shape[2] == dataset['settings']['n_el'][()], \
+                'n_el does not match the third dimension of raw_data.'
+            assert data_shape[3] == dataset['settings']['n_ax'][()], \
+                'n_ax does not match the fourth dimension of raw_data.'
             assert data_shape[4] in (1, 2), \
                 'The fifth dimension of raw_data is not 1 or 2.'
 
