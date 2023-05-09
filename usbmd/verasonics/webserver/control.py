@@ -42,7 +42,7 @@ class PIDController:
 
         self.error = error
         self.error_sum += self.error
-        self.error_diff = (self.error - self.error_last)
+        self.error_diff = self.error - self.error_last
 
         self.error_last = self.error
 
