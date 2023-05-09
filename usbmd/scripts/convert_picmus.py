@@ -51,8 +51,13 @@ if __name__ == '__main__':
                 relative_folder_path = Path(root).relative_to(base_dir)
 
                 # Define the output path
+                # NOTE: I added Path(file).stem to put each file in its own
+                # folder. This makes it possible to use it as a dataset because
+                # it ensures there are never different types of data file in
+                # the same folder.
                 output_path = Path(output_dir,
                                    relative_folder_path,
+                                   Path(file).stem,
                                    file)
 
                 # Create the output directory if it does not exist already
