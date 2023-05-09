@@ -103,6 +103,7 @@ config_schema = Schema({
         Optional("modtype", default=None): Or(*_MOD_TYPES),
         Optional("from_modtype", default=None): Or(*_MOD_TYPES),
         Optional("user", default=None): dict,
+        Optional("dataset_folder", default=None): Or(None, str),
     },
     "plot": {
         "save": bool,
