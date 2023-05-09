@@ -101,7 +101,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 
                 tsb_lst = list(map(np.int16, tsb_lst))
                 tsb_bytes = bytearray(struct.pack(
-                    '%sh' % len(tsb_lst), *tsb_lst))
+                    f'{tsb_lst}d', *tsb_lst))
                 print('Sent data size: ' + str(len(tsb_bytes)) + 'bytes')
                 connection.sendall(tsb_bytes)
         # except KeyboardInterrupt:
