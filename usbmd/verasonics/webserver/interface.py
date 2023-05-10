@@ -37,6 +37,7 @@ import scipy.io
 import tensorflow as tf
 from demo_setup import get_models
 from flask import Flask, Response, render_template, request
+from flask_restful import Resource, Api
 from futures3.thread import ThreadPoolExecutor
 
 from usbmd.utils.video import FPS_counter, ScanConverterTF
@@ -750,12 +751,38 @@ class UltrasoundProcessingServer:
 
         return ('', 204)
 
+    def get_settings(self):
+        """Function that returns the current settings of the webserver class"""
+        import json
+        def is_jsonable(x):
+            try:
+                json.dumps(x)
+                return True
+            except (TypeError, OverflowError):
+                return False
+
+        settings = self.__dict__
+        for key,value in settings.items():
+            if not is_jsonable(value):
+                settings[key] = str(value)
+
+        return settings
+
+    def delete_settings(self):
+        """Function that resets the current settings of the webserver class"""
+        self.__init__()
+
+    def set_settings(self, settings):
+        """Function that sets the current settings of the webserver class"""
+        self.__dict__ = settings
+
 
 # Initialize Flask server
 app = Flask(__name__)
 app.secret_key = 'Secret'
 app.config["SESSION_PERMANENT"] = False
 
+api = Api(app)
 
 @app.route('/')
 def index():
@@ -788,6 +815,25 @@ def start_benchmark():
 
 # Initialize Verasonics webserver
 usp = UltrasoundProcessingServer()
+
+
+## REST API ##
+class Settings(Resource):
+    def get(self):
+        """Returns the current settings of the server"""
+        return usp.get_settings()
+
+    def post(self):
+        """Updates the settings of the server"""
+        return usp.update_settings()
+
+    def delete(self):
+        """Deletes the settings of the server"""
+        return usp.delete_settings()
+
+api.add_resource(Settings, '/settings')
+
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000,

@@ -37,7 +37,7 @@ if __name__ == '__main__':
 
     host = ''  # client: 131.155.127.59
     port_tcp = 30000  # TCP
-    bufferSize = 65536
+    bufferSize = 65536 
     #'2048', '4096', '8192', '16384', '32768', 65536, 131072
 
     server_address_tcp = (host, port_tcp)
