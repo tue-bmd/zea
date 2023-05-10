@@ -16,15 +16,18 @@ scan:
   n_angles: 11
 
 data:
-  local: false
   file_path: null
+  local: true
   dataset_name: 'abledata'
   dtype: 'raw_data'
-  modtype: 'iq'
+  modtype: 'rf'
   dynamic_range: [-60, 0]
 
+scan:
+  n_angles: 75
 
 device: 'gpu'
+ml_library: 'tensorflow'
 
 plot:
   save: true
