@@ -750,32 +750,6 @@ class UltrasoundProcessingServer:
 
         return ('', 204)
 
-    def get_settings(self):
-        """Function that returns the current settings of the webserver class"""
-        import json
-        def is_jsonable(x):
-            try:
-                json.dumps(x)
-                return True
-            except (TypeError, OverflowError):
-                return False
-
-        settings = self.__dict__
-        for key,value in settings.items():
-            if not is_jsonable(value):
-                settings[key] = str(value)
-
-        return settings
-
-    def delete_settings(self):
-        """Function that resets the current settings of the webserver class"""
-        self.__init__()
-
-    def set_settings(self, settings):
-        """Function that sets the current settings of the webserver class"""
-        self.__dict__ = settings
-
-
 # Initialize Flask server
 app = Flask(__name__)
 app.secret_key = 'Secret'
