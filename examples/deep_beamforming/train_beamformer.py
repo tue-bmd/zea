@@ -112,12 +112,13 @@ def train(config):
 
 
 if __name__ == '__main__':
-    # Set GPU usage
-    set_gpu_usage()
-
     # Load config
     path_to_config_file = Path.cwd() / 'configs/config_picmus_iq.yaml'
     config = setup(file=path_to_config_file)
     config.data.user = set_data_paths(local=True)
 
+    # Set GPU usage
+    set_gpu_usage(config.device)
+
+    # Train
     _, beamformer = train(config)
