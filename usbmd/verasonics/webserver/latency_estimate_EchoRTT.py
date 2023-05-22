@@ -26,7 +26,6 @@ def sigint_handler():
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, sigint_handler)
 
-
     trcvElapsedTime = []
     tproElapsedTime = []
     tsbElapsedTime = []
@@ -37,7 +36,7 @@ if __name__ == '__main__':
 
     host = ''  # client: 131.155.127.59
     port_tcp = 30000  # TCP
-    bufferSize = 65536 
+    bufferSize = 65536
     #'2048', '4096', '8192', '16384', '32768', 65536, 131072
 
     server_address_tcp = (host, port_tcp)
@@ -46,7 +45,6 @@ if __name__ == '__main__':
     L = 128*1024*na  # 524288
     T = L
     readSize = 65507  # bytes (4096)
-
 
     bytesPerElementSent = 2
     bytesPerElementRead = 2  # int16
@@ -91,11 +89,11 @@ if __name__ == '__main__':
                         signal += data
                     #executionTimeRCV = (time.time() - startTimeRCV)
                     print('Received data size: ' +
-                        str(total) + 'bytes')  # length signal
+                          str(total) + 'bytes')  # length signal
                     dataToBeProcessed = array.array('h', signal)
                     # length signal
                     print('Received data size: ' +
-                        str(len(dataToBeProcessed)) + 'elements')
+                          str(len(dataToBeProcessed)) + 'elements')
 
                     tsb_lst = dataToBeProcessed
                     # print(tsb_lst)
