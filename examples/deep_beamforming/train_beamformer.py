@@ -1,6 +1,12 @@
 """Example script for training deep learning based beamforming.
+
 Author(s): Ben Luijten
 Date: 09/12/2022
+
+Summary: This script trains a deep learning based beamformer (ABLE) on a single angle plane wave
+input, towards an 11 plane wave target. The target is created using the same scan parameters as the
+input, but with a different number of angles and DAS beamforming.
+
 """
 from pathlib import Path
 
@@ -16,31 +22,14 @@ from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
 from usbmd.utils.utils import update_dictionary
-
-
-def create_targets(data, scan, probe, n_angles):
-    config.data.n_angles = n_angles
-    scan.n_angles = n_angles
-    scan.N_tx = n_angles
-
-    # Target beamformer
-    beamformer = create_beamformer(probe, scan, config)
-
-    # Create targets
-    targets = beamformer(data)
-
-    return targets
-
-def create_inputs(data, scan, probe, config, n_angles):
-    inputs = data[n_angles]
-    inputs = np.expand_dims(inputs, axis=0)
-    return inputs
+from usbmd.utils.video import ScanConverterTF
 
 
 def train(config):
 
-    # intialize dataset
+    # Intialize dataset
     dataset = get_dataset(config.data)
+    data = dataset[0]
 
     # Initialize scan based on dataset
     scan_class = dataset.get_scan_class()
@@ -54,32 +43,70 @@ def train(config):
     # initialize probe
     probe = get_probe(dataset.get_probe_name())
 
-    # Create input and target data
-    inputs = create_inputs(dataset[0], scan, probe, config, scan.n_angles)
-    targets = create_targets(dataset[0], scan, probe, 11)
+    # Create target data
+    target_beamformer = create_beamformer(probe, scan, config)
+
+    targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
+
+    # Create the beamforming model
+
+    # Only use the center angle for training
+    config.scan.n_angles = 1
+    config.model.beamformer.type = 'able'
+    config_scan_params = config.scan
+
+    # dict merging of manual config and dataset default scan parameters
+    scan_params = update_dictionary(default_scan_params, config_scan_params)
+    scan = scan_class(**scan_params, modtype=config.data.modtype)
+    scan.angles = np.array([0])
+
+    inputs = np.expand_dims(data[37:38], axis=0)
 
     beamformer = create_beamformer(probe, scan, config)
-
     beamformer.summary()
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-    beamformer.compile(optimizer=optimizer,
-                  loss=smsle,
-                  metrics=smsle,
-                  run_eagerly=False)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
 
-    data = dataset[0]
-    data = data[scan.n_angles]
-    data = np.expand_dims(data, axis=0)
+    beamformer.compile(optimizer=optimizer,
+                       loss=smsle,
+                       metrics=smsle,
+                       run_eagerly=False)
+
+    # repeat the inputs and targets N times with noise
+    N = 100
+    inputs = np.repeat(inputs, N, axis=0)
+    targets = np.repeat(targets, N, axis=0)
+
+    # add noise to the inputs based on SNR
+    SNR = 20
+    noise = np.random.normal(0, 1, inputs.shape)
+    noise = noise / np.linalg.norm(noise) * np.linalg.norm(inputs) / SNR
+    inputs += noise
 
     # Train the model
     history = beamformer.fit(
-        data,
-        epochs=100,
+        inputs,
+        targets,
+        epochs=10,
         batch_size=1,
         verbose=1)
 
-    return beamformer
+    scan_converter = ScanConverterTF(grid=scan.grid)
+
+    targets = scan_converter.convert(targets)
+    predictions = scan_converter.convert(beamformer(inputs))
+
+    # plot the resulting image
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.imshow(targets[0], cmap='gray')
+    plt.title('Target')
+    plt.subplot(1, 2, 2)
+    plt.imshow(predictions[0], cmap='gray')
+    plt.title('Prediction')
+    plt.show()
+
+    return history, beamformer
 
 
 if __name__ == '__main__':
@@ -90,116 +117,5 @@ if __name__ == '__main__':
     path_to_config_file = Path.cwd() / 'configs/config_picmus_iq.yaml'
     config = setup(file=path_to_config_file)
     config.data.user = set_data_paths(local=True)
-    config.data.n_angles = 75
 
-    beamformer = train(config)
-
-
-
-
-
-
-
-# def train(config, dataset_directory):
-#     """Loads parameters and data, and trains the model"""
-
-#     # Initialization
-#     # Load the probe and grid based on config
-#     probe = get_probe_from_config(config)
-#     scan = initialize_scan_from_probe(probe)
-#     grid = scan.grid
-
-#     # Set number of channels (RF/IQ)
-#     # This will be added to the probe class later on
-#     probe.N_ch = 2 if config.data.get('IQ') else 1
-#     probe.N_tx = config.data.n_angles
-
-#     probe.fc = 6250000
-#     probe.fdemod = 0
-#     probe.bandwidth = None
-
-#     # Create the beamforming model
-#     # A grid is added as "auxiallary input" such that we can train on different grid patches
-#     model = create_beamformer(probe, scan, config, aux_inputs=['grid'])
-
-#     model.summary()
-
-#     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-#     model.compile(optimizer=optimizer,
-#                   loss=smsle,
-#                   metrics=smsle,
-#                   run_eagerly=False)
-
-#     # Data loading
-#     dataloader
-
-
-#     dataloader = UltrasoundLoader(
-#         config,
-#         dataset_directory,
-#         probe,
-#         grid,
-#         val_size=0.1)
-
-#     N_batches = len(dataloader.x_train)
-#     x_test, y_test = dataloader.load_test()
-
-#     # Create TF dataloader
-#     tf_train_gen = tf.data.Dataset.from_generator(
-#         dataloader.load_batches,
-#         output_types=((tf.float32, tf.float32), tf.float32),
-#         output_shapes=((tf.TensorShape(model.inputs[0].shape[1:]),
-#                         tf.TensorShape(model.inputs[1].shape[1:])),
-#                         tf.TensorShape(model.outputs[0].shape[1:]))
-#     ).batch(config.model.batch_size)
-
-#     # Train the model
-#     model.fit(tf_train_gen,
-#               steps_per_epoch=N_batches,
-#               epochs=20,
-#               callbacks=[],
-#               max_queue_size=10,
-#               workers=1,
-#               verbose=1)
-
-#     # Inference
-#     test_idx = 2
-
-#     # Create full-image inference model, no aux grid input needed here
-#     config.model.patch_shape = (grid.shape[0], grid.shape[1])
-#     infer_model = create_beamformer(probe, grid, config)
-#     infer_model.set_weights(model.get_weights())
-#     y_pred = infer_model(
-#         [np.expand_dims(x_test[test_idx], 0), np.expand_dims(grid, 0)])
-
-#     # Convert to images
-#     proc = Process(None, probe=probe)
-#     proc.downsample_factor = 1
-#     y_pred_img = proc.run(y_pred['beamformed'][0].numpy(),
-#                           dtype='envelope_data', to_dtype='image')
-#     y_test_img = proc.run(
-#         y_test[test_idx], dtype='envelope_data', to_dtype='image')
-
-#     # Show an example of the test data
-#     aspect = (grid.shape[1]/grid.shape[0])/(np.diff(config.scan.xlims)/np.diff(config.scan.zlims))
-
-#     fig, axs = plt.subplots(1, 2)
-#     axs[0].imshow(y_pred_img.T, cmap='gray', aspect = aspect)
-#     axs[0].set_title('Deep Learning')
-#     axs[1].imshow(y_test_img, cmap='gray', aspect = aspect)
-#     axs[1].set_title('Target')
-#     fig.show()
-
-#     return model
-
-
-# if __name__ == '__main__':
-#     # pylint: disable=no-member
-#     # Choose gpu, or select automatically
-#     set_gpu_usage()
-
-#     # Load config file
-#     path_to_config_file = Path.cwd() / 'examples/deep_beamforming/example_config_nMAP.yaml'
-#     config = setup(path_to_config_file)
-
-#     model = train(config)
+    _, beamformer = train(config)
