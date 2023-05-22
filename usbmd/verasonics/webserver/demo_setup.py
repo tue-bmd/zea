@@ -112,14 +112,18 @@ def create_DAS(n_angles):
         config,
         aux_inputs=config.model.beamformer.get('aux_inputs')
     )
-    model = tf.function(model, jit_compile=True)
 
-    # build model by passing a dictionary of dummy data with correct dtype.
-    # Use the input name as key. Use dictionary comprehension
+    try:
+        model = tf.function(model, jit_compile=True)
+    except:
+        print('Could not compile model, running uncompiled')
+
+    # Build model by passing a dictionary of dummy data with correct dtype and shape
     dummy_input = {
         inp.name.strip('_input'): tf.zeros(inp.shape, dtype=inp.dtype) for inp in model.inputs
     }
     _ = model(dummy_input)
+    
     return model, scan.grid
 
 
