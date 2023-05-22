@@ -26,6 +26,8 @@ from usbmd.utils.video import ScanConverterTF
 
 
 def train(config):
+    """Train function that initializes the dataset, beamformer model and optimizer, creates the
+    target data, and then trains the model."""
 
     # Intialize dataset
     dataset = get_dataset(config.data)
