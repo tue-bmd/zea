@@ -1,4 +1,5 @@
 # pylint: disable=no-member
+# pylint disable=not-an-iterable
 
 """This module contains the function to initialize the models for the webserver demo."""
 
@@ -120,7 +121,6 @@ def create_DAS(n_angles):
         print('Could not compile model, running uncompiled')
 
     # Build model by passing a dictionary of dummy data with correct dtype and shape
-    # pylint disable=not-an-iterable
     dummy_input = {
         inp.name.strip('_input'): tf.zeros(inp.shape, dtype=inp.dtype) for inp in model.inputs
     }
