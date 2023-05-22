@@ -1,5 +1,5 @@
 # pylint: disable=no-member
-# pylint disable=not-an-iterable
+# pylint: disable=not-an-iterable
 
 """This module contains the function to initialize the models for the webserver demo."""
 
