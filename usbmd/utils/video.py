@@ -12,10 +12,10 @@ import tensorflow as tf
 
 
 class FPS_counter():
-    """ An FPS counter class that overlays a frames-per-second count on an image stream"""
+    """An FPS counter class that overlays a frames-per-second count on an image stream"""
 
     def __init__(self, buffer_size = 5):
-        """_summary_
+        """ Initialize FPS counter
 
         Args:
             buffer_size (int, optional): Size of the MA window (in frames). Defaults to 30.
@@ -65,7 +65,8 @@ class ScanConverter():
             max_buffer_size = 10,
             norm_factor=2**14,
             dtype='iq'):
-        """_summary_
+
+        """Initialize scan converter
 
         Args:
             norm_mode (str, optional): Normalization mode ('max', 'smoothnormal', 'fixed').
@@ -80,8 +81,8 @@ class ScanConverter():
         self.norm_mode = norm_mode
         self.env_mode = env_mode
         self.norm_factor = norm_factor
-        self.img_buffer = deque(maxlen=img_buffer_size)
-        self.max_buffer = deque(maxlen=max_buffer_size)
+        self.img_buffer = deque(maxlen=img_buffer_size) # Buffer for image frames
+        self.max_buffer = deque(maxlen=max_buffer_size) # Buffer for max values (for normalization)
         self.dynamic_range = 60
 
         self.persistence_mode = 'MA'
@@ -109,7 +110,7 @@ class ScanConverter():
         img = self.normalize(img)
         img = self.compression(img)
         img = self.remove_nan_and_inf(img)
-        #img = self.resize(img)
+        img = self.resize(img)
         #img = self.persistence(img)
         img = np.clip(img, -60, 0)
         img = ((img + 60)*(255/60)).astype('uint8')
@@ -156,7 +157,6 @@ class ScanConverter():
         "Normalization function"
         max_val = np.maximum(img.max(), 1e-9)
         self.max_buffer.append(img.max())
-        #self.max_buffer = self.max_buffer[-self.buffer_size::]
 
         if self.norm_mode == 'normal':
             img = img/max_val
@@ -229,11 +229,8 @@ class ScanConverterTF(ScanConverter):
         img = self.normalize(img)
         img = self.compression(img)
         img = self.remove_nan_and_inf(img)
-
         img = tf.clip_by_value(img, -self.dynamic_range, 0)
-
         img = self.resize(img)
-
         img = tf.cast((img + self.dynamic_range)*(255./self.dynamic_range), tf.uint8)
 
         return img
