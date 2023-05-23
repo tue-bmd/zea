@@ -41,10 +41,14 @@ def train(config):
 
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
-    scan = scan_class(**scan_params, modtype=config.data.modtype)
 
     # Reducing the pixels per wavelength to 1 to reduce memory usage at the cost of resolution
-    scan.grid.pixels_per_wavelength = 1
+    scan_params['pixels_per_wvln'] = 1
+    # Setting the grid size to automatic mode based on pixels per wavelength
+    scan_params['Nx'] = None
+    scan_params['Nz'] = None
+
+    scan = scan_class(**scan_params, modtype=config.data.modtype)
 
     # initialize probe
     probe = get_probe(dataset.get_probe_name())
@@ -62,6 +66,13 @@ def train(config):
 
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
+
+    # Reducing the pixels per wavelength to 1 to reduce memory usage at the cost of resolution
+    scan_params['pixels_per_wvln'] = 1
+    # Setting the grid size to automatic mode based on pixels per wavelength
+    scan_params['Nx'] = None
+    scan_params['Nz'] = None
+
     scan = scan_class(**scan_params, modtype=config.data.modtype)
     scan.angles = np.array([0])
 
@@ -99,6 +110,7 @@ def train(config):
 
     scan_converter = ScanConverterTF(grid=scan.grid)
 
+
     targets = scan_converter.convert(targets)
     predictions = scan_converter.convert(beamformer(inputs))
 
@@ -122,7 +134,7 @@ if __name__ == '__main__':
     config.data.user = set_data_paths(local=True)
 
     # Set GPU usage
-    set_gpu_usage(config.device)
+    set_gpu_usage(config.get('device'))
 
     # Train
     _, beamformer = train(config)
