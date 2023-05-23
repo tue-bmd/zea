@@ -1,5 +1,7 @@
-""" Video processing functions
-Author(s): Ben Luijten
+"""Video processing functions.
+
+Author(s)     : Ben Luijten
+Date          : -
 """
 
 from collections import deque

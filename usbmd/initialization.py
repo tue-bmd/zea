@@ -1,6 +1,7 @@
 """Initialize functions for datasets / probes and scans.
-Author(s): Tristan Stevens
-Date: 28/02/2023
+
+Author(s)     : Tristan Stevens
+Date          : 28/02/2023
 """
 from usbmd.scan import Scan
 from usbmd.registry import dataset_registry, probe_registry
