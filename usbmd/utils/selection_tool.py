@@ -1,8 +1,8 @@
 """Selection tools for interactively selecting part of an array
 displayed as an image with matplotlib.
 
-Author(s)     : Tristan Stevens
-Date          : 24/02/2023
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 24/02/2023
 """
 
 import sys

@@ -1,8 +1,8 @@
 """
 TODO: Add docstring
 
-Author(s)     : Tristan Stevens
-Date          : Thu Nov 18 2021
+- **Author(s)**     : Tristan Stevens
+- **Date**          : Thu Nov 18 2021
 """
 from pathlib import Path
 

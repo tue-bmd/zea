@@ -1,7 +1,7 @@
 """ Lightweight ultrasound simulator that can be used for testing purposes.
 
-Author(s)     : Ben Luijten
-Date          : Tue January 31 2023
+- **Author(s)**     : Ben Luijten
+- **Date**          : Tue January 31 2023
 """
 
 import numpy as np

@@ -1,8 +1,8 @@
 """This module contains functionality for converting between hdf5, mat and
 dictionary.
 
-Author(s)     : Tristan Stevens
-Date          : -
+- **Author(s)**     : Tristan Stevens
+- **Date**          : -
 """
 import argparse
 from pathlib import Path
