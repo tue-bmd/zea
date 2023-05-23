@@ -64,7 +64,7 @@ class DataLoaderUI:
         self.probe = get_probe(self.dataset.get_probe_name())
 
         # intialize process class
-        self.process = Process(config, self.scan, self.probe)
+        self.process = Process(self.config, self.scan, self.probe)
 
         # initialize attributes for UI class
         self.data = None
