@@ -42,15 +42,38 @@ from futures3.thread import ThreadPoolExecutor
 from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.benchmarking import BenchmarkTool
 from usbmd.verasonics.webserver.control import PIDController
+from usbmd.tensorflow_ultrasound.layers.filtering import Bandpass, Highpass, Lowpass
+from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
+
+# Set GPU config
+set_gpu_usage()
 
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
 
-
 # Set logger
 if debugger_is_active():
     logging.basicConfig(level=logging.DEBUG)
+
+
+def create_filter_model(bandwidth_pct, N_tx):
+    # Define the input tensor
+    input_tensor = tf.keras.Input(shape=(N_tx, 128, 576, 2))
+
+    # Apply the Filter1DLayer layer
+    # filter_layer = Filter1DLayer(axis=-2, filter_weights=filter_weights)
+    filter_layer = Bandpass(
+        bandwidth=bandwidth_pct*6.25e6,
+        fs=25e6,
+        fc=6.25e6,
+        N=32)
+    filtered_tensor = filter_layer(input_tensor)
+
+    # Create a model
+    model = tf.keras.Model(inputs=input_tensor, outputs=filtered_tensor)
+    model = tf.function(model, jit_compile=True)
+    return model
 
 
 class UltrasoundProcessingServer:
@@ -91,6 +114,7 @@ class UltrasoundProcessingServer:
         self.model_dict, self.grid = get_models()
         self.active_model = self.model_dict['DAS_1PW']
 
+
         # Objects
         self.fps_counter = FPS_counter()
         self.scan_converter = ScanConverterTF(
@@ -125,6 +149,7 @@ class UltrasoundProcessingServer:
         self.fs = 6.25e6  # Sampling frequency
         self.fc = 6.25e6  # Center frequency
 
+        self.filter_model = create_filter_model(0.5, 1)
         # Stores inputs for the beamformer model
         self.inputs = {}
 
@@ -484,6 +509,7 @@ class UltrasoundProcessingServer:
                 inputs, frame_id = self.prepare_inputs(buffer)
 
                 if inputs:
+                    inputs['data'] = self.filter_model(inputs['data'])
                     BF = self.active_model(inputs)[0]
                     img = self.scan_converter.convert(BF)
                     img = np.array(img)
@@ -728,6 +754,14 @@ class UltrasoundProcessingServer:
             if request.form.get('upscaling') is not None:
                 self.upscaling = not self.upscaling
                 logging.debug(self.upscaling)
+
+            if request.form.get('slide_bandwidth') is not None:
+                self.bandwidth = float(request.form.get('slide_bandwidth'))/100
+
+                # Re-initialize filtering model
+                self.filter_model = create_filter_model(self.bandwidth, self.na_transmit)
+
+                logging.debug(self.bandwidth)
 
             if request.form.get('source') is not None:
                 self.source = request.form.get('source')
