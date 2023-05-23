@@ -29,6 +29,7 @@ def train(config):
     """Train function that initializes the dataset, beamformer model and optimizer, creates the
     target data, and then trains the model."""
 
+    ## Dataloading and parameter initialization
     # Intialize dataset
     dataset = get_dataset(config.data)
     data = dataset[0]
@@ -42,6 +43,9 @@ def train(config):
     scan_params = update_dictionary(default_scan_params, config_scan_params)
     scan = scan_class(**scan_params, modtype=config.data.modtype)
 
+    # Reducing the pixels per wavelength to 1 to reduce memory usage at the cost of resolution
+    scan.grid.pixels_per_wavelength = 1
+
     # initialize probe
     probe = get_probe(dataset.get_probe_name())
 
@@ -50,8 +54,7 @@ def train(config):
 
     targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
 
-    # Create the beamforming model
-
+    ## Create the beamforming model
     # Only use the center angle for training
     config.scan.n_angles = 1
     config.model.beamformer.type = 'able'
@@ -74,6 +77,7 @@ def train(config):
                        metrics=smsle,
                        run_eagerly=False)
 
+    ## Augment the data and train the model
     # repeat the inputs and targets N times with noise
     N = 100
     inputs = np.repeat(inputs, N, axis=0)
