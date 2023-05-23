@@ -1,8 +1,8 @@
 """Config utilities.
 Load settings from yaml files and access them as objects / dicts.
 
-Author(s)     : Iris Huijben, Tristan Stevens
-Date          : -
+- **Author(s)**     : Iris Huijben, Tristan Stevens
+- **Date**          : -
 """
 import copy
 from pathlib import Path
