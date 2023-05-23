@@ -1,7 +1,6 @@
-# pylint: disable=no-member
-
 """This module contains the function to initialize the models for the webserver demo."""
-
+# pylint: disable=no-member
+# pylint: disable=not-an-iterable
 
 import os
 
@@ -123,7 +122,7 @@ def create_DAS(n_angles):
         inp.name.strip('_input'): tf.zeros(inp.shape, dtype=inp.dtype) for inp in model.inputs
     }
     _ = model(dummy_input)
-    
+
     return model, scan.grid
 
 

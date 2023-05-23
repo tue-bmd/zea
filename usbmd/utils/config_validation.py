@@ -37,7 +37,8 @@ model_schema = Schema({
         "type": Or(None, *_BEAMFORMER_TYPES),
         Optional("folds", default=1): positive_integer,
         Optional("end_with_prox", default=False): bool,
-        Optional("proxtype", default="softthres"): Or(None, "wavelet", "softthres", "fourier", "neural"),
+        Optional("proxtype", default="softthres"): \
+            Or(None, "wavelet", "softthres", "fourier", "neural"),
         Optional("kernel_size", default=3): positive_integer,
         Optional("aux_inputs", default=None): Or(None, list),
     },
