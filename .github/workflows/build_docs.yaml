@@ -1,11 +1,6 @@
 name: Pydoc
 
-on:
-  pull_request:
-  push:
-    branches:
-    - main
-    - develop
+on: [push]
 
 jobs:
   build_docs:
