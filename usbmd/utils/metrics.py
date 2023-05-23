@@ -1,7 +1,7 @@
 """This module defines quality metrics for ultrasound images.
 
-Author(s)     : Tristan Stevens, Ben Luijten
-Date          : 18 Nov 2021
+- **Author(s)**     : Tristan Stevens, Ben Luijten
+- **Date**          : 18 Nov 2021
 """
 
 import numpy as np

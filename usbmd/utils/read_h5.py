@@ -1,7 +1,7 @@
 """Read functionality.
 
-Author(s)     : Tristan Stevens
-Date          : -
+- **Author(s)**     : Tristan Stevens
+- **Date**          : -
 """
 from pathlib import Path
 

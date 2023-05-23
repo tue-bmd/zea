@@ -1,7 +1,7 @@
 """Register classes
 
-Author(s)     : Tristan Stevens, Vincent van de Schaft
-Date          : 28/02/2023
+- **Author(s)**     : Tristan Stevens, Vincent van de Schaft
+- **Date**          : 28/02/2023
 """
 from usbmd.utils.registration import RegisterDecorator
 

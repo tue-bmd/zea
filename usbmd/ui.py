@@ -1,8 +1,8 @@
 """The ui module runs a complete ultrasound beamforming pipeline and displays
 the results in a GUI.
 
-Author(s)     : Tristan Stevens
-Date          : Thu Nov 18 2021
+- **Author(s)**     : Tristan Stevens
+- **Date**          : Thu Nov 18 2021
 """
 import argparse
 import sys

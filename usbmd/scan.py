@@ -1,8 +1,8 @@
 """Class structures containing parameters defining an ultrasound scan and the
 beamforming grid.
 
-Author(s)     : Vincent van de Schaft
-Date          : Wed Feb 15 2024
+- **Author(s)**     : Vincent van de Schaft
+- **Date**          : Wed Feb 15 2024
 """
 import numpy as np
 
