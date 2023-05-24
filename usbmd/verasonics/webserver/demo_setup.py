@@ -1,8 +1,6 @@
+"""This module contains the function to initialize the models for the webserver demo."""
 # pylint: disable=no-member
 # pylint: disable=not-an-iterable
-
-"""This module contains the function to initialize the models for the webserver demo."""
-
 
 import os
 
