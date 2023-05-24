@@ -750,12 +750,10 @@ class UltrasoundProcessingServer:
 
         return ('', 204)
 
-
 # Initialize Flask server
 app = Flask(__name__)
 app.secret_key = 'Secret'
 app.config["SESSION_PERMANENT"] = False
-
 
 @app.route('/')
 def index():
