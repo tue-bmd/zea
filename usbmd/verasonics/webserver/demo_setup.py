@@ -86,6 +86,7 @@ def model_from_file(path):
 
     return wrapped_model
 
+
 def create_DAS(n_angles):
     """Creates a delay-and-sum model with n_angles PWs"""
     print(f'Creating DAS {len(n_angles)} PW model')

@@ -26,7 +26,6 @@ def sigint_handler():
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, sigint_handler)
 
-
     trcvElapsedTime = []
     tproElapsedTime = []
     tsbElapsedTime = []
@@ -46,7 +45,6 @@ if __name__ == '__main__':
     L = 128*1024*na  # 524288
     T = L
     readSize = 65507  # bytes (4096)
-
 
     bytesPerElementSent = 2
     bytesPerElementRead = 2  # int16
@@ -91,11 +89,11 @@ if __name__ == '__main__':
                         signal += data
                     #executionTimeRCV = (time.time() - startTimeRCV)
                     print('Received data size: ' +
-                        str(total) + 'bytes')  # length signal
+                          str(total) + 'bytes')  # length signal
                     dataToBeProcessed = array.array('h', signal)
                     # length signal
                     print('Received data size: ' +
-                        str(len(dataToBeProcessed)) + 'elements')
+                          str(len(dataToBeProcessed)) + 'elements')
 
                     tsb_lst = dataToBeProcessed
                     # print(tsb_lst)
