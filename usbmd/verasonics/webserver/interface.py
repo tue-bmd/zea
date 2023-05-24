@@ -57,19 +57,25 @@ if debugger_is_active():
     logging.basicConfig(level=logging.DEBUG)
 
 
-def create_filter_model(bandwidth_pct, N_tx):
+def create_filter_model(bandwidth, fs, fc, N_tx):
     # Define the input tensor
     input_tensor = tf.keras.Input(shape=(N_tx, 128, 576, 2))
 
     # Apply the Filter1DLayer layer
     # filter_layer = Filter1DLayer(axis=-2, filter_weights=filter_weights)
-    filter_layer = Bandpass(
-        bandwidth=bandwidth_pct*6.25e6,
-        fs=25e6,
-        fc=6.25e6,
-        N=32)
-    filtered_tensor = filter_layer(input_tensor)
+    # filter_layer = Bandpass(
+    #     bandwidth=bandwidth,
+    #     fs=fs,
+    #     fc=0,
+    #     N=32)
 
+    filter_layer = Lowpass(
+        cutoff=bandwidth,
+        fs=fs,
+        fc=0,
+        N=32)
+
+    filtered_tensor = filter_layer(input_tensor)
     # Create a model
     model = tf.keras.Model(inputs=input_tensor, outputs=filtered_tensor)
     model = tf.function(model, jit_compile=True)
@@ -149,7 +155,11 @@ class UltrasoundProcessingServer:
         self.fs = 6.25e6  # Sampling frequency
         self.fc = 6.25e6  # Center frequency
 
-        self.filter_model = create_filter_model(0.5, 1)
+        self.filter_model = create_filter_model(
+            self.fc*0.5,
+            self.fs,
+            self.fc,
+            1)
         # Stores inputs for the beamformer model
         self.inputs = {}
 
@@ -375,17 +385,19 @@ class UltrasoundProcessingServer:
                     else:
                         tsb_lst.append(0)
 
-                    if len(tsb_lst) != self.numTunableParameters:
-                        print(
-                            'Length of the to-sent-back (tsb) list different from expected')
+                    # to compensate for the frequency control
+                    tsb_lst.append(0)
+
+                    # if len(tsb_lst) != self.numTunableParameters:
+                    #     print(
+                    #         'Length of the to-sent-back (tsb) list different from expected')
 
                     # SEND UPDATE as DOUBLE
                     tsb_lst = list(map(np.double, tsb_lst))
                     tsb_bytes = bytearray(struct.pack(
                         f'{len(tsb_lst)}d', *tsb_lst))
-                    print('going to send tsb now')
+
                     connection.sendall(tsb_bytes)
-                    print('this is the tsb list: ', tsb_lst)
 
                     executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
@@ -757,9 +769,14 @@ class UltrasoundProcessingServer:
 
             if request.form.get('slide_bandwidth') is not None:
                 self.bandwidth = float(request.form.get('slide_bandwidth'))/100
+                print(self.fc*self.bandwidth)
 
                 # Re-initialize filtering model
-                self.filter_model = create_filter_model(self.bandwidth, self.na_transmit)
+                self.filter_model = create_filter_model(
+                    self.fc*self.bandwidth,
+                    self.fs,
+                    self.fc,
+                    self.na_transmit)
 
                 logging.debug(self.bandwidth)
 
