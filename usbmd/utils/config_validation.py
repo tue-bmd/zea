@@ -1,6 +1,5 @@
-"""Validate configuration yaml files
-Author(s): Tristan Stevens
-Date: 31/01/2023
+"""Validate configuration yaml files.
+
 https://github.com/keleshev/schema
 https://www.andrewvillazon.com/validate-yaml-python-schema/
 
@@ -9,6 +8,9 @@ Furthermore it check the config file you create for validity and sets
 missing (if optional) parameters to default values. When adding functionality
 that needs parameters from the config file, make sure to add those paremeters here.
 Also if that parameter is optional, add a default value.
+
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 31/01/2023
 """
 from pathlib import Path
 
