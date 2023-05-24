@@ -137,7 +137,7 @@ class PlaneWaveScan(Scan):
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=256, Nx=128, Nz=128, tzero_correct=True, downsample=1,
-                 angles=None, n_angles=None):
+                 pixels_per_wvln=3, angles=None, n_angles=None):
         """
         Initializes a PlaneWaveScan object.
 
@@ -176,7 +176,7 @@ class PlaneWaveScan(Scan):
         super().__init__(
             N_tx=N_tx, xlims=xlims, ylims=ylims, zlims=zlims, fc=fc, fs=fs, c=c,
             modtype=modtype, N_ax=N_ax, Nx=Nx, Nz=Nz,
-            tzero_correct=tzero_correct, downsample=downsample)
+            tzero_correct=tzero_correct, downsample=downsample, pixels_per_wvln=pixels_per_wvln)
 
         assert angles is not None, \
             'Please provide angles at which plane wave dataset was recorded'
