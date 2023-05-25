@@ -28,6 +28,38 @@ def get_grid(scan):
         )
     return grid
 
+def check_for_aliasing(scan):
+    """Checks if the scan class parameters will cause aliasing."""
+    wvln = scan.c / scan.fc
+    dx = wvln / scan.pixels_per_wavelength
+    dz = dx
+
+    width = scan.xlims[1] - scan.xlims[0]
+    depth = scan.zlims[1] - scan.zlims[0]
+
+    if scan.Nx and scan.Nz:
+        if width/scan.Nx > wvln/2:
+            print(
+                f'WARNING: width/Nx = {width/scan.Nx} < wvln/2 = {wvln/2}. '
+                f'Consider increasing Nx'
+            )
+        if depth/scan.Nz > wvln/2:
+            print(
+                f'WARNING: depth/Nz = {depth/scan.Nz} < wvln/2 = {wvln/2}. '
+                f'Consider increasing Nz'
+            )
+    else:
+        if dx > wvln/2:
+            print(
+                f'WARNING: dx = {dx} > wvln/2 = {wvln/2}. '
+                f'Consider increasing pixels_per_wavelength to 2 or more'
+            )
+        if dz > wvln/2:
+            print(
+                f'WARNING: dz = {dz} > wvln/2 = {wvln/2}. '
+                f'Consider increasing pixels_per_wavelength to 2 or more'
+            )
+
 
 def cartesian_pixel_grid(xlims, zlims, **kwargs):
     """
