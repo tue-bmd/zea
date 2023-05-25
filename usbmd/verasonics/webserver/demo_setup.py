@@ -66,9 +66,9 @@ def get_models():
     """Function that creates all models, will be replaced in later versions"""
     model_dict = {}
     model_dict['DAS_1PW'], grid = create_DAS([5])
-    # model_dict['DAS_5PW'], grid = create_DAS([1, 3, 5, 7, 9])
-    # model_dict['DAS_11PW'], grid = create_DAS(
-    #     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    model_dict['DAS_5PW'], grid = create_DAS([1, 3, 5, 7, 9])
+    model_dict['DAS_11PW'], grid = create_DAS(
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     # model_dict['ABLE_1PW'], grid = create_ABLE(
     #     'configs/inference/l11-4v_ABLE_1PW.yaml')
     # model_dict['ABLE_5PW'], grid = create_ABLE(

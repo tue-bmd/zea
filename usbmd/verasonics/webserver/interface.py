@@ -154,6 +154,7 @@ class UltrasoundProcessingServer:
         self.c = 1540  # Speed of sound
         self.fs = 6.25e6  # Sampling frequency
         self.fc = 6.25e6  # Center frequency
+        self.bandwidth = 0.5
 
         self.filter_model = create_filter_model(
             self.fc*0.5,
@@ -714,6 +715,14 @@ class UltrasoundProcessingServer:
                 self.active_model = self.select_model(
                     self.bf_type, self.na_transmit)
                 logging.debug(self.na_transmit)
+
+                # also update the filter model
+                self.filter_model = create_filter_model(
+                    self.fc*self.bandwidth,
+                    self.fs,
+                    self.fc,
+                    self.na_transmit)
+
 
             if request.form.get('intensityAuto') is not None:
                 self.auto_update_intensity = not self.auto_update_intensity
