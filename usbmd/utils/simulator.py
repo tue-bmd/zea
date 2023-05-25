@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 
-from usbmd.utils.pixelgrid import make_pixel_grid
+from usbmd.utils.pixelgrid import cartesian_pixel_grid
 
 class UltrasoundSimulator:
     """A lightweight ultrasound simulator tool, intended for testing purposes."""
@@ -68,7 +68,12 @@ class UltrasoundSimulator:
         if scan is not None:
             self.grid = scan.grid
         else:
-            self.grid = make_pixel_grid([-19e-3, 19e-3], [0, 63e-3], self.wvln/8, self.wvln/8)
+            self.grid = cartesian_pixel_grid(
+                [-19e-3, 19e-3],
+                [0, 63e-3],
+                dx=self.wvln/8,
+                dz=self.wvln/8
+                )
 
         self.dx = self.grid[0,1,0]-self.grid[0,0,0]
         self.dz = self.grid[1,0,2]-self.grid[0,0,2]
