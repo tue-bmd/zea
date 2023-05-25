@@ -424,8 +424,7 @@ def setup(file=None):
 
     config = load_config_from_yaml(Path(file))
     print(f'Using config file: {file}')
-    config = check_config(config.serialize())
-    config = Config(config)
+    config = check_config(config)
 
     ## git
     cwd = Path.cwd().stem
