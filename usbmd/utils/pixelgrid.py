@@ -16,24 +16,24 @@ def get_grid(scan):
     Nz = scan.Nz
 
     if Nx and Nz:
-        return make_pixel_grid_v2(xlims, zlims, Nx, Nz)
+        grid = cartesian_pixel_grid(xlims, zlims, Nx=Nx, Nz=Nz)
     else:
         wvln = scan.c / scan.fc
         dx = wvln / scan.pixels_per_wavelength
         dz = dx
-
-        grid = make_pixel_grid(xlims, zlims, dx, dz)
+        grid = cartesian_pixel_grid(xlims, zlims, dx=dx, dz=dz)
         print(
             f'Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, '
             f'using {scan.pixels_per_wavelength} pixels per wavelength.'
         )
-        return grid
+    return grid
 
 
-def make_pixel_grid(xlims, zlims, dx, dz):
+def cartesian_pixel_grid(xlims, zlims, **kwargs):
     """
     Generate a Cartesian pixel grid based on input parameters.
     The output has shape (nx, nz, 3).
+    Either Nx and Nz or dx and dz must be defined.
 
     INPUTS
     xlims   Azimuthal limits of pixel grid ([xmin, xmax])
@@ -41,27 +41,34 @@ def make_pixel_grid(xlims, zlims, dx, dz):
     dx      Pixel spacing in azimuth
     dz      Pixel spacing in depth
     Nx      Number of azimuthal pixels, overrides dx and dz parameters
+    Nz      Number of depth pixels, overrides dx and dz parameters
 
     OUTPUTS
-    grid    Pixel grid of size (nx, nz, 3)
+    grid    Pixel grid of size (nx, nz, 3) in Cartesian coordinates (x, y, z)
     """
-    x = np.arange(xlims[0], xlims[1] + eps, dx)
-    z = np.arange(zlims[0], zlims[1] + eps, dz)
-    zz, xx = np.meshgrid(z, x, indexing="ij")
-    yy = 0 * xx
-    grid = np.stack((xx, yy, zz), axis=-1)
+    # Check if Nx and Nz are defined in kwargs and if they are not None
+    Nx = kwargs.get("Nx", None)
+    Nz = kwargs.get("Nz", None)
+    dx = kwargs.get("dx", None)
+    dz = kwargs.get("dz", None)
+
+    # Determine the grid spacing
+    if Nx is not None and Nz is not None:
+        x = np.linspace(xlims[0], xlims[1] + eps, Nx)
+        z = np.linspace(zlims[0], zlims[1] + eps, Nz)
+    elif dx is not None and dz is not None:
+        x = np.arange(xlims[0], xlims[1] + eps, dx)
+        z = np.arange(zlims[0], zlims[1] + eps, dz)
+    else:
+        raise ValueError("Either Nx and Nz or dx and dz must be defined.")
+
+    # Create the pixel grid
+    z_grid, x_grid = np.meshgrid(z, x, indexing="ij")
+    y_grid = 0 * x_grid # Assume y = 0
+    grid = np.stack((x_grid, y_grid, z_grid), axis=-1)
     return grid
 
-def make_pixel_grid_v2(xlims, zlims, Nx, Nz):
-    """ Generate a pixel grid based on input parameters. """
-    x = np.linspace(xlims[0], xlims[1] + eps, Nx)
-    z = np.linspace(zlims[0], zlims[1] + eps, Nz)
-    xx, zz = np.meshgrid(x, z, indexing="xy")
-    yy = 0 * xx
-    grid = np.stack((xx, yy, zz), axis=-1)
-    return grid
-
-def make_foctx_grid(rlims, dr, oris, dirs):
+def radial_pixel_grid(rlims, dr, oris, dirs):
     """
     Generate a focused pixel grid based on input parameters.
     To accommodate the multitude of ways of defining a focused transmit grid, we define
