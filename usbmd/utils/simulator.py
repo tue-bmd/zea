@@ -1,15 +1,7 @@
-"""
-==============================================================================
-    Eindhoven University of Technology
-==============================================================================
+""" Lightweight ultrasound simulator that can be used for testing purposes.
 
-    Source Name   : simulator.py
-
-    Author(s)     : Ben Luijten
-    Date          : Tue January 31 2023
-
-    Lightweight ultrasound simulator that can be used for testing purposes
-==============================================================================
+- **Author(s)**     : Ben Luijten
+- **Date**          : Tue January 31 2023
 """
 
 import numpy as np

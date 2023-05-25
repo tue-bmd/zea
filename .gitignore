@@ -138,3 +138,5 @@ dmypy.json
 tensorflow_ultrasound/figures/
 usbmd/figures/
 examples/deep_beamforming/example_config_ABLE.yaml
+trained_models/
+benchmarks/

@@ -10,25 +10,41 @@ filename = 'L11-4v-PlaneWaves-Beamforming-Display-Server-n';
 sampleMode = 'BS100BW'; %BS100BW
 returnToMatlabFreq = 1;
 interAcqPeriod = 160; %160 us
-interFramePeriod = 10000; %10 ms --> acquisition frame rate: 100 fps
+interFramePeriod = 5000; %5 ms --> acquisition frame rate: 200 fps
 na = 11; % no.plane waves
 na_transmit = 1;
+bf_type = 'DAS';
+
+switch bf_type
+    case 'RAW'
+        bf_idx = 1;
+    case 'DAS'
+        bf_idx = 2;
+    case 'ABLE'
+        bf_idx = 3;
+end
+
 %Nax %added by VSX automatically from Receive structure
 Nel = 128; 
 bytesPerElementSent = 2; % write channel data as int16
 bytesPerElementRead = 8; % read updated parameters as double
-numTunableParameters = 2; %intensity and na
+numTunableParameters = 3; %intensity and na
+%countUpdate = 0;
+%TimeTagEna = 1; % initial state of time tag function
+
 
 % Define Server Address and Port
 %IPV4 = '131.155.34.167';
-IPV4 = '131.155.34.16'; % Massimo
-%IPV4 = '131.155.125.231'; % Workstation Ben
+%IPV4 = '131.155.34.16'; % Massimo
+IPV4 = '131.155.125.231'; % Workstation Ben
 PORT = 30000;
 
-saved_WritingTime = [];
+writingElapsedTime = [];
 timeExtFuncStartWrite_vect = []; % start writing
-saved_UpdatingTime = [];
+changingParElapsedTime = [];
 timeExtFuncEndUpdate_vect = []; % end reading updates and modify base env
+updatedIdx =[];
+countLoop = 0;
 %timeStamp_vect = [];
 %timeToExtFunc_vect =[];
 
@@ -52,7 +68,7 @@ Resource.Parameters.numRcvChannels = 128;    % number of receive channels.
 Resource.Parameters.speedOfSound = 1540;    % set speed of sound in m/sec before calling computeTrans
 Resource.Parameters.verbose = 2;
 Resource.Parameters.initializeOnly = 0;
-Resource.Parameters.simulateMode = 1;
+Resource.Parameters.simulateMode = 0;
 %  Resource.Parameters.simulateMode = 1 forces simulate mode, even if hardware is present.
 %  Resource.Parameters.simulateMode = 2 stops sequence and processes RcvData continuously.
 
@@ -62,7 +78,6 @@ Trans.units = 'wavelengths'; % Explicit declaration avoids warning message when 
 Trans = computeTrans(Trans);  % L11-4v transducer is 'known' transducer so we can use computeTrans.
 Trans.maxHighVoltage = 50;  % set maximum high voltage limit for pulser supply.
 Trans.frequency = 6.25;
-%disp(Trans.frequency); %Trans.frequency = 6.25; 
 
 % Specify PData structure array.
 PData(1).PDelta = [Trans.spacing, 0, 0.5];
@@ -212,6 +227,14 @@ Process(3).method = 'updateFromServer';
 Process(3).Parameters = {'srcbuffer','none',... % name of buffer to process.
                          'dstbuffer','none'};
 
+% external processing function to process time tag data
+% Process(4).classname = 'External';
+% Process(4).method = 'readTimeTag';
+% Process(4).Parameters = {'srcbuffer','receive',... % name of buffer to process.
+%                          'srcbufnum',1,...
+%                          'srcframenum',-1, ...
+%                          'dstbuffer','none'};
+
 
 % Specify SeqControl structure arrays.
 SeqControl(1).command = 'jump'; % jump back to start
@@ -238,7 +261,15 @@ for i = 1:Resource.RcvBuffer(1).numFrames
     Event(n-1).seqControl = [3,nsc]; % modify last acquisition Event's seqControl
       SeqControl(nsc).command = 'transferToHost'; % transfer frame to host buffer
       nsc = nsc+1;
-      
+    
+%     Event(n).info = 'Read Time Tag.'; 
+%     Event(n).tx = 0;         
+%     Event(n).rcv = 0;        
+%     Event(n).recon = 0;      
+%     Event(n).process = 4;    
+%     Event(n).seqControl = 0;
+%     n = n+1;
+    
     Event(n).info = 'Update.'; 
     Event(n).tx = 0;         
     Event(n).rcv = 0;        
@@ -290,14 +321,17 @@ UI(2).Control = {'UserA1','Style','VsSlider','Label',['Range (',AxesUnit,')'],..
 UI(2).Callback = text2cell('%RangeChangeCallback');
 
 % Callback for saving RF data
+import vsv.seq.uicontrol.VsSliderControl
 UI(3).Control = {'UserB3', 'Style', 'VsPushButton', 'Label', 'SaveFast RF'};
 UI(3).Callback = text2cell('%SaveRFCallback');
+
 
 % External function definitions.
 import vsv.seq.function.ExFunctionDef
 EF(1).Function = vsv.seq.function.ExFunctionDef('beamformingServer', @beamformingServer);
 EF(2).Function = vsv.seq.function.ExFunctionDef('updateFromServer', @updateFromServer);
-%EF(3).Function = vsv.seq.function.ExFunctionDef('saveStructures', @saveStructures);
+%EF(3).Function = vsv.seq.function.ExFunctionDef('readTimeTag', @readTimeTag);
+EF(3).Function = vsv.seq.function.ExFunctionDef('saveStructures', @saveStructures);
 
 
 % Specify factor for converting sequenceRate to frameRate.
@@ -421,7 +455,7 @@ function beamformingServer(RFData)
     timeExtFuncStartWrite_vect = [timeExtFuncStartWrite_vect, dateInfo];
     assignin('base', 'timeExtFuncStartWrite_vect', timeExtFuncStartWrite_vect);
 
-    tTOTALstart = tic;
+    
 
     info = whos('RFData');
     if info.class ~= 'int16'
@@ -445,18 +479,21 @@ function beamformingServer(RFData)
     
     % SEND DATA  
     disp('Writing ...')
-           
+    
+    tTOTALstart = tic; 
+    
     if na_transmit == na
         data = RFData(1 : na_transmit*nRowsPerAcq, :); %when moving to S51 specificy the elements
     elseif na_transmit == 5
         angles = [2,4,6,8,10];
         data = [];
-        for k = 1:length(angles)
-            data = vertcat(data, RFData(k*nRowsPerAcq : (k+1)*nRowsPerAcq - 1, :)); %when moving to S51 specificy the elements
+        for k = angles
+            data = vertcat(data, RFData((k-1)*nRowsPerAcq + 1: k*nRowsPerAcq, :)); %when moving to S51 specificy the elements
+            %data = vertcat(data, RFData(start*nRowsPerAcq + 1 : (start+1)*nRowsPerAcq, :));
         end
     elseif na_transmit == 1
-        start = ceil(na/2);
-        data = RFData(start*nRowsPerAcq : (start+1)*nRowsPerAcq - 1, :); %when moving to S51 specificy the elements
+        start = floor(na/2);
+        data = RFData(start*nRowsPerAcq + 1 : (start+1)*nRowsPerAcq, :); %when moving to S51 specificy the elements
     else
         disp("Error: na_transmit can only be set to 1 or na")
         return
@@ -465,35 +502,35 @@ function beamformingServer(RFData)
     %disp(size(data)) %data = reshape(data,[1,sk(1)*sk(2)]);
     data_line = reshape(data,1,[]);
     
-    filename =  strcat('saved_data_matlab',extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
-    save(filename, 'RFData', 'data_line')
-    
     % write as int16
     write(t,data_line,'int16');
 
     tTOTALtime = toc(tTOTALstart);
-    saved_WritingTime = evalin('base','saved_WritingTime'); %
-    saved_WritingTime = [saved_WritingTime; tTOTALtime];
-    assignin('base','saved_WritingTime', saved_WritingTime);
+    writingElapsedTime = evalin('base','writingElapsedTime'); %
+    writingElapsedTime = [writingElapsedTime; tTOTALtime];
+    assignin('base','writingElapsedTime', writingElapsedTime);
 
 end
 
 
 function updateFromServer()
-
-    
+    countLoop = evalin('base', 'countLoop');
+    countLoop  = countLoop  +1;
+    assignin('base','countLoop', countLoop);
     
     t = evalin('base','t'); % tcp socket
     na = evalin('base', 'na');
     na_transmit = evalin ('base', 'na_transmit');
     TPC = evalin('base', 'TPC');
+    bf_idx = evalin ('base', 'bf_idx');
+    %timeStamp_vect = evalin('base', 'timeStamp_vect');
     bytesPerElementRead = evalin('base', 'bytesPerElementRead'); % read updated parameters as double
     numTunableParameters = evalin('base', 'numTunableParameters');
-    saved_UpdatingTime = evalin('base','saved_UpdatingTime'); %
+    changingParElapsedTime = evalin('base','changingParElapsedTime'); %
     timeExtFuncEndUpdate_vect = evalin('base', 'timeExtFuncEndUpdate_vect');
-    saved_WritingTime = evalin('base','saved_WritingTime'); %
+    writingElapsedTime = evalin('base','writingElapsedTime'); %
     timeExtFuncStartWrite_vect = evalin('base', 'timeExtFuncStartWrite_vect');
-    
+    updatedIdx = evalin('base', 'updatedIdx');
     %READ DATA
     disp('Reading ...')
     
@@ -507,7 +544,7 @@ function updateFromServer()
     while  total < numTunableParameters
 
         while t.BytesAvailable == 0
-            % disp('waiting for data');
+            disp('waiting for data');
             i=i+1;
             if i == 1e8; return; end
         end
@@ -522,7 +559,7 @@ function updateFromServer()
     end
     
     tsb = typecast(uint8(tsb_cat),'double');
-    %disp(tsb)
+    disp(tsb)
     
     if length(tsb) ~= numTunableParameters
         disp("Error: received less data than expected")
@@ -533,15 +570,51 @@ function updateFromServer()
     if tsb(2) ~= 0 && tsb(2) <= na
        %keyboard
        % save performance with previous number of firing angles
-       saveStructures(na_transmit, timeExtFuncEndUpdate_vect, saved_UpdatingTime, saved_WritingTime, timeExtFuncStartWrite_vect);
-       
+       saveStructures(na_transmit, bf_idx, updatedIdx, timeExtFuncEndUpdate_vect, changingParElapsedTime, writingElapsedTime, timeExtFuncStartWrite_vect)
+    
        a = fprintf('Firing angles: %d', tsb(2));
        disp(a);
        
        assignin('base', 'na_transmit', tsb(2));
+       
+       countLoop= 0;
+       assignin('base','countLoop',countLoop); %
+       updatedIdx = [];
+       assignin('base','updatedIdx',updatedIdx); %
+       changingParElapsedTime = []; 
+       assignin('base','changingParElapsedTime', changingParElapsedTime); %
+       timeExtFuncEndUpdate_vect = []; 
+       assignin('base', 'timeExtFuncEndUpdate_vect', timeExtFuncEndUpdate_vect);
+       writingElapsedTime = []; 
+       assignin('base','writingElapsedTime', writingElapsedTime); %
+       timeExtFuncStartWrite_vect = [];
+       assignin('base', 'timeExtFuncStartWrite_vect', timeExtFuncStartWrite_vect);
+       %timeStamp_vect =[]; 
+       %assignin('base', 'timeStamp_vect', timeStamp_vect);
+       
     end
-
+    
+    if tsb(3) ~= 0
+       %keyboard
+       %save performance with previous number of firing angles
+       saveStructures(na_transmit, bf_idx, updatedIdx, timeExtFuncEndUpdate_vect, changingParElapsedTime, writingElapsedTime, timeExtFuncStartWrite_vect)
+    
+       switch tsb(3)
+        case 1 
+            bf_idx = 1;
+        case 2
+            bf_idx = 2;
+        case 3 
+            bf_idx = 3;
+       end
+       
+    end
+    
     if tsb(1) ~= 0
+        
+        updatedIdx = [updatedIdx, countLoop];
+        assignin('base','updatedIdx',updatedIdx);
+        
         hvSuggested = tsb(1);
         %keyboard
         % High Voltage 1
@@ -549,9 +622,9 @@ function updateFromServer()
 
             ntpc = 1;
             a = fprintf('Old Transmit Voltage value:',TPC(ntpc).hv);
-            disp(a);
+            %disp(a);
             b = fprintf('Transmit Voltage value:', hvSuggested);
-            disp(b);
+            %disp(b);
             
             hv = hvSuggested;
 
@@ -568,44 +641,57 @@ function updateFromServer()
     end
     
     tUPDATEtime = toc(tUPDATEstart);
-    saved_UpdatingTime = [saved_UpdatingTime; tUPDATEtime];
-    assignin('base','saved_UpdatingTime', saved_UpdatingTime);
+    changingParElapsedTime = [changingParElapsedTime; tUPDATEtime];
+    assignin('base','changingParElapsedTime', changingParElapsedTime);
     
-    % Absolute time at which it finishes the external function for updating
+    % Absolute time at which it finishes the external function for changingPar
     dateInfo = datetime('now','TimeZone','local', 'Format' , 'yyyy-MM-dd HH:mm:ss.SSSSSS');
     timeExtFuncEndUpdate_vect = [timeExtFuncEndUpdate_vect, dateInfo];
     assignin('base', 'timeExtFuncEndUpdate_vect', timeExtFuncEndUpdate_vect);
 end
 
 
-function saveStructures(na_transmit, timeExtFuncEndUpdate_vect, saved_UpdatingTime, saved_WritingTime, timeExtFuncStartWrite_vect)
 
+function saveStructures(na_transmit, bf_idx,updatedIdx, timeExtFuncEndUpdate_vect, changingParElapsedTime, writingElapsedTime, timeExtFuncStartWrite_vect)
+    
+    switch bf_idx
+        case 1
+            bf_type = 'RAW';
+        case 2
+            bf_type = 'DAS';
+        case 3
+            bf_type = 'ABLE';
+    end
+    
     switch na_transmit
         case 1
             timeExtFuncEndUpdate_vect1 = timeExtFuncEndUpdate_vect; 
-            saved_UpdatingTime1 = saved_UpdatingTime; 
-            saved_WritingTime1 = saved_WritingTime;  
+            updatedIdx1 = updatedIdx;
+            changingParElapsedTime_1 = changingParElapsedTime; 
+            writingElapsedTime_1 = writingElapsedTime;  
             timeExtFuncStartWrite_vect1 = timeExtFuncStartWrite_vect;
-            filename =  strcat('L114v_na1_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
-            save(filename, 'timeExtFuncEndUpdate_vect1', 'saved_UpdatingTime1', ...
-                'saved_WritingTime1',  'timeExtFuncStartWrite_vect1')
+            filename =  strcat('L114v_na1_', bf_type, '_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
+            save(filename, 'timeExtFuncEndUpdate_vect1', 'updatedIdx1', 'changingParElapsedTime_1', ...
+                'writingElapsedTime_1',   'timeExtFuncStartWrite_vect1')
 
         case 5
+            updatedIdx5 = updatedIdx;
             timeExtFuncEndUpdate_vect5 = timeExtFuncEndUpdate_vect; 
-            saved_UpdatingTime5 = saved_UpdatingTime; 
-            saved_WritingTime5 = saved_WritingTime;  
+            changingParElapsedTime_5 = changingParElapsedTime; 
+            writingElapsedTime_5 = writingElapsedTime;  
             timeExtFuncStartWrite_vect5 = timeExtFuncStartWrite_vect;
-            filename =  strcat('L114v_na5_matlab',extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
-            save(filename, 'timeExtFuncEndUpdate_vect5', 'saved_UpdatingTime5', ...
-                'saved_WritingTime5',  'timeExtFuncStartWrite_vect5')
+            filename =  strcat('L114v_na5_', bf_type, '_matlab',extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
+            save(filename, 'timeExtFuncEndUpdate_vect5','updatedIdx5', 'changingParElapsedTime_5', ...
+                'writingElapsedTime_5',  'timeExtFuncStartWrite_vect5')
 
         case 11
+            updatedIdx11 = updatedIdx;
             timeExtFuncEndUpdate_vect11 = timeExtFuncEndUpdate_vect; 
-            saved_UpdatingTime11 = saved_UpdatingTime; 
-            saved_WritingTime11 = saved_WritingTime;  
+            changingParElapsedTime_11 = changingParElapsedTime; 
+            writingElapsedTime_11 = writingElapsedTime;  
             timeExtFuncStartWrite_vect11 = timeExtFuncStartWrite_vect;
-            filename =  strcat('L114v_na11_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
-            save(filename, 'timeExtFuncEndUpdate_vect11', 'saved_UpdatingTime11', ...
-                'saved_WritingTime11',  'timeExtFuncStartWrite_vect11')
+            filename =  strcat('L114v_na11_', bf_type, '_matlab', extractBefore(datestr(datetime('now')), ' '), strrep(extractAfter(datestr(datetime('now')), ' '),':',''), '.mat'); 
+            save(filename, 'timeExtFuncEndUpdate_vect11', 'updatedIdx11', 'changingParElapsedTime_11', ...
+                'writingElapsedTime_11', 'timeExtFuncStartWrite_vect11')
     end
 end

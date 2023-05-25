@@ -1,17 +1,8 @@
-"""
-==============================================================================
-    Eindhoven University of Technology
-==============================================================================
+"""Class structures containing parameters defining an ultrasound scan and the
+beamforming grid.
 
-    Source Name   : scan.py
-
-    Author(s)     : Vincent van de Schaft
-    Date          : Wed Feb 15 2024
-
-    Class structures containing parameters defining an ultrasound scan and the
-    beamforming grid.
-
-==============================================================================
+- **Author(s)**     : Vincent van de Schaft
+- **Date**          : Wed Feb 15 2024
 """
 import numpy as np
 
@@ -127,6 +118,25 @@ class Scan:
         #: The beamforming grid of shape (Nx, Nz, 3)
         self.grid = get_grid(self)
 
+    def get_time_zero(self, element_positions, c=1540, offset=0):
+        """Returns an ndarray with the delay between the first element firing
+        and that element firing.
+
+        Args:
+            element_positions (ndarray): The element positions as specified in
+                the Probe object.
+            c (int, float): The assumed speed of sound.
+            offset (float, optional): Additional offset to add. Defaults to 0.
+
+        Returns:
+            ndarray: The delays
+        """
+        # pylint: disable=unused-argument
+        if self.tzero_correct:
+            return np.ones(self.N_tx)*offset
+        else:
+            return np.zeros(self.N_tx)
+
 class FocussedScan(Scan):
     """
     Class representing a focussed beam scan where every transmit has a beam
@@ -152,8 +162,8 @@ class PlaneWaveScan(Scan):
 
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=128, Nz=128, downsample=1, angles=None,
-                 n_angles=None, initial_times=None):
+                 N_ax=256, Nx=128, Nz=128, tzero_correct=True, downsample=1,
+                 pixels_per_wvln=3, angles=None, n_angles=None):
         """
         Initializes a PlaneWaveScan object.
 
@@ -193,7 +203,8 @@ class PlaneWaveScan(Scan):
 
         super().__init__(
             N_tx=N_tx, xlims=xlims, ylims=ylims, zlims=zlims, fc=fc, fs=fs, c=c,
-            modtype=modtype, N_ax=N_ax, Nx=Nx, Nz=Nz, downsample=downsample)
+            modtype=modtype, N_ax=N_ax, Nx=Nx, Nz=Nz,
+            tzero_correct=tzero_correct, downsample=downsample, pixels_per_wvln=pixels_per_wvln)
 
         assert angles is not None, \
             'Please provide angles at which plane wave dataset was recorded'
