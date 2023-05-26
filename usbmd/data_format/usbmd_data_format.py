@@ -28,7 +28,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     n_ch = 1
     n_frames = 2
 
-    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, n_ch))
+    raw_data = np.zeros((n_frames, n_tx, n_el, n_ax, n_ch))
 
     t0_delays = np.zeros((n_tx, n_el))
     tx_apodizations = np.zeros((n_tx, n_el))
