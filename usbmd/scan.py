@@ -6,7 +6,7 @@ beamforming grid.
 """
 import numpy as np
 
-from usbmd.utils.pixelgrid import get_grid
+from usbmd.utils.pixelgrid import get_grid, check_for_aliasing
 
 _MOD_TYPES = [None, 'rf', 'iq']
 
@@ -114,6 +114,8 @@ class Scan:
 
         #: The z_axis locations of the pixels in the beamforming grid
         self.z_axis = np.linspace(*self.zlims, N_ax)
+
+        check_for_aliasing(self)
 
         #: The beamforming grid of shape (Nx, Nz, 3)
         self.grid = get_grid(self)
