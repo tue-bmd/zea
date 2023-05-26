@@ -12,7 +12,7 @@ The USBMD data format has the following structure:
     - `beamformed_data`: The data after beamforming.
     - `image`: The processed image.
     - `image_sc`: The scan converted image.
-- The `settings` group must contain the following keys:
+- The `scan` group must contain the following keys:
     - `probe_geometry`: The geometry of the probe.
     - `t0_delays`: The time delays of the transducer elements.
     - `n_frames`: The number of frames in the dataset.
