@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from usbmd.data_format.usbmd_data_format import generate_example_dataset, validate_dataset
 
@@ -7,11 +8,11 @@ def test_example_dataset():
     """Tests the generate_example_dataset function by calling it and then
     validating it using the validate_dataset function.
     """
-    path = 'test_case_dataset.hdf5'
+    # Define path to store the example dataset
+    path = Path('temp', 'test_case_dataset.hdf5')
 
-    # Ensure that the file does not exist
-    if os.path.exists(path):
-        raise FileExistsError(f'The file {path} already exists.')
+    # Create the directory if it does not exist
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     # Generate the example dataset
     generate_example_dataset(path)
