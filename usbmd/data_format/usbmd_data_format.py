@@ -5,9 +5,6 @@ import logging
 import numpy as np
 import h5py
 
-from usbmd.utils.utils import print_hdf5_attrs
-
-
 def generate_example_dataset(path, add_optional_fields=False):
     """Generates an example dataset that contains all the necessary fields.
     Note: This dataset does not contain actual data, but is filled with random
