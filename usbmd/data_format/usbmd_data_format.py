@@ -112,7 +112,8 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
 
     # Write scan group
     scan_group = dataset.create_group('scan')
-    scan_group.attrs['description'] = 'This group contains the scan parameters.'
+    scan_group.attrs['description'] = ('This group contains the scan '
+                                       'parameters.')
 
     add_dataset(group=scan_group,
                 name='n_ax',
@@ -181,9 +182,9 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
                     name='tx_apodizations',
                     data=tx_apodizations,
                     description='The transmit delays for each element defining the'
-                    ' wavefront in seconds of shape (n_tx, n_elem). This is the'
-                    ' time at which each element fires shifted such that the'
-                    ' first element fires at t=0.',
+                    ' wavefront in seconds of shape (n_tx, n_elem). This is'
+                    ' the time at which each element fires shifted such that'
+                    ' the first element fires at t=0.',
                     unit='unitless')
 
     if focus_distances is not None:
@@ -206,8 +207,8 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
         add_dataset(group=scan_group,
                     name='azimuth_angles',
                     data=azimuth_angles,
-                    description='The azimuthal angles of the transmit beams in '
-                    'radians of shape (n_tx,).',
+                    description='The azimuthal angles of the transmit beams '
+                    'in radians of shape (n_tx,).',
                     unit='rad')
 
     dataset.close()
@@ -271,11 +272,13 @@ def validate_dataset(path):
         elif key == 'beamformed_data':
             logging.warning('No validation has been defined for beamformed data.')
         elif key == 'envelope_data':
-            logging.warning('No validation has been defined for envelope data.')
+            logging.warning('No validation has been defined for envelope '
+                            'data.')
         elif key == 'image':
             logging.warning('No validation has been defined for image data.')
         elif key == 'image_sc':
-            logging.warning('No validation has been defined for image_sc data.')
+            logging.warning('No validation has been defined for image_sc '
+                            'data.')
 
     required_scan_keys = [
         'n_ax',
@@ -295,30 +298,47 @@ def validate_dataset(path):
     # Ensure that all keys have the correct shape
     for key in dataset['scan'].keys():
         if key == 'probe_geometry':
-            assert dataset['scan'][key].shape == (dataset['scan']['n_el'][()], 3), \
+            correct_shape = (dataset['scan']['n_el'][()], 3)
+            assert dataset['scan'][key].shape == correct_shape,\
                 'The probe_geometry does not have the correct shape.'
+
         elif key == 't0_delays':
-            assert dataset['scan'][key].shape == (dataset['scan']['n_tx'][()], dataset['scan']['n_el'][()]), \
+            correct_shape = (dataset['scan']['n_tx'][()],
+                             dataset['scan']['n_el'][()])
+            assert dataset['scan'][key].shape == correct_shape,\
                 'The t0_delays does not have the correct shape.'
+
         elif key == 'tx_apodizations':
-            assert dataset['scan'][key].shape == (dataset['scan']['n_tx'][()], dataset['scan']['n_el'][()]), \
+            correct_shape = (dataset['scan']['n_tx'][()],
+                             dataset['scan']['n_el'][()])
+            assert dataset['scan'][key].shape == correct_shape,\
                 'The tx_apodizations does not have the correct shape.'
+
         elif key == 'focus_distances':
-            assert dataset['scan'][key].shape == (dataset['scan']['n_tx'][()],), \
+            correct_shape = (dataset['scan']['n_tx'][()],)
+            assert dataset['scan'][key].shape == correct_shape,\
                 'The focus_distances does not have the correct shape.'
+
         elif key == 'polar_angles':
-            assert dataset['scan'][key].shape == (dataset['scan']['n_tx'][()],), \
+            correct_shape = (dataset['scan']['n_tx'][()],)
+            assert dataset['scan'][key].shape == correct_shape,\
                 'The polar_angles does not have the correct shape.'
+
         elif key == 'azimuth_angles':
-            assert dataset['scan'][key].shape == (dataset['scan']['n_tx'][()],), \
+            correct_shape = (dataset['scan']['n_tx'][()],)
+            assert dataset['scan'][key].shape == correct_shape,\
                 'The azimuthal_angles does not have the correct shape.'
+
         elif key == 'initial_times':
-            assert dataset['scan'][key].shape == (dataset['scan']['n_tx'][()],), \
+            correct_shape = (dataset['scan']['n_tx'][()],)
+            assert dataset['scan'][key].shape == correct_shape,\
                 'The initial_times does not have the correct shape.'
+
         elif key in ('sampling_frequency', 'center_frequency', 'n_frames',
                      'n_tx', 'n_el', 'n_ax', 'sound_speed'):
             assert dataset['scan'][key].size == 1, \
                 f'{key} does not have the correct shape.'
+
         else:
             logging.warning('No validation has been defined for %s.', key)
 
@@ -343,10 +363,3 @@ def assert_unit_and_description_present(hdf5_file, _prefix=''):
                 f'The dataset {_prefix}/{key} does not have a unit attribute.'
             assert 'description' in hdf5_file[key].attrs.keys(), \
                 f'The dataset {_prefix}/{key} does not have a description attribute.'
-
-if __name__ == '__main__':
-    path = 'example_dataset.hdf5'
-    generate_example_dataset(path)
-    file = h5py.File(path, 'r')
-    print_hdf5_attrs(file)
-    validate_dataset(path)

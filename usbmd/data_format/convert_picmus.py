@@ -37,7 +37,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
     q_data = np.array(file['data']['imag'], dtype='float32')
 
     if np.sum(q_data) < 0.1:
-        # Use only the I-data and add dummy dimension (shape (tx, el, ax, ch=1))
+        # Use only the I-data, add dummy dimension (shape (tx, el, ax, ch=1))
         raw_data = i_data[..., None]
     else:
         # Stack I- and Q-data (shape (tx, el, ax, 2))
@@ -49,7 +49,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
     # raw_data = np.transpose(raw_data, (0, 1, 3, 2, 4))
 
 
-    n_frames, n_tx, n_el, n_ax, n_ch = raw_data.shape
+    _, n_tx, n_el, _, _ = raw_data.shape
 
     center_frequency = int(file['modulation_frequency'][()])
     # Fix a mistake in one of the PICMUS files

@@ -1,5 +1,6 @@
 """
-Script to convert the PICMUS database to the USBMD format using `usbmd.data_format.convert_picmus.convert_picmus`.
+Script to convert the PICMUS database to the USBMD format using `usbmd.
+data_format.convert_picmus.convert_picmus`.
 """
 
 import os
