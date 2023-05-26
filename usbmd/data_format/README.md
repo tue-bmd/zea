@@ -14,7 +14,7 @@ The USBMD data format has the following structure:
     - `image_sc`: The scan converted image.
 - The `scan` group must contain the following keys:
     - `probe_geometry`: The geometry of the probe.
-    - `t0_delays`: The time delays of the transducer elements.
+    - `t0_delays`: The time delays of the transducer elements. These delays determine the steering and focusing of the beam as well as the type of transmit (plane-wave, focused, etc.).
     - `n_frames`: The number of frames in the dataset.
     - `n_tx`: The number of transmits per frame.
     - `n_el`: The number of elements in the transducer.
