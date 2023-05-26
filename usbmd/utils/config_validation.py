@@ -88,7 +88,6 @@ scan_schema = Schema({
     Optional("N_ax", default=None): Or(None, int),
     Optional("fc", default=None): Or(None, any_number),
     Optional("fs", default=None): Or(None, any_number),
-    Optional("tzero_correct", default=None): Or(None, bool),
     Optional("downsample", default=None): Or(None, positive_integer),
 })
 
