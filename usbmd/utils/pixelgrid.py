@@ -29,7 +29,10 @@ def get_grid(scan):
     return grid
 
 def check_for_aliasing(scan):
-    """Checks if the scan class parameters will cause aliasing."""
+    """Checks if the scan class parameters will cause spatial aliasing due to a too low pixel
+    density. If so, a warning is printed with a suggestion to increase the pixel density by either
+    increasing the number of pixels, or decreasing the pixel spacing, depending on which parameter
+    was set by the user."""
     wvln = scan.c / scan.fc
     dx = wvln / scan.pixels_per_wavelength
     dz = dx
