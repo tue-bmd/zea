@@ -1,3 +1,5 @@
+"""Test generating and validating usbmd data format.
+"""
 import os
 from pathlib import Path
 
