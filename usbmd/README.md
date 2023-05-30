@@ -1,3 +1,4 @@
+<!-- This is the readme for the pdoc documentation (used as header in index.html) -->
 # Ultrasound-BMd
 Ultrasound-BMd (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
 The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox. This repository is being maintained by researchers from the [BM/d lab](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab/) at Eindhoven University of Technology. Currently for [internal](LICENSE) use only.
@@ -22,7 +23,7 @@ python -m pip install -e .
  Alternatively, you can [run this code via Docker](#running-the-code-with-docker) using included [Dockerfile](../../Dockerfile).
 
 #### usbmd import
-You can use the package as follows in your own project:
+After installation, you can use the package as follows in your own project:
 ```Python
 # import usbmd package
 import usbmd
@@ -48,25 +49,28 @@ In order to use this repository and point to the correct data paths, you can ent
 The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
 
 #### Datastructure
-This repository can support custom datastructures by implementing your own [Dataset](datasets.html) class, but the preferred way makes use of the `.hdf5` file format and is structured as follows:
+This repository can support custom datastructures by implementing your own [Dataset](datasets.html) class, but the preferred way makes use of the `.hdf5` file format. For more information on dataset format, see [usbmd/data_format/README.md](data_format/index.html). The datasets are structured as follows:
+
 ```c
-data_file.hdf5                  // [unit], [array shape]
+data_file.hdf5                  // [unit], [array shape], [type]
 ├── data
 │    │  (see data types)
-│    └── `dtype`                // [-], [n_frames, n_angles, n_ax, n_elem]
-│       (... optional ...)
-│        ├── real               // [-], [n_frames, n_angles, n_ax, n_elem]
-│        └── imag               // [-], [n_frames, n_angles, n_ax, n_elem]
+│    └── `dtype`                // [-], [n_frames, n_tx, n_el, n_ax, n_ch], [float32]
 │
 │  (all settings go here)
-├── settings
-│    │── angles                 // [rad], [n_angles]
-│    │── initial_time           // [s]
-│    │── modulation_frequency   // [Hz]
-│    │── probe_geometry         // [m], [n_elem, 3]
-│    │── sampling_frequency     // [Hz]
-│    │── sound_speed            // [m/s]
-│    │── PRF                    // [Hz]
+├── scan
+│    │── center_frequency       // [Hz], [-], [float32]
+│    │── sampling_frequency     // [Hz], [-], [float32]
+│    │── n_tx                   // [-], [-], [int16]
+│    │── n_el                   // [-], [-], [int16]
+│    │── n_ax                   // [-], [-], [int16]
+│    │── angles                 // [rad], [n_tx, 2], [float32]
+│    │── virtual_sources        // [m], [n_tx, 3], [float32]
+│    │── transmit_apodization   // [-], [n_tx, n_el], [float32]
+│    │── tzero                  // [-], [n_tx, n_el], [float32]
+│    │── probe_geometry         // [m], [n_el, 3], [float32]
+│    │── sound_speed            // [m/s], [-], [float32]
+│    │── initial_times          // [s], [-], [float32]
 │    └── ... (other optional parameters)
 ```
 
@@ -79,11 +83,17 @@ data_file.hdf5                  // [unit], [array shape]
 #### Data types
 The following terminology is used in the code when referring to different data types.
 - `raw_data` --> The raw channel data, storing the time-samples from each distinct ultrasound transducer.
+  - [n_frames, n_tx, n_el, n_ax]
 - `aligned_data` --> Time-of-flight (TOF) corrected data. This is the data that is time aligned with respect to the array geometry.
+  - [n_frames, n_tx, n_el, n_ax]
 - `beamformed_data` --> Beamformed or also known as beamsummed data. Aligned data is coherently summed together along the elements. The data has now been transformed from the aperture domain to the spatial domain.
+  - [n_frames, n_z, n_x]
 - `envelope_data` --> The envelope of the signal is here detected and the center frequency is removed from the signal.
+  - [n_frames, n_z, n_x]
 - `image` --> After log compression of the envelope data, the image is formed.
+  - [n_frames, n_z, n_x]
 - `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
+  - [n_frames, output_size_z, output_size_x]
 
 ## How to use with Verasonics
 Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](../../usbmd/verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](datasets.html), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](ui.html) script and select your newly generated datafile to visualize the data.
@@ -108,7 +118,7 @@ The -e option stands for editable, which is important because it allows you to c
 
 ## Running the code with Docker
 
-This package also includes a [Dockerfile](Dockerfile.html) that you can use to run the code in a containerized environment.
+This package also includes a [Dockerfile](../../Dockerfile). that you can use to run the code in a containerized environment.
 
 1. Install Docker on your machine. You can download Docker from the official website: https://www.docker.com/get-started.
 
