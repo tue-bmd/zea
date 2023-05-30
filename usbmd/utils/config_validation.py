@@ -13,9 +13,11 @@ Also if that parameter is optional, add a default value.
 - **Date**          : 31/01/2023
 """
 from pathlib import Path
+from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
+from usbmd.utils.config import Config
 from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
                               _MOD_TYPES)
 from usbmd.utils.metrics import _METRICS
@@ -130,9 +132,16 @@ config_schema = Schema({
     Optional("git", default=None): Or(None, str),
 })
 
-def check_config(config: dict, verbose: bool=False):
+def check_config(config: Union[dict, Config], verbose: bool=False):
     """Check a config given dictionary"""
-    config = config_schema.validate(dict(config))
+    assert type(config) in [dict, Config], \
+        f'Config must be a dictionary or Config object, not {type(config)}'
+    if isinstance(config, Config):
+        config = config.serialize()
+        config = config_schema.validate(config)
+        config = Config(config)
+    else:
+        config = config_schema.validate(config)
     if verbose:
         print('Config is correct')
     return config
