@@ -49,18 +49,16 @@ In order to use this repository and point to the correct data paths, you can ent
 The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
 
 #### Datastructure
-This repository can support custom datastructures by implementing your own [Dataset](datasets.html) class, but the preferred way makes use of the `.hdf5` file format and is structured as follows:
+This repository can support custom datastructures by implementing your own [Dataset](datasets.html) class, but the preferred way makes use of the `.hdf5` file format. For more information on dataset format, see [usbmd/data_format/README.md](data_format/index.html). The datasets are structured as follows:
+
 ```c
 data_file.hdf5                  // [unit], [array shape], [type]
 ├── data
 │    │  (see data types)
-│    └── `dtype`
-│        ├── real               // [-], [n_frames, n_tx, n_el, n_ax], [float32]
-│       (... optional ...)
-│        └── imag               // [-], [n_frames, n_tx, n_el, n_ax], [float32]
+│    └── `dtype`                // [-], [n_frames, n_tx, n_el, n_ax, n_ch], [float32]
 │
 │  (all settings go here)
-├── settings
+├── scan
 │    │── center_frequency       // [Hz], [-], [float32]
 │    │── sampling_frequency     // [Hz], [-], [float32]
 │    │── n_tx                   // [-], [-], [int16]
@@ -72,7 +70,7 @@ data_file.hdf5                  // [unit], [array shape], [type]
 │    │── tzero                  // [-], [n_tx, n_el], [float32]
 │    │── probe_geometry         // [m], [n_el, 3], [float32]
 │    │── sound_speed            // [m/s], [-], [float32]
-│    │── initial_time           // [s], [-], [float32]
+│    │── initial_times          // [s], [-], [float32]
 │    └── ... (other optional parameters)
 ```
 
