@@ -6,7 +6,7 @@ beamforming grid.
 """
 import numpy as np
 
-from usbmd.utils.pixelgrid import get_grid
+from usbmd.utils.pixelgrid import get_grid, check_for_aliasing
 
 _MOD_TYPES = [None, 'rf', 'iq']
 
@@ -87,6 +87,7 @@ class Scan:
 
         self.z_axis = np.linspace(*self.zlims, N_ax)
 
+        check_for_aliasing(self)
         self.grid = get_grid(self)
         self.Nx = self.grid.shape[1] if not self.Nx else self.Nx
         self.Nz = self.grid.shape[0] if not self.Nz else self.Nz
