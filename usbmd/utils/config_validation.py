@@ -90,7 +90,6 @@ scan_schema = Schema({
     Optional("N_ax", default=None): Or(None, int),
     Optional("fc", default=None): Or(None, any_number),
     Optional("fs", default=None): Or(None, any_number),
-    Optional("tzero_correct", default=None): Or(None, bool),
     Optional("downsample", default=None): Or(None, positive_integer),
 })
 
@@ -111,6 +110,7 @@ config_schema = Schema({
         Optional("modtype", default=None): Or(*_MOD_TYPES),
         Optional("from_modtype", default=None): Or(*_MOD_TYPES),
         Optional("user", default=None): Or(None, dict),
+        Optional("dataset_folder", default=None): Or(None, str),
     },
     "plot": {
         "save": bool,
