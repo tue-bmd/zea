@@ -1,4 +1,4 @@
-"""The ui module runs a complete ultrasound beamforming pipeline and displays
+"""The UI module runs a complete ultrasound beamforming pipeline and displays
 the results in a GUI.
 
 - **Author(s)**     : Tristan Stevens
@@ -424,8 +424,7 @@ def setup(file=None):
 
     config = load_config_from_yaml(Path(file))
     print(f'Using config file: {file}')
-    config = check_config(config.serialize())
-    config = Config(config)
+    config = check_config(config)
 
     ## git
     cwd = Path.cwd().stem

@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 from PIL import Image
+import h5py
 
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
@@ -232,3 +233,41 @@ def update_dictionary(dict1: dict, dict2: dict, keep_none: bool=False) -> dict:
     # dict merging python > 3.9: default_scan_params | config_scan_params
     dict_out = {**dict1, **dict2}
     return dict_out
+
+def print_hdf5_attrs(hdf5_obj, prefix=''):
+    """Recursively prints all keys, attributes, and shapes in an HDF5 file.
+
+    Args:
+        hdf5_obj (h5py.File, h5py.Group, h5py.Dataset): HDF5 object to print.
+        prefix (str, optional): Prefix to print before each line. This
+            parameter is used in internal recursion and should not be supplied
+            by the user.
+    """
+    assert isinstance(hdf5_obj, (h5py.File, h5py.Group, h5py.Dataset)),\
+        'ERROR: hdf5_obj must be a File, Group, or Dataset object'
+
+    if isinstance(hdf5_obj, h5py.File):
+        name = 'root' if hdf5_obj.name == '/' else hdf5_obj.name
+        print(prefix + name + '/')
+        prefix += '    '
+    elif isinstance(hdf5_obj, h5py.Dataset):
+        shape_str = str(hdf5_obj.shape).replace(",)", ")")
+        print(prefix + '├── ' + hdf5_obj.name + ' (shape=' + shape_str + ')')
+        prefix += '│   '
+
+    # Print all attributes
+    for key, val in hdf5_obj.attrs.items():
+        print(prefix + '├── ' + key + ': ' + str(val))
+
+    # Recursively print all keys, attributes, and shapes in groups
+    if isinstance(hdf5_obj, h5py.Group):
+        for i, key in enumerate(hdf5_obj.keys()):
+            is_last = i == len(hdf5_obj.keys()) - 1
+            if is_last:
+                marker = '└── '
+                new_prefix = prefix + '    '
+            else:
+                marker = '├── '
+                new_prefix = prefix + '│   '
+            print(prefix + marker + key + '/')
+            print_hdf5_attrs(hdf5_obj[key], new_prefix)
