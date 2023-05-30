@@ -1,4 +1,4 @@
-"""The ui module runs a complete ultrasound beamforming pipeline and displays
+"""The UI module runs a complete ultrasound beamforming pipeline and displays
 the results in a GUI.
 
 - **Author(s)**     : Tristan Stevens
