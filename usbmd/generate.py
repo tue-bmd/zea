@@ -1,14 +1,13 @@
-"""
-==============================================================================
-    Eindhoven University of Technology
-==============================================================================
+"""Generate ultrasound dataset from any data type to another and save to disk.
 
-    Source Name   : generate.py
+Supports both saving to png and hdf5. saving to png is only supported for image data.
 
-    Author(s)     : Tristan Stevens
-    Date          : Thu Nov 18 2021
+Example:
+    Run from command line to generate PICMUS dataset:
+    >>> python usbmd/ui.py -c configs/config_picmus_rf.yaml -t generate
 
-==============================================================================
+- **Author(s)**     : Tristan Stevens
+- **Date**          : Thu Nov 18 2021
 """
 from pathlib import Path
 
@@ -58,7 +57,7 @@ class GenerateDataSet:
         assert self.filetype in ['hdf5', 'png'], \
             ValueError(f'Unsupported filteype: {self.filetype}.')
 
-        if self.to_dtype != 'image' and self.filetype == 'png':
+        if self.to_dtype not in ['image', 'image_sc'] and self.filetype == 'png':
             raise ValueError(
                 'Cannot save to png if to_dtype is not image. '
                 'Please set filetype to hdf5.'
@@ -114,13 +113,23 @@ class GenerateDataSet:
             desc=f'Generating dataset ({self.to_dtype}, {self.filetype})',
         ):
             data = self.dataset[idx]
-            data = np.squeeze(data)
 
-            if len(data.shape) == 2:
-                data = np.expand_dims(data, axis=0)
-                single_frame = True
+            # TODO: following logic deals with inconsistencies with rf / iq axis and
+            # batch / frame axis that are sometimes not present. For the future; make sure
+            # dataset just always returns with frame axis
+            if data.shape[-1] == 1:
+                data = np.squeeze(data, axis=-1)
+
+            single_frame = False
+            if self.config.data.dtype in ['raw_data', 'aligned_data']:
+                if len(data.shape) == 3:
+                    single_frame = True
             else:
-                single_frame = False
+                if len(data.shape) == 2:
+                    single_frame = True
+
+            if single_frame:
+                data = np.expand_dims(data, axis=0)
 
             base_name = self.dataset.file_paths[idx]
 
@@ -130,6 +139,7 @@ class GenerateDataSet:
                         name = base_name
                     else:
                         name = base_name.parent / str(i)
+
 
                     path = self.get_path_from_name(name, '.png')
 

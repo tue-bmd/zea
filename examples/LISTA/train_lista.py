@@ -1,6 +1,6 @@
 """Example script for training unfolded LISTA.
-Author(s): Tristan Stevens
-Date: 09/12/2022
+- **Author(s)**: Tristan Stevens
+- **Date**: 09/12/2022
 """
 from pathlib import Path
 
