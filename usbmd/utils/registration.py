@@ -30,7 +30,8 @@ dataset_class = dataset_registry['picmus']
 dataset = dataset_class()
 ```
 
-Author: Vincent van de Schaft
+- **Author(s)**     : Vincent van de Schaft
+- **Date**          : -
 """
 
 class RegisterDecorator:

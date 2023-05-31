@@ -1,6 +1,5 @@
-"""Validate configuration yaml files
-Author(s): Tristan Stevens
-Date: 31/01/2023
+"""Validate configuration yaml files.
+
 https://github.com/keleshev/schema
 https://www.andrewvillazon.com/validate-yaml-python-schema/
 
@@ -9,9 +8,16 @@ Furthermore it check the config file you create for validity and sets
 missing (if optional) parameters to default values. When adding functionality
 that needs parameters from the config file, make sure to add those paremeters here.
 Also if that parameter is optional, add a default value.
+
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 31/01/2023
 """
+from pathlib import Path
+from typing import Union
+
 from schema import And, Optional, Or, Regex, Schema
 
+from usbmd.utils.config import Config
 from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
                               _MOD_TYPES)
 from usbmd.utils.metrics import _METRICS
@@ -30,13 +36,14 @@ percentage = And(any_number, lambda f: 0 <= f <= 100)
 # model
 model_schema = Schema({
     Optional("batch_size", default=8): positive_integer,
-    Optional("patch_shape", default=None): Or(None, list_of_size_two),
+    Optional("patch_shape", default=[8, 8]): list_of_size_two,
     Optional("beamformer", default=None): {
         "type": Or(None, *_BEAMFORMER_TYPES),
-        Optional("folds", default=None): positive_integer,
-        Optional("end_with_prox", default=None): bool,
-        Optional("proxtype", default=None): Or(None, "wavelet", "softthres", "fourier", "neural"),
-        Optional("kernel_size", default=None): positive_integer,
+        Optional("folds", default=1): positive_integer,
+        Optional("end_with_prox", default=False): bool,
+        Optional("proxtype", default="softthres"): \
+            Or(None, "wavelet", "softthres", "fourier", "neural"),
+        Optional("kernel_size", default=3): positive_integer,
         Optional("aux_inputs", default=None): Or(None, list),
     },
 })
@@ -44,37 +51,37 @@ model_schema = Schema({
 # preprocess
 preprocess_schema = Schema({
     Optional("elevation_compounding", default=None): Or(int, "max", "mean", None),
-    Optional("multi_bpf", default=None): {
+    Optional("multi_bpf", default=None): Or(None, {
         "num_taps": positive_integer,
         "freqs": list_of_floats,
         "bandwidths": list_of_floats,
         # Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
-    },
+    }),
     Optional("demodulation", default='manual'): Or('manual', 'hilbert', 'gabor'),
 })
 
 # postprocess
 postprocess_schema = Schema({
-    Optional("contrast_boost", default=None): {
+    Optional("contrast_boost", default=None): Or(None, {
         "k_p": float,
         "k_n": float,
         "threshold": float,
-    },
-    Optional("thresholding", default=None): {
-        Optional("percentile", default=None): percentage,
-        Optional("threshold", default=None): any_number,
+    }),
+    Optional("thresholding", default=None): Or(None, {
+        Optional("percentile", default=None): Or(None, percentage),
+        Optional("threshold", default=None): Or(None, any_number),
         Optional("fill_value", default="min"): Or("min", "max", "threshold", any_number),
         Optional("below_threshold", default=True): bool,
         Optional("threshold_type", default="hard"): "hard",
-    },
-    Optional("lista", default=None): bool,
+    }),
+    Optional("lista", default=False): bool,
 })
 
 # scan
 scan_schema = Schema({
-    Optional("xlims", default=None): list_of_size_two,
-    Optional("zlims", default=None): list_of_size_two,
-    Optional("ylims", default=None): list_of_size_two,
+    Optional("xlims", default=None): Or(None, list_of_size_two),
+    Optional("zlims", default=None): Or(None, list_of_size_two),
+    Optional("ylims", default=None): Or(None, list_of_size_two),
     # TODO: n_angles and N_tx are overlapping parameters
     Optional("n_angles", default=None): Or(None, int, list),
     Optional("N_tx", default=None): Or(None, int),
@@ -83,8 +90,7 @@ scan_schema = Schema({
     Optional("N_ax", default=None): Or(None, int),
     Optional("fc", default=None): Or(None, any_number),
     Optional("fs", default=None): Or(None, any_number),
-    Optional("tzero_correct", default=None): Or(None, bool),
-    Optional("downsample", default=None): positive_integer,
+    Optional("downsample", default=None): Or(None, positive_integer),
 })
 
 # top level schema
@@ -94,7 +100,7 @@ config_schema = Schema({
         "dtype": Or(*_DATA_TYPES),
         Optional("output_size", default=500): positive_integer,
         Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
-        Optional("file_path", default=None): Or(None, str),
+        Optional("file_path", default=None): Or(None, str, Path),
         Optional("local", default=True): bool,
         Optional("subset", default=None): Or(None, str),
         Optional("frame_no", default=None): Or(None, "all", int),
@@ -103,16 +109,17 @@ config_schema = Schema({
         Optional("apodization", default=None): Or(None, str),
         Optional("modtype", default=None): Or(*_MOD_TYPES),
         Optional("from_modtype", default=None): Or(*_MOD_TYPES),
-        Optional("user", default=None): dict,
+        Optional("user", default=None): Or(None, dict),
+        Optional("dataset_folder", default=None): Or(None, str),
     },
     "plot": {
         "save": bool,
         "axis": bool,
         Optional("fps", default=20): int,
-        Optional("tag", default=None): str,
-        Optional("headless", default=None): bool,
-        Optional("selector", default=None): Or('rectangle', 'lasso'),
-        Optional("selector_metric", default=None): Or(*_METRICS),
+        Optional("tag", default=None): Or(None, str),
+        Optional("headless", default=False): bool,
+        Optional("selector", default=None): Or(None, 'rectangle', 'lasso'),
+        Optional("selector_metric", default='gcnr'): Or(*_METRICS),
     },
     Optional("model", default=model_schema.validate({})): model_schema,
     Optional("preprocess", default=preprocess_schema.validate({})): preprocess_schema,
@@ -122,11 +129,19 @@ config_schema = Schema({
     Optional("device", default=None): \
         Or("cpu", "gpu", "cuda", Regex(r"cuda:\d+"), Regex(r"gpu:\d+"), Regex(r"auto:\d+"), None),
     Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, 'disable'),
+    Optional("git", default=None): Or(None, str),
 })
 
-def check_config(config: dict, verbose: bool=False):
+def check_config(config: Union[dict, Config], verbose: bool=False):
     """Check a config given dictionary"""
-    config = config_schema.validate(dict(config))
+    assert type(config) in [dict, Config], \
+        f'Config must be a dictionary or Config object, not {type(config)}'
+    if isinstance(config, Config):
+        config = config.serialize()
+        config = config_schema.validate(config)
+        config = Config(config)
+    else:
+        config = config_schema.validate(config)
     if verbose:
         print('Config is correct')
     return config

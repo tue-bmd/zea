@@ -1,1 +1,0 @@
-This is where the automatically generated documentation will be stored.

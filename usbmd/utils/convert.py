@@ -1,6 +1,8 @@
-"""Convert utilities.
-Converting between hdf5, mat and dictionary.
-Author(s): Tristan Stevens
+"""This module contains functionality for converting between hdf5, mat and
+dictionary.
+
+- **Author(s)**     : Tristan Stevens
+- **Date**          : -
 """
 import argparse
 from pathlib import Path
