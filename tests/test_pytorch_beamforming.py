@@ -12,7 +12,7 @@ import torch
 
 from usbmd.probes import Verasonics_l11_4v
 
-from usbmd.pytorch_ultrasound.layers.beamformers import create_beamformer
+from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
 from usbmd.pytorch_ultrasound.processing import on_device_torch
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.config import load_config_from_yaml
@@ -51,7 +51,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     scan.grid = cartesian_pixel_grid(scan.xlims, scan.zlims, dx = scan.wvln/4, dz = scan.wvln/4)
     simulator = UltrasoundSimulator(probe, scan)
-    beamformer = create_beamformer(probe, scan, config)
+    beamformer = get_beamformer(probe, scan, config)
 
     # Ensure reproducible results
     torch.random.manual_seed(0)
