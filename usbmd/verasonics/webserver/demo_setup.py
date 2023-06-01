@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
-from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
+from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.utils.config import load_config_from_yaml
 
 
@@ -106,7 +106,7 @@ def create_DAS(n_angles):
         Nz=config.scan.get('Nz')
     )
 
-    model = create_beamformer(
+    model = get_beamformer(
         probe,
         scan,
         config,
@@ -145,7 +145,7 @@ def create_ABLE(config_path):
         Nz=config.scan.get('Nz')
     )
 
-    model = create_beamformer(
+    model = get_beamformer(
         probe,
         scan,
         config,
@@ -194,7 +194,7 @@ def distributed_model(probe, scan, config, gpus):
         scan.Nz = subgrid.shape[0]
 
         with tf.device(gpu.name.strip('/physical_device:')):
-            sub_beamformers.append(create_beamformer(
+            sub_beamformers.append(get_beamformer(
                 probe,
                 scan,
                 config,

@@ -13,3 +13,8 @@ dataset_registry = RegisterDecorator(
 
 # The registry for the probes.
 probe_registry = RegisterDecorator()
+
+# The registry for the beamformers.
+beamformer_registry = RegisterDecorator(
+    items_to_register=['name', 'framework']
+)
