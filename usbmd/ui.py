@@ -1,14 +1,8 @@
-"""
-==============================================================================
-    Eindhoven University of Technology
-==============================================================================
+"""The UI module runs a complete ultrasound beamforming pipeline and displays
+the results in a GUI.
 
-    Source Name   : ui.py
-
-    Author(s)     : Tristan Stevens
-    Date          : Thu Nov 18 2021
-
-==============================================================================
+- **Author(s)**     : Tristan Stevens
+- **Date**          : Thu Nov 18 2021
 """
 import argparse
 import sys
@@ -67,7 +61,7 @@ class DataLoaderUI:
         self.probe = get_probe(self.dataset.get_probe_name())
 
         # intialize process class
-        self.process = Process(config, self.scan, self.probe)
+        self.process = Process(self.config, self.scan, self.probe)
 
         # initialize attributes for UI class
         self.data = None
@@ -430,8 +424,7 @@ def setup(file=None):
 
     config = load_config_from_yaml(Path(file))
     print(f'Using config file: {file}')
-    config = check_config(config.serialize())
-    config = Config(config)
+    config = check_config(config)
 
     ## git
     cwd = Path.cwd().stem

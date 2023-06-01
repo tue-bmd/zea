@@ -11,7 +11,7 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 from usbmd.utils.config import Config, load_config_from_yaml
-from usbmd.utils.config_validation import config_schema
+from usbmd.utils.config_validation import check_config
 
 # Define some dictionaries to test the Config class
 simple_dict = {
@@ -55,7 +55,12 @@ def test_all_configs_valid(file):
     with open(file, 'r', encoding='utf-8') as f:
         configuration = yaml.load(f, Loader=yaml.FullLoader)
     try:
-        config_schema.validate(dict(configuration))
+        configuration = check_config(configuration)
+        # check another time, since defaults are now set, which are not
+        # checked by the first check_config. Basically this checks if the
+        # config_validation.py entries are correct.
+        check_config(configuration)
+
     except SchemaError as se:
         raise ValueError(f'Error in config {f}') from se
 
@@ -148,7 +153,6 @@ def test_serialize(dictionary):
     # Check if the config is the same
     config_check_equal_recursive(config, serialized)
 
-
 def config_check_equal_recursive(config, dictionary):
     """Recursively check if all values in config are of the correct type and
     equal as to corresponding key in the config.
@@ -167,7 +171,6 @@ def config_check_equal_recursive(config, dictionary):
             assert value1 == value2, 'All values must be the same'
             assert isinstance(value1, type(value2)), ('All types must be the '
                                                       'same')
-
 
 def test_check_equal():
     """Tests the config_check_equal_recursive function."""
