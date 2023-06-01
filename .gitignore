@@ -1,6 +1,7 @@
 # usbmd repo specific
 figures/
 custom_configs/
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -137,3 +138,5 @@ dmypy.json
 tensorflow_ultrasound/figures/
 usbmd/figures/
 examples/deep_beamforming/example_config_ABLE.yaml
+trained_models/
+benchmarks/
