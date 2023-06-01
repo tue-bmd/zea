@@ -17,7 +17,7 @@ import tensorflow as tf
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
+from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.ui import setup
@@ -54,7 +54,7 @@ def train(config):
     probe = get_probe(dataset.get_probe_name())
 
     # Create target data
-    target_beamformer = create_beamformer(probe, scan, config)
+    target_beamformer = get_beamformer(probe, scan, config)
 
     targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
 
@@ -78,7 +78,7 @@ def train(config):
 
     inputs = np.expand_dims(data[37:38], axis=0)
 
-    beamformer = create_beamformer(probe, scan, config)
+    beamformer = get_beamformer(probe, scan, config)
     beamformer.summary()
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
