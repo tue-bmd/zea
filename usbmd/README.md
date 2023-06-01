@@ -24,7 +24,7 @@ python -m pip install -e .
 
 #### usbmd import
 After installation, you can use the package as follows in your own project:
-```Python
+```python
 # import usbmd package
 import usbmd
 # or if you want to use the Tensorflow tools
