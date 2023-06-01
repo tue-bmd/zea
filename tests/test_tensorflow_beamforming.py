@@ -10,7 +10,7 @@ import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
-from usbmd.tensorflow_ultrasound.layers.beamformers import create_beamformer
+from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import cartesian_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
@@ -46,7 +46,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     scan.grid = cartesian_pixel_grid(scan.xlims, scan.zlims, dx=scan.wvln/4, dz=scan.wvln/4)
     simulator = UltrasoundSimulator(probe, scan)
-    beamformer = create_beamformer(probe, scan, config)
+    beamformer = get_beamformer(probe, scan, config)
 
     # Ensure reproducible results
     tf.random.set_seed(0)
