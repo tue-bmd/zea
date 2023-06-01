@@ -170,22 +170,10 @@
       </fieldset>
 
 
-      <h3>Filter bandwidth</h3>
-      <div class="container">
-        <form action="/" method="post" enctype="multipart/form-data" id="form">
-          <div class="row">
-            <div class="col">
-              <input id="slide_bandwidth" type="range" min="0" max="100" step="1" value="50" name="slide_bandwidth">
-              <div id="label_bandwidth">50</div>
-            </div>
-          </div>
-        </form>
-      </div>
 
       <h3>Scaling mode</h3>
       <fieldset id="group2">
-        <input type="radio" value="option1" name="group2" checked="checked" onclick="setScaleNormal()">
-        Normalized
+        <input type="radio" value="option1" name="group2" checked="checked" onclick="setScaleNormal()"> Normalized
         </input><br>
         <input type="radio" value="option2" name="group2" onclick="setScaleSmoothNormal()"> Smooth Normalized
         </input><br>
@@ -554,16 +542,6 @@
     label_sos = document.getElementById("label_sos");
   slide_sos.onchange = function () {
     label_sos.innerHTML = this.value;
-    $.post({
-      url: "{{ url_for('create_file') }}",
-      data: $('form').serialize(),
-    });
-  }
-
-  var slide_bandwidth = document.getElementById('slide_bandwidth'),
-    label_bandwidth = document.getElementById("label_bandwidth");
-  slide_bandwidth.onchange = function () {
-    label_bandwidth.innerHTML = this.value;
     $.post({
       url: "{{ url_for('create_file') }}",
       data: $('form').serialize(),

@@ -42,44 +42,15 @@ from futures3.thread import ThreadPoolExecutor
 from usbmd.utils.video import FPS_counter, ScanConverterTF
 from usbmd.verasonics.webserver.benchmarking import BenchmarkTool
 from usbmd.verasonics.webserver.control import PIDController
-from usbmd.tensorflow_ultrasound.layers.filtering import Bandpass, Highpass, Lowpass
-from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-
-# Set GPU config
-set_gpu_usage()
 
 def debugger_is_active() -> bool:
     """Return if the debugger is currently active"""
     return hasattr(sys, 'gettrace') and sys.gettrace() is not None
 
+
 # Set logger
 if debugger_is_active():
     logging.basicConfig(level=logging.DEBUG)
-
-
-def create_filter_model(bandwidth, fs, fc, N_tx):
-    # Define the input tensor
-    input_tensor = tf.keras.Input(shape=(N_tx, 128, 576, 2))
-
-    # Apply the Filter1DLayer layer
-    # filter_layer = Filter1DLayer(axis=-2, filter_weights=filter_weights)
-    # filter_layer = Bandpass(
-    #     bandwidth=bandwidth,
-    #     fs=fs,
-    #     fc=0,
-    #     N=32)
-
-    filter_layer = Lowpass(
-        cutoff=bandwidth,
-        fs=fs,
-        fc=0,
-        N=32)
-
-    filtered_tensor = filter_layer(input_tensor)
-    # Create a model
-    model = tf.keras.Model(inputs=input_tensor, outputs=filtered_tensor)
-    model = tf.function(model, jit_compile=True)
-    return model
 
 
 class UltrasoundProcessingServer:
@@ -120,7 +91,6 @@ class UltrasoundProcessingServer:
         self.model_dict, self.grid = get_models()
         self.active_model = self.model_dict['DAS_1PW']
 
-
         # Objects
         self.fps_counter = FPS_counter()
         self.scan_converter = ScanConverterTF(
@@ -154,13 +124,7 @@ class UltrasoundProcessingServer:
         self.c = 1540  # Speed of sound
         self.fs = 6.25e6  # Sampling frequency
         self.fc = 6.25e6  # Center frequency
-        self.bandwidth = 0.5
 
-        self.filter_model = create_filter_model(
-            self.fc*0.5,
-            self.fs,
-            self.fc,
-            1)
         # Stores inputs for the beamformer model
         self.inputs = {}
 
@@ -386,19 +350,17 @@ class UltrasoundProcessingServer:
                     else:
                         tsb_lst.append(0)
 
-                    # to compensate for the frequency control
-                    tsb_lst.append(0)
-
-                    # if len(tsb_lst) != self.numTunableParameters:
-                    #     print(
-                    #         'Length of the to-sent-back (tsb) list different from expected')
+                    if len(tsb_lst) != self.numTunableParameters:
+                        print(
+                            'Length of the to-sent-back (tsb) list different from expected')
 
                     # SEND UPDATE as DOUBLE
                     tsb_lst = list(map(np.double, tsb_lst))
                     tsb_bytes = bytearray(struct.pack(
                         f'{len(tsb_lst)}d', *tsb_lst))
-
+                    print('going to send tsb now')
                     connection.sendall(tsb_bytes)
+                    print('this is the tsb list: ', tsb_lst)
 
                     executionTimeUPD = time.perf_counter() - start_time_update
                     self.update_elapsed_time.append(executionTimeUPD)
@@ -522,7 +484,6 @@ class UltrasoundProcessingServer:
                 inputs, frame_id = self.prepare_inputs(buffer)
 
                 if inputs:
-                    inputs['data'] = self.filter_model(inputs['data'])
                     BF = self.active_model(inputs)[0]
                     img = self.scan_converter.convert(BF)
                     img = np.array(img)
@@ -716,14 +677,6 @@ class UltrasoundProcessingServer:
                     self.bf_type, self.na_transmit)
                 logging.debug(self.na_transmit)
 
-                # also update the filter model
-                self.filter_model = create_filter_model(
-                    self.fc*self.bandwidth,
-                    self.fs,
-                    self.fc,
-                    self.na_transmit)
-
-
             if request.form.get('intensityAuto') is not None:
                 self.auto_update_intensity = not self.auto_update_intensity
                 logging.debug(self.auto_update_intensity)
@@ -775,19 +728,6 @@ class UltrasoundProcessingServer:
             if request.form.get('upscaling') is not None:
                 self.upscaling = not self.upscaling
                 logging.debug(self.upscaling)
-
-            if request.form.get('slide_bandwidth') is not None:
-                self.bandwidth = float(request.form.get('slide_bandwidth'))/100
-                print(self.fc*self.bandwidth)
-
-                # Re-initialize filtering model
-                self.filter_model = create_filter_model(
-                    self.fc*self.bandwidth,
-                    self.fs,
-                    self.fc,
-                    self.na_transmit)
-
-                logging.debug(self.bandwidth)
 
             if request.form.get('source') is not None:
                 self.source = request.form.get('source')
