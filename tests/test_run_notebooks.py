@@ -4,10 +4,10 @@ a test for each notebook that executes it using papermill. The test fails if
 if any of the cells in the notebook raise an exception.
 """
 import glob
-import pytest
-import shutil
-import papermill as pm
 from pathlib import Path
+import shutil
+import pytest
+import papermill as pm
 
 # Find all notebooks in the folder tests/examples
 notebook_paths = set(glob.glob('tests\\examples\\*.ipynb'))
@@ -20,6 +20,8 @@ notebook_paths = notebook_paths - notebooks_to_remove
 
 @pytest.mark.parametrize("notebook_path", notebook_paths)
 def test_notebook_run(notebook_path):
+    """Runs the notebook at notebook path and fails if any of the cells raise
+    an exception."""
 
     output_dir = Path('temp', 'notebooks_run_by_pytest')
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -41,7 +43,7 @@ def test_notebook_run(notebook_path):
         pm.execute_notebook(
            notebook_path,
            output_path,
-           parameters=dict(quick_mode=True)
+           parameters={'quick_mode':True}
         )
     except pm.exceptions.PapermillExecutionError:
         assert False, 'Error executing the notebook with papermill.'
