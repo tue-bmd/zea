@@ -14,6 +14,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Data files
+*.hdf5
+*.h5
+
 # Distribution / packaging
 .Python
 build/
