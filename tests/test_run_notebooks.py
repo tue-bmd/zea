@@ -46,8 +46,8 @@ def test_notebook_run(notebook_path):
            output_path,
            parameters={'quick_mode':True}
         )
-    except pm.exceptions.PapermillExecutionError:
-        assert False, 'Error executing the notebook with papermill.'
+    except pm.exceptions.PapermillExecutionError as pme:
+        raise AssertionError(f'Error executing the notebook with papermill: {pme}') from pme
 
     # Remove temporary directory
     shutil.rmtree(output_dir)
