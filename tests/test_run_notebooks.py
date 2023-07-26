@@ -3,20 +3,21 @@ This file searches all notebooks in the folder examples/notebooks and then runs
 a test for each notebook that executes it using papermill. The test fails if
 if any of the cells in the notebook raise an exception.
 """
-import glob
 from pathlib import Path
 import shutil
 import pytest
 import papermill as pm
 
-# Find all notebooks in the folder tests/examples
-notebook_paths = set(glob.glob('tests\\examples\\*.ipynb'))
+# Find all notebooks in the folder examples
+notebook_paths = set(Path('examples').rglob('*.ipynb'))
 
 # Specify notebook names to be removed
-notebooks_to_remove = set(['PICMUS_beamforming.ipynb',])
+notebooks_to_remove = set([])
 
 # Filter out the undesired notebook names
 notebook_paths = notebook_paths - notebooks_to_remove
+
+print(f'Found {len(notebook_paths)} notebooks to test.')
 
 @pytest.mark.parametrize("notebook_path", notebook_paths)
 def test_notebook_run(notebook_path):
