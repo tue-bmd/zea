@@ -10,9 +10,10 @@ from collections.abc import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, PathPatch
 from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector, RectangleSelector
+from skimage import measure
 
 from usbmd.utils.metrics import get_metric
 from usbmd.utils.utils import filename_from_window_dialog, translate
@@ -28,7 +29,7 @@ def crop_array(array, value=None):
     return array
 
 
-def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=True):
+def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=True, num_selections=None):
     """Interactively select part of an array displayed as an image with matplotlib.
 
     Args:
@@ -39,6 +40,7 @@ def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=Tr
         extent (list): extent of axis where selection is made. Used to transform
             coordinates back to pixel values. Defaults to None.
         verbose (bool): verbosity of print statements. Defaults to False.
+        num_selections (int): number of selections to make. Defaults to None.
 
     Returns:
         patches (list): list of selected parts of data
@@ -101,11 +103,16 @@ def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=Tr
                    RectangleSelector: {'interactive': True}}
 
     lasso = selector(ax, onselect_dict[selector], **kwargs_dict[selector])
-    # if verbose:
-    #     print('...Close plot to finish selection...')
-    # plt.show(block=True)
-    plt.show(block=False)
-    input("Press Enter to continue (don't close plot)...\n")
+
+    if num_selections:
+        if verbose:
+            print(f'...Plot will close after {num_selections} selections...')
+        plt.show(block=False)
+        while not (select_idx >= num_selections):
+            plt.pause(0.1)
+    else:
+        plt.show(block=False)
+        input("Press Enter to continue (don't close plot)...\n")
 
     lasso.disconnect_events()
     lasso.set_visible(False)
@@ -117,13 +124,17 @@ def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=Tr
 
     return patches, masks
 
-def add_rectangle_from_mask(ax, mask, **kwargs):
+def add_rectangle_from_mask(
+    ax, mask, edgecolor='r', facecolor='none', linewidth=1, **kwargs):
     """add a rectangle box to axis from mask array.
 
     Args:
         ax (plt.ax): matplotlib axis
         mask (ndarray): numpy array with rectangle non-zero
             box defining the region of interest.
+        edgecolor (str): color of the shape's edge
+        facecolor (str): color of the shape's face
+        linewidth (int): width of the shape's edge
 
     Returns:
         plt.ax: matplotlib axis with rectangle added
@@ -132,12 +143,36 @@ def add_rectangle_from_mask(ax, mask, **kwargs):
     y1, y2 = np.where(np.diff(mask, axis=0).sum(axis=1))[0]
     x1, x2 = np.where(np.diff(mask, axis=1).sum(axis=0))[0]
     rect = Rectangle(
-        (x1, y1), (x2 - x1), (y2 - y1), linewidth=1,
-        edgecolor='r', facecolor='none', **kwargs)
+        (x1, y1), (x2 - x1), (y2 - y1),
+        edgecolor=edgecolor, facecolor=facecolor, linewidth=linewidth, **kwargs)
 
     # Add the patch to the Axes
-    ax.add_patch(rect)
-    return ax
+    rect_obj = ax.add_patch(rect)
+    return rect_obj
+
+def add_shape_from_mask(ax, mask, **kwargs):
+    """add a shape to axis from mask array.
+
+    Args:
+        ax (plt.ax): matplotlib axis
+        mask (ndarray): numpy array with non-zero
+            shape defining the region of interest.
+        edgecolor (str): color of the shape's edge
+        facecolor (str): color of the shape's face
+        linewidth (int): width of the shape's edge
+
+    Returns:
+        plt.ax: matplotlib axis with shape added
+    """
+    # Create a Path patch
+    contours = measure.find_contours(mask, 0.5)
+    patches = []
+    for contour in contours:
+        path = Path(contour[:, ::-1])
+        patch = PathPatch(
+            path, **kwargs)
+        patches.append(ax.add_patch(patch))
+    return patches
 
 def interactive_selector_with_plot_and_metric(
     data, ax=None, selector='rectangle', metric=None, cmap='gray',
@@ -175,7 +210,7 @@ def interactive_selector_with_plot_and_metric(
 
     # create selector for first axis only
     patches, masks = interactive_selector(
-        data[selection_axis], ax[selection_axis], selector, **kwargs)
+        data[selection_axis], ax[selection_axis], selector, num_selections=2, **kwargs)
 
     if len(patches) != 2:
         raise ValueError(
@@ -201,9 +236,11 @@ def interactive_selector_with_plot_and_metric(
         for _ax, score in zip(ax, scores):
             title = _ax.get_title()
             _ax.set_title(title + '\n' + f'{metric}: {score:.3f}')
-            if selector == 'rectangle':
-                for mask in masks:
+            for mask in masks:
+                if selector == 'rectangle':
                     add_rectangle_from_mask(_ax, mask)
+                else:
+                    add_shape_from_mask(_ax, mask)
             plt.tight_layout()
 
     # plot patches and masks
