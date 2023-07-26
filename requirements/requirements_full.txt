@@ -21,3 +21,4 @@ torchaudio
 
 pylint
 pytest
+ipykernel
