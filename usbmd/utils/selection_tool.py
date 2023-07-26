@@ -29,14 +29,15 @@ def crop_array(array, value=None):
     return array
 
 
-def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=True, num_selections=None):
+def interactive_selector(
+    data, ax, selector='rectangle', extent=None, verbose=True, num_selections=None):
     """Interactively select part of an array displayed as an image with matplotlib.
 
     Args:
         data (ndarray): input array.
         ax (plt.ax): existing matplotlib figure ax to select region on.
-        selector (str, optional): type of selector. Defaults to 'rectangle'. For `lasso`,
-            use `LassoSelector`; for `rectangle`, use `RectangleSelector`.
+        selector (str, optional): type of selector. Defaults to 'rectangle'.
+            For `lasso` use `LassoSelector`; for `rectangle`, use `RectangleSelector`.
         extent (list): extent of axis where selection is made. Used to transform
             coordinates back to pixel values. Defaults to None.
         verbose (bool): verbosity of print statements. Defaults to False.
@@ -108,7 +109,7 @@ def interactive_selector(data, ax, selector='rectangle', extent=None, verbose=Tr
         if verbose:
             print(f'...Plot will close after {num_selections} selections...')
         plt.show(block=False)
-        while not (select_idx >= num_selections):
+        while not select_idx >= num_selections:
             plt.pause(0.1)
     else:
         plt.show(block=False)
