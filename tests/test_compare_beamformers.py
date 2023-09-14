@@ -6,7 +6,6 @@ import numpy as np
 from tests.test_pytorch_beamforming import test_das_beamforming as test_torch
 from tests.test_tensorflow_beamforming import test_das_beamforming as test_tf
 
-
 def test_compare_beamformers():
     """Compares Torch and Tensorflow outputs, and checks if they are (almost) equal"""
     output_torch = test_torch(compare_gt=False)

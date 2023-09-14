@@ -15,6 +15,12 @@ dataset_registry = RegisterDecorator(
 probe_registry = RegisterDecorator()
 
 # The registry for the beamformers.
-beamformer_registry = RegisterDecorator(
+# separate registries to avoid dupicate entries
+# as torch and tf beamformers cannot coexist in same registry
+tf_beamformer_registry = RegisterDecorator(
+    items_to_register=['name', 'framework']
+)
+
+torch_beamformer_registry = RegisterDecorator(
     items_to_register=['name', 'framework']
 )
