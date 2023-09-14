@@ -21,9 +21,10 @@ from schema import And, Optional, Or, Regex, Schema
 # Register beamforing types in registry
 from usbmd.tensorflow_ultrasound.layers import (beamformers, minimum_variance,
                                                 random_minimum, unfolded_bf)
-from usbmd.registry import beamformer_registry
+from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 
-_BEAMFORMER_TYPES = beamformer_registry.registered_names()
+_BEAMFORMER_TYPES = set(
+    tf_beamformer_registry.registered_names() + torch_beamformer_registry.registered_names())
 from usbmd.processing import (_DATA_TYPES, _ML_LIBRARIES,
                               _MOD_TYPES)
 
