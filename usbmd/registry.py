@@ -5,8 +5,8 @@
 """
 from usbmd.utils.registration import RegisterDecorator
 
-# The registry for the datasets linking each dataset to a probe_name and a
-# scan_class.
+# The registry for the datasets linking each dataset to
+# a probe_name and a scan_class.
 dataset_registry = RegisterDecorator(
     items_to_register=['probe_name', 'scan_class']
 )
@@ -15,6 +15,12 @@ dataset_registry = RegisterDecorator(
 probe_registry = RegisterDecorator()
 
 # The registry for the beamformers.
-beamformer_registry = RegisterDecorator(
+# separate registries to avoid dupicate entries
+# as torch and tf beamformers cannot coexist in same registry
+tf_beamformer_registry = RegisterDecorator(
+    items_to_register=['name', 'framework']
+)
+
+torch_beamformer_registry = RegisterDecorator(
     items_to_register=['name', 'framework']
 )
