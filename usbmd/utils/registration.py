@@ -15,15 +15,16 @@ values to register to the keys for the class as keyword arguments.
 and use the registry object to get the class corresponding to a name.
 
 Example:
-```
-dataset_registry(items_to_register=['probe_used', 'scan_class'])
+```datasets.py
+dataset_registry = RegisterDecorator(items_to_register=['probe_used', 'scan_class'])
 
-@interlacer_registry(name='picmus', probe_used='L11-5V', scan_class=PicmusScan)
+@dataset_registry(name='picmus', probe_used='L11-5V', scan_class=PicmusScan)
 class PICMUS(Dataset):
     ...
+```
 
--------------------------------------------------------------------------------
 In another file:
+```other_file.py
 from usbmd.datasets import dataset_registry
 
 dataset_class = dataset_registry['picmus']
