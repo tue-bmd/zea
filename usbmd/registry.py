@@ -5,8 +5,8 @@
 """
 from usbmd.utils.registration import RegisterDecorator
 
-# The registry for the datasets linking each dataset to a probe_name and a
-# scan_class.
+# The registry for the datasets linking each dataset to
+# a probe_name and a scan_class.
 dataset_registry = RegisterDecorator(
     items_to_register=['probe_name', 'scan_class']
 )
