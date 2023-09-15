@@ -17,9 +17,18 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-from usbmd.utils.config import Config
-from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
+# pylint: disable=unused-import
+# Register beamforing types in registry
+from usbmd.tensorflow_ultrasound.layers import (beamformers, minimum_variance,
+                                                random_minimum, unfolded_bf)
+from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
+
+_BEAMFORMER_TYPES = set(
+    tf_beamformer_registry.registered_names() + torch_beamformer_registry.registered_names())
+from usbmd.processing import (_DATA_TYPES, _ML_LIBRARIES,
                               _MOD_TYPES)
+
+from usbmd.utils.config import Config
 from usbmd.utils.metrics import _METRICS
 
 # predefined checks, later used in schema to check validity of parameter
