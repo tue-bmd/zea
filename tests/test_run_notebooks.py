@@ -19,7 +19,7 @@ notebook_paths = notebook_paths - notebooks_to_remove
 
 print(f'Found {len(notebook_paths)} notebooks to test.')
 
-@pytest.mark.parametrize("notebook_path", notebook_paths)
+@pytest.mark.parametrize("notebook_path", notebook_paths, ids=lambda x: x.name)
 def test_notebook_run(notebook_path):
     """Runs the notebook at notebook path and fails if any of the cells raise
     an exception."""
