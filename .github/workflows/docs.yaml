@@ -25,6 +25,7 @@ jobs:
           path: ${{ env.pythonLocation }}
           key: ${{ env.pythonLocation }}-${{ hashFiles('setup.py') }}-${{ hashFiles('requirements/requirements_full.txt') }}
           ref: ${{ github.head_ref }}
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install dependencies
@@ -55,4 +56,5 @@ jobs:
       - name: Push the docs
         uses: ad-m/github-push-action@master
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.head_ref }}
