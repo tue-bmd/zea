@@ -6,9 +6,9 @@ import pandas as pd
 
 def get_gpu_memory(verbose=True):
     """ Retrieve memory allocation information of all gpus.
-    Arguments
+    Args:
         verbose: prints output if True.
-    Retuns
+    Returns:
         memory_free_values: list of available memory for each gpu in MiB.
     """
     def _output_to_list(x):
@@ -32,14 +32,39 @@ def get_gpu_memory(verbose=True):
         df = df = pd.DataFrame({'memory': memory_free_values})
         df.index.name = 'GPU'
         print(df)
+
     return memory_free_values
 
 def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True):
     """ Select GPU based on the device argument and available GPU's. This function does not rely
-    on pytorch or tensorflow, and is shared between both frameworks."""
+    on pytorch or tensorflow, and is shared between both frameworks.
+    Args:
+        available_gpu_ids: list of available GPU ids.
+        memory_free: list of available memory for each gpu in MiB.
+        device (str/int/list): GPU device(s) to select.
+            - If 'cpu', use CPU.
+            - If 'gpu', select GPU based on available memory.
+                Throw an error if no GPU is available.
+            - If None, try to select GPU based on available memory.
+                Fall back to CPU if no GPU is available.
+            - If an integer or a list of integers, use the corresponding GPU(s).
+                If the list contains None values (e.g. [0, None, 2]), a GPU will be
+                selected based on available memory.
+            - If formatted as 'cuda:xx' or 'gpu:xx', where xx is an integer,
+                use the corresponding GPU(s).
+            - If formatted as 'auto:xx', where xx is an integer, automatically
+                select xx GPUs based on available memory. If xx is -1, use all available GPUs.
+        verbose: prints output if True.
+    Returns:
+        gpu_ids: list of selected GPU ids. If no GPU is selected, returns an empty list. If a CPU
+            is selected, returns None.
+    """
 
      # Check if GPU mode is forced or if GPU should be selected based on memory
-    if device == 'gpu' or device == 'cuda' or device is None:
+    if device == 'cpu' or (device is None and not available_gpu_ids):
+        print('Setting device to CPU')
+        return None
+    elif device == 'gpu' or device == 'cuda' or device is None:
         gpu_ids = [None]  # Use None to select GPU based on available memory later
     elif isinstance(device, int) or device is None:
         gpu_ids = [device]  # Use a specific GPU if an integer is provided
