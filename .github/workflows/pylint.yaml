@@ -9,9 +9,9 @@ on:
 
 jobs:
   pylint:
-    timeout-minutes: 5
     name: pylint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         python-version: ["3.9"]
