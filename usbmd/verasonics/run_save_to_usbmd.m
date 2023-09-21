@@ -31,9 +31,8 @@ else
     filename = input('Enter the filename (without extension): ', 's');
 end
 
-output_dir = 'D:\Vincent_van_de_schaft\verasonics';
+% Generate a unique filename
+output_path = unique_filename(output_dir, filename, '.hdf5');
 
-% Prompt the user for the filename
-filename = input('Enter the filename (including extension): ', 's');
-
-save_to_usbmd_format(output_dir, filename)
+% Save the data to the output path
+save_to_usbmd_format(output_path)
