@@ -24,6 +24,8 @@ jobs:
         with:
           path: ${{ env.pythonLocation }}
           key: ${{ env.pythonLocation }}-${{ hashFiles('setup.py') }}-${{ hashFiles('requirements/requirements_full.txt') }}
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -39,8 +41,8 @@ jobs:
 
       - name: Commit the docs
         run: |
-          git config --global user.email "<>"
-          git config --global user.name "GitHub Actions"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           git add docs/usbmd/\*.html
           # Check for changes in docs folder (else do nothing)
           if ! git status --porcelain | grep "docs/usbmd/"; then
@@ -48,11 +50,9 @@ jobs:
             exit 0
           else
             git commit -m "Update docs"
-            git pull
           fi
 
       - name: Push the docs
         uses: ad-m/github-push-action@master
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.head_ref }}
