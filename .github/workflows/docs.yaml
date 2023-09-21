@@ -49,6 +49,7 @@ jobs:
           if ! git status --porcelain | grep "docs/usbmd/"; then
             echo "No changes in docs folder"
           else
+            BRANCH_NAME=$(echo "${GITHUB_REF}" | sed 's/refs\/heads\///')
             git commit -m "Update docs"
-            git push ${{ env.BRANCH_NAME }}
+            git push origin HEAD:"$BRANCH_NAME"
           fi
