@@ -48,6 +48,7 @@ jobs:
             exit 0
           else
             git commit -m "Update docs"
+            git pull
           fi
 
       - name: Push the docs
