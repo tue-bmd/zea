@@ -37,6 +37,9 @@ jobs:
           find ./docs/usbmd/ -name "*.html" -type f -delete
           pdoc3 usbmd --html --output-dir docs --force --skip-errors --template-dir docs/usbmd/templates
 
+      - name: Get Branch Name
+        run: echo "BRANCH_NAME=$(echo ${GITHUB_REF} | sed 's/refs\/heads\///')" >> $GITHUB_ENV
+
       - name: Commit the docs
         run: |
           git config --global user.email "<>"
@@ -47,5 +50,5 @@ jobs:
             echo "No changes in docs folder"
           else
             git commit -m "Update docs"
-            git push
+            git push ${{ env.BRANCH_NAME }}
           fi
