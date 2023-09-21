@@ -45,7 +45,13 @@ jobs:
           # Check for changes in docs folder (else do nothing)
           if ! git status --porcelain | grep "docs/usbmd/"; then
             echo "No changes in docs folder"
+            exit 0
           else
             git commit -m "Update docs"
-            git push
           fi
+
+      - name: Push the docs
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.head_ref }}
