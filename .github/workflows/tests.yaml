@@ -1,4 +1,4 @@
-name: Pylint, Pytest
+name: Pytest
 
 on:
   pull_request:
