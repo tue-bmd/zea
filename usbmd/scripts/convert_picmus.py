@@ -4,7 +4,9 @@ data_format.convert_picmus.convert_picmus`.
 
 Example usage:
 ```
-> python usbmd/scripts/convert_picmus.py --src_dir X:\Ultrasound-BMd\data\PICMUS --output_dir converted_PICMUS_dir
+> python usbmd/scripts/convert_picmus.py
+--src_dir X:/Ultrasound-BMd/data/PICMUS
+--output_dir converted_PICMUS_dir
 ```
 """
 
