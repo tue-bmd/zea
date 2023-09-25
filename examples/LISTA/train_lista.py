@@ -14,7 +14,7 @@ from usbmd.generate import GenerateDataSet
 from usbmd.tensorflow_ultrasound.dataloader import ImageLoader
 from usbmd.tensorflow_ultrasound.models import lista
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-from usbmd.ui import setup
+from usbmd.setup import setup
 
 # choose gpu
 set_gpu_usage(device=0)
