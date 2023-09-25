@@ -6,8 +6,10 @@ import pandas as pd
 
 def get_gpu_memory(verbose=True):
     """ Retrieve memory allocation information of all gpus.
+
     Args:
-        verbose: prints output if True.
+        verbose (bool): prints output if True.
+
     Returns:
         memory_free_values: list of available memory for each gpu in MiB.
     """
@@ -24,8 +26,12 @@ def get_gpu_memory(verbose=True):
         gpus = os.environ['CUDA_VISIBLE_DEVICES']
         gpus = [int(gpu) for gpu in gpus.split(',')][:len(memory_free_values)]
         if verbose:
-            print(f'{len(memory_free_values) - len(gpus)}/{len(memory_free_values)} '
-                'GPUs were disabled')
+            # Report the number of disabled GPUs out of the total
+            num_disabled_gpus = len(memory_free_values) - len(gpus)
+            num_gpus = len(memory_free_values)
+
+            print(f'{num_disabled_gpus/num_gpus} GPUs were disabled')
+
         memory_free_values = [memory_free_values[gpu] for gpu in gpus]
 
     if verbose:
@@ -36,8 +42,9 @@ def get_gpu_memory(verbose=True):
     return memory_free_values
 
 def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True):
-    """ Select GPU based on the device argument and available GPU's. This function does not rely
-    on pytorch or tensorflow, and is shared between both frameworks.
+    """Select GPU based on the device argument and available GPU's. This
+    function does not rely on pytorch or tensorflow, and is shared between both
+    frameworks.
     Args:
         available_gpu_ids: list of available GPU ids.
         memory_free: list of available memory for each gpu in MiB.
@@ -48,16 +55,17 @@ def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True):
             - If None, try to select GPU based on available memory.
                 Fall back to CPU if no GPU is available.
             - If an integer or a list of integers, use the corresponding GPU(s).
-                If the list contains None values (e.g. [0, None, 2]), a GPU will be
-                selected based on available memory.
+                If the list contains None values (e.g. [0, None, 2]), a GPU
+                will be selected based on available memory.
             - If formatted as 'cuda:xx' or 'gpu:xx', where xx is an integer,
                 use the corresponding GPU(s).
             - If formatted as 'auto:xx', where xx is an integer, automatically
-                select xx GPUs based on available memory. If xx is -1, use all available GPUs.
+                select xx GPUs based on available memory. If xx is -1, use all
+                available GPUs.
         verbose: prints output if True.
     Returns:
-        gpu_ids: list of selected GPU ids. If no GPU is selected, returns an empty list. If a CPU
-            is selected, returns None.
+        gpu_ids: list of selected GPU ids. If no GPU is selected, returns an
+            empty list. If a CPU is selected, returns None.
     """
 
      # Check if GPU mode is forced or if GPU should be selected based on memory
@@ -101,7 +109,8 @@ def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True):
     if None in gpu_ids:
         # Automatically select GPUs based on available memory
         sorted_gpu_ids = [
-            x for x, _ in sorted(enumerate(memory_free), key=lambda x: x[1], reverse=True)
+            x for x, _ in sorted(enumerate(memory_free), key=lambda x: x[1],
+                                 reverse=True)
             ]
 
         for i, gpu in enumerate(gpu_ids):
@@ -114,7 +123,8 @@ def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True):
 
     if verbose:
         for gpu_id in gpu_ids:
-            print(f'Selected GPU {gpu_id} with Free Memory: {memory_free[gpu_id]:.2f} MiB')
+            print(f'Selected GPU {gpu_id} with Free Memory:'
+                  f' {memory_free[gpu_id]:.2f} MiB')
 
     # Set the CUDA_VISIBLE_DEVICES environment variable to the selected GPU(s)
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpu_ids))
