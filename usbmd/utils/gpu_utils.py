@@ -41,8 +41,8 @@ def get_gpu_memory(verbose=True):
 
     return memory_free_values
 
-def select_gpus(available_gpu_ids, memory_free, hide_others=True, device=None,
-                verbose=True):
+def select_gpus(available_gpu_ids, memory_free, device=None,
+                verbose=True, hide_others=True):
     """ Select GPU based on the device argument and available GPU's. This
     function does not rely on pytorch or tensorflow, and is shared between both
     frameworks.
@@ -54,8 +54,6 @@ def select_gpus(available_gpu_ids, memory_free, hide_others=True, device=None,
     Args:
         available_gpu_ids (list): list of available GPU ids.
         memory_free (list): list of available memory for each gpu in MiB.
-        hide_others (bool): if True, hide other GPUs from the system by setting
-            the CUDA_VISIBLE_DEVICES environment variable.
         device (str/int/list): GPU device(s) to select.
             - If 'cpu', use CPU.
             - If 'gpu', select GPU based on available memory.
@@ -70,7 +68,9 @@ def select_gpus(available_gpu_ids, memory_free, hide_others=True, device=None,
             - If formatted as 'auto:xx', where xx is an integer, automatically
                 select xx GPUs based on available memory. If xx is -1, use all
                 available GPUs.
-        verbose(bool): prints output if True.
+        verbose (bool): prints output if True.
+        hide_others (bool): if True, hide other GPUs from the system by setting
+            the CUDA_VISIBLE_DEVICES environment variable.
 
     Returns:
         gpu_ids: list of selected GPU ids. If no GPU is selected, returns an
