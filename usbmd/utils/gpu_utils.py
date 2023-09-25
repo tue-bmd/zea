@@ -6,8 +6,10 @@ import pandas as pd
 
 def get_gpu_memory(verbose=True):
     """ Retrieve memory allocation information of all gpus.
+
     Args:
-        verbose: prints output if True.
+        verbose (bool): prints output if True.
+
     Returns:
         memory_free_values: list of available memory for each gpu in MiB.
     """
@@ -24,8 +26,12 @@ def get_gpu_memory(verbose=True):
         gpus = os.environ['CUDA_VISIBLE_DEVICES']
         gpus = [int(gpu) for gpu in gpus.split(',')][:len(memory_free_values)]
         if verbose:
-            print(f'{len(memory_free_values) - len(gpus)}/{len(memory_free_values)} '
-                'GPUs were disabled')
+            # Report the number of disabled GPUs out of the total
+            num_disabled_gpus = len(memory_free_values) - len(gpus)
+            num_gpus = len(memory_free_values)
+
+            print(f'{num_disabled_gpus/num_gpus} GPUs were disabled')
+
         memory_free_values = [memory_free_values[gpu] for gpu in gpus]
 
     if verbose:
