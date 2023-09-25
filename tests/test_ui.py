@@ -12,25 +12,26 @@ sys.path.append(str(wd))
 
 from usbmd import ui
 from usbmd.generate import GenerateDataSet
+from usbmd.setup import setup
 
 plt.rcParams['backend'] = 'agg'
 
 def test_ui_initialization():
     """Test ui initialization function"""
-    config = ui.setup('./tests/config_test.yaml')
+    config = setup('./tests/config_test.yaml')
     config.ml_library = 'torch'
 
     dataloader_ui = ui.DataLoaderUI(config)
     dataloader_ui.run()
 
-    config = ui.setup('./tests/config_test.yaml')
+    config = setup('./tests/config_test.yaml')
     config.ml_library = 'tensorflow'
     dataloader_ui = ui.DataLoaderUI(config)
     dataloader_ui.run()
 
 def test_get_data():
     """Test ui get_data function"""
-    config = ui.setup('./tests/config_test.yaml')
+    config = setup('./tests/config_test.yaml')
     dataloader_ui = ui.DataLoaderUI(config)
     data = dataloader_ui.get_data()
     assert data is not None
@@ -39,7 +40,7 @@ def test_get_data():
 
 def test_generate():
     """Test generate class"""
-    config = ui.setup('./tests/config_test.yaml')
+    config = setup('./tests/config_test.yaml')
     config.ml_library = 'tensorflow'
     config.data.dtype = 'beamformed_data' # TODO: fix for raw_data
 

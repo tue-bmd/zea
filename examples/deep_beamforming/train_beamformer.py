@@ -20,7 +20,7 @@ from usbmd.probes import get_probe
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-from usbmd.ui import setup
+from usbmd.setup import setup
 from usbmd.utils.utils import update_dictionary
 from usbmd.utils.video import ScanConverterTF
 
