@@ -24,9 +24,9 @@ from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import (_DATA_TYPES, Process, get_contrast_boost_func,
                               threshold_signal)
-from usbmd.utils.config import Config, load_config_from_yaml
-from usbmd.utils.config_validation import check_config
-from usbmd.utils.git_info import get_git_summary
+from usbmd.setup import setup
+from usbmd.usbmd_gui import USBMDApp
+from usbmd.utils.config import Config
 from usbmd.utils.selection_tool import \
     interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (filename_from_window_dialog,
@@ -71,6 +71,7 @@ class DataLoaderUI:
         self.fig = None
         self.ax = None
         self.headless = False
+        self.gui = None
 
         # initialize post processing tools
         if 'postprocess' in self.config:
@@ -122,7 +123,10 @@ class DataLoaderUI:
                 to_dtype=to_dtype)
 
             if plot:
-                self.plot(self.image, block=True, save=save, axis=axis)
+                if self.gui:
+                    self.plot(self.image, block=False, save=save, axis=axis)
+                else:
+                    self.plot(self.image, block=True, save=save, axis=axis)
 
         return self.image
 
@@ -217,6 +221,9 @@ class DataLoaderUI:
         if self.probe.probe_type == 'phased':
             image = self.process.run(image, dtype='image', to_dtype='image_sc')
 
+        # match orientation
+        image = np.fliplr(image)
+
         if not movie and axis:
             self.fig, self.ax = plt.subplots()
 
@@ -300,6 +307,9 @@ class DataLoaderUI:
         self.verbose = False
         while True:
             for i in range(1, n_frames):
+                if self.gui:
+                    self.gui.check_freeze()
+
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
@@ -396,43 +406,6 @@ class DataLoaderUI:
         if self.verbose:
             print(f'Video saved to {path}')
 
-def setup(file=None):
-    """Setup function. Retrieves config file and checks for validity.
-
-    Args:
-        file (str, optional): file path to config yaml. Defaults to None.
-            if None, argparser is checked. If that is None as well, the window
-            ui will pop up for choosing the config file manually.
-
-    Returns:
-        config (dict): config object / dict.
-
-    """
-    if file is None:
-        # if no argument is provided resort to UI window
-        filetype = 'yaml'
-        try:
-            file = filename_from_window_dialog(
-                f'Choose .{filetype} file',
-                filetypes=((filetype, '*.' + filetype),),
-                initialdir='./configs',
-            )
-        except Exception as e:
-            raise ValueError (
-                'Please specify the path to a config file through --config flag ' \
-                'if GUI is not working (usually on headless servers).') from e
-
-    config = load_config_from_yaml(Path(file))
-    print(f'Using config file: {file}')
-    config = check_config(config)
-
-    ## git
-    cwd = Path.cwd().stem
-    if cwd in ('Ultrasound-BMd', 'usbmd'):
-        config['git'] = get_git_summary()
-
-    return config
-
 def get_args():
     """Command line argument parser"""
     parser = argparse.ArgumentParser(description='Process ultrasound data.')
@@ -440,19 +413,33 @@ def get_args():
     parser.add_argument('-t', '--task',
         default='run', choices=['run', 'generate'],  type=str,
         help='which task to run')
+    parser.add_argument('--gui', default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     return args
 
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
+    if args.gui:
+        warnings.warn('GUI is very much in beta, please report any bugs to the Github.')
+        gui = USBMDApp(
+            title='USBMD GUI',
+            resolution=(600, 300), verbose=True)
+
     config = setup(file=args.config)
     config.data.user = set_data_paths(local=config.data.local)
 
     if args.task == 'run':
         ui = DataLoaderUI(config)
-        image = ui.run()
-        return image
+
+        if args.gui:
+            gui.ui = ui
+            ui.gui = gui # haha
+            gui.build(config)
+            gui.mainloop()
+        else:
+            ui.run()
+
     elif args.task == 'generate':
         destination_folder = input('>> Give destination folder path: ')
         to_dtype = input(f'>> Specify data type \n{_DATA_TYPES}: ')
