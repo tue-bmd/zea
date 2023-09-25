@@ -413,6 +413,7 @@ def get_args():
     parser.add_argument('-t', '--task',
         default='run', choices=['run', 'generate'],  type=str,
         help='which task to run')
+    # pylint: disable=no-member
     parser.add_argument('--gui', default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     return args
