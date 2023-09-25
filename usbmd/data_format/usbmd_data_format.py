@@ -363,7 +363,7 @@ def assert_unit_and_description_present(hdf5_file, _prefix=''):
             assert 'description' in hdf5_file[key].attrs.keys(), \
                 f'The dataset {_prefix}/{key} does not have a description attribute.'
 
-def load_usbmd_file(path, frames=None):
+def load_usbmd_file(path, frames=None, data_type='raw_data'):
     """Loads a hdf5 file in the USBMD format and returns the data together with
     a scan object containing the parameters of the acquisition and a probe
     object containing the parameters of the probe.
@@ -372,6 +372,9 @@ def load_usbmd_file(path, frames=None):
         path (str, pathlike): The path to the hdf5 file.
         frames (tuple, list, optional): The frames to load. Defaults to None in which
             case all frames are loaded.
+        data_type (str, optional): The type of data to load. Defaults to
+            'raw_data'. Other options are 'aligned_data', 'beamformed_data',
+            'envelope_data', 'image' and 'image_sc'.
 
     Returns:
         (np.ndarray): The raw data of shape (n_frames, n_tx, n_el, n_ax, n_ch).
@@ -389,6 +392,11 @@ def load_usbmd_file(path, frames=None):
         # Assert that all frames are integers
         assert all(isinstance(frame, int) for frame in frames), \
             'All frames must be integers.'
+
+    assert data_type in ('raw_data', 'aligned_data', 'beamformed_data',
+                         'envelope_data', 'image', 'image_sc'), \
+            'The data_type must be one of raw_data, aligned_data, '\
+            'beamformed_data, envelope_data, image or image_sc.'
 
     with h5py.File(path, 'r') as hdf5_file:
         # data = hdf5_file['data']['raw_data'][:]
