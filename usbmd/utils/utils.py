@@ -3,17 +3,18 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : -
 """
+import datetime
 import os
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 
 import cv2
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 from PIL import Image
-import h5py
 
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
@@ -271,3 +272,12 @@ def print_hdf5_attrs(hdf5_obj, prefix=''):
                 new_prefix = prefix + '│   '
             print(prefix + marker + key + '/')
             print_hdf5_attrs(hdf5_obj[key], new_prefix)
+
+def get_date_string(string : str=None):
+    """Generate a date string for current time, according to format specified by `string`."""
+    now = datetime.datetime.now()
+    if string is None:
+        string = '%Y_%m_%d_%H%M%S'
+
+    date_str = now.strftime(string)
+    return date_str
