@@ -11,6 +11,7 @@ schema
 tqdm
 pyyaml
 decorator
+papermill
 
 tensorflow-gpu<2.11
 --extra-index-url https://download.pytorch.org/whl/cu117
@@ -20,3 +21,4 @@ torchaudio
 
 pylint
 pytest
+ipykernel

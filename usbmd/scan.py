@@ -14,7 +14,7 @@ class Scan:
     """Scan base class."""
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=3328, Nx=128, Nz=128, pixels_per_wvln=3,
+                 N_ax=3328, Nx=None, Nz=None, pixels_per_wvln=3,
                  downsample=1, initial_times=None):
         """
         Initializes a Scan object representing the number and type of transmits,
@@ -145,8 +145,8 @@ class PlaneWaveScan(Scan):
 
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=128, Nz=128, downsample=1, pixels_per_wvln=3,
-                 angles=None, n_angles=None, initial_times=None):
+                 N_ax=256, Nx=None, Nz=None, downsample=1, pixels_per_wvln=3,
+                 angles=None, n_angles=None):
         """
         Initializes a PlaneWaveScan object.
 
@@ -165,9 +165,9 @@ class PlaneWaveScan(Scan):
             N_ax (int, optional): The number of axial samples per element per
                 transmit. Defaults to 256.
             Nx (int, optional): The number of pixels in the x direction in the
-                beamforming grid. Defaults to 128.
+                beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the z direction in the
-                beamforming grid. Defaults to 128.
+                beamforming grid. Defaults to None.
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
             n_angles (int, list, optional): The number of angles to use for

@@ -144,3 +144,6 @@ usbmd/figures/
 examples/deep_beamforming/example_config_ABLE.yaml
 trained_models/
 benchmarks/
+
+# Temporary files
+temp/
