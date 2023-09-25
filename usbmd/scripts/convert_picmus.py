@@ -1,6 +1,11 @@
 """
 Script to convert the PICMUS database to the USBMD format using `usbmd.
 data_format.convert_picmus.convert_picmus`.
+
+Example usage:
+```
+> python usbmd/scripts/convert_picmus.py --src_dir X:\Ultrasound-BMd\data\PICMUS --output_dir converted_PICMUS_dir
+```
 """
 
 import os
