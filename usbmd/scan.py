@@ -187,8 +187,7 @@ class PlaneWaveScan(Scan):
         super().__init__(
             N_tx=N_tx, xlims=xlims, ylims=ylims, zlims=zlims, fc=fc, fs=fs, c=c,
             modtype=modtype, N_ax=N_ax, Nx=Nx, Nz=Nz,
-            downsample=downsample, pixels_per_wvln=pixels_per_wvln,
-            initial_times=initial_times)
+            downsample=downsample, pixels_per_wvln=pixels_per_wvln)
 
         assert angles is not None, \
             'Please provide angles at which plane wave dataset was recorded'
