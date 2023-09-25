@@ -8,7 +8,7 @@ import numpy as np
 eps = 1e-10
 
 
-def get_grid(scan):
+def get_grid(scan, verbose=False):
     """Creates a pixelgrid based on scan class parameters."""
     xlims = scan.xlims
     zlims = scan.zlims
@@ -22,10 +22,11 @@ def get_grid(scan):
         dx = wvln / scan.pixels_per_wavelength
         dz = dx
         grid = cartesian_pixel_grid(xlims, zlims, dx=dx, dz=dz)
-        print(
-            f'Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, '
-            f'using {scan.pixels_per_wavelength} pixels per wavelength.'
-        )
+        if verbose:
+            print(
+                f'Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, '
+                f'using {scan.pixels_per_wavelength} pixels per wavelength.'
+            )
     return grid
 
 def check_for_aliasing(scan):
