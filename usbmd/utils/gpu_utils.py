@@ -1,19 +1,15 @@
 """ GPU utilities for selecting GPUs and checking memory usage. """
 
 import os
+import shutil
 import subprocess as sp
+
 import pandas as pd
 
 
 def check_nvidia_smi():
     """Checks whether nvidia-smi is available."""
-    ret_code = sp.call(
-        ["nvidia-smi"], stdout=sp.PIPE, stderr=sp.PIPE)
-
-    if ret_code == 0:
-        return True
-    else:
-        return False
+    return shutil.which("nvidia-smi") is not None
 
 def get_gpu_memory(verbose=True):
     """ Retrieve memory allocation information of all gpus.
