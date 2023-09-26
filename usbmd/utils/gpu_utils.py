@@ -90,7 +90,7 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
     elif isinstance(device, str):
         device = device.lower()  # Parse the device string
 
-        if device.startswith('cuda:'):
+        if device.startswith('cuda:') or device.startswith('gpu:'):
             # Parse and use a specific GPU or all GPUs
             device_id = int(device.split(':')[1])
 
