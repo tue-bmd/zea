@@ -128,6 +128,9 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
                                  reverse=True)
             ]
 
+        assert len(gpu_ids) <= len(sorted_gpu_ids), \
+            f'Selected more GPUs ({len(gpu_ids)}) than available ({len(sorted_gpu_ids)})'
+
         for i, gpu in enumerate(gpu_ids):
             if gpu is None and sorted_gpu_ids[i] in available_gpu_ids:
                 gpu_ids[i] = sorted_gpu_ids[i]
