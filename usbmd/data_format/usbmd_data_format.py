@@ -459,9 +459,3 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
             data = hdf5_file['data']['raw_data'][frames]
 
         return data, scan, probe
-
-if __name__ == '__main__':
-    path = r"C:\Users\s153800\OneDrive - TU Eindhoven\3 resources\000 verasonics data\2023-09-22\linescanning_0000.hdf5"
-
-    data, scan, probe = load_usbmd_file(path, frames=[0,])
-    print(data.shape)
