@@ -432,17 +432,25 @@ def load_usbmd_file(path, frames=None):
         x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
         z0, z1 = 0, depth
 
+        n_tx = int(hdf5_file['scan']['n_tx'][0])
+        t0_delays = hdf5_file['scan']['t0_delays'][:]
+        initial_times = hdf5_file['scan']['initial_times'][:]
+        tx_apodizations = hdf5_file['scan']['tx_apodizations'][:]
+
         # Initialize the scan object
         scan = Scan(
-            N_tx=int(hdf5_file['scan']['n_tx'][0]),
+            N_tx=n_tx,
+            t0_delays=t0_delays,
+            initial_times=initial_times,
+            tx_apodizations=tx_apodizations,
             xlims=(x0, x1),
             zlims=(z0, z1),
             fc=fc,
             fs=fs,
-            initial_times=hdf5_file['scan']['initial_times'][:],
             N_ax=n_ax,
             c=c,
         )
+
 
         # Load the desired frames from the file
         if frames is None:
