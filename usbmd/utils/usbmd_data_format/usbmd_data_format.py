@@ -1,12 +1,36 @@
 """
-Functions to write and validate datasets in the USBMD format.
+The USBMD data format has the following structure:
+- The dataset always contains a `data` and a `settings` group.
+- The `data` group contains the actual data.
+- The `settings` group contains all the settings that are necessary to
+    interpret the data.
+- The `data` group contains one or more of the following keys:
+    - `raw_data`: The raw data of the ultrasound measurement. This can be
+    either rf-data or iq-data.
+    - `aligned_data`: The time-of-flight corrected data. This can be either
+    rf-data or iq-data.
+    - `envelope_data`: The envelope of the aligned data.
+    - `beamformed_data`: The data after beamforming.
+    - `image`: The processed image.
+    - `image_sc`: The scan converted image.
+- The `settings` group must contain the following keys:
+    - `probe_geometry`: The geometry of the probe.
+    - `t0_delays`: The time delays of the transducer elements.
+    - `n_frames`: The number of frames in the dataset.
+    - `n_tx`: The number of transmits per frame.
+    - `n_el`: The number of elements in the transducer.
+    - `n_ax`: The number of axial samples per transmit.
+    - `n_ch`: The number of rf/iq channels in the data (either 1 or 2).
+    - `sampling_frequency`: The sampling frequency of the data.
+    - `center_frequency`: The center frequency of the transducer.
+
 """
 import logging
 import numpy as np
 import h5py
-from pathlib import Path
-from usbmd.scan import Scan
-from usbmd.probes import get_probe, Probe
+
+from usbmd.utils.utils import print_hdf5_attrs
+
 
 def generate_example_dataset(path, add_optional_fields=False):
     """Generates an example dataset that contains all the necessary fields.
@@ -59,6 +83,7 @@ def generate_example_dataset(path, add_optional_fields=False):
                            polar_angles=polar_angles,
                            azimuth_angles=azimuth_angles)
 
+
 def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
                            center_frequency, initial_times, t0_delays,
                            sound_speed, probe_name,
@@ -97,7 +122,6 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
 
     # Write data group
     data_group = dataset.create_group('data')
-    data_group.attrs['description'] = 'This group contains the data.'
     data_shape = (n_frames, n_tx, n_el, n_ax, n_ch)
     assert raw_data.shape == data_shape, \
         f'The raw_data has the wrong shape. Expected {data_shape}, ' \
@@ -109,60 +133,58 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
                 description='The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).',
                 unit='unitless')
 
-    # Write scan group
-    scan_group = dataset.create_group('scan')
-    scan_group.attrs['description'] = ('This group contains the scan '
-                                       'parameters.')
+    # Write settings group
+    settings_group = dataset.create_group('settings')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='n_ax',
                 data=n_ax,
                 description='The number of axial samples.',
                 unit='unitless')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='n_el',
                 data=n_el,
                 description='The number of elements in the probe.',
                 unit='unitless')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='n_tx',
                 data=n_tx,
                 description='The number of transmits per frame.',
                 unit='unitless')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='n_frames',
                 data=n_tx,
                 description='The number of frames.',
                 unit='unitless')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='sound_speed',
                 data=sound_speed,
                 description='The speed of sound in m/s',
                 unit='m/s')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='probe_geometry',
                 data=probe_geometry,
                 description='The probe geometry of shape (n_el, 3).',
                 unit='m')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='sampling_frequency',
                 data=sampling_frequency,
                 description='The sampling frequency in Hz.',
                 unit='Hz')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='center_frequency',
                 data=center_frequency,
                 description='The center frequency in Hz.',
                 unit='Hz')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='initial_times',
                 data=initial_times,
                 description='The times when the A/D converter starts sampling '
@@ -170,24 +192,24 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
                 'first element firing and the first recorded sample.',
                 unit='s')
 
-    add_dataset(group=scan_group,
+    add_dataset(group=settings_group,
                 name='t0_delays',
                 data=t0_delays,
                 description='The t0_delays of shape (n_tx, n_el).',
                 unit='s')
 
     if tx_apodizations is not None:
-        add_dataset(group=scan_group,
+        add_dataset(group=settings_group,
                     name='tx_apodizations',
                     data=tx_apodizations,
                     description='The transmit delays for each element defining the'
-                    ' wavefront in seconds of shape (n_tx, n_elem). This is'
-                    ' the time at which each element fires shifted such that'
-                    ' the first element fires at t=0.',
+                    ' wavefront in seconds of shape (n_tx, n_el). This is the'
+                    ' time at which each element fires shifted such that the'
+                    ' first element fires at t=0.',
                     unit='unitless')
 
     if focus_distances is not None:
-        add_dataset(group=scan_group,
+        add_dataset(group=settings_group,
                     name='focus_distances',
                     data=focus_distances,
                     description='The transmit focus distances in meters of '
@@ -195,7 +217,7 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
                     unit='m')
 
     if polar_angles is not None:
-        add_dataset(group=scan_group,
+        add_dataset(group=settings_group,
                     name='polar_angles',
                     data=polar_angles,
                     description='The polar angles of the transmit beams in '
@@ -203,11 +225,11 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
                     unit='rad')
 
     if azimuth_angles is not None:
-        add_dataset(group=scan_group,
+        add_dataset(group=settings_group,
                     name='azimuth_angles',
                     data=azimuth_angles,
-                    description='The azimuthal angles of the transmit beams '
-                    'in radians of shape (n_tx,).',
+                    description='The azimuthal angles of the transmit beams in '
+                    'radians of shape (n_tx,).',
                     unit='rad')
 
     dataset.close()
@@ -229,16 +251,16 @@ def validate_dataset(path):
 
     # Validate the root group
     check_key(dataset, 'data')
-    check_key(dataset, 'scan')
+    check_key(dataset, 'settings')
 
-    # validate the scan group
-    check_key(dataset['scan'], 'n_ax')
-    check_key(dataset['scan'], 'n_el')
-    check_key(dataset['scan'], 'n_tx')
-    check_key(dataset['scan'], 'probe_geometry')
-    check_key(dataset['scan'], 'sampling_frequency')
-    check_key(dataset['scan'], 'center_frequency')
-    check_key(dataset['scan'], 't0_delays')
+    # validate the settings group
+    check_key(dataset['settings'], 'n_ax')
+    check_key(dataset['settings'], 'n_el')
+    check_key(dataset['settings'], 'n_tx')
+    check_key(dataset['settings'], 'probe_geometry')
+    check_key(dataset['settings'], 'sampling_frequency')
+    check_key(dataset['settings'], 'center_frequency')
+    check_key(dataset['settings'], 't0_delays')
 
     # validate the data group
     allowed_data_keys = [
@@ -247,7 +269,7 @@ def validate_dataset(path):
         'beamformed_data',
         'envelope_data',
         'image',
-        'image_sc']# TODO: Add initial_times?
+        'image_sc']
     for key in dataset['data'].keys():
         assert key in allowed_data_keys, \
             'The data group contains an unexpected key.'
@@ -257,11 +279,11 @@ def validate_dataset(path):
         if key == 'raw_data':
             assert len(data_shape) == 5, \
                 'The raw_data group does not have a shape of length 5.'
-            assert data_shape[1] == dataset['scan']['n_tx'][()], \
+            assert data_shape[1] == dataset['settings']['n_tx'][()], \
                 'n_tx does not match the second dimension of raw_data.'
-            assert data_shape[2] == dataset['scan']['n_el'][()], \
+            assert data_shape[2] == dataset['settings']['n_el'][()], \
                 'n_el does not match the third dimension of raw_data.'
-            assert data_shape[3] == dataset['scan']['n_ax'][()], \
+            assert data_shape[3] == dataset['settings']['n_ax'][()], \
                 'n_ax does not match the fourth dimension of raw_data.'
             assert data_shape[4] in (1, 2), \
                 'The fifth dimension of raw_data is not 1 or 2.'
@@ -271,15 +293,13 @@ def validate_dataset(path):
         elif key == 'beamformed_data':
             logging.warning('No validation has been defined for beamformed data.')
         elif key == 'envelope_data':
-            logging.warning('No validation has been defined for envelope '
-                            'data.')
+            logging.warning('No validation has been defined for envelope data.')
         elif key == 'image':
             logging.warning('No validation has been defined for image data.')
         elif key == 'image_sc':
-            logging.warning('No validation has been defined for image_sc '
-                            'data.')
+            logging.warning('No validation has been defined for image_sc data.')
 
-    required_scan_keys = [
+    required_settings_keys = [
         'n_ax',
         'n_el',
         'n_tx',
@@ -289,55 +309,38 @@ def validate_dataset(path):
         'center_frequency']
 
     # Ensure that all required keys are present
-    for required_key in required_scan_keys:
-        assert required_key in dataset['scan'].keys(), \
-            ('The scan group does not contain the required key '
+    for required_key in required_settings_keys:
+        assert required_key in dataset['settings'].keys(), \
+            ('The settings group does not contain the required key '
              f'{required_key}.')
 
     # Ensure that all keys have the correct shape
-    for key in dataset['scan'].keys():
+    for key in dataset['settings'].keys():
         if key == 'probe_geometry':
-            correct_shape = (dataset['scan']['n_el'][()], 3)
-            assert dataset['scan'][key].shape == correct_shape,\
+            assert dataset['settings'][key].shape == (dataset['settings']['n_el'][()], 3), \
                 'The probe_geometry does not have the correct shape.'
-
         elif key == 't0_delays':
-            correct_shape = (dataset['scan']['n_tx'][()],
-                             dataset['scan']['n_el'][()])
-            assert dataset['scan'][key].shape == correct_shape,\
+            assert dataset['settings'][key].shape == (dataset['settings']['n_tx'][()], dataset['settings']['n_el'][()]), \
                 'The t0_delays does not have the correct shape.'
-
         elif key == 'tx_apodizations':
-            correct_shape = (dataset['scan']['n_tx'][()],
-                             dataset['scan']['n_el'][()])
-            assert dataset['scan'][key].shape == correct_shape,\
+            assert dataset['settings'][key].shape == (dataset['settings']['n_tx'][()], dataset['settings']['n_el'][()]), \
                 'The tx_apodizations does not have the correct shape.'
-
         elif key == 'focus_distances':
-            correct_shape = (dataset['scan']['n_tx'][()],)
-            assert dataset['scan'][key].shape == correct_shape,\
+            assert dataset['settings'][key].shape == (dataset['settings']['n_tx'][()],), \
                 'The focus_distances does not have the correct shape.'
-
         elif key == 'polar_angles':
-            correct_shape = (dataset['scan']['n_tx'][()],)
-            assert dataset['scan'][key].shape == correct_shape,\
+            assert dataset['settings'][key].shape == (dataset['settings']['n_tx'][()],), \
                 'The polar_angles does not have the correct shape.'
-
         elif key == 'azimuth_angles':
-            correct_shape = (dataset['scan']['n_tx'][()],)
-            assert dataset['scan'][key].shape == correct_shape,\
+            assert dataset['settings'][key].shape == (dataset['settings']['n_tx'][()],), \
                 'The azimuthal_angles does not have the correct shape.'
-
         elif key == 'initial_times':
-            correct_shape = (dataset['scan']['n_tx'][()],)
-            assert dataset['scan'][key].shape == correct_shape,\
+            assert dataset['settings'][key].shape == (dataset['settings']['n_tx'][()],), \
                 'The initial_times does not have the correct shape.'
-
         elif key in ('sampling_frequency', 'center_frequency', 'n_frames',
                      'n_tx', 'n_el', 'n_ax', 'sound_speed'):
-            assert dataset['scan'][key].size == 1, \
+            assert dataset['settings'][key].size == 1, \
                 f'{key} does not have the correct shape.'
-
         else:
             logging.warning('No validation has been defined for %s.', key)
 
@@ -363,97 +366,9 @@ def assert_unit_and_description_present(hdf5_file, _prefix=''):
             assert 'description' in hdf5_file[key].attrs.keys(), \
                 f'The dataset {_prefix}/{key} does not have a description attribute.'
 
-def load_usbmd_file(path, frames=None):
-    """Loads a hdf5 file in the USBMD format and returns the data together with
-    a scan object containing the parameters of the acquisition and a probe
-    object containing the parameters of the probe.
-
-    Args:
-        path (str, pathlike): The path to the hdf5 file.
-        frames (tuple, list, optional): The frames to load. Defaults to None in which
-            case all frames are loaded.
-
-    Returns:
-        (np.ndarray): The raw data of shape (n_frames, n_tx, n_el, n_ax, n_ch).
-        (Scan): A scan object containing the parameters of the acquisition.
-        (Probe): A probe object containing the parameters of the probe.
-    """
-
-    assert isinstance(path, (str, Path)), \
-        'The path must be a string or a pathlib.Path object.'
-
-    assert isinstance(frames, (tuple, list, type(None))), \
-        'The frames must be a tuple, list or None.'
-
-    if frames is not None:
-        # Assert that all frames are integers
-        assert all(isinstance(frame, int) for frame in frames), \
-            'All frames must be integers.'
-
-    with h5py.File(path, 'r') as hdf5_file:
-        # data = hdf5_file['data']['raw_data'][:]
-        # scan = Scan(hdf5_file['scan'])
-
-        # Define the probe
-        probe_name = hdf5_file.attrs['probe']
-        ele_pos = hdf5_file['scan']['probe_geometry'][:]
-
-        # Try to load a known probe type. If this fails, use a generic probe
-        # instead, but warn the user.
-        try:
-            probe = get_probe(probe_name)
-        except NotImplementedError:
-
-            logging.warning('The probe %s is not implemented. Using a '
-                            'generic probe instead.', probe_name)
-
-            probe = Probe(ele_pos=ele_pos)
-
-        # Verify that the probe geometry matches the probe geometry in the
-        # dataset
-        if not np.allclose(ele_pos, probe.ele_pos):
-            probe.ele_pos = ele_pos
-            logging.warning('The probe geometry in the data file does not '
-                            'match the probe geometry of the probe. The probe '
-                            'geometry has been updated to match the data file.'
-                            )
-
-        # Define the scan
-        n_ax = int(hdf5_file['scan']['n_ax'][0])
-        c = hdf5_file['scan']['sound_speed'][0]
-        fs = hdf5_file['scan']['sampling_frequency'][0]
-        fc = hdf5_file['scan']['center_frequency'][0]
-
-        # Compute the depth of the scan from the number of axial samples
-        depth = n_ax / fs * c / 2
-
-        # Set the scan limits to the limits of the probe and the depth of the
-        # scan
-        x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
-        z0, z1 = 0, depth
-
-        # Initialize the scan object
-        scan = Scan(
-            N_tx=int(hdf5_file['scan']['n_tx'][0]),
-            xlims=(x0, x1),
-            zlims=(z0, z1),
-            fc=fc,
-            fs=fs,
-            initial_times=hdf5_file['scan']['initial_times'][:],
-            N_ax=n_ax,
-            c=c,
-        )
-
-        # Load the desired frames from the file
-        if frames is None:
-            data = hdf5_file['data']['raw_data'][:]
-        else:
-            data = hdf5_file['data']['raw_data'][frames]
-
-        return data, scan, probe
-
 if __name__ == '__main__':
-    path = r"C:\Users\s153800\OneDrive - TU Eindhoven\3 resources\000 verasonics data\2023-09-22\linescanning_0000.hdf5"
-
-    data, scan, probe = load_usbmd_file(path, frames=[0,])
-    print(data.shape)
+    path = 'example_dataset.hdf5'
+    generate_example_dataset(path)
+    file = h5py.File(path, 'r')
+    print_hdf5_attrs(file)
+    validate_dataset(path)
