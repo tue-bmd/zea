@@ -20,7 +20,6 @@ from usbmd.tensorflow_ultrasound.utils.gpu_config import \
 ])
 def test_gpu_usage(device, ml_lib):
     """Test gpu usage setting script"""
-    # this only works when this tests runs first, since gpu usage should be done first
     if ml_lib == 'tensorflow':
         set_gpu_usage_tf(device=device)
     elif ml_lib == 'torch':
