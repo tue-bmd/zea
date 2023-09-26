@@ -54,6 +54,7 @@ def train(config):
     probe = get_probe(dataset.get_probe_name())
 
     # Create target data
+    # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config, jit_compile=True)
 
     targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
