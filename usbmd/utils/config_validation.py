@@ -144,7 +144,7 @@ config_schema = Schema({
     Optional("postprocess", default=postprocess_schema.validate({})): postprocess_schema,
     Optional("scan", default=scan_schema.validate({})): scan_schema,
 
-    Optional("device", default=None): \
+    Optional("device", default='auto:1'): \
         Or("cpu", "gpu", "cuda", Regex(r"cuda:\d+"), Regex(r"gpu:\d+"), Regex(r"auto:\d+"), None),
     Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, 'disable'),
     Optional("git", default=None): Or(None, str),
