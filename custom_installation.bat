@@ -31,6 +31,13 @@ echo Environment path: %env_path%
 REM Set default value for environment name if not provided
 call conda create --prefix %env_path% -y
 
+REM Make symbolic link to be able to active env easily
+for %%a in ("%env_path:\=" "%") do set "env_name=%%~a"
+
+if "%env_path%" neq "%userprofile%/.conda/envs/%env_name%" (
+    mklink /J "%userprofile%/.conda/envs/%env_name%" "%env_path%"
+)
+
 call activate %env_path%
 
 call conda install python=3.9 -y
