@@ -4,6 +4,7 @@ beamforming grid.
 - **Author(s)**     : Vincent van de Schaft
 - **Date**          : Wed Feb 15 2024
 """
+import warnings
 import numpy as np
 from usbmd.utils.pixelgrid import get_grid
 
@@ -12,9 +13,10 @@ _MOD_TYPES = [None, 'rf', 'iq']
 class Scan:
     """Scan base class."""
 
-    def __init__(self, xlims=(-0.01, 0.01), ylims=(0, 0), zlims=(0, 0.04),
-                 fc=7e6, fs=28e6, c=1540, modtype='rf', N_ax=3328, Nx=128,
-                 Nz=128, pixels_per_wvln=3, downsample=1):
+    def __init__(self, N_tx, fc=7e6, fs=28e6, c=1540, modtype='rf', N_ax=3328,
+                 initial_times=None, t0_delays=None, tx_apodizations=None,
+                 Nx=128, Nz=128, xlims=(-0.01, 0.01), ylims=(0, 0),
+                 zlims=(0, 0.04), pixels_per_wvln=3, downsample=1):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
 
@@ -23,6 +25,7 @@ class Scan:
         the grid is recomputed automatically.
 
         Args:
+            N_tx (int): The number of transmits to produce a single frame.
             xlim (tuple, optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
             ylim (tuple, optional): The y-limits in the beamforming grid.
@@ -55,7 +58,7 @@ class Scan:
 
         # Attributes concerning channel data
         #: The number of transmissions in a frame
-        self.n_tx = 0
+        self.N_tx = N_tx
         #: The modulation carrier frequency [Hz]
         self.fc = fc
         #: The sampling rate [Hz]
@@ -102,63 +105,76 @@ class Scan:
 
         self.z_axis = np.linspace(*self.zlims, N_ax)
 
-        #: List of transmit objects that define all transmits in the scan
-        self.transmits = []
+        if initial_times is None:
+            warnings.warn('No initial times provided. Assuming all zeros.')
+            initial_times = np.zeros(N_tx)
 
-    def add_transmit(self, t0_delays, tx_apodizations, c, initial_time=0.0):
-        """Adds a transmit to the scan.
+        self.initial_times = initial_times
 
-        Args:
-            t0_delays (np.ndarray): The transmit delays in seconds of shape
-                (n_tx, n_el), shifted such that the smallest delay is 0.
-            tx_apodizations (np.ndarray, float): The transmit apodizations of
-                shape (n_tx, n_el) or a single float to use for all
-                apodizations.
-            c (float): The speed of sound in m/s.
-            initial_time (float, optional): The initial time of the transmit
-                in seconds. Defaults to 0.0.
+        if t0_delays is None:
+            warnings.warn('No t0_delays provided. Assuming all zeros and '
+                          '128 element probe.')
+            t0_delays = np.zeros((N_tx, 128))
+        self.t0_delays = t0_delays
 
-        """
-        assert isinstance(tx_apodizations, (np.ndarray, float)), \
-            "tx_apodizations must be a numpy array or a float."
-        assert isinstance(t0_delays, np.ndarray), \
-            "tx_delays must be a numpy array."
+        if tx_apodizations is None:
+            warnings.warn('No tx_apodizations provided. Assuming all ones and '
+                          '128 element probe.')
+            tx_apodizations = np.ones((N_tx, 128))
+        self.tx_apodizations = tx_apodizations
 
-        self.n_tx += 1
-        if isinstance(tx_apodizations, float):
-            # Set the transmit apodizations to all ones if not supplied
-            tx_apodizations = np.ones_like(t0_delays)*tx_apodizations
+    # def add_transmit(self, index, t0_delays, tx_apodizations, c, initial_time=0.0):
+    #     """Adds a transmit to the scan.
 
-        # Create a new transmit object and add it to the list of transmits
-        transmit = Transmit(t0_delays, tx_apodizations, initial_time)
-        self.transmits.append(transmit)
+    #     Args:
+    #         index (int): The index of the transmit.
+    #         t0_delays (np.ndarray): The transmit delays in seconds of shape
+    #             (n_el,), shifted such that the smallest delay is 0.
+    #         tx_apodizations (np.ndarray, float): The transmit apodizations of
+    #             shape (n_el,) or a single float to use for all
+    #             apodizations.
+    #         c (float): The speed of sound in m/s.
+    #         initial_time (float, optional): The initial time of the transmit
+    #             in seconds. Defaults to 0.0.
 
-    def add_planewave_transmit(self, ele_pos, polar_angle, azimuth_angle=0,
-                               apodization=1., c=1540, initial_time=0.0):
-        """Adds a planewave transmit to the scan.
+    #     """
+    #     assert isinstance(tx_apodizations, (np.ndarray, float)), \
+    #         "tx_apodizations must be a numpy array or a float."
+    #     assert isinstance(t0_delays, np.ndarray), \
+    #         "tx_delays must be a numpy array."
 
-        Args:
-            ele_pos (np.ndarray): The element positions in meters of shape
-                (n_el, 3).
-            polar_angle (float): The polar angle of the planewave wave vector
-                in degrees. (This is the one that is used in 2D imaging.)
-            azimuth_angle (float): The azimuth angle of the planewave wave
-                vector in degrees. (This is the one that is used in 3D
-                imaging.)
-            focus_distance (float): The focus of the planewave in meters.
-            apodization (float, optional): The apodization to use for the
-                transmit. Defaults to 1.
-            c (float): The speed of sound in m/s.
-            initial_time (float, optional): The initial time of the transmit
-                in seconds. Defaults to 0.0.
-        """
+    #     if isinstance(tx_apodizations, float):
+    #         # Set the transmit apodizations to all ones if not supplied
+    #         tx_apodizations = np.ones_like(t0_delays)*tx_apodizations
 
-        self.n_tx += 1
+    #     self.initial_times[index] = initial_time
+    #     self.t0_delays[index] = t0_delays
+    #     self.tx_apodizations[index] = tx_apodizations
 
-        # Create a new transmit object and add it to the list of transmits
-        transmit = PlanewaveTransmit(ele_pos, polar_angle, azimuth_angle,
-                                     apodization, c, initial_time)
-        self.transmits.append(transmit)
+    # def add_planewave_transmit(self, ele_pos, polar_angle, azimuth_angle=0,
+    #                            apodization=1., c=1540, initial_time=0.0):
+    #     """Adds a planewave transmit to the scan.
+
+    #     Args:
+    #         ele_pos (np.ndarray): The element positions in meters of shape
+    #             (n_el, 3).
+    #         polar_angle (float): The polar angle of the planewave wave vector
+    #             in degrees. (This is the one that is used in 2D imaging.)
+    #         azimuth_angle (float): The azimuth angle of the planewave wave
+    #             vector in degrees. (This is the one that is used in 3D
+    #             imaging.)
+    #         focus_distance (float): The focus of the planewave in meters.
+    #         apodization (float, optional): The apodization to use for the
+    #             transmit. Defaults to 1.
+    #         c (float): The speed of sound in m/s.
+    #         initial_time (float, optional): The initial time of the transmit
+    #             in seconds. Defaults to 0.0.
+    #     """
+
+    #     # Create a new transmit object and add it to the list of transmits
+    #     transmit = PlanewaveTransmit(ele_pos, polar_angle, azimuth_angle,
+    #                                  apodization, c, initial_time)
+    #     self.transmits.append(transmit)
 
     @property
     def Nx(self):
@@ -342,7 +358,7 @@ class PlaneWaveScan(Scan):
         else:
             self.n_angles = list(range(len(self.angles)))
 
-        self.n_tx = len(self.angles)
+        self.N_tx = len(self.angles)
 
 
 class DivergingWaveScan(Scan):
