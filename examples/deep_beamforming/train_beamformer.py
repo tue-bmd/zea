@@ -54,7 +54,7 @@ def train(config):
     probe = get_probe(dataset.get_probe_name())
 
     # Create target data
-    target_beamformer = get_beamformer(probe, scan, config)
+    target_beamformer = get_beamformer(probe, scan, config, jit_compile=True)
 
     targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
 
@@ -86,7 +86,8 @@ def train(config):
     beamformer.compile(optimizer=optimizer,
                        loss=smsle,
                        metrics=smsle,
-                       run_eagerly=False)
+                       run_eagerly=False,
+                       jit_compile=True)
 
     ## Augment the data and train the model
     # repeat the inputs and targets N times with noise
@@ -109,7 +110,6 @@ def train(config):
         verbose=1)
 
     scan_converter = ScanConverterTF(grid=scan.grid)
-
 
     targets = scan_converter.convert(targets)
     predictions = scan_converter.convert(beamformer(inputs))
@@ -134,7 +134,7 @@ if __name__ == '__main__':
     config.data.user = set_data_paths(local=True)
 
     # Set GPU usage
-    set_gpu_usage(config.get('device'))
+    set_gpu_usage('auto:1')
 
     # Train
     _, beamformer = train(config)
