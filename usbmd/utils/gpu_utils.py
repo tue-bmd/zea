@@ -4,6 +4,17 @@ import os
 import subprocess as sp
 import pandas as pd
 
+
+def check_nvidia_smi():
+    """Checks whether nvidia-smi is available."""
+    ret_code = sp.call(
+        ["nvidia-smi"], stdout=sp.PIPE, stderr=sp.PIPE)
+
+    if ret_code == 0:
+        return True
+    else:
+        return False
+
 def get_gpu_memory(verbose=True):
     """ Retrieve memory allocation information of all gpus.
 
@@ -13,6 +24,10 @@ def get_gpu_memory(verbose=True):
     Returns:
         memory_free_values: list of available memory for each gpu in MiB.
     """
+    if not check_nvidia_smi():
+        raise RuntimeError('nvidia-smi is not available. Install nvidia-smi '
+                           'to use this function.')
+
     def _output_to_list(x):
         return x.decode('ascii').split('\n')[:-1]
 
