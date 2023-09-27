@@ -1,6 +1,13 @@
 """
 Script to convert the PICMUS database to the USBMD format using `usbmd.
 data_format.convert_picmus.convert_picmus`.
+
+Example usage:
+```
+> python usbmd/scripts/convert_picmus.py
+--src_dir X:/Ultrasound-BMd/data/PICMUS
+--output_dir converted_PICMUS_dir
+```
 """
 
 import os
@@ -12,13 +19,11 @@ from usbmd.data_format.convert_picmus import convert_picmus
 
 if __name__ == '__main__':
     # Parse the arguments
-    parser = argparse.ArgumentParser(description='Converts the PICMUS database'
-                                     ' to the USBMD format. The src_dir is '
-                                     'scanned for hdf5 files ending in iq or '
-                                     'rf. These files are converted and '
-                                     'stored in output_dir under the same '
-                                     'relative path as they came from in '
-                                     'src_dir.')
+    parser = argparse.ArgumentParser(
+        description=('Converts the PICMUS database to the USBMD format. The '
+        'src_dir is scanned for hdf5 files ending in iq or rf. These files are'
+        'converted and stored in output_dir under the same relative path as '
+        'they came from in src_dir.'))
 
     parser.add_argument('--src_dir', type=str,
                         help='Source directory where the original PICMUS data '
