@@ -293,7 +293,7 @@ class PlaneWaveScan(Scan):
     def __init__(self, xlims=(-0.01, 0.01), ylims=(0, 0), zlims=(0, 0.04),
                  fc=7e6, fs=28e6, c=1540, modtype='rf',N_ax=256, Nx=128,
                  Nz=128, downsample=1, angles=None,
-                 n_angles=None):
+                 n_angles=None, initial_times=None):
         """
         Initializes a PlaneWaveScan object.
 
