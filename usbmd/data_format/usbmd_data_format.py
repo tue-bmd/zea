@@ -2,8 +2,11 @@
 Functions to write and validate datasets in the USBMD format.
 """
 import logging
+from pathlib import Path
 import numpy as np
 import h5py
+from usbmd.scan import Scan
+from usbmd.probes import get_probe, Probe
 
 def generate_example_dataset(path, add_optional_fields=False):
     """Generates an example dataset that contains all the necessary fields.
@@ -55,7 +58,6 @@ def generate_example_dataset(path, add_optional_fields=False):
                            focus_distances=focus_distances,
                            polar_angles=polar_angles,
                            azimuth_angles=azimuth_angles)
-
 
 def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
                            center_frequency, initial_times, t0_delays,
@@ -360,3 +362,100 @@ def assert_unit_and_description_present(hdf5_file, _prefix=''):
                 f'The dataset {_prefix}/{key} does not have a unit attribute.'
             assert 'description' in hdf5_file[key].attrs.keys(), \
                 f'The dataset {_prefix}/{key} does not have a description attribute.'
+
+def load_usbmd_file(path, frames=None, data_type='raw_data'):
+    """Loads a hdf5 file in the USBMD format and returns the data together with
+    a scan object containing the parameters of the acquisition and a probe
+    object containing the parameters of the probe.
+
+    Args:
+        path (str, pathlike): The path to the hdf5 file.
+        frames (tuple, list, optional): The frames to load. Defaults to None in which
+            case all frames are loaded.
+        data_type (str, optional): The type of data to load. Defaults to
+            'raw_data'. Other options are 'aligned_data', 'beamformed_data',
+            'envelope_data', 'image' and 'image_sc'.
+
+    Returns:
+        (np.ndarray): The raw data of shape (n_frames, n_tx, n_el, n_ax, n_ch).
+        (Scan): A scan object containing the parameters of the acquisition.
+        (Probe): A probe object containing the parameters of the probe.
+    """
+
+    assert isinstance(path, (str, Path)), \
+        'The path must be a string or a pathlib.Path object.'
+
+    assert isinstance(frames, (tuple, list, type(None))), \
+        'The frames must be a tuple, list or None.'
+
+    if frames is not None:
+        # Assert that all frames are integers
+        assert all(isinstance(frame, int) for frame in frames), \
+            'All frames must be integers.'
+
+    assert data_type in ('raw_data', 'aligned_data', 'beamformed_data',
+                         'envelope_data', 'image', 'image_sc'), \
+            'The data_type must be one of raw_data, aligned_data, '\
+            'beamformed_data, envelope_data, image or image_sc.'
+
+    with h5py.File(path, 'r') as hdf5_file:
+        # data = hdf5_file['data']['raw_data'][:]
+        # scan = Scan(hdf5_file['scan'])
+
+        # Define the probe
+        probe_name = hdf5_file.attrs['probe']
+        ele_pos = hdf5_file['scan']['probe_geometry'][:]
+
+        # Try to load a known probe type. If this fails, use a generic probe
+        # instead, but warn the user.
+        try:
+            probe = get_probe(probe_name)
+        except NotImplementedError:
+
+            logging.warning('The probe %s is not implemented. Using a '
+                            'generic probe instead.', probe_name)
+
+            probe = Probe(ele_pos=ele_pos)
+
+        # Verify that the probe geometry matches the probe geometry in the
+        # dataset
+        if not np.allclose(ele_pos, probe.ele_pos):
+            probe.ele_pos = ele_pos
+            logging.warning('The probe geometry in the data file does not '
+                            'match the probe geometry of the probe. The probe '
+                            'geometry has been updated to match the data file.'
+                            )
+
+        # Define the scan
+        n_ax = int(hdf5_file['scan']['n_ax'][0])
+        c = hdf5_file['scan']['sound_speed'][0]
+        fs = hdf5_file['scan']['sampling_frequency'][0]
+        fc = hdf5_file['scan']['center_frequency'][0]
+
+        # Compute the depth of the scan from the number of axial samples
+        depth = n_ax / fs * c / 2
+
+        # Set the scan limits to the limits of the probe and the depth of the
+        # scan
+        x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
+        z0, z1 = 0, depth
+
+        # Initialize the scan object
+        scan = Scan(
+            N_tx=int(hdf5_file['scan']['n_tx'][0]),
+            xlims=(x0, x1),
+            zlims=(z0, z1),
+            fc=fc,
+            fs=fs,
+            initial_times=hdf5_file['scan']['initial_times'][:],
+            N_ax=n_ax,
+            c=c,
+        )
+
+        # Load the desired frames from the file
+        if frames is None:
+            data = hdf5_file['data']['raw_data'][:]
+        else:
+            data = hdf5_file['data']['raw_data'][frames]
+
+        return data, scan, probe
