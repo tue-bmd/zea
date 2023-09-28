@@ -134,7 +134,7 @@ def generate_usbmd_dataset(path, raw_data, probe_geometry, sampling_frequency,
 
     add_dataset(group=scan_group,
                 name='n_frames',
-                data=n_tx,
+                data=n_frames,
                 description='The number of frames.',
                 unit='unitless')
 
@@ -427,10 +427,10 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
                             )
 
         # Define the scan
-        n_ax = int(hdf5_file['scan']['n_ax'][0])
-        c = hdf5_file['scan']['sound_speed'][0]
-        fs = hdf5_file['scan']['sampling_frequency'][0]
-        fc = hdf5_file['scan']['center_frequency'][0]
+        n_ax = int(hdf5_file['scan']['n_ax'][()])
+        c = hdf5_file['scan']['sound_speed'][()]
+        fs = hdf5_file['scan']['sampling_frequency'][()]
+        fc = hdf5_file['scan']['center_frequency'][()]
 
         # Compute the depth of the scan from the number of axial samples
         depth = n_ax / fs * c / 2
@@ -440,7 +440,7 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
         x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
         z0, z1 = 0, depth
 
-        n_tx = int(hdf5_file['scan']['n_tx'][0])
+        n_tx = int(hdf5_file['scan']['n_tx'][()])
         t0_delays = hdf5_file['scan']['t0_delays'][:]
         initial_times = hdf5_file['scan']['initial_times'][:]
         tx_apodizations = hdf5_file['scan']['tx_apodizations'][:]
@@ -460,7 +460,6 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
             polar_angles=hdf5_file['scan']['polar_angles'][:],
             azimuth_angles=hdf5_file['scan']['azimuth_angles'][:],
             focus_distances=hdf5_file['scan']['focus_distances'][:],
-            t0_delays=hdf5_file['scan']['t0_delays'][:],
         )
 
 
