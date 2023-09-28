@@ -2,6 +2,7 @@
 Author(s): Tristan Stevens
 Date: 27/04/2023
 """
+# pylint disable=too-many-ancestors
 import pprint
 import tkinter as tk
 from pathlib import Path
@@ -15,13 +16,14 @@ from usbmd.utils.utils import filename_from_window_dialog, get_date_string
 
 class App(tk.Tk):
     """App class for building a GUI from a dictionary"""
+
     def __init__(
         self,
-        schema: Schema=None,
-        resolution: str=None,
-        title: str=None,
-        button: bool=True,
-        verbose: bool=False
+        schema: Schema = None,
+        resolution: str = None,
+        title: str = None,
+        button: bool = True,
+        verbose: bool = False,
     ):
         super().__init__()
 
@@ -38,15 +40,15 @@ class App(tk.Tk):
             self.title(str(title))
         if resolution is not None:
             assert len(resolution) == 2
-            self.geometry(f'{int(resolution[0])}x{int(resolution[1])}')
+            self.geometry(f"{int(resolution[0])}x{int(resolution[1])}")
         else:
             self.geometry("600x200")
 
         # Set up style
-        self.background_color =  self.cget("background")
-        self.notebook_color = "#e6e6e6" # light gray
+        self.background_color = self.cget("background")
+        self.notebook_color = "#e6e6e6"  # light gray
         self.button_color = "#d9d9d9"
-        self.button_color_active = "#4baf4f" # green
+        self.button_color_active = "#4baf4f"  # green
 
         self.styling()
 
@@ -58,7 +60,15 @@ class App(tk.Tk):
             self.set_button = None
 
         # these keys will trigger filedialog button (to select filepaths)
-        self.keys_for_file_paths = ['filepath', 'data_root', 'file_path', 'path', 'datasets', 'output', 'repo_root']
+        self.keys_for_file_paths = [
+            "filepath",
+            "data_root",
+            "file_path",
+            "path",
+            "datasets",
+            "output",
+            "repo_root",
+        ]
 
         # on closing the window
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -78,28 +88,33 @@ class App(tk.Tk):
         if self.set_button:
             self.set_button.pack()
 
-        self.notebook.pack(expand=True, fill='both')
+        self.notebook.pack(expand=True, fill="both")
 
     def styling(self):
         """Initialize style"""
         self.style = ttk.Style()
-        self.style.theme_use('clam')
+        self.style.theme_use("clam")
         self.style.configure("TNotebook", background=self.background_color)
         self.style.configure("TNotebook.Tab", background="#b3b3b3")
         # self.style.configure("TLabel", background=self.notebook_color, foreground="#000000")
         self.style.configure("TEntry", background="#f2f2f2")
-        self.style.map('TButton',
-            foreground=[('active', 'white'), ('disabled', 'gray')],
-            background=[('active', self.button_color_active), ('disabled', self.button_color)],
-            hovercolor=[('active', '#e6f2ff'), ('disabled', '#256d27')])
+        self.style.map(
+            "TButton",
+            foreground=[("active", "white"), ("disabled", "gray")],
+            background=[
+                ("active", self.button_color_active),
+                ("disabled", self.button_color),
+            ],
+            hovercolor=[("active", "#e6f2ff"), ("disabled", "#256d27")],
+        )
 
         self.theme_bg = self.style.lookup(".", "background")
 
     def raise_above_all(self):
         """Move window to the foreground and center"""
-        self.attributes('-topmost', 1)
-        self.attributes('-topmost', 0)
-        self.eval('tk::PlaceWindow . center')
+        self.attributes("-topmost", 1)
+        self.attributes("-topmost", 0)
+        self.eval("tk::PlaceWindow . center")
 
     def add_tabs(self, dict_obj, entries, parent=None):
         """Build GUI with tabs for each nested dictionary"""
@@ -107,11 +122,11 @@ class App(tk.Tk):
             parent = self.notebook
 
         for key, value in dict_obj.items():
-            if key == 'male':
-                print('')
+            if key == "male":
+                print("")
             if isinstance(value, dict):
                 child_notebook = tk.ttk.Notebook(parent)
-                child_notebook.pack(expand=True, fill='both')
+                child_notebook.pack(expand=True, fill="both")
 
                 parent.add(child_notebook, text=key)
                 entries[key] = {}
@@ -137,7 +152,8 @@ class App(tk.Tk):
             entry.type = Path
             # Create an open file button
             open_button = ttk.Button(
-                frame, text='Select file', command=lambda : self.insert_file_path(entry))
+                frame, text="Select file", command=lambda: self.insert_file_path(entry)
+            )
             open_button.pack(side="right", padx=10, pady=10)
         elif isinstance(value, str):
             entry = ttk.Entry(frame)
@@ -158,7 +174,9 @@ class App(tk.Tk):
         elif isinstance(value, list):
             entry = ListEntry(frame, value)
         else:
-            raise ValueError(f"Unsupported data type {type(value)} for default value {key} : {value}")
+            raise ValueError(
+                f"Unsupported data type {type(value)} for default value {key} : {value}"
+            )
 
         if not isinstance(value, (list, bool)):
             entry.insert(0, str(value))
@@ -197,6 +215,7 @@ class App(tk.Tk):
 
     def save(self, data, entries):
         """Update the dictionary with the new values"""
+
         def _save(data, entries):
             for key, entry in entries.items():
                 if isinstance(entry, dict):
@@ -219,10 +238,11 @@ class App(tk.Tk):
 
         if self.debug:
             pprint.pprint(data)
-            print('-----------------')
+            print("-----------------")
 
     def load(self, data, entries):
         """Load the dictionary into the GUI"""
+
         def _load(data, entries):
             for key, value in data.items():
                 if isinstance(value, dict):
@@ -239,7 +259,7 @@ class App(tk.Tk):
     def _get_entry_val(entry, key):
         value = entry.get()
 
-        if value == 'None':
+        if value == "None":
             return None
         try:
             value = entry.type(value)
@@ -268,17 +288,20 @@ class App(tk.Tk):
     def save_to_file(self, name=None):
         """Save current data to file"""
         if name is None:
-            name = '_'
+            name = "_"
         else:
-            name = '_' + name + '_'
+            name = "_" + name + "_"
 
-        folder = Path('./custom_configs')
+        folder = Path("./custom_configs")
         folder.mkdir(exist_ok=True)
         filename = folder / (get_date_string() + name + "config.yaml")
         Config(self.data).save_to_yaml(filename)
-        print(f'Succesfully saved config to {filename}')
+        print(f"Succesfully saved config to {filename}")
+
 
 class BooleanEntry(tk.Frame):
+    """Frame class for a Boolean entry."""
+
     def __init__(self, frame, value):
         super().__init__(frame)
         self.type = bool
@@ -287,15 +310,21 @@ class BooleanEntry(tk.Frame):
         self.checkbox.pack(side="left", padx=10, pady=10)
 
     def get(self):
+        """Get the value of the entry"""
         return self.var.get()
 
     def delete(self, first, last=None):
+        """Delete the entry"""
         pass
 
     def insert(self, first, last=None):
+        """Delete the entry"""
         pass
 
+
 class ListEntry(ttk.Frame):
+    """Frame class for a List entry."""
+
     def __init__(self, frame, value):
         super().__init__(frame)
         self.type = list
@@ -310,11 +339,15 @@ class ListEntry(ttk.Frame):
                 entry.type = bool
             elif isinstance(item, int):
                 entry = ttk.Entry(self, validate="key")
-                entry.configure(validatecommand=(entry.register(self.validate_int), "%P"))
+                entry.configure(
+                    validatecommand=(entry.register(self.validate_int), "%P")
+                )
                 entry.type = int
             elif isinstance(item, float):
                 entry = ttk.Entry(self, validate="key")
-                entry.configure(validatecommand=(entry.register(self.validate_float), "%P"))
+                entry.configure(
+                    validatecommand=(entry.register(self.validate_float), "%P")
+                )
                 entry.type = float
             else:
                 raise ValueError(f"Unsupported data type for list item: {type(item)}")
@@ -343,6 +376,7 @@ class ListEntry(ttk.Frame):
             entry.destroy()
 
     def validate_int(self, value):
+        """Validate if entry is an integer"""
         try:
             if value:
                 int(value)
@@ -351,6 +385,7 @@ class ListEntry(ttk.Frame):
             return False
 
     def validate_float(self, value):
+        """Validate if entry is a float"""
         try:
             if value:
                 float(value)
@@ -363,31 +398,30 @@ class ListEntry(ttk.Frame):
         return [entry.type(entry.get()) for entry in self.entries]
 
     def delete(self, first, last=None):
+        """Delete the entry"""
         pass
 
     def insert(self, first, last=None):
+        """Insert an entry"""
         pass
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     data = {
-        'general': {
-            'title': 'My App',
-            'version': 1.0,
-            'description': 'A simple app'
+        "general": {"title": "My App", "version": 1.0, "description": "A simple app"},
+        "user": {
+            "name": "John",
+            "age": 30.2,
+            "you": [1.0, 2, 3, 4],
+            "filepath": "somepath/var",
+            "address": {
+                "street": "123 Main St",
+                "city": "New York",
+                "state": "NY",
+                "zip": "10001",
+                "male": True,
+            },
         },
-        'user': {
-            'name': 'John',
-            'age': 30.2,
-            'you': [1.0,2,3,4],
-            'filepath': 'somepath/var',
-            'address': {
-                'street': '123 Main St',
-                'city': 'New York',
-                'state': 'NY',
-                'zip': '10001',
-                'male': True,
-            }
-        }
     }
 
     app = App()
