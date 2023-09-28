@@ -1,8 +1,17 @@
 """ GPU utilities for selecting GPUs and checking memory usage. """
 
 import os
+import shutil
 import subprocess as sp
+import warnings
+
 import pandas as pd
+
+
+def check_nvidia_smi():
+    """Checks whether nvidia-smi is available."""
+    return shutil.which("nvidia-smi") is not None
+
 
 def get_gpu_memory(verbose=True):
     """ Retrieve memory allocation information of all gpus.
@@ -13,11 +22,21 @@ def get_gpu_memory(verbose=True):
     Returns:
         memory_free_values: list of available memory for each gpu in MiB.
     """
+    if not check_nvidia_smi():
+        warnings.warn(
+            'nvidia-smi is not available. Cannot retrieve GPU memory. Falling back to CPU..')
+        return None
+
     def _output_to_list(x):
         return x.decode('ascii').split('\n')[:-1]
 
     COMMAND = "nvidia-smi --query-gpu=memory.free --format=csv"
-    memory_free_info = _output_to_list(sp.check_output(COMMAND.split()))[1:]
+    try:
+        memory_free_info = _output_to_list(
+            sp.check_output(COMMAND.split()))[1:]
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
     memory_free_values = [int(x.split()[0])
                           for i, x in enumerate(memory_free_info)]
 
@@ -40,6 +59,7 @@ def get_gpu_memory(verbose=True):
         print(df)
 
     return memory_free_values
+
 
 def select_gpus(available_gpu_ids, memory_free, device=None,
                 verbose=True, hide_others=True):
@@ -77,12 +97,13 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
             empty list. If a CPU is selected, returns None.
     """
 
-     # Check if GPU mode is forced or if GPU should be selected based on memory
+    # Check if GPU mode is forced or if GPU should be selected based on memory
     if device == 'cpu' or (device is None and not available_gpu_ids):
         print('Setting device to CPU')
         return None
     elif device == 'gpu' or device == 'cuda' or device is None:
-        gpu_ids = [None]  # Use None to select GPU based on available memory later
+        # Use None to select GPU based on available memory later
+        gpu_ids = [None]
     elif isinstance(device, int) or device is None:
         gpu_ids = [device]  # Use a specific GPU if an integer is provided
     elif isinstance(device, list):
@@ -90,7 +111,7 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
     elif isinstance(device, str):
         device = device.lower()  # Parse the device string
 
-        if device.startswith('cuda:'):
+        if device.startswith('cuda:') or device.startswith('gpu:'):
             # Parse and use a specific GPU or all GPUs
             device_id = int(device.split(':')[1])
 
@@ -122,7 +143,10 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
         sorted_gpu_ids = [
             x for x, _ in sorted(enumerate(memory_free), key=lambda x: x[1],
                                  reverse=True)
-            ]
+        ]
+
+        assert len(gpu_ids) <= len(sorted_gpu_ids), \
+            f'Selected more GPUs ({len(gpu_ids)}) than available ({len(sorted_gpu_ids)})'
 
         for i, gpu in enumerate(gpu_ids):
             if gpu is None and sorted_gpu_ids[i] in available_gpu_ids:
