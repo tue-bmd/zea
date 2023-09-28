@@ -15,6 +15,9 @@ from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.pixelgrid import cartesian_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
 
+# turn on eager execution
+tf.config.run_functions_eagerly(True)
+
 # Add project folder to path to find config files
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
@@ -33,6 +36,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     config = load_config_from_yaml(r'./tests/config_test.yaml')
     config.ml_library = 'tensorflow'
+    config.model.beamformer.type = 'mv'
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
