@@ -12,15 +12,13 @@ _MOD_TYPES = [None, 'rf', 'iq']
 
 class Scan:
     """Scan base class."""
-    def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
-                 zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=3328, Nx=None, Nz=None, pixels_per_wvln=3,
-                 polar_angles=None, azimuth_angles=None,t0_delays=None,
-                 focus_distances=None,
-                 downsample=1, initial_times=None):
-        """
-        Initializes a Scan object representing the number and type of transmits,
-        and the target pixels to beamform to.
+
+    def __init__(self, N_tx, fc=7e6, fs=28e6, c=1540, modtype='rf', N_ax=3328,
+                 initial_times=None, t0_delays=None, tx_apodizations=None,
+                 Nx=128, Nz=128, xlims=(-0.01, 0.01), ylims=(0, 0),
+                 zlims=(0, 0.04), pixels_per_wvln=3, downsample=1):
+        """Initializes a Scan object representing the number and type of
+        transmits, and the target pixels to beamform to.
 
         The Scan object generates a pixel grid based on Nx, Nz, xlims, and
         zlims when it is initialized. When any of these parameters are changed
@@ -288,86 +286,6 @@ class FocussedScan(Scan):
 
     def __init__(self, angles, origins, focus_distances, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
-
-        # Attributes concerning channel data
-        #: The number of transmits in a single frame
-        self.N_tx = N_tx
-        #: The transmit center frequency. This is the frequency of the
-        #: modulation
-        self.fc = fc
-        #: The sampling frequency of the receive data
-        self.fs = fs
-        #: The average speed of sound
-        self.c = c
-        #: The modulation type. This can be 'rf' or 'iq'
-        self.modtype = modtype
-        #: The number of axial samples in a single receive recording
-        self.N_ax = N_ax // downsample
-        #: ?
-        self.fdemod = self.fc if modtype == 'iq' else 0.
-        #: The number of channels in a single receive recording. For IQ-data
-        #: there are 2 channels (the I and the Q channel). For rf-data there
-        #: is only 1 channel.
-        self.N_ch = 2 if modtype == 'iq' else 1
-        #: The wavelength of the carrier signal
-        self.wvln = self.c / self.fc
-        #: The number of pixels per wavelength
-        self.pixels_per_wavelength = pixels_per_wvln
-        if initial_times is None:
-            #: The initial times of the transmits. This is the time between the
-            #: first element firing and the first sample being recorded.
-            self.initial_times = np.zeros(N_tx)
-        else:
-            self.initial_times = initial_times
-
-        # Beamforming grid related attributes
-        #: The lateral limits of the beamforming grid
-        self.xlims = xlims
-        #: The y-limits of the beamforming grid (only used in 3D imaging)
-        self.ylims = ylims
-        if zlims:
-            #: The axial limits of the beamforming grid
-            self.zlims = zlims
-        else:
-            self.zlims = [0, self.c * self.N_ax / self.fs / 2]
-            print(self.zlims)
-
-        #: The number of pixels in the lateral direction in the beamforming
-        #: grid
-        self.Nx = Nx
-        #: The number of pixels in the axial direction in the beamforming grid
-        self.Nz = Nz
-
-        #: The z_axis locations of the pixels in the beamforming grid
-        self.z_axis = np.linspace(*self.zlims, N_ax)
-
-        check_for_aliasing(self)
-
-        # TODO: Change to polar angles
-        #: The polar angles of the planewaves. (The ones usually used in 2D imaging)
-        self.angles = polar_angles
-        #: The azimuth angles of the planewaves. (The ones usually used in 3D imaging)
-        self.azimuth_angles = azimuth_angles
-        #: Thefocus distances from the origin for each transmit (n_tx). Set to
-        #: Inf for planewave. Negative for diverging wave. Positive for
-        #: focused transmits.
-        self.focus_distances = focus_distances
-        #: The transmit delays for each element shifted such that the first
-        #: element fires at t=0 of shape (n_elements,)
-        self.t0_delays = t0_delays
-
-        #: The beamforming grid of shape (Nx, Nz, 3)
-        self.grid = get_grid(self)
-
-class FocussedScan(Scan):
-    """
-    Class representing a focussed beam scan where every transmit has a beam
-    origin, angle, and focus defined.
-    """
-
-    def __init__(self, angles, origins, focus_distances, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
         # TODO: Change to vfocus?
         self.origins = origins
@@ -380,10 +298,10 @@ class PlaneWaveScan(Scan):
     Class representing a plane wave scan where every transmit has an angle.
     """
 
-    def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
-                 zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
-                 N_ax=256, Nx=None, Nz=None, downsample=1, pixels_per_wvln=3,
-                 angles=None, n_angles=None, initial_times=None):
+    def __init__(self, xlims=(-0.01, 0.01), ylims=(0, 0), zlims=(0, 0.04),
+                 fc=7e6, fs=28e6, c=1540, modtype='rf',N_ax=256, Nx=128,
+                 Nz=128, downsample=1, angles=None,
+                 n_angles=None, initial_times=None):
         """
         Initializes a PlaneWaveScan object.
 
