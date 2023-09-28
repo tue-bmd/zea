@@ -15,6 +15,8 @@ class Scan:
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=3328, Nx=None, Nz=None, pixels_per_wvln=3,
+                 polar_angles=None, azimuth_angles=None,t0_delays=None,
+                 focus_distances=None,
                  downsample=1, initial_times=None):
         """
         Initializes a Scan object representing the number and type of transmits,
@@ -49,6 +51,19 @@ class Scan:
             pixels_per_wvln (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
+            polar_angles (ndarray, optional): The polar angles of the
+                transmissions of shape (n_tx,). (The ones usually used in 2D
+                imaging) Defaults to None.
+            azimuth_angles (ndarray, optional): The azimuth angles of the
+                transmissions of shape (n_tx,). (The ones usually used in 3D
+                imaging) Defaults to None.
+            t0_delays (ndarray, optional): The transmit delays for each element
+                shifted such that the first element fires at t=0 of shape
+                (element,). Defaults to None.
+            focus_distances (ndarray, optional): The focus distances from the
+                origin for each transmit (n_tx,). Set to Inf for planewave.
+                Negative for diverging wave. Positive for focused transmits.
+                Defaults to None.
             downsample (int, optional): Decimation factor applied after downconverting
                 data to baseband (RF to IQ). Defaults to 1.
             initial_times (ndarray, optional): The initial times of the
@@ -117,6 +132,19 @@ class Scan:
 
         check_for_aliasing(self)
 
+        # TODO: Change to polar angles
+        #: The polar angles of the planewaves. (The ones usually used in 2D imaging)
+        self.angles = polar_angles
+        #: The azimuth angles of the planewaves. (The ones usually used in 3D imaging)
+        self.azimuth_angles = azimuth_angles
+        #: Thefocus distances from the origin for each transmit (n_tx). Set to
+        #: Inf for planewave. Negative for diverging wave. Positive for
+        #: focused transmits.
+        self.focus_distances = focus_distances
+        #: The transmit delays for each element shifted such that the first
+        #: element fires at t=0 of shape (n_elements,)
+        self.t0_delays = t0_delays
+
         #: The beamforming grid of shape (Nx, Nz, 3)
         self.grid = get_grid(self)
 
@@ -146,7 +174,7 @@ class PlaneWaveScan(Scan):
     def __init__(self, N_tx=75, xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), fc=7e6, fs=28e6, c=1540, modtype='rf',
                  N_ax=256, Nx=None, Nz=None, downsample=1, pixels_per_wvln=3,
-                 angles=None, n_angles=None, initial_times  = None):
+                 angles=None, n_angles=None, initial_times=None):
         """
         Initializes a PlaneWaveScan object.
 
