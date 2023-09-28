@@ -18,7 +18,7 @@ from tkinter import ttk
 
 import usbmd
 from usbmd.common import set_data_paths
-from usbmd.setup import setup
+from usbmd.setup_usbmd import setup_config
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config, config_schema
 from usbmd.utils.gui import App
@@ -115,7 +115,7 @@ class USBMDApp(App):
 
     def set(self):
         super().set()
-        self.ui(self.data)
+        self.ui.__init__(self.data)
 
     def run(self):
         """TBA, run function"""
@@ -167,7 +167,7 @@ class USBMDApp(App):
         """Load in a new config file"""
         self.style.configure("Load.TButton", background=self.button_color_active)
         try:
-            new_config = setup()
+            new_config = setup_config()
             super().load(new_config, self.entries)
         except:
             print('No new config loaded.')

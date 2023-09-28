@@ -24,7 +24,7 @@ from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import (_DATA_TYPES, Process, get_contrast_boost_func,
                               threshold_signal)
-from usbmd.setup import setup
+from usbmd.setup_usbmd import setup_config
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.config import Config
 from usbmd.utils.selection_tool import \
@@ -427,7 +427,7 @@ def main():
             title='USBMD GUI',
             resolution=(600, 300), verbose=True)
 
-    config = setup(file=args.config)
+    config = setup_config(file=args.config)
     config.data.user = set_data_paths(local=config.data.local)
 
     if args.task == 'run':
