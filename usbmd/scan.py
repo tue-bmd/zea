@@ -26,12 +26,6 @@ class Scan:
 
         Args:
             N_tx (int): The number of transmits to produce a single frame.
-            xlim (tuple, optional): The x-limits in the beamforming grid.
-                Defaults to (-0.01, 0.01).
-            ylim (tuple, optional): The y-limits in the beamforming grid.
-                Defaults to (0, 0).
-            zlim (tuple, optional): The z-limits in the beamforming grid.
-                Defaults to (0,0.04).
             fc (float, optional): The modulation carrier frequency.
                 Defaults to 7e6.
             fs (float, optional): The sampling rate to sample rf- or
@@ -41,10 +35,24 @@ class Scan:
                 Defaults to 'rf'
             N_ax (int, optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
+            initial_times (np.ndarray, optional): The initial times of the
+                transmits in seconds of shape (N_tx,). Defaults to None.
+            t0_delays (np.ndarray, optional): The transmit delays in seconds of
+                shape (N_tx, n_el), shifted such that the smallest delay is 0.
+                Defaults to None.
+            tx_apodizations (np.ndarray, float, optional): The transmit
+                apodizations of shape (N_tx, n_el) or a single float to use for
+                all apodizations. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
+            xlim (tuple, optional): The x-limits in the beamforming grid.
+                Defaults to (-0.01, 0.01).
+            ylim (tuple, optional): The y-limits in the beamforming grid.
+                Defaults to (0, 0).
+            zlim (tuple, optional): The z-limits in the beamforming grid.
+                Defaults to (0,0.04).
             pixels_per_wvln (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
