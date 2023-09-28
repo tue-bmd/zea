@@ -427,10 +427,10 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
                             )
 
         # Define the scan
-        n_ax = int(hdf5_file['scan']['n_ax'][0])
-        c = hdf5_file['scan']['sound_speed'][0]
-        fs = hdf5_file['scan']['sampling_frequency'][0]
-        fc = hdf5_file['scan']['center_frequency'][0]
+        n_ax = int(hdf5_file['scan']['n_ax'][()])
+        c = hdf5_file['scan']['sound_speed'][()]
+        fs = hdf5_file['scan']['sampling_frequency'][()]
+        fc = hdf5_file['scan']['center_frequency'][()]
 
         # Compute the depth of the scan from the number of axial samples
         depth = n_ax / fs * c / 2
@@ -442,7 +442,7 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
 
         # Initialize the scan object
         scan = Scan(
-            N_tx=int(hdf5_file['scan']['n_tx'][0]),
+            N_tx=int(hdf5_file['scan']['n_tx'][()]),
             xlims=(x0, x1),
             zlims=(z0, z1),
             fc=fc,
