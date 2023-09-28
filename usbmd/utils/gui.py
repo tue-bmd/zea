@@ -2,7 +2,6 @@
 Author(s): Tristan Stevens
 Date: 27/04/2023
 """
-# pylint disable=too-many-ancestors
 import pprint
 import tkinter as tk
 from pathlib import Path
@@ -315,11 +314,11 @@ class BooleanEntry(tk.Frame):
 
     def delete(self, first, last=None):
         """Delete the entry"""
-        pass
+        raise NotImplementedError
 
     def insert(self, first, last=None):
         """Delete the entry"""
-        pass
+        raise NotImplementedError
 
 
 class ListEntry(ttk.Frame):
@@ -399,11 +398,11 @@ class ListEntry(ttk.Frame):
 
     def delete(self, first, last=None):
         """Delete the entry"""
-        pass
+        raise NotImplementedError
 
     def insert(self, first, last=None):
         """Insert an entry"""
-        pass
+        raise NotImplementedError
 
 
 if __name__ == "__main__":
