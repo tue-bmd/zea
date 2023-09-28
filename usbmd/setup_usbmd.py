@@ -10,8 +10,8 @@ from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.utils import filename_from_window_dialog
 
 
-def setup(file=None):
-    """Setup function. Retrieves config file and checks for validity.
+def setup_config(file=None):
+    """Setup function for config. Retrieves config file and checks for validity.
 
     Args:
         file (str, optional): file path to config yaml. Defaults to None.

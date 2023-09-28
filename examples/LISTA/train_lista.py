@@ -11,17 +11,17 @@ import tensorflow as tf
 # make sure you have Pip installed usbmd (see README)
 # import usbmd.tensorflow_ultrasound as usbmd_tf
 from usbmd.generate import GenerateDataSet
+from usbmd.setup_usbmd import setup_config
 from usbmd.tensorflow_ultrasound.dataloader import ImageLoader
 from usbmd.tensorflow_ultrasound.models import lista
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-from usbmd.setup import setup
 
 # choose gpu
 set_gpu_usage(device=0)
 
 # # choose config file
 path_to_config_file = Path.cwd() / 'configs/config_picmus.yaml'
-config = setup(path_to_config_file)
+config = setup_config(path_to_config_file)
 
 # generate image dataset from raw data
 destination_folder = Path.cwd() / 'lista_test'

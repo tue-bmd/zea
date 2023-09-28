@@ -17,10 +17,10 @@ import tensorflow as tf
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
+from usbmd.setup_usbmd import setup_config
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-from usbmd.setup import setup
 from usbmd.utils.utils import update_dictionary
 from usbmd.utils.video import ScanConverterTF
 
@@ -131,7 +131,7 @@ def train(config):
 if __name__ == '__main__':
     # Load config
     path_to_config_file = Path.cwd() / 'configs/config_picmus_iq.yaml'
-    config = setup(file=path_to_config_file)
+    config = setup_config(file=path_to_config_file)
     config.data.user = set_data_paths(local=True)
 
     # Set GPU usage
