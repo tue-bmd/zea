@@ -12,14 +12,32 @@ Also if that parameter is optional, add a default value.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 31/01/2023
 """
+import importlib
 from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
+_ML_LIBRARIES = [None, 'torch', 'tensorflow']
+
+# need to import ML libraries first for registry
+for lib in _ML_LIBRARIES:
+    if importlib.util.find_spec(str(lib)):
+        if lib == 'torch':
+            # pylint: disable=unused-import
+            import usbmd.pytorch_ultrasound
+        if lib == 'tensorflow':
+            # pylint: disable=unused-import
+            import usbmd.tensorflow_ultrasound
+
+# Register beamforing types in registry
+from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
+
+_BEAMFORMER_TYPES = set(
+    tf_beamformer_registry.registered_names() + torch_beamformer_registry.registered_names())
+
+from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
-from usbmd.processing import (_BEAMFORMER_TYPES, _DATA_TYPES, _ML_LIBRARIES,
-                              _MOD_TYPES)
 from usbmd.utils.metrics import _METRICS
 
 # predefined checks, later used in schema to check validity of parameter
@@ -126,7 +144,7 @@ config_schema = Schema({
     Optional("postprocess", default=postprocess_schema.validate({})): postprocess_schema,
     Optional("scan", default=scan_schema.validate({})): scan_schema,
 
-    Optional("device", default=None): \
+    Optional("device", default='auto:1'): \
         Or("cpu", "gpu", "cuda", Regex(r"cuda:\d+"), Regex(r"gpu:\d+"), Regex(r"auto:\d+"), None),
     Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, 'disable'),
     Optional("git", default=None): Or(None, str),
