@@ -35,8 +35,9 @@ jobs:
 
       - name: Build the docs
         run: |
-          find ./docs/usbmd/ -name "*.html" -type f -delete
-          pdoc3 usbmd --html --output-dir docs --force --skip-errors --template-dir docs/usbmd/templates
+          rm -rf docs/usbmd
+          pdoc3 usbmd --html --output-dir docs --template-dir docs/pdoc_template
+          cp docs/usbmd_logo_v2.png docs/usbmd/usbmd_logo_v2.png
 
       - name: Commit the docs
         run: |
