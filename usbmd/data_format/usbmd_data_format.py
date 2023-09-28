@@ -457,6 +457,10 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
             fs=fs,
             N_ax=n_ax,
             c=c,
+            polar_angles=hdf5_file['scan']['polar_angles'][:],
+            azimuth_angles=hdf5_file['scan']['azimuth_angles'][:],
+            focus_distances=hdf5_file['scan']['focus_distances'][:],
+            t0_delays=hdf5_file['scan']['t0_delays'][:],
         )
 
 
