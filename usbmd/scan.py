@@ -36,6 +36,7 @@ class Scan:
         focus_distances=None,
         downsample=1,
         initial_times=None,
+        selected_transmits=None
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -159,8 +160,8 @@ class Scan:
                           '128 element probe.')
             t0_delays = np.zeros((N_tx, 128))
         #: The transmit delays in seconds of shape (N_tx, n_el), shifted such : that the
-        #smallest delay is 0. For instance for a straight planewave : transmit all
-        #delays are zero.
+        # smallest delay is 0. For instance for a straight planewave : transmit all
+        # delays are zero.
         self.t0_delays = t0_delays
 
         if tx_apodizations is None:
@@ -168,40 +169,87 @@ class Scan:
                           '128 element probe.')
             tx_apodizations = np.ones((N_tx, 128))
         #: The transmit apodizations of shape (N_tx, n_el) or a single float to : use
-        #for all apodizations. These values indicate both windowing : (apodization) over
-        #the aperture and the subaperture that is used : during transmit.
+        # for all apodizations. These values indicate both windowing : (apodization) over
+        # the aperture and the subaperture that is used : during transmit.
         self.tx_apodizations = tx_apodizations
 
         if polar_angles is None:
             warnings.warn('No polar_angles provided. Assuming all zeros.')
             polar_angles = np.zeros(N_tx)
         #: The polar angles of the transmits in radians of shape (N_tx,). These : are
-        #the angles usually used in 2D imaging.
+        # the angles usually used in 2D imaging.
         self.polar_angles = polar_angles
         #: Identical to `Scan.polar_angles`. This attribute is added for : backward
-        #compatibility.
+        # compatibility.
         self.angles = self.polar_angles
 
         if azimuth_angles is None:
             warnings.warn('No azimuth_angles provided. Assuming all zeros.')
             azimuth_angles = np.zeros(N_tx)
         #: The azimuth angles of the transmits in radians of shape (N_tx,). : These are
-        #the angles usually only used in 3D imaging.
+        # the angles usually only used in 3D imaging.
         self.azimuth_angles = azimuth_angles
 
         if focus_distances is None:
             warnings.warn('No focus_distances provided. Assuming all zeros.')
             focus_distances = np.zeros(N_tx)
         #: The focus distances of the transmits in meters of shape (N_tx,). : These are
-        #the distances of the virtual focus points from the origin. : For a planewave
-        #these should be set to Inf.
+        # the distances of the virtual focus points from the origin. : For a planewave
+        # these should be set to Inf.
         self.focus_distances = focus_distances
 
         #: Used to select a subset of the transmits to use for beamforming. If set to an
         # integer, then that number of transmits is selected as homogeneously as
         # possible. If set to a list of integers, then the transmits with those indices
         # are selected. If set to None, then all transmits are used. Defaults to None.
-        self.selected_transmits (int, list, optional):
+        self.selected_transmits = self.select_transmits(
+            selected_transmits, N_tx)
+
+    def select_transmits(self, selected_transmits, n_tx):
+        """Interprets the selected transmits argument and returns an array of transmit
+        indices.
+
+        Args:
+            selected_transmits (int, list, None): The selected transmits input. If set
+            to an integer, then that number of transmits is selected as homogeneously as
+            possible. If set to a list of integers, then the transmits with those
+            indices are selected. If set to None, then all transmits are used. Defaults
+            to None.
+            n_tx (int): The number of transmits in the scan.
+
+        Returns:
+            list: The selected transmits as a list of indices
+        """
+        if selected_transmits is None:
+            return [n for n in range(n_tx)]
+
+        if isinstance(selected_transmits, int):
+
+            # Do an error check if the number of selected transmits is not too large
+            assert selected_transmits <= n_tx, (
+                f"Number of selected transmits ({selected_transmits}) "
+                f"exceeds number of transmits in scan ({n_tx})."
+            )
+
+            # Compute selected_transmits evenly spaced indices for reduced angles
+            tx_indices = np.linspace(0, n_tx - 1, n_tx)
+
+            # Round the computed angles to integers and turn into list
+            tx_indices = list(np.rint(tx_indices).astype("int"))
+
+            return list(tx_indices)
+
+        if isinstance(selected_transmits, list):
+            assert all([isinstance(n, int) for n in selected_transmits]), (
+                "selected_transmits must be a list of integers."
+            )
+            # Check if the selected transmits are not too large
+            assert all([n < n_tx for n in selected_transmits]), (
+                f"Selected transmits {selected_transmits} exceed the number of "
+                f"transmits in the scan ({n_tx})."
+            )
+
+            return selected_transmits
 
     @property
     def Nx(self):
@@ -347,7 +395,7 @@ class PlaneWaveScan(Scan):
                 transmits in seconds of shape (N_tx,). Defaults to None.
 
         Raises:
-            ValueError: If n_angles has an invalid value.
+            ValueError: If selected_transmits has an invalid value.
         """
 
         # Pass all arguments to the Scan base class
@@ -375,30 +423,31 @@ class PlaneWaveScan(Scan):
             angles is not None
         ), "Please provide angles at which plane wave dataset was recorded"
         self.angles = angles
-        if n_angles:
-            if isinstance(n_angles, list):
+        if selected_transmits:
+            if isinstance(selected_transmits, list):
                 try:
-                    self.n_angles = n_angles
-                    self.angles = self.angles[n_angles]
+                    self.selected_transmits = selected_transmits
+                    self.angles = self.angles[selected_transmits]
                 except Exception as exc:
                     raise ValueError(
                         "Angle indexing does not match the number of recorded angles"
                     ) from exc
-            elif n_angles > len(self.angles):
+            elif selected_transmits > len(self.angles):
                 raise ValueError(
-                    f"Number of angles {n_angles} specified supersedes "
+                    f"Number of angles {selected_transmits} specified supersedes "
                     f"number of recorded angles {len(self.angles)}."
                 )
             else:
-                # Compute n_angles evenly spaced indices for reduced angles
-                angle_indices = np.linspace(0, len(self.angles) - 1, n_angles)
+                # Compute selected_transmits evenly spaced indices for reduced angles
+                angle_indices = np.linspace(
+                    0, len(self.angles) - 1, selected_transmits)
                 # Round the computed angles to integers and turn into list
                 angle_indices = list(np.rint(angle_indices).astype("int"))
                 # Store the values and indices in the object
-                self.n_angles = angle_indices
+                self.selected_transmits = angle_indices
                 self.angles = self.angles[angle_indices]
         else:
-            self.n_angles = list(range(len(self.angles)))
+            self.selected_transmits = list(range(len(self.angles)))
 
         self.N_tx = len(self.angles)
 
