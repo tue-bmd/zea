@@ -39,7 +39,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
 
     if add_optional_fields:
-        focus_distances = np.zeros((n_tx,), dtype=np.float32)
+        focus_distances = np.ones((n_tx,), dtype=np.float32)*np.inf
         tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
         polar_angles = np.zeros((n_tx,), dtype=np.float32)
         azimuth_angles = np.zeros((n_tx,), dtype=np.float32)
