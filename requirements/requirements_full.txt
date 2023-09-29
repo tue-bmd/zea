@@ -22,3 +22,5 @@ torchaudio
 pylint
 pytest
 ipykernel
+black
+isort

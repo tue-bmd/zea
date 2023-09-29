@@ -22,16 +22,24 @@ from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.processing import (_DATA_TYPES, Process, get_contrast_boost_func,
-                              threshold_signal)
-from usbmd.utils.config import Config, load_config_from_yaml
-from usbmd.utils.config_validation import check_config
-from usbmd.utils.git_info import get_git_summary
-from usbmd.utils.selection_tool import \
-    interactive_selector_with_plot_and_metric
-from usbmd.utils.utils import (filename_from_window_dialog,
-                               plt_window_has_been_closed, save_to_gif,
-                               strtobool, to_image, update_dictionary)
+from usbmd.processing import (
+    _DATA_TYPES,
+    Process,
+    get_contrast_boost_func,
+    threshold_signal,
+)
+from usbmd.setup_usbmd import setup_config
+from usbmd.usbmd_gui import USBMDApp
+from usbmd.utils.config import Config
+from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
+from usbmd.utils.utils import (
+    filename_from_window_dialog,
+    plt_window_has_been_closed,
+    save_to_gif,
+    strtobool,
+    to_image,
+    update_dictionary,
+)
 
 
 class DataLoaderUI:
@@ -71,12 +79,13 @@ class DataLoaderUI:
         self.fig = None
         self.ax = None
         self.headless = False
+        self.gui = None
 
         # initialize post processing tools
-        if 'postprocess' in self.config:
-            if 'contrast_boost' in self.config.postprocess:
+        if "postprocess" in self.config:
+            if "contrast_boost" in self.config.postprocess:
                 self.contrast_boost = get_contrast_boost_func()
-            if 'lista' in self.config.postprocess:
+            if "lista" in self.config.postprocess:
                 # initialize neural network
                 pass
             # etc...
@@ -92,24 +101,25 @@ class DataLoaderUI:
             self.headles = False
         # check if non headless mode is possible
         if self.headless is False:
-            if plt.rcParams['backend'].lower() == 'agg':
+            if plt.rcParams["backend"].lower() == "agg":
                 self.headless = True
-                warnings.warn('Could not connect to display, running headless.')
+                warnings.warn("Could not connect to display, running headless.")
         else:
-            print('Running in headless mode as set by config.')
+            print("Running in headless mode as set by config.")
 
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
-        to_dtype = 'image' if to_dtype is None else to_dtype
+        to_dtype = "image" if to_dtype is None else to_dtype
         save = self.config.plot.save
         axis = self.config.plot.axis
 
-        if self.config.data.get('frame_no') == 'all':
-            if to_dtype != 'image':
+        if self.config.data.get("frame_no") == "all":
+            if to_dtype != "image":
                 warnings.warn(
-                    f'Image to_dtype: {to_dtype} not yet supported for movies.\
-                        falling back to  to_dtype: `image`')
+                    f"Image to_dtype: {to_dtype} not yet supported for movies.\
+                        falling back to  to_dtype: `image`"
+                )
             ## run movie
             self.run_movie(save=save)
         else:
@@ -117,12 +127,14 @@ class DataLoaderUI:
             self.data = self.get_data()
 
             self.image = self.process.run(
-                self.data,
-                dtype=self.config.data.dtype,
-                to_dtype=to_dtype)
+                self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+            )
 
             if plot:
-                self.plot(self.image, block=True, save=save, axis=axis)
+                if self.gui:
+                    self.plot(self.image, block=False, save=save, axis=axis)
+                else:
+                    self.plot(self.image, block=True, save=save, axis=axis)
 
         return self.image
 
@@ -144,23 +156,25 @@ class DataLoaderUI:
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
             self.file_path = filename_from_window_dialog(
-                f'Choose .{filtetype} file',
-                filetypes=((filtetype, '*.' + filtetype),),
+                f"Choose .{filtetype} file",
+                filetypes=((filtetype, "*." + filtetype),),
                 initialdir=initialdir,
             )
             self.config.data.file_path = self.file_path
 
         if self.verbose:
-            print(f'Selected {self.file_path}')
+            print(f"Selected {self.file_path}")
 
         # find file in dataset
         if self.file_path in self.dataset.file_paths:
             file_idx = self.dataset.file_paths.index(self.file_path)
         else:
-            raise ValueError(f'Chosen datafile {self.file_path} does not exist in dataset!')
+            raise ValueError(
+                f"Chosen datafile {self.file_path} does not exist in dataset!"
+            )
 
-        if self.config.data.get('frame_no') == 'all':
-            print('Will run all frames as `all` was chosen in config...')
+        if self.config.data.get("frame_no") == "all":
+            print("Will run all frames as `all` was chosen in config...")
 
         data = self.dataset[file_idx]
 
@@ -168,18 +182,22 @@ class DataLoaderUI:
 
     def postprocess(self, image):
         """Post processing in image domain."""
-        if 'postprocess' not in self.config:
+        if "postprocess" not in self.config:
             return image
 
         if self.config.postprocess.contrast_boost is not None:
-            if self.config.data.dtype not in ['raw_data', 'aligned_data']:
-                warnings.warn(f'contrast boost not possible with {self.config.data.dtype}')
+            if self.config.data.dtype not in ["raw_data", "aligned_data"]:
+                warnings.warn(
+                    f"contrast boost not possible with {self.config.data.dtype}"
+                )
                 return image
             apodization = self.config.data.apodization
-            self.config.data.apodization = 'checkerboard'
+            self.config.data.apodization = "checkerboard"
             noise = self.process.run(self.data, dtype=self.config.data.dtype)
             self.config.data.apodization = apodization
-            image = self.contrast_boost(image, noise, **self.config.postprocess.contrast_boost)
+            image = self.contrast_boost(
+                image, noise, **self.config.postprocess.contrast_boost
+            )
 
         if self.config.postprocess.thresholding is not None:
             image = threshold_signal(image, **self.config.postprocess.thresholding)
@@ -189,11 +207,11 @@ class DataLoaderUI:
     def plot(
         self,
         image,
-        image_range: tuple=None,
-        save: bool=False,
-        movie: bool=False,
-        block: bool=True,
-        axis: bool=True,
+        image_range: tuple = None,
+        save: bool = False,
+        movie: bool = False,
+        block: bool = True,
+        axis: bool = True,
     ):
         """Plot image.
 
@@ -214,8 +232,11 @@ class DataLoaderUI:
             fig (fig): figure object.
 
         """
-        if self.probe.probe_type == 'phased':
-            image = self.process.run(image, dtype='image', to_dtype='image_sc')
+        if self.probe.probe_type == "phased":
+            image = self.process.run(image, dtype="image", to_dtype="image_sc")
+
+        # match orientation
+        image = np.fliplr(image)
 
         if not movie and axis:
             self.fig, self.ax = plt.subplots()
@@ -235,7 +256,7 @@ class DataLoaderUI:
         if movie:
             if axis:
                 if self.mpl_img is None:
-                    raise ValueError('First run plot function without movie.')
+                    raise ValueError("First run plot function without movie.")
                 self.mpl_img.set_data(image)
                 self.fig.canvas.draw_idle()
                 self.fig.canvas.flush_events()
@@ -243,29 +264,37 @@ class DataLoaderUI:
             else:
                 image = to_image(image, self.config.data.dynamic_range, pillow=False)
                 if not self.headless:
-                    cv2.imshow('frame', image)
+                    cv2.imshow("frame", image)
                 return image
         else:
             if axis:
                 self.mpl_img = self.ax.imshow(
-                    image, cmap='gray', vmin=vmin, vmax=vmax,
-                    origin='upper', extent=extent, interpolation='none',
+                    image,
+                    cmap="gray",
+                    vmin=vmin,
+                    vmax=vmax,
+                    origin="upper",
+                    extent=extent,
+                    interpolation="none",
                 )
 
-                self.ax.set_xlabel('Lateral Width (mm)')
-                self.ax.set_ylabel('Axial length (mm)')
+                self.ax.set_xlabel("Lateral Width (mm)")
+                self.ax.set_ylabel("Axial length (mm)")
                 divider = make_axes_locatable(self.ax)
 
-                cax = divider.append_axes('right', size='5%', pad=0.05)
+                cax = divider.append_axes("right", size="5%", pad=0.05)
                 plt.colorbar(self.mpl_img, cax=cax)
 
                 self.fig.tight_layout()
 
                 if self.config.plot.selector:
                     interactive_selector_with_plot_and_metric(
-                        image, self.ax, extent=extent,
+                        image,
+                        self.ax,
+                        extent=extent,
                         selector=self.config.plot.selector,
-                        metric=self.config.plot.selector_metric)
+                        metric=self.config.plot.selector_metric,
+                    )
 
                 if save:
                     self.save_image(self.fig)
@@ -279,7 +308,7 @@ class DataLoaderUI:
                 self.save_image(image)
                 return image
 
-    def run_movie(self, save: bool=False):
+    def run_movie(self, save: bool = False):
         """Run all frames in file in sequence"""
 
         print('Playing video, press "q" to exit...')
@@ -300,22 +329,25 @@ class DataLoaderUI:
         self.verbose = False
         while True:
             for i in range(1, n_frames):
+                if self.gui:
+                    self.gui.check_freeze()
+
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
                 image = self.process.run(self.data, dtype=self.config.data.dtype)
 
-                if 'postprocess' in self.config:
+                if "postprocess" in self.config:
                     image = self.postprocess(image)
 
                 image = self.plot(image, movie=True, axis=axis)
-                print(f'frame {i}', end='\r')
+                print(f"frame {i}", end="\r")
 
                 if save:
                     if len(images) < n_frames:
                         images.append(image)
 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                if cv2.waitKey(1) & 0xFF == ord("q"):
                     self.save_video(images)
                     return
                 if axis:
@@ -329,7 +361,7 @@ class DataLoaderUI:
                         return
 
             # clear line, frame number
-            print('\x1b[2K', end='\r')
+            print("\x1b[2K", end="\r")
 
     def save_image(self, fig, path=None):
         """Save image to disk.
@@ -341,27 +373,33 @@ class DataLoaderUI:
         """
         if path is None:
             if self.config.plot.tag:
-                tag = '_' + self.config.plot.tag
+                tag = "_" + self.config.plot.tag
             else:
-                tag = ''
+                tag = ""
 
             if self.dataset.frame_no is not None:
-                filename = self.file_path.stem + '-' + str(self.dataset.frame_no) + tag + '.png'
+                filename = (
+                    self.file_path.stem
+                    + "-"
+                    + str(self.dataset.frame_no)
+                    + tag
+                    + ".png"
+                )
             else:
-                filename = self.file_path.stem + tag + '.png'
+                filename = self.file_path.stem + tag + ".png"
 
-            path = Path('./figures', filename)
-            Path('./figures').mkdir(parents=True, exist_ok=True)
+            path = Path("./figures", filename)
+            Path("./figures").mkdir(parents=True, exist_ok=True)
 
         if isinstance(fig, plt.Figure):
             fig.savefig(path, transparent=True)
         elif isinstance(fig, Image.Image):
             fig.save(path)
         else:
-            raise ValueError('Figure is not PIL image or matplotlib figure object.')
+            raise ValueError("Figure is not PIL image or matplotlib figure object.")
 
         if self.verbose:
-            print(f'Image saved to {path}')
+            print(f"Image saved to {path}")
 
     def save_video(self, images, path=None):
         """Save video to disk.
@@ -376,89 +414,76 @@ class DataLoaderUI:
         """
         if path is None:
             if self.config.plot.tag:
-                tag = '_' + self.config.plot.tag
+                tag = "_" + self.config.plot.tag
             else:
-                tag = ''
-            filename = self.file_path.stem + tag + '.gif'
+                tag = ""
+            filename = self.file_path.stem + tag + ".gif"
 
-            path = Path('./figures', filename)
-            Path('./figures').mkdir(parents=True, exist_ok=True)
+            path = Path("./figures", filename)
+            Path("./figures").mkdir(parents=True, exist_ok=True)
 
         if isinstance(images[0], plt.Figure):
-            raise NotImplementedError('Saving videos using matplotlib '\
-                                      '(`axis = True` in config) not yet supported')
+            raise NotImplementedError(
+                "Saving videos using matplotlib "
+                "(`axis = True` in config) not yet supported"
+            )
         if isinstance(images[0], np.ndarray):
             fps = self.config.plot.fps
             save_to_gif(images, path, fps=fps)
         else:
-            raise ValueError('Figure is not a numpy array or matplotlib figure object.')
+            raise ValueError("Figure is not a numpy array or matplotlib figure object.")
 
         if self.verbose:
-            print(f'Video saved to {path}')
+            print(f"Video saved to {path}")
 
-def setup(file=None):
-    """Setup function. Retrieves config file and checks for validity.
-
-    Args:
-        file (str, optional): file path to config yaml. Defaults to None.
-            if None, argparser is checked. If that is None as well, the window
-            ui will pop up for choosing the config file manually.
-
-    Returns:
-        config (dict): config object / dict.
-
-    """
-    if file is None:
-        # if no argument is provided resort to UI window
-        filetype = 'yaml'
-        try:
-            file = filename_from_window_dialog(
-                f'Choose .{filetype} file',
-                filetypes=((filetype, '*.' + filetype),),
-                initialdir='./configs',
-            )
-        except Exception as e:
-            raise ValueError (
-                'Please specify the path to a config file through --config flag ' \
-                'if GUI is not working (usually on headless servers).') from e
-
-    config = load_config_from_yaml(Path(file))
-    print(f'Using config file: {file}')
-    config = check_config(config)
-
-    ## git
-    cwd = Path.cwd().stem
-    if cwd in ('Ultrasound-BMd', 'usbmd'):
-        config['git'] = get_git_summary()
-
-    return config
 
 def get_args():
     """Command line argument parser"""
-    parser = argparse.ArgumentParser(description='Process ultrasound data.')
-    parser.add_argument('-c', '--config', type=str, default=None, help='path to config file.')
-    parser.add_argument('-t', '--task',
-        default='run', choices=['run', 'generate'],  type=str,
-        help='which task to run')
+    parser = argparse.ArgumentParser(description="Process ultrasound data.")
+    parser.add_argument(
+        "-c", "--config", type=str, default=None, help="path to config file."
+    )
+    parser.add_argument(
+        "-t",
+        "--task",
+        default="run",
+        choices=["run", "generate"],
+        type=str,
+        help="which task to run",
+    )
+    # pylint: disable=no-member
+    parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     return args
+
 
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
-    config = setup(file=args.config)
+    if args.gui:
+        warnings.warn("GUI is very much in beta, please report any bugs to the Github.")
+        gui = USBMDApp(title="USBMD GUI", resolution=(600, 300), verbose=True)
+
+    config = setup_config(file=args.config)
     config.data.user = set_data_paths(local=config.data.local)
 
-    if args.task == 'run':
+    if args.task == "run":
         ui = DataLoaderUI(config)
-        image = ui.run()
-        return image
-    elif args.task == 'generate':
-        destination_folder = input('>> Give destination folder path: ')
-        to_dtype = input(f'>> Specify data type \n{_DATA_TYPES}: ')
-        retain_folder_structure = input('>> Retain folder structure? (Y/N): ')
+
+        if args.gui:
+            gui.ui = ui
+            ui.gui = gui  # haha
+            gui.build(config)
+            gui.mainloop()
+        else:
+            ui.run()
+
+    elif args.task == "generate":
+        destination_folder = input(">> Give destination folder path: ")
+        to_dtype = input(f">> Specify data type \n{_DATA_TYPES}: ")
+        retain_folder_structure = input(">> Retain folder structure? (Y/N): ")
         retain_folder_structure = strtobool(retain_folder_structure)
-        filetype = input('>> Filetype (hdf5, png): ')
+        filetype = input(">> Filetype (hdf5, png): ")
         generator = GenerateDataSet(
             config,
             to_dtype=to_dtype,
@@ -468,5 +493,6 @@ def main():
         )
         generator.generate()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

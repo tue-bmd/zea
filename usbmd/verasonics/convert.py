@@ -2,6 +2,7 @@
 Author(s): Tristan Stevens
 """
 from pathlib import Path
+
 import numpy as np
 
 from usbmd.utils.convert import get_args, save_dict_to_file
@@ -32,19 +33,18 @@ def save_to_usbmd_format(filename):
     data = np.transpose(data, (0, 2, 3, 1))
 
     dic = {
-        'data/' + key: data,
+        "data/" + key: data,
     }
-    save_dict_to_file(filename.with_suffix('.hdf5'), dic)
+    save_dict_to_file(filename.with_suffix(".hdf5"), dic)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     args = get_args()
     data = {}
     if args.file is None:
         file = filename_from_window_dialog(
-            'Choose .mat or .hdf5 file',
-            filetypes=(
-                ('mat or hdf5', '*.mat *.hdf5 *.h5'),
-            ),
+            "Choose .mat or .hdf5 file",
+            filetypes=(("mat or hdf5", "*.mat *.hdf5 *.h5"),),
         )
     else:
         file = Path(args.file)
