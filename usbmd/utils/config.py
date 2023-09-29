@@ -1,13 +1,14 @@
 """Config utilities.
 Load settings from yaml files and access them as objects / dicts.
 
-- **Author(s)**     : Iris Huijben, Tristan Stevens
-- **Date**          : -
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 14-09-2021
 """
 import copy
 from pathlib import Path
 
 import yaml
+
 
 class Config(dict):
     """Config class.
@@ -21,13 +22,14 @@ class Config(dict):
         super().__init__(dictionary)
 
         for key, value in self.items():
-            assert(key not in ['keys', 'values', 'items']), \
-                'The configuration contains the following key {key} which is '\
-                'reserved already as a standard attribute of a dict.'
+            assert key not in ["keys", "values", "items"], (
+                "The configuration contains the following key {key} which is "
+                "reserved already as a standard attribute of a dict."
+            )
 
             # Change the key: TODO: now only string keys are supported.
             # new_key = str(key).replace('-', '_')
-            #self.update({new_key, self.pop(key)})
+            # self.update({new_key, self.pop(key)})
 
             if isinstance(value, (list, tuple)):
                 detected_dict = 0
@@ -35,7 +37,7 @@ class Config(dict):
                     if isinstance(val, dict):
                         val = Config(val)
                         self[key][idx] = val
-                        #setattr(self, key, val)
+                        # setattr(self, key, val)
                         detected_dict += 1
                 if not detected_dict:
                     setattr(self, key, value)
@@ -45,7 +47,6 @@ class Config(dict):
                 setattr(self, key, value)
             else:
                 setattr(self, key, value)
-
 
     def __getattr__(self, attr):
         return self[attr]
@@ -69,12 +70,13 @@ class Config(dict):
 
     def save_to_yaml(self, path):
         """Save config contents to yaml"""
-        with open(Path(path), 'w', encoding='utf-8') as save_file:
+        with open(Path(path), "w", encoding="utf-8") as save_file:
             yaml.dump(self.serialize(), save_file, default_flow_style=False)
+
 
 def load_config_from_yaml(path):
     """Load config object from yaml file"""
-    with open(Path(path), 'r', encoding='utf-8') as file:
+    with open(Path(path), "r", encoding="utf-8") as file:
         dictionary = yaml.load(file, Loader=yaml.FullLoader)
     if dictionary:
         return Config(dictionary)

@@ -14,6 +14,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Data files
+*.hdf5
+*.h5
+
 # Distribution / packaging
 .Python
 build/
@@ -140,3 +144,6 @@ usbmd/figures/
 examples/deep_beamforming/example_config_ABLE.yaml
 trained_models/
 benchmarks/
+
+# Temporary files
+temp/

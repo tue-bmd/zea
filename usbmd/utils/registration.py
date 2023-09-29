@@ -15,32 +15,34 @@ values to register to the keys for the class as keyword arguments.
 and use the registry object to get the class corresponding to a name.
 
 Example:
-```
-dataset_registry(items_to_register=['probe_used', 'scan_class'])
+```datasets.py
+dataset_registry = RegisterDecorator(items_to_register=['probe_used', 'scan_class'])
 
-@interlacer_registry(name='picmus', probe_used='L11-5V', scan_class=PicmusScan)
+@dataset_registry(name='picmus', probe_used='L11-5V', scan_class=PicmusScan)
 class PICMUS(Dataset):
     ...
+```
 
--------------------------------------------------------------------------------
 In another file:
+```other_file.py
 from usbmd.datasets import dataset_registry
 
 dataset_class = dataset_registry['picmus']
 dataset = dataset_class()
 ```
 
-- **Author(s)**     : Vincent van de Schaft
-- **Date**          : -
+- **Author(s)**     : Vincent van de Schaft, Tristan Stevens
+- **Date**          : 14/03/2023
 """
+
 
 class RegisterDecorator:
     """Decorator class for registering classes. The docorator registers a name
     to the class and optionally registers additional values to keys for the
     class.
     """
-    def __init__(self, items_to_register=None):
 
+    def __init__(self, items_to_register=None):
         # The registry is a dictionary mapping names to classes
         self.registry = {}
 
@@ -53,17 +55,16 @@ class RegisterDecorator:
             items_to_register = {}
 
         for reg in items_to_register:
-            assert isinstance(reg, str), 'Item to register must be a string'
+            assert isinstance(reg, str), "Item to register must be a string"
             self.additional_registries[reg.lower()] = {}
-
 
     def __call__(self, name, **kwargs):
         """The decorator function. The name is the name to register to the
         class and the kwargs are the additional values to register to the
         class.
         Note: All names and keys are converted to lowercase."""
-        assert isinstance(name, str), 'Name must be a string'
-        assert name not in self.registry, f'Name {name} already registered'
+        assert isinstance(name, str), "Name must be a string"
+        assert name not in self.registry, f"Name {name} already registered"
 
         call_kwargs = kwargs.copy()
         name = name.lower()
@@ -89,34 +90,36 @@ class RegisterDecorator:
         if isinstance(cls_or_name, str):
             cls_or_name = self.registry[cls_or_name.lower()]
         # Assert that key is a class type
-        assert isinstance(cls_or_name, type), 'Key must be a class type'
+        assert isinstance(cls_or_name, type), "Key must be a class type"
         return self.additional_registries[parameter.lower()][cls_or_name]
 
     def __str__(self) -> str:
         """Prints the keys and class names of the registry each on a single
         line followed by the keys and values of each additional registry.
         """
-        string = 'registry:\n'
+        string = "registry:\n"
         for key, cls in self.registry.items():
-            string += f'{key.ljust(30)}: {cls.__name__}\n'
+            string += f"{key.ljust(30)}: {cls.__name__}\n"
 
-        string += '\nadditional_registries:\n'
+        string += "\nadditional_registries:\n"
         for reg, dictionary in self.additional_registries.items():
-            string += f'{reg}:\n'
+            string += f"{reg}:\n"
             for cls, val in dictionary.items():
-                string += f'\t{cls.__name__.ljust(30)}: {val}\n'
+                string += f"\t{cls.__name__.ljust(30)}: {val}\n"
 
         return string
 
     def __getitem__(self, key):
         """Returns the class corresponding to the key. The key can be a string
         or a class type."""
-        assert isinstance(key, str), 'Key must be a string'
+        assert isinstance(key, str), "Key must be a string"
         try:
             return self.registry[key.lower()]
         except KeyError as exc:
-            raise KeyError(f'Name {key} not registered. Please choose from '
-                           f'{self.registered_names()}.') from exc
+            raise KeyError(
+                f"Name {key} not registered. Please choose from "
+                f"{self.registered_names()}."
+            ) from exc
 
     def get_additional_registries(self):
         """Returns a list of the names of the additional registries."""
@@ -125,3 +128,15 @@ class RegisterDecorator:
     def registered_names(self):
         """Returns a list of the names registered."""
         return list(self.registry.keys())
+
+    def clear(self):
+        """Clears the registry."""
+        self.registry = {}
+        self.additional_registries = {}
+        items_to_register = self.additional_registries.keys()
+
+        if items_to_register is None:
+            items_to_register = {}
+
+        for reg in items_to_register:
+            self.additional_registries[reg.lower()] = {}

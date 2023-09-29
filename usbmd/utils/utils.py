@@ -3,21 +3,22 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : -
 """
+import datetime
 import os
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 
 import cv2
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 from PIL import Image
-import h5py
 
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
-    """ Get filename through dialog window
+    """Get filename through dialog window
     Args:
         window_name: string with name of window
         filetypes: tuple of tuples containing (name, filetypes)
@@ -28,17 +29,17 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
         filename: string containing path to selected file
     """
     if filetypes is None:
-        filetypes = (('all files', '*.*'),)
+        filetypes = (("all files", "*.*"),)
 
     try:
         root = Tk()
     except Exception as error:
         raise ValueError(
-            'Cannot run USBMD GUI on a server, ' \
-            'unless a X11 server is properly setup') from error
+            "Cannot run USBMD GUI on a server, unless a X11 server is properly setup"
+        ) from error
 
     # open in foreground
-    root.wm_attributes('-topmost', 1)
+    root.wm_attributes("-topmost", 1)
     # we don't want a full GUI, so keep the root window from appearing
     root.withdraw()
     # show an "Open" dialog box and return the path to the selected file
@@ -52,10 +53,11 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     if filename:
         return Path(filename)
     else:
-        raise ValueError('No file selected.')
+        raise ValueError("No file selected.")
+
 
 def translate(array, range_from, range_to):
-    """ Map values in array from one range to other.
+    """Map values in array from one range to other.
 
     Args:
         array (ndarray): input array.
@@ -67,8 +69,8 @@ def translate(array, range_from, range_to):
     """
     left_min, left_max = range_from
     right_min, right_max = range_to
-    assert left_min <= left_max, 'boundaries are set incorrectly'
-    assert right_min < right_max, 'boundaries are set incorrectly'
+    assert left_min <= left_max, "boundaries are set incorrectly"
+    assert right_min < right_max, "boundaries are set incorrectly"
     if left_min == left_max:
         return np.ones_like(array) * right_max
 
@@ -77,6 +79,7 @@ def translate(array, range_from, range_to):
 
     # Convert the 0-1 range into a value in the right range.
     return right_min + (value_scaled * (right_max - right_min))
+
 
 def search_file_tree(directory, filetypes=None, write=True):
     """Lists all files in directory and sub-directories.
@@ -95,35 +98,40 @@ def search_file_tree(directory, filetypes=None, write=True):
 
     """
     directory = Path(directory)
-    if (directory / 'file_paths.txt').is_file():
-        print('Using pregenerated txt file in the following directory for reading file paths: ')
+    if (directory / "file_paths.txt").is_file():
+        print(
+            "Using pregenerated txt file in the following directory for reading file paths: "
+        )
         print(directory)
-        with open(directory / 'file_paths.txt', encoding='utf-8') as file:
+        with open(directory / "file_paths.txt", encoding="utf-8") as file:
             file_paths = file.read().splitlines()
         return file_paths
 
     # set default file type
     if filetypes is None:
-        filetypes = ('jpg', 'jpeg', 'JPEG', 'png', 'PNG')
+        filetypes = ("jpg", "jpeg", "JPEG", "png", "PNG")
 
     file_paths = []
 
     # Traverse file tree to index all dicom files
-    for dirpath, _, filenames in tqdm.tqdm(os.walk(directory), desc='Searching file tree'):
+    for dirpath, _, filenames in tqdm.tqdm(
+        os.walk(directory), desc="Searching file tree"
+    ):
         for file in filenames:
             # Append to file_paths if it is a filetype file
             if file.endswith(filetypes):
-                file_paths.append(str(Path(dirpath)/Path(file)))
+                file_paths.append(str(Path(dirpath) / Path(file)))
 
-    print(f'\nFound {len(file_paths)} image files in .\\{Path(directory)}\n')
-    assert len(file_paths) > 0, 'ERROR: No image files were found'
+    print(f"\nFound {len(file_paths)} image files in .\\{Path(directory)}\n")
+    assert len(file_paths) > 0, "ERROR: No image files were found"
 
     if write:
-        with open(directory / 'file_paths.txt', 'w', encoding='utf-8') as file:
-            file_paths = [file + '\n' for file in file_paths]
+        with open(directory / "file_paths.txt", "w", encoding="utf-8") as file:
+            file_paths = [file + "\n" for file in file_paths]
             file.writelines(file_paths)
 
     return file_paths
+
 
 def find_key(dictionary, contains, case_sensitive=False):
     """Find key in dictionary that contains partly the string `contains`
@@ -144,17 +152,20 @@ def find_key(dictionary, contains, case_sensitive=False):
         key = [k for k in dictionary.keys() if contains in k.lower()]
     return key[0]
 
+
 def plt_window_has_been_closed(fig):
     """Checks whether matplotlib plot window is closed"""
     return not plt.fignum_exists(fig.number)
 
+
 def print_clear_line():
     """Clears line. Helpful when printing in a loop on the same line."""
-    line_up = '\033[1A'
-    line_clear = '\x1b[2K'
+    line_up = "\033[1A"
+    line_clear = "\x1b[2K"
     print(line_up, end=line_clear)
 
-def to_image(image, value_range: tuple=None, pillow: bool=True):
+
+def to_image(image, value_range: tuple = None, pillow: bool = True):
     """Convert numpy array to uint8 image format.
 
     Args:
@@ -169,14 +180,13 @@ def to_image(image, value_range: tuple=None, pillow: bool=True):
             (pillow if set to True)
     """
     if value_range:
-        image = translate(
-            np.clip(image, *value_range), value_range, (0, 255)
-        )
+        image = translate(np.clip(image, *value_range), value_range, (0, 255))
 
     image = image.astype(np.uint8)
     if pillow:
         image = Image.fromarray(image)
     return image
+
 
 def strtobool(val: str):
     """Convert a string representation of truth to True or False.
@@ -186,37 +196,43 @@ def strtobool(val: str):
     'val' is anything else.
     """
     val = val.lower()
-    if val in ('y', 'yes', 't', 'true', 'on', '1'):
+    if val in ("y", "yes", "t", "true", "on", "1"):
         return True
-    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
+    elif val in ("n", "no", "f", "false", "off", "0"):
         return False
     else:
-        raise ValueError(f'invalid truth value {val}')
+        raise ValueError(f"invalid truth value {val}")
+
 
 def save_to_gif(images, filename, fps=20):
-    """ Saves a sequence of images to .gif file.
+    """Saves a sequence of images to .gif file.
     Args:
         images: list of images (numpy arrays).
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
-    duration = 1 / (fps) * 1000 # milliseconds per frame
+    duration = 1 / (fps) * 1000  # milliseconds per frame
 
     # convert grayscale images to RGB
     if len(images[0].shape) == 2:
         images = [cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) for img in images]
 
-    pillow_img, *pillow_imgs = [
-        Image.fromarray(img) for img in images
-    ]
+    pillow_img, *pillow_imgs = [Image.fromarray(img) for img in images]
 
     pillow_img.save(
-        fp=filename, format='GIF', append_images=pillow_imgs, save_all=True,
-        loop=0, duration=duration, interlace=False, optimize=False,
+        fp=filename,
+        format="GIF",
+        append_images=pillow_imgs,
+        save_all=True,
+        loop=0,
+        duration=duration,
+        interlace=False,
+        optimize=False,
     )
-    return print(f'Succesfully saved GIF to -> {filename}')
+    return print(f"Succesfully saved GIF to -> {filename}")
 
-def update_dictionary(dict1: dict, dict2: dict, keep_none: bool=False) -> dict:
+
+def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict:
     """Updates dict1 with values dict2
 
     Args:
@@ -234,7 +250,8 @@ def update_dictionary(dict1: dict, dict2: dict, keep_none: bool=False) -> dict:
     dict_out = {**dict1, **dict2}
     return dict_out
 
-def print_hdf5_attrs(hdf5_obj, prefix=''):
+
+def print_hdf5_attrs(hdf5_obj, prefix=""):
     """Recursively prints all keys, attributes, and shapes in an HDF5 file.
 
     Args:
@@ -243,31 +260,42 @@ def print_hdf5_attrs(hdf5_obj, prefix=''):
             parameter is used in internal recursion and should not be supplied
             by the user.
     """
-    assert isinstance(hdf5_obj, (h5py.File, h5py.Group, h5py.Dataset)),\
-        'ERROR: hdf5_obj must be a File, Group, or Dataset object'
+    assert isinstance(
+        hdf5_obj, (h5py.File, h5py.Group, h5py.Dataset)
+    ), "ERROR: hdf5_obj must be a File, Group, or Dataset object"
 
     if isinstance(hdf5_obj, h5py.File):
-        name = 'root' if hdf5_obj.name == '/' else hdf5_obj.name
-        print(prefix + name + '/')
-        prefix += '    '
+        name = "root" if hdf5_obj.name == "/" else hdf5_obj.name
+        print(prefix + name + "/")
+        prefix += "    "
     elif isinstance(hdf5_obj, h5py.Dataset):
         shape_str = str(hdf5_obj.shape).replace(",)", ")")
-        print(prefix + '├── ' + hdf5_obj.name + ' (shape=' + shape_str + ')')
-        prefix += '│   '
+        print(prefix + "├── " + hdf5_obj.name + " (shape=" + shape_str + ")")
+        prefix += "│   "
 
     # Print all attributes
     for key, val in hdf5_obj.attrs.items():
-        print(prefix + '├── ' + key + ': ' + str(val))
+        print(prefix + "├── " + key + ": " + str(val))
 
     # Recursively print all keys, attributes, and shapes in groups
     if isinstance(hdf5_obj, h5py.Group):
         for i, key in enumerate(hdf5_obj.keys()):
             is_last = i == len(hdf5_obj.keys()) - 1
             if is_last:
-                marker = '└── '
-                new_prefix = prefix + '    '
+                marker = "└── "
+                new_prefix = prefix + "    "
             else:
-                marker = '├── '
-                new_prefix = prefix + '│   '
-            print(prefix + marker + key + '/')
+                marker = "├── "
+                new_prefix = prefix + "│   "
+            print(prefix + marker + key + "/")
             print_hdf5_attrs(hdf5_obj[key], new_prefix)
+
+
+def get_date_string(string: str = None):
+    """Generate a date string for current time, according to format specified by `string`."""
+    now = datetime.datetime.now()
+    if string is None:
+        string = "%Y_%m_%d_%H%M%S"
+
+    date_str = now.strftime(string)
+    return date_str
