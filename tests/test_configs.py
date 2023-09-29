@@ -14,45 +14,34 @@ from usbmd.utils.config import Config, load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 
 # Define some dictionaries to test the Config class
-simple_dict = {
-    'a': 1,
-    'b': 2,
-    'c': 3
-}
-nested_dict = {
-    'a': 1,
-    'nested_dictionary': {
-        'b': 2,
-        'c': 3
-    }
-}
+simple_dict = {"a": 1, "b": 2, "c": 3}
+nested_dict = {"a": 1, "nested_dictionary": {"b": 2, "c": 3}}
 doubly_nested_dict = {
-    'a': 1,
-    'nested_dictionary': {
-        'b': 2,
-        'doubly_nested_dictionary': 4
-    }
+    "a": 1,
+    "nested_dictionary": {"b": 2, "doubly_nested_dictionary": 4},
 }
-dict_strings = {
-    'a': 'first',
-    'b': 'second'
-}
-dict_none = {
-    'a': 1,
-    'b': None,
-    'c': 3
-}
+dict_strings = {"a": "first", "b": "second"}
+dict_none = {"a": 1, "b": None, "c": 3}
 # Bundle all dictionaries in a list
-config_initializers = [simple_dict, nested_dict, doubly_nested_dict, dict_strings, dict_none]
+config_initializers = [
+    simple_dict,
+    nested_dict,
+    doubly_nested_dict,
+    dict_strings,
+    dict_none,
+]
 
-@pytest.mark.parametrize('file', [
-        *list(Path('./configs').rglob('*.yaml')),
-        *list(Path('./examples').rglob('*.yaml')),
-    ]
+
+@pytest.mark.parametrize(
+    "file",
+    [
+        *list(Path("./configs").rglob("*.yaml")),
+        *list(Path("./examples").rglob("*.yaml")),
+    ],
 )
 def test_all_configs_valid(file):
     """Test if configs are valide according to schema"""
-    with open(file, 'r', encoding='utf-8') as f:
+    with open(file, "r", encoding="utf-8") as f:
         configuration = yaml.load(f, Loader=yaml.FullLoader)
     try:
         configuration = check_config(configuration)
@@ -62,9 +51,10 @@ def test_all_configs_valid(file):
         check_config(configuration)
 
     except SchemaError as se:
-        raise ValueError(f'Error in config {f}') from se
+        raise ValueError(f"Error in config {f}") from se
 
-@pytest.mark.parametrize('dictionary', config_initializers)
+
+@pytest.mark.parametrize("dictionary", config_initializers)
 def test_getitem(dictionary):
     """Tests if the getitem method works for simple dictionaries."""
     config = Config(dictionary=dictionary)
@@ -73,14 +63,12 @@ def test_getitem(dictionary):
 
     # Check if config raises an error when indexing a missing key
     with pytest.raises(KeyError):
-        print(config['key_not_in_config'])
+        print(config["key_not_in_config"])
+
 
 def test_dot_indexing():
     """Tests if the dot indexing works for simple dictionaries."""
-    dictionary = {
-        'a': 3,
-        'b': 4
-    }
+    dictionary = {"a": 3, "b": 4}
     config = Config(dictionary=dictionary)
     assert config.a == 3
     assert config.b == 4
@@ -88,15 +76,10 @@ def test_dot_indexing():
     with pytest.raises(KeyError):
         print(config.key_not_in_config)
 
+
 def test_nested_dot_indexing():
     """Tests if the dot indexing works for nested dictionaries."""
-    dictionary = {
-        'a': 3,
-        'subdict': {
-            'b': 4,
-            'c': 5
-        }
-    }
+    dictionary = {"a": 3, "subdict": {"b": 4, "c": 5}}
     config = Config(dictionary=dictionary)
     assert config.subdict.b == 4
     assert config.subdict.c == 5
@@ -104,7 +87,8 @@ def test_nested_dot_indexing():
     with pytest.raises(KeyError):
         print(config.subdict.key_not_in_config)
 
-@pytest.mark.parametrize('dictionary', config_initializers)
+
+@pytest.mark.parametrize("dictionary", config_initializers)
 def test_recursive_config(dictionary):
     """Tests if all types in the config correspond to the ones in the
     dictionary except for the dictionaries, which are converted to Configs.
@@ -112,7 +96,8 @@ def test_recursive_config(dictionary):
     config = Config(dictionary=dictionary)
     config_check_equal_recursive(config, dictionary)
 
-@pytest.mark.parametrize('dictionary', config_initializers)
+
+@pytest.mark.parametrize("dictionary", config_initializers)
 def test_yaml_saving_loading(request, dictionary):
     """Tests if the config can be saved to a yaml file."""
     config = Config(dictionary=dictionary)
@@ -121,7 +106,7 @@ def test_yaml_saving_loading(request, dictionary):
     test_id = request.node.name
 
     # Define the save path
-    path = Path(f'temp_{test_id}', 'config.yaml')
+    path = Path(f"temp_{test_id}", "config.yaml")
 
     # Create the directory if it does not exist
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,10 +124,12 @@ def test_yaml_saving_loading(request, dictionary):
         # Check if the config is the same
         config_check_equal_recursive(config, config2)
     except AssertionError as exc:
-        raise AssertionError('Config is not the same after saving and '
-                             'loading') from exc
+        raise AssertionError(
+            "Config is not the same after saving and " "loading"
+        ) from exc
 
-@pytest.mark.parametrize('dictionary', config_initializers)
+
+@pytest.mark.parametrize("dictionary", config_initializers)
 def test_serialize(dictionary):
     """Tests if the config can be serialized and deserialized without changing its contents."""
     config = Config(dictionary=dictionary)
@@ -152,6 +139,7 @@ def test_serialize(dictionary):
 
     # Check if the config is the same
     config_check_equal_recursive(config, serialized)
+
 
 def config_check_equal_recursive(config, dictionary):
     """Recursively check if all values in config are of the correct type and
@@ -168,9 +156,9 @@ def config_check_equal_recursive(config, dictionary):
         if isinstance(value1, Config):
             config_check_equal_recursive(value1, value2)
         else:
-            assert value1 == value2, 'All values must be the same'
-            assert isinstance(value1, type(value2)), ('All types must be the '
-                                                      'same')
+            assert value1 == value2, "All values must be the same"
+            assert isinstance(value1, type(value2)), "All types must be the " "same"
+
 
 def test_check_equal():
     """Tests the config_check_equal_recursive function."""
@@ -184,7 +172,7 @@ def test_check_equal():
     config4.a = 2
     # The same config but with a value changed
     config5 = Config(dictionary=simple_dict)
-    config5.b = '3'
+    config5.b = "3"
 
     config_check_equal_recursive(config, config2)
     with pytest.raises(AssertionError):

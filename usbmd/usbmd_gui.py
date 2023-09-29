@@ -81,8 +81,11 @@ class USBMDApp(App):
 
         if self.display_path_label:
             self.path_label = ttk.Label(
-                self, text=self.data_root,
-                font=("TkDefaultFont", 8), background=self.background_color)
+                self,
+                text=self.data_root,
+                font=("TkDefaultFont", 8),
+                background=self.background_color,
+            )
             self.path_label.pack(side="bottom", padx=10, pady=0)
 
         self.user_label = ttk.Label(self, text=self.user_text, style="Footer.TLabel")

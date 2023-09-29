@@ -20,10 +20,12 @@ def get_probe_from_config(config):
     """
     dataset_name = config.data.dataset_name
 
-    probe_name = dataset_registry.get_parameter(cls_or_name=dataset_name,
-                                                parameter='probe_name')
+    probe_name = dataset_registry.get_parameter(
+        cls_or_name=dataset_name, parameter="probe_name"
+    )
     probe = probe_registry[probe_name]
     return probe
+
 
 def initialize_scan_from_probe(probe):
     """
@@ -44,6 +46,7 @@ def initialize_scan_from_probe(probe):
 
     scan = Scan(**default_parameters)
     return scan
+
 
 def initialize_scan_from_config(config):
     """
