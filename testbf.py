@@ -1,23 +1,28 @@
+from usbmd.processing import rf2iq, log_compress
+import torch
+from usbmd.utils.config_validation import check_config
+from usbmd.utils.config import load_config_from_yaml
+from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
+from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+from usbmd.data_format.usbmd_data_format import load_usbmd_file
 import h5py
 from usbmd.utils.utils import print_hdf5_attrs
 import cv2
 
 # Define path to the data file
-data_path = r"Z:\Ultrasound-BMd\data\USBMD-example-data\planewave_l115v.hdf5"
+data_path = r"C:\Users\s153800\Downloads\linescanning_l115v_0002.hdf5"
 # data_path = r"C:\Users\s153800\Downloads\point_l115v_0000.hdf5"
 # data_path = r"C:\Users\s153800\Downloads\point_l115v_0003.hdf5"
-
-
-from usbmd.data_format.usbmd_data_format import load_usbmd_file
-import numpy as np
+# data_path = r"C:\Users\s153800\Downloads\planewave_l115v.hdf5"
 
 
 # Load the data file and construct a probe and scan object
 # We will only load the first two frames of the data file
-data, scan, probe = load_usbmd_file(data_path, frames=[0,])
+data, scan, probe = load_usbmd_file(
+    data_path, frames=[0,])
 
-
-import matplotlib.pyplot as plt
 
 print(data.shape)
 
@@ -33,25 +38,22 @@ SINGLE_FRAME = False
 
 if SINGLE_FRAME:
 
-      tx = 3
+    tx = 3
 
-      data = data[0:1, tx:tx+1]
-      # scan.zlims = (0.0, 80.58375e-3)
-      # scan.xlims = (-0.031, 0.031)
-      scan.N_tx = 1
-      scan.t0_delays = scan.t0_delays[tx:tx+1, :]
-      scan.initial_times = scan.initial_times[tx:tx+1]
+    data = data[0:1, tx:tx+1]
+    # scan.zlims = (0.0, 80.58375e-3)
+    # scan.xlims = (-0.031, 0.031)
+    scan.N_tx = 1
+    scan.t0_delays = scan.t0_delays[tx:tx+1, :]
+    scan.initial_times = scan.initial_times[tx:tx+1]
 
 
 # elements = [n for n in range(20)] + [n for n in range(28, 128)]
 
 # data[:, :, elements] = 0
 
-
-print(scan.initial_times)
-
-scan.Nx = 512
-scan.Nz = 512
+scan.Nx = 64
+scan.Nz = 64
 
 # Hack that is needed because the Scan base class does not contain the angles
 # attribute and the beamformer assumes that it does
@@ -64,12 +66,6 @@ print('The dimensions of the data are (n_frames, n_transmits, n_elements, '
       'n_axial_samples, n_rf_iq_channels)')
 
 
-
-from pathlib import Path
-from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
-from usbmd.utils.config import load_config_from_yaml
-from usbmd.utils.config_validation import check_config
-
 # Load the config file
 config_path = Path('configs', 'config_usbmd_rf.yaml')
 config = load_config_from_yaml(config_path)
@@ -79,11 +75,6 @@ check_config(config)
 
 # Create the beamformer
 beamformer = get_beamformer(probe=probe, scan=scan, config=config)
-
-
-
-import torch
-from usbmd.processing import rf2iq, log_compress
 
 
 # Swap the 3th and 4th axes
@@ -106,7 +97,10 @@ iq_data = torch.from_numpy(iq_data)
 # Beamform the data
 beamformer_output = beamformer(iq_data)
 
-image = beamformer_output['beamformed'].numpy()[0, :, :, 0]
+image = beamformer_output.numpy()
+
+print(image.shape)
+image = image[0, :, :, 0]
 
 image = np.abs(image)
 
@@ -115,7 +109,6 @@ image = log_compress(image)
 
 print(f'Image shape: {image.shape}')
 
-import matplotlib.pyplot as plt
 
 # Plot the image
 fig, ax = plt.subplots(figsize=(6, 6))
