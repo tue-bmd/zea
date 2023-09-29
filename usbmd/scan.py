@@ -6,7 +6,7 @@ beamforming grid.
 """
 import numpy as np
 
-from usbmd.utils.pixelgrid import get_grid, check_for_aliasing
+from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 
 _MOD_TYPES = [None, 'rf', 'iq']
 

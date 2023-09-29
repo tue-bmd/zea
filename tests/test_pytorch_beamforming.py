@@ -11,7 +11,6 @@ import numpy as np
 import torch
 
 from usbmd.probes import Verasonics_l11_4v
-
 from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
 from usbmd.pytorch_ultrasound.processing import on_device_torch
 from usbmd.scan import PlaneWaveScan

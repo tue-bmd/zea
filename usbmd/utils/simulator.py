@@ -4,11 +4,12 @@
 - **Date**          : Tue January 31 2023
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
 import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 
 from usbmd.utils.pixelgrid import cartesian_pixel_grid
+
 
 class UltrasoundSimulator:
     """A lightweight ultrasound simulator tool, intended for testing purposes."""

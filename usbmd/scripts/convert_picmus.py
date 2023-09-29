@@ -10,10 +10,10 @@ Example usage:
 ```
 """
 
-import os
-import logging
-from pathlib import Path
 import argparse
+import logging
+import os
+from pathlib import Path
 
 from usbmd.data_format.convert_picmus import convert_picmus
 

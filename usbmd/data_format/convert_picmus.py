@@ -1,12 +1,14 @@
 """Functionality to convert the PICMUS dataset to the USBMD format."""
 
-import os
 import logging
+import os
+
 import h5py
 import numpy as np
 
 from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
 from usbmd.scan import compute_t0_delays_planewave
+
 
 def convert_picmus(source_path, output_path, overwrite=False):
     """Converts the PICMUS database to the USBMD format.

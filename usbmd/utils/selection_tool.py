@@ -10,7 +10,7 @@ from collections.abc import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Rectangle, PathPatch
+from matplotlib.patches import PathPatch, Rectangle
 from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector, RectangleSelector
 from skimage import measure
