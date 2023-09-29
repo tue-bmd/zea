@@ -3,9 +3,10 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 28/02/2023
 """
-from usbmd.scan import Scan
-from usbmd.registry import dataset_registry, probe_registry
 from usbmd.probes import get_probe
+from usbmd.registry import dataset_registry, probe_registry
+from usbmd.scan import Scan
+
 
 def get_probe_from_config(config):
     """
@@ -19,10 +20,12 @@ def get_probe_from_config(config):
     """
     dataset_name = config.data.dataset_name
 
-    probe_name = dataset_registry.get_parameter(cls_or_name=dataset_name,
-                                                parameter='probe_name')
+    probe_name = dataset_registry.get_parameter(
+        cls_or_name=dataset_name, parameter="probe_name"
+    )
     probe = probe_registry[probe_name]
     return probe
+
 
 def initialize_scan_from_probe(probe):
     """
@@ -43,6 +46,7 @@ def initialize_scan_from_probe(probe):
 
     scan = Scan(**default_parameters)
     return scan
+
 
 def initialize_scan_from_config(config):
     """

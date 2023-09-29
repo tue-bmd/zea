@@ -14,7 +14,7 @@ def check_nvidia_smi():
 
 
 def get_gpu_memory(verbose=True):
-    """ Retrieve memory allocation information of all gpus.
+    """Retrieve memory allocation information of all gpus.
 
     Args:
         verbose (bool): prints output if True.
@@ -24,46 +24,46 @@ def get_gpu_memory(verbose=True):
     """
     if not check_nvidia_smi():
         warnings.warn(
-            'nvidia-smi is not available. Cannot retrieve GPU memory. Falling back to CPU..')
+            "nvidia-smi is not available. Cannot retrieve GPU memory. Falling back to CPU.."
+        )
         return None
 
     def _output_to_list(x):
-        return x.decode('ascii').split('\n')[:-1]
+        return x.decode("ascii").split("\n")[:-1]
 
     COMMAND = "nvidia-smi --query-gpu=memory.free --format=csv"
     try:
-        memory_free_info = _output_to_list(
-            sp.check_output(COMMAND.split()))[1:]
+        memory_free_info = _output_to_list(sp.check_output(COMMAND.split()))[1:]
     except Exception as e:
         print(f"An error occurred: {e}")
 
-    memory_free_values = [int(x.split()[0])
-                          for i, x in enumerate(memory_free_info)]
+    memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
 
     # only show enabled devices
-    if 'CUDA_VISIBLE_DEVICES' in os.environ:
-        gpus = os.environ['CUDA_VISIBLE_DEVICES']
-        gpus = [int(gpu) for gpu in gpus.split(',')][:len(memory_free_values)]
+    if "CUDA_VISIBLE_DEVICES" in os.environ:
+        gpus = os.environ["CUDA_VISIBLE_DEVICES"]
+        gpus = [int(gpu) for gpu in gpus.split(",")][: len(memory_free_values)]
         if verbose:
             # Report the number of disabled GPUs out of the total
             num_disabled_gpus = len(memory_free_values) - len(gpus)
             num_gpus = len(memory_free_values)
 
-            print(f'{num_disabled_gpus/num_gpus} GPUs were disabled')
+            print(f"{num_disabled_gpus/num_gpus} GPUs were disabled")
 
         memory_free_values = [memory_free_values[gpu] for gpu in gpus]
 
     if verbose:
-        df = df = pd.DataFrame({'memory': memory_free_values})
-        df.index.name = 'GPU'
+        df = df = pd.DataFrame({"memory": memory_free_values})
+        df.index.name = "GPU"
         print(df)
 
     return memory_free_values
 
 
-def select_gpus(available_gpu_ids, memory_free, device=None,
-                verbose=True, hide_others=True):
-    """ Select GPU based on the device argument and available GPU's. This
+def select_gpus(
+    available_gpu_ids, memory_free, device=None, verbose=True, hide_others=True
+):
+    """Select GPU based on the device argument and available GPU's. This
     function does not rely on pytorch or tensorflow, and is shared between both
     frameworks.
 
@@ -98,10 +98,10 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
     """
 
     # Check if GPU mode is forced or if GPU should be selected based on memory
-    if device == 'cpu' or (device is None and not available_gpu_ids):
-        print('Setting device to CPU')
+    if device == "cpu" or (device is None and not available_gpu_ids):
+        print("Setting device to CPU")
         return None
-    elif device == 'gpu' or device == 'cuda' or device is None:
+    elif device == "gpu" or device == "cuda" or device is None:
         # Use None to select GPU based on available memory later
         gpu_ids = [None]
     elif isinstance(device, int) or device is None:
@@ -111,42 +111,45 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
     elif isinstance(device, str):
         device = device.lower()  # Parse the device string
 
-        if device.startswith('cuda:') or device.startswith('gpu:'):
+        if device.startswith("cuda:") or device.startswith("gpu:"):
             # Parse and use a specific GPU or all GPUs
-            device_id = int(device.split(':')[1])
+            device_id = int(device.split(":")[1])
 
             if not isinstance(device_id, int):
-                raise ValueError(f'Invalid device format: {device}. '
-                                 f'Expected "cuda:<gpu_id>".')
+                raise ValueError(
+                    f"Invalid device format: {device}. " f'Expected "cuda:<gpu_id>".'
+                )
             gpu_ids = [device_id]
 
-        elif device.startswith('auto:'):
+        elif device.startswith("auto:"):
             # Automatically select GPUs based on available memory
-            num_gpus = int(device.split(':')[1])  # number of GPUs to use
+            num_gpus = int(device.split(":")[1])  # number of GPUs to use
 
-            print(f'Selecting {num_gpus} GPUs based on available memory.')
+            print(f"Selecting {num_gpus} GPUs based on available memory.")
 
             if not isinstance(num_gpus, int):
-                raise ValueError(f'Invalid device format: {device}. '
-                                 f'Expected "auto:<num_gpus>".')
+                raise ValueError(
+                    f"Invalid device format: {device}. " f'Expected "auto:<num_gpus>".'
+                )
             if num_gpus == -1:
                 num_gpus = len(available_gpu_ids)  # use all available GPUs
             # Create list of N None values corresponding to unassigned GPUs
             gpu_ids = num_gpus * [None]
 
         else:
-            raise ValueError(f'Invalid device format: {device}. ')
+            raise ValueError(f"Invalid device format: {device}. ")
 
     # Auto-select GPUs based on available memory for None values
     if None in gpu_ids:
         # Automatically select GPUs based on available memory
         sorted_gpu_ids = [
-            x for x, _ in sorted(enumerate(memory_free), key=lambda x: x[1],
-                                 reverse=True)
+            x
+            for x, _ in sorted(enumerate(memory_free), key=lambda x: x[1], reverse=True)
         ]
 
-        assert len(gpu_ids) <= len(sorted_gpu_ids), \
-            f'Selected more GPUs ({len(gpu_ids)}) than available ({len(sorted_gpu_ids)})'
+        assert len(gpu_ids) <= len(
+            sorted_gpu_ids
+        ), f"Selected more GPUs ({len(gpu_ids)}) than available ({len(sorted_gpu_ids)})"
 
         for i, gpu in enumerate(gpu_ids):
             if gpu is None and sorted_gpu_ids[i] in available_gpu_ids:
@@ -154,17 +157,19 @@ def select_gpus(available_gpu_ids, memory_free, device=None,
     else:
         bad_gpus = set(gpu_ids) - set(available_gpu_ids)
         if bad_gpus:
-            raise ValueError(f'GPUs {bad_gpus} not available!!')
+            raise ValueError(f"GPUs {bad_gpus} not available!!")
 
     if verbose:
         for gpu_id in gpu_ids:
-            print(f'Selected GPU {gpu_id} with Free Memory: '
-                  f'{memory_free[gpu_id]:.2f} MiB')
+            print(
+                f"Selected GPU {gpu_id} with Free Memory: "
+                f"{memory_free[gpu_id]:.2f} MiB"
+            )
 
     # Hide other GPUs from the system
     if hide_others:
         # Set the CUDA_VISIBLE_DEVICES environment variable to the selected
         # GPU(s)
-        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpu_ids))
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
 
     return gpu_ids

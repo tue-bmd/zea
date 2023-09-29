@@ -24,10 +24,11 @@ def get_grid(scan, verbose=False):
         grid = cartesian_pixel_grid(xlims, zlims, dx=dx, dz=dz)
         if verbose:
             print(
-                f'Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, '
-                f'using {scan.pixels_per_wavelength} pixels per wavelength.'
+                f"Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, "
+                f"using {scan.pixels_per_wavelength} pixels per wavelength."
             )
     return grid
+
 
 def check_for_aliasing(scan):
     """Checks if the scan class parameters will cause spatial aliasing due to a too low pixel
@@ -42,27 +43,28 @@ def check_for_aliasing(scan):
     depth = scan.zlims[1] - scan.zlims[0]
 
     if scan.Nx and scan.Nz:
-        if width/scan.Nx > wvln/2:
+        if width / scan.Nx > wvln / 2:
             print(
-                f'WARNING: width/Nx = {width/scan.Nx} < wvln/2 = {wvln/2}. '
-                f'Consider increasing scan.Nx to {int(width/(wvln/2))} or more.'
+                f"WARNING: width/Nx = {width/scan.Nx} < wvln/2 = {wvln/2}. "
+                f"Consider increasing scan.Nx to {int(width/(wvln/2))} or more."
             )
-        if depth/scan.Nz > wvln/2:
+        if depth / scan.Nz > wvln / 2:
             print(
-                f'WARNING: depth/Nz = {depth/scan.Nz} < wvln/2 = {wvln/2}. '
-                f'Consider increasing scan.Nz to {int(depth/(wvln/2))} or more.'
+                f"WARNING: depth/Nz = {depth/scan.Nz} < wvln/2 = {wvln/2}. "
+                f"Consider increasing scan.Nz to {int(depth/(wvln/2))} or more."
             )
     else:
-        if dx > wvln/2:
+        if dx > wvln / 2:
             print(
-                f'WARNING: dx = {dx} > wvln/2 = {wvln/2}. '
-                f'Consider increasing scan.pixels_per_wavelength to 2 or more'
+                f"WARNING: dx = {dx} > wvln/2 = {wvln/2}. "
+                f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
-        if dz > wvln/2:
+        if dz > wvln / 2:
             print(
-                f'WARNING: dz = {dz} > wvln/2 = {wvln/2}. '
-                f'Consider increasing scan.pixels_per_wavelength to 2 or more'
+                f"WARNING: dz = {dz} > wvln/2 = {wvln/2}. "
+                f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
+
 
 def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
     """Generate a Cartesian pixel grid based on input parameters.
@@ -82,8 +84,9 @@ def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
         grid (np.ndarray): Pixel grid of size (nx, nz, 3) in
             Cartesian coordinates (x, y, z)
     """
-    assert (bool(Nx) and bool(Nz)) ^ (bool(dx) and bool(dz)), \
-        "Either Nx and Nz or dx and dz must be defined."
+    assert (bool(Nx) and bool(Nz)) ^ (
+        bool(dx) and bool(dz)
+    ), "Either Nx and Nz or dx and dz must be defined."
 
     # Determine the grid spacing
     if Nx is not None and Nz is not None:
@@ -97,9 +100,10 @@ def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
 
     # Create the pixel grid
     z_grid, x_grid = np.meshgrid(z, x, indexing="ij")
-    y_grid = 0 * x_grid # Assume y = 0
+    y_grid = 0 * x_grid  # Assume y = 0
     grid = np.stack((x_grid, y_grid, z_grid), axis=-1)
     return grid
+
 
 def radial_pixel_grid(rlims, dr, oris, dirs):
     """Generate a focused pixel grid based on input parameters.
