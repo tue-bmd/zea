@@ -283,7 +283,15 @@ class FocussedScan(Scan):
     """
     Class representing a focussed beam scan where every transmit has a beam
     origin, angle, and focus defined.
+    """
 
+    def __init__(self, N_tx, fc=7e6, fs=28e6, c=1540, modtype='rf', N_ax=3328,
+                 initial_times=None, t0_delays=None, tx_apodizations=None,
+                 polar_angles=None, azimuth_angles=None,
+                 focus_distances=None, Nx=128, Nz=128,
+                 xlims=(-0.01, 0.01), ylims=(0, 0),
+                 zlims=(0, 0.04), pixels_per_wvln=3, downsample=1):
+        """
         Args:
             probe (Probe, str, optional): Probe object to read values from or
                 probe name to initialize. Defaults to None.
@@ -327,6 +335,7 @@ class FocussedScan(Scan):
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
         """
+
         super().__init__()
 
         assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
@@ -452,6 +461,7 @@ class PlaneWaveScan(Scan):
     """
     Class representing a plane wave scan where every transmit has an angle.
     """
+
     def __init__(
         self,
         N_tx=75,
@@ -663,6 +673,7 @@ class Transmit:
 
         return tx_delay_min
 
+
 class PlanewaveTransmit(Transmit):
     """Planewave transmit class. Initializes the Transmit base class with the
     correct transmit delays for a planewave."""
@@ -742,6 +753,8 @@ class PlanewaveTransmit(Transmit):
         return tx_delays
 
 # WIP
+
+
 class FocusedTransmit(Transmit):
     """Focused transmit class. Initializes the Transmit base class with the
     correct transmit delays for a focused transmit."""
@@ -788,6 +801,7 @@ class FocusedTransmit(Transmit):
 
         # Initialize the Transmit base class
         super().__init__(t0_delays, tx_apodizations)
+
 
 def compute_t0_delays_planewave(ele_pos, polar_angle, azimuth_angle=0, c=1540):
     """Computes the transmit delays for a planewave, shifted such that the
