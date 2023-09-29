@@ -452,7 +452,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
         x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
         z0, z1 = 0, depth
 
-        n_tx = int(hdf5_file['scan']['n_tx'][()])
+        n_tx = len(transmits)
         initial_times = hdf5_file['scan']['initial_times'][transmits]
         tx_apodizations = hdf5_file['scan']['tx_apodizations'][transmits]
         t0_delays = hdf5_file['scan']['t0_delays'][transmits]
