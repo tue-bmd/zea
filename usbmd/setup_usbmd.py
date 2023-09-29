@@ -31,25 +31,26 @@ def setup_config(file=None):
     """
     if file is None:
         # if no argument is provided resort to UI window
-        filetype = 'yaml'
+        filetype = "yaml"
         try:
             file = filename_from_window_dialog(
-                f'Choose .{filetype} file',
-                filetypes=((filetype, '*.' + filetype),),
-                initialdir='./configs',
+                f"Choose .{filetype} file",
+                filetypes=((filetype, "*." + filetype),),
+                initialdir="./configs",
             )
         except Exception as e:
-            raise ValueError (
-                'Please specify the path to a config file through --config flag ' \
-                'if GUI is not working (usually on headless servers).') from e
+            raise ValueError(
+                "Please specify the path to a config file through --config flag "
+                "if GUI is not working (usually on headless servers)."
+            ) from e
 
     config = load_config_from_yaml(Path(file))
-    print(f'Using config file: {file}')
+    print(f"Using config file: {file}")
     config = check_config(config)
 
     ## git
     cwd = Path.cwd().stem
-    if cwd in ('Ultrasound-BMd', 'usbmd'):
-        config['git'] = get_git_summary()
+    if cwd in ("Ultrasound-BMd", "usbmd"):
+        config["git"] = get_git_summary()
 
     return config
