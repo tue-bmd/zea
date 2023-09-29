@@ -15,7 +15,9 @@ class Scan:
 
     def __init__(self, N_tx, fc=7e6, fs=28e6, c=1540, modtype='rf', N_ax=3328,
                  initial_times=None, t0_delays=None, tx_apodizations=None,
-                 Nx=128, Nz=128, xlims=(-0.01, 0.01), ylims=(0, 0),
+                 polar_angles=None, azimuth_angles=None,
+                 focus_distances=None, Nx=128, Nz=128,
+                 xlims=(-0.01, 0.01), ylims=(0, 0),
                  zlims=(0, 0.04), pixels_per_wvln=3, downsample=1):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -130,6 +132,21 @@ class Scan:
                           '128 element probe.')
             tx_apodizations = np.ones((N_tx, 128))
         self.tx_apodizations = tx_apodizations
+
+        if polar_angles is None:
+            warnings.warn('No polar_angles provided. Assuming all zeros.')
+            polar_angles = np.zeros(N_tx)
+        self.polar_angles = polar_angles
+
+        if azimuth_angles is None:
+            warnings.warn('No azimuth_angles provided. Assuming all zeros.')
+            azimuth_angles = np.zeros(N_tx)
+        self.azimuth_angles = azimuth_angles
+
+        if focus_distances is None:
+            warnings.warn('No focus_distances provided. Assuming all zeros.')
+            focus_distances = np.zeros(N_tx)
+        self.focus_distances = focus_distances
 
     # def add_transmit(self, index, t0_delays, tx_apodizations, c, initial_time=0.0):
     #     """Adds a transmit to the scan.
