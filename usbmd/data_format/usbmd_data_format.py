@@ -131,7 +131,7 @@ def generate_usbmd_dataset(
 
     # Write scan group
     scan_group = dataset.create_group("scan")
-    scan_group.attrs["description"] = "This group contains the scan " + "parameters."
+    scan_group.attrs["description"] = "This group contains the scan parameters."
 
     add_dataset(
         group=scan_group,
@@ -324,11 +324,11 @@ def validate_dataset(path):
         elif key == "beamformed_data":
             logging.warning("No validation has been defined for beamformed data.")
         elif key == "envelope_data":
-            logging.warning("No validation has been defined for envelope " "data.")
+            logging.warning("No validation has been defined for envelope data.")
         elif key == "image":
             logging.warning("No validation has been defined for image data.")
         elif key == "image_sc":
-            logging.warning("No validation has been defined for image_sc " "data.")
+            logging.warning("No validation has been defined for image_sc data.")
 
     required_scan_keys = [
         "n_ax",
@@ -493,7 +493,7 @@ def load_usbmd_file(path, frames=None, data_type="raw_data"):
         except NotImplementedError:
 
             logging.warning(
-                "The probe %s is not implemented. Using a " "generic probe instead.",
+                "The probe %s is not implemented. Using a generic probe instead.",
                 probe_name,
             )
 

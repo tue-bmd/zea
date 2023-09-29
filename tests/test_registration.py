@@ -31,7 +31,7 @@ def test_getitem():
 
     assert registry["A"] == ClassA, "Key should have linked to class"
     assert registry["A"] == registry.registry["a"], (
-        "getitem should be" " equivalent to indexing self.registry."
+        "getitem should be equivalent to indexing self.registry."
     )
 
 
@@ -63,7 +63,7 @@ def test_additional_parameters():
         """Test class A."""
 
     assert registry.get_parameter("A", "lucky_number") == 8, (
-        "Failed to " "retrieve additional parameter"
+        "Failed to retrieve additional parameter"
     )
 
 

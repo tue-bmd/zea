@@ -299,7 +299,7 @@ class PlaneWaveScan(Scan):
                     self.angles = self.angles[n_angles]
                 except Exception as exc:
                     raise ValueError(
-                        "Angle indexing does not match the number of " "recorded angles"
+                        "Angle indexing does not match the number of recorded angles"
                     ) from exc
             elif n_angles > len(self.angles):
                 raise ValueError(
