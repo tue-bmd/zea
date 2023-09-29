@@ -28,17 +28,18 @@ def generate_example_dataset(path, add_optional_fields=False):
     n_ch = 1
     n_frames = 2
 
-    raw_data = np.zeros((n_frames, n_tx, n_el, n_ax, n_ch))
+    raw_data = np.ones((n_frames, n_tx, n_el, n_ax, n_ch))
 
-    t0_delays = np.zeros((n_tx, n_el))
-    tx_apodizations = np.zeros((n_tx, n_el))
-    probe_geometry = np.zeros((n_el, 3))
+    t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
+    tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+    probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
 
     if add_optional_fields:
-        focus_distances = np.zeros((n_tx,))
-        tx_apodizations = np.zeros((n_tx, n_el))
-        polar_angles = np.zeros((n_tx,))
-        azimuth_angles = np.zeros((n_tx,))
+        focus_distances = np.zeros((n_tx,), dtype=np.float32)
+        tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
+        polar_angles = np.zeros((n_tx,), dtype=np.float32)
+        azimuth_angles = np.zeros((n_tx,), dtype=np.float32)
     else:
         focus_distances = None
         tx_apodizations = None
@@ -451,6 +452,7 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
+            N_tx=int(hdf5_file['scan']['n_tx'][()]),
             xlims=(x0, x1),
             zlims=(z0, z1),
             fc=fc,
