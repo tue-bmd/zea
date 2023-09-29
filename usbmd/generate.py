@@ -19,8 +19,9 @@ from PIL import Image
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import _DATA_TYPES, Process, to_8bit
-from usbmd.utils.utils import update_dictionary
 from usbmd.utils.config import Config
+from usbmd.utils.utils import update_dictionary
+
 
 class GenerateDataSet:
     """Class for generating and saving ultrasound dataset to disk."""

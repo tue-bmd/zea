@@ -3,7 +3,8 @@
 import os
 from pathlib import Path
 
-from usbmd.data_format.usbmd_data_format import generate_example_dataset, validate_dataset
+from usbmd.data_format.usbmd_data_format import (generate_example_dataset,
+                                                 validate_dataset)
 
 
 def test_example_dataset():

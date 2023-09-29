@@ -1,9 +1,10 @@
 """Tests for the probes module."""
-import pytest
 import numpy as np
+import pytest
 
+from usbmd.probes import Probe, get_probe
 from usbmd.registry import probe_registry
-from usbmd.probes import get_probe, Probe
+
 
 @pytest.mark.parametrize('probe_name', probe_registry.registered_names())
 def test_get_probe(probe_name):

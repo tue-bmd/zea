@@ -3,10 +3,11 @@ This file searches all notebooks in the folder examples/notebooks and then runs
 a test for each notebook that executes it using papermill. The test fails if
 if any of the cells in the notebook raise an exception.
 """
-from pathlib import Path
 import shutil
-import pytest
+from pathlib import Path
+
 import papermill as pm
+import pytest
 
 # Find all notebooks in the folder examples
 notebook_paths = set(Path('examples').rglob('*.ipynb'))

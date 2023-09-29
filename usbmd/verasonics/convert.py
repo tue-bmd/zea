@@ -2,6 +2,7 @@
 Author(s): Tristan Stevens
 """
 from pathlib import Path
+
 import numpy as np
 
 from usbmd.utils.convert import get_args, save_dict_to_file

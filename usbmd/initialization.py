@@ -3,9 +3,10 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 28/02/2023
 """
-from usbmd.scan import Scan
-from usbmd.registry import dataset_registry, probe_registry
 from usbmd.probes import get_probe
+from usbmd.registry import dataset_registry, probe_registry
+from usbmd.scan import Scan
+
 
 def get_probe_from_config(config):
     """

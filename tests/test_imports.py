@@ -1,9 +1,10 @@
 """ Check that all Python files in the project can be compiled, and that no import errors occur, for
 example due to missing dependencies in the requirements.txt file. """
 
+import glob
 import traceback
 from pathlib import Path
-import glob
+
 
 def check_imports_errors(directory):
     """ Check all Python files in a directory for import errors. """

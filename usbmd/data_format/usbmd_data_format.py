@@ -3,10 +3,13 @@ Functions to write and validate datasets in the USBMD format.
 """
 import logging
 from pathlib import Path
-import numpy as np
+
 import h5py
+import numpy as np
+
+from usbmd.probes import Probe, get_probe
 from usbmd.scan import Scan
-from usbmd.probes import get_probe, Probe
+
 
 def generate_example_dataset(path, add_optional_fields=False):
     """Generates an example dataset that contains all the necessary fields.
