@@ -270,7 +270,8 @@ def validate_dataset(path):
     dataset = h5py.File(path, "r")
 
     def check_key(dataset, key):
-        assert key in dataset.keys(), f"The dataset does not contain the key {key}."
+        assert key in dataset.keys(
+        ), f"The dataset does not contain the key {key}."
 
     # Validate the root group
     check_key(dataset, "data")
@@ -320,13 +321,16 @@ def validate_dataset(path):
         elif key == "aligned_data":
             logging.warning("No validation has been defined for aligned data.")
         elif key == "beamformed_data":
-            logging.warning("No validation has been defined for beamformed data.")
+            logging.warning(
+                "No validation has been defined for beamformed data.")
         elif key == "envelope_data":
-            logging.warning("No validation has been defined for envelope data.")
+            logging.warning(
+                "No validation has been defined for envelope data.")
         elif key == "image":
             logging.warning("No validation has been defined for image data.")
         elif key == "image_sc":
-            logging.warning("No validation has been defined for image_sc data.")
+            logging.warning(
+                "No validation has been defined for image_sc data.")
 
     required_scan_keys = [
         "n_ax",
@@ -353,13 +357,15 @@ def validate_dataset(path):
             ), "The probe_geometry does not have the correct shape."
 
         elif key == "t0_delays":
-            correct_shape = (dataset["scan"]["n_tx"][()], dataset["scan"]["n_el"][()])
+            correct_shape = (dataset["scan"]["n_tx"]
+                             [()], dataset["scan"]["n_el"][()])
             assert (
                 dataset["scan"][key].shape == correct_shape
             ), "The t0_delays does not have the correct shape."
 
         elif key == "tx_apodizations":
-            correct_shape = (dataset["scan"]["n_tx"][()], dataset["scan"]["n_el"][()])
+            correct_shape = (dataset["scan"]["n_tx"]
+                             [()], dataset["scan"]["n_el"][()])
             assert (
                 dataset["scan"][key].shape == correct_shape
             ), "The tx_apodizations does not have the correct shape."
@@ -429,6 +435,7 @@ def assert_unit_and_description_present(hdf5_file, _prefix=""):
             assert (
                 "description" in hdf5_file[key].attrs.keys()
             ), f"The dataset {_prefix}/{key} does not have a description attribute."
+
 
 def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
     """Loads a hdf5 file in the USBMD format and returns the data together with
@@ -520,7 +527,6 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
         fs = float(hdf5_file['scan']['sampling_frequency'][()])
         fc = float(hdf5_file['scan']['center_frequency'][()])
 
-
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
 
@@ -543,8 +549,6 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
         polar_angles = hdf5_file['scan']['polar_angles'][transmits]
         azimuth_angles = hdf5_file['scan']['azimuth_angles'][transmits]
         focus_distances = hdf5_file['scan']['focus_distances'][transmits]
-
-
 
         # Initialize the scan object
         scan = Scan(
