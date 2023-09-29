@@ -11,6 +11,7 @@ import numpy as np
 
 class ReadH5:
     """Read H5 files object class"""
+
     def __init__(self, file_path):
         """Open a .h5 file for reading.
 
@@ -19,7 +20,7 @@ class ReadH5:
 
         """
         self.file_path = Path(file_path)
-        self.h5f = h5py.File(self.file_path, 'r')
+        self.h5f = h5py.File(self.file_path, "r")
 
     def get_extension(self):
         """Get file extension
@@ -60,7 +61,7 @@ class ReadH5:
                 else:
                     output = sub_group[i]
             else:
-                raise ValueError(f'{type(group)}')
+                raise ValueError(f"{type(group)}")
             alist.append(output)
         return alist
 
@@ -80,7 +81,7 @@ class ReadH5:
 
     @staticmethod
     def _visit_func(_, node):
-        print(f'{node.name}: ')
+        print(f"{node.name}: ")
 
     @staticmethod
     def frame_as_first(frames):
@@ -110,6 +111,7 @@ class ReadH5:
 
         """
         group_info = []
+
         def visit_func(name, node):
             if isinstance(node, h5py.Dataset):
                 n_elements = np.prod(np.array(node.shape, dtype=np.float64))
@@ -138,8 +140,10 @@ class ReadH5:
         """
         self.h5f.close()
 
+
 def recursively_load_dict_contents_from_group(
-    h5file: h5py._hl.files.File, path: str, squeeze=True) -> dict:
+    h5file: h5py._hl.files.File, path: str, squeeze=True
+) -> dict:
     """Load dict from contents of group"""
     ans = {}
     for key, item in h5file[path].items():
@@ -151,5 +155,7 @@ def recursively_load_dict_contents_from_group(
             else:
                 ans[key] = item[()]
         elif isinstance(item, h5py._hl.group.Group):
-            ans[key] = recursively_load_dict_contents_from_group(h5file, path + key + '/')
+            ans[key] = recursively_load_dict_contents_from_group(
+                h5file, path + key + "/"
+            )
     return ans
