@@ -395,15 +395,11 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
         # Assert that all frames are integers
         assert all(isinstance(frame, int) for frame in frames), \
             'All frames must be integers.'
-    else:
-        frames = np.arange(len(frames), dtype=np.int)
 
     if transmits is not None:
         # Assert that all frames are integers
         assert all(isinstance(tx, int) for tx in transmits), \
             'All transmits must be integers.'
-    else:
-        transmits = np.arange(len(transmits), dtype=np.int)
 
     assert data_type in ('raw_data', 'aligned_data', 'beamformed_data',
                          'envelope_data', 'image', 'image_sc'), \
@@ -439,10 +435,19 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
                             )
 
         # Define the scan
+        n_frames = int(hdf5_file['scan']['n_frames'][()])
         n_ax = int(hdf5_file['scan']['n_ax'][()])
+        n_tx = int(hdf5_file['scan']['n_tx'][()])
         c = float(hdf5_file['scan']['sound_speed'][()])
         fs = float(hdf5_file['scan']['sampling_frequency'][()])
         fc = float(hdf5_file['scan']['center_frequency'][()])
+
+
+        if frames is None:
+            frames = np.arange(n_frames, dtype=np.int32)
+
+        if transmits is None:
+            transmits = np.arange(n_tx, dtype=np.int32)
 
         # Compute the depth of the scan from the number of axial samples
         depth = n_ax / fs * c / 2
@@ -452,7 +457,8 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
         x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
         z0, z1 = 0, depth
 
-        n_tx = len(transmits)
+        if transmits is not None:
+            n_tx = len(transmits)
         initial_times = hdf5_file['scan']['initial_times'][transmits]
         tx_apodizations = hdf5_file['scan']['tx_apodizations'][transmits]
         t0_delays = hdf5_file['scan']['t0_delays'][transmits]
