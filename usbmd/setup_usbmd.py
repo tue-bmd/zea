@@ -1,4 +1,11 @@
-"""module summary
+"""This module contains setup functions for usbmd. In general
+these setup funcs group together several functions that are often
+used together for ease of use.
+
+setup_config: Setup function for config. Retrieves config file and checks for validity.
+setup (TBA): General setup function for usbmd. Runs setup_config, sets data paths and
+    initializes gpu if available.
+
 Author(s): Tristan Stevens
 Date: 25/09/2023
 """
