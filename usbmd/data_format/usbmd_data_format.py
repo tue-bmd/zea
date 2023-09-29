@@ -131,7 +131,7 @@ def generate_usbmd_dataset(
 
     # Write scan group
     scan_group = dataset.create_group("scan")
-    scan_group.attrs["description"] = "This group contains the scan " "parameters."
+    scan_group.attrs["description"] = "This group contains the scan " + "parameters."
 
     add_dataset(
         group=scan_group,

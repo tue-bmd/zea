@@ -127,7 +127,7 @@ class USBMDApp(App):
 
     def set(self):
         super().set()
-        # pylint: disable=unnecessary-dunder-call
+        # pylint: disable=bad-option-value, unnecessary-dunder-call
         self.ui.__init__(self.data)
 
     def run(self):
