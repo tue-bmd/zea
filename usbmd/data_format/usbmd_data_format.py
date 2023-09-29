@@ -231,7 +231,7 @@ def generate_usbmd_dataset(
             name="focus_distances",
             data=focus_distances,
             description="The transmit focus distances in meters of "
-            "shape (n_tx,). For planewaves this is set to 0.",
+            "shape (n_tx,). For planewaves this is set to Inf.",
             unit="m",
         )
 
