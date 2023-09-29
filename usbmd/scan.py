@@ -339,7 +339,6 @@ class CircularWaveScan(Scan):
         downsample=1,
         focus=None,
     ):
-
         super().__init__(
             N_tx=N_tx,
             xlims=xlims,

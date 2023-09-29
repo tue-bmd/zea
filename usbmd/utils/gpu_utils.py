@@ -14,7 +14,7 @@ def check_nvidia_smi():
 
 
 def get_gpu_memory(verbose=True):
-    """ Retrieve memory allocation information of all gpus.
+    """Retrieve memory allocation information of all gpus.
 
     Args:
         verbose (bool): prints output if True.
@@ -63,7 +63,7 @@ def get_gpu_memory(verbose=True):
 def select_gpus(
     available_gpu_ids, memory_free, device=None, verbose=True, hide_others=True
 ):
-    """ Select GPU based on the device argument and available GPU's. This
+    """Select GPU based on the device argument and available GPU's. This
     function does not rely on pytorch or tensorflow, and is shared between both
     frameworks.
 

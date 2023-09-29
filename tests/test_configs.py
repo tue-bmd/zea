@@ -124,9 +124,7 @@ def test_yaml_saving_loading(request, dictionary):
         # Check if the config is the same
         config_check_equal_recursive(config, config2)
     except AssertionError as exc:
-        raise AssertionError(
-            "Config is not the same after saving and loading"
-        ) from exc
+        raise AssertionError("Config is not the same after saving and loading") from exc
 
 
 @pytest.mark.parametrize("dictionary", config_initializers)

@@ -43,7 +43,6 @@ class RegisterDecorator:
     """
 
     def __init__(self, items_to_register=None):
-
         # The registry is a dictionary mapping names to classes
         self.registry = {}
 

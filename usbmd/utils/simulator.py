@@ -111,7 +111,6 @@ class UltrasoundSimulator:
         inp = []
         tar = []
         for i in range(self.batch_size):
-
             # Get positions of point scatterers
             if isinstance(points, list):
                 scatterers = len(points[i])
