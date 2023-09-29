@@ -19,6 +19,7 @@ from usbmd.utils.simulator import UltrasoundSimulator
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
+
 def test_das_beamforming(debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
@@ -31,20 +32,24 @@ def test_das_beamforming(debug=False, compare_gt=True):
         numpy array: beamformed output
     """
 
-    config = load_config_from_yaml(r'./tests/config_test.yaml')
-    config.ml_library = 'tensorflow'
+    config = load_config_from_yaml(r"./tests/config_test.yaml")
+    config.ml_library = "tensorflow"
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
-    scan = PlaneWaveScan(N_tx=1,
-                         xlims=(-19e-3, 19e-3),
-                         zlims=(0, 63e-3),
-                         N_ax=2046,
-                         fs=probe_parameters['fs'],
-                         fc=probe_parameters['fc'],
-                         angles=np.array([0,]))
+    scan = PlaneWaveScan(
+        N_tx=1,
+        xlims=(-19e-3, 19e-3),
+        zlims=(0, 63e-3),
+        N_ax=2046,
+        fs=probe_parameters["fs"],
+        fc=probe_parameters["fc"],
+        angles=np.array([0,]),
+    )
 
-    scan.grid = cartesian_pixel_grid(scan.xlims, scan.zlims, dx=scan.wvln/4, dz=scan.wvln/4)
+    scan.grid = cartesian_pixel_grid(
+        scan.xlims, scan.zlims, dx=scan.wvln / 4, dz=scan.wvln / 4
+    )
     simulator = UltrasoundSimulator(probe, scan)
     beamformer = get_beamformer(probe, scan, config)
 
@@ -55,32 +60,34 @@ def test_das_beamforming(debug=False, compare_gt=True):
     # Generate pseudorandom input tensor
     data = simulator.generate(200)
 
-    inputs = np.expand_dims(data[0], axis=(1,-1))
-    inputs = np.transpose(inputs, axes=(0,1,3,2,4))
+    inputs = np.expand_dims(data[0], axis=(1, -1))
+    inputs = np.transpose(inputs, axes=(0, 1, 3, 2, 4))
 
     # Perform beamforming and convert to numpy array
     outputs = beamformer(inputs)
 
     # plot results
     if debug:
-        fig, axs = plt.subplots(1,3)
-        aspect_ratio = (data[1].shape[1]/data[1].shape[2])/(data[0].shape[1]/data[0].shape[2])
+        fig, axs = plt.subplots(1, 3)
+        aspect_ratio = (data[1].shape[1] / data[1].shape[2]) / (
+            data[0].shape[1] / data[0].shape[2]
+        )
         axs[0].imshow(np.abs(inputs.squeeze().T), aspect=aspect_ratio)
-        axs[0].set_title('RF data')
+        axs[0].set_title("RF data")
         axs[1].imshow(np.squeeze(outputs))
-        axs[1].set_title('Beamformed')
-        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT))
-        axs[2].set_title('Ground Truth')
+        axs[1].set_title("Beamformed")
+        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
+        axs[2].set_title("Ground Truth")
         fig.show()
 
-    y_true = cv2.GaussianBlur(data[1].squeeze(), (5,5), cv2.BORDER_DEFAULT)
+    y_true = cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT)
     y_pred = np.squeeze(outputs)
 
-    y_true = y_true/y_true.max()
-    y_pred = y_pred/y_pred.max()
+    y_true = y_true / y_true.max()
+    y_pred = y_pred / y_pred.max()
 
-    MSE = np.mean(np.square(y_true-y_pred))
-    print(f'MSE: {MSE}')
+    MSE = np.mean(np.square(y_true - y_pred))
+    print(f"MSE: {MSE}")
 
     if compare_gt:
         assert MSE < 0.01
@@ -88,5 +95,5 @@ def test_das_beamforming(debug=False, compare_gt=True):
         return y_pred
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_das_beamforming(debug=True)

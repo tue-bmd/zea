@@ -20,22 +20,20 @@ from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 set_gpu_usage(device=0)
 
 # # choose config file
-path_to_config_file = Path.cwd() / 'configs/config_picmus.yaml'
+path_to_config_file = Path.cwd() / "configs/config_picmus.yaml"
 config = setup_config(path_to_config_file)
 
 # generate image dataset from raw data
-destination_folder = Path.cwd() / 'lista_test'
+destination_folder = Path.cwd() / "lista_test"
 try:
     gen = GenerateDataSet(
-        config,
-        destination_folder=destination_folder,
-        retain_folder_structure=False,
+        config, destination_folder=destination_folder, retain_folder_structure=False,
     )
     gen.generate()
 except ValueError:
-    print(f'Dataset already exists in {destination_folder}')
+    print(f"Dataset already exists in {destination_folder}")
 
-RUN_EAGERLY = False # for debugging set to true
+RUN_EAGERLY = False  # for debugging set to true
 image_shape = (1249, 387)
 epochs = 100
 learning_rate = 0.001
@@ -55,12 +53,12 @@ image = np.squeeze(batch[0])
 
 # plot image
 plt.figure()
-plt.imshow(image, cmap='gray')
+plt.imshow(image, cmap="gray")
 
-model = lista.UnfoldingModel(image_shape, activation='relu')
+model = lista.UnfoldingModel(image_shape, activation="relu")
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-    loss='mse',
+    loss="mse",
     run_eagerly=RUN_EAGERLY,
 )
 
@@ -73,11 +71,11 @@ if len(dataloader) < 10:
     for i, batch in enumerate(dataloader):
         X, Y = batch
         out = np.squeeze(model(X))
-        axs[i, 0].imshow(np.squeeze(Y), cmap='gray')
-        axs[i, 1].imshow(out, cmap='gray')
+        axs[i, 0].imshow(np.squeeze(Y), cmap="gray")
+        axs[i, 1].imshow(out, cmap="gray")
 
 for ax in axs.ravel():
-    ax.axis('off')
+    ax.axis("off")
 
 fig.tight_layout()
 

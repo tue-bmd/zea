@@ -3,8 +3,10 @@
 import os
 from pathlib import Path
 
-from usbmd.data_format.usbmd_data_format import (generate_example_dataset,
-                                                 validate_dataset)
+from usbmd.data_format.usbmd_data_format import (
+    generate_example_dataset,
+    validate_dataset,
+)
 
 
 def test_example_dataset():
@@ -12,7 +14,7 @@ def test_example_dataset():
     validating it using the validate_dataset function.
     """
     # Define path to store the example dataset
-    path = Path('temp', 'test_case_dataset.hdf5')
+    path = Path("temp", "test_case_dataset.hdf5")
 
     # Create the directory if it does not exist
     path.parent.mkdir(parents=True, exist_ok=True)

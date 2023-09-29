@@ -9,10 +9,18 @@ import torch
 
 from usbmd import processing
 from usbmd.probes import get_probe
-from usbmd.processing import (channels_to_complex, complex_to_channels,
-                              demodulate, downsample, normalize,
-                              project_to_cartesian_grid, scan_convert, to_8bit,
-                              to_image, upmix)
+from usbmd.processing import (
+    channels_to_complex,
+    complex_to_channels,
+    demodulate,
+    downsample,
+    normalize,
+    project_to_cartesian_grid,
+    scan_convert,
+    to_8bit,
+    to_image,
+    upmix,
+)
 from usbmd.pytorch_ultrasound import processing as processing_torch
 from usbmd.scan import PlaneWaveScan
 from usbmd.tensorflow_ultrasound import processing as processing_tf
@@ -26,6 +34,7 @@ def set_random_seed(seed=None):
     random.seed(seed)
     torch.random.manual_seed(seed)
     return seed
+
 
 def equality_libs_processing(test_func):
     """Test the processing functions of different libraries
@@ -83,19 +92,28 @@ def equality_libs_processing(test_func):
         # Check if the outputs from the individual test functions are equal
         if tf_output is not None:
             np.testing.assert_almost_equal(
-                original_output, tf_output, decimal=6,
-                err_msg=f'Function {func_name} failed with tensorflow processing.')
-            print(f'Function {func_name} passed with tensorflow output.')
+                original_output,
+                tf_output,
+                decimal=6,
+                err_msg=f"Function {func_name} failed with tensorflow processing.",
+            )
+            print(f"Function {func_name} passed with tensorflow output.")
         if torch_output is not None:
             np.testing.assert_almost_equal(
-                original_output, torch_output, decimal=6,
-                err_msg=f'Function {func_name} failed with pytorch processing.')
-            print(f'Function {func_name} passed with pytorch output.')
+                original_output,
+                torch_output,
+                decimal=6,
+                err_msg=f"Function {func_name} failed with pytorch processing.",
+            )
+            print(f"Function {func_name} passed with pytorch output.")
         if tf_output is not None and torch_output is not None:
             np.testing.assert_almost_equal(
-                tf_output, torch_output, decimal=6,
-                err_msg=f'Function {func_name} failed, tensorflow ' \
-                         'and pytorch output not the same.')
+                tf_output,
+                torch_output,
+                decimal=6,
+                err_msg=f"Function {func_name} failed, tensorflow "
+                "and pytorch output not the same.",
+            )
 
         # Reset the processing function to the original implementation
         setattr(processing, func_name, original_processing_func)
@@ -103,43 +121,48 @@ def equality_libs_processing(test_func):
     return decorator.decorator(wrapper, test_func)
 
 
-@pytest.mark.parametrize('comp_type, size', [
-    ('a', (2, 1, 128, 32)),
-    ('a', (512, 512)),
-    ('mu', (2, 1, 128, 32)),
-    ('mu', (512, 512)),
-])
+@pytest.mark.parametrize(
+    "comp_type, size",
+    [
+        ("a", (2, 1, 128, 32)),
+        ("a", (512, 512)),
+        ("mu", (2, 1, 128, 32)),
+        ("mu", (512, 512)),
+    ],
+)
 @equality_libs_processing
 def test_companding(comp_type, size):
     """Test companding function"""
-    signal = np.clip((np.random.random(size) - 0.5) *2, -1, 1)
+    signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
     signal = signal.astype(np.float32)
 
     signal_out = processing.companding(signal, expand=False, comp_type=comp_type)
-    assert np.any(np.not_equal(signal, signal_out)), \
-        'Companding failed, arrays should not be equal'
+    assert np.any(
+        np.not_equal(signal, signal_out)
+    ), "Companding failed, arrays should not be equal"
     signal_out = processing.companding(signal_out, expand=True, comp_type=comp_type)
 
     np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
 
-@pytest.mark.parametrize('size, dynamic_range, input_range', [
-    ((2, 1, 128, 32), (-30, -5), None),
-    ((512, 512), None, (0, 1)),
-    ((1, 128, 32), None, None),
-])
+
+@pytest.mark.parametrize(
+    "size, dynamic_range, input_range",
+    [
+        ((2, 1, 128, 32), (-30, -5), None),
+        ((512, 512), None, (0, 1)),
+        ((1, 128, 32), None, None),
+    ],
+)
 def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
     data = np.random.random(size)
     _data = to_image(data, dynamic_range, input_range)
     _data = to_8bit(data, dynamic_range)
-    assert _data.dtype == 'uint8'
+    assert _data.dtype == "uint8"
 
-@pytest.mark.parametrize('size', [
-    (2, 1, 128, 32),
-    (512, 512),
-    (1, 128, 32),
-])
+
+@pytest.mark.parametrize("size", [(2, 1, 128, 32), (512, 512), (1, 128, 32),])
 def test_scan_conversion(size):
     """Tests the scan_conversion function with random data"""
     data = np.random.random(size)
@@ -147,10 +170,8 @@ def test_scan_conversion(size):
     z_axis = np.linspace(0, 100, 2000)
     scan_convert(data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0)
 
-@pytest.mark.parametrize('size', [
-    (128, 32),
-    (512, 512),
-])
+
+@pytest.mark.parametrize("size", [(128, 32), (512, 512),])
 def test_grid_conversion(size):
     """Tests the grid conversion function with random 2d data"""
     data = np.random.random(size)
@@ -182,11 +203,15 @@ def test_grid_conversion(size):
     # such that it can be inverted
     # np.testing.assert_almost_equal(data, _data)
 
-@pytest.mark.parametrize('size, output_range, input_range', [
-    ((2, 1, 128, 32), (-30, -5), (0, 1)),
-    ((512, 512), (-2, -1), (-3, 50)),
-    ((1, 128, 32), (50, 51), (-2.2, 3.0)),
-])
+
+@pytest.mark.parametrize(
+    "size, output_range, input_range",
+    [
+        ((2, 1, 128, 32), (-30, -5), (0, 1)),
+        ((512, 512), (-2, -1), (-3, 50)),
+        ((1, 128, 32), (50, 51), (-2.2, 3.0)),
+    ],
+)
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
     data = np.random.random(size)
@@ -197,11 +222,10 @@ def test_normalize(size, output_range, input_range):
     _ = normalize(data)
     np.testing.assert_almost_equal(data, _data)
 
-@pytest.mark.parametrize('size, axis', [
-    ((2, 1, 128, 32), (2)),
-    ((512, 512), (-1)),
-    ((1, 128, 32), (0)),
-])
+
+@pytest.mark.parametrize(
+    "size, axis", [((2, 1, 128, 32), (2)), ((512, 512), (-1)), ((1, 128, 32), (0)),]
+)
 def test_complex_to_channels(size, axis):
     """Test complex to channels and back"""
     data = np.random.random(size) + 1j * np.random.random(size)
@@ -210,11 +234,11 @@ def test_complex_to_channels(size, axis):
     np.testing.assert_almost_equal(data, __data)
     return _data
 
-@pytest.mark.parametrize('size, axis', [
-    ((222, 1, 2, 32), (2)),
-    ((512, 512, 2), (-1)),
-    ((2, 1, 128, 32), (0)),
-])
+
+@pytest.mark.parametrize(
+    "size, axis",
+    [((222, 1, 2, 32), (2)), ((512, 512, 2), (-1)), ((2, 1, 128, 32), (0)),],
+)
 @equality_libs_processing
 def test_channels_to_complex(size, axis):
     """Test channels to complex and back"""
@@ -224,15 +248,14 @@ def test_channels_to_complex(size, axis):
     np.testing.assert_almost_equal(data, __data)
     return _data
 
-@pytest.mark.parametrize('factor, batch_size', [
-    (1, 2), (6, 1), (2, 3),
-])
+
+@pytest.mark.parametrize("factor, batch_size", [(1, 2), (6, 1), (2, 3),])
 def test_up_and_down_conversion(factor, batch_size):
     """Test rf2iq and iq2rf in sequence"""
-    probe = get_probe('verasonics_l11_4v')
+    probe = get_probe("verasonics_l11_4v")
     probe_parameters = probe.get_default_scan_parameters()
-    fs = probe_parameters['fs']
-    fc = probe_parameters['fc']
+    fs = probe_parameters["fs"]
+    fc = probe_parameters["fc"]
     scan = PlaneWaveScan(
         N_tx=1,
         xlims=(-19e-3, 19e-3),
@@ -240,7 +263,8 @@ def test_up_and_down_conversion(factor, batch_size):
         N_ax=2048,
         fs=fs,
         fc=fc,
-        angles=np.array([0,]))
+        angles=np.array([0,]),
+    )
 
     simulator = UltrasoundSimulator(probe, scan, batch_size=batch_size)
 

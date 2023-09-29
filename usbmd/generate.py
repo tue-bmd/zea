@@ -25,14 +25,15 @@ from usbmd.utils.utils import update_dictionary
 
 class GenerateDataSet:
     """Class for generating and saving ultrasound dataset to disk."""
+
     def __init__(
         self,
         config,
-        to_dtype: str='image',
-        destination_folder: str=None,
-        retain_folder_structure: bool=True,
-        filetype: str='hdf5',
-        overwrite: bool=False,
+        to_dtype: str = "image",
+        destination_folder: str = None,
+        retain_folder_structure: bool = True,
+        filetype: str = "hdf5",
+        overwrite: bool = False,
     ):
         """
         Args:
@@ -51,17 +52,19 @@ class GenerateDataSet:
         """
         self.config = Config(config)
         self.to_dtype = to_dtype
-        assert self.to_dtype in _DATA_TYPES, \
-            ValueError(f'Unsupported dtype: {self.to_dtype}.')
+        assert self.to_dtype in _DATA_TYPES, ValueError(
+            f"Unsupported dtype: {self.to_dtype}."
+        )
         self.retain_folder_structure = retain_folder_structure
         self.filetype = filetype
-        assert self.filetype in ['hdf5', 'png'], \
-            ValueError(f'Unsupported filteype: {self.filetype}.')
+        assert self.filetype in ["hdf5", "png"], ValueError(
+            f"Unsupported filteype: {self.filetype}."
+        )
 
-        if self.to_dtype not in ['image', 'image_sc'] and self.filetype == 'png':
+        if self.to_dtype not in ["image", "image_sc"] and self.filetype == "png":
             raise ValueError(
-                'Cannot save to png if to_dtype is not image. '
-                'Please set filetype to hdf5.'
+                "Cannot save to png if to_dtype is not image. "
+                "Please set filetype to hdf5."
             )
 
         # intialize dataset
@@ -83,20 +86,24 @@ class GenerateDataSet:
         self.process = Process(config, self.scan, self.probe)
 
         if self.dataset.datafolder is None:
-            self.dataset.datafolder = Path('.')
+            self.dataset.datafolder = Path(".")
 
         if destination_folder is None:
-            self.destination_folder = self.dataset.datafolder.parent / \
-                f'{self.dataset.config.dataset_name}_image'
+            self.destination_folder = (
+                self.dataset.datafolder.parent
+                / f"{self.dataset.config.dataset_name}_image"
+            )
         else:
             self.destination_folder = Path(destination_folder)
             if not self.destination_folder.is_absolute():
-                self.destination_folder = self.dataset.datafolder.parent / self.destination_folder
+                self.destination_folder = (
+                    self.dataset.datafolder.parent / self.destination_folder
+                )
 
         if self.destination_folder.exists():
             if not overwrite:
                 raise ValueError(
-                    f'Cannot create dataset in {self.destination_folder}, folder already exists!'
+                    f"Cannot create dataset in {self.destination_folder}, folder already exists!"
                 )
 
     def generate(self):
@@ -111,7 +118,7 @@ class GenerateDataSet:
         """
         for idx in tqdm.tqdm(
             range(len(self.dataset)),
-            desc=f'Generating dataset ({self.to_dtype}, {self.filetype})',
+            desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
         ):
             data = self.dataset[idx]
 
@@ -122,7 +129,7 @@ class GenerateDataSet:
                 data = np.squeeze(data, axis=-1)
 
             single_frame = False
-            if self.config.data.dtype in ['raw_data', 'aligned_data']:
+            if self.config.data.dtype in ["raw_data", "aligned_data"]:
                 if len(data.shape) == 3:
                     single_frame = True
             else:
@@ -134,29 +141,30 @@ class GenerateDataSet:
 
             base_name = self.dataset.file_paths[idx]
 
-            if self.filetype == 'png':
+            if self.filetype == "png":
                 for i, image in enumerate(data):
                     if single_frame:
                         name = base_name
                     else:
                         name = base_name.parent / str(i)
 
+                    path = self.get_path_from_name(name, ".png")
 
-                    path = self.get_path_from_name(name, '.png')
-
-                    image = self.process.run(image, self.config.data.dtype, self.to_dtype)
+                    image = self.process.run(
+                        image, self.config.data.dtype, self.to_dtype
+                    )
                     self.save_image(image, path)
 
-            elif self.filetype == 'hdf5':
+            elif self.filetype == "hdf5":
                 data_list = []
                 for d in data:
                     d = self.process.run(d, self.config.data.dtype, self.to_dtype)
                     data_list.append(d)
                 data = np.stack(data_list, axis=0)
-                path = self.get_path_from_name(base_name, '.hdf5')
+                path = self.get_path_from_name(base_name, ".hdf5")
                 self.save_data(data, path)
 
-        print(f'Succesfully created dataset in {self.destination_folder}')
+        print(f"Succesfully created dataset in {self.destination_folder}")
         return True
 
     def get_path_from_name(self, name, suffix):
@@ -190,5 +198,5 @@ class GenerateDataSet:
             image (ndarray): input data
             path (str): file path
         """
-        with h5py.File(path, 'w') as h5file:
-            h5file[f'data/{self.to_dtype}'] = data
+        with h5py.File(path, "w") as h5file:
+            h5file[f"data/{self.to_dtype}"] = data
