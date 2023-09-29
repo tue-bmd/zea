@@ -24,7 +24,7 @@ python -m pip install -e .
 
 #### usbmd import
 After installation, you can use the package as follows in your own project:
-```Python
+```python
 # import usbmd package
 import usbmd
 # or if you want to use the Tensorflow tools
@@ -45,8 +45,7 @@ If you make your own config, make sure it can be validated using the [config val
 ## Data
 
 #### Data paths
-In order to use this repository and point to the correct data paths, you can enter the location of your dataroot in the [`common.py`](common.html) file. It is possible to add multiple devices / platforms per user by means of if statements.
-The default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS.
+In order to use this repository and point to the correct data paths, you'll need to create a user profile. We have a script to guide you through the setup and create your userprofile; start by running `python usbmd/common.py` (see [`common.py`](common.html)). When you run this script, you will be prompted to provide a path to your data directory -- the default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS. Your user profile will then be created at `users.yaml`. Once it's created, you edit your profile to add multiple devices or data paths -- see the current `users.yaml` file for examples of this.
 
 #### Datastructure
 This repository can support custom datastructures by implementing your own [Dataset](datasets.html) class, but the preferred way makes use of the `.hdf5` file format. For more information on dataset format, see [usbmd/data_format/README.md](data_format/index.html). The datasets are structured as follows:
