@@ -28,17 +28,18 @@ def generate_example_dataset(path, add_optional_fields=False):
     n_ch = 1
     n_frames = 2
 
-    raw_data = np.zeros((n_frames, n_tx, n_el, n_ax, n_ch))
+    raw_data = np.ones((n_frames, n_tx, n_el, n_ax, n_ch))
 
-    t0_delays = np.zeros((n_tx, n_el))
-    tx_apodizations = np.zeros((n_tx, n_el))
-    probe_geometry = np.zeros((n_el, 3))
+    t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
+    tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+    probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
 
     if add_optional_fields:
-        focus_distances = np.zeros((n_tx,))
-        tx_apodizations = np.zeros((n_tx, n_el))
-        polar_angles = np.zeros((n_tx,))
-        azimuth_angles = np.zeros((n_tx,))
+        focus_distances = np.zeros((n_tx,), dtype=np.float32)
+        tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
+        polar_angles = np.zeros((n_tx,), dtype=np.float32)
+        azimuth_angles = np.zeros((n_tx,), dtype=np.float32)
     else:
         focus_distances = None
         tx_apodizations = None
@@ -427,10 +428,10 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
                             )
 
         # Define the scan
-        n_ax = int(hdf5_file['scan']['n_ax'][0])
-        c = hdf5_file['scan']['sound_speed'][0]
-        fs = hdf5_file['scan']['sampling_frequency'][0]
-        fc = hdf5_file['scan']['center_frequency'][0]
+        n_ax = int(hdf5_file['scan']['n_ax'][()])
+        c = hdf5_file['scan']['sound_speed'][()]
+        fs = hdf5_file['scan']['sampling_frequency'][()]
+        fc = hdf5_file['scan']['center_frequency'][()]
 
         # Compute the depth of the scan from the number of axial samples
         depth = n_ax / fs * c / 2
@@ -442,7 +443,7 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
 
         # Initialize the scan object
         scan = Scan(
-            N_tx=int(hdf5_file['scan']['n_tx'][0]),
+            N_tx=int(hdf5_file['scan']['n_tx'][()]),
             xlims=(x0, x1),
             zlims=(z0, z1),
             fc=fc,
@@ -450,6 +451,10 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
             initial_times=hdf5_file['scan']['initial_times'][:],
             N_ax=n_ax,
             c=c,
+            polar_angles=hdf5_file['scan']['polar_angles'][:],
+            azimuth_angles=hdf5_file['scan']['azimuth_angles'][:],
+            focus_distances=hdf5_file['scan']['focus_distances'][:],
+            t0_delays=hdf5_file['scan']['t0_delays'][:],
         )
 
         # Load the desired frames from the file
