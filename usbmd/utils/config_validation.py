@@ -95,7 +95,12 @@ preprocess_schema = Schema(
 postprocess_schema = Schema(
     {
         Optional("contrast_boost", default=None): Or(
-            None, {"k_p": float, "k_n": float, "threshold": float,}
+            None,
+            {
+                "k_p": float,
+                "k_n": float,
+                "threshold": float,
+            },
         ),
         Optional("thresholding", default=None): Or(
             None,

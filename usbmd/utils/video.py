@@ -16,7 +16,7 @@ class FPS_counter:
     """An FPS counter class that overlays a frames-per-second count on an image stream"""
 
     def __init__(self, buffer_size=5):
-        """ Initialize FPS counter
+        """Initialize FPS counter
 
         Args:
             buffer_size (int, optional): Size of the MA window (in frames). Defaults to 30.
@@ -66,10 +66,9 @@ class ScanConverter:
         env_mode="abs",
         img_buffer_size=30,
         max_buffer_size=10,
-        norm_factor=2 ** 14,
+        norm_factor=2**14,
         dtype="iq",
     ):
-
         """Initialize scan converter
 
         Args:

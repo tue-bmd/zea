@@ -42,10 +42,10 @@ def test_probe_attributes(probe_name):
     probe = get_probe(probe_name)
 
     assert isinstance(probe.ele_pos, np.ndarray), (
-        "Element positions must be" " a numpy array"
+        "Element positions must be a numpy array"
     )
     assert probe.ele_pos.shape == (probe.N_el, 3), (
-        "Element positions must be" " of shape (N_el, 3)"
+        "Element positions must be of shape (N_el, 3)"
     )
     # assert probe.bandwidth is not None, 'Probe must have a bandwidth'
     assert probe.probe_type in ("linear", "phased"), (

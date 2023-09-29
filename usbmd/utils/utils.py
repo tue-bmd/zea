@@ -18,7 +18,7 @@ from PIL import Image
 
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
-    """ Get filename through dialog window
+    """Get filename through dialog window
     Args:
         window_name: string with name of window
         filetypes: tuple of tuples containing (name, filetypes)
@@ -44,7 +44,10 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     root.withdraw()
     # show an "Open" dialog box and return the path to the selected file
     filename = askopenfilename(
-        parent=root, title=window_name, filetypes=filetypes, initialdir=initialdir,
+        parent=root,
+        title=window_name,
+        filetypes=filetypes,
+        initialdir=initialdir,
     )
     # check whether a file was selected
     if filename:
@@ -54,7 +57,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
 
 
 def translate(array, range_from, range_to):
-    """ Map values in array from one range to other.
+    """Map values in array from one range to other.
 
     Args:
         array (ndarray): input array.
@@ -202,7 +205,7 @@ def strtobool(val: str):
 
 
 def save_to_gif(images, filename, fps=20):
-    """ Saves a sequence of images to .gif file.
+    """Saves a sequence of images to .gif file.
     Args:
         images: list of images (numpy arrays).
         filename: string containing filename to which data should be written.

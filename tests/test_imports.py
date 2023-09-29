@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def check_imports_errors(directory):
-    """ Check all Python files in a directory for import errors. """
+    """Check all Python files in a directory for import errors."""
     python_files = glob.glob(f"{directory}/**/*.py", recursive=True)
 
     for python_file in python_files:

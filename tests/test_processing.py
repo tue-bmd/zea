@@ -28,7 +28,7 @@ from usbmd.utils.simulator import UltrasoundSimulator
 
 
 def set_random_seed(seed=None):
-    """ Set random seed to all random generators. """
+    """Set random seed to all random generators."""
     np.random.seed(seed)
     tf.random.set_seed(seed)
     random.seed(seed)
@@ -58,6 +58,7 @@ def equality_libs_processing(test_func):
             - my_processing_func_tf
             - test_my_processing_func
     """
+
     # @functools.wraps(test_func)
     def wrapper(test_func, *args, **kwargs):
         # Set random seed
@@ -162,7 +163,14 @@ def test_converting_to_image(size, dynamic_range, input_range):
     assert _data.dtype == "uint8"
 
 
-@pytest.mark.parametrize("size", [(2, 1, 128, 32), (512, 512), (1, 128, 32),])
+@pytest.mark.parametrize(
+    "size",
+    [
+        (2, 1, 128, 32),
+        (512, 512),
+        (1, 128, 32),
+    ],
+)
 def test_scan_conversion(size):
     """Tests the scan_conversion function with random data"""
     data = np.random.random(size)
@@ -171,7 +179,13 @@ def test_scan_conversion(size):
     scan_convert(data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0)
 
 
-@pytest.mark.parametrize("size", [(128, 32), (512, 512),])
+@pytest.mark.parametrize(
+    "size",
+    [
+        (128, 32),
+        (512, 512),
+    ],
+)
 def test_grid_conversion(size):
     """Tests the grid conversion function with random 2d data"""
     data = np.random.random(size)
@@ -224,7 +238,12 @@ def test_normalize(size, output_range, input_range):
 
 
 @pytest.mark.parametrize(
-    "size, axis", [((2, 1, 128, 32), (2)), ((512, 512), (-1)), ((1, 128, 32), (0)),]
+    "size, axis",
+    [
+        ((2, 1, 128, 32), (2)),
+        ((512, 512), (-1)),
+        ((1, 128, 32), (0)),
+    ],
 )
 def test_complex_to_channels(size, axis):
     """Test complex to channels and back"""
@@ -237,7 +256,11 @@ def test_complex_to_channels(size, axis):
 
 @pytest.mark.parametrize(
     "size, axis",
-    [((222, 1, 2, 32), (2)), ((512, 512, 2), (-1)), ((2, 1, 128, 32), (0)),],
+    [
+        ((222, 1, 2, 32), (2)),
+        ((512, 512, 2), (-1)),
+        ((2, 1, 128, 32), (0)),
+    ],
 )
 @equality_libs_processing
 def test_channels_to_complex(size, axis):
@@ -249,7 +272,14 @@ def test_channels_to_complex(size, axis):
     return _data
 
 
-@pytest.mark.parametrize("factor, batch_size", [(1, 2), (6, 1), (2, 3),])
+@pytest.mark.parametrize(
+    "factor, batch_size",
+    [
+        (1, 2),
+        (6, 1),
+        (2, 3),
+    ],
+)
 def test_up_and_down_conversion(factor, batch_size):
     """Test rf2iq and iq2rf in sequence"""
     probe = get_probe("verasonics_l11_4v")
@@ -263,7 +293,11 @@ def test_up_and_down_conversion(factor, batch_size):
         N_ax=2048,
         fs=fs,
         fc=fc,
-        angles=np.array([0,]),
+        angles=np.array(
+            [
+                0,
+            ]
+        ),
     )
 
     simulator = UltrasoundSimulator(probe, scan, batch_size=batch_size)

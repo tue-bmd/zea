@@ -27,7 +27,9 @@ config = setup_config(path_to_config_file)
 destination_folder = Path.cwd() / "lista_test"
 try:
     gen = GenerateDataSet(
-        config, destination_folder=destination_folder, retain_folder_structure=False,
+        config,
+        destination_folder=destination_folder,
+        retain_folder_structure=False,
     )
     gen.generate()
 except ValueError:

@@ -119,7 +119,7 @@ def psnr(x, y):
 @register_metric(name="ncc")
 def ncc(x, y):
     """Normalized cross correlation"""
-    return (x * y).sum() / np.sqrt((x ** 2).sum() * (y ** 2).sum())
+    return (x * y).sum() / np.sqrt((x**2).sum() * (y**2).sum())
 
 
 @register_metric(name="image_entropy")

@@ -9,8 +9,7 @@ import sys
 
 
 def get_git_commit_hash():
-    """Gets git commit hash of current branch.
-    """
+    """Gets git commit hash of current branch."""
     return str(subprocess.check_output(["git", "rev-parse", "HEAD"]).strip(), "utf-8")
 
 

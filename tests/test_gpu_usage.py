@@ -31,7 +31,13 @@ def test_gpu_usage(device, ml_lib):
         set_gpu_usage_pytorch(device=device)
 
 
-@pytest.mark.parametrize("ml_lib", ["tensorflow", "torch",])
+@pytest.mark.parametrize(
+    "ml_lib",
+    [
+        "tensorflow",
+        "torch",
+    ],
+)
 def test_default_gpu_usage(ml_lib):
     """Test gpu usage setting script with defaults"""
     if ml_lib == "tensorflow":

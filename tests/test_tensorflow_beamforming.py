@@ -44,7 +44,11 @@ def test_das_beamforming(debug=False, compare_gt=True):
         N_ax=2046,
         fs=probe_parameters["fs"],
         fc=probe_parameters["fc"],
-        angles=np.array([0,]),
+        angles=np.array(
+            [
+                0,
+            ]
+        ),
     )
 
     scan.grid = cartesian_pixel_grid(

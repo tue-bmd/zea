@@ -491,7 +491,6 @@ def load_usbmd_file(path, frames=None, data_type="raw_data"):
         try:
             probe = get_probe(probe_name)
         except NotImplementedError:
-
             logging.warning(
                 "The probe %s is not implemented. Using a generic probe instead.",
                 probe_name,

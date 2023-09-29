@@ -46,7 +46,6 @@ if __name__ == "__main__":
 
     # Traverse the source directory and convert all files
     for root, dirs, files in os.walk(base_dir):
-
         for file in files:
             logging.info("Processing %s", file)
             # Select only the data files that actually contain rf or iq data
@@ -55,7 +54,6 @@ if __name__ == "__main__":
             if (
                 file.endswith("iq.hdf5") or file.endswith("rf.hdf5")
             ) and not "img" in file:
-
                 # Get the full path to the file
                 path = os.path.join(root, file)
 
