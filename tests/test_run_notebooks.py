@@ -12,7 +12,9 @@ import papermill as pm
 notebook_paths = set(Path('examples').rglob('*.ipynb'))
 
 # Specify notebook names to be removed
-notebooks_to_remove = set([])
+notebooks_to_remove = set([
+    Path('examples', 'notebooks', 'loading_usbmd_data_file.ipynb')
+])
 
 # Filter out the undesired notebook names
 notebook_paths = notebook_paths - notebooks_to_remove
