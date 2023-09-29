@@ -35,7 +35,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
         root = Tk()
     except Exception as error:
         raise ValueError(
-            "Cannot run USBMD GUI on a server, " "unless a X11 server is properly setup"
+            "Cannot run USBMD GUI on a server, unless a X11 server is properly setup"
         ) from error
 
     # open in foreground

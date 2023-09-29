@@ -125,7 +125,7 @@ def test_yaml_saving_loading(request, dictionary):
         config_check_equal_recursive(config, config2)
     except AssertionError as exc:
         raise AssertionError(
-            "Config is not the same after saving and " "loading"
+            "Config is not the same after saving and loading"
         ) from exc
 
 
@@ -157,7 +157,7 @@ def config_check_equal_recursive(config, dictionary):
             config_check_equal_recursive(value1, value2)
         else:
             assert value1 == value2, "All values must be the same"
-            assert isinstance(value1, type(value2)), "All types must be the " "same"
+            assert isinstance(value1, type(value2)), "All types must be the same"
 
 
 def test_check_equal():

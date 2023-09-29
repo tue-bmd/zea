@@ -31,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--src_dir",
         type=str,
-        help="Source directory where the original PICMUS data " "is stored.",
+        help="Source directory where the original PICMUS data is stored.",
     )
 
     parser.add_argument(
