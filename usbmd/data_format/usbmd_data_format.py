@@ -364,15 +364,17 @@ def assert_unit_and_description_present(hdf5_file, _prefix=''):
             assert 'description' in hdf5_file[key].attrs.keys(), \
                 f'The dataset {_prefix}/{key} does not have a description attribute.'
 
-def load_usbmd_file(path, frames=None, data_type='raw_data'):
+def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
     """Loads a hdf5 file in the USBMD format and returns the data together with
     a scan object containing the parameters of the acquisition and a probe
     object containing the parameters of the probe.
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
-        frames (tuple, list, optional): The frames to load. Defaults to None in which
-            case all frames are loaded.
+        frames (tuple, list, optional): The frames to load. Defaults to None in
+            which case all frames are loaded.
+        transmits (tuple, list, optional): The transmits to load. Defaults to
+            None.
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
@@ -393,6 +395,15 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
         # Assert that all frames are integers
         assert all(isinstance(frame, int) for frame in frames), \
             'All frames must be integers.'
+    else:
+        frames = np.arange(len(frames), dtype=np.int)
+
+    if transmits is not None:
+        # Assert that all frames are integers
+        assert all(isinstance(tx, int) for tx in transmits), \
+            'All transmits must be integers.'
+    else:
+        transmits = np.arange(len(transmits), dtype=np.int)
 
     assert data_type in ('raw_data', 'aligned_data', 'beamformed_data',
                          'envelope_data', 'image', 'image_sc'), \
@@ -442,9 +453,14 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
         z0, z1 = 0, depth
 
         n_tx = int(hdf5_file['scan']['n_tx'][()])
-        t0_delays = hdf5_file['scan']['t0_delays'][:]
-        initial_times = hdf5_file['scan']['initial_times'][:]
-        tx_apodizations = hdf5_file['scan']['tx_apodizations'][:]
+        initial_times = hdf5_file['scan']['initial_times'][transmits]
+        tx_apodizations = hdf5_file['scan']['tx_apodizations'][transmits]
+        t0_delays = hdf5_file['scan']['t0_delays'][transmits]
+        polar_angles = hdf5_file['scan']['polar_angles'][transmits]
+        azimuth_angles = hdf5_file['scan']['azimuth_angles'][transmits]
+        focus_distances = hdf5_file['scan']['focus_distances'][transmits]
+
+
 
         # Initialize the scan object
         scan = Scan(
@@ -452,23 +468,19 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
-            N_tx=int(hdf5_file['scan']['n_tx'][()]),
             xlims=(x0, x1),
             zlims=(z0, z1),
             fc=fc,
             fs=fs,
             N_ax=n_ax,
             c=c,
-            polar_angles=hdf5_file['scan']['polar_angles'][:],
-            azimuth_angles=hdf5_file['scan']['azimuth_angles'][:],
-            focus_distances=hdf5_file['scan']['focus_distances'][:],
+            polar_angles=polar_angles,
+            azimuth_angles=azimuth_angles,
+            focus_distances=focus_distances,
         )
 
-
         # Load the desired frames from the file
-        if frames is None:
-            data = hdf5_file['data']['raw_data'][:]
-        else:
-            data = hdf5_file['data']['raw_data'][frames]
+        data = hdf5_file['data']['raw_data'][frames]
+        data = data[:, transmits]
 
         return data, scan, probe
