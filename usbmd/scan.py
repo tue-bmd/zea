@@ -137,6 +137,7 @@ class Scan:
             warnings.warn('No polar_angles provided. Assuming all zeros.')
             polar_angles = np.zeros(N_tx)
         self.polar_angles = polar_angles
+        self.angles = self.polar_angles
 
         if azimuth_angles is None:
             warnings.warn('No azimuth_angles provided. Assuming all zeros.')
