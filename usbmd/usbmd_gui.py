@@ -70,6 +70,7 @@ class USBMDApp(App):
 
         # pause functionality
         self.pause_var = False
+        self.display_path_label = False
 
     def build(self, data):
         """Build the application"""
@@ -78,10 +79,11 @@ class USBMDApp(App):
         )
         self.version_label.pack(side="bottom", padx=10, pady=0)
 
-        # self.path_label = ttk.Label(
-        #     self, text=self.data_root,
-        #     font=("TkDefaultFont", 8), background=self.background_color)
-        # self.path_label.pack(side="bottom", padx=10, pady=0)
+        if self.display_path_label:
+            self.path_label = ttk.Label(
+                self, text=self.data_root,
+                font=("TkDefaultFont", 8), background=self.background_color)
+            self.path_label.pack(side="bottom", padx=10, pady=0)
 
         self.user_label = ttk.Label(self, text=self.user_text, style="Footer.TLabel")
         self.user_label.pack(side="bottom", padx=10, pady=5)
