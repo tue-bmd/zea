@@ -32,6 +32,7 @@ class Scan:
         polar_angles=None,
         azimuth_angles=None,
         t0_delays=None,
+        tx_apodizations=None,
         focus_distances=None,
         downsample=1,
         initial_times=None,
