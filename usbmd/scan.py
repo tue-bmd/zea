@@ -344,6 +344,7 @@ class PlaneWaveScan(Scan):
         tx_apodizations=None,
         downsample=1,
         initial_times=None,
+        selected_transmits=None
     ):
         """
         Initializes a PlaneWaveScan object.
@@ -393,6 +394,11 @@ class PlaneWaveScan(Scan):
                 data to baseband (RF to IQ). Defaults to 1.
             initial_times (np.ndarray, optional): The initial times of the
                 transmits in seconds of shape (N_tx,). Defaults to None.
+            selected_transmits (int, list, optional): Used to select a subset of the
+                transmits to use for beamforming. If set to an integer, then that number
+                of transmits is selected as homogeneously as possible. If set to a list
+                of integers, then the transmits with those indices are selected. If set
+                to None, then all transmits are used. Defaults to None.
 
         Raises:
             ValueError: If selected_transmits has an invalid value.
@@ -417,39 +423,14 @@ class PlaneWaveScan(Scan):
             tx_apodizations=tx_apodizations,
             downsample=downsample,
             initial_times=initial_times,
+            selected_transmits=selected_transmits
         )
 
         assert (
             angles is not None
         ), "Please provide angles at which plane wave dataset was recorded"
         self.angles = angles
-        if selected_transmits:
-            if isinstance(selected_transmits, list):
-                try:
-                    self.selected_transmits = selected_transmits
-                    self.angles = self.angles[selected_transmits]
-                except Exception as exc:
-                    raise ValueError(
-                        "Angle indexing does not match the number of recorded angles"
-                    ) from exc
-            elif selected_transmits > len(self.angles):
-                raise ValueError(
-                    f"Number of angles {selected_transmits} specified supersedes "
-                    f"number of recorded angles {len(self.angles)}."
-                )
-            else:
-                # Compute selected_transmits evenly spaced indices for reduced angles
-                angle_indices = np.linspace(
-                    0, len(self.angles) - 1, selected_transmits)
-                # Round the computed angles to integers and turn into list
-                angle_indices = list(np.rint(angle_indices).astype("int"))
-                # Store the values and indices in the object
-                self.selected_transmits = angle_indices
-                self.angles = self.angles[angle_indices]
-        else:
-            self.selected_transmits = list(range(len(self.angles)))
-
-        self.N_tx = len(self.angles)
+        self.polar_angles = angles
 
 
 class DivergingWaveScan(Scan):
