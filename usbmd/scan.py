@@ -167,59 +167,6 @@ class Scan:
             focus_distances = np.zeros(N_tx)
         self.focus_distances = focus_distances
 
-    # def add_transmit(self, index, t0_delays, tx_apodizations, c, initial_time=0.0):
-    #     """Adds a transmit to the scan.
-
-    #     Args:
-    #         index (int): The index of the transmit.
-    #         t0_delays (np.ndarray): The transmit delays in seconds of shape
-    #             (n_el,), shifted such that the smallest delay is 0.
-    #         tx_apodizations (np.ndarray, float): The transmit apodizations of
-    #             shape (n_el,) or a single float to use for all
-    #             apodizations.
-    #         c (float): The speed of sound in m/s.
-    #         initial_time (float, optional): The initial time of the transmit
-    #             in seconds. Defaults to 0.0.
-
-    #     """
-    #     assert isinstance(tx_apodizations, (np.ndarray, float)), \
-    #         "tx_apodizations must be a numpy array or a float."
-    #     assert isinstance(t0_delays, np.ndarray), \
-    #         "tx_delays must be a numpy array."
-
-    #     if isinstance(tx_apodizations, float):
-    #         # Set the transmit apodizations to all ones if not supplied
-    #         tx_apodizations = np.ones_like(t0_delays)*tx_apodizations
-
-    #     self.initial_times[index] = initial_time
-    #     self.t0_delays[index] = t0_delays
-    #     self.tx_apodizations[index] = tx_apodizations
-
-    # def add_planewave_transmit(self, ele_pos, polar_angle, azimuth_angle=0,
-    #                            apodization=1., c=1540, initial_time=0.0):
-    #     """Adds a planewave transmit to the scan.
-
-    #     Args:
-    #         ele_pos (np.ndarray): The element positions in meters of shape
-    #             (n_el, 3).
-    #         polar_angle (float): The polar angle of the planewave wave vector
-    #             in degrees. (This is the one that is used in 2D imaging.)
-    #         azimuth_angle (float): The azimuth angle of the planewave wave
-    #             vector in degrees. (This is the one that is used in 3D
-    #             imaging.)
-    #         focus_distance (float): The focus of the planewave in meters.
-    #         apodization (float, optional): The apodization to use for the
-    #             transmit. Defaults to 1.
-    #         c (float): The speed of sound in m/s.
-    #         initial_time (float, optional): The initial time of the transmit
-    #             in seconds. Defaults to 0.0.
-    #     """
-
-    #     # Create a new transmit object and add it to the list of transmits
-    #     transmit = PlanewaveTransmit(ele_pos, polar_angle, azimuth_angle,
-    #                                  apodization, c, initial_time)
-    #     self.transmits.append(transmit)
-
     @property
     def Nx(self):
         """The number of pixels in the lateral direction in the beamforming
