@@ -100,13 +100,13 @@ class Scan:
         assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
 
         # Attributes concerning channel data : The number of transmissions in a frame
-        self.N_tx = N_tx
+        self.N_tx = int(N_tx)
         #: The modulation carrier frequency [Hz]
-        self.fc = fc
+        self.fc = float(fc)
         #: The sampling rate [Hz]
-        self.fs = fs
+        self.fs = float(fs)
         #: The speed of sound [m/s]
-        self.c = c
+        self.c = float(c)
         #: The modulation type of the raw data ('rf' or 'iq')
         self.modtype = modtype
         #: The number of samples per channel per acquisition
@@ -130,9 +130,9 @@ class Scan:
         self._zlims = zlims
 
         #: The number of pixels in the lateral direction in the beamforming : grid
-        self._Nx = Nx
+        self._Nx = int(Nx)
         #: The number of pixels in the axial direction in the beamforming grid
-        self._Nz = Nz
+        self._Nz = int(Nz)
 
         #: The beamforming grid of shape (Nx, Nz, 3)
         self._grid = None
