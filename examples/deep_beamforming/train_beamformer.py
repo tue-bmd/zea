@@ -29,7 +29,7 @@ def train(config):
     """Train function that initializes the dataset, beamformer model and optimizer, creates the
     target data, and then trains the model."""
 
-    ## Dataloading and parameter initialization
+    # Dataloading and parameter initialization
     # Intialize dataset
     dataset = get_dataset(config.data)
     data = dataset[0]
@@ -93,7 +93,7 @@ def train(config):
         jit_compile=True,
     )
 
-    ## Augment the data and train the model
+    # Augment the data and train the model
     # repeat the inputs and targets N times with noise
     N = 100
     inputs = np.repeat(inputs, N, axis=0)
@@ -106,7 +106,8 @@ def train(config):
     inputs += noise
 
     # Train the model
-    history = beamformer.fit(inputs, targets, epochs=10, batch_size=1, verbose=1)
+    history = beamformer.fit(
+        inputs, targets, epochs=10, batch_size=1, verbose=1)
 
     scan_converter = ScanConverterTF(grid=scan.grid)
 
