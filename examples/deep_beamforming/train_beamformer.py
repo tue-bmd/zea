@@ -57,11 +57,12 @@ def train(config):
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config, jit_compile=True)
 
-    targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
+    targets = target_beamformer(np.expand_dims(
+        data[scan.selected_transmits], axis=0))
 
-    ## Create the beamforming model
+    # Create the beamforming model
     # Only use the center angle for training
-    config.scan.n_angles = 1
+    config.scan.selected_transmits = 1
     config.model.beamformer.type = "able"
     config_scan_params = config.scan
 
