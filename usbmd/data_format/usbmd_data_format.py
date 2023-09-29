@@ -452,7 +452,6 @@ def load_usbmd_file(path, frames=None, data_type='raw_data'):
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
-            N_tx=int(hdf5_file['scan']['n_tx'][()]),
             xlims=(x0, x1),
             zlims=(z0, z1),
             fc=fc,
