@@ -55,9 +55,14 @@ def test_das_beamforming(debug=False, compare_gt=True):
         ),
     )
 
-    scan.grid = cartesian_pixel_grid(
-        scan.xlims, scan.zlims, dx=scan.wvln / 4, dz=scan.wvln / 4
-    )
+    # Set scan grid parameters
+    # The grid is updated automatically when it is accessed after the scan parameters
+    # have been changed.
+    dx = scan.wvln / 4
+    dz = scan.wvln / 4
+    scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
+    scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
+
     simulator = UltrasoundSimulator(probe, scan)
     beamformer = get_beamformer(probe, scan, config)
 
@@ -73,7 +78,8 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     # Perform beamforming and convert to numpy array
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    outputs = on_device_torch(beamformer, inputs, device=device, return_numpy=True)
+    outputs = on_device_torch(
+        beamformer, inputs, device=device, return_numpy=True)
 
     # plot results
     if debug:
@@ -85,7 +91,8 @@ def test_das_beamforming(debug=False, compare_gt=True):
         axs[0].set_title("RF data")
         axs[1].imshow(np.squeeze(outputs))
         axs[1].set_title("Beamformed")
-        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
+        axs[2].imshow(cv2.GaussianBlur(
+            data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
         axs[2].set_title("Ground Truth")
         fig.show()
 
