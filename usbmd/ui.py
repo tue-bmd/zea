@@ -4,6 +4,17 @@ the results in a GUI.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : Thu Nov 18 2021
 """
+import argparse
+import sys
+import warnings
+from pathlib import Path
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from PIL import Image
+
 from usbmd.utils.utils import (
     filename_from_window_dialog,
     plt_window_has_been_closed,
@@ -26,16 +37,6 @@ from usbmd.probes import get_probe
 from usbmd.generate import GenerateDataSet
 from usbmd.datasets import get_dataset
 from usbmd.common import set_data_paths
-import argparse
-import sys
-import warnings
-from pathlib import Path
-
-import cv2
-import matplotlib.pyplot as plt
-import numpy as np
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from PIL import Image
 
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
