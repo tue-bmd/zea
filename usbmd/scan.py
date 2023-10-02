@@ -205,7 +205,10 @@ class Scan:
         # integer, then that number of transmits is selected as homogeneously as
         # possible. If set to a list of integers, then the transmits with those indices
         # are selected. If set to None, then all transmits are used. Defaults to None.
-        self.selected_transmits = self.select_transmits(selected_transmits, N_tx)
+        self.selected_transmits = self.select_transmits(
+            selected_transmits, N_tx)
+
+        check_for_aliasing(self)
 
     def select_transmits(self, selected_transmits, n_tx):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -223,7 +226,7 @@ class Scan:
             list: The selected transmits as a list of indices
         """
         if selected_transmits is None:
-            return [n for n in range(n_tx)]
+            return list(range(n_tx))
 
         if isinstance(selected_transmits, int):
             # Do an error check if the number of selected transmits is not too large
@@ -242,10 +245,10 @@ class Scan:
 
         if isinstance(selected_transmits, list):
             assert all(
-                [isinstance(n, int) for n in selected_transmits]
+                isinstance(n, int) for n in selected_transmits
             ), "selected_transmits must be a list of integers."
             # Check if the selected transmits are not too large
-            assert all([n < n_tx for n in selected_transmits]), (
+            assert all(n < n_tx for n in selected_transmits), (
                 f"Selected transmits {selected_transmits} exceed the number of "
                 f"transmits in the scan ({n_tx})."
             )
