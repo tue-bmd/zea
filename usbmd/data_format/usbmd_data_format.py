@@ -552,7 +552,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
 
         # Initialize the scan object
         scan = Scan(
-            N_tx=n_tx,
+            n_tx=n_tx,
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
@@ -560,7 +560,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
             zlims=(z0, z1),
             fc=fc,
             fs=fs,
-            N_ax=n_ax,
+            n_ax=n_ax,
             c=c,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,

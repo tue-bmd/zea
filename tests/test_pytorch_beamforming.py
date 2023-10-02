@@ -41,10 +41,10 @@ def test_das_beamforming(debug=False, compare_gt=True):
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
     scan = PlaneWaveScan(
-        N_tx=1,
+        n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        N_ax=2046,
+        n_ax=2046,
         fs=probe_parameters["fs"],
         fc=probe_parameters["fc"],
         angles=np.array(

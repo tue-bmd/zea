@@ -5,7 +5,7 @@ import numpy as np
 from usbmd.scan import Scan, PlaneWaveScan
 
 scan_args = {
-    "N_tx": 10,
+    "n_tx": 10,
     "xlims": (-0.019, 0.019),
     "ylims": (0, 0),
     "zlims": (0, 0.04),
@@ -13,7 +13,7 @@ scan_args = {
     "fs": 28e6,
     "c": 1540,
     "modtype": "rf",
-    "N_ax": 3328,
+    "n_ax": 3328,
     "Nx": 64,
     "Nz": 128,
     "pixels_per_wvln": 4,
@@ -27,7 +27,7 @@ scan_args = {
 }
 
 planewave_scan_args = {
-    "N_tx": 10,
+    "n_tx": 10,
     "xlims": (-0.019, 0.019),
     "ylims": (0, 0),
     "zlims": (0, 0.04),
@@ -35,7 +35,7 @@ planewave_scan_args = {
     "fs": 28e6,
     "c": 1540,
     "modtype": "rf",
-    "N_ax": 3328,
+    "n_ax": 3328,
     "Nx": 64,
     "Nz": 128,
     "pixels_per_wvln": 4,
@@ -52,7 +52,7 @@ def test_initialization():
     """
     scan = Scan(**scan_args)
 
-    assert scan.N_tx == scan_args['N_tx']
+    assert scan.n_tx == scan_args['n_tx']
     assert scan.xlims == scan_args['xlims']
     assert scan.ylims == scan_args['ylims']
     assert scan.zlims == scan_args['zlims']
@@ -60,7 +60,7 @@ def test_initialization():
     assert scan.fs == scan_args['fs']
     assert scan.c == scan_args['c']
     assert scan.modtype == scan_args['modtype']
-    assert scan.N_ax == scan_args['N_ax']
+    assert scan.n_ax == scan_args['n_ax']
     assert scan.Nx == scan_args['Nx']
     assert scan.Nz == scan_args['Nz']
     assert np.all(scan.polar_angles == scan_args['polar_angles'])
@@ -76,7 +76,7 @@ def test_planewave_scan():
     """Test initialization of PlaneWaveScan class."""
     scan = PlaneWaveScan(**planewave_scan_args)
 
-    assert scan.N_tx == planewave_scan_args['N_tx']
+    assert scan.n_tx == planewave_scan_args['n_tx']
     assert scan.xlims == planewave_scan_args['xlims']
     assert scan.ylims == planewave_scan_args['ylims']
     assert scan.zlims == planewave_scan_args['zlims']
@@ -84,7 +84,7 @@ def test_planewave_scan():
     assert scan.fs == planewave_scan_args['fs']
     assert scan.c == planewave_scan_args['c']
     assert scan.modtype == planewave_scan_args['modtype']
-    assert scan.N_ax == planewave_scan_args['N_ax']
+    assert scan.n_ax == planewave_scan_args['n_ax']
     assert scan.Nx == planewave_scan_args['Nx']
     assert scan.Nz == planewave_scan_args['Nz']
     assert np.all(scan.polar_angles == planewave_scan_args['polar_angles'])

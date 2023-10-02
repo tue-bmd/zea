@@ -17,7 +17,7 @@ class Scan:
 
     def __init__(
         self,
-        N_tx=75,
+        n_tx=75,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -25,7 +25,7 @@ class Scan:
         fs=28e6,
         c=1540,
         modtype="rf",
-        N_ax=3328,
+        n_ax=3328,
         Nx=128,
         Nz=128,
         pixels_per_wvln=3,
@@ -46,7 +46,7 @@ class Scan:
         automatically.
 
         Args:
-            N_tx (int): The number of transmits to produce a single frame. xlims (tuple,
+            n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
             optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
             ylims (tuple, optional): The y-limits in the beamforming grid.
@@ -60,7 +60,7 @@ class Scan:
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
-            modtype (str, optional): The modulation type. ('rf' or 'iq'). N_ax (int,
+            modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
             optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
@@ -68,26 +68,26 @@ class Scan:
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
             polar_angles (np.ndarray, optional): The polar angles of the
-                transmits in radians of shape (N_tx,). These are the angles usually used
+                transmits in radians of shape (n_tx,). These are the angles usually used
                 in 2D imaging. Defaults to None.
             azimuth_angles (np.ndarray, optional): The azimuth angles of the
-                transmits in radians of shape (N_tx,). These are the angles usually used
+                transmits in radians of shape (n_tx,). These are the angles usually used
                 in 3D imaging. Defaults to None.
             t0_delays (np.ndarray, optional): The transmit delays in seconds of
-                shape (N_tx, n_el), shifted such that the smallest delay is 0. Defaults
+                shape (n_tx, n_el), shifted such that the smallest delay is 0. Defaults
                 to None.
             tx_apodizations (np.ndarray, float, optional): The transmit
-                apodizations of shape (N_tx, n_el) or a single float to use for all
+                apodizations of shape (n_tx, n_el) or a single float to use for all
                 apodizations. Defaults to None.
             pixels_per_wvln (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
             focus_distances (np.ndarray, optional): The focus distances of the
-                transmits in meters of shape (N_tx,). Defaults to None.
+                transmits in meters of shape (n_tx,). Defaults to None.
             downsample (int, optional): Decimation factor applied after downconverting
                 data to baseband (RF to IQ). Defaults to 1.
             initial_times (np.ndarray, optional): The initial times of the
-                transmits in seconds of shape (N_tx,). Defaults to None.
+                transmits in seconds of shape (n_tx,). Defaults to None.
             selected_transmits (int, list, optional): Used to select a subset of the
                 transmits to use for beamforming. If set to an integer, then that number
                 of transmits is selected as homogeneously as possible. If set to a list
@@ -100,7 +100,7 @@ class Scan:
         assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
 
         # Attributes concerning channel data : The number of transmissions in a frame
-        self.N_tx = int(N_tx)
+        self.n_tx = int(n_tx)
         #: The modulation carrier frequency [Hz]
         self.fc = float(fc)
         #: The sampling rate [Hz]
@@ -110,7 +110,7 @@ class Scan:
         #: The modulation type of the raw data ('rf' or 'iq')
         self.modtype = modtype
         #: The number of samples per channel per acquisition
-        self.N_ax = N_ax // downsample
+        self.n_ax = n_ax // downsample
         #: The demodulation frequency [Hz]
         self.fdemod = self.fc if modtype == "iq" else 0.0
         #: The number of rf/iq channels (1 for rf, 2 for iq)
@@ -141,16 +141,16 @@ class Scan:
         if zlims:
             self.zlims = zlims
         else:
-            self.zlims = [0, self.c * self.N_ax / self.fs / 2]
+            self.zlims = [0, self.c * self.n_ax / self.fs / 2]
             print(self.zlims)
 
-        self.z_axis = np.linspace(*self.zlims, N_ax)
+        self.z_axis = np.linspace(*self.zlims, n_ax)
 
         if initial_times is None:
             warnings.warn("No initial times provided. Assuming all zeros.")
-            initial_times = np.zeros(N_tx)
+            initial_times = np.zeros(n_tx)
 
-        #: The initial times of the transmits in seconds of shape (N_tx,). These are the
+        #: The initial times of the transmits in seconds of shape (n_tx,). These are the
         # time intervals between the first element firing and the first sample in the
         # receive recording..
         self.initial_times = initial_times
@@ -159,8 +159,8 @@ class Scan:
             warnings.warn(
                 "No t0_delays provided. Assuming all zeros and 128 element probe."
             )
-            t0_delays = np.zeros((N_tx, 128))
-        #: The transmit delays in seconds of shape (N_tx, n_el), shifted such : that the
+            t0_delays = np.zeros((n_tx, 128))
+        #: The transmit delays in seconds of shape (n_tx, n_el), shifted such : that the
         # smallest delay is 0. For instance for a straight planewave : transmit all
         # delays are zero.
         self.t0_delays = t0_delays
@@ -170,16 +170,16 @@ class Scan:
                 "No tx_apodizations provided. Assuming all ones and "
                 "128 element probe."
             )
-            tx_apodizations = np.ones((N_tx, 128))
-        #: The transmit apodizations of shape (N_tx, n_el) or a single float to : use
+            tx_apodizations = np.ones((n_tx, 128))
+        #: The transmit apodizations of shape (n_tx, n_el) or a single float to : use
         # for all apodizations. These values indicate both windowing : (apodization) over
         # the aperture and the subaperture that is used : during transmit.
         self.tx_apodizations = tx_apodizations
 
         if polar_angles is None:
             warnings.warn("No polar_angles provided. Assuming all zeros.")
-            polar_angles = np.zeros(N_tx)
-        #: The polar angles of the transmits in radians of shape (N_tx,). These : are
+            polar_angles = np.zeros(n_tx)
+        #: The polar angles of the transmits in radians of shape (n_tx,). These : are
         # the angles usually used in 2D imaging.
         self.polar_angles = polar_angles
         #: Identical to `Scan.polar_angles`. This attribute is added for : backward
@@ -188,15 +188,15 @@ class Scan:
 
         if azimuth_angles is None:
             warnings.warn("No azimuth_angles provided. Assuming all zeros.")
-            azimuth_angles = np.zeros(N_tx)
-        #: The azimuth angles of the transmits in radians of shape (N_tx,). : These are
+            azimuth_angles = np.zeros(n_tx)
+        #: The azimuth angles of the transmits in radians of shape (n_tx,). : These are
         # the angles usually only used in 3D imaging.
         self.azimuth_angles = azimuth_angles
 
         if focus_distances is None:
             warnings.warn("No focus_distances provided. Assuming all zeros.")
-            focus_distances = np.zeros(N_tx)
-        #: The focus distances of the transmits in meters of shape (N_tx,). : These are
+            focus_distances = np.zeros(n_tx)
+        #: The focus distances of the transmits in meters of shape (n_tx,). : These are
         # the distances of the virtual focus points from the origin. : For a planewave
         # these should be set to Inf.
         self.focus_distances = focus_distances
@@ -206,7 +206,7 @@ class Scan:
         # possible. If set to a list of integers, then the transmits with those indices
         # are selected. If set to None, then all transmits are used. Defaults to None.
         self.selected_transmits = self.select_transmits(
-            selected_transmits, N_tx)
+            selected_transmits, n_tx)
 
         check_for_aliasing(self)
 
@@ -331,7 +331,7 @@ class PlaneWaveScan(Scan):
     def __init__(
         self,
         angles=None,
-        N_tx=75,
+        n_tx=75,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -339,7 +339,7 @@ class PlaneWaveScan(Scan):
         fs=28e6,
         c=1540,
         modtype="rf",
-        N_ax=3328,
+        n_ax=3328,
         Nx=128,
         Nz=128,
         pixels_per_wvln=3,
@@ -356,7 +356,7 @@ class PlaneWaveScan(Scan):
         Args:
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
-            N_tx (int): The number of transmits to produce a single frame. xlims (tuple,
+            n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
             optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
             ylims (tuple, optional): The y-limits in the beamforming grid.
@@ -370,7 +370,7 @@ class PlaneWaveScan(Scan):
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
-            modtype (str, optional): The modulation type. ('rf' or 'iq'). N_ax (int,
+            modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
             optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
@@ -378,26 +378,26 @@ class PlaneWaveScan(Scan):
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
             polar_angles (np.ndarray, optional): The polar angles of the
-                transmits in radians of shape (N_tx,). These are the angles usually used
+                transmits in radians of shape (n_tx,). These are the angles usually used
                 in 2D imaging. Defaults to None.
             azimuth_angles (np.ndarray, optional): The azimuth angles of the
-                transmits in radians of shape (N_tx,). These are the angles usually used
+                transmits in radians of shape (n_tx,). These are the angles usually used
                 in 3D imaging. Defaults to None.
             t0_delays (np.ndarray, optional): The transmit delays in seconds of
-                shape (N_tx, n_el), shifted such that the smallest delay is 0. Defaults
+                shape (n_tx, n_el), shifted such that the smallest delay is 0. Defaults
                 to None.
             tx_apodizations (np.ndarray, float, optional): The transmit
-                apodizations of shape (N_tx, n_el) or a single float to use for all
+                apodizations of shape (n_tx, n_el) or a single float to use for all
                 apodizations. Defaults to None.
             pixels_per_wvln (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
             focus_distances (np.ndarray, optional): The focus distances of the
-                transmits in meters of shape (N_tx,). Defaults to None.
+                transmits in meters of shape (n_tx,). Defaults to None.
             downsample (int, optional): Decimation factor applied after downconverting
                 data to baseband (RF to IQ). Defaults to 1.
             initial_times (np.ndarray, optional): The initial times of the
-                transmits in seconds of shape (N_tx,). Defaults to None.
+                transmits in seconds of shape (n_tx,). Defaults to None.
             selected_transmits (int, list, optional): Used to select a subset of the
                 transmits to use for beamforming. If set to an integer, then that number
                 of transmits is selected as homogeneously as possible. If set to a list
@@ -410,7 +410,7 @@ class PlaneWaveScan(Scan):
 
         # Pass all arguments to the Scan base class
         super().__init__(
-            N_tx=N_tx,
+            n_tx=n_tx,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
@@ -418,7 +418,7 @@ class PlaneWaveScan(Scan):
             fs=fs,
             c=c,
             modtype=modtype,
-            N_ax=N_ax,
+            n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
             pixels_per_wvln=pixels_per_wvln,
@@ -428,7 +428,7 @@ class PlaneWaveScan(Scan):
             downsample=downsample,
             initial_times=initial_times,
             selected_transmits=selected_transmits,
-            focus_distances=np.inf * np.ones(N_tx),
+            focus_distances=np.inf * np.ones(n_tx),
         )
 
         assert (
@@ -447,7 +447,7 @@ class DivergingWaveScan(Scan):
 
     def __init__(
         self,
-        N_tx=75,
+        n_tx=75,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -455,14 +455,14 @@ class DivergingWaveScan(Scan):
         fs=28e6,
         c=1540,
         modtype="rf",
-        N_ax=256,
+        n_ax=256,
         Nx=128,
         Nz=128,
         downsample=1,
         focus=None,
     ):
         super().__init__(
-            N_tx=N_tx,
+            n_tx=n_tx,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
@@ -470,7 +470,7 @@ class DivergingWaveScan(Scan):
             fs=fs,
             c=c,
             modtype=modtype,
-            N_ax=N_ax,
+            n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
             downsample=downsample,
