@@ -432,10 +432,14 @@ class PlaneWaveScan(Scan):
         )
 
         assert (
-            angles is not None
+            angles is not None or polar_angles is not None
         ), "Please provide angles at which plane wave dataset was recorded"
-        self.angles = angles
-        self.polar_angles = angles
+        if angles is not None:
+            self.angles = angles
+            self.polar_angles = angles
+        else:
+            self.angles = polar_angles
+            self.polar_angles = polar_angles
 
 
 class DivergingWaveScan(Scan):
