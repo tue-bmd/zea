@@ -12,7 +12,6 @@ from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.utils.config import load_config_from_yaml
-from usbmd.utils.pixelgrid import cartesian_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
 
 # Add project folder to path to find config files
@@ -85,7 +84,8 @@ def test_das_beamforming(debug=False, compare_gt=True):
         axs[0].set_title("RF data")
         axs[1].imshow(np.squeeze(outputs))
         axs[1].set_title("Beamformed")
-        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
+        axs[2].imshow(cv2.GaussianBlur(
+            data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
         axs[2].set_title("Ground Truth")
         fig.show()
 

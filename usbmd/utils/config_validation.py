@@ -12,15 +12,15 @@ Also if that parameter is optional, add a default value.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 31/01/2023
 """
+import importlib
+from pathlib import Path
+from typing import Union
+from schema import And, Optional, Or, Regex, Schema
 from usbmd.utils.metrics import _METRICS
 from usbmd.utils.config import Config
 from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
-import importlib
-from pathlib import Path
-from typing import Union
 
-from schema import And, Optional, Or, Regex, Schema
 
 _ML_LIBRARIES = [None, "torch", "tensorflow"]
 
