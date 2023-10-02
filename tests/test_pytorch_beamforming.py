@@ -44,7 +44,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        n_ax=2046,
+        n_ax=2047,
         fs=probe_parameters["fs"],
         fc=probe_parameters["fc"],
         angles=np.array(
