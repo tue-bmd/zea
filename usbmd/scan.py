@@ -36,7 +36,7 @@ class Scan:
         focus_distances=None,
         downsample=1,
         initial_times=None,
-        selected_transmits=None
+        selected_transmits=None,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -112,9 +112,9 @@ class Scan:
         #: The number of samples per channel per acquisition
         self.N_ax = N_ax // downsample
         #: The demodulation frequency [Hz]
-        self.fdemod = self.fc if modtype == 'iq' else 0.
+        self.fdemod = self.fc if modtype == "iq" else 0.0
         #: The number of rf/iq channels (1 for rf, 2 for iq)
-        self.n_ch = 2 if modtype == 'iq' else 1
+        self.n_ch = 2 if modtype == "iq" else 1
         #: The wavelength of the modulation carrier [m]
         self.wvln = self.c / self.fc
         #: The number of pixels per wavelength in the beamforming grid
@@ -147,7 +147,7 @@ class Scan:
         self.z_axis = np.linspace(*self.zlims, N_ax)
 
         if initial_times is None:
-            warnings.warn('No initial times provided. Assuming all zeros.')
+            warnings.warn("No initial times provided. Assuming all zeros.")
             initial_times = np.zeros(N_tx)
 
         #: The initial times of the transmits in seconds of shape (N_tx,). These are the
@@ -156,8 +156,9 @@ class Scan:
         self.initial_times = initial_times
 
         if t0_delays is None:
-            warnings.warn('No t0_delays provided. Assuming all zeros and '
-                          '128 element probe.')
+            warnings.warn(
+                "No t0_delays provided. Assuming all zeros and " "128 element probe."
+            )
             t0_delays = np.zeros((N_tx, 128))
         #: The transmit delays in seconds of shape (N_tx, n_el), shifted such : that the
         # smallest delay is 0. For instance for a straight planewave : transmit all
@@ -165,8 +166,10 @@ class Scan:
         self.t0_delays = t0_delays
 
         if tx_apodizations is None:
-            warnings.warn('No tx_apodizations provided. Assuming all ones and '
-                          '128 element probe.')
+            warnings.warn(
+                "No tx_apodizations provided. Assuming all ones and "
+                "128 element probe."
+            )
             tx_apodizations = np.ones((N_tx, 128))
         #: The transmit apodizations of shape (N_tx, n_el) or a single float to : use
         # for all apodizations. These values indicate both windowing : (apodization) over
@@ -174,7 +177,7 @@ class Scan:
         self.tx_apodizations = tx_apodizations
 
         if polar_angles is None:
-            warnings.warn('No polar_angles provided. Assuming all zeros.')
+            warnings.warn("No polar_angles provided. Assuming all zeros.")
             polar_angles = np.zeros(N_tx)
         #: The polar angles of the transmits in radians of shape (N_tx,). These : are
         # the angles usually used in 2D imaging.
@@ -184,14 +187,14 @@ class Scan:
         self.angles = self.polar_angles
 
         if azimuth_angles is None:
-            warnings.warn('No azimuth_angles provided. Assuming all zeros.')
+            warnings.warn("No azimuth_angles provided. Assuming all zeros.")
             azimuth_angles = np.zeros(N_tx)
         #: The azimuth angles of the transmits in radians of shape (N_tx,). : These are
         # the angles usually only used in 3D imaging.
         self.azimuth_angles = azimuth_angles
 
         if focus_distances is None:
-            warnings.warn('No focus_distances provided. Assuming all zeros.')
+            warnings.warn("No focus_distances provided. Assuming all zeros.")
             focus_distances = np.zeros(N_tx)
         #: The focus distances of the transmits in meters of shape (N_tx,). : These are
         # the distances of the virtual focus points from the origin. : For a planewave
@@ -202,8 +205,7 @@ class Scan:
         # integer, then that number of transmits is selected as homogeneously as
         # possible. If set to a list of integers, then the transmits with those indices
         # are selected. If set to None, then all transmits are used. Defaults to None.
-        self.selected_transmits = self.select_transmits(
-            selected_transmits, N_tx)
+        self.selected_transmits = self.select_transmits(selected_transmits, N_tx)
 
     def select_transmits(self, selected_transmits, n_tx):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -224,7 +226,6 @@ class Scan:
             return [n for n in range(n_tx)]
 
         if isinstance(selected_transmits, int):
-
             # Do an error check if the number of selected transmits is not too large
             assert selected_transmits <= n_tx, (
                 f"Number of selected transmits ({selected_transmits}) "
@@ -240,9 +241,9 @@ class Scan:
             return list(tx_indices)
 
         if isinstance(selected_transmits, list):
-            assert all([isinstance(n, int) for n in selected_transmits]), (
-                "selected_transmits must be a list of integers."
-            )
+            assert all(
+                [isinstance(n, int) for n in selected_transmits]
+            ), "selected_transmits must be a list of integers."
             # Check if the selected transmits are not too large
             assert all([n < n_tx for n in selected_transmits]), (
                 f"Selected transmits {selected_transmits} exceed the number of "
@@ -344,7 +345,7 @@ class PlaneWaveScan(Scan):
         tx_apodizations=None,
         downsample=1,
         initial_times=None,
-        selected_transmits=None
+        selected_transmits=None,
     ):
         """
         Initializes a PlaneWaveScan object.
@@ -423,7 +424,8 @@ class PlaneWaveScan(Scan):
             tx_apodizations=tx_apodizations,
             downsample=downsample,
             initial_times=initial_times,
-            selected_transmits=selected_transmits
+            selected_transmits=selected_transmits,
+            focus_distances=np.inf * np.ones(N_tx),
         )
 
         assert (
