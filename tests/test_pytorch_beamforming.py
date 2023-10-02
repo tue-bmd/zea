@@ -75,8 +75,13 @@ def test_das_beamforming(debug=False, compare_gt=True):
     inputs = np.expand_dims(data[0], axis=(1, -1))
     inputs = np.transpose(inputs, axes=(0, 1, 3, 2, 4))
 
+    # Set device
+    device = config.device
+    if not device == 'cpu' and not torch.cuda.is_available():
+        device = 'cpu'
+        print("Warning: CUDA not available. Using CPU instead.")
+
     # Perform beamforming and convert to numpy array
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
     outputs = on_device_torch(
         beamformer, inputs, device=device, return_numpy=True)
 
