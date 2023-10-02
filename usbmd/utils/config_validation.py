@@ -126,7 +126,6 @@ scan_schema = Schema(
         Optional("ylims", default=None): Or(None, list_of_size_two),
         # TODO: selected_transmits and n_tx are overlapping parameters
         Optional("selected_transmits", default=None): Or(None, int, list),
-        Optional("n_tx", default=None): Or(None, int),
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
         Optional("n_ax", default=None): Or(None, int),
