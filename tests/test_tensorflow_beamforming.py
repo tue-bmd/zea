@@ -85,8 +85,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
         axs[0].set_title("RF data")
         axs[1].imshow(np.squeeze(outputs))
         axs[1].set_title("Beamformed")
-        axs[2].imshow(cv2.GaussianBlur(
-            data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
+        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
         axs[2].set_title("Ground Truth")
         fig.show()
 
