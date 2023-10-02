@@ -1,5 +1,8 @@
 """Basic testing for ui / generate
 """
+from usbmd.setup_usbmd import setup_config
+from usbmd.generate import GenerateDataSet
+from usbmd import ui
 import shutil
 import sys
 from pathlib import Path
@@ -10,9 +13,6 @@ import numpy as np
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from usbmd import ui
-from usbmd.generate import GenerateDataSet
-from usbmd.setup_usbmd import setup_config
 
 plt.rcParams["backend"] = "agg"
 
@@ -38,7 +38,7 @@ def test_get_data():
     data = dataloader_ui.get_data()
     assert data is not None
     assert isinstance(data, np.ndarray), "Data is not a numpy array"
-    assert len(data.shape) == 4, "Data must be 4d (N_tx, N_el, N_ax, N_ch)"
+    assert len(data.shape) == 4, "Data must be 4d (n_tx, n_el, n_ax, N_ch)"
 
 
 def test_generate():
