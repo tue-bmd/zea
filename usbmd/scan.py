@@ -157,7 +157,7 @@ class Scan:
 
         if t0_delays is None:
             warnings.warn(
-                "No t0_delays provided. Assuming all zeros and " "128 element probe."
+                "No t0_delays provided. Assuming all zeros and 128 element probe."
             )
             t0_delays = np.zeros((N_tx, 128))
         #: The transmit delays in seconds of shape (N_tx, n_el), shifted such : that the
