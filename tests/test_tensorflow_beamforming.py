@@ -99,6 +99,9 @@ def test_das_beamforming(debug=False, compare_gt=True):
     MSE = np.mean(np.square(y_true - y_pred))
     print(f"MSE: {MSE}")
 
+    # Free all GPU memory
+    tf.keras.backend.clear_session()
+
     if compare_gt:
         assert MSE < 0.01
     else:
