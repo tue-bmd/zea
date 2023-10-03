@@ -447,7 +447,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
         frames (tuple, list, optional): The frames to load. Defaults to None in
             which case all frames are loaded.
         transmits (tuple, list, optional): The transmits to load. Defaults to
-            None.
+            None in which case all transmits are used.
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
