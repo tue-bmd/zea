@@ -568,7 +568,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type='raw_data'):
         )
 
         # Load the desired frames from the file
-        data = hdf5_file['data']['raw_data'][frames]
+        data = hdf5_file["data"]["raw_data"][frames]
         data = data[:, transmits]
 
         return data, scan, probe
