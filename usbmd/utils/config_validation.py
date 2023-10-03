@@ -19,7 +19,6 @@ from schema import And, Optional, Or, Regex, Schema
 from usbmd.utils.metrics import _METRICS
 from usbmd.utils.config import Config
 from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
-from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 
 
 _ML_LIBRARIES = [None, "torch", "tensorflow"]
@@ -35,6 +34,7 @@ for lib in _ML_LIBRARIES:
             import usbmd.tensorflow_ultrasound
 
 # Register beamforing types in registry
+from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 
 _BEAMFORMER_TYPES = set(
     tf_beamformer_registry.registered_names()
