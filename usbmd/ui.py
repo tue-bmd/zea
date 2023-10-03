@@ -15,6 +15,9 @@ import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from PIL import Image
 
+wd = Path(__file__).parent.resolve()
+sys.path.append(str(wd))
+
 from usbmd.utils.utils import (
     filename_from_window_dialog,
     plt_window_has_been_closed,
@@ -38,9 +41,6 @@ from usbmd.generate import GenerateDataSet
 from usbmd.datasets import get_dataset
 from usbmd.common import set_data_paths
 
-wd = Path(__file__).parent.resolve()
-sys.path.append(str(wd))
-
 
 class DataLoaderUI:
     """UI for selecting / loading / processing single ultrasound images.
@@ -62,8 +62,7 @@ class DataLoaderUI:
         config_scan_params = self.config.scan
 
         # dict merging of manual config and dataset default scan parameters
-        scan_params = update_dictionary(
-            default_scan_params, config_scan_params)
+        scan_params = update_dictionary(default_scan_params, config_scan_params)
         self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
 
         # initialize probe
@@ -104,8 +103,7 @@ class DataLoaderUI:
         if self.headless is False:
             if plt.rcParams["backend"].lower() == "agg":
                 self.headless = True
-                warnings.warn(
-                    "Could not connect to display, running headless.")
+                warnings.warn("Could not connect to display, running headless.")
         else:
             print("Running in headless mode as set by config.")
 
@@ -202,8 +200,7 @@ class DataLoaderUI:
             )
 
         if self.config.postprocess.thresholding is not None:
-            image = threshold_signal(
-                image, **self.config.postprocess.thresholding)
+            image = threshold_signal(image, **self.config.postprocess.thresholding)
 
         return image
 
@@ -265,8 +262,7 @@ class DataLoaderUI:
                 self.fig.canvas.flush_events()
                 return self.fig
             else:
-                image = to_image(
-                    image, self.config.data.dynamic_range, pillow=False)
+                image = to_image(image, self.config.data.dynamic_range, pillow=False)
                 if not self.headless:
                     cv2.imshow("frame", image)
                 return image
@@ -339,8 +335,7 @@ class DataLoaderUI:
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
-                image = self.process.run(
-                    self.data, dtype=self.config.data.dtype)
+                image = self.process.run(self.data, dtype=self.config.data.dtype)
 
                 if "postprocess" in self.config:
                     image = self.postprocess(image)
@@ -401,8 +396,7 @@ class DataLoaderUI:
         elif isinstance(fig, Image.Image):
             fig.save(path)
         else:
-            raise ValueError(
-                "Figure is not PIL image or matplotlib figure object.")
+            raise ValueError("Figure is not PIL image or matplotlib figure object.")
 
         if self.verbose:
             print(f"Image saved to {path}")
@@ -437,8 +431,7 @@ class DataLoaderUI:
             fps = self.config.plot.fps
             save_to_gif(images, path, fps=fps)
         else:
-            raise ValueError(
-                "Figure is not a numpy array or matplotlib figure object.")
+            raise ValueError("Figure is not a numpy array or matplotlib figure object.")
 
         if self.verbose:
             print(f"Video saved to {path}")
@@ -459,8 +452,7 @@ def get_args():
         help="which task to run",
     )
     # pylint: disable=no-member
-    parser.add_argument("--gui", default=False,
-                        action=argparse.BooleanOptionalAction)
+    parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     return args
 
@@ -469,8 +461,7 @@ def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
     if args.gui:
-        warnings.warn(
-            "GUI is very much in beta, please report any bugs to the Github.")
+        warnings.warn("GUI is very much in beta, please report any bugs to the Github.")
         gui = USBMDApp(title="USBMD GUI", resolution=(600, 300), verbose=True)
 
     config = setup_config(file=args.config)
