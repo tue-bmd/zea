@@ -15,7 +15,6 @@ from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
 from usbmd.pytorch_ultrasound.processing import on_device_torch
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.config import load_config_from_yaml
-from usbmd.utils.pixelgrid import cartesian_pixel_grid
 from usbmd.utils.simulator import UltrasoundSimulator
 
 # Add project folder to path to find config files
@@ -42,10 +41,10 @@ def test_das_beamforming(debug=False, compare_gt=True):
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
     scan = PlaneWaveScan(
-        N_tx=1,
+        n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        N_ax=2046,
+        n_ax=2047,
         fs=probe_parameters["fs"],
         fc=probe_parameters["fc"],
         angles=np.array(
@@ -55,9 +54,14 @@ def test_das_beamforming(debug=False, compare_gt=True):
         ),
     )
 
-    scan.grid = cartesian_pixel_grid(
-        scan.xlims, scan.zlims, dx=scan.wvln / 4, dz=scan.wvln / 4
-    )
+    # Set scan grid parameters
+    # The grid is updated automatically when it is accessed after the scan parameters
+    # have been changed.
+    dx = scan.wvln / 4
+    dz = scan.wvln / 4
+    scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
+    scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
+
     simulator = UltrasoundSimulator(probe, scan)
     beamformer = get_beamformer(probe, scan, config)
 
@@ -71,9 +75,15 @@ def test_das_beamforming(debug=False, compare_gt=True):
     inputs = np.expand_dims(data[0], axis=(1, -1))
     inputs = np.transpose(inputs, axes=(0, 1, 3, 2, 4))
 
+    # Set device
+    device = config.device
+    if not device == 'cpu' and not torch.cuda.is_available():
+        device = 'cpu'
+        print("Warning: CUDA not available. Using CPU instead.")
+
     # Perform beamforming and convert to numpy array
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    outputs = on_device_torch(beamformer, inputs, device=device, return_numpy=True)
+    outputs = on_device_torch(
+        beamformer, inputs, device=device, return_numpy=True)
 
     # plot results
     if debug:
@@ -85,7 +95,8 @@ def test_das_beamforming(debug=False, compare_gt=True):
         axs[0].set_title("RF data")
         axs[1].imshow(np.squeeze(outputs))
         axs[1].set_title("Beamformed")
-        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
+        axs[2].imshow(cv2.GaussianBlur(
+            data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
         axs[2].set_title("Ground Truth")
         fig.show()
 
@@ -97,6 +108,9 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     MSE = np.mean(np.square(y_true - y_pred))
     print(f"MSE: {MSE}")
+
+    # Free all GPU memory
+    torch.cuda.empty_cache()
 
     if compare_gt:
         assert MSE < 0.01

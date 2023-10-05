@@ -85,7 +85,8 @@ def equality_libs_processing(test_func):
         # Run the test function with processing_torch module
         torch_output = None
         if hasattr(processing_torch, func_name + "_torch"):
-            processing_func_torch = getattr(processing_torch, func_name + "_torch")
+            processing_func_torch = getattr(
+                processing_torch, func_name + "_torch")
             setattr(processing, func_name, processing_func_torch)
             set_random_seed(seed)
             torch_output = np.array(test_func(*args, **kwargs))
@@ -137,11 +138,13 @@ def test_companding(comp_type, size):
     signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
     signal = signal.astype(np.float32)
 
-    signal_out = processing.companding(signal, expand=False, comp_type=comp_type)
+    signal_out = processing.companding(
+        signal, expand=False, comp_type=comp_type)
     assert np.any(
         np.not_equal(signal, signal_out)
     ), "Companding failed, arrays should not be equal"
-    signal_out = processing.companding(signal_out, expand=True, comp_type=comp_type)
+    signal_out = processing.companding(
+        signal_out, expand=True, comp_type=comp_type)
 
     np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
@@ -176,7 +179,8 @@ def test_scan_conversion(size):
     data = np.random.random(size)
     x_axis = np.linspace(-50, 50, 100)
     z_axis = np.linspace(0, 100, 2000)
-    scan_convert(data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0)
+    scan_convert(data, x_axis, z_axis, n_pixels=500,
+                 spline_order=1, fill_value=0)
 
 
 @pytest.mark.parametrize(
@@ -287,10 +291,10 @@ def test_up_and_down_conversion(factor, batch_size):
     fs = probe_parameters["fs"]
     fc = probe_parameters["fc"]
     scan = PlaneWaveScan(
-        N_tx=1,
+        n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        N_ax=2048,
+        n_ax=2048,
         fs=fs,
         fc=fc,
         angles=np.array(
