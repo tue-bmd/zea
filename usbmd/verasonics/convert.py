@@ -23,13 +23,13 @@ def save_to_usbmd_format(filename):
 
     data = file[:]
     data = data[0][1]
-    N_frames, N_el, _ = data.shape
+    n_frames, n_el, _ = data.shape
 
     # hardcoded for now
-    N_ax = 8192
+    n_ax = 8192
     N_planes = 101
 
-    data = np.reshape(data, (N_frames, N_el, N_planes, N_ax))
+    data = np.reshape(data, (n_frames, n_el, N_planes, n_ax))
     data = np.transpose(data, (0, 2, 3, 1))
 
     dic = {
