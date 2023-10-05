@@ -18,20 +18,6 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.common import set_data_paths
-from usbmd.datasets import get_dataset
-from usbmd.generate import GenerateDataSet
-from usbmd.probes import get_probe
-from usbmd.processing import (
-    _DATA_TYPES,
-    Process,
-    get_contrast_boost_func,
-    threshold_signal,
-)
-from usbmd.setup_usbmd import setup_config
-from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils.config import Config
-from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
     filename_from_window_dialog,
     plt_window_has_been_closed,
@@ -40,6 +26,20 @@ from usbmd.utils.utils import (
     to_image,
     update_dictionary,
 )
+from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
+from usbmd.utils.config import Config
+from usbmd.usbmd_gui import USBMDApp
+from usbmd.setup_usbmd import setup_config
+from usbmd.processing import (
+    _DATA_TYPES,
+    Process,
+    get_contrast_boost_func,
+    threshold_signal,
+)
+from usbmd.probes import get_probe
+from usbmd.generate import GenerateDataSet
+from usbmd.datasets import get_dataset
+from usbmd.common import set_data_paths
 
 
 class DataLoaderUI:
@@ -120,10 +120,10 @@ class DataLoaderUI:
                     f"Image to_dtype: {to_dtype} not yet supported for movies.\
                         falling back to  to_dtype: `image`"
                 )
-            ## run movie
+            # run movie
             self.run_movie(save=save)
         else:
-            ## plot single frame
+            # plot single frame
             self.data = self.get_data()
 
             self.image = self.process.run(
@@ -144,7 +144,7 @@ class DataLoaderUI:
         Using either file specified in config or if None, the ui window.
 
         Returns:
-            data (np.ndarray): data array of shape (N_tx, N_el, N_ax, N_ch)
+            data (np.ndarray): data array of shape (n_tx, n_el, n_ax, N_ch)
         """
         if self.config.data.file_path:
             path = Path(self.config.data.file_path)
