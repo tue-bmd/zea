@@ -23,6 +23,7 @@ class Scan:
         zlims=(0, 0.04),
         fc=7e6,
         fs=28e6,
+        bandwidth_percentage = 200,
         c=1540,
         modtype="rf",
         n_ax=3328,
@@ -36,7 +37,7 @@ class Scan:
         focus_distances=None,
         downsample=1,
         initial_times=None,
-        selected_transmits=None,
+        selected_transmits=None
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.

@@ -526,6 +526,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         c = float(hdf5_file['scan']['sound_speed'][()])
         fs = float(hdf5_file['scan']['sampling_frequency'][()])
         fc = float(hdf5_file['scan']['center_frequency'][()])
+        bandwidth_percentage = float(hdf5_file['scan']['bandwidth_percentage'][()])
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
@@ -560,6 +561,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
             zlims=(z0, z1),
             fc=fc,
             fs=fs,
+            bandwidth_percentage = bandwidth_percentage,
             n_ax=n_ax,
             c=c,
             polar_angles=polar_angles,
