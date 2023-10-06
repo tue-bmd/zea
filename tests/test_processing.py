@@ -19,6 +19,7 @@ from usbmd.processing import (
     scan_convert,
     to_8bit,
     to_image,
+    transform_sc_image_to_square,
     upmix,
 )
 from usbmd.pytorch_ultrasound import processing as processing_torch
@@ -177,10 +178,28 @@ def test_converting_to_image(size, dynamic_range, input_range):
 def test_scan_conversion(size):
     """Tests the scan_conversion function with random data"""
     data = np.random.random(size)
-    x_axis = np.linspace(-50, 50, 100)
+    x_axis = np.linspace(-50, 50, 100)  # angles
     z_axis = np.linspace(0, 100, 2000)
-    scan_convert(data, x_axis, z_axis, n_pixels=500,
-                 spline_order=1, fill_value=0)
+    scan_convert(data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0)
+
+
+@pytest.mark.parametrize(
+    "size",
+    [
+        (200, 200),
+    ],
+)
+def test_scan_conversion_and_inverse(size):
+    """Tests the scan_conversion function with random data and
+    invert the data with transform_sc_image_to_square"""
+    data = np.random.random(size)
+    x_axis = np.linspace(-50, 50, 100)  # angles
+    z_axis = np.linspace(0, 100, 2000)
+    data_sc = scan_convert(
+        data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0
+    )
+    data_sc_inv = transform_sc_image_to_square(data_sc)
+    assert ((data_sc - data_sc_inv) ** 2).mean() < 0.2, "MSE is too high"
 
 
 @pytest.mark.parametrize(
@@ -193,33 +212,19 @@ def test_scan_conversion(size):
 def test_grid_conversion(size):
     """Tests the grid conversion function with random 2d data"""
     data = np.random.random(size)
-    x_grid_points = np.linspace(-50, 50, 100)
-    z_grid_points = np.linspace(0, 100, 2000)
+    x_grid_points = np.linspace(-45, 45, 100)  # angles
+    z_grid_points = np.linspace(0, 100, 100)
 
     x_sample_points = np.deg2rad(x_grid_points) + np.pi / 2
-    z_sample_points = np.deg2rad(z_grid_points) + np.pi / 2
+    z_sample_points = z_grid_points
 
-    _data = project_to_cartesian_grid(
+    project_to_cartesian_grid(
         data,
         (x_sample_points, z_sample_points),
         (x_grid_points, z_grid_points),
         spline_order=1,
         fill_value=0,
     )
-
-    x_sample_points, x_grid_points = x_grid_points, x_sample_points
-    z_sample_points, z_grid_points = z_grid_points, z_sample_points
-
-    _data = project_to_cartesian_grid(
-        _data,
-        (x_sample_points, z_sample_points),
-        (x_grid_points, z_grid_points),
-        spline_order=1,
-        fill_value=0,
-    )
-    # probably there is a way to cleverly choose the grid / sample
-    # such that it can be inverted
-    # np.testing.assert_almost_equal(data, _data)
 
 
 @pytest.mark.parametrize(
