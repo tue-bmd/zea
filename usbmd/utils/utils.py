@@ -10,7 +10,6 @@ from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 
 import cv2
-import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
