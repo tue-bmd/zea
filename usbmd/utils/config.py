@@ -13,46 +13,31 @@ import yaml
 class Config(dict):
     """Config class.
 
-    This Config class extends a normal dictionary with the getattr and
-    setattr functionality, and it enables saving to a yml.
+    This Config class extends a normal dictionary with easydict such that
+    values can be accessed as class attributes. Furthermore it enables
+    saving and loading to a yaml.
 
     """
+    def __init__(self, dictionary=None, **kwargs):
+        if dictionary is None:
+            dictionary = {}
+        if kwargs:
+            dictionary.update(**kwargs)
+        for k, v in dictionary.items():
+            setattr(self, k, v)
+        # Class attributes
+        for k in self.__class__.__dict__:
+            if not (k.startswith('__') and k.endswith('__')):
+                if k not in ['serialize', 'deep_copy', 'save_to_yaml']:
+                    setattr(self, k, getattr(self, k))
 
-    def __init__(self, dictionary):
-        super().__init__(dictionary)
-
-        for key, value in self.items():
-            assert key not in ["keys", "values", "items"], (
-                "The configuration contains the following key {key} which is "
-                "reserved already as a standard attribute of a dict."
-            )
-
-            # Change the key: TODO: now only string keys are supported.
-            # new_key = str(key).replace('-', '_')
-            # self.update({new_key, self.pop(key)})
-
-            if isinstance(value, (list, tuple)):
-                detected_dict = 0
-                for idx, val in enumerate(value):
-                    if isinstance(val, dict):
-                        val = Config(val)
-                        self[key][idx] = val
-                        # setattr(self, key, val)
-                        detected_dict += 1
-                if not detected_dict:
-                    setattr(self, key, value)
-
-            elif isinstance(value, dict):
-                value = Config(value)
-                setattr(self, key, value)
-            else:
-                setattr(self, key, value)
-
-    def __getattr__(self, attr):
-        return self[attr]
-
-    def __setattr__(self, attr, value):
-        self[attr] = value
+    def __setattr__(self, name, value):
+        if isinstance(value, (list, tuple)):
+            value = [self.__class__(x) if isinstance(x, dict) else x for x in value]
+        else:
+            value = self.__class__(value) if isinstance(value, dict) else value
+        super(Config, self).__setattr__(name, value)
+        self[name] = value
 
     def serialize(self):
         """Serialize config object to dictionary"""
