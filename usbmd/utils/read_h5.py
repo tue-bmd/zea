@@ -20,7 +20,26 @@ class ReadH5:
 
         """
         self.file_path = Path(file_path)
-        self.h5f = h5py.File(self.file_path, "r")
+        self.file = None
+
+    def open(self):
+        """Open the .hdf5 HDF5 file for reading."""
+        try:
+            self.file = h5py.File(self.file_path, 'r')
+        except Exception as e:
+            raise ValueError(f"Unable to open HDF5 file: {str(e)}") from e
+        return self.file
+
+    def close(self):
+        """Close the .hdf5 HDF5 file after reading."""
+        self.file.close()
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     def get_extension(self):
         """Get file extension
@@ -33,9 +52,9 @@ class ReadH5:
 
     def __getitem__(self, i, keys=None):
         if keys is None:
-            return self._get(i=i, group=self.h5f)
+            return self._get(i=i, group=self.file)
         else:
-            return self._get_from_keys(i=i, keys=keys, group=self.h5f)
+            return self._get_from_keys(i=i, keys=keys, group=self.file)
 
     @staticmethod
     def _get_from_keys(i, keys, group):
@@ -45,8 +64,8 @@ class ReadH5:
         return alist
 
     def get_all(self):
-        """Get all data (for all indices) in h5f"""
-        return self._get(i=None, group=self.h5f)
+        """Get all data (for all indices) in file"""
+        return self._get(i=None, group=self.file)
 
     def _get(self, i=None, group=None):
         alist = []
@@ -72,33 +91,21 @@ class ReadH5:
             keys (list with strings): keys.
 
         """
-        return self.h5f.keys()
+        return self.file.keys()
 
     def summary(self):
         """Summary of the hdf5 object"""
-        self.h5f.visititems(print)
-        # self.h5f.visititems(self._visit_func)
+        print_hdf5_attrs(self.file)
 
-    @staticmethod
-    def _visit_func(_, node):
-        print(f"{node.name}: ")
+    def __len__(self):
+        key = self.get_largest_group_name()
+        return len(self.file[key])
 
-    @staticmethod
-    def frame_as_first(frames):
-        """permute the dataset to have the frame indices as the first dimension
-
-        Args:
-            frames (ndarray): array with frame indices as last dimension
-
-        Returns:
-            frames (ndarray): array of shape num_frames x ....
-        """
-
-        # always start with frame dim:
-        last_dim = len(np.shape(frames)) - 1
-        order = (last_dim,) + tuple(np.arange(0, last_dim))
-        frames = np.array(frames).transpose(order)
-        return frames
+    @property
+    def shape(self):
+        """Return shape of largest group in dataset"""
+        key = self.get_largest_group_name()
+        return self.file[key].shape
 
     def get_largest_group_name(self):
         """Returns key which contains a value with most number of elements.
@@ -117,28 +124,10 @@ class ReadH5:
                 n_elements = np.prod(np.array(node.shape, dtype=np.float64))
                 group_info.append((name, n_elements))
 
-        self.h5f.visititems(visit_func)
+        self.file.visititems(visit_func)
         idx = np.argmax([gi[1] for gi in group_info])
         key_name, _ = group_info[idx]
         return key_name
-
-    def __len__(self):
-        key = self.get_largest_group_name()
-        return len(self.h5f[key])
-
-    @property
-    def shape(self):
-        """Return shape of largest group in dataset"""
-        key = self.get_largest_group_name()
-        return self.h5f[key].shape
-
-    def close(self):
-        """Close the .hdf5 HDF5 file for reading.
-
-        Returns:
-            void
-        """
-        self.h5f.close()
 
 
 def recursively_load_dict_contents_from_group(
@@ -159,3 +148,42 @@ def recursively_load_dict_contents_from_group(
                 h5file, path + key + "/"
             )
     return ans
+
+def print_hdf5_attrs(hdf5_obj, prefix=""):
+    """Recursively prints all keys, attributes, and shapes in an HDF5 file.
+
+    Args:
+        hdf5_obj (h5py.File, h5py.Group, h5py.Dataset): HDF5 object to print.
+        prefix (str, optional): Prefix to print before each line. This
+            parameter is used in internal recursion and should not be supplied
+            by the user.
+    """
+    assert isinstance(
+        hdf5_obj, (h5py.File, h5py.Group, h5py.Dataset)
+    ), "ERROR: hdf5_obj must be a File, Group, or Dataset object"
+
+    if isinstance(hdf5_obj, h5py.File):
+        name = "root" if hdf5_obj.name == "/" else hdf5_obj.name
+        print(prefix + name + "/")
+        prefix += "    "
+    elif isinstance(hdf5_obj, h5py.Dataset):
+        shape_str = str(hdf5_obj.shape).replace(",)", ")")
+        print(prefix + "├── " + hdf5_obj.name + " (shape=" + shape_str + ")")
+        prefix += "│   "
+
+    # Print all attributes
+    for key, val in hdf5_obj.attrs.items():
+        print(prefix + "├── " + key + ": " + str(val))
+
+    # Recursively print all keys, attributes, and shapes in groups
+    if isinstance(hdf5_obj, h5py.Group):
+        for i, key in enumerate(hdf5_obj.keys()):
+            is_last = i == len(hdf5_obj.keys()) - 1
+            if is_last:
+                marker = "└── "
+                new_prefix = prefix + "    "
+            else:
+                marker = "├── "
+                new_prefix = prefix + "│   "
+            print(prefix + marker + key + "/")
+            print_hdf5_attrs(hdf5_obj[key], new_prefix)
