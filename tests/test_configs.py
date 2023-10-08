@@ -73,7 +73,7 @@ def test_dot_indexing():
     assert config.a == 3
     assert config.b == 4
     # Check if config raises an error when indexing key_not_in_config
-    with pytest.raises(KeyError):
+    with pytest.raises(AttributeError):
         print(config.key_not_in_config)
 
 
@@ -84,7 +84,7 @@ def test_nested_dot_indexing():
     assert config.subdict.b == 4
     assert config.subdict.c == 5
     # Check if config raises an error when indexing key_not_in_config
-    with pytest.raises(KeyError):
+    with pytest.raises(AttributeError):
         print(config.subdict.key_not_in_config)
 
 
