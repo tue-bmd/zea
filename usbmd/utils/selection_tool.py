@@ -292,6 +292,7 @@ def interactive_selector_for_dataset():
     """To be added. UI for generating and saving masks for entire dataset.
     In an efficient and user friendly way.
     """
+    raise NotImplementedError
 
 def main():
     """Main function for interactive selector on multiple images."""
