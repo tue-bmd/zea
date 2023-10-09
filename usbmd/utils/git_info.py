@@ -1,7 +1,9 @@
-"""Git utilities
+"""Git utilities.
 
-Author(s)     : Tristan Stevens, Iris Huijben
-Data          : -
+Get git commit hash and branch name.
+
+Author(s)     : Tristan Stevens
+Data          : January 27th, 2023
 """
 
 import subprocess
