@@ -47,10 +47,12 @@ class UltrasoundSimulator:
             self.fc = scan.fc
             self.c = scan.c
             self.ele_pos = probe.ele_pos
+            self.wvln = scan.wvln
 
         else:
             self.fc = fc
             self.c = c
+            self.wvln = c / fc
 
             if ele_pos:
                 self.ele_pos = ele_pos
@@ -65,7 +67,6 @@ class UltrasoundSimulator:
                 )
 
         self.batch_size = batch_size
-        self.wvln = scan.wvln
         self.ele_pos = self.ele_pos[:, 0] - np.min(self.ele_pos[0, 0])
 
         # Set grid
