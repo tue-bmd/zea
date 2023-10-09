@@ -2,7 +2,7 @@
 the results in a GUI.
 
 - **Author(s)**     : Tristan Stevens
-- **Date**          : Thu Nov 18 2021
+- **Date**          : November 18th, 2021
 """
 import argparse
 import sys
@@ -18,6 +18,20 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
+from usbmd.common import set_data_paths
+from usbmd.datasets import get_dataset
+from usbmd.generate import GenerateDataSet
+from usbmd.probes import get_probe
+from usbmd.processing import (
+    _DATA_TYPES,
+    Process,
+    get_contrast_boost_func,
+    threshold_signal,
+)
+from usbmd.setup_usbmd import setup_config
+from usbmd.usbmd_gui import USBMDApp
+from usbmd.utils.config import Config
+from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
     filename_from_window_dialog,
     plt_window_has_been_closed,
@@ -26,20 +40,6 @@ from usbmd.utils.utils import (
     to_image,
     update_dictionary,
 )
-from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
-from usbmd.utils.config import Config
-from usbmd.usbmd_gui import USBMDApp
-from usbmd.setup_usbmd import setup_config
-from usbmd.processing import (
-    _DATA_TYPES,
-    Process,
-    get_contrast_boost_func,
-    threshold_signal,
-)
-from usbmd.probes import get_probe
-from usbmd.generate import GenerateDataSet
-from usbmd.datasets import get_dataset
-from usbmd.common import set_data_paths
 
 
 class DataLoaderUI:
