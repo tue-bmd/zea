@@ -7,7 +7,7 @@ Example:
     >>> python usbmd/ui.py -c configs/config_picmus_rf.yaml -t generate
 
 - **Author(s)**     : Tristan Stevens
-- **Date**          : Thu Nov 18 2021
+- **Date**          : November 18th, 2021
 """
 from pathlib import Path
 
