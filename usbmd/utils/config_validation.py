@@ -15,11 +15,12 @@ Also if that parameter is optional, add a default value.
 import importlib
 from pathlib import Path
 from typing import Union
-from schema import And, Optional, Or, Regex, Schema
-from usbmd.utils.metrics import _METRICS
-from usbmd.utils.config import Config
-from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 
+from schema import And, Optional, Or, Regex, Schema
+
+from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
+from usbmd.utils.config import Config
+from usbmd.utils.metrics import _METRICS
 
 _ML_LIBRARIES = [None, "torch", "tensorflow"]
 
@@ -156,8 +157,8 @@ config_schema = Schema(
             Optional("dataset_folder", default=None): Or(None, str),
         },
         "plot": {
-            "save": bool,
-            "axis": bool,
+            Optional("save", default=False): bool,
+            Optional("axis", default=False): bool,
             Optional("fps", default=20): int,
             Optional("tag", default=None): Or(None, str),
             Optional("headless", default=False): bool,

@@ -31,7 +31,8 @@ from usbmd.processing import (
 from usbmd.setup_usbmd import setup_config
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.config import Config
-from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
+from usbmd.utils.selection_tool import \
+    interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
     filename_from_window_dialog,
     plt_window_has_been_closed,
