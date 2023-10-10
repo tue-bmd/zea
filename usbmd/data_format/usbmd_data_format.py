@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 
 from usbmd.probes import Probe, get_probe
+from usbmd.processing import _DATA_TYPES
 from usbmd.scan import Scan
 
 
@@ -265,7 +266,6 @@ def validate_dataset(path):
     Args:
         path (str, pathlike): The path to the hdf5 dataset.
 
-
     """
     dataset = h5py.File(path, "r")
 
@@ -287,14 +287,8 @@ def validate_dataset(path):
     check_key(dataset["scan"], "t0_delays")
 
     # validate the data group
-    allowed_data_keys = [
-        "raw_data",
-        "aligned_data",
-        "beamformed_data",
-        "envelope_data",
-        "image",
-        "image_sc",
-    ]  # TODO: Add initial_times?
+    allowed_data_keys = _DATA_TYPES
+
     for key in dataset["data"].keys():
         assert key in allowed_data_keys, "The data group contains an unexpected key."
 
@@ -477,17 +471,9 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         assert all(isinstance(tx, int) for tx in transmits), \
             'All transmits must be integers.'
 
-    assert data_type in (
-        "raw_data",
-        "aligned_data",
-        "beamformed_data",
-        "envelope_data",
-        "image",
-        "image_sc",
-    ), (
-        "The data_type must be one of raw_data, aligned_data, "
-        "beamformed_data, envelope_data, image or image_sc."
-    )
+    assert (
+        data_type in _DATA_TYPES
+    ), f"Data type {data_type} does not exist, should be in {_DATA_TYPES}"
 
     with h5py.File(path, "r") as hdf5_file:
         # data = hdf5_file['data']['raw_data'][:]
@@ -541,8 +527,8 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
         z0, z1 = 0, depth
 
-        if transmits is not None:
-            n_tx = len(transmits)
+        n_tx = len(transmits)
+
         initial_times = hdf5_file['scan']['initial_times'][transmits]
         tx_apodizations = hdf5_file['scan']['tx_apodizations'][transmits]
         t0_delays = hdf5_file['scan']['t0_delays'][transmits]
@@ -568,7 +554,9 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         )
 
         # Load the desired frames from the file
-        data = hdf5_file["data"]["raw_data"][frames]
-        data = data[:, transmits]
+        data = hdf5_file["data"][data_type][frames]
+
+        if data_type in ["raw_data", "aligned_data"]:
+            data = data[:, transmits]
 
         return data, scan, probe

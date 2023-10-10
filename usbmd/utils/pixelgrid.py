@@ -3,6 +3,8 @@
 - **Author(s)**     : Dongwoon Hyun, Ben Luijten
 - **Date**          : 2020-04-03
 """
+import warnings
+
 import numpy as np
 
 eps = 1e-10
@@ -44,24 +46,24 @@ def check_for_aliasing(scan):
 
     if scan.Nx and scan.Nz:
         if width / scan.Nx > wvln / 2:
-            print(
-                f"WARNING: width/Nx = {width/scan.Nx} < wvln/2 = {wvln/2}. "
+            warnings.warn(
+                f"width/Nx = {width/scan.Nx:.7f} < wvln/2 = {wvln/2}. "
                 f"Consider increasing scan.Nx to {int(width/(wvln/2))} or more."
             )
         if depth / scan.Nz > wvln / 2:
-            print(
-                f"WARNING: depth/Nz = {depth/scan.Nz} < wvln/2 = {wvln/2}. "
+            warnings.warn(
+                f"depth/Nz = {depth/scan.Nz:.7f} < wvln/2 = {wvln/2:.7f}. "
                 f"Consider increasing scan.Nz to {int(depth/(wvln/2))} or more."
             )
     else:
         if dx > wvln / 2:
-            print(
-                f"WARNING: dx = {dx} > wvln/2 = {wvln/2}. "
+            warnings.warn(
+                f"dx = {dx:.7f} > wvln/2 = {wvln/2:.7f}. "
                 f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
         if dz > wvln / 2:
-            print(
-                f"WARNING: dz = {dz} > wvln/2 = {wvln/2}. "
+            warnings.warn(
+                f"dz = {dz:.7f} > wvln/2 = {wvln/2:.7f}. "
                 f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
 
