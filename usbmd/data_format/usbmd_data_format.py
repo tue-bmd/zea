@@ -287,7 +287,7 @@ def validate_dataset(path):
     check_key(dataset["scan"], "t0_delays")
 
     # validate the data group
-    allowed_data_keys = _DATA_TYPES  # TODO: Add initial_times?
+    allowed_data_keys = _DATA_TYPES
 
     for key in dataset["data"].keys():
         assert key in allowed_data_keys, "The data group contains an unexpected key."
