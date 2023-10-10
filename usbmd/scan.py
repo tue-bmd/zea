@@ -210,12 +210,11 @@ class Scan:
         # integer, then that number of transmits is selected as homogeneously as
         # possible. If set to a list of integers, then the transmits with those indices
         # are selected. If set to None, then all transmits are used. Defaults to None.
-        self.selected_transmits = self.select_transmits(
-            selected_transmits, n_tx)
+        self.selected_transmits = self.select_transmits(selected_transmits)
 
         check_for_aliasing(self)
 
-    def select_transmits(self, selected_transmits, n_tx):
+    def select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
         indices.
 
@@ -225,26 +224,32 @@ class Scan:
             possible. If set to a list of integers, then the transmits with those
             indices are selected. If set to None, then all transmits are used. Defaults
             to None.
-            n_tx (int): The number of transmits in the scan.
 
         Returns:
             list: The selected transmits as a list of indices
         """
         if selected_transmits is None:
-            return list(range(n_tx))
+            return list(range(self.n_tx))
 
         if isinstance(selected_transmits, int):
             # Do an error check if the number of selected transmits is not too large
-            assert selected_transmits <= n_tx, (
+            assert selected_transmits <= self.n_tx, (
                 f"Number of selected transmits ({selected_transmits}) "
-                f"exceeds number of transmits in scan ({n_tx})."
+                f"exceeds number of transmits in scan ({self.n_tx})."
             )
 
-            # Compute selected_transmits evenly spaced indices for reduced angles
-            tx_indices = np.linspace(0, n_tx - 1, n_tx)
+            # If the number of selected transmits is 1, then pick the middle transmit
+            if selected_transmits == 1:
+                tx_indices = [self.n_tx // 2]
+            else:
+                # Compute selected_transmits evenly spaced indices for reduced angles
+                tx_indices = np.linspace(0, self.n_tx - 1, selected_transmits)
 
-            # Round the computed angles to integers and turn into list
-            tx_indices = list(np.rint(tx_indices).astype("int"))
+                # Round the computed angles to integers and turn into list
+                tx_indices = list(np.rint(tx_indices).astype("int"))
+
+            # Update the number of transmits
+            self.n_tx = selected_transmits
 
             return list(tx_indices)
 
@@ -253,10 +258,13 @@ class Scan:
                 isinstance(n, int) for n in selected_transmits
             ), "selected_transmits must be a list of integers."
             # Check if the selected transmits are not too large
-            assert all(n < n_tx for n in selected_transmits), (
+            assert all(n < self.n_tx for n in selected_transmits), (
                 f"Selected transmits {selected_transmits} exceed the number of "
-                f"transmits in the scan ({n_tx})."
+                f"transmits in the scan ({self.n_tx})."
             )
+
+            # Update the number of transmits
+            self.n_tx = len(selected_transmits)
 
             return selected_transmits
 

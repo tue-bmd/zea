@@ -2,7 +2,7 @@
 dictionary.
 
 - **Author(s)**     : Tristan Stevens
-- **Date**          : -
+- **Date**          : October 3th, 2022
 """
 import argparse
 from pathlib import Path

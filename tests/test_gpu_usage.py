@@ -2,9 +2,7 @@
 """
 import pytest
 
-from usbmd.pytorch_ultrasound.utils.gpu_config import (
-    set_gpu_usage as set_gpu_usage_pytorch,
-)
+from usbmd.pytorch_ultrasound.utils.gpu_config import get_device as get_device_pytorch
 from usbmd.tensorflow_ultrasound.utils.gpu_config import (
     set_gpu_usage as set_gpu_usage_tf,
 )
@@ -28,7 +26,7 @@ def test_gpu_usage(device, ml_lib):
     if ml_lib == "tensorflow":
         set_gpu_usage_tf(device=device)
     elif ml_lib == "torch":
-        set_gpu_usage_pytorch(device=device)
+        get_device_pytorch(device=device)
 
 
 @pytest.mark.parametrize(
@@ -43,4 +41,4 @@ def test_default_gpu_usage(ml_lib):
     if ml_lib == "tensorflow":
         set_gpu_usage_tf()
     elif ml_lib == "torch":
-        set_gpu_usage_pytorch()
+        get_device_pytorch()

@@ -1,0 +1,8 @@
+[tool.black]
+line-length = 88
+target-version = ['py39']
+include = '\.pyi?$|\.ipynb$'  # Include both Python files and Jupyter notebooks
+
+[tool.isort]
+profile = "black"
+line_length = 88
