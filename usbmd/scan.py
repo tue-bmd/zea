@@ -58,6 +58,8 @@ class Scan:
                 Defaults to 7e6.
             fs (float, optional): The sampling rate to sample rf- or
                 iq-signals with. Defaults to 28e6.
+            bandwidth_percentage: Bandwidth of RF signal in % of center
+            frequency. Defaults to 200. 
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
@@ -106,6 +108,8 @@ class Scan:
         self.fc = float(fc)
         #: The sampling rate [Hz]
         self.fs = float(fs)
+        #: The percentage bandwidth []
+        self.bandwidth_percentage = float(bandwidth_percentage)
         #: The speed of sound [m/s]
         self.c = float(c)
         #: The modulation type of the raw data ('rf' or 'iq')
