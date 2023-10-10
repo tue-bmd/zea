@@ -288,6 +288,11 @@ def interactive_selector_with_plot_and_metric(
 
     return scores
 
+def interactive_selector_for_dataset():
+    """To be added. UI for generating and saving masks for entire dataset.
+    In an efficient and user friendly way.
+    """
+    raise NotImplementedError
 
 def main():
     """Main function for interactive selector on multiple images."""
@@ -312,8 +317,14 @@ def main():
 
     fig.tight_layout()
 
+    while True:
+        selector = input("Which selection tool do you want to use? [rectangle/lasso]): ")
+        if selector in ["rectangle", "lasso"]:
+            break
+        print("Please enter either 'rectangle' or 'lasso'")
+
     interactive_selector_with_plot_and_metric(
-        images, axs, selector="rectangle", metric="gcnr"
+        images, axs, selector=selector, metric="gcnr"
     )
 
     plt.show()

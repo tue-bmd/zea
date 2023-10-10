@@ -1,6 +1,7 @@
-"""USBMD GUI app
-Author(s): Tristan Stevens
-Date: 19/04/2023
+"""USBMD GUI app, builds on the App class from usbmd/utils/gui.py
+
+Provides a graphical user friendly way of interacting with the USBMD package
+and setting config parameters.
 
 TODO:
 - add schema, such that options are available
@@ -11,6 +12,8 @@ TODO:
 - labels prettier
 - fix load config, such that are inserted in entries
 
+- **Author(s)**     : Tristan Stevens
+- **Date**          : April 19th, 2023
 """
 import warnings
 from threading import Thread
