@@ -14,7 +14,7 @@ from pathlib import Path
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
-from usbmd.utils.utils import filename_from_window_dialog
+from usbmd.utils.io import filename_from_window_dialog
 
 
 def setup_config(file=None):
