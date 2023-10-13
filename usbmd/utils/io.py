@@ -12,6 +12,7 @@ from tkinter.filedialog import askopenfilename
 
 import cv2
 import imageio
+import matplotlib
 import numpy as np
 import pydicom
 import tqdm
@@ -144,3 +145,51 @@ def search_file_tree(directory, filetypes=None, write=True):
             file.writelines(file_paths)
 
     return file_paths
+
+def move_matplotlib_figure(figure, position, size=None):
+    """Move matplotlib figure to a specific position on the screen.
+    Args:
+        figure (plt.figure): matplotlib figure
+        position (tuple): x and y position of figure in pixels
+        size (tuple, optional): width and height of figure in pixels
+
+    """
+    x, y = position
+
+    if size is not None:
+        width, height = size
+        figure.set_size_inches(width / figure.dpi, height / figure.dpi)
+
+    backend = matplotlib.get_backend()
+
+    if backend == 'TkAgg':
+        figure.canvas.manager.window.wm_geometry(f"+{x}+{y}")
+    elif backend == 'WXAgg':
+        figure.canvas.manager.window.SetPosition((x, y))
+    else:
+        # This works for QT and GTK
+        # You can also use window.setGeometry
+        figure.canvas.manager.window.move(x, y)
+
+def get_matplotlib_figure_props(figure):
+    """Return a dictionary of matplotlib figure properties.
+    Args:
+        figure (plt.figure): matplotlib figure
+    Returns:
+        tuple: position and size of figure in pixels
+            position (tuple): x and y position of figure in pixels
+            size (tuple): width and height of figure in pixels
+    """
+    # Get size and position in the format of "widthxheight+X+Y"
+    geometry = figure.canvas.manager.window.geometry()
+
+    # Split the geometry string by '+' to extract size and position
+    size_str, *pos_str = geometry.split('+')
+
+    # Extract width and height from the size string
+    size = map(int, size_str.split('x'))
+
+    # Extract X and Y position values as integers
+    position = map(int, pos_str)
+
+    return position, size
