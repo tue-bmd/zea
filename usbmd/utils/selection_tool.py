@@ -34,6 +34,8 @@ from usbmd.utils.utils import translate
 
 def crop_array(array, value=None):
     """Crop an array to remove all rows and columns containing only a given value."""
+    array = np.array(array)
+    assert array.ndim == 2, f"Array must be 2D, not {array.ndim}D."
     mask = np.all(np.equal(array, value), axis=1)
     array = array[~mask]
 
