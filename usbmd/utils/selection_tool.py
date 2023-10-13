@@ -360,7 +360,7 @@ def interpolate_rectangles(rectangles, x_indices, y_indices):
 
 
 def extract_polygon_from_mask(mask, tolerance: float = 0.01):
-    """Find contours in a binary mask and fit polygon.
+    """Find largest contour in a binary mask and fit polygon.
 
     Polygon approximation will reduce contour points, unless tolerance is 0.
 
@@ -371,7 +371,16 @@ def extract_polygon_from_mask(mask, tolerance: float = 0.01):
         Numpy array of shape (N, 2) with vertices of the polygon.
     """
     contours = find_contours(mask, 0.5, fully_connected="high")
-    poly = approximate_polygon(contours[0], tolerance)
+    # return the largest contour
+    if len(contours) > 1:
+        contour_lengths = [len(contour) for contour in contours]
+        contour = contours[np.argmax(contour_lengths)]
+        warnings.warn(
+            "Warning: multiple contours found. Returning the largest contour."
+        )
+    else:
+        contour = contours[0]
+    poly = approximate_polygon(contour, tolerance)
     return poly
 
 
