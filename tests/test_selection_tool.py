@@ -37,7 +37,7 @@ def test_polygon():
     poly = extract_polygon_from_mask(mask, 0.0)
     # reconstruct mask
     mask_reconstructed = reconstruct_mask_from_polygon(poly, mask.shape)
-    assert np.testing.assert_array_almost_equal(mask, mask_reconstructed, 0.1)
+    np.testing.assert_array_almost_equal(mask, mask_reconstructed, 0.1)
 
 @pytest.mark.parametrize(
     "mode", ["min", "max"],
