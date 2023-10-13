@@ -606,7 +606,7 @@ def interactive_selector_for_dataset():
 
 def main():
     """Main function for interactive selector on multiple images."""
-    print("Select as many images as you like, and close window to continue...")
+    print("Select as many images as you like, OR select 1 video / gif / dicom, and close window to continue...")
     images = []
     file_names = []
     try:
