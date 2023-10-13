@@ -4,7 +4,6 @@ displayed as an image with matplotlib.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 24/02/2023
 """
-import sys
 import warnings
 from collections.abc import Iterable
 from pathlib import Path
@@ -25,6 +24,7 @@ from usbmd.utils.io import (
     _SUPPORTED_VID_TYPES,
     filename_from_window_dialog,
     get_matplotlib_figure_props,
+    load_image,
     load_video,
     move_matplotlib_figure,
 )
@@ -50,7 +50,7 @@ def interactive_selector(
     """Interactively select part of an array displayed as an image with matplotlib.
 
     Args:
-        data (ndarray): input array.
+        data (ndarray): input array. should be 2D.
         ax (plt.ax): existing matplotlib figure ax to select region on.
         selector (str, optional): type of selector. Defaults to 'rectangle'.
             For `lasso` use `LassoSelector`; for `rectangle`, use `RectangleSelector`.
@@ -63,6 +63,8 @@ def interactive_selector(
         patches (list): list of selected parts of data
         masks (list): list of boolean masks for selected parts of data
     """
+    assert data.ndim == 2, f"Data must be 2D, not {data.ndim}D."
+
     x, y = np.meshgrid(
         np.arange(data.shape[1], dtype=int), np.arange(data.shape[0], dtype=int)
     )
@@ -611,7 +613,7 @@ def main():
         while True:
             file = filename_from_window_dialog("Choose image / video file")
             if file.suffix in [".png", ".jpg", ".jpeg"]:
-                image = plt.imread(file)
+                image = load_image(file)
                 images.append(image)
                 file_names.append(file.name)
                 same_images = True
@@ -620,10 +622,9 @@ def main():
                 same_images = False
                 break
     except Exception as e:
-        print("Error:", e)
         if len(images) == 0:
-            sys.exit("Please select 1 or more images")
-
+            raise e
+        print("No more images selected. Continuing...")
     while True:
         selector = input(
             "Which selection tool do you want to use? [rectangle/lasso]): "
