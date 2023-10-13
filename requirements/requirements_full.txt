@@ -12,6 +12,7 @@ tqdm
 pyyaml
 decorator
 papermill
+pydicom
 
 tensorflow-gpu<2.11
 --extra-index-url https://download.pytorch.org/whl/cu117
