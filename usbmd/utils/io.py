@@ -19,6 +19,7 @@ import tqdm
 from pydicom.pixel_data_handlers import convert_color_space
 
 _SUPPORTED_VID_TYPES = ['.avi', '.mp4', '.gif', '']
+_SUPPORTED_IMG_TYPES = ['.jpg', '.png', '.JPEG', '.PNG', '.jpeg']
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
     """Get filename through dialog window
@@ -95,6 +96,32 @@ def load_video(filename):
     frames = [cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) for frame in frames]
     return np.array(frames)
 
+def load_image(filename, grayscale=True):
+    """Load an image file and return a numpy array.
+
+    Supported file types: jpg, png.
+
+    Args:
+        filename (str): The path to the image file.
+
+    Returns:
+        numpy.ndarray: A numpy array of the image.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+    """
+    filename = Path(filename)
+    assert Path(filename).exists(), f'File {filename} does not exist'
+    extension = filename.suffix
+    assert extension in _SUPPORTED_IMG_TYPES, f'File extension {extension} not supported'
+
+    image = cv2.imread(str(filename))
+
+    if grayscale and len(image.shape) == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    return image
+
+
 def search_file_tree(directory, filetypes=None, write=True):
     """Lists all files in directory and sub-directories.
 
@@ -123,7 +150,7 @@ def search_file_tree(directory, filetypes=None, write=True):
 
     # set default file type
     if filetypes is None:
-        filetypes = ("jpg", "jpeg", "JPEG", "png", "PNG")
+        filetypes = _SUPPORTED_IMG_TYPES
 
     file_paths = []
 
@@ -133,7 +160,7 @@ def search_file_tree(directory, filetypes=None, write=True):
     ):
         for file in filenames:
             # Append to file_paths if it is a filetype file
-            if file.endswith(filetypes):
+            if Path(file).suffix in filetypes:
                 file_paths.append(str(Path(dirpath) / Path(file)))
 
     print(f"\nFound {len(file_paths)} image files in .\\{Path(directory)}\n")
