@@ -50,12 +50,15 @@ def test_equalize_polygons(mode):
     poly3 = np.array([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]])
 
     # equalize
-    poly1, poly2, poly3 = equalize_polygons((poly1, poly2, poly3), mode=mode)
-    assert len(poly1) == len(poly2) == len(poly3)
+    polygons = (poly1, poly2, poly3)
+    polygons = equalize_polygons(polygons, mode=mode)
+    assert len(polygons) == 3
+    # same length for all elements in list
+    assert len(set(len(poly) for poly in polygons)) == 1
     if mode == "min":
-        assert len(poly1) == 3
+        assert len(polygons[0]) == 3
     elif mode == "max":
-        assert len(poly1) == 5
+        assert len(polygons[0]) == 5
 
 def test_match_polygons():
     """Test polygon matching."""
