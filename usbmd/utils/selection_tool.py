@@ -364,6 +364,7 @@ def interpolate_rectangles(rectangles, x_indices, y_indices):
     for values in [x1, x2, y1, y2]:
         values_interp.append(np.interp(y_indices, x_indices, values).astype(np.int32))
 
+    # pylint: disable=unbalanced-tuple-unpacking
     x1, x2, y1, y2 = values_interp
     new_rectangles = [((x1[i], y1[i]), (x2[i], y2[i])) for i in range(len(x1))]
     return new_rectangles
@@ -596,7 +597,6 @@ def interpolate_masks(masks: list, num_frames: int, rectangle: bool = False):
     return interpolated_masks
 
 
-
 def interactive_selector_for_dataset():
     """To be added. UI for generating and saving masks for entire dataset.
     In an efficient and user friendly way.
@@ -606,7 +606,10 @@ def interactive_selector_for_dataset():
 
 def main():
     """Main function for interactive selector on multiple images."""
-    print("Select as many images as you like, OR select 1 video / gif / dicom, and close window to continue...")
+    print(
+        "Select as many images as you like, OR select 1 video / gif / dicom, "
+        "and close window to continue..."
+    )
     images = []
     file_names = []
     try:
@@ -736,6 +739,7 @@ def main():
         filename = Path(file.parent.stem + "_" + f"{file.stem}_interpolated_masks.gif")
         ani.save(filename, writer="pillow")
         print(f"Succesfully saved animation as {filename}")
+
 
 if __name__ == "__main__":
     main()
