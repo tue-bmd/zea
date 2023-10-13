@@ -21,7 +21,13 @@ from skimage import measure
 from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
 
-from usbmd.utils.io import _SUPPORTED_VID_TYPES, filename_from_window_dialog, load_video
+from usbmd.utils.io import (
+    _SUPPORTED_VID_TYPES,
+    filename_from_window_dialog,
+    get_matplotlib_figure_props,
+    load_video,
+    move_matplotlib_figure,
+)
 from usbmd.utils.metrics import get_metric
 from usbmd.utils.utils import translate
 
@@ -664,12 +670,20 @@ def main():
             )
             selection_images = [images[idx] for idx in selection_idx]
             selection_masks = []
+            pos, size = None, None
             for image in selection_images:
                 fig, axs = plt.subplots()
+                fig.tight_layout()
+                # set window size to what user selected for plot before
+                if pos is not None:
+                    move_matplotlib_figure(fig, pos, size)
+
                 axs.imshow(image, cmap="gray")
                 _, mask = interactive_selector(
                     image, axs, selector=selector, num_selections=1
                 )
+                pos, size = get_matplotlib_figure_props(fig)
+
                 if selector == "rectangle":
                     add_rectangle_from_mask(axs, mask[0], alpha=0.5)
                 else:
