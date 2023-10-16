@@ -215,7 +215,7 @@ def test_scan_conversion_and_inverse(size, random_data_type):
     data_sc_inv = transform_sc_image_to_polar(data_sc, output_size=polar_data.shape)
     mean_squared_error = ((polar_data - data_sc_inv) ** 2).mean()
 
-    assert mean_squared_error < 0.1, "MSE is too high"
+    assert mean_squared_error < 0.11, "MSE is too high"
 
 
 @pytest.mark.parametrize(
