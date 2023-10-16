@@ -258,3 +258,24 @@ def get_date_string(string: str = None):
 
     date_str = now.strftime(string)
     return date_str
+
+def find_first_nonzero_index(arr, axis, invalid_val=-1):
+    """
+    Find the index of the first non-zero element along a specified axis in a NumPy array.
+
+    Args:
+        arr (numpy.ndarray): The input array to search for the first non-zero element.
+        axis (int): The axis along which to perform the search.
+        invalid_val (int, optional): The value to assign to elements where no
+            non-zero values are found along the axis.
+
+    Returns:
+        numpy.ndarray: An array of indices where the first non-zero element
+            occurs along the specified axis. Elements with no non-zero values along
+            the axis are replaced with the 'invalid_val'.
+
+    """
+    nonzero_mask = arr != 0
+    return np.where(
+        nonzero_mask.any(axis=axis), nonzero_mask.argmax(axis=axis), invalid_val
+    )
