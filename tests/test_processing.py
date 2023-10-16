@@ -19,7 +19,7 @@ from usbmd.processing import (
     scan_convert,
     to_8bit,
     to_image,
-    transform_sc_image_to_square,
+    transform_sc_image_to_polar,
     upmix,
 )
 from usbmd.pytorch_ultrasound import processing as processing_torch
@@ -184,22 +184,38 @@ def test_scan_conversion(size):
 
 
 @pytest.mark.parametrize(
-    "size",
+    "size, random_data_type",
     [
-        (200, 200),
+        ((200, 200), "gaussian"),
+        ((100, 333), "gaussian"),
+        ((200, 200), "radial"),
+        ((100, 333), "radial"),
     ],
 )
-def test_scan_conversion_and_inverse(size):
+def test_scan_conversion_and_inverse(size, random_data_type):
     """Tests the scan_conversion function with random data and
-    invert the data with transform_sc_image_to_square"""
-    data = np.random.random(size)
-    x_axis = np.linspace(-50, 50, 100)  # angles
+    invert the data with transform_sc_image_to_polar.
+    For gaussian data, the mean squared error is around 0.09.
+    For radial data, the mean squared error is around 0.0002.
+    """
+    if random_data_type == "gaussian":
+        polar_data = np.random.random(size)
+    elif random_data_type == "radial":
+        x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
+        r = np.sqrt(x**2 + y**2)
+        polar_data = np.exp(-(r**2))
+    else:
+        raise NotImplementedError
+
+    x_axis = np.linspace(-45, 45, 100)  # angles
     z_axis = np.linspace(0, 100, 2000)
     data_sc = scan_convert(
-        data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0
+        polar_data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0
     )
-    data_sc_inv = transform_sc_image_to_square(data_sc)
-    assert ((data_sc - data_sc_inv) ** 2).mean() < 0.2, "MSE is too high"
+    data_sc_inv = transform_sc_image_to_polar(data_sc, output_size=polar_data.shape)
+    mean_squared_error = ((polar_data - data_sc_inv) ** 2).mean()
+
+    assert mean_squared_error < 0.1, "MSE is too high"
 
 
 @pytest.mark.parametrize(
