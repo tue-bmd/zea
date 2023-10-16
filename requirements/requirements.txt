@@ -11,3 +11,4 @@ schema
 tqdm
 pyyaml
 pydicom
+PyQt5
