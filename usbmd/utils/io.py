@@ -6,6 +6,7 @@ Use to quickly read and write files or interact with file system.
 - **Date**          : October 12th, 2023
 """
 import os
+import warnings
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
@@ -17,6 +18,7 @@ import numpy as np
 import pydicom
 import tqdm
 from pydicom.pixel_data_handlers import convert_color_space
+from PyQt5.QtCore import QRect
 
 _SUPPORTED_VID_TYPES = ['.avi', '.mp4', '.gif', '']
 _SUPPORTED_IMG_TYPES = ['.jpg', '.png', '.JPEG', '.PNG', '.jpeg']
@@ -210,13 +212,30 @@ def get_matplotlib_figure_props(figure):
     # Get size and position in the format of "widthxheight+X+Y"
     geometry = figure.canvas.manager.window.geometry()
 
-    # Split the geometry string by '+' to extract size and position
-    size_str, *pos_str = geometry.split('+')
+    # Get the geometry object based on the backend
+    backend_name = matplotlib.get_backend()
 
-    # Extract width and height from the size string
-    size = map(int, size_str.split('x'))
-
-    # Extract X and Y position values as integers
-    position = map(int, pos_str)
+    try:
+        if backend_name == 'TkAgg':
+            assert isinstance(geometry, str), \
+                f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
+            # format: "widthxheight+X+Y"
+            # Split the geometry string by '+' to extract size and position
+            size_str, *pos_str = geometry.split('+')
+            # Extract width and height from the size string
+            size = map(int, size_str.split('x'))
+            # Extract X and Y position values as integers
+            position = map(int, pos_str)
+        elif backend_name == 'QtAgg':
+            assert isinstance(geometry, QRect), \
+                f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
+            # format: QRect object
+            position = geometry.x(), geometry.y()
+            size = geometry.size().width(), geometry.size().height()
+        else:
+            raise ValueError(f"Unsupported backend: {backend_name}")
+    except Exception as error:
+        warnings.warn(f"Could not get figure properties: {error}")
+        position, size = None, None
 
     return position, size
