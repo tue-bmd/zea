@@ -200,10 +200,13 @@ def test_scan_conversion_and_inverse(size, random_data_type):
     """
     if random_data_type == "gaussian":
         polar_data = np.random.random(size)
+        # random data allow large error since interpolation is hard
+        allowed_error = 0.2
     elif random_data_type == "radial":
         x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
         r = np.sqrt(x**2 + y**2)
         polar_data = np.exp(-(r**2))
+        allowed_error = 0.001
     else:
         raise NotImplementedError
 
@@ -215,7 +218,8 @@ def test_scan_conversion_and_inverse(size, random_data_type):
     data_sc_inv = transform_sc_image_to_polar(data_sc, output_size=polar_data.shape)
     mean_squared_error = ((polar_data - data_sc_inv) ** 2).mean()
 
-    assert mean_squared_error < 0.11, "MSE is too high"
+    assert mean_squared_error < allowed_error, \
+        f"MSE is too high: {mean_squared_error:.4f} > {allowed_error:.4f}"
 
 
 @pytest.mark.parametrize(
