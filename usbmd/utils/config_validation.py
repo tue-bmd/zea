@@ -85,7 +85,7 @@ preprocess_schema = Schema(
                 "num_taps": positive_integer,
                 "freqs": list_of_floats,
                 "bandwidths": list_of_floats,
-                # Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
+                Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
             },
         ),
         Optional("demodulation", default="manual"): Or("manual", "hilbert", "gabor"),
@@ -125,7 +125,6 @@ scan_schema = Schema(
         Optional("xlims", default=None): Or(None, list_of_size_two),
         Optional("zlims", default=None): Or(None, list_of_size_two),
         Optional("ylims", default=None): Or(None, list_of_size_two),
-        # TODO: selected_transmits and n_tx are overlapping parameters
         Optional("selected_transmits", default=None): Or(None, int, list),
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
