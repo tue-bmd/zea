@@ -7,7 +7,9 @@ displayed as an image with matplotlib.
 import warnings
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Union
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
@@ -29,7 +31,7 @@ from usbmd.utils.io import (
     move_matplotlib_figure,
 )
 from usbmd.utils.metrics import get_metric
-from usbmd.utils.utils import translate
+from usbmd.utils.utils import strtobool, translate
 
 
 def crop_array(array, value=None):
@@ -45,8 +47,9 @@ def crop_array(array, value=None):
 
 
 def interactive_selector(
-    data, ax, selector="rectangle", extent=None, verbose=True, num_selections=None
-):
+    data, ax, selector: str="rectangle", extent: list=None, verbose: bool=True,
+    num_selections: int=None, confirm_selection: bool=False,
+) -> tuple:
     """Interactively select part of an array displayed as an image with matplotlib.
 
     Args:
@@ -58,6 +61,7 @@ def interactive_selector(
             coordinates back to pixel values. Defaults to None.
         verbose (bool): verbosity of print statements. Defaults to False.
         num_selections (int): number of selections to make. Defaults to None.
+        confirm_selection (bool): whether to confirm selection before moving on.
 
     Returns:
         patches (list): list of selected parts of data
@@ -69,10 +73,6 @@ def interactive_selector(
         np.arange(data.shape[1], dtype=int), np.arange(data.shape[0], dtype=int)
     )
     pix = np.vstack((x.flatten(), y.flatten())).T
-
-    mask = np.tile(False, data.shape)
-    masks = []
-    select_idx = 0
 
     def _translate_coordinates(x, y):
         if extent:
@@ -126,43 +126,60 @@ def interactive_selector(
     }
     kwargs_dict = {LassoSelector: {}, RectangleSelector: {"interactive": True}}
 
-    lasso = selector(ax, onselect_dict[selector], **kwargs_dict[selector])
+    def _execute_selector():
+        lasso = selector(ax, onselect_dict[selector], **kwargs_dict[selector])
 
-    if num_selections:
-        if verbose:
-            print(f"...Plot will close after {num_selections} selections...")
-        plt.show(block=False)
-        while not select_idx >= num_selections:
-            plt.pause(0.1)
-    else:
-        plt.show(block=False)
-        input("Press Enter to continue (don't close plot)...\n")
+        if num_selections:
+            if verbose:
+                print(f"...Plot will close after {num_selections} selections...")
+            plt.show(block=False)
+            while not select_idx >= num_selections:
+                plt.pause(0.1)
+        else:
+            plt.show(block=False)
+            input("Press Enter to continue (don't close plot)...\n")
 
-    lasso.disconnect_events()
-    lasso.set_visible(False)
-    lasso.update()
+        lasso.disconnect_events()
+        lasso.set_visible(False)
+        lasso.update()
+
+
+    mask = np.tile(False, data.shape)
+    masks = []
+    select_idx = 0
+    _execute_selector()
 
     patches = []
     for mask in masks:
         patches.append(crop_array(data * mask, value=0))
 
+    like_selection = not bool(confirm_selection)
+
+    while not like_selection:
+        print(f"You have made {len(patches)} selection(s).")
+        like_selection = strtobool(input("Do you like your selection? (y/n) "))
+
+        if not like_selection:
+            mask = np.tile(False, data.shape)
+            masks = []
+            select_idx = 0
+            _execute_selector()
+
+            patches = []
+            for mask in masks:
+                patches.append(crop_array(data * mask, value=0))
+
     return patches, masks
 
 
-def add_rectangle_from_mask(
-    ax,
-    mask,
-    edgecolor="r",
-    facecolor="none",
-    linewidth=1,
-    **kwargs,
-):
+def add_rectangle_from_mask(ax, mask, **kwargs):
     """add a rectangle box to axis from mask array.
 
     Args:
         ax (plt.ax): matplotlib axis
         mask (ndarray): numpy array with rectangle non-zero
             box defining the region of interest.
+    Kwargs:
         edgecolor (str): color of the shape's edge
         facecolor (str): color of the shape's face
         linewidth (int): width of the shape's edge
@@ -177,9 +194,6 @@ def add_rectangle_from_mask(
         (x1, y1),
         (x2 - x1),
         (y2 - y1),
-        edgecolor=edgecolor,
-        facecolor=facecolor,
-        linewidth=linewidth,
         **kwargs,
     )
 
@@ -195,6 +209,7 @@ def add_shape_from_mask(ax, mask, **kwargs):
         ax (plt.ax): matplotlib axis
         mask (ndarray): numpy array with non-zero
             shape defining the region of interest.
+    Kwargs:
         edgecolor (str): color of the shape's edge
         facecolor (str): color of the shape's face
         linewidth (int): width of the shape's edge
@@ -528,9 +543,13 @@ def equalize_polygons(polygons, mode="max"):
         return interpolated_polygons
 
 
-def interpolate_masks(masks: list, num_frames: int, rectangle: bool = False):
+def interpolate_masks(
+    masks: Union[list, np.ndarray], num_frames: int, rectangle: bool = False
+) -> list:
     """Interpolate between arbitrary number of masks."""
-    assert isinstance(masks, list), "Masks must be a list of numpy arrays."
+    assert isinstance(
+        masks, (list, np.ndarray)
+    ), "Masks must be a list of numpy arrays."
     assert num_frames > 1, "At least two frames are required for interpolation."
     number_of_masks = len(masks)
     assert number_of_masks > 1, "At least two masks are required for interpolation."
@@ -604,6 +623,80 @@ def interactive_selector_for_dataset():
     raise NotImplementedError
 
 
+def ask_for_selection_tool():
+    """Ask user for which selection tool to use."""
+    while True:
+        selector = input(
+            "Which selection tool do you want to use? [rectangle/lasso]): "
+        )
+        if selector in ["rectangle", "lasso"]:
+            break
+        print("Please enter either 'rectangle' or 'lasso'")
+    return selector
+
+
+def ask_for_num_selections():
+    """Ask user for number of selections to make."""
+    while True:
+        num_selections = input("How many selections do you want to make? ")
+        try:
+            num_selections = int(num_selections)
+            if num_selections < 1:
+                raise ValueError
+            break
+        except ValueError:
+            print("Please enter a positive integer")
+    return num_selections
+
+
+def ask_save_animation_with_fps():
+    """Ask user for fps to save animation with."""
+    while True:
+        try:
+            fps = int(input("Save animation as gif? Enter fps: "))
+            break
+        except ValueError:
+            print("Please enter a positive integer")
+    return fps
+
+
+def update_imshow_with_mask(
+    frame_no: int,
+    axs: matplotlib.axes.Axes,
+    imshow_obj: matplotlib.image.AxesImage,
+    images: np.ndarray,
+    masks: np.ndarray,
+    selector: str,
+) -> tuple:
+    """Updates the imshow object with the image from the given frame and
+    overlays a mask on top of it.
+
+    Args:
+        frame_no (int): The index of the frame to display.
+        axs (matplotlib.axes.Axes): The axes object to display the image on.
+        imshow_obj (matplotlib.image.AxesImage): The imshow object to update.
+        images (numpy.ndarray): An array of images to display.
+        masks (numpy.ndarray): An array of masks to overlay on top of the images.
+        selector (str): The type of selector to use for the mask.
+            Can be either "rectangle" or "shape".
+
+    Returns:
+        tuple: A tuple containing the updated imshow object and the mask object.
+    """
+    imshow_obj.set_array(images[frame_no])
+    for obj in axs.findobj():
+        if isinstance(obj, (PathPatch, Rectangle)):
+            try:
+                obj.remove()
+            except:
+                pass
+    if selector == "rectangle":
+        mask_obj = add_rectangle_from_mask(axs, masks[frame_no])
+    else:
+        mask_obj = add_shape_from_mask(axs, masks[frame_no], alpha=0.5)
+    return imshow_obj, mask_obj
+
+
 def main():
     """Main function for interactive selector on multiple images."""
     print(
@@ -628,13 +721,8 @@ def main():
         if len(images) == 0:
             raise e
         print("No more images selected. Continuing...")
-    while True:
-        selector = input(
-            "Which selection tool do you want to use? [rectangle/lasso]): "
-        )
-        if selector in ["rectangle", "lasso"]:
-            break
-        print("Please enter either 'rectangle' or 'lasso'")
+
+    selector = ask_for_selection_tool()
 
     if same_images is True:
         figs, axs = [], []
@@ -662,15 +750,9 @@ def main():
     else:
         if len(images) > 3:
             print(f"Found sequence of {len(images)} images. ")
-            while True:
-                num_selections = input("How many selections do you want to make? ")
-                try:
-                    num_selections = int(num_selections)
-                    if num_selections < 1:
-                        raise ValueError
-                    break
-                except ValueError:
-                    print("Please enter a positive integer")
+
+            num_selections = ask_for_num_selections()
+
             selection_idx = np.linspace(0, len(images) - 1, int(num_selections)).astype(
                 int
             )
@@ -697,43 +779,30 @@ def main():
                 plt.close()
                 selection_masks.append(mask[0])
 
+        # small hack to make sure that there is always at least two masks for interpolation
+        if len(selection_masks) == 1:
+            selection_masks.append(selection_masks[0])
+
         interpolated_masks = interpolate_masks(
             selection_masks, num_frames=len(images), rectangle=(selector == "rectangle")
         )
 
         fig, axs = plt.subplots()
-        animation_img = axs.imshow(images[0], cmap="gray")
+
+        imshow_obj = axs.imshow(images[0], cmap="gray")
 
         if selector == "rectangle":
-            masks = add_rectangle_from_mask(axs, interpolated_masks[0])
+            add_rectangle_from_mask(axs, interpolated_masks[0])
         else:
-            masks = add_shape_from_mask(axs, interpolated_masks[0], alpha=0.5)
+            add_shape_from_mask(axs, interpolated_masks[0], alpha=0.5)
 
-        def update(frame, animation_img, masks):
-            animation_img.set_array(images[frame])
-            for obj in axs.findobj():
-                if isinstance(obj, (PathPatch, Rectangle)):
-                    try:
-                        obj.remove()
-                    except:
-                        pass
-            if selector == "rectangle":
-                masks = add_rectangle_from_mask(axs, interpolated_masks[frame])
-            else:
-                masks = add_shape_from_mask(axs, interpolated_masks[frame], alpha=0.5)
-            return animation_img, masks
+        fps = ask_save_animation_with_fps()
 
-        while True:
-            try:
-                fps = int(input("Save animation as gif? Enter fps: "))
-                break
-            except ValueError:
-                print("Please enter a positive integer")
         ani = FuncAnimation(
             fig,
-            update,
+            update_imshow_with_mask,
             frames=len(images),
-            fargs=(animation_img, masks),
+            fargs=(axs, imshow_obj, images, interpolated_masks, selector),
             interval=1000 / fps,
         )
         filename = Path(file.parent.stem + "_" + f"{file.stem}_interpolated_masks.gif")
