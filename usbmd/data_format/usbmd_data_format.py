@@ -82,6 +82,7 @@ def generate_usbmd_dataset(
     polar_angles=None,
     azimuth_angles=None,
     tx_apodizations=None,
+    bandwidth_percent=None,
 ):
     """Generates a dataset in the USBMD format.
 
@@ -255,6 +256,16 @@ def generate_usbmd_dataset(
             "in radians of shape (n_tx,).",
             unit="rad",
         )
+    
+    if bandwidth_percent is not None:
+        add_dataset(
+            group=bandwidth_percent,
+            name="bandwidth_percent",
+            data=bandwidth_percent,
+            description="The receive bandwidth of RF signal in "
+            "percentage of center frequency.",
+            unit="unitless",
+        )
 
     dataset.close()
     validate_dataset(path)
@@ -381,6 +392,12 @@ def validate_dataset(path):
             assert (
                 dataset["scan"][key].shape == correct_shape
             ), "The azimuthal_angles does not have the correct shape."
+
+        elif key == "bandwidth_percent":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The percent bandwidth does not have the correct shape."
 
         elif key == "initial_times":
             correct_shape = (dataset["scan"]["n_tx"][()],)
@@ -512,7 +529,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         c = float(hdf5_file['scan']['sound_speed'][()])
         fs = float(hdf5_file['scan']['sampling_frequency'][()])
         fc = float(hdf5_file['scan']['center_frequency'][()])
-        bandwidth_percentage = float(hdf5_file['scan']['bandwidth_percentage'][()])
+        bandwidth_percent = float(hdf5_file['scan']['bandwidth_percent'][()])
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
@@ -547,7 +564,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
             zlims=(z0, z1),
             fc=fc,
             fs=fs,
-            bandwidth_percentage = bandwidth_percentage,
+            bandwidth_percent=bandwidth_percent,
             n_ax=n_ax,
             c=c,
             polar_angles=polar_angles,
