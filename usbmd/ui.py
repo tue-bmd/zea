@@ -31,10 +31,9 @@ from usbmd.processing import (
 from usbmd.setup_usbmd import setup_config
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.config import Config
-from usbmd.utils.io import filename_from_window_dialog
+from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
 from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
-    matplotlib_figure_to_numpy,
     plt_window_has_been_closed,
     save_to_gif,
     strtobool,
@@ -490,7 +489,6 @@ def main():
             filetype=filetype,
         )
         generator.generate()
-
 
 if __name__ == "__main__":
     main()

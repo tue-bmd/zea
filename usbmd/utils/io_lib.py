@@ -7,6 +7,7 @@ Use to quickly read and write files or interact with file system.
 """
 import os
 import warnings
+from io import BytesIO
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
@@ -18,6 +19,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pydicom
 import tqdm
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
@@ -267,3 +272,43 @@ def raise_matplotlib_window(figname=None):
     elif backend == 'TkAgg':
         cfm.window.attributes('-topmost', True)
         cfm.window.attributes('-topmost', False)
+
+def matplotlib_figure_to_numpy(fig):
+    """Convert matplotlib figure to numpy array.
+
+    Args:
+        fig (matplotlib.figure.Figure): figure to convert.
+
+    Returns:
+        np.ndarray: numpy array of figure.
+
+    """
+    try:
+        if matplotlib.get_backend() == 'Qt5Agg':
+            canvas = FigureCanvasQTAgg(fig)
+        elif matplotlib.get_backend() == 'TkAgg':
+            canvas = FigureCanvasTkAgg(fig)
+        elif matplotlib.get_backend() == 'agg':
+            canvas = FigureCanvasAgg(fig)
+        else:
+            buf = BytesIO()
+            fig.savefig(buf, format='png')
+            buf.seek(0)
+            image = Image.open(buf).convert("RGB")
+            image = np.array(image)[..., :3]
+            buf.close()
+            return image
+
+        canvas.draw()
+
+        if matplotlib.get_backend() == 'Qt5Agg':
+            image = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
+        else:
+            image = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
+
+        width, height = fig.canvas.get_width_height()
+        image = image.reshape((height, width, 3))
+        return image
+    except:
+        warnings.warn("Could not convert figure to numpy array.")
+        return np.array([])

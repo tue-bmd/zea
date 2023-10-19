@@ -22,7 +22,7 @@ from skimage import measure
 from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
 
-from usbmd.utils.io import (
+from usbmd.utils.io_lib import (
     _SUPPORTED_VID_TYPES,
     filename_from_window_dialog,
     get_matplotlib_figure_props,
