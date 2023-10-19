@@ -434,7 +434,7 @@ class DataLoaderUI:
             raise ValueError("Figure is not a numpy array or matplotlib figure object.")
 
         fps = self.config.plot.fps
-        save_to_gif(np_images, path, fps=fps)
+        save_to_gif(images, path, fps=fps)
 
         if self.verbose:
             print(f"Video saved to {path}")
