@@ -14,6 +14,7 @@ from tkinter.filedialog import askopenfilename
 import cv2
 import imageio
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pydicom
 import tqdm
@@ -45,7 +46,9 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
         ) from error
 
     # open in foreground
-    root.wm_attributes("-topmost", 1)
+    root.wm_attributes("-topmost", True)
+    root.wm_attributes("-topmost", False)
+
     # we don't want a full GUI, so keep the root window from appearing
     root.withdraw()
     # show an "Open" dialog box and return the path to the selected file
@@ -239,3 +242,28 @@ def get_matplotlib_figure_props(figure):
         position, size = None, None
 
     return position, size
+
+
+def raise_window(figname=None):
+    """Raise the matplotlib window for Figure figname to the foreground.
+
+    If no argument is given, raise the current figure.
+
+    This function will only work with a Qt or Tk graphics backend.
+    """
+    # check for backend
+    backend = matplotlib.get_backend()
+    if backend in ['Qt5Agg', 'TkAgg']:
+        warnings.warn("This function only works with a Qt or Tk graphics backend")
+
+    if figname:
+        plt.figure(figname)
+
+    cfm = plt.get_current_fig_manager()
+
+    if backend == 'Qt5Agg':
+        cfm.window.activateWindow()
+        cfm.window.raise_()
+    elif backend == 'TkAgg':
+        cfm.window.attributes('-topmost', True)
+        cfm.window.attributes('-topmost', False)
