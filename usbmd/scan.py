@@ -5,6 +5,7 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 import warnings
+
 import numpy as np
 
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -18,6 +19,7 @@ class Scan:
     def __init__(
         self,
         n_tx=75,
+        n_el=128,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -26,8 +28,8 @@ class Scan:
         c=1540,
         modtype="rf",
         n_ax=3328,
-        Nx=128,
-        Nz=128,
+        Nx=None,
+        Nz=None,
         pixels_per_wvln=3,
         polar_angles=None,
         azimuth_angles=None,
@@ -49,6 +51,7 @@ class Scan:
             n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
             optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
+            n_el (int, optional): The number of elements in the array. Defaults to 128.
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
@@ -101,6 +104,8 @@ class Scan:
 
         # Attributes concerning channel data : The number of transmissions in a frame
         self.n_tx = int(n_tx)
+        #: The number of elements in the array
+        self.n_el = int(n_el)
         #: The modulation carrier frequency [Hz]
         self.fc = float(fc)
         #: The sampling rate [Hz]
@@ -130,9 +135,9 @@ class Scan:
         self._zlims = zlims
 
         #: The number of pixels in the lateral direction in the beamforming : grid
-        self._Nx = int(Nx)
+        self._Nx = int(Nx) if Nx else self.n_el
         #: The number of pixels in the axial direction in the beamforming grid
-        self._Nz = int(Nz)
+        self._Nz = int(Nz) if Nz else self.n_el
 
         #: The beamforming grid of shape (Nx, Nz, 3)
         self._grid = None
@@ -144,11 +149,11 @@ class Scan:
             self.zlims = [0, self.c * self.n_ax / self.fs / 2]
             print(self.zlims)
 
-        self.z_axis = np.linspace(*self.zlims, n_ax)
+        self.z_axis = np.linspace(*self.zlims, self.n_ax)
 
         if initial_times is None:
             warnings.warn("No initial times provided. Assuming all zeros.")
-            initial_times = np.zeros(n_tx)
+            initial_times = np.zeros(self.n_tx)
 
         #: The initial times of the transmits in seconds of shape (n_tx,). These are the
         # time intervals between the first element firing and the first sample in the
@@ -159,7 +164,14 @@ class Scan:
             warnings.warn(
                 "No t0_delays provided. Assuming all zeros and 128 element probe."
             )
-            t0_delays = np.zeros((n_tx, 128))
+            t0_delays = np.zeros((self.n_tx, self.n_el))
+        else:
+            assert t0_delays.shape == (self.n_tx, self.n_el), (
+                f"t0_delays must have shape (n_tx, n_el). "
+                f"Got shape {t0_delays.shape}. Please set t0_delays either to None in which "
+                f"case all zeros are assumed, or set the n_tx and n_el params to match the "
+                "t0_delays shape."
+            )
         #: The transmit delays in seconds of shape (n_tx, n_el), shifted such : that the
         # smallest delay is 0. For instance for a straight planewave : transmit all
         # delays are zero.
@@ -170,7 +182,7 @@ class Scan:
                 "No tx_apodizations provided. Assuming all ones and "
                 "128 element probe."
             )
-            tx_apodizations = np.ones((n_tx, 128))
+            tx_apodizations = np.ones((n_tx, self.n_el))
         #: The transmit apodizations of shape (n_tx, n_el) or a single float to : use
         # for all apodizations. These values indicate both windowing : (apodization) over
         # the aperture and the subaperture that is used : during transmit.
@@ -178,7 +190,7 @@ class Scan:
 
         if polar_angles is None:
             warnings.warn("No polar_angles provided. Assuming all zeros.")
-            polar_angles = np.zeros(n_tx)
+            polar_angles = np.zeros(self.n_tx)
         #: The polar angles of the transmits in radians of shape (n_tx,). These : are
         # the angles usually used in 2D imaging.
         self.polar_angles = polar_angles
@@ -188,14 +200,14 @@ class Scan:
 
         if azimuth_angles is None:
             warnings.warn("No azimuth_angles provided. Assuming all zeros.")
-            azimuth_angles = np.zeros(n_tx)
+            azimuth_angles = np.zeros(self.n_tx)
         #: The azimuth angles of the transmits in radians of shape (n_tx,). : These are
         # the angles usually only used in 3D imaging.
         self.azimuth_angles = azimuth_angles
 
         if focus_distances is None:
             warnings.warn("No focus_distances provided. Assuming all zeros.")
-            focus_distances = np.zeros(n_tx)
+            focus_distances = np.zeros(self.n_tx)
         #: The focus distances of the transmits in meters of shape (n_tx,). : These are
         # the distances of the virtual focus points from the origin. : For a planewave
         # these should be set to Inf.

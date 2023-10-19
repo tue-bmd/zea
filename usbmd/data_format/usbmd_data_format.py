@@ -431,7 +431,7 @@ def assert_unit_and_description_present(hdf5_file, _prefix=""):
             ), f"The dataset {_prefix}/{key} does not have a description attribute."
 
 
-def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
+def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data", config=None):
     """Loads a hdf5 file in the USBMD format and returns the data together with
     a scan object containing the parameters of the acquisition and a probe
     object containing the parameters of the probe.
@@ -512,6 +512,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         c = float(hdf5_file['scan']['sound_speed'][()])
         fs = float(hdf5_file['scan']['sampling_frequency'][()])
         fc = float(hdf5_file['scan']['center_frequency'][()])
+        n_el = int(hdf5_file['scan']['n_el'][()])
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
@@ -519,13 +520,16 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         if transmits is None:
             transmits = np.arange(n_tx, dtype=np.int32)
 
-        # Compute the depth of the scan from the number of axial samples
-        depth = n_ax / fs * c / 2
-
-        # Set the scan limits to the limits of the probe and the depth of the
-        # scan
-        x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
-        z0, z1 = 0, depth
+        if 'xlims' not in config.scan:
+            # Set the scan limits to the limits of the probe and
+            # the depth of the scan
+            x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
+            config.scan.xlims = (x0, x1)
+        if 'zlims' not in config.scan:
+            # Compute the depth of the scan from the number of axial samples
+            depth = n_ax / fs * c / 2
+            z0, z1 = 0, depth
+            config.scan.zlims = (z0, z1)
 
         n_tx = len(transmits)
 
@@ -539,11 +543,10 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         # Initialize the scan object
         scan = Scan(
             n_tx=n_tx,
+            n_el=n_el,
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
-            xlims=(x0, x1),
-            zlims=(z0, z1),
             fc=fc,
             fs=fs,
             n_ax=n_ax,
@@ -551,6 +554,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
+            **config.scan,
         )
 
         # Load the desired frames from the file
