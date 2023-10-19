@@ -256,7 +256,6 @@ def generate_usbmd_dataset(
             "in radians of shape (n_tx,).",
             unit="rad",
         )
-    
     if bandwidth_percent is not None:
         add_dataset(
             group=bandwidth_percent,
