@@ -4,10 +4,16 @@
 - **Date**          : October 25th, 2022
 """
 import datetime
+import io
+import warnings
 
 import cv2
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from PIL import Image
 
 
@@ -194,6 +200,32 @@ def matplotlib_figure_to_numpy(fig):
         np.ndarray: numpy array of figure.
 
     """
-    image = np.frombuffer(fig.canvas.tostring_rgb(), dtype="uint8")
-    image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-    return image
+    try:
+        if matplotlib.get_backend() == 'Qt5Agg':
+            canvas = FigureCanvasQTAgg(fig)
+        elif matplotlib.get_backend() == 'TkAgg':
+            canvas = FigureCanvasTkAgg(fig)
+        elif matplotlib.get_backend() == 'agg':
+            canvas = FigureCanvasAgg(fig)
+        else:
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png')
+            buf.seek(0)
+            image = Image.open(buf).convert("RGB")
+            image = np.array(image)[..., :3]
+            buf.close()
+            return image
+
+        canvas.draw()
+
+        if matplotlib.get_backend() == 'Qt5Agg':
+            image = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
+        else:
+            image = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
+
+        width, height = fig.canvas.get_width_height()
+        image = image.reshape((height, width, 3))
+        return image
+    except:
+        warnings.warn("Could not convert figure to numpy array.")
+        return np.array([])
