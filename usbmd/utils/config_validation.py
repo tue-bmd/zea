@@ -157,7 +157,7 @@ config_schema = Schema(
         },
         "plot": {
             Optional("save", default=False): bool,
-            Optional("axis", default=False): bool,
+            Optional("plot_lib", default="opencv"): Or("opencv", "matplotlib"),
             Optional("fps", default=20): int,
             Optional("tag", default=None): Or(None, str),
             Optional("headless", default=False): bool,

@@ -183,3 +183,17 @@ def find_first_nonzero_index(arr, axis, invalid_val=-1):
     return np.where(
         nonzero_mask.any(axis=axis), nonzero_mask.argmax(axis=axis), invalid_val
     )
+
+def matplotlib_figure_to_numpy(fig):
+    """Convert matplotlib figure to numpy array.
+
+    Args:
+        fig (matplotlib.figure.Figure): figure to convert.
+
+    Returns:
+        np.ndarray: numpy array of figure.
+
+    """
+    image = np.frombuffer(fig.canvas.tostring_rgb(), dtype="uint8")
+    image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    return image

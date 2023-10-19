@@ -123,33 +123,36 @@ def equality_libs_processing(test_func):
 
     return decorator.decorator(wrapper, test_func)
 
-
 @pytest.mark.parametrize(
-    "comp_type, size",
+    "comp_type, size, parameter_value_range",
     [
-        ("a", (2, 1, 128, 32)),
-        ("a", (512, 512)),
-        ("mu", (2, 1, 128, 32)),
-        ("mu", (512, 512)),
+        ("a", (2, 1, 128, 32), (50, 200)),
+        ("a", (512, 512), (50, 200)),
+        ("mu", (2, 1, 128, 32), (50, 300)),
+        ("mu", (512, 512), (50, 300)),
     ],
 )
 @equality_libs_processing
-def test_companding(comp_type, size):
+def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
-    signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
-    signal = signal.astype(np.float32)
 
-    signal_out = processing.companding(
-        signal, expand=False, comp_type=comp_type)
-    assert np.any(
-        np.not_equal(signal, signal_out)
-    ), "Companding failed, arrays should not be equal"
-    signal_out = processing.companding(
-        signal_out, expand=True, comp_type=comp_type)
+    for parameter_value in np.linspace(*parameter_value_range, 10):
+        A = parameter_value if comp_type == "a" else 0
+        mu = parameter_value if comp_type == "mu" else 0
 
-    np.testing.assert_almost_equal(signal, signal_out, decimal=6)
+        signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
+        signal = signal.astype(np.float32)
+
+        signal_out = processing.companding(
+            signal, expand=False, comp_type=comp_type, A=A, mu=mu)
+        assert np.any(
+            np.not_equal(signal, signal_out)
+        ), "Companding failed, arrays should not be equal"
+        signal_out = processing.companding(
+            signal_out, expand=True, comp_type=comp_type, A=A, mu=mu)
+
+        np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
-
 
 @pytest.mark.parametrize(
     "size, dynamic_range, input_range",
