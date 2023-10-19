@@ -256,10 +256,10 @@ def generate_usbmd_dataset(
             "in radians of shape (n_tx,).",
             unit="rad",
         )
-    
+
     if bandwidth_percent is not None:
         add_dataset(
-            group=bandwidth_percent,
+            group=scan_group,
             name="bandwidth_percent",
             data=bandwidth_percent,
             description="The receive bandwidth of RF signal in "
@@ -393,12 +393,6 @@ def validate_dataset(path):
                 dataset["scan"][key].shape == correct_shape
             ), "The azimuthal_angles does not have the correct shape."
 
-        elif key == "bandwidth_percent":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The percent bandwidth does not have the correct shape."
-
         elif key == "initial_times":
             correct_shape = (dataset["scan"]["n_tx"][()],)
             assert (
@@ -407,6 +401,7 @@ def validate_dataset(path):
 
         elif key in (
             "sampling_frequency",
+            "bandwidth_percent",
             "center_frequency",
             "n_frames",
             "n_tx",
