@@ -11,7 +11,7 @@ from tkinter import ttk
 from schema import Schema
 
 from usbmd.utils.config import Config
-from usbmd.utils.io import filename_from_window_dialog
+from usbmd.utils.io_lib import filename_from_window_dialog
 from usbmd.utils.utils import get_date_string
 
 
