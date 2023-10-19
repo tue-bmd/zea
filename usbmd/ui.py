@@ -424,15 +424,17 @@ class DataLoaderUI:
             Path("./figures").mkdir(parents=True, exist_ok=True)
 
         if isinstance(images[0], plt.Figure):
-            raise NotImplementedError(
-                "Saving videos using matplotlib "
-                "(`axis = True` in config) not yet supported"
-            )
-        if isinstance(images[0], np.ndarray):
-            fps = self.config.plot.fps
-            save_to_gif(images, path, fps=fps)
-        else:
+            np_images = []
+            for fig in images:
+                image = np.frombuffer(fig.canvas.tostring_rgb(), dtype="uint8")
+                image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+                np_images.append(image)
+            images = np_images
+        elif not isinstance(images[0], np.ndarray):
             raise ValueError("Figure is not a numpy array or matplotlib figure object.")
+
+        fps = self.config.plot.fps
+        save_to_gif(np_images, path, fps=fps)
 
         if self.verbose:
             print(f"Video saved to {path}")
