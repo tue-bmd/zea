@@ -352,6 +352,7 @@ class PlaneWaveScan(Scan):
         self,
         angles=None,
         n_tx=75,
+        n_el=128,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -377,8 +378,9 @@ class PlaneWaveScan(Scan):
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
             n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
-            optional): The x-limits in the beamforming grid.
+                optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
+            n_el (int, optional): The number of elements in the array. Defaults to 128.
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
@@ -431,6 +433,7 @@ class PlaneWaveScan(Scan):
         # Pass all arguments to the Scan base class
         super().__init__(
             n_tx=n_tx,
+            n_el=n_el,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
@@ -468,6 +471,7 @@ class DivergingWaveScan(Scan):
     def __init__(
         self,
         n_tx=75,
+        n_el=128,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -483,6 +487,7 @@ class DivergingWaveScan(Scan):
     ):
         super().__init__(
             n_tx=n_tx,
+            n_el=n_el,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
