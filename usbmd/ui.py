@@ -426,7 +426,7 @@ class DataLoaderUI:
             Path("./figures").mkdir(parents=True, exist_ok=True)
 
         if not isinstance(images[0], np.ndarray):
-            raise ValueError("Figure is not a numpy array or matplotlib figure object.")
+            raise ValueError("Images are not numpy arrays.")
 
         fps = self.config.plot.fps
         save_to_gif(images, path, fps=fps)
