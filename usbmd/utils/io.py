@@ -244,7 +244,7 @@ def get_matplotlib_figure_props(figure):
     return position, size
 
 
-def raise_window(figname=None):
+def raise_matplotlib_window(figname=None):
     """Raise the matplotlib window for Figure figname to the foreground.
 
     If no argument is given, raise the current figure.
