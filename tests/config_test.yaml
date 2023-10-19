@@ -22,4 +22,4 @@ ml_library: 'torch'
 
 plot:
   save: false
-  axis: true
+  plot_lib: matplotlib
