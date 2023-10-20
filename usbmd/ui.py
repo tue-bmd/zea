@@ -338,7 +338,8 @@ class DataLoaderUI:
         # plot remaining frames in a loop
         images = []
         self.verbose = False
-        while True:
+        exit_condition = False
+        while not exit_condition:
             for i in range(1, n_frames):
                 if self.gui:
                     self.gui.check_freeze()
@@ -357,25 +358,25 @@ class DataLoaderUI:
 
                 print(f"frame {i}", end="\r")
 
-                if save:
-                    if len(images) < n_frames:
-                        images.append(image)
+                # Append image to list for saving
+                if save and len(images) < n_frames and image is not None:
+                    images.append(image)
 
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    self.save_video(images)
-                    return
-                if plot_lib == "matplotlib":
-                    if plt_window_has_been_closed(self.fig):
-                        self.save_video(images)
-                        return
-
-                if self.headless:
-                    if len(images) == n_frames:
-                        self.save_video(images)
-                        return
+                # Update exit condition
+                exit_condition = (
+                    (cv2.waitKey(1) & 0xFF == ord("q"))
+                    or (
+                        plot_lib == "matplotlib"
+                        and plt_window_has_been_closed(self.fig)
+                    )
+                    or (self.headless and len(images) == n_frames)
+                )
 
             # clear line, frame number
             print("\x1b[2K", end="\r")
+
+        if save:
+            self.save_video(images)
 
     def save_image(self, fig, path=None):
         """Save image to disk.
