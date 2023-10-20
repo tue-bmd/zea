@@ -318,7 +318,7 @@ class DataLoaderUI:
             )
             to_dtype = "image"
 
-        print('Playing video, press "q" to exit...')
+        print('Playing video, press/hold "q" while the window is active to exit...')
         plot_lib = self.config.plot.plot_lib
         self.config.data.frame_no = 0
         self.data = self.get_data()
@@ -364,7 +364,7 @@ class DataLoaderUI:
 
                 # Update exit condition
                 exit_condition = (
-                    (cv2.waitKey(1) & 0xFF == ord("q"))
+                    cv2.waitKey(1) == ord("q")
                     or (
                         plot_lib == "matplotlib"
                         and plt_window_has_been_closed(self.fig)
@@ -374,6 +374,9 @@ class DataLoaderUI:
 
             # clear line, frame number
             print("\x1b[2K", end="\r")
+
+        if plot_lib == "opencv":
+            cv2.destroyAllWindows()
 
         if save:
             self.save_video(images)
