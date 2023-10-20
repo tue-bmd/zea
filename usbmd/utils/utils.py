@@ -164,29 +164,6 @@ def print_clear_line():
     print(line_up, end=line_clear)
 
 
-def to_image(image, value_range: tuple = None, pillow: bool = True):
-    """Convert numpy array to uint8 image format.
-
-    Args:
-        image (ndarray): input array image
-        value_range (tuple, optional): assumed range of input data.
-            Defaults to None.
-        pillow (bool, optional): whether to convert the image
-            array to pillow object. Defaults to True.
-
-    Returns:
-        image: output image array uint8 [0, 255]
-            (pillow if set to True)
-    """
-    if value_range:
-        image = translate(np.clip(image, *value_range), value_range, (0, 255))
-
-    image = image.astype(np.uint8)
-    if pillow:
-        image = Image.fromarray(image)
-    return image
-
-
 def strtobool(val: str):
     """Convert a string representation of truth to True or False.
 
