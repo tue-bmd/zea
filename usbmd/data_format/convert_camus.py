@@ -1,5 +1,6 @@
 """Functionality to convert the camus dataset to the USBMD format.
-Requires SimpleITK to be installed: pip install SimpleITK
+Requires SimpleITK to be installed: pip install SimpleITK.
+Make sure after installing to import SimpleITK as sitk.
 """
 
 from __future__ import annotations
@@ -12,7 +13,8 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 import numpy as np
-import SimpleITK as sitk
+
+# import SimpleITK as sitk
 from tqdm import tqdm
 
 from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
