@@ -290,6 +290,9 @@ def matplotlib_figure_to_numpy(fig):
         np.ndarray: numpy array of figure.
 
     """
+    if plt_window_has_been_closed(fig):
+        return
+    fig.canvas.draw()
     image = np.frombuffer(fig.canvas.tostring_rgb(), dtype="uint8")
     image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     return image
