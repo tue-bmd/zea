@@ -47,8 +47,13 @@ def crop_array(array, value=None):
 
 
 def interactive_selector(
-    data, ax, selector: str="rectangle", extent: list=None, verbose: bool=True,
-    num_selections: int=None, confirm_selection: bool=False,
+    data,
+    ax,
+    selector: str = "rectangle",
+    extent: list = None,
+    verbose: bool = True,
+    num_selections: int = None,
+    confirm_selection: bool = False,
 ) -> tuple:
     """Interactively select part of an array displayed as an image with matplotlib.
 
@@ -142,7 +147,6 @@ def interactive_selector(
         lasso.disconnect_events()
         lasso.set_visible(False)
         lasso.update()
-
 
     mask = np.tile(False, data.shape)
     masks = []
@@ -404,6 +408,9 @@ def extract_polygon_from_mask(mask, tolerance: float = 0.01):
         warnings.warn(
             "Warning: multiple contours found. Returning the largest contour."
         )
+    elif len(contours) == 0:
+        warnings.warn("Warning: no contours found. Returning None.")
+        return None
     else:
         contour = contours[0]
     poly = approximate_polygon(contour, tolerance)
@@ -767,9 +774,19 @@ def main():
                     move_matplotlib_figure(fig, pos, size)
 
                 axs.imshow(image, cmap="gray")
-                _, mask = interactive_selector(
-                    image, axs, selector=selector, num_selections=1
-                )
+
+                while True:
+                    _, mask = interactive_selector(
+                        image, axs, selector=selector, num_selections=1
+                    )
+                    # check if mask is empty else retry
+                    if mask[0].sum() == 0:
+                        print(
+                            "Empty mask. Try again, make sure to make a descent selection..."
+                        )
+                    else:
+                        break
+
                 pos, size = get_matplotlib_figure_props(fig)
 
                 if selector == "rectangle":
