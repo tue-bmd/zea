@@ -58,13 +58,16 @@ class DataLoaderUI:
         self.dataset = get_dataset(self.config.data)
 
         # Initialize scan based on dataset
-        scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters()
-        config_scan_params = self.config.scan
+        if config.data.dtype not in ["image", "image_sc"]:
+            scan_class = self.dataset.get_scan_class()
+            default_scan_params = self.dataset.get_default_scan_parameters()
+            config_scan_params = self.config.scan
 
-        # dict merging of manual config and dataset default scan parameters
-        scan_params = update_dictionary(default_scan_params, config_scan_params)
-        self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
+            # dict merging of manual config and dataset default scan parameters
+            scan_params = update_dictionary(default_scan_params, config_scan_params)
+            self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
+        else:
+            self.scan = None
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -111,18 +114,13 @@ class DataLoaderUI:
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
-        to_dtype = "image" if to_dtype is None else to_dtype
+        to_dtype = self.config.data.to_dtype if to_dtype is None else to_dtype
         save = self.config.plot.save
         plot_lib = self.config.plot.plot_lib
 
         if self.config.data.get("frame_no") == "all":
-            if to_dtype != "image":
-                warnings.warn(
-                    f"Image to_dtype: {to_dtype} not yet supported for movies.\
-                        falling back to  to_dtype: `image`"
-                )
             # run movie
-            self.run_movie(save=save)
+            self.run_movie(save=save, to_dtype=to_dtype)
         else:
             # plot single frame
             self.data = self.get_data()
@@ -310,8 +308,15 @@ class DataLoaderUI:
                 self.save_image(image)
                 return image
 
-    def run_movie(self, save: bool = False):
+    def run_movie(self, save: bool = False, to_dtype: str = "image"):
         """Run all frames in file in sequence"""
+
+        if to_dtype not in ["image", "image_sc"]:
+            warnings.warn(
+                f"Image to_dtype: {to_dtype} not yet supported for movies."
+                "falling back to  to_dtype: `image`"
+            )
+            to_dtype = "image"
 
         print('Playing video, press "q" to exit...')
         plot_lib = self.config.plot.plot_lib
@@ -320,7 +325,9 @@ class DataLoaderUI:
         n_frames = len(self.dataset.h5_reader)
 
         # plot initial frame
-        self.image = self.process.run(self.data, dtype=self.config.data.dtype)
+        self.image = self.process.run(
+            self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+        )
         if plot_lib == "matplotlib":
             self.plot(self.image, plot_lib=plot_lib, block=False)
         elif plot_lib == "opencv":
@@ -339,7 +346,9 @@ class DataLoaderUI:
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
-                image = self.process.run(self.data, dtype=self.config.data.dtype)
+                image = self.process.run(
+                    self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+                )
 
                 if "postprocess" in self.config:
                     image = self.postprocess(image)
