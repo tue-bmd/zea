@@ -27,6 +27,7 @@ from usbmd.processing import (
     Process,
     get_contrast_boost_func,
     threshold_signal,
+    to_8bit,
 )
 from usbmd.setup_usbmd import setup_config
 from usbmd.usbmd_gui import USBMDApp
@@ -38,7 +39,6 @@ from usbmd.utils.utils import (
     plt_window_has_been_closed,
     save_to_gif,
     strtobool,
-    to_image,
     update_dictionary,
 )
 
@@ -239,12 +239,15 @@ class DataLoaderUI:
         if not movie and plot_lib == "matplotlib":
             self.fig, self.ax = plt.subplots()
 
-            extent = [
-                self.scan.xlims[0] * 1e3,
-                self.scan.xlims[1] * 1e3,
-                self.scan.zlims[1] * 1e3,
-                self.scan.zlims[0] * 1e3,
-            ]
+            if self.scan:
+                extent = [
+                    self.scan.xlims[0] * 1e3,
+                    self.scan.xlims[1] * 1e3,
+                    self.scan.zlims[1] * 1e3,
+                    self.scan.zlims[0] * 1e3,
+                ]
+            else:
+                extent = None
 
             if image_range is None:
                 vmin, vmax = self.config.data.dynamic_range
@@ -261,7 +264,7 @@ class DataLoaderUI:
                 image = matplotlib_figure_to_numpy(self.fig)
                 return image
             elif plot_lib == "opencv":
-                image = to_image(image, self.config.data.dynamic_range, pillow=False)
+                image = to_8bit(image, self.config.data.dynamic_range, pillow=False)
                 if not self.headless:
                     cv2.imshow("frame", image)
                 return image
@@ -303,7 +306,7 @@ class DataLoaderUI:
                 return image
 
             elif plot_lib == "opencv":
-                image = to_image(image, self.config.data.dynamic_range)
+                image = to_8bit(image, self.config.data.dynamic_range)
                 image.show()
                 self.save_image(image)
                 return image
@@ -320,66 +323,73 @@ class DataLoaderUI:
 
         print('Playing video, press/hold "q" while the window is active to exit...')
         plot_lib = self.config.plot.plot_lib
-        self.config.data.frame_no = 0
-        self.data = self.get_data()
         n_frames = len(self.dataset.h5_reader)
 
+        # Process all data
+        images = []
+        self.verbose = False
+        for i in range(n_frames):
+            self.config.data.frame_no = i
+            self.data = self.get_data()
+
+            image = self.process.run(
+                self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+            )
+
+            if "postprocess" in self.config:
+                image = self.postprocess(image)
+            images.append(image)
+
         # plot initial frame
-        self.image = self.process.run(
-            self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
-        )
         if plot_lib == "matplotlib":
-            self.plot(self.image, plot_lib=plot_lib, block=False)
+            self.plot(images[0], plot_lib=plot_lib, block=False)
         elif plot_lib == "opencv":
-            self.plot(self.image, movie=True, plot_lib=plot_lib, block=False)
+            self.plot(images[0], movie=True, plot_lib=plot_lib, block=False)
         else:
             raise ValueError(f"plot_lib {plot_lib} not supported")
 
         # plot remaining frames in a loop
-        images = []
-        self.verbose = False
-        exit_condition = False
-        while not exit_condition:
-            for i in range(1, n_frames):
+        if not self.headless:
+            self.plot_loop(images, plot_lib)
+
+        if save:
+            images = [
+                to_8bit(
+                    image,
+                    dynamic_range=self.config.data.dynamic_range,
+                    pillow=False,
+                )
+                for image in images
+            ]
+            self.save_video(images)
+
+    def plot_loop(self, images, plot_lib):
+        """
+        Continuously plots a sequence of images using the specified plotting library.
+
+        Args:
+            images (list): A list of images to plot.
+            plot_lib (str): The name of the plotting library to use.
+
+        Returns:
+            None
+        """
+        while True:
+            for i, image in enumerate(images):
                 if self.gui:
                     self.gui.check_freeze()
 
-                self.config.data.frame_no = i
-                self.data = self.get_data()
-
-                image = self.process.run(
-                    self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
-                )
-
-                if "postprocess" in self.config:
-                    image = self.postprocess(image)
-
                 image = self.plot(image, movie=True, plot_lib=plot_lib)
+                if plot_lib == "opencv" and cv2.waitKey(25) & 0xFF == ord("q"):
+                    cv2.destroyAllWindows()
+                    return
+                if plot_lib == "matplotlib" and plt_window_has_been_closed(self.fig):
+                    return
 
                 print(f"frame {i}", end="\r")
 
-                # Append image to list for saving
-                if save and len(images) < n_frames and image is not None:
-                    images.append(image)
-
-                # Update exit condition
-                exit_condition = (
-                    cv2.waitKey(1) == ord("q")
-                    or (
-                        plot_lib == "matplotlib"
-                        and plt_window_has_been_closed(self.fig)
-                    )
-                    or (self.headless and len(images) == n_frames)
-                )
-
             # clear line, frame number
             print("\x1b[2K", end="\r")
-
-        if plot_lib == "opencv":
-            cv2.destroyAllWindows()
-
-        if save:
-            self.save_video(images)
 
     def save_image(self, fig, path=None):
         """Save image to disk.

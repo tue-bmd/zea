@@ -103,7 +103,8 @@ class GenerateDataSet:
         if self.destination_folder.exists():
             if not overwrite:
                 raise ValueError(
-                    f"Cannot create dataset in {self.destination_folder}, folder already exists!"
+                    f"Cannot create dataset in {self.destination_folder}, folder"
+                    " already exists!"
                 )
 
     def generate(self):
@@ -188,7 +189,6 @@ class GenerateDataSet:
             path (str): file path
         """
         image = to_8bit(image)
-        image = Image.fromarray(image)
         image.save(path)
 
     def save_data(self, data, path):
