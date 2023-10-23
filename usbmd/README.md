@@ -16,7 +16,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 
 ## Quick setup
 
-### usbmd installation
+### Installation
 
 This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](../../setup.py) file is located and run the following command from terminal:
@@ -28,7 +28,9 @@ python -m pip install -e .
  For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide).
  Alternatively, you can [run this code via Docker](#running-the-code-with-docker) using included [Dockerfile](../../Dockerfile).
 
-#### usbmd import
+### Getting started
+
+#### Importing
 
 After installation, you can use the package as follows in your own project:
 
@@ -41,7 +43,7 @@ from usbmd import tensorflow_ultrasound as usmbd_tf
 from usbmd import pytorch_ultrasound as usbmd_torch
 ```
 
-#### Getting started
+#### User interface
 
 In order to get started with usbmd stand-alone, you can run [`ui.py`](ui.html), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](../../configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
 
@@ -50,6 +52,20 @@ python ui.py --config configs/config_picmus.yaml
 ```
 
 If you make your own config, make sure it can be validated using the [config validation](utils/config_validation.html) schema. This ensures it has the correct structure and all required parameters are present.
+
+#### GPU support
+
+Make sure that before using any GPU enabled functionality the following code is run:
+
+```python
+# Init GPU / CPU according to config
+if config.ml_library == 'torch':
+    from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
+    config.device = get_device(config.device)
+elif config.ml_library == 'tensorflow':
+    from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
+    set_gpu_usage(config.device)
+```
 
 ## Data
 
