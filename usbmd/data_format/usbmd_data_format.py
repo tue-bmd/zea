@@ -525,8 +525,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         fs = float(hdf5_file['scan']['sampling_frequency'][()])
         fc = float(hdf5_file['scan']['center_frequency'][()])
         bandwidth_percent = float(hdf5_file['scan']['bandwidth_percent'][()])
-        modtype = float(hdf5_file['scan']['modtype'][()])
-
+        
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
 
@@ -549,7 +548,20 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         polar_angles = hdf5_file['scan']['polar_angles'][transmits]
         azimuth_angles = hdf5_file['scan']['azimuth_angles'][transmits]
         focus_distances = hdf5_file['scan']['focus_distances'][transmits]
+        
+        # Load the desired frames from the file
+        data = hdf5_file["data"][data_type][frames]
 
+        if data_type in ["raw_data", "aligned_data"]:
+            data = data[:, transmits]
+
+        if data.shape[-1] == 1:
+            modtype = 'rf'
+        elif data.shape[-1] == 2:
+            modtype = 'iq'
+        else:
+            raise ValueError('The data has an unexpected shape.')
+        
         # Initialize the scan object
         scan = Scan(
             n_tx=n_tx,
@@ -568,11 +580,5 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
         )
-
-        # Load the desired frames from the file
-        data = hdf5_file["data"][data_type][frames]
-
-        if data_type in ["raw_data", "aligned_data"]:
-            data = data[:, transmits]
-
+        
         return data, scan, probe
