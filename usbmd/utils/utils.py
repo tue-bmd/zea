@@ -1,58 +1,14 @@
 """Utility functions
 
 - **Author(s)**     : Tristan Stevens
-- **Date**          : -
+- **Date**          : October 25th, 2022
 """
 import datetime
-import os
-from pathlib import Path
-from tkinter import Tk
-from tkinter.filedialog import askopenfilename
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import tqdm
 from PIL import Image
-
-
-def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
-    """Get filename through dialog window
-    Args:
-        window_name: string with name of window
-        filetypes: tuple of tuples containing (name, filetypes)
-            example:
-                (('mat or hdf5 or whatever you want', '*.mat *.hdf5 *'), (ckpt, *.ckpt))
-        initialdir: path to directory where window will start
-    Returns:
-        filename: string containing path to selected file
-    """
-    if filetypes is None:
-        filetypes = (("all files", "*.*"),)
-
-    try:
-        root = Tk()
-    except Exception as error:
-        raise ValueError(
-            "Cannot run USBMD GUI on a server, unless a X11 server is properly setup"
-        ) from error
-
-    # open in foreground
-    root.wm_attributes("-topmost", 1)
-    # we don't want a full GUI, so keep the root window from appearing
-    root.withdraw()
-    # show an "Open" dialog box and return the path to the selected file
-    filename = askopenfilename(
-        parent=root,
-        title=window_name,
-        filetypes=filetypes,
-        initialdir=initialdir,
-    )
-    # check whether a file was selected
-    if filename:
-        return Path(filename)
-    else:
-        raise ValueError("No file selected.")
 
 
 def translate(array, range_from, range_to):
@@ -78,58 +34,6 @@ def translate(array, range_from, range_to):
 
     # Convert the 0-1 range into a value in the right range.
     return right_min + (value_scaled * (right_max - right_min))
-
-
-def search_file_tree(directory, filetypes=None, write=True):
-    """Lists all files in directory and sub-directories.
-
-    If file_paths.txt is detected in the directory, that file is read and used.
-
-    Args:
-        directory (str): path to directory.
-        filetypes (Tuple of strings, optional): filetypes.
-            Defaults to image types (.png etc.).
-        write (bool, optional): Whether to write to file. Useful has searching
-            the tree takes quite a while. Defaults to True.
-
-    Returns:
-        file_paths (List): List with str to all file paths.
-
-    """
-    directory = Path(directory)
-    if (directory / "file_paths.txt").is_file():
-        print(
-            "Using pregenerated txt file in the following directory for reading file paths: "
-        )
-        print(directory)
-        with open(directory / "file_paths.txt", encoding="utf-8") as file:
-            file_paths = file.read().splitlines()
-        return file_paths
-
-    # set default file type
-    if filetypes is None:
-        filetypes = ("jpg", "jpeg", "JPEG", "png", "PNG")
-
-    file_paths = []
-
-    # Traverse file tree to index all dicom files
-    for dirpath, _, filenames in tqdm.tqdm(
-        os.walk(directory), desc="Searching file tree"
-    ):
-        for file in filenames:
-            # Append to file_paths if it is a filetype file
-            if file.endswith(filetypes):
-                file_paths.append(str(Path(dirpath) / Path(file)))
-
-    print(f"\nFound {len(file_paths)} image files in .\\{Path(directory)}\n")
-    assert len(file_paths) > 0, "ERROR: No image files were found"
-
-    if write:
-        with open(directory / "file_paths.txt", "w", encoding="utf-8") as file:
-            file_paths = [file + "\n" for file in file_paths]
-            file.writelines(file_paths)
-
-    return file_paths
 
 
 def find_key(dictionary, contains, case_sensitive=False):
@@ -236,6 +140,7 @@ def get_date_string(string: str = None):
     date_str = now.strftime(string)
     return date_str
 
+
 def find_first_nonzero_index(arr, axis, invalid_val=-1):
     """
     Find the index of the first non-zero element along a specified axis in a NumPy array.
@@ -256,20 +161,3 @@ def find_first_nonzero_index(arr, axis, invalid_val=-1):
     return np.where(
         nonzero_mask.any(axis=axis), nonzero_mask.argmax(axis=axis), invalid_val
     )
-
-def matplotlib_figure_to_numpy(fig):
-    """Convert matplotlib figure to numpy array.
-
-    Args:
-        fig (matplotlib.figure.Figure): figure to convert.
-
-    Returns:
-        np.ndarray: numpy array of figure.
-
-    """
-    if plt_window_has_been_closed(fig):
-        return
-    fig.canvas.draw()
-    image = np.frombuffer(fig.canvas.tostring_rgb(), dtype="uint8")
-    image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-    return image
