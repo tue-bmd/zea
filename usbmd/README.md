@@ -21,7 +21,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](../../setup.py) file is located and run the following command from terminal:
 
-```bash
+```shell
 python -m pip install -e .
 ```
 
@@ -45,7 +45,7 @@ from usbmd import pytorch_ultrasound as usbmd_torch
 
 In order to get started with usbmd stand-alone, you can run [`ui.py`](ui.html), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](../../configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
 
-```bash
+```shell
 python ui.py --config configs/config_picmus.yaml
 ```
 
@@ -125,7 +125,7 @@ Install anaconda from [here](https://docs.conda.io/en/latest/miniconda.html).
 
 To reproduce the environment on your own machine run the following commands:
 
-```bash
+```shell
 conda create -n usbmd python=3.9
 conda activate usbmd
 python -m pip install --upgrade pip
@@ -151,7 +151,7 @@ This package also includes a [Dockerfile](../../Dockerfile). that you can use to
 
 2. Build the Docker image by running the following command from the root folder
 
-    ```bash
+    ```shell
     docker build -t ultrasound-bmd .
     ```
 
@@ -159,7 +159,7 @@ This package also includes a [Dockerfile](../../Dockerfile). that you can use to
 
 3. Run the Docker container by running the following command:
 
-    ```bash
+    ```shell
     docker run -it --rm -v /path/to/your/data:/data ultrasound-bmd
     ```
 
@@ -170,7 +170,7 @@ This package also includes a [Dockerfile](../../Dockerfile). that you can use to
 
 To install Tensorflow >= 2.8 ([installation guide](https://www.tensorflow.org/install/pip))
 
-```bash
+```shell
 conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
 python -m pip install "tensorflow<2.11"
 # Verify install:
@@ -179,7 +179,7 @@ python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')
 
 To install Pytorch >= 1.13 ([installation guide](https://pytorch.org/get-started/locally/))
 
-```bash
+```shell
 conda install pytorch pytorch-cuda=11.7 -c pytorch -c nvidia
 conda install cudatoolkit
 # Verify install:
@@ -191,14 +191,14 @@ python -c "import torch; print(torch.cuda.is_available())"
 Please see [`CONTRIBUTING.md`](../CONTRIBUTING.md) on guidelines to contribute to this repository.
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 
-```bash
+```shell
 pip install pylint
 pylint usbmd
 ```
 
 Also make sure all the pytest tests are running succesfully (100%) by running the following command in the root directory:
 
-```bash
+```shell
 pytest ./tests
 ```
 
