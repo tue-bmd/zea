@@ -525,6 +525,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         fs = float(hdf5_file['scan']['sampling_frequency'][()])
         fc = float(hdf5_file['scan']['center_frequency'][()])
         bandwidth_percent = float(hdf5_file['scan']['bandwidth_percent'][()])
+        modtype = float(hdf5_file['scan']['modtype'][()])
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
@@ -560,6 +561,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
             fc=fc,
             fs=fs,
             bandwidth_percent=bandwidth_percent,
+            modtype = modtype,
             n_ax=n_ax,
             c=c,
             polar_angles=polar_angles,
