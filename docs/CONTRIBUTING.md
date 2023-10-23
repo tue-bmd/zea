@@ -19,13 +19,31 @@
 To keep our code consistent and ease collaboration, we all follow the PEP 8 style convention. You can read about PEP 8 [here](https://peps.python.org/pep-0008/). Please take a look and familiarise yourself with these conventions. Some examples of what this style uses are:
 
 - Use 4 spaces per indentation level
-- Limit all lines to a maximum of 79 characters
+- Limit all lines to a maximum of 88 characters
 - Imports are always put at the top of the file and are grouped by type.
 - Class names should normally use the CapWords convention
 - Function and variable names should be lowercase, with words separated by underscores as necessary to improve readability
 - (Many more recommendations)
 
-The style of our code will be continuously checked via pylint when you submit a Pull Request to merge code to branch `main`. Any inconsistency will be flagged and will block the pull request until it is resolved. It's recommended to set up your IDE to automatically enforce  PEP 8 style. For instance, PyCharm can automatically reformat your code to be PEP 8 compliant (see [here](https://www.jetbrains.com/help/pycharm/reformat-and-rearrange-code.html)).
+The style of our code will be continuously checked via pylint when you submit a Pull Request to merge code to branch `main`. Any inconsistency will be flagged and will block the pull request until it is resolved.
+
+It's recommended to set up your IDE to enforce PEP 8 style. In general, we use VS Code, the black formatter, pylint and isort to achieve this. You can install [black](https://marketplace.visualstudio.com/items?itemName=ms-python.black-formatter), [isort](https://marketplace.visualstudio.com/items?itemName=ms-python.isort), [pylint](https://marketplace.visualstudio.com/items?itemName=ms-python.pylint) as extentions to VS Code.
+
+Additional it is useful to add the following settings to your settings.json. This will automatically format your code on save.
+
+```json
+"[python]": {
+   "editor.defaultFormatter": "ms-python.black-formatter",
+   "editor.formatOnSave": true,
+   "editor.codeActionsOnSave": {
+   "source.organizeImports": true
+   },
+},
+"isort.args": [
+   "--profile",
+   "black"
+],
+```
 
 To check if pylint runs succesfully run the following in the root directory
 
