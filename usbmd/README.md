@@ -74,8 +74,8 @@ elif config.ml_library == 'tensorflow':
 In order to use this repository and point to the correct data paths, you'll need to create a user profile. We have a script to guide you through the setup and create your userprofile; start by running `python usbmd/common.py` (see [`common.py`](common.html)). When you run this script, you will be prompted to provide a path to your data directory -- the default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS. Your user profile will then be created at `users.yaml`. Once it's created, you can edit your profile to add multiple devices or data paths -- see the example below.
 
 ```yaml
-USER_NAME:
-  DEVICE_NAME:
+MY_USER_NAME:
+  MY_DEVICE_NAME:
     system: windows
     data_root:
       local: D:\Datasets
