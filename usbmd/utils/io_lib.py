@@ -52,8 +52,8 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
 
     # open in foreground
     root.wm_attributes("-topmost", True)
-    root.wm_attributes("-topmost", False)
-
+    if "inline" in matplotlib.get_backend():
+        root.wm_attributes("-topmost", False)
     # we don't want a full GUI, so keep the root window from appearing
     root.withdraw()
     # show an "Open" dialog box and return the path to the selected file
