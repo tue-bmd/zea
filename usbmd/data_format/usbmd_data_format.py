@@ -236,7 +236,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=scan_group,
         name="initial_times",
-        data=initial_times,
+        data=initial_times if initial_times else [],
         description=(
             "The times when the A/D converter starts sampling "
             "in seconds of shape (n_tx,). This is the time between the "
