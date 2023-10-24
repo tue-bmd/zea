@@ -19,6 +19,7 @@ from usbmd.processing import (
     scan_convert,
     to_8bit,
     to_image,
+    transform_sc_image_to_polar,
     upmix,
 )
 from usbmd.pytorch_ultrasound import processing as processing_torch
@@ -85,7 +86,8 @@ def equality_libs_processing(test_func):
         # Run the test function with processing_torch module
         torch_output = None
         if hasattr(processing_torch, func_name + "_torch"):
-            processing_func_torch = getattr(processing_torch, func_name + "_torch")
+            processing_func_torch = getattr(
+                processing_torch, func_name + "_torch")
             setattr(processing, func_name, processing_func_torch)
             set_random_seed(seed)
             torch_output = np.array(test_func(*args, **kwargs))
@@ -121,31 +123,36 @@ def equality_libs_processing(test_func):
 
     return decorator.decorator(wrapper, test_func)
 
-
 @pytest.mark.parametrize(
-    "comp_type, size",
+    "comp_type, size, parameter_value_range",
     [
-        ("a", (2, 1, 128, 32)),
-        ("a", (512, 512)),
-        ("mu", (2, 1, 128, 32)),
-        ("mu", (512, 512)),
+        ("a", (2, 1, 128, 32), (50, 200)),
+        ("a", (512, 512), (50, 200)),
+        ("mu", (2, 1, 128, 32), (50, 300)),
+        ("mu", (512, 512), (50, 300)),
     ],
 )
 @equality_libs_processing
-def test_companding(comp_type, size):
+def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
-    signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
-    signal = signal.astype(np.float32)
 
-    signal_out = processing.companding(signal, expand=False, comp_type=comp_type)
-    assert np.any(
-        np.not_equal(signal, signal_out)
-    ), "Companding failed, arrays should not be equal"
-    signal_out = processing.companding(signal_out, expand=True, comp_type=comp_type)
+    for parameter_value in np.linspace(*parameter_value_range, 10):
+        A = parameter_value if comp_type == "a" else 0
+        mu = parameter_value if comp_type == "mu" else 0
 
-    np.testing.assert_almost_equal(signal, signal_out, decimal=6)
+        signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
+        signal = signal.astype(np.float32)
+
+        signal_out = processing.companding(
+            signal, expand=False, comp_type=comp_type, A=A, mu=mu)
+        assert np.any(
+            np.not_equal(signal, signal_out)
+        ), "Companding failed, arrays should not be equal"
+        signal_out = processing.companding(
+            signal_out, expand=True, comp_type=comp_type, A=A, mu=mu)
+
+        np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
-
 
 @pytest.mark.parametrize(
     "size, dynamic_range, input_range",
@@ -174,9 +181,48 @@ def test_converting_to_image(size, dynamic_range, input_range):
 def test_scan_conversion(size):
     """Tests the scan_conversion function with random data"""
     data = np.random.random(size)
-    x_axis = np.linspace(-50, 50, 100)
+    x_axis = np.linspace(-50, 50, 100)  # angles
     z_axis = np.linspace(0, 100, 2000)
     scan_convert(data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0)
+
+
+@pytest.mark.parametrize(
+    "size, random_data_type",
+    [
+        ((200, 200), "gaussian"),
+        ((100, 333), "gaussian"),
+        ((200, 200), "radial"),
+        ((100, 333), "radial"),
+    ],
+)
+def test_scan_conversion_and_inverse(size, random_data_type):
+    """Tests the scan_conversion function with random data and
+    invert the data with transform_sc_image_to_polar.
+    For gaussian data, the mean squared error is around 0.09.
+    For radial data, the mean squared error is around 0.0002.
+    """
+    if random_data_type == "gaussian":
+        polar_data = np.random.random(size)
+        # random data allow large error since interpolation is hard
+        allowed_error = 0.2
+    elif random_data_type == "radial":
+        x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
+        r = np.sqrt(x**2 + y**2)
+        polar_data = np.exp(-(r**2))
+        allowed_error = 0.001
+    else:
+        raise NotImplementedError
+
+    x_axis = np.linspace(-45, 45, 100)  # angles
+    z_axis = np.linspace(0, 100, 2000)
+    data_sc = scan_convert(
+        polar_data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0
+    )
+    data_sc_inv = transform_sc_image_to_polar(data_sc, output_size=polar_data.shape)
+    mean_squared_error = ((polar_data - data_sc_inv) ** 2).mean()
+
+    assert mean_squared_error < allowed_error, \
+        f"MSE is too high: {mean_squared_error:.4f} > {allowed_error:.4f}"
 
 
 @pytest.mark.parametrize(
@@ -189,33 +235,19 @@ def test_scan_conversion(size):
 def test_grid_conversion(size):
     """Tests the grid conversion function with random 2d data"""
     data = np.random.random(size)
-    x_grid_points = np.linspace(-50, 50, 100)
-    z_grid_points = np.linspace(0, 100, 2000)
+    x_grid_points = np.linspace(-45, 45, 100)  # angles
+    z_grid_points = np.linspace(0, 100, 100)
 
     x_sample_points = np.deg2rad(x_grid_points) + np.pi / 2
-    z_sample_points = np.deg2rad(z_grid_points) + np.pi / 2
+    z_sample_points = z_grid_points
 
-    _data = project_to_cartesian_grid(
+    project_to_cartesian_grid(
         data,
         (x_sample_points, z_sample_points),
         (x_grid_points, z_grid_points),
         spline_order=1,
         fill_value=0,
     )
-
-    x_sample_points, x_grid_points = x_grid_points, x_sample_points
-    z_sample_points, z_grid_points = z_grid_points, z_sample_points
-
-    _data = project_to_cartesian_grid(
-        _data,
-        (x_sample_points, z_sample_points),
-        (x_grid_points, z_grid_points),
-        spline_order=1,
-        fill_value=0,
-    )
-    # probably there is a way to cleverly choose the grid / sample
-    # such that it can be inverted
-    # np.testing.assert_almost_equal(data, _data)
 
 
 @pytest.mark.parametrize(
@@ -287,10 +319,10 @@ def test_up_and_down_conversion(factor, batch_size):
     fs = probe_parameters["fs"]
     fc = probe_parameters["fc"]
     scan = PlaneWaveScan(
-        N_tx=1,
+        n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        N_ax=2048,
+        n_ax=2048,
         fs=fs,
         fc=fc,
         angles=np.array(
