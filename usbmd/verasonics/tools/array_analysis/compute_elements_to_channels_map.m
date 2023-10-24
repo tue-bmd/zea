@@ -1,25 +1,28 @@
-% compute_elements_to_channels_map.m   uses data produced by the script SetUp_record_pulse_echos.make
+% compute_elements_to_channels_map.m   uses data produced by the script SetUp_record_pulse_echos.m
 %                                      to compute the mapping (i.e. Trans.ConnectorES) between array
 %                                      elements and Verasonics channels.
 %
-% todo: make the loading of data produced by SetUp_record_pulse_echos.m more user friendly,
-%       and stick to the usbmd format
+% todo: think about migrating to the usbmd format
 
-load('20231016_142738_allResponses.mat')
+usbmd_Globals
 
-num_elements = size(M,1);
-num_samples = size(M,2);
+filename = uigetfile(fullfile(usbmd_g_DataSaveDir,'*_allResponses.mat'));
+load(fullfile(usbmd_g_DataSaveDir, filename));
+
+num_elements  = size(M,1);
+num_samples   = size(M,2);
 num_transmits = size(M,3);
-assert(num_elements == num_transmits, 'expected as many transmit events as receivers');
+assert(num_elements == num_transmits, 'Expected as many transmit events as receivers');
 
 % Ask user for a start and a stop index of the first acoustic reflection
 T = sum(M,3);
-figure, plot(T'), title('Click left and right around the first acoustic reflection'), drawnow
+figure, plot(T')
+title('Click left and right around the first acoustic reflection')
+drawnow
 [xx,yy] = ginput(2);
 xx = round(xx);
 
-% Compute all evenlopes
-% M_env = abs(hilbert(M(:,xx(1):xx(2),:)));
+% Compute all envelopes
 M_env = zeros(num_elements, xx(2)-xx(1)+1, num_transmits);
 for t = 1 : num_transmits
     for e = 1 : num_elements
@@ -60,11 +63,9 @@ Mdiag = zeros(num_elements,num_samples);
 for n = 1:num_elements
     Mdiag(n,:) = M(n,:,n);
 end
-figure
 iusPlotSignalsStack(Mdiag')
 axis([0 num_samples 0 num_elements+1])
 
 % AFTER
-figure
 iusPlotSignalsStack(Mdiag(sorted_indices,:)')
 axis([0 num_samples 0 num_elements+1])

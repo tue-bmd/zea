@@ -1,10 +1,10 @@
 clearvars
-usbmd_Globals();
+usbmd_Globals
 
 filename = fullfile(usbmd_g_MatFilesDir, mfilename);
 
 % Specify Trans structure array.
-Trans = usbmd_init_trans(usbmd_g_TransName, usbmd_g_TransFreq);
+Trans = usbmd_InitTrans(usbmd_g_TransName, usbmd_g_TransFreq);
 
 %% Provide the input parameters for this script
 pulseFreqMHz         = Trans.frequency;
@@ -242,7 +242,8 @@ save(filename); VSX
 return
 
 
-%% Callback functions 
+%% Callback functions
+
 %CB#1 - activeRXb change (note: CB#zero-eleventh is needed, otherwise text2cell.m function fails)
 numAcqs = evalin('base', 'numAcqs'); 
 Receive = evalin('base', 'Receive');
@@ -253,7 +254,6 @@ for n = 1 : numAcqs
     ApodR([round(UIValue) activeRXa]) = 1;
     Receive(n).Apod = ApodR;
 end
-% figure(115),  plot(Receive(1).Apod), title('new receive apodization B')
 assignin('base', 'Receive', Receive);
 Control.Command = 'update&Run';                 
 Control.Parameters = {'Receive'};
@@ -272,7 +272,6 @@ for n = 1 : numAcqs
     ApodR([round(UIValue) activeRXb]) = 1;
     Receive(n).Apod = ApodR;
 end
-% figure(114),  plot(Receive(1).Apod), title('new receive apodization A')
 assignin('base', 'Receive', Receive);
 Control.Command = 'update&Run';                 
 Control.Parameters = {'Receive'};
@@ -293,19 +292,14 @@ return
 
 %-CB#5Callback (pulse freq MHz)
 pulseFreqMHz = UIValue;
-assignin('base','pulseFreqMHz',pulseFreqMHz);
-nrPulseCycles = evalin('base','nrPulseCycles');
-%disp(['New pulse freq = ',num2str(pulseFreqMHz),' MHz, nr of pulse cycles = ',num2str(nrPulseCycles)]);
+assignin('base', 'pulseFreqMHz', pulseFreqMHz);
+nrPulseCycles = evalin('base', 'nrPulseCycles');
 TW = usbmd_ComputeTW(pulseFreqMHz,nrPulseCycles);
-assignin('base','TW', TW);
-Control = evalin('base','Control');
+assignin('base', 'TW', TW);
+Control = evalin('base', 'Control');
 Control.Command = 'update&Run';
 Control.Parameters = {'TW'};
-assignin('base','Control', Control);
-% autoMode = evalin('base','autoMode');
-% if autoMode == 1
-%     usbmd_SetAutoValues();
-% end
+assignin('base', 'Control', Control);
 return
 %-CB#5Callback
 
@@ -316,7 +310,6 @@ Trans = evalin('base', 'Trans');
 ApodT = zeros(1, Trans.numelements);
 ApodT(round(UIValue)) = 1;
 TX.Apod = ApodT;
-% figure(113),  plot(TX(1).Apod), title('new transmit apodization')
 assignin('base', 'TX', TX);
 Control.Command    = 'update&Run';
 Control.Parameters = {'TX', 'TW'};
@@ -333,9 +326,8 @@ return
 
 %-CB#6Callback - Pulse change
 nrPulseCycles = UIValue;
-assignin('base','nrPulseCycles',nrPulseCycles);
+assignin('base', 'nrPulseCycles', nrPulseCycles);
 pulseFreqMHz = evalin('base','pulseFreqMHz');
-%disp(['New nr of pulse cycles = ',num2str(nrPulseCycles),', pulse freq = ',num2str(pulseFreqMHz),' MHz']);
 TW = usbmd_ComputeTW(pulseFreqMHz,nrPulseCycles);
 assignin('base','TW', TW);
 Control = evalin('base','Control');
@@ -344,30 +336,6 @@ Control.Parameters = {'TW'};
 assignin('base','Control', Control);
 return
 %-CB#6Callback
-
-%-UI#8Callback (Vddh)
-Vddh = round(UIValue);
-simMode = evalin('base','Resource.Parameters.simulateMode');
-if simMode==0
-%     toolBoxInst = evalin('base','toolBoxInst');
-%     toolBoxInst.VddH.Modify( Vddh, toolBoxInst.verbose);
-    usbmd_ToolboxFLICE_ModifyVddH( Vddh);
-else
-    disp(['Simulation mode, new Vddh = ',num2str(Vddh)]);
-end
-return
-%-UI#8Callback
-
-%-UI#9Callback (toggle hot mode)
-toolBoxInst = evalin('base','toolBoxInst');
-if toolBoxInst.hot == 0
-    usbmd_ToolboxFLICE_Hot; % enable output of complete toolbox
-else
-    usbmd_ToolboxFLICE_Cold; % disable output of complete toolbox
-end
-assignin('base','toolBoxInst',toolBoxInst)
-return
-%-UI#9Callback
 
 %-UI#10Callback (toggle transmit flash mode)
 handleToGUIFigure = findobj('tag','UI');
@@ -485,19 +453,18 @@ subplot(311)
   hold all
     plot(plotXAxisData,RFLineA);
     plot(plotXAxisData,RFLineB,'LineStyle',':');
-%   V = axis; V(3)=-100; V(4)=100; %axis(V);
-  V = axis; V(3)=-16384; V(4)=16383; axis(V);
-  enableFlash = evalin('base','enableFlash');
-  if (enableAveraging)
+    V = axis; V(3)=-16384; V(4)=16383; axis(V);
+    enableFlash = evalin('base','enableFlash');
+    if (enableAveraging)
       nrAvg = numAcqs;
-  else
+    else
       nrAvg = 1;
-  end
-  if (enableFlash == 0)
-    title(['activeTX = ',num2str(activeTX),', activeRX = ',num2str([activeRXa activeRXb]),', RF line averaging ',num2str(nrAvg),' x, upsample ',num2str(upsampleFactor) 'x'])
-  else
-    title(['activeTX = ALL, activeRX = ',num2str([activeRXa activeRXb]),', RF line averaging ',num2str(numAcqs),' times, upsample ',num2str(upsampleFactor) 'x'])
-  end
+    end
+    if (enableFlash == 0)
+      title(['activeTX = ',num2str(activeTX),', activeRX = ',num2str([activeRXa activeRXb]),', RF line averaging ',num2str(nrAvg),' x, upsample ',num2str(upsampleFactor) 'x'])
+    else
+      title(['activeTX = ALL, activeRX = ',num2str([activeRXa activeRXb]),', RF line averaging ',num2str(numAcqs),' times, upsample ',num2str(upsampleFactor) 'x'])
+    end
     plot(plotXAxisData([measureStartIndex measureStartIndex]),[V(3) V(4)], 'r');
     plot(plotXAxisData([measureStopIndex measureStopIndex]),[V(3) V(4)], 'r');
   hold off
@@ -506,10 +473,10 @@ subplot(311)
   legend('A','B');
 subplot(312)
   hold all
-  plot(plotXAxisData(measureStartIndex:measureStopIndex), hA, 'b');
-  plot(plotXAxisData(measureStartIndex:measureStopIndex), hA_env, 'b:');
-  plot(plotXAxisData(measureStartIndex:measureStopIndex), hB,'r');
-  plot(plotXAxisData(measureStartIndex:measureStopIndex), hB_env,'r:');
+    plot(plotXAxisData(measureStartIndex:measureStopIndex), hA, 'b');
+    plot(plotXAxisData(measureStartIndex:measureStopIndex), hA_env, 'b:');
+    plot(plotXAxisData(measureStartIndex:measureStopIndex), hB,'r');
+    plot(plotXAxisData(measureStartIndex:measureStopIndex), hB_env,'r:');
   hold off
   xlabel(plotXAxisLabel);
   axis tight;

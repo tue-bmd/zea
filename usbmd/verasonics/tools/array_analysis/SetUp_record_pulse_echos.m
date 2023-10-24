@@ -3,9 +3,9 @@
 %responses of all elements are recorded to a file for later analysis.
 
 clearvars
-usbmd_Globals();
+usbmd_Globals
 
-filename = 'Harm/MatFiles/PulseEchos';
+filename =  fullfile(usbmd_g_MatFilesDir, mfilename);
 
 %% System object: transducer characteristics in the Trans object
 Trans = usbmd_InitTrans(usbmd_g_TransName, usbmd_g_TransFreq);
@@ -238,32 +238,32 @@ Trans                   = evalin('base','Trans');
 TW                      = evalin('base','TW');
 pulseFreqMHz            = evalin('base','pulseFreqMHz');
 nrPulseCycles           = evalin('base','nrPulseCycles');
-usbmd_g_SaveDir         = evalin('base','usbmd_g_SaveDir');
+usbmd_g_DataSaveDir     = evalin('base','usbmd_g_DataSaveDir');
 interleave              = evalin('base','interleave');
 
 if (lineLength ~= size(RFData,1) / nrTxEvents)
-    error('myProcFunction_storeRFLines_HBE.m: invalid line length.');
+    error('StorePulseEchos1: invalid line length.');
 end
 
 prefix = sprintf('%d%02d%02d_%02d%02d%02d_', C(1), C(2), C(3), ...
     C(4), C(5), round(C(6)));
-saveFileName            = fullfile(usbmd_g_SaveDir, [prefix, 'allResponses.mat']);
+saveFileName = fullfile(usbmd_g_DataSaveDir, [prefix, 'allResponses.mat']);
 
 % We have "nrTxEvents" transmit pulse events.
 %   if nrTxEvents==Trans.numelements we have one transmit pulse event for each element separately
 %   if nrTxEvents==1    then all the Trans.numelements elements were fired simultaneously
 % We have Trans.numelements receive channels per transmit pulse event
 % Each receive channel contains "lineLength" samples
-M    = zeros(sum(Trans.numelements), lineLength, nrTxEvents);
+M = zeros(sum(Trans.numelements), lineLength, nrTxEvents);
 for t = 1 : nrTxEvents
-    lineIndexRange   = (t-1)*lineLength+1 : t*lineLength;
-    M(:,:,t) = double(RFData(lineIndexRange,Trans.ConnectorES))';
+    lineIndexRange = (t-1)*lineLength+1 : t*lineLength;
+    M(:,:,t) = double(RFData(lineIndexRange, Trans.ConnectorES))';
 end
 
 % Perform interleaving
 if interleave > 1
-    for t = 1:nrTxEvents
-        for chan = 1:size(M,1)
+    for t = 1 : nrTxEvents
+        for chan = 1 : size(M,1)
             tmp = reshape(M(chan,:,t), lineLength/interleave, interleave);
             M(chan,:,t) = reshape(tmp', 1, lineLength);
         end
