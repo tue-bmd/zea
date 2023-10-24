@@ -22,7 +22,7 @@ from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.utils import update_dictionary
-from usbmd.utils.video import ScanConverterTF
+from usbmd.processing import Process
 
 
 def train(config):
@@ -55,7 +55,7 @@ def train(config):
 
     # Create target data
     # pylint: disable=unexpected-keyword-arg
-    target_beamformer = get_beamformer(probe, scan, config, jit_compile=True)
+    target_beamformer = get_beamformer(probe, scan, config)
 
     targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
 
@@ -106,11 +106,12 @@ def train(config):
 
     # Train the model
     history = beamformer.fit(inputs, targets, epochs=10, batch_size=1, verbose=1)
+    predictions = np.array(beamformer(inputs))
 
-    scan_converter = ScanConverterTF(grid=scan.grid)
-
-    targets = scan_converter.convert(targets)
-    predictions = scan_converter.convert(beamformer(inputs))
+    # Create a Process class to convert the data to an image
+    process = Process(config, scan, probe)
+    targets = process.run(targets, 'beamformed_data', 'image')
+    predictions = process.run(predictions, 'beamformed_data', 'image')
 
     # plot the resulting image
     plt.figure()
