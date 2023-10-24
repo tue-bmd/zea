@@ -148,7 +148,7 @@ class GenerateDataSet:
                     image = self.process.run(
                         image, self.config.data.dtype, self.to_dtype
                     )
-                    self.save_image(image, path)
+                    self.save_image(np.squeeze(image), path)
 
             elif self.filetype == "hdf5":
                 data_list = []

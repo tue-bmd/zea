@@ -185,8 +185,8 @@ def search_file_tree(directory, filetypes=None, write=True):
 
     if write:
         with open(directory / "file_paths.txt", "w", encoding="utf-8") as file:
-            file_paths = [file + "\n" for file in file_paths]
-            file.writelines(file_paths)
+            _file_paths = [file + "\n" for file in file_paths]
+            file.writelines(_file_paths)
 
     return file_paths
 
