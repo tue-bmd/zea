@@ -40,7 +40,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
 
     if add_optional_fields:
-        focus_distances = np.ones((n_tx,), dtype=np.float32)*np.inf
+        focus_distances = np.ones((n_tx,), dtype=np.float32) * np.inf
         tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
         polar_angles = np.zeros((n_tx,), dtype=np.float32)
         azimuth_angles = np.zeros((n_tx,), dtype=np.float32)
@@ -158,11 +158,13 @@ def generate_usbmd_dataset(
         unit="unitless",
     )
 
-    add_dataset(group=scan_group,
-                name='n_frames',
-                data=n_frames,
-                description='The number of frames.',
-                unit='unitless')
+    add_dataset(
+        group=scan_group,
+        name="n_frames",
+        data=n_frames,
+        description="The number of frames.",
+        unit="unitless",
+    )
 
     add_dataset(
         group=scan_group,
@@ -270,8 +272,7 @@ def validate_dataset(path):
     dataset = h5py.File(path, "r")
 
     def check_key(dataset, key):
-        assert key in dataset.keys(
-        ), f"The dataset does not contain the key {key}."
+        assert key in dataset.keys(), f"The dataset does not contain the key {key}."
 
     # Validate the root group
     check_key(dataset, "data")
@@ -315,16 +316,13 @@ def validate_dataset(path):
         elif key == "aligned_data":
             logging.warning("No validation has been defined for aligned data.")
         elif key == "beamformed_data":
-            logging.warning(
-                "No validation has been defined for beamformed data.")
+            logging.warning("No validation has been defined for beamformed data.")
         elif key == "envelope_data":
-            logging.warning(
-                "No validation has been defined for envelope data.")
+            logging.warning("No validation has been defined for envelope data.")
         elif key == "image":
             logging.warning("No validation has been defined for image data.")
         elif key == "image_sc":
-            logging.warning(
-                "No validation has been defined for image_sc data.")
+            logging.warning("No validation has been defined for image_sc data.")
 
     required_scan_keys = [
         "n_ax",
@@ -351,15 +349,13 @@ def validate_dataset(path):
             ), "The probe_geometry does not have the correct shape."
 
         elif key == "t0_delays":
-            correct_shape = (dataset["scan"]["n_tx"]
-                             [()], dataset["scan"]["n_el"][()])
+            correct_shape = (dataset["scan"]["n_tx"][()], dataset["scan"]["n_el"][()])
             assert (
                 dataset["scan"][key].shape == correct_shape
             ), "The t0_delays does not have the correct shape."
 
         elif key == "tx_apodizations":
-            correct_shape = (dataset["scan"]["n_tx"]
-                             [()], dataset["scan"]["n_el"][()])
+            correct_shape = (dataset["scan"]["n_tx"][()], dataset["scan"]["n_el"][()])
             assert (
                 dataset["scan"][key].shape == correct_shape
             ), "The tx_apodizations does not have the correct shape."
@@ -468,8 +464,9 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
 
     if transmits is not None:
         # Assert that all frames are integers
-        assert all(isinstance(tx, int) for tx in transmits), \
-            'All transmits must be integers.'
+        assert all(
+            isinstance(tx, int) for tx in transmits
+        ), "All transmits must be integers."
 
     assert (
         data_type in _DATA_TYPES
@@ -506,12 +503,12 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
             )
 
         # Define the scan
-        n_frames = int(hdf5_file['scan']['n_frames'][()])
-        n_ax = int(hdf5_file['scan']['n_ax'][()])
-        n_tx = int(hdf5_file['scan']['n_tx'][()])
-        c = float(hdf5_file['scan']['sound_speed'][()])
-        fs = float(hdf5_file['scan']['sampling_frequency'][()])
-        fc = float(hdf5_file['scan']['center_frequency'][()])
+        n_frames = int(hdf5_file["scan"]["n_frames"][()])
+        n_ax = int(hdf5_file["scan"]["n_ax"][()])
+        n_tx = int(hdf5_file["scan"]["n_tx"][()])
+        c = float(hdf5_file["scan"]["sound_speed"][()])
+        fs = float(hdf5_file["scan"]["sampling_frequency"][()])
+        fc = float(hdf5_file["scan"]["center_frequency"][()])
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
@@ -529,12 +526,12 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
 
         n_tx = len(transmits)
 
-        initial_times = hdf5_file['scan']['initial_times'][transmits]
-        tx_apodizations = hdf5_file['scan']['tx_apodizations'][transmits]
-        t0_delays = hdf5_file['scan']['t0_delays'][transmits]
-        polar_angles = hdf5_file['scan']['polar_angles'][transmits]
-        azimuth_angles = hdf5_file['scan']['azimuth_angles'][transmits]
-        focus_distances = hdf5_file['scan']['focus_distances'][transmits]
+        initial_times = hdf5_file["scan"]["initial_times"][transmits]
+        tx_apodizations = hdf5_file["scan"]["tx_apodizations"][transmits]
+        t0_delays = hdf5_file["scan"]["t0_delays"][transmits]
+        polar_angles = hdf5_file["scan"]["polar_angles"][transmits]
+        azimuth_angles = hdf5_file["scan"]["azimuth_angles"][transmits]
+        focus_distances = hdf5_file["scan"]["focus_distances"][transmits]
 
         # Initialize the scan object
         scan = Scan(
