@@ -552,12 +552,17 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         if data_type in ["raw_data", "aligned_data"]:
             data = data[:, transmits]
 
+        if data_type in ["raw_data", "aligned_data", "beamformed_data"]:
             if data.shape[-1] == 1:
                 modtype = "rf"
             elif data.shape[-1] == 2:
                 modtype = "iq"
             else:
-                raise ValueError("The data has an unexpected shape.")
+                raise ValueError(
+                    f"The data has an unexpected shape: {data.shape}. Last "
+                    "dimension must be 1 (RF) or 2 (IQ), when data_type is "
+                    f"{data_type}."
+                )
 
         # Initialize the scan object
         scan = Scan(
