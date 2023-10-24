@@ -1,7 +1,10 @@
 """Functionality to convert the PICMUS dataset to the USBMD format."""
 
+import argparse
 import logging
 import os
+import sys
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -97,3 +100,39 @@ def convert_picmus(source_path, output_path, overwrite=False):
         probe_name="verasonics_l11_4v",
         description="PICMUS dataset converted to USBMD format",
     )
+
+def get_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", type=str, default="Z:/Ultrasound-BMd/data/PICMUS")
+    parser.add_argument("--output", type=str, default="Z:/Ultrasound-BMd/data/picmus_converted")
+    args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+    args = get_args()
+
+    picmus_source_folder = Path(args.source)
+    picmus_output_folder = Path(args.output)
+
+    # check if output folder exists if so close program
+    if picmus_output_folder.exists():
+        print(f"Output folder {picmus_output_folder} already exists. Exiting program.")
+        sys.exit()
+
+    # clone folder structure of source to output using pathlib
+    # and run convert_picmus() for every hdf5 found in there
+    for source_file in picmus_source_folder.glob("**/*.hdf5"):
+        # check if source file in PICMUS database (ignore other files)
+        if not "database" in source_file.parts:
+            continue
+
+        output_file = picmus_output_folder / source_file.relative_to(picmus_source_folder)
+        # make sure folder exists
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            convert_picmus(source_file, output_file, overwrite=False)
+        except Exception as e:
+            print(f"Error converting {source_file}")
+            print(e)
+            continue
