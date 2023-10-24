@@ -82,6 +82,7 @@ def generate_usbmd_dataset(
     polar_angles=None,
     azimuth_angles=None,
     tx_apodizations=None,
+    bandwidth_percent=None,
 ):
     """Generates a dataset in the USBMD format.
 
@@ -258,6 +259,16 @@ def generate_usbmd_dataset(
             unit="rad",
         )
 
+    if bandwidth_percent is not None:
+        add_dataset(
+            group=scan_group,
+            name="bandwidth_percent",
+            data=bandwidth_percent,
+            description="The receive bandwidth of RF signal in "
+            "percentage of center frequency.",
+            unit="unitless",
+        )
+
     dataset.close()
     validate_dataset(path)
 
@@ -386,6 +397,7 @@ def validate_dataset(path):
 
         elif key in (
             "sampling_frequency",
+            "bandwidth_percent",
             "center_frequency",
             "n_frames",
             "n_tx",
@@ -543,17 +555,13 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
             zlims=(z0, z1),
             fc=fc,
             fs=fs,
+            bandwidth_percent=bandwidth_percent,
+            modtype=modtype,
             n_ax=n_ax,
             c=c,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
         )
-
-        # Load the desired frames from the file
-        data = hdf5_file["data"][data_type][frames]
-
-        if data_type in ["raw_data", "aligned_data"]:
-            data = data[:, transmits]
 
         return data, scan, probe
