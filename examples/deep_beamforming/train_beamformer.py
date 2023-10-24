@@ -17,12 +17,12 @@ import tensorflow as tf
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
+from usbmd.processing import Process
 from usbmd.setup_usbmd import setup_config
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.utils import update_dictionary
-from usbmd.processing import Process
 
 
 def train(config):
@@ -110,8 +110,8 @@ def train(config):
 
     # Create a Process class to convert the data to an image
     process = Process(config, scan, probe)
-    targets = process.run(targets, 'beamformed_data', 'image')
-    predictions = process.run(predictions, 'beamformed_data', 'image')
+    targets = process.run(targets, "beamformed_data", "image")
+    predictions = process.run(predictions, "beamformed_data", "image")
 
     # plot the resulting image
     plt.figure()
