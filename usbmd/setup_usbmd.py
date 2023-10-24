@@ -10,7 +10,9 @@ Author(s): Tristan Stevens
 Date: 25/09/2023
 """
 from pathlib import Path
+from typing import Union
 
+from usbmd.common import set_data_paths
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
@@ -52,5 +54,42 @@ def setup_config(file=None):
     cwd = Path.cwd().stem
     if cwd in ("Ultrasound-BMd", "usbmd"):
         config["git"] = get_git_summary()
+
+    return config
+
+
+def setup(config_path: str = None, user_config: Union[str, dict] = None):
+    """General setup function for usbmd. Loads config, sets data paths and
+    initializes gpu if available. Will return config object.
+
+    Args:
+        config_path (str, optional): file path to config yaml.
+            Defaults to None, in which case a window dialog will pop up.
+        user_config (str or dict, optional): path that points to yaml file with user info.
+            Alternively dictionary with user info. Defaults to None.
+
+    Returns:
+        config (dict): config object / dict.
+    """
+
+    # Load config
+    config = setup_config(config_path)
+
+    # Set data paths
+    config.data.user = set_data_paths(user_config, local=config.data.local)
+
+    # Init GPU / CPU according to config
+    if config.ml_library == "torch":
+        # pylint: disable=import-outside-toplevel
+        from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
+
+        config.device = get_device(config.device)
+    elif config.ml_library == "tensorflow":
+        # pylint: disable=import-outside-toplevel
+        from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
+
+        set_gpu_usage(config.device)
+    else:
+        raise ValueError(f"Unknown ml_library ({config.ml_library}) in config.")
 
     return config
