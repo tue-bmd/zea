@@ -3,7 +3,7 @@ these setup funcs group together several functions that are often
 used together for ease of use.
 
 setup_config: Setup function for config. Retrieves config file and checks for validity.
-setup (TBA): General setup function for usbmd. Runs setup_config, sets data paths and
+setup: General setup function for usbmd. Runs setup_config, sets data paths and
     initializes gpu if available.
 
 Author(s): Tristan Stevens
@@ -58,7 +58,10 @@ def setup_config(file=None):
     return config
 
 
-def setup(config_path: str = None, user_config: Union[str, dict] = None):
+def setup(
+    config_path: str = None,
+    user_config: Union[str, dict] = None,
+):
     """General setup function for usbmd. Loads config, sets data paths and
     initializes gpu if available. Will return config object.
 
@@ -79,17 +82,39 @@ def setup(config_path: str = None, user_config: Union[str, dict] = None):
     config.data.user = set_data_paths(user_config, local=config.data.local)
 
     # Init GPU / CPU according to config
-    if config.ml_library == "torch":
+    config.device = init_device(config.ml_library, config.device)
+
+    return config
+
+
+def init_device(ml_library: str, device: Union[str, int, list]):
+    """Selects a GPU or CPU device based on the config.
+    For PyTorch, this will return the device.
+    For TensorFlow, this will hide all other GPUs from the system
+    by setting the CUDA_VISIBLE_DEVICES.
+
+    Args:
+        ml_library (str): String indicating which ml library to use.
+        device (str/int/list): device(s) to select.
+
+    Returns:
+        device (str):
+    """
+
+    # Init GPU / CPU according to config
+    if ml_library == "torch":
         # pylint: disable=import-outside-toplevel
         from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
 
-        config.device = get_device(config.device)
-    elif config.ml_library == "tensorflow":
+        device = get_device(device)
+    if ml_library == "tensorflow":
         # pylint: disable=import-outside-toplevel
         from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 
-        set_gpu_usage(config.device)
+        set_gpu_usage(device)
+    elif ml_library == "disable" or ml_library is None:
+        pass
     else:
-        raise ValueError(f"Unknown ml_library ({config.ml_library}) in config.")
+        raise ValueError(f"Unknown ml_library ({ml_library}) in config.")
 
-    return config
+    return device
