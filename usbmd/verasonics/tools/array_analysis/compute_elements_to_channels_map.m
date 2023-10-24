@@ -63,9 +63,9 @@ Mdiag = zeros(num_elements,num_samples);
 for n = 1:num_elements
     Mdiag(n,:) = M(n,:,n);
 end
-iusPlotSignalsStack(Mdiag')
+usbmd_PlotSignalsStack(Mdiag')
 axis([0 num_samples 0 num_elements+1])
 
 % AFTER
-iusPlotSignalsStack(Mdiag(sorted_indices,:)')
+usbmd_PlotSignalsStack(Mdiag(sorted_indices,:)')
 axis([0 num_samples 0 num_elements+1])
