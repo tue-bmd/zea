@@ -11,74 +11,84 @@ import tensorflow as tf
 # make sure you have Pip installed usbmd (see README)
 # import usbmd.tensorflow_ultrasound as usbmd_tf
 from usbmd.generate import GenerateDataSet
-from usbmd.setup_usbmd import setup_config
+from usbmd.setup_usbmd import setup
 from usbmd.tensorflow_ultrasound.dataloader import ImageLoader
 from usbmd.tensorflow_ultrasound.models import lista
-from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-
-# choose gpu
-set_gpu_usage(device=0)
-
-# # choose config file
-path_to_config_file = Path.cwd() / "configs/config_picmus.yaml"
-config = setup_config(path_to_config_file)
-
-# generate image dataset from raw data
-destination_folder = Path.cwd() / "lista_test"
-try:
-    gen = GenerateDataSet(
-        config,
-        destination_folder=destination_folder,
-        retain_folder_structure=False,
-    )
-    gen.generate()
-except ValueError:
-    print(f"Dataset already exists in {destination_folder}")
 
 RUN_EAGERLY = False  # for debugging set to true
-image_shape = (1249, 387)
-epochs = 100
-learning_rate = 0.001
 
-# initiate dataloader
-dataloader = ImageLoader(
-    destination_folder,
-    destination_folder,
-    batch_size=1,
-    image_shape=image_shape,
-    shuffle=True,
-)
 
-# get image from batch
-batch = next(iter(dataloader))
-image = np.squeeze(batch[0])
+def train_lista(config):
+    """Train LISTA network"""
 
-# plot image
-plt.figure()
-plt.imshow(image, cmap="gray")
+    image_shape = (1249, 387)
+    epochs = 10
+    learning_rate = 0.001
 
-model = lista.UnfoldingModel(image_shape, activation="relu")
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-    loss="mse",
-    run_eagerly=RUN_EAGERLY,
-)
+    # generate image dataset from raw data
+    destination_folder = Path.cwd() / "lista_test"
+    if not destination_folder.exists():
+        gen = GenerateDataSet(
+            config,
+            destination_folder=destination_folder,
+            retain_folder_structure=False,
+            filetype="png",
+        )
+        gen.generate()
+    else:
+        print(f"Dataset already exists in {destination_folder}")
 
-model.summary()
+    # initiate dataloader
+    dataloader = ImageLoader(
+        destination_folder,
+        destination_folder,
+        batch_size=1,
+        image_shape=image_shape,
+        shuffle=True,
+    )
 
-model.fit(dataloader, epochs=epochs)
+    # get image from batch
+    batch = next(iter(dataloader))
+    image = np.squeeze(batch[0])
 
-if len(dataloader) < 10:
-    fig, axs = plt.subplots(len(dataloader), 2)
-    for i, batch in enumerate(dataloader):
-        X, Y = batch
-        out = np.squeeze(model(X))
-        axs[i, 0].imshow(np.squeeze(Y), cmap="gray")
-        axs[i, 1].imshow(out, cmap="gray")
+    # plot image
+    plt.figure()
+    plt.imshow(image, cmap="gray")
 
-for ax in axs.ravel():
-    ax.axis("off")
+    model = lista.UnfoldingModel(image_shape, activation="relu")
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        loss="mse",
+        run_eagerly=RUN_EAGERLY,
+    )
 
-fig.tight_layout()
+    model.summary()
 
-plt.show()
+    model.fit(dataloader, epochs=epochs)
+
+    if len(dataloader) < 10:
+        fig, axs = plt.subplots(len(dataloader), 2)
+        if len(axs.shape) == 1:
+            axs = axs.reshape(-1, 2)
+        for i, batch in enumerate(dataloader):
+            X, Y = batch
+            out = np.squeeze(model(X))
+            axs[i, 0].imshow(np.squeeze(Y), cmap="gray")
+            axs[i, 1].imshow(out, cmap="gray")
+
+    for ax in axs.ravel():
+        ax.axis("off")
+
+    fig.tight_layout()
+
+    return model
+
+
+if __name__ == "__main__":
+    # Load config
+    path_to_config_file = Path.cwd() / "configs/config_usbmd_iq.yaml"
+    config = setup(path_to_config_file)
+
+    # Train
+    model = train_lista(config)
+    plt.show()
