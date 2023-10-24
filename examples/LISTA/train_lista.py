@@ -22,7 +22,7 @@ def train_lista(config):
     """Train LISTA network"""
 
     image_shape = (1249, 387)
-    epochs = 10
+    epochs = 100
     learning_rate = 0.001
 
     # generate image dataset from raw data
