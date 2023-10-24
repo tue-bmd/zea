@@ -521,6 +521,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         c = float(hdf5_file["scan"]["sound_speed"][()])
         fs = float(hdf5_file["scan"]["sampling_frequency"][()])
         fc = float(hdf5_file["scan"]["center_frequency"][()])
+        bandwidth_percent = float(hdf5_file["scan"]["bandwidth_percent"][()])
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
@@ -544,6 +545,24 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         polar_angles = hdf5_file["scan"]["polar_angles"][transmits]
         azimuth_angles = hdf5_file["scan"]["azimuth_angles"][transmits]
         focus_distances = hdf5_file["scan"]["focus_distances"][transmits]
+
+        # Load the desired frames from the file
+        data = hdf5_file["data"][data_type][frames]
+
+        if data_type in ["raw_data", "aligned_data"]:
+            data = data[:, transmits]
+
+        if data_type in ["raw_data", "aligned_data", "beamformed_data"]:
+            if data.shape[-1] == 1:
+                modtype = "rf"
+            elif data.shape[-1] == 2:
+                modtype = "iq"
+            else:
+                raise ValueError(
+                    f"The data has an unexpected shape: {data.shape}. Last "
+                    "dimension must be 1 (RF) or 2 (IQ), when data_type is "
+                    f"{data_type}."
+                )
 
         # Initialize the scan object
         scan = Scan(
