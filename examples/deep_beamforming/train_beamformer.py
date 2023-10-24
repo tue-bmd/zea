@@ -25,7 +25,7 @@ from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.utils import update_dictionary
 
 
-def train(config):
+def train_beamformer(config):
     """Train function that initializes the dataset, beamformer model and optimizer, creates the
     target data, and then trains the model."""
 
@@ -57,11 +57,11 @@ def train(config):
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
 
-    targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
+    targets = target_beamformer(np.expand_dims(data[scan.selected_transmits], axis=0))
 
     ## Create the beamforming model
     # Only use the center angle for training
-    config.scan.n_angles = 1
+    config.scan.selected_transmits = 1
     config.model.beamformer.type = "able"
     config_scan_params = config.scan
 
@@ -121,7 +121,6 @@ def train(config):
     plt.subplot(1, 2, 2)
     plt.imshow(predictions[0], cmap="gray")
     plt.title("Prediction")
-    plt.show()
 
     return history, beamformer
 
@@ -136,4 +135,6 @@ if __name__ == "__main__":
     set_gpu_usage("auto:1")
 
     # Train
-    _, beamformer = train(config)
+    _, beamformer = train_beamformer(config)
+
+    plt.show()
