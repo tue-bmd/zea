@@ -11,7 +11,7 @@ import h5py
 import numpy as np
 import scipy.io as sio
 
-from usbmd.utils.utils import filename_from_window_dialog
+from usbmd.utils.io_lib import filename_from_window_dialog
 
 
 def load_mat(filename):
