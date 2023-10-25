@@ -26,8 +26,9 @@ from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
-_SUPPORTED_VID_TYPES = ['.avi', '.mp4', '.gif', '']
-_SUPPORTED_IMG_TYPES = ['.jpg', '.png', '.JPEG', '.PNG', '.jpeg']
+_SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
+_SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
+
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
     """Get filename through dialog window
@@ -69,6 +70,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     else:
         raise ValueError("No file selected.")
 
+
 def load_video(filename):
     """Load a video file and return a numpy array of frames.
 
@@ -83,11 +85,13 @@ def load_video(filename):
         ValueError: If the file extension is not supported.
     """
     filename = Path(filename)
-    assert Path(filename).exists(), f'File {filename} does not exist'
+    assert Path(filename).exists(), f"File {filename} does not exist"
     extension = filename.suffix
-    assert extension in _SUPPORTED_VID_TYPES, f'File extension {extension} not supported'
+    assert (
+        extension in _SUPPORTED_VID_TYPES
+    ), f"File extension {extension} not supported"
 
-    if extension in ['.avi', '.mp4']:
+    if extension in [".avi", ".mp4"]:
         cap = cv2.VideoCapture(filename)
         frames = []
         while True:
@@ -96,15 +100,16 @@ def load_video(filename):
                 break
             frames.append(frame)
         cap.release()
-    elif extension == '.gif':
+    elif extension == ".gif":
         frames = imageio.mimread(filename)
-    elif extension == '':
+    elif extension == "":
         ds = pydicom.dcmread(filename)
         frames = convert_color_space(ds.pixel_array, "YBR_FULL", "RGB")
     else:
-        raise ValueError('Unsupported file extension')
+        raise ValueError("Unsupported file extension")
     frames = [cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) for frame in frames]
     return np.array(frames)
+
 
 def load_image(filename, grayscale=True):
     """Load an image file and return a numpy array.
@@ -121,9 +126,11 @@ def load_image(filename, grayscale=True):
         ValueError: If the file extension is not supported.
     """
     filename = Path(filename)
-    assert Path(filename).exists(), f'File {filename} does not exist'
+    assert Path(filename).exists(), f"File {filename} does not exist"
     extension = filename.suffix
-    assert extension in _SUPPORTED_IMG_TYPES, f'File extension {extension} not supported'
+    assert (
+        extension in _SUPPORTED_IMG_TYPES
+    ), f"File extension {extension} not supported"
 
     image = cv2.imread(str(filename))
 
@@ -155,7 +162,7 @@ def search_file_tree(directory, filetypes=None, write=True):
         )
         print(directory)
         with open(directory / "file_paths.txt", encoding="utf-8") as file:
-            file_paths = file.read().splitlines()
+            file_paths = [line.strip() for line in file]
         return file_paths
 
     # set default file type
@@ -173,15 +180,16 @@ def search_file_tree(directory, filetypes=None, write=True):
             if Path(file).suffix in filetypes:
                 file_paths.append(str(Path(dirpath) / Path(file)))
 
+    assert len(file_paths) > 0, f"No image files were found in: {directory}"
     print(f"\nFound {len(file_paths)} image files in .\\{Path(directory)}\n")
-    assert len(file_paths) > 0, "ERROR: No image files were found"
 
     if write:
         with open(directory / "file_paths.txt", "w", encoding="utf-8") as file:
-            file_paths = [file + "\n" for file in file_paths]
-            file.writelines(file_paths)
+            _file_paths = [file + "\n" for file in file_paths]
+            file.writelines(_file_paths)
 
     return file_paths
+
 
 def move_matplotlib_figure(figure, position, size=None):
     """Move matplotlib figure to a specific position on the screen.
@@ -199,14 +207,15 @@ def move_matplotlib_figure(figure, position, size=None):
 
     backend = matplotlib.get_backend()
 
-    if backend == 'TkAgg':
+    if backend == "TkAgg":
         figure.canvas.manager.window.wm_geometry(f"+{x}+{y}")
-    elif backend == 'WXAgg':
+    elif backend == "WXAgg":
         figure.canvas.manager.window.SetPosition((x, y))
     else:
         # This works for QT and GTK
         # You can also use window.setGeometry
         figure.canvas.manager.window.move(x, y)
+
 
 def get_matplotlib_figure_props(figure):
     """Return a dictionary of matplotlib figure properties.
@@ -224,19 +233,21 @@ def get_matplotlib_figure_props(figure):
     backend_name = matplotlib.get_backend()
 
     try:
-        if backend_name == 'TkAgg':
-            assert isinstance(geometry, str), \
-                f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
+        if backend_name == "TkAgg":
+            assert isinstance(
+                geometry, str
+            ), f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
             # format: "widthxheight+X+Y"
             # Split the geometry string by '+' to extract size and position
-            size_str, *pos_str = geometry.split('+')
+            size_str, *pos_str = geometry.split("+")
             # Extract width and height from the size string
-            size = map(int, size_str.split('x'))
+            size = map(int, size_str.split("x"))
             # Extract X and Y position values as integers
             position = map(int, pos_str)
-        elif backend_name == 'QtAgg':
-            assert isinstance(geometry, QRect), \
-                f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
+        elif backend_name == "QtAgg":
+            assert isinstance(
+                geometry, QRect
+            ), f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
             # format: QRect object
             position = geometry.x(), geometry.y()
             size = geometry.size().width(), geometry.size().height()
@@ -258,7 +269,7 @@ def raise_matplotlib_window(figname=None):
     """
     # check for backend
     backend = matplotlib.get_backend()
-    if backend in ['Qt5Agg', 'TkAgg']:
+    if backend in ["Qt5Agg", "TkAgg"]:
         warnings.warn("This function only works with a Qt or Tk graphics backend")
 
     if figname:
@@ -266,12 +277,13 @@ def raise_matplotlib_window(figname=None):
 
     cfm = plt.get_current_fig_manager()
 
-    if backend == 'Qt5Agg':
+    if backend == "Qt5Agg":
         cfm.window.activateWindow()
         cfm.window.raise_()
-    elif backend == 'TkAgg':
-        cfm.window.attributes('-topmost', True)
-        cfm.window.attributes('-topmost', False)
+    elif backend == "TkAgg":
+        cfm.window.attributes("-topmost", True)
+        cfm.window.attributes("-topmost", False)
+
 
 def matplotlib_figure_to_numpy(fig):
     """Convert matplotlib figure to numpy array.
@@ -284,15 +296,15 @@ def matplotlib_figure_to_numpy(fig):
 
     """
     try:
-        if matplotlib.get_backend() == 'Qt5Agg':
+        if matplotlib.get_backend() == "Qt5Agg":
             canvas = FigureCanvasQTAgg(fig)
-        elif matplotlib.get_backend() == 'TkAgg':
+        elif matplotlib.get_backend() == "TkAgg":
             canvas = FigureCanvasTkAgg(fig)
-        elif matplotlib.get_backend() == 'agg':
+        elif matplotlib.get_backend() == "agg":
             canvas = FigureCanvasAgg(fig)
         else:
             buf = BytesIO()
-            fig.savefig(buf, format='png')
+            fig.savefig(buf, format="png")
             buf.seek(0)
             image = Image.open(buf).convert("RGB")
             image = np.array(image)[..., :3]
@@ -301,7 +313,7 @@ def matplotlib_figure_to_numpy(fig):
 
         canvas.draw()
 
-        if matplotlib.get_backend() == 'Qt5Agg':
+        if matplotlib.get_backend() == "Qt5Agg":
             image = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
         else:
             image = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)

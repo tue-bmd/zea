@@ -14,14 +14,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
-from usbmd.setup_usbmd import setup_config
+from usbmd.setup_usbmd import setup
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
-from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.utils import update_dictionary
 
 
@@ -106,6 +104,8 @@ def train_beamformer(config):
 
     # Train the model
     history = beamformer.fit(inputs, targets, epochs=10, batch_size=1, verbose=1)
+
+    # Beamform the data using trained model
     predictions = np.array(beamformer(inputs))
 
     # Create a Process class to convert the data to an image
@@ -128,11 +128,7 @@ def train_beamformer(config):
 if __name__ == "__main__":
     # Load config
     path_to_config_file = Path.cwd() / "configs/config_picmus_iq.yaml"
-    config = setup_config(file=path_to_config_file)
-    config.data.user = set_data_paths(local=True)
-
-    # Set GPU usage
-    set_gpu_usage("auto:1")
+    config = setup(path_to_config_file)
 
     # Train
     _, beamformer = train_beamformer(config)
