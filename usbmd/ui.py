@@ -18,12 +18,11 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import _DATA_TYPES, Process
-from usbmd.setup_usbmd import setup_config
+from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.config import Config
 from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
@@ -103,8 +102,8 @@ class DataLoaderUI:
         if self.config.data.get("frame_no") == "all":
             if to_dtype != "image":
                 warnings.warn(
-                    f"Image to_dtype: {to_dtype} not yet supported for movies.\
-                        falling back to  to_dtype: `image`"
+                    f"Image to_dtype: {to_dtype} not yet supported for movies.         "
+                    "               falling back to  to_dtype: `image`"
                 )
             # run movie
             self.run_movie(save=save)
@@ -432,8 +431,7 @@ def main():
         warnings.warn("GUI is very much in beta, please report any bugs to the Github.")
         gui = USBMDApp(title="USBMD GUI", resolution=(600, 300), verbose=True)
 
-    config = setup_config(file=args.config)
-    config.data.user = set_data_paths(local=config.data.local)
+    config = setup(args.config)
 
     if args.task == "run":
         ui = DataLoaderUI(config)
