@@ -52,6 +52,7 @@ any_number = Or(
 )
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
+positive_float = And(float, lambda f: f > 0)
 list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
 
@@ -115,7 +116,16 @@ postprocess_schema = Schema(
                 Optional("threshold_type", default="hard"): "hard",
             },
         ),
-        Optional("lista", default=False): bool,
+        Optional("lista", default=None): bool,
+        Optional("bm3d", default=None): Or(
+            None,
+            {
+                Optional("sigma", default=0.1): positive_float,
+                Optional("stage", default="all_stages"): Or(
+                    "all_stages", "hard_thresholding"
+                ),
+            },
+        ),
     }
 )
 
