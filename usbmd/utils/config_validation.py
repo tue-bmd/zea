@@ -116,7 +116,7 @@ postprocess_schema = Schema(
                 Optional("threshold_type", default="hard"): "hard",
             },
         ),
-        Optional("lista", default=None): bool,
+        Optional("lista", default=None): Or(bool, None),
         Optional("bm3d", default=None): Or(
             None,
             {
