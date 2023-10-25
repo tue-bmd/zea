@@ -41,8 +41,6 @@ def train_beamformer(config):
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
 
-    # Reducing the pixels per wavelength to 1 to reduce memory usage at the cost of resolution
-    scan_params["pixels_per_wvln"] = 3
     # Setting the grid size to automatic mode based on pixels per wavelength
     scan_params["Nx"] = None
     scan_params["Nz"] = None
@@ -56,7 +54,8 @@ def train_beamformer(config):
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
     target_beamformer = patch_wise(target_beamformer)
-    targets = target_beamformer(np.expand_dims(data[scan.selected_transmits], axis=0))
+    print('Creating target data...')
+    targets = target_beamformer.predict(np.expand_dims(data[scan.selected_transmits], axis=0))
 
     ## Create the beamforming model
     # Only use the center angle for training
@@ -67,8 +66,6 @@ def train_beamformer(config):
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
 
-    # Reducing the pixels per wavelength to 1 to reduce memory usage at the cost of resolution
-    scan_params["pixels_per_wvln"] = 3
     # Setting the grid size to automatic mode based on pixels per wavelength
     scan_params["Nx"] = None
     scan_params["Nz"] = None
@@ -83,7 +80,7 @@ def train_beamformer(config):
 
     # Get DAS beamformer as reference
     config.model.beamformer.type = "das"
-    das_beamformer = patch_wise(get_beamformer(probe, scan, config))
+    das_beamformer = get_beamformer(probe, scan, config)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
 
