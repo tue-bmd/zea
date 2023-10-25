@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 
 from usbmd.probes import Probe, get_probe
+from usbmd.processing import _DATA_TYPES
 from usbmd.scan import Scan
 
 
@@ -39,7 +40,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
 
     if add_optional_fields:
-        focus_distances = np.zeros((n_tx,), dtype=np.float32)
+        focus_distances = np.ones((n_tx,), dtype=np.float32) * np.inf
         tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
         polar_angles = np.zeros((n_tx,), dtype=np.float32)
         azimuth_angles = np.zeros((n_tx,), dtype=np.float32)
@@ -81,6 +82,7 @@ def generate_usbmd_dataset(
     polar_angles=None,
     azimuth_angles=None,
     tx_apodizations=None,
+    bandwidth_percent=None,
 ):
     """Generates a dataset in the USBMD format.
 
@@ -160,7 +162,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=scan_group,
         name="n_frames",
-        data=n_tx,
+        data=n_frames,
         description="The number of frames.",
         unit="unitless",
     )
@@ -233,7 +235,7 @@ def generate_usbmd_dataset(
             name="focus_distances",
             data=focus_distances,
             description="The transmit focus distances in meters of "
-            "shape (n_tx,). For planewaves this is set to 0.",
+            "shape (n_tx,). For planewaves this is set to Inf.",
             unit="m",
         )
 
@@ -257,6 +259,16 @@ def generate_usbmd_dataset(
             unit="rad",
         )
 
+    if bandwidth_percent is not None:
+        add_dataset(
+            group=scan_group,
+            name="bandwidth_percent",
+            data=bandwidth_percent,
+            description="The receive bandwidth of RF signal in "
+            "percentage of center frequency.",
+            unit="unitless",
+        )
+
     dataset.close()
     validate_dataset(path)
 
@@ -266,7 +278,6 @@ def validate_dataset(path):
 
     Args:
         path (str, pathlike): The path to the hdf5 dataset.
-
 
     """
     dataset = h5py.File(path, "r")
@@ -288,14 +299,8 @@ def validate_dataset(path):
     check_key(dataset["scan"], "t0_delays")
 
     # validate the data group
-    allowed_data_keys = [
-        "raw_data",
-        "aligned_data",
-        "beamformed_data",
-        "envelope_data",
-        "image",
-        "image_sc",
-    ]  # TODO: Add initial_times?
+    allowed_data_keys = _DATA_TYPES
+
     for key in dataset["data"].keys():
         assert key in allowed_data_keys, "The data group contains an unexpected key."
 
@@ -392,6 +397,7 @@ def validate_dataset(path):
 
         elif key in (
             "sampling_frequency",
+            "bandwidth_percent",
             "center_frequency",
             "n_frames",
             "n_tx",
@@ -433,15 +439,17 @@ def assert_unit_and_description_present(hdf5_file, _prefix=""):
             ), f"The dataset {_prefix}/{key} does not have a description attribute."
 
 
-def load_usbmd_file(path, frames=None, data_type="raw_data"):
+def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
     """Loads a hdf5 file in the USBMD format and returns the data together with
     a scan object containing the parameters of the acquisition and a probe
     object containing the parameters of the probe.
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
-        frames (tuple, list, optional): The frames to load. Defaults to None in which
-            case all frames are loaded.
+        frames (tuple, list, optional): The frames to load. Defaults to None in
+            which case all frames are loaded.
+        transmits (tuple, list, optional): The transmits to load. Defaults to
+            None in which case all transmits are used.
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
@@ -466,17 +474,15 @@ def load_usbmd_file(path, frames=None, data_type="raw_data"):
             isinstance(frame, int) for frame in frames
         ), "All frames must be integers."
 
-    assert data_type in (
-        "raw_data",
-        "aligned_data",
-        "beamformed_data",
-        "envelope_data",
-        "image",
-        "image_sc",
-    ), (
-        "The data_type must be one of raw_data, aligned_data, "
-        "beamformed_data, envelope_data, image or image_sc."
-    )
+    if transmits is not None:
+        # Assert that all frames are integers
+        assert all(
+            isinstance(tx, int) for tx in transmits
+        ), "All transmits must be integers."
+
+    assert (
+        data_type in _DATA_TYPES
+    ), f"Data type {data_type} does not exist, should be in {_DATA_TYPES}"
 
     with h5py.File(path, "r") as hdf5_file:
         # data = hdf5_file['data']['raw_data'][:]
@@ -509,10 +515,19 @@ def load_usbmd_file(path, frames=None, data_type="raw_data"):
             )
 
         # Define the scan
+        n_frames = int(hdf5_file["scan"]["n_frames"][()])
         n_ax = int(hdf5_file["scan"]["n_ax"][()])
-        c = hdf5_file["scan"]["sound_speed"][()]
-        fs = hdf5_file["scan"]["sampling_frequency"][()]
-        fc = hdf5_file["scan"]["center_frequency"][()]
+        n_tx = int(hdf5_file["scan"]["n_tx"][()])
+        c = float(hdf5_file["scan"]["sound_speed"][()])
+        fs = float(hdf5_file["scan"]["sampling_frequency"][()])
+        fc = float(hdf5_file["scan"]["center_frequency"][()])
+        bandwidth_percent = float(hdf5_file["scan"]["bandwidth_percent"][()])
+
+        if frames is None:
+            frames = np.arange(n_frames, dtype=np.int32)
+
+        if transmits is None:
+            transmits = np.arange(n_tx, dtype=np.int32)
 
         # Compute the depth of the scan from the number of axial samples
         depth = n_ax / fs * c / 2
@@ -522,26 +537,50 @@ def load_usbmd_file(path, frames=None, data_type="raw_data"):
         x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
         z0, z1 = 0, depth
 
+        n_tx = len(transmits)
+
+        initial_times = hdf5_file["scan"]["initial_times"][transmits]
+        tx_apodizations = hdf5_file["scan"]["tx_apodizations"][transmits]
+        t0_delays = hdf5_file["scan"]["t0_delays"][transmits]
+        polar_angles = hdf5_file["scan"]["polar_angles"][transmits]
+        azimuth_angles = hdf5_file["scan"]["azimuth_angles"][transmits]
+        focus_distances = hdf5_file["scan"]["focus_distances"][transmits]
+
+        # Load the desired frames from the file
+        data = hdf5_file["data"][data_type][frames]
+
+        if data_type in ["raw_data", "aligned_data"]:
+            data = data[:, transmits]
+
+        if data_type in ["raw_data", "aligned_data", "beamformed_data"]:
+            if data.shape[-1] == 1:
+                modtype = "rf"
+            elif data.shape[-1] == 2:
+                modtype = "iq"
+            else:
+                raise ValueError(
+                    f"The data has an unexpected shape: {data.shape}. Last "
+                    "dimension must be 1 (RF) or 2 (IQ), when data_type is "
+                    f"{data_type}."
+                )
+
         # Initialize the scan object
         scan = Scan(
-            N_tx=int(hdf5_file["scan"]["n_tx"][()]),
+            n_tx=n_tx,
+            t0_delays=t0_delays,
+            initial_times=initial_times,
+            tx_apodizations=tx_apodizations,
             xlims=(x0, x1),
             zlims=(z0, z1),
             fc=fc,
             fs=fs,
-            initial_times=hdf5_file["scan"]["initial_times"][:],
-            N_ax=n_ax,
+            bandwidth_percent=bandwidth_percent,
+            modtype=modtype,
+            n_ax=n_ax,
             c=c,
-            polar_angles=hdf5_file["scan"]["polar_angles"][:],
-            azimuth_angles=hdf5_file["scan"]["azimuth_angles"][:],
-            focus_distances=hdf5_file["scan"]["focus_distances"][:],
-            t0_delays=hdf5_file["scan"]["t0_delays"][:],
+            polar_angles=polar_angles,
+            azimuth_angles=azimuth_angles,
+            focus_distances=focus_distances,
         )
-
-        # Load the desired frames from the file
-        if frames is None:
-            data = hdf5_file["data"]["raw_data"][:]
-        else:
-            data = hdf5_file["data"]["raw_data"][frames]
 
         return data, scan, probe

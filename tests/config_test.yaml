@@ -13,7 +13,7 @@ data:
 scan:
   xlims: [-0.019, 0.019]
   zlims: [0, 0.063]
-  n_angles: 1
+  selected_transmits: 1
 
 # The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)
 device: 'cpu'
@@ -22,4 +22,4 @@ ml_library: 'torch'
 
 plot:
   save: false
-  axis: true
+  plot_lib: matplotlib

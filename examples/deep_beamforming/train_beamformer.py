@@ -15,14 +15,13 @@ import numpy as np
 import tensorflow as tf
 from keras.layers import Input
 
-from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup_config
+from usbmd.setup_usbmd import setup
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer, patch_wise
 from usbmd.tensorflow_ultrasound.losses import smsle
-from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.utils import update_dictionary
 
 
@@ -57,9 +56,7 @@ def train_beamformer(config):
     # Create target data
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
-
     target_beamformer = patch_wise(target_beamformer)
-
     targets = target_beamformer(np.expand_dims(data[scan.selected_transmits], axis=0))
 
     ## Create the beamforming model
@@ -140,11 +137,7 @@ def train_beamformer(config):
 if __name__ == "__main__":
     # Load config
     path_to_config_file = Path.cwd() / "configs/config_picmus_iq.yaml"
-    config = setup_config(file=path_to_config_file)
-    config.data.user = set_data_paths(local=True)
-
-    # Set GPU usage
-    set_gpu_usage("auto:1")
+    config = setup(path_to_config_file)
 
     # Train
     _, beamformer = train_beamformer(config)

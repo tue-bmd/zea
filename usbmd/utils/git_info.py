@@ -1,11 +1,14 @@
-"""Git utilities
+"""Git utilities.
 
-Author(s)     : Tristan Stevens, Iris Huijben
-Data          : -
+Get git commit hash and branch name.
+
+Author(s)     : Tristan Stevens
+Data          : January 27th, 2023
 """
 
 import subprocess
 import sys
+import warnings
 
 
 def get_git_commit_hash():
@@ -27,9 +30,9 @@ def get_git_summary():
         print("Git branch and commit: ")
         git_summary = get_git_branch() + "=" + get_git_commit_hash()
         print(git_summary)
+        return git_summary
     except Exception:
-        print("Cannot find Git")
-    return git_summary
+        warnings.warn("Cannot find Git")
 
 
 if __name__ == "__main__":
