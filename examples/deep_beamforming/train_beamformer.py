@@ -13,19 +13,20 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+from keras.layers import Input
 
 from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
+from usbmd.processing import Process
 from usbmd.setup_usbmd import setup_config
-from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
+from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer, patch_wise
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.utils import update_dictionary
-from usbmd.utils.video import ScanConverterTF
 
 
-def train(config):
+def train_beamformer(config):
     """Train function that initializes the dataset, beamformer model and optimizer, creates the
     target data, and then trains the model."""
 
@@ -43,7 +44,7 @@ def train(config):
     scan_params = update_dictionary(default_scan_params, config_scan_params)
 
     # Reducing the pixels per wavelength to 1 to reduce memory usage at the cost of resolution
-    scan_params["pixels_per_wvln"] = 1
+    scan_params["pixels_per_wvln"] = 3
     # Setting the grid size to automatic mode based on pixels per wavelength
     scan_params["Nx"] = None
     scan_params["Nz"] = None
@@ -55,13 +56,15 @@ def train(config):
 
     # Create target data
     # pylint: disable=unexpected-keyword-arg
-    target_beamformer = get_beamformer(probe, scan, config, jit_compile=True)
+    target_beamformer = get_beamformer(probe, scan, config)
 
-    targets = target_beamformer(np.expand_dims(data[scan.n_angles], axis=0))
+    target_beamformer = patch_wise(target_beamformer)
+
+    targets = target_beamformer(np.expand_dims(data[scan.selected_transmits], axis=0))
 
     ## Create the beamforming model
     # Only use the center angle for training
-    config.scan.n_angles = 1
+    config.scan.selected_transmits = 1
     config.model.beamformer.type = "able"
     config_scan_params = config.scan
 
@@ -69,7 +72,7 @@ def train(config):
     scan_params = update_dictionary(default_scan_params, config_scan_params)
 
     # Reducing the pixels per wavelength to 1 to reduce memory usage at the cost of resolution
-    scan_params["pixels_per_wvln"] = 1
+    scan_params["pixels_per_wvln"] = 3
     # Setting the grid size to automatic mode based on pixels per wavelength
     scan_params["Nx"] = None
     scan_params["Nz"] = None
@@ -81,6 +84,10 @@ def train(config):
 
     beamformer = get_beamformer(probe, scan, config)
     beamformer.summary()
+
+    # Get DAS beamformer as reference
+    config.model.beamformer.type = "das"
+    das_beamformer = patch_wise(get_beamformer(probe, scan, config))
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
 
@@ -99,28 +106,33 @@ def train(config):
     targets = np.repeat(targets, N, axis=0)
 
     # add noise to the inputs based on SNR
-    SNR = 20
+    SNR = 5
     noise = np.random.normal(0, 1, inputs.shape)
     noise = noise / np.linalg.norm(noise) * np.linalg.norm(inputs) / SNR
     inputs += noise
 
     # Train the model
-    history = beamformer.fit(inputs, targets, epochs=10, batch_size=1, verbose=1)
+    history = beamformer.fit(inputs, targets, epochs=100, batch_size=1, verbose=1)
+    predictions = np.array(beamformer(inputs))
+    das = np.array(das_beamformer(inputs))
 
-    scan_converter = ScanConverterTF(grid=scan.grid)
-
-    targets = scan_converter.convert(targets)
-    predictions = scan_converter.convert(beamformer(inputs))
+    # Create a Process class to convert the data to an image
+    process = Process(config, scan, probe)
+    targets = process.run(targets, "beamformed_data", "image")
+    predictions = process.run(predictions, "beamformed_data", "image")
+    das = process.run(das, "beamformed_data", "image")
 
     # plot the resulting image
     plt.figure()
-    plt.subplot(1, 2, 1)
+    plt.subplot(1, 3, 1)
     plt.imshow(targets[0], cmap="gray")
     plt.title("Target")
-    plt.subplot(1, 2, 2)
+    plt.subplot(1, 3, 2)
     plt.imshow(predictions[0], cmap="gray")
     plt.title("Prediction")
-    plt.show()
+    plt.subplot(1, 3, 3)
+    plt.imshow(das[0], cmap="gray")
+    plt.title("DAS")
 
     return history, beamformer
 
@@ -135,4 +147,6 @@ if __name__ == "__main__":
     set_gpu_usage("auto:1")
 
     # Train
-    _, beamformer = train(config)
+    _, beamformer = train_beamformer(config)
+
+    plt.show()
