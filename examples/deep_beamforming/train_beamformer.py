@@ -18,8 +18,7 @@ from keras.layers import Input
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
-from usbmd.setup_usbmd import setup_config
-from usbmd.setup_usbmd import setup
+from usbmd.setup_usbmd import setup, setup_config
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer, patch_wise
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.utils.utils import update_dictionary
