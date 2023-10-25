@@ -7,7 +7,7 @@ Example:
     >>> python usbmd/ui.py -c configs/config_picmus_rf.yaml -t generate
 
 - **Author(s)**     : Tristan Stevens
-- **Date**          : Thu Nov 18 2021
+- **Date**          : November 18th, 2021
 """
 from pathlib import Path
 
@@ -47,6 +47,7 @@ class GenerateDataSet:
             retain_folder_structure (bool, optional): Whether to exactly copy
                 the folder structure of the original dataset or put all output
                 files in one folder. Defaults to True.
+            filetype (str, optional): Filetype to save to. Defaults to "hdf5".
             overwrite (bool, optional): Whether to overwrite existing files.
 
         """
@@ -122,18 +123,12 @@ class GenerateDataSet:
         ):
             data = self.dataset[idx]
 
-            # TODO: following logic deals with inconsistencies with rf / iq axis and
-            # batch / frame axis that are sometimes not present. For the future; make sure
-            # dataset just always returns with frame axis
-            if data.shape[-1] == 1:
-                data = np.squeeze(data, axis=-1)
-
             single_frame = False
             if self.config.data.dtype in ["raw_data", "aligned_data"]:
-                if len(data.shape) == 3:
+                if len(data.shape) == 4:
                     single_frame = True
             else:
-                if len(data.shape) == 2:
+                if len(data.shape) == 3:
                     single_frame = True
 
             if single_frame:
@@ -153,7 +148,7 @@ class GenerateDataSet:
                     image = self.process.run(
                         image, self.config.data.dtype, self.to_dtype
                     )
-                    self.save_image(image, path)
+                    self.save_image(np.squeeze(image), path)
 
             elif self.filetype == "hdf5":
                 data_list = []

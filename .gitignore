@@ -147,3 +147,5 @@ benchmarks/
 
 # Temporary files
 temp/
+users.yaml
+file_paths.txt

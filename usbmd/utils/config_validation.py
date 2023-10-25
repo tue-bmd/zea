@@ -18,6 +18,10 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
+from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
+from usbmd.utils.config import Config
+from usbmd.utils.metrics import _METRICS
+
 _ML_LIBRARIES = [None, "torch", "tensorflow"]
 
 # need to import ML libraries first for registry
@@ -38,9 +42,6 @@ _BEAMFORMER_TYPES = set(
     + torch_beamformer_registry.registered_names()
 )
 
-from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
-from usbmd.utils.config import Config
-from usbmd.utils.metrics import _METRICS
 
 # predefined checks, later used in schema to check validity of parameter
 any_number = Or(
@@ -84,7 +85,7 @@ preprocess_schema = Schema(
                 "num_taps": positive_integer,
                 "freqs": list_of_floats,
                 "bandwidths": list_of_floats,
-                # Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
+                Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
             },
         ),
         Optional("demodulation", default="manual"): Or("manual", "hilbert", "gabor"),
@@ -124,12 +125,10 @@ scan_schema = Schema(
         Optional("xlims", default=None): Or(None, list_of_size_two),
         Optional("zlims", default=None): Or(None, list_of_size_two),
         Optional("ylims", default=None): Or(None, list_of_size_two),
-        # TODO: n_angles and N_tx are overlapping parameters
-        Optional("n_angles", default=None): Or(None, int, list),
-        Optional("N_tx", default=None): Or(None, int),
+        Optional("selected_transmits", default=None): Or(None, int, list),
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
-        Optional("N_ax", default=None): Or(None, int),
+        Optional("n_ax", default=None): Or(None, int),
         Optional("fc", default=None): Or(None, any_number),
         Optional("fs", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
@@ -157,8 +156,8 @@ config_schema = Schema(
             Optional("dataset_folder", default=None): Or(None, str),
         },
         "plot": {
-            "save": bool,
-            "axis": bool,
+            Optional("save", default=False): bool,
+            Optional("plot_lib", default="opencv"): Or("opencv", "matplotlib"),
             Optional("fps", default=20): int,
             Optional("tag", default=None): Or(None, str),
             Optional("headless", default=False): bool,

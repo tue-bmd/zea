@@ -1,6 +1,7 @@
-"""easy GUI generation from config
-Author(s): Tristan Stevens
-Date: 27/04/2023
+"""Easy GUI generation from config yaml.
+
+- **Author(s)**     : Tristan Stevens
+- **Date**          : April 27th, 2023
 """
 import pprint
 import tkinter as tk
@@ -10,7 +11,8 @@ from tkinter import ttk
 from schema import Schema
 
 from usbmd.utils.config import Config
-from usbmd.utils.utils import filename_from_window_dialog, get_date_string
+from usbmd.utils.io_lib import filename_from_window_dialog
+from usbmd.utils.utils import get_date_string
 
 
 class App(tk.Tk):
@@ -181,7 +183,8 @@ class App(tk.Tk):
             entry.insert(0, str(value))
         return entry
 
-    def validate_int(self, value):
+    @staticmethod
+    def validate_int(value):
         """Validate if entry is an integer"""
         try:
             if value:
@@ -190,7 +193,8 @@ class App(tk.Tk):
         except ValueError:
             return False
 
-    def validate_float(self, value):
+    @staticmethod
+    def validate_float(value):
         """Validate if entry is a float"""
         try:
             if value:
@@ -199,7 +203,8 @@ class App(tk.Tk):
         except ValueError:
             return False
 
-    def validate_path(self, value):
+    @staticmethod
+    def validate_path(value):
         """Validate if entry is a valid path"""
         try:
             if value:
@@ -267,7 +272,8 @@ class App(tk.Tk):
             print(e)
         return value
 
-    def insert_file_path(self, entry):
+    @staticmethod
+    def insert_file_path(entry):
         """Insert the filepath from filedialog in a textfield"""
         try:
             filename = filename_from_window_dialog()
@@ -374,7 +380,8 @@ class ListEntry(ttk.Frame):
             entry = self.entries.pop()
             entry.destroy()
 
-    def validate_int(self, value):
+    @staticmethod
+    def validate_int(value):
         """Validate if entry is an integer"""
         try:
             if value:
@@ -383,7 +390,8 @@ class ListEntry(ttk.Frame):
         except ValueError:
             return False
 
-    def validate_float(self, value):
+    @staticmethod
+    def validate_float(value):
         """Validate if entry is a float"""
         try:
             if value:
