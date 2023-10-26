@@ -18,6 +18,7 @@ class Config(dict):
     saving and loading to a yaml.
 
     """
+
     def __init__(self, dictionary=None, **kwargs):
         if dictionary is None:
             dictionary = {}
@@ -27,8 +28,8 @@ class Config(dict):
             setattr(self, k, v)
         # Class attributes
         for k in self.__class__.__dict__:
-            if not (k.startswith('__') and k.endswith('__')):
-                if k not in ['serialize', 'deep_copy', 'save_to_yaml']:
+            if not (k.startswith("__") and k.endswith("__")):
+                if k not in ["serialize", "deep_copy", "save_to_yaml"]:
                     setattr(self, k, getattr(self, k))
 
     def __setattr__(self, name, value):
@@ -38,6 +39,10 @@ class Config(dict):
             value = self.__class__(value) if isinstance(value, dict) else value
         super().__setattr__(name, value)
         self[name] = value
+
+    def update(self, override_dict):
+        for name, value in override_dict.items():
+            setattr(self, name, value)
 
     def serialize(self):
         """Serialize config object to dictionary"""
