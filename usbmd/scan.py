@@ -224,6 +224,16 @@ class Scan:
         # are selected. If set to None, then all transmits are used. Defaults to None.
         self.selected_transmits = self.select_transmits(selected_transmits)
 
+
+        # Create subselection of transmit events
+        self.polar_angles = self.polar_angles[self.selected_transmits]
+        self.azimuth_angles = self.azimuth_angles[self.selected_transmits]
+        self.focus_distances = self.focus_distances[self.selected_transmits]
+        self.angles = self.angles[self.selected_transmits]
+        self.tx_apodizations = self.tx_apodizations[self.selected_transmits]
+        self.t0_delays = self.t0_delays[self.selected_transmits]
+        self.initial_times = self.initial_times[self.selected_transmits]
+
         check_for_aliasing(self)
 
     def select_transmits(self, selected_transmits):
@@ -242,6 +252,17 @@ class Scan:
         """
         if selected_transmits is None:
             return list(range(self.n_tx))
+
+        # 'all', 'center'
+        if isinstance(selected_transmits, str):
+            if selected_transmits == "all":
+                return list(range(self.n_tx))
+            elif selected_transmits == "center":
+                return [self.n_tx // 2]
+            else:
+                raise ValueError(
+                    f"Invalid value for selected_transmits: {selected_transmits}."
+                )
 
         if isinstance(selected_transmits, int):
             # Do an error check if the number of selected transmits is not too large
@@ -279,6 +300,8 @@ class Scan:
             self.n_tx = len(selected_transmits)
 
             return selected_transmits
+
+
 
     @property
     def Nx(self):
@@ -434,6 +457,15 @@ class PlaneWaveScan(Scan):
         Raises:
             ValueError: If selected_transmits has an invalid value.
         """
+        assert (
+            angles is not None or polar_angles is not None
+        ), "Please provide angles at which plane wave dataset was recorded"
+        if angles is not None:
+            self.angles = angles
+            self.polar_angles = angles
+        else:
+            self.angles = polar_angles
+            self.polar_angles = polar_angles
 
         # Pass all arguments to the Scan base class
         super().__init__(
@@ -458,16 +490,6 @@ class PlaneWaveScan(Scan):
             selected_transmits=selected_transmits,
             focus_distances=np.inf * np.ones(n_tx),
         )
-
-        assert (
-            angles is not None or polar_angles is not None
-        ), "Please provide angles at which plane wave dataset was recorded"
-        if angles is not None:
-            self.angles = angles
-            self.polar_angles = angles
-        else:
-            self.angles = polar_angles
-            self.polar_angles = polar_angles
 
 
 class DivergingWaveScan(Scan):
