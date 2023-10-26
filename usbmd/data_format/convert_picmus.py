@@ -41,7 +41,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
     i_data = np.array(file["data"]["real"], dtype="float32")
     q_data = np.array(file["data"]["imag"], dtype="float32")
 
-    if np.sum(q_data) < 0.1:
+    if np.abs(np.sum(q_data)) < 0.1:
         # Use only the I-data, add dummy dimension (shape (tx, el, ax, ch=1))
         raw_data = i_data[..., None]
     else:
@@ -101,13 +101,17 @@ def convert_picmus(source_path, output_path, overwrite=False):
         description="PICMUS dataset converted to USBMD format",
     )
 
+
 def get_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=str, default="Z:/Ultrasound-BMd/data/PICMUS")
-    parser.add_argument("--output", type=str, default="Z:/Ultrasound-BMd/data/picmus_converted")
+    parser.add_argument(
+        "--output", type=str, default="Z:/Ultrasound-BMd/data/picmus_converted"
+    )
     args = parser.parse_args()
     return args
+
 
 if __name__ == "__main__":
     args = get_args()
@@ -127,7 +131,9 @@ if __name__ == "__main__":
         if not "database" in source_file.parts:
             continue
 
-        output_file = picmus_output_folder / source_file.relative_to(picmus_source_folder)
+        output_file = picmus_output_folder / source_file.relative_to(
+            picmus_source_folder
+        )
         # make sure folder exists
         output_file.parent.mkdir(parents=True, exist_ok=True)
         try:
