@@ -10,6 +10,7 @@ import warnings
 from pathlib import Path
 
 import cv2
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -21,12 +22,7 @@ sys.path.append(str(wd))
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.processing import (
-    _DATA_TYPES,
-    Process,
-    get_contrast_boost_func,
-    threshold_signal,
-)
+from usbmd.processing import _DATA_TYPES, Process
 from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.config import Config
@@ -77,30 +73,19 @@ class DataLoaderUI:
         self.mpl_img = None
         self.fig = None
         self.ax = None
-        self.headless = False
         self.gui = None
 
-        # initialize post processing tools
-        if "postprocess" in self.config:
-            if "contrast_boost" in self.config.postprocess:
-                self.contrast_boost = get_contrast_boost_func()
-            if "lista" in self.config.postprocess:
-                # initialize neural network
-                pass
-            # etc...
+        if self.config.plot.headless is None:
+            self.headless = False
+        else:
+            self.headless = self.config.plot.headless
 
         self.check_for_display()
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
-        # first read from config, headless could be an option
-        if self.config.plot.headless is not None:
-            self.headless = self.config.plot.headless
-        else:
-            self.headles = False
-        # check if non headless mode is possible
         if self.headless is False:
-            if plt.rcParams["backend"].lower() == "agg":
+            if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
                 warnings.warn("Could not connect to display, running headless.")
         else:
@@ -126,8 +111,13 @@ class DataLoaderUI:
             self.data = self.get_data()
 
             self.image = self.process.run(
-                self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+                self.data,
+                dtype=self.config.data.dtype,
+                to_dtype=to_dtype,
             )
+            if self.process.postprocess:
+                self.image = self.process.postprocess.run(self.image[None, ..., None])
+                self.image = np.squeeze(self.image)
 
             if plot:
                 if self.gui:
@@ -178,30 +168,6 @@ class DataLoaderUI:
         data = self.dataset[file_idx]
 
         return data
-
-    def postprocess(self, image):
-        """Post processing in image domain."""
-        if "postprocess" not in self.config:
-            return image
-
-        if self.config.postprocess.contrast_boost is not None:
-            if self.config.data.dtype not in ["raw_data", "aligned_data"]:
-                warnings.warn(
-                    f"contrast boost not possible with {self.config.data.dtype}"
-                )
-                return image
-            apodization = self.config.data.apodization
-            self.config.data.apodization = "checkerboard"
-            noise = self.process.run(self.data, dtype=self.config.data.dtype)
-            self.config.data.apodization = apodization
-            image = self.contrast_boost(
-                image, noise, **self.config.postprocess.contrast_boost
-            )
-
-        if self.config.postprocess.thresholding is not None:
-            image = threshold_signal(image, **self.config.postprocess.thresholding)
-
-        return image
 
     def plot(
         self,
@@ -319,6 +285,10 @@ class DataLoaderUI:
 
         # plot initial frame
         self.image = self.process.run(self.data, dtype=self.config.data.dtype)
+        if self.process.postprocess:
+            self.image = self.process.postprocess.run(self.image[None, ..., None])
+            self.image = np.squeeze(self.image)
+
         if plot_lib == "matplotlib":
             self.plot(self.image, plot_lib=plot_lib, block=False)
         elif plot_lib == "opencv":
@@ -338,9 +308,9 @@ class DataLoaderUI:
                 self.data = self.get_data()
 
                 image = self.process.run(self.data, dtype=self.config.data.dtype)
-
-                if "postprocess" in self.config:
-                    image = self.postprocess(image)
+                if self.process.postprocess:
+                    image = self.process.postprocess.run(image[None, ..., None])
+                    image = np.squeeze(image)
 
                 image = self.plot(image, movie=True, plot_lib=plot_lib)
 
