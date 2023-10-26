@@ -12,3 +12,4 @@ tqdm
 pyyaml
 pydicom
 PyQt5
+bm3d
