@@ -456,7 +456,7 @@ def load_usbmd_file(
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
         config (utils.config.Config, optional): A config object containing parameters.
-            only parameters used in this functions are the config.scan parameters.
+            This function only uses parameters from config.scan.
 
     Returns:
         (np.ndarray): The raw data of shape (n_frames, n_tx, n_el, n_ax, n_ch).
