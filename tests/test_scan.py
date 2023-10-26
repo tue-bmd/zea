@@ -2,10 +2,11 @@
 """
 import numpy as np
 
-from usbmd.scan import Scan, PlaneWaveScan
+from usbmd.scan import PlaneWaveScan, Scan
 
 scan_args = {
     "n_tx": 10,
+    "n_el": 10,
     "xlims": (-0.019, 0.019),
     "ylims": (0, 0),
     "zlims": (0, 0.04),
@@ -19,7 +20,7 @@ scan_args = {
     "pixels_per_wvln": 4,
     "polar_angles": np.linspace(-np.pi/2, np.pi/2, 10),
     "azimuth_angles": np.linspace(-np.pi/2, np.pi/2, 10),
-    "t0_delays": np.linspace(0, 1e-6, 10),
+    "t0_delays": np.repeat(np.linspace(0, 1e-6, 10)[..., None], 10, axis=-1),
     "tx_apodizations": np.ones((10, 10)),
     "focus_distances": np.ones(10)*0.04,
     "downsample": 1,
@@ -28,6 +29,7 @@ scan_args = {
 
 planewave_scan_args = {
     "n_tx": 10,
+    "n_el": 128,
     "xlims": (-0.019, 0.019),
     "ylims": (0, 0),
     "zlims": (0, 0.04),
@@ -53,6 +55,7 @@ def test_initialization():
     scan = Scan(**scan_args)
 
     assert scan.n_tx == scan_args['n_tx']
+    assert scan.n_el == scan_args['n_el']
     assert scan.xlims == scan_args['xlims']
     assert scan.ylims == scan_args['ylims']
     assert scan.zlims == scan_args['zlims']
@@ -77,6 +80,7 @@ def test_planewave_scan():
     scan = PlaneWaveScan(**planewave_scan_args)
 
     assert scan.n_tx == planewave_scan_args['n_tx']
+    assert scan.n_el == planewave_scan_args['n_el']
     assert scan.xlims == planewave_scan_args['xlims']
     assert scan.ylims == planewave_scan_args['ylims']
     assert scan.zlims == planewave_scan_args['zlims']
