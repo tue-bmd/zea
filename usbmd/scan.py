@@ -19,6 +19,7 @@ class Scan:
     def __init__(
         self,
         n_tx=75,
+        n_el=128,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -51,6 +52,7 @@ class Scan:
             n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
             optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
+            n_el (int, optional): The number of elements in the array. Defaults to 128.
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
@@ -60,7 +62,7 @@ class Scan:
             fs (float, optional): The sampling rate to sample rf- or
                 iq-signals with. Defaults to 28e6.
             bandwidth_percent: Receive bandwidth of RF signal in % of center
-                frequency. Not necessarily the same as probe bandwidth. Defaults to 200. 
+                frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
@@ -105,6 +107,8 @@ class Scan:
 
         # Attributes concerning channel data : The number of transmissions in a frame
         self.n_tx = int(n_tx)
+        #: The number of elements in the array
+        self.n_el = int(n_el)
         #: The modulation carrier frequency [Hz]
         self.fc = float(fc)
         #: The sampling rate [Hz]
@@ -150,11 +154,11 @@ class Scan:
             self.zlims = [0, self.c * self.n_ax / self.fs / 2]
             print(self.zlims)
 
-        self.z_axis = np.linspace(*self.zlims, n_ax)
+        self.z_axis = np.linspace(*self.zlims, self.n_ax)
 
         if initial_times is None:
             warnings.warn("No initial times provided. Assuming all zeros.")
-            initial_times = np.zeros(n_tx)
+            initial_times = np.zeros(self.n_tx)
 
         #: The initial times of the transmits in seconds of shape (n_tx,). These are the
         # time intervals between the first element firing and the first sample in the
@@ -165,7 +169,14 @@ class Scan:
             warnings.warn(
                 "No t0_delays provided. Assuming all zeros and 128 element probe."
             )
-            t0_delays = np.zeros((n_tx, 128))
+            t0_delays = np.zeros((self.n_tx, self.n_el))
+        else:
+            assert t0_delays.shape == (self.n_tx, self.n_el), (
+                f"t0_delays must have shape (n_tx, n_el). "
+                f"Got shape {t0_delays.shape}. Please set t0_delays either to None in which "
+                f"case all zeros are assumed, or set the n_tx and n_el params to match the "
+                "t0_delays shape."
+            )
         #: The transmit delays in seconds of shape (n_tx, n_el), shifted such : that the
         # smallest delay is 0. For instance for a straight planewave : transmit all
         # delays are zero.
@@ -176,7 +187,7 @@ class Scan:
                 "No tx_apodizations provided. Assuming all ones and "
                 "128 element probe."
             )
-            tx_apodizations = np.ones((n_tx, 128))
+            tx_apodizations = np.ones((n_tx, self.n_el))
         #: The transmit apodizations of shape (n_tx, n_el) or a single float to : use
         # for all apodizations. These values indicate both windowing : (apodization) over
         # the aperture and the subaperture that is used : during transmit.
@@ -184,7 +195,7 @@ class Scan:
 
         if polar_angles is None:
             warnings.warn("No polar_angles provided. Assuming all zeros.")
-            polar_angles = np.zeros(n_tx)
+            polar_angles = np.zeros(self.n_tx)
         #: The polar angles of the transmits in radians of shape (n_tx,). These : are
         # the angles usually used in 2D imaging.
         self.polar_angles = polar_angles
@@ -194,14 +205,14 @@ class Scan:
 
         if azimuth_angles is None:
             warnings.warn("No azimuth_angles provided. Assuming all zeros.")
-            azimuth_angles = np.zeros(n_tx)
+            azimuth_angles = np.zeros(self.n_tx)
         #: The azimuth angles of the transmits in radians of shape (n_tx,). : These are
         # the angles usually only used in 3D imaging.
         self.azimuth_angles = azimuth_angles
 
         if focus_distances is None:
             warnings.warn("No focus_distances provided. Assuming all zeros.")
-            focus_distances = np.zeros(n_tx)
+            focus_distances = np.zeros(self.n_tx)
         #: The focus distances of the transmits in meters of shape (n_tx,). : These are
         # the distances of the virtual focus points from the origin. : For a planewave
         # these should be set to Inf.
@@ -346,6 +357,7 @@ class PlaneWaveScan(Scan):
         self,
         angles=None,
         n_tx=75,
+        n_el=128,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -371,8 +383,9 @@ class PlaneWaveScan(Scan):
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
             n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
-            optional): The x-limits in the beamforming grid.
+                optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
+            n_el (int, optional): The number of elements in the array. Defaults to 128.
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
@@ -425,6 +438,7 @@ class PlaneWaveScan(Scan):
         # Pass all arguments to the Scan base class
         super().__init__(
             n_tx=n_tx,
+            n_el=n_el,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
@@ -462,6 +476,7 @@ class DivergingWaveScan(Scan):
     def __init__(
         self,
         n_tx=75,
+        n_el=128,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
@@ -477,6 +492,7 @@ class DivergingWaveScan(Scan):
     ):
         super().__init__(
             n_tx=n_tx,
+            n_el=n_el,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
