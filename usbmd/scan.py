@@ -5,6 +5,7 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 import warnings
+
 import numpy as np
 
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -27,8 +28,8 @@ class Scan:
         c=1540,
         modtype="rf",
         n_ax=3328,
-        Nx=128,
-        Nz=128,
+        Nx=None,
+        Nz=None,
         pixels_per_wvln=3,
         polar_angles=None,
         azimuth_angles=None,
@@ -135,9 +136,9 @@ class Scan:
         self._zlims = zlims
 
         #: The number of pixels in the lateral direction in the beamforming : grid
-        self._Nx = int(Nx)
+        self._Nx = int(Nx) if Nx is not None else None
         #: The number of pixels in the axial direction in the beamforming grid
-        self._Nz = int(Nz)
+        self._Nz = int(Nz) if Nz is not None else None
 
         #: The beamforming grid of shape (Nx, Nz, 3)
         self._grid = None

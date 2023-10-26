@@ -14,22 +14,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
-from usbmd.setup_usbmd import setup_config
+from usbmd.processing import Process
+from usbmd.setup_usbmd import setup
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
-from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 from usbmd.utils.utils import update_dictionary
-from usbmd.utils.video import ScanConverterTF
 
 
-def train(config):
+def train_beamformer(config):
     """Train function that initializes the dataset, beamformer model and optimizer, creates the
     target data, and then trains the model."""
 
-    # Dataloading and parameter initialization
+    ## Dataloading and parameter initialization
     # Intialize dataset
     dataset = get_dataset(config.data)
     data = dataset[0]
@@ -55,12 +53,11 @@ def train(config):
 
     # Create target data
     # pylint: disable=unexpected-keyword-arg
-    target_beamformer = get_beamformer(probe, scan, config, jit_compile=True)
+    target_beamformer = get_beamformer(probe, scan, config)
 
-    targets = target_beamformer(np.expand_dims(
-        data[scan.selected_transmits], axis=0))
+    targets = target_beamformer(np.expand_dims(data[scan.selected_transmits], axis=0))
 
-    # Create the beamforming model
+    ## Create the beamforming model
     # Only use the center angle for training
     config.scan.selected_transmits = 1
     config.model.beamformer.type = "able"
@@ -93,7 +90,7 @@ def train(config):
         jit_compile=True,
     )
 
-    # Augment the data and train the model
+    ## Augment the data and train the model
     # repeat the inputs and targets N times with noise
     N = 100
     inputs = np.repeat(inputs, N, axis=0)
@@ -106,13 +103,15 @@ def train(config):
     inputs += noise
 
     # Train the model
-    history = beamformer.fit(
-        inputs, targets, epochs=10, batch_size=1, verbose=1)
+    history = beamformer.fit(inputs, targets, epochs=10, batch_size=1, verbose=1)
 
-    scan_converter = ScanConverterTF(grid=scan.grid)
+    # Beamform the data using trained model
+    predictions = np.array(beamformer(inputs))
 
-    targets = scan_converter.convert(targets)
-    predictions = scan_converter.convert(beamformer(inputs))
+    # Create a Process class to convert the data to an image
+    process = Process(config, scan, probe)
+    targets = process.run(targets, "beamformed_data", "image")
+    predictions = process.run(predictions, "beamformed_data", "image")
 
     # plot the resulting image
     plt.figure()
@@ -122,7 +121,6 @@ def train(config):
     plt.subplot(1, 2, 2)
     plt.imshow(predictions[0], cmap="gray")
     plt.title("Prediction")
-    plt.show()
 
     return history, beamformer
 
@@ -130,11 +128,9 @@ def train(config):
 if __name__ == "__main__":
     # Load config
     path_to_config_file = Path.cwd() / "configs/config_picmus_iq.yaml"
-    config = setup_config(file=path_to_config_file)
-    config.data.user = set_data_paths(local=True)
-
-    # Set GPU usage
-    set_gpu_usage("auto:1")
+    config = setup(path_to_config_file)
 
     # Train
-    _, beamformer = train(config)
+    _, beamformer = train_beamformer(config)
+
+    plt.show()
