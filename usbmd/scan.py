@@ -5,6 +5,7 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 import warnings
+
 import numpy as np
 
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -23,11 +24,12 @@ class Scan:
         zlims=(0, 0.04),
         fc=7e6,
         fs=28e6,
+        bandwidth_percent=200,
         c=1540,
         modtype="rf",
         n_ax=3328,
-        Nx=128,
-        Nz=128,
+        Nx=None,
+        Nz=None,
         pixels_per_wvln=3,
         polar_angles=None,
         azimuth_angles=None,
@@ -57,6 +59,8 @@ class Scan:
                 Defaults to 7e6.
             fs (float, optional): The sampling rate to sample rf- or
                 iq-signals with. Defaults to 28e6.
+            bandwidth_percent: Receive bandwidth of RF signal in % of center
+                frequency. Not necessarily the same as probe bandwidth. Defaults to 200. 
             c (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
@@ -105,6 +109,8 @@ class Scan:
         self.fc = float(fc)
         #: The sampling rate [Hz]
         self.fs = float(fs)
+        #: The percent bandwidth []
+        self.bandwidth_percent = float(bandwidth_percent)
         #: The speed of sound [m/s]
         self.c = float(c)
         #: The modulation type of the raw data ('rf' or 'iq')
@@ -130,9 +136,9 @@ class Scan:
         self._zlims = zlims
 
         #: The number of pixels in the lateral direction in the beamforming : grid
-        self._Nx = int(Nx)
+        self._Nx = int(Nx) if Nx is not None else None
         #: The number of pixels in the axial direction in the beamforming grid
-        self._Nz = int(Nz)
+        self._Nz = int(Nz) if Nz is not None else None
 
         #: The beamforming grid of shape (Nx, Nz, 3)
         self._grid = None
