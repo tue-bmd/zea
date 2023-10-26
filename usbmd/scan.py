@@ -483,7 +483,7 @@ class PlaneWaveScan(Scan):
             Nx=Nx,
             Nz=Nz,
             pixels_per_wvln=pixels_per_wvln,
-            polar_angles=angles,
+            polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             tx_apodizations=tx_apodizations,
             downsample=downsample,
