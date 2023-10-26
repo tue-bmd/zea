@@ -29,7 +29,7 @@ class Config(dict):
         # Class attributes
         for k in self.__class__.__dict__:
             if not (k.startswith("__") and k.endswith("__")):
-                if k not in ["serialize", "deep_copy", "save_to_yaml"]:
+                if k not in ["update", "serialize", "deep_copy", "save_to_yaml"]:
                     setattr(self, k, getattr(self, k))
 
     def __setattr__(self, name, value):
