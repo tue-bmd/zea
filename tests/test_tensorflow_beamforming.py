@@ -115,4 +115,4 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
 
 
 if __name__ == "__main__":
-    test_das_beamforming(debug=True)
+    test_das_beamforming(reconstruction_mode='pw', debug=True)
