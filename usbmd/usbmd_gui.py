@@ -151,7 +151,7 @@ class USBMDApp(App):
                 pass
 
             self.style.configure("Run.TButton", background=self.button_color)
-            self.ui.plot(self.ui.image, block=False, save=True, axis=True)
+            self.ui.plot(self.ui.image, block=False, save=True, plot_lib="matplotlib")
 
     def freeze(self):
         """Freeze function"""

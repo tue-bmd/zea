@@ -10,6 +10,7 @@ import warnings
 from pathlib import Path
 
 import cv2
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -72,21 +73,19 @@ class DataLoaderUI:
         self.mpl_img = None
         self.fig = None
         self.ax = None
-        self.headless = False
         self.gui = None
+
+        if self.config.plot.headless is None:
+            self.headless = False
+        else:
+            self.headless = self.config.plot.headless
 
         self.check_for_display()
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
-        # first read from config, headless could be an option
-        if self.config.plot.headless is not None:
-            self.headless = self.config.plot.headless
-        else:
-            self.headles = False
-        # check if non headless mode is possible
         if self.headless is False:
-            if plt.rcParams["backend"].lower() == "agg":
+            if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
                 warnings.warn("Could not connect to display, running headless.")
         else:
