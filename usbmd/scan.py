@@ -226,6 +226,7 @@ class Scan:
 
 
         # Create subselection of transmit events
+        self.n_tx = len(self.selected_transmits)
         self.polar_angles = self.polar_angles[self.selected_transmits]
         self.azimuth_angles = self.azimuth_angles[self.selected_transmits]
         self.focus_distances = self.focus_distances[self.selected_transmits]
