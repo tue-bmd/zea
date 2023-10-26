@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from usbmd.probes import Verasonics_l11_4v
@@ -19,7 +20,8 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-def test_das_beamforming(debug=False, compare_gt=True):
+@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"])
+def test_das_beamforming(debug=False, compare_gt=True, reconstruction_mode="pw"):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
 
@@ -36,6 +38,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
+
     scan = PlaneWaveScan(
         n_tx=1,
         xlims=(-19e-3, 19e-3),
@@ -48,6 +51,11 @@ def test_das_beamforming(debug=False, compare_gt=True):
                 0,
             ]
         ),
+    )
+    # We override the focus parameter for now to force the beamformer to use the generic delay
+    # calculation if reconstruction_mode == "generic".
+    scan.focus_distances = (
+        np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
     # Set scan grid parameters
@@ -84,8 +92,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
         axs[0].set_title("RF data")
         axs[1].imshow(np.squeeze(outputs))
         axs[1].set_title("Beamformed")
-        axs[2].imshow(cv2.GaussianBlur(
-            data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
+        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
         axs[2].set_title("Ground Truth")
         fig.show()
 
