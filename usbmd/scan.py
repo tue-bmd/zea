@@ -224,7 +224,6 @@ class Scan:
         # are selected. If set to None, then all transmits are used. Defaults to None.
         self.selected_transmits = self.select_transmits(selected_transmits)
 
-
         # Create subselection of transmit events
         self.n_tx = len(self.selected_transmits)
         self.polar_angles = self.polar_angles[self.selected_transmits]
@@ -301,8 +300,6 @@ class Scan:
             self.n_tx = len(selected_transmits)
 
             return selected_transmits
-
-
 
     @property
     def Nx(self):
