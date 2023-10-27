@@ -163,6 +163,7 @@ def get_date_string(string: str = None):
     date_str = now.strftime(string)
     return date_str
 
+
 def find_first_nonzero_index(arr, axis, invalid_val=-1):
     """
     Find the index of the first non-zero element along a specified axis in a NumPy array.

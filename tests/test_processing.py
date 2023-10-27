@@ -86,8 +86,7 @@ def equality_libs_processing(test_func):
         # Run the test function with processing_torch module
         torch_output = None
         if hasattr(processing_torch, func_name + "_torch"):
-            processing_func_torch = getattr(
-                processing_torch, func_name + "_torch")
+            processing_func_torch = getattr(processing_torch, func_name + "_torch")
             setattr(processing, func_name, processing_func_torch)
             set_random_seed(seed)
             torch_output = np.array(test_func(*args, **kwargs))
@@ -123,6 +122,7 @@ def equality_libs_processing(test_func):
 
     return decorator.decorator(wrapper, test_func)
 
+
 @pytest.mark.parametrize(
     "comp_type, size, parameter_value_range",
     [
@@ -144,15 +144,18 @@ def test_companding(comp_type, size, parameter_value_range):
         signal = signal.astype(np.float32)
 
         signal_out = processing.companding(
-            signal, expand=False, comp_type=comp_type, A=A, mu=mu)
+            signal, expand=False, comp_type=comp_type, A=A, mu=mu
+        )
         assert np.any(
             np.not_equal(signal, signal_out)
         ), "Companding failed, arrays should not be equal"
         signal_out = processing.companding(
-            signal_out, expand=True, comp_type=comp_type, A=A, mu=mu)
+            signal_out, expand=True, comp_type=comp_type, A=A, mu=mu
+        )
 
         np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
+
 
 @pytest.mark.parametrize(
     "size, dynamic_range, input_range",
@@ -221,8 +224,9 @@ def test_scan_conversion_and_inverse(size, random_data_type):
     data_sc_inv = transform_sc_image_to_polar(data_sc, output_size=polar_data.shape)
     mean_squared_error = ((polar_data - data_sc_inv) ** 2).mean()
 
-    assert mean_squared_error < allowed_error, \
-        f"MSE is too high: {mean_squared_error:.4f} > {allowed_error:.4f}"
+    assert (
+        mean_squared_error < allowed_error
+    ), f"MSE is too high: {mean_squared_error:.4f} > {allowed_error:.4f}"
 
 
 @pytest.mark.parametrize(

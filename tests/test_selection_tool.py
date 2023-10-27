@@ -25,6 +25,7 @@ def test_rectangles():
     mask_reconstructed = reconstruct_mask_from_rectangle(rect, mask.shape)
     assert np.all(mask == mask_reconstructed)
 
+
 def test_polygon():
     """Test polygon extraction / reconstruction."""
     # create random polygon mask
@@ -39,8 +40,10 @@ def test_polygon():
     mask_reconstructed = reconstruct_mask_from_polygon(poly, mask.shape)
     np.testing.assert_array_almost_equal(mask, mask_reconstructed, 0.1)
 
+
 @pytest.mark.parametrize(
-    "mode", ["min", "max"],
+    "mode",
+    ["min", "max"],
 )
 def test_equalize_polygons(mode):
     """Test polygon equalization."""
@@ -59,6 +62,7 @@ def test_equalize_polygons(mode):
         assert len(polygons[0]) == 3
     elif mode == "max":
         assert len(polygons[0]) == 5
+
 
 def test_match_polygons():
     """Test polygon matching."""
