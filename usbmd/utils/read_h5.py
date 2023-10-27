@@ -25,7 +25,7 @@ class ReadH5:
     def open(self):
         """Open the .hdf5 HDF5 file for reading."""
         try:
-            self.file = h5py.File(self.file_path, 'r')
+            self.file = h5py.File(self.file_path, "r")
         except Exception as e:
             raise ValueError(f"Unable to open HDF5 file: {str(e)}") from e
         return self.file
@@ -148,6 +148,7 @@ def recursively_load_dict_contents_from_group(
                 h5file, path + key + "/"
             )
     return ans
+
 
 def print_hdf5_attrs(hdf5_obj, prefix=""):
     """Recursively prints all keys, attributes, and shapes in an HDF5 file.
