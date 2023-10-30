@@ -8,9 +8,8 @@ import warnings
 
 import numpy as np
 
+from usbmd.utils.checks import _MOD_TYPES
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
-
-_MOD_TYPES = [None, "rf", "iq"]
 
 
 class Scan:
