@@ -18,7 +18,7 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
+from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.metrics import _METRICS
 
