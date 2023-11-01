@@ -18,7 +18,7 @@ class UltrasoundSimulator:
         self,
         probe=None,
         scan=None,
-        ele_pos=None,
+        probe_geometry=None,
         batch_size=1,
         fc=6.25e6,
         sound_speed=1540,
@@ -32,7 +32,7 @@ class UltrasoundSimulator:
                 Defaults to None.
             scan (Scan, optional): Scan object containing parameters and
                 beamforming grid. Defaults to None.
-            ele_pos (ndarray, optional): Array geometry. Defaults to None.
+            probe_geometry (ndarray, optional): Array geometry. Defaults to None.
             batch_size (int, optional): Number of batches. Defaults to 1.
             fc (float, optional): Center frequency. Defaults to 6.25e6.
             sound_speed (int, optional): Speed-of-Sound. Defaults to 1540.
@@ -46,7 +46,7 @@ class UltrasoundSimulator:
             print("Probe and scanclass recognized, ignoring manual parameters")
             self.fc = scan.fc
             self.sound_speed = scan.sound_speed
-            self.ele_pos = probe.ele_pos
+            self.probe_geometry = probe.probe_geometry
             self.wvln = scan.wvln
 
         else:
@@ -54,10 +54,10 @@ class UltrasoundSimulator:
             self.sound_speed = sound_speed
             self.wvln = sound_speed / fc
 
-            if ele_pos:
-                self.ele_pos = ele_pos
+            if probe_geometry:
+                self.probe_geometry = probe_geometry
             else:
-                self.ele_pos = np.stack(
+                self.probe_geometry = np.stack(
                     [
                         np.linspace(-19.0e-3, 19.0e-3, 128).T,
                         np.zeros((128,)),
@@ -67,7 +67,9 @@ class UltrasoundSimulator:
                 )
 
         self.batch_size = batch_size
-        self.ele_pos = self.ele_pos[:, 0] - np.min(self.ele_pos[0, 0])
+        self.probe_geometry = self.probe_geometry[:, 0] - np.min(
+            self.probe_geometry[0, 0]
+        )
 
         # Set grid
         if scan is not None:
@@ -87,7 +89,7 @@ class UltrasoundSimulator:
         self.Nz = self.grid.shape[0]
 
         # Simulation parameters
-        self.Nt = 2 * (self.Nz) * self.dz / c
+        self.Nt = 2 * (self.Nz) * self.dz / sound_speed
         self.dt = (1 / fc) / 4  # fs = 4*fc
         self.t = self.dt * np.arange(0, np.round(self.Nt / self.dt))
         self.x = self.dx * np.arange(0, self.Nx)
@@ -134,7 +136,7 @@ class UltrasoundSimulator:
             for j in range(scatterers):
                 d_trans = points_z[j] / self.sound_speed
                 tau_j = d_trans + np.sqrt(
-                    ((points_x[j] - self.ele_pos) / self.sound_speed) ** 2
+                    ((points_x[j] - self.probe_geometry) / self.sound_speed) ** 2
                     + (points_z[j] / self.sound_speed) ** 2
                 )
                 s_i = s_i + np.array(

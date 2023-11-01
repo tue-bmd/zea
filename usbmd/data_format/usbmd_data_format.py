@@ -494,7 +494,7 @@ def load_usbmd_file(
 
         # Define the probe
         probe_name = hdf5_file.attrs["probe"]
-        ele_pos = hdf5_file["scan"]["probe_geometry"][:]
+        probe_geometry = hdf5_file["scan"]["probe_geometry"][:]
 
         # Try to load a known probe type. If this fails, use a generic probe
         # instead, but warn the user.
@@ -506,12 +506,12 @@ def load_usbmd_file(
                 probe_name,
             )
 
-            probe = Probe(ele_pos=ele_pos)
+            probe = Probe(probe_geometry=probe_geometry)
 
         # Verify that the probe geometry matches the probe geometry in the
         # dataset
-        if not np.allclose(ele_pos, probe.ele_pos):
-            probe.ele_pos = ele_pos
+        if not np.allclose(probe_geometry, probe.probe_geometry):
+            probe.probe_geometry = probe_geometry
             logging.warning(
                 "The probe geometry in the data file does not "
                 "match the probe geometry of the probe. The probe "
@@ -522,9 +522,9 @@ def load_usbmd_file(
         n_frames = int(hdf5_file["scan"]["n_frames"][()])
         n_ax = int(hdf5_file["scan"]["n_ax"][()])
         n_tx = int(hdf5_file["scan"]["n_tx"][()])
-        c = float(hdf5_file["scan"]["sound_speed"][()])
-        fs = float(hdf5_file["scan"]["sampling_frequency"][()])
-        fc = float(hdf5_file["scan"]["center_frequency"][()])
+        sound_speed = float(hdf5_file["scan"]["sound_speed"][()])
+        sampling_frequency = float(hdf5_file["scan"]["sampling_frequency"][()])
+        center_frequency = float(hdf5_file["scan"]["center_frequency"][()])
         n_el = int(hdf5_file["scan"]["n_el"][()])
         bandwidth_percent = float(hdf5_file["scan"]["bandwidth_percent"][()])
 
@@ -533,17 +533,6 @@ def load_usbmd_file(
 
         if transmits is None:
             transmits = np.arange(n_tx, dtype=np.int32)
-
-        if "xlims" not in config.scan:
-            # Set the scan limits to the limits of the probe and
-            # the depth of the scan
-            x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
-            config.scan.xlims = (x0, x1)
-        if "zlims" not in config.scan:
-            # Compute the depth of the scan from the number of axial samples
-            depth = n_ax / fs * c / 2
-            z0, z1 = 0, depth
-            config.scan.zlims = (z0, z1)
 
         n_tx = len(transmits)
 
@@ -579,15 +568,16 @@ def load_usbmd_file(
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
-            fc=fc,
-            fs=fs,
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
             bandwidth_percent=bandwidth_percent,
             modtype=modtype,
             n_ax=n_ax,
-            c=c,
+            sound_speed=sound_speed,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
+            probe_geometry=probe_geometry,
             **config.scan,
         )
 

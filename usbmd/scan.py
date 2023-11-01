@@ -17,28 +17,29 @@ class Scan:
 
     def __init__(
         self,
-        n_tx=75,
-        n_el=128,
-        xlims=(-0.01, 0.01),
-        ylims=(0, 0),
-        zlims=(0, 0.04),
-        fc=7e6,
-        fs=28e6,
-        bandwidth_percent=200,
-        sound_speed=1540,
-        modtype="rf",
-        n_ax=3328,
-        Nx=None,
-        Nz=None,
-        pixels_per_wvln=3,
-        polar_angles=None,
-        azimuth_angles=None,
-        t0_delays=None,
-        tx_apodizations=None,
-        focus_distances=None,
-        downsample=1,
-        initial_times=None,
-        selected_transmits=None,
+        n_tx: int,
+        n_el: int,
+        center_frequency: float,
+        sampling_frequency: float,
+        xlims=None,
+        ylims=None,
+        zlims=None,
+        bandwidth_percent: int = 200,
+        sound_speed: float = 1540,
+        modtype: str = "rf",
+        n_ax: int = None,
+        Nx: int = None,
+        Nz: int = None,
+        pixels_per_wvln: int = 3,
+        polar_angles: np.ndarray = None,
+        azimuth_angles: np.ndarray = None,
+        t0_delays: np.ndarray = None,
+        tx_apodizations: np.ndarray = None,
+        focus_distances: np.ndarray = None,
+        downsample: int = 1,
+        initial_times: np.ndarray = None,
+        selected_transmits: list = None,
+        probe_geometry: np.ndarray = None,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -48,18 +49,17 @@ class Scan:
         automatically.
 
         Args:
-            n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
-            optional): The x-limits in the beamforming grid.
-                Defaults to (-0.01, 0.01).
-            n_el (int, optional): The number of elements in the array. Defaults to 128.
+            n_tx (int): The number of transmits to produce a single frame.
+            n_el (int, optional): The number of elements in the array.
+            center_frequency (float): The modulation carrier frequency.
+            sampling_frequency (float): The sampling rate to sample rf- or
+                iq-signals with.
+            xlims (tuple, optional): The x-limits in the beamforming grid.
+                Defaults to (probe_geometry[0, 0], probe_geometry[-1, 0]).
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
-                Defaults to (0,0.04).
-            fc (float, optional): The modulation carrier frequency.
-                Defaults to 7e6.
-            fs (float, optional): The sampling rate to sample rf- or
-                iq-signals with. Defaults to 28e6.
+                Defaults to (0, n_ax * sound_speed / fs / 2).
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
@@ -98,6 +98,8 @@ class Scan:
                 of transmits is selected as homogeneously as possible. If set to a list
                 of integers, then the transmits with those indices are selected. If set
                 to None, then all transmits are used. Defaults to None.
+            probe_geometry (np.ndarray, optional): (n_el, 3) array with element positions
+                in meters. Necessary for automatic xlim calculation if not set. Defaults to None.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -109,9 +111,9 @@ class Scan:
         #: The number of elements in the array
         self.n_el = int(n_el)
         #: The modulation carrier frequency [Hz]
-        self.fc = float(fc)
+        self.fc = float(center_frequency)
         #: The sampling rate [Hz]
-        self.fs = float(fs)
+        self.fs = float(sampling_frequency)
         #: The percent bandwidth []
         self.bandwidth_percent = float(bandwidth_percent)
         #: The speed of sound [m/s]
@@ -128,6 +130,8 @@ class Scan:
         self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
         self.pixels_per_wavelength = pixels_per_wvln
+        #: The probe geometry of shape (n_el, 3)
+        self.probe_geometry = probe_geometry
 
         # Beamforming grid related attributes
         # ---------------------------------------------------------------------
@@ -150,8 +154,21 @@ class Scan:
         if zlims:
             self.zlims = zlims
         else:
+            # Compute the depth of the scan from the number of axial samples
             self.zlims = [0, self.sound_speed * self.n_ax / self.fs / 2]
-            print(self.zlims)
+        if ylims:
+            self.ylims = ylims
+        else:
+            self.ylims = [0, 0]
+        if xlims:
+            self.xlims = xlims
+        else:
+            # Set the scan limits to the limits of the probe and
+            if self.probe_geometry is None:
+                raise ValueError(
+                    "Please provide probe_geometry or xlims, currently neither is set."
+                )
+            self.xlims = self.probe_geometry[0, 0], self.probe_geometry[-1, 0]
 
         self.z_axis = np.linspace(*self.zlims, self.n_ax)
 
@@ -381,8 +398,8 @@ class PlaneWaveScan(Scan):
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
-        fc=7e6,
-        fs=28e6,
+        center_frequency=7e6,
+        sampling_frequency=28e6,
         sound_speed=1540,
         modtype="rf",
         n_ax=3328,
@@ -410,9 +427,9 @@ class PlaneWaveScan(Scan):
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
                 Defaults to (0,0.04).
-            fc (float, optional): The modulation carrier frequency.
+            center_frequency (float, optional): The modulation carrier frequency.
                 Defaults to 7e6.
-            fs (float, optional): The sampling rate to sample rf- or
+            sampling_frequency (float, optional): The sampling rate to sample rf- or
                 iq-signals with. Defaults to 28e6.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
@@ -471,8 +488,8 @@ class PlaneWaveScan(Scan):
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
-            fc=fc,
-            fs=fs,
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
             sound_speed=sound_speed,
             modtype=modtype,
             n_ax=n_ax,
@@ -499,8 +516,8 @@ class DivergingWaveScan(Scan):
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
-        fc=7e6,
-        fs=28e6,
+        center_frequency=7e6,
+        sampling_frequency=28e6,
         sound_speed=1540,
         modtype="rf",
         n_ax=256,
@@ -515,8 +532,8 @@ class DivergingWaveScan(Scan):
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
-            fc=fc,
-            fs=fs,
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
             sound_speed=sound_speed,
             modtype=modtype,
             n_ax=n_ax,
@@ -531,13 +548,13 @@ class DivergingWaveScan(Scan):
 
 
 def compute_t0_delays_planewave(
-    ele_pos, polar_angle, azimuth_angle=0, sound_speed=1540
+    probe_geometry, polar_angle, azimuth_angle=0, sound_speed=1540
 ):
     """Computes the transmit delays for a planewave, shifted such that the
     first element fires at t=0.
 
     Args:
-        ele_pos (np.ndarray): The positions of the elements in the array of
+        probe_geometry (np.ndarray): The positions of the elements in the array of
             shape (element, 3).
         polar_angle (float): The polar angle of the planewave in radians.
         azimuth_angle (float, optional): The azimuth angle of the planewave
@@ -557,7 +574,7 @@ def compute_t0_delays_planewave(
     )[None]
 
     # Compute the projection of the element positions onto the wave vector
-    projection = np.sum(ele_pos * v, axis=1)
+    projection = np.sum(probe_geometry * v, axis=1)
 
     # Convert from distance to time to compute the transmit delays.
     t0_delays_not_zero_algined = projection / sound_speed
@@ -574,7 +591,12 @@ def compute_t0_delays_planewave(
 
 
 def compute_t0_delays_focused(
-    origin, focus_distance, ele_pos, polar_angle, azimuth_angle=0, sound_speed=1540
+    origin,
+    focus_distance,
+    probe_geometry,
+    polar_angle,
+    azimuth_angle=0,
+    sound_speed=1540,
 ):
     """Computes the transmit delays for a focused transmit, shifted such that
     the first element fires at t=0.
@@ -582,7 +604,7 @@ def compute_t0_delays_focused(
     Args:
         origin (np.ndarray): The origin of the focused transmit of shape (3,).
         focus_distance (float): The distance to the focus.
-        ele_pos (np.ndarray): The positions of the elements in the array of
+        probe_geometry (np.ndarray): The positions of the elements in the array of
             shape (element, 3).
         polar_angle (float): The polar angle of the planewave in radians.
         azimuth_angle (float, optional): The azimuth angle of the planewave
@@ -609,7 +631,7 @@ def compute_t0_delays_focused(
     virtual_source = virtual_source[None]
 
     # Compute the distance between the virtual source and each element
-    dist = np.linalg.norm(virtual_source - ele_pos, axis=1)
+    dist = np.linalg.norm(virtual_source - probe_geometry, axis=1)
 
     dist *= -np.sign(focus_distance)
 
