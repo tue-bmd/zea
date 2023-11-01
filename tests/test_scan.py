@@ -10,8 +10,8 @@ scan_args = {
     "xlims": (-0.019, 0.019),
     "ylims": (0, 0),
     "zlims": (0, 0.04),
-    "fc": 7e6,
-    "fs": 28e6,
+    "center_frequency": 7e6,
+    "sampling_frequency": 28e6,
     "sound_speed": 1540,
     "modtype": "rf",
     "n_ax": 3328,
@@ -33,8 +33,8 @@ planewave_scan_args = {
     "xlims": (-0.019, 0.019),
     "ylims": (0, 0),
     "zlims": (0, 0.04),
-    "fc": 7e6,
-    "fs": 28e6,
+    "center_frequency": 7e6,
+    "sampling_frequency": 28e6,
     "sound_speed": 1540,
     "modtype": "rf",
     "n_ax": 3328,
@@ -58,8 +58,8 @@ def test_initialization():
     assert scan.xlims == scan_args["xlims"]
     assert scan.ylims == scan_args["ylims"]
     assert scan.zlims == scan_args["zlims"]
-    assert scan.fc == scan_args["fc"]
-    assert scan.fs == scan_args["fs"]
+    assert scan.fc == scan_args["center_frequency"]
+    assert scan.fs == scan_args["sampling_frequency"]
     assert scan.sound_speed == scan_args["sound_speed"]
     assert scan.modtype == scan_args["modtype"]
     assert scan.n_ax == scan_args["n_ax"]
@@ -83,8 +83,8 @@ def test_planewave_scan():
     assert scan.xlims == planewave_scan_args["xlims"]
     assert scan.ylims == planewave_scan_args["ylims"]
     assert scan.zlims == planewave_scan_args["zlims"]
-    assert scan.fc == planewave_scan_args["fc"]
-    assert scan.fs == planewave_scan_args["fs"]
+    assert scan.fc == planewave_scan_args["center_frequency"]
+    assert scan.fs == planewave_scan_args["sampling_frequency"]
     assert scan.sound_speed == planewave_scan_args["sound_speed"]
     assert scan.modtype == planewave_scan_args["modtype"]
     assert scan.n_ax == planewave_scan_args["n_ax"]
