@@ -8,8 +8,8 @@ import h5py
 import numpy as np
 
 from usbmd.probes import Probe, get_probe
-from usbmd.processing import _DATA_TYPES
 from usbmd.scan import Scan
+from usbmd.utils.checks import _DATA_TYPES
 
 
 def generate_example_dataset(path, add_optional_fields=False):
