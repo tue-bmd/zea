@@ -25,7 +25,7 @@ class Scan:
         fc=7e6,
         fs=28e6,
         bandwidth_percent=200,
-        c=1540,
+        sound_speed=1540,
         modtype="rf",
         n_ax=3328,
         Nx=None,
@@ -62,7 +62,7 @@ class Scan:
                 iq-signals with. Defaults to 28e6.
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
-            c (float, optional): The speed of sound in m/s. Defaults to 1540.
+            sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
             modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
@@ -115,7 +115,7 @@ class Scan:
         #: The percent bandwidth []
         self.bandwidth_percent = float(bandwidth_percent)
         #: The speed of sound [m/s]
-        self.c = float(c)
+        self.sound_speed = float(sound_speed)
         #: The modulation type of the raw data ('rf' or 'iq')
         self.modtype = modtype
         #: The number of samples per channel per acquisition
@@ -125,7 +125,7 @@ class Scan:
         #: The number of rf/iq channels (1 for rf, 2 for iq)
         self.n_ch = 2 if modtype == "iq" else 1
         #: The wavelength of the modulation carrier [m]
-        self.wvln = self.c / self.fc
+        self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
         self.pixels_per_wavelength = pixels_per_wvln
 
@@ -150,7 +150,7 @@ class Scan:
         if zlims:
             self.zlims = zlims
         else:
-            self.zlims = [0, self.c * self.n_ax / self.fs / 2]
+            self.zlims = [0, self.sound_speed * self.n_ax / self.fs / 2]
             print(self.zlims)
 
         self.z_axis = np.linspace(*self.zlims, self.n_ax)
@@ -383,7 +383,7 @@ class PlaneWaveScan(Scan):
         zlims=(0, 0.04),
         fc=7e6,
         fs=28e6,
-        c=1540,
+        sound_speed=1540,
         modtype="rf",
         n_ax=3328,
         Nx=128,
@@ -414,7 +414,7 @@ class PlaneWaveScan(Scan):
                 Defaults to 7e6.
             fs (float, optional): The sampling rate to sample rf- or
                 iq-signals with. Defaults to 28e6.
-            c (float, optional): The speed of sound in m/s. Defaults to 1540.
+            sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
             modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
@@ -473,7 +473,7 @@ class PlaneWaveScan(Scan):
             zlims=zlims,
             fc=fc,
             fs=fs,
-            c=c,
+            sound_speed=sound_speed,
             modtype=modtype,
             n_ax=n_ax,
             Nx=Nx,
@@ -501,7 +501,7 @@ class DivergingWaveScan(Scan):
         zlims=(0, 0.04),
         fc=7e6,
         fs=28e6,
-        c=1540,
+        sound_speed=1540,
         modtype="rf",
         n_ax=256,
         Nx=128,
@@ -517,7 +517,7 @@ class DivergingWaveScan(Scan):
             zlims=zlims,
             fc=fc,
             fs=fs,
-            c=c,
+            sound_speed=sound_speed,
             modtype=modtype,
             n_ax=n_ax,
             Nx=Nx,
@@ -530,7 +530,9 @@ class DivergingWaveScan(Scan):
         raise NotImplementedError("CircularWaveScan has not been implemented.")
 
 
-def compute_t0_delays_planewave(ele_pos, polar_angle, azimuth_angle=0, c=1540):
+def compute_t0_delays_planewave(
+    ele_pos, polar_angle, azimuth_angle=0, sound_speed=1540
+):
     """Computes the transmit delays for a planewave, shifted such that the
     first element fires at t=0.
 
@@ -540,7 +542,7 @@ def compute_t0_delays_planewave(ele_pos, polar_angle, azimuth_angle=0, c=1540):
         polar_angle (float): The polar angle of the planewave in radians.
         azimuth_angle (float, optional): The azimuth angle of the planewave
             in radians. Defaults to 0.
-        c (float, optional): The speed of sound. Defaults to 1540.
+        sound_speed (float, optional): The speed of sound. Defaults to 1540.
 
     Returns:
         np.ndarray: The transmit delays for each element of shape (element,).
@@ -558,11 +560,11 @@ def compute_t0_delays_planewave(ele_pos, polar_angle, azimuth_angle=0, c=1540):
     projection = np.sum(ele_pos * v, axis=1)
 
     # Convert from distance to time to compute the transmit delays.
-    t0_delays_not_zero_algined = projection / c
+    t0_delays_not_zero_algined = projection / sound_speed
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.
-    t_first_fire = np.min(projection) / c
+    t_first_fire = np.min(projection) / sound_speed
 
     # The transmit delays are the projection minus the offset. This ensures
     # that the first element fires at t=0.
@@ -572,7 +574,7 @@ def compute_t0_delays_planewave(ele_pos, polar_angle, azimuth_angle=0, c=1540):
 
 
 def compute_t0_delays_focused(
-    origin, focus_distance, ele_pos, polar_angle, azimuth_angle=0, c=1540
+    origin, focus_distance, ele_pos, polar_angle, azimuth_angle=0, sound_speed=1540
 ):
     """Computes the transmit delays for a focused transmit, shifted such that
     the first element fires at t=0.
@@ -585,7 +587,7 @@ def compute_t0_delays_focused(
         polar_angle (float): The polar angle of the planewave in radians.
         azimuth_angle (float, optional): The azimuth angle of the planewave
             in radians. Defaults to 0.
-        c (float, optional): The speed of sound. Defaults to 1540.
+        sound_speed (float, optional): The speed of sound. Defaults to 1540.
 
     Returns:
         np.ndarray: The transmit delays for each element of shape (element,).
@@ -613,7 +615,7 @@ def compute_t0_delays_focused(
 
     # Convert from distance to time to compute the
     # transmit delays/travel times.
-    travel_times = dist / c
+    travel_times = dist / sound_speed
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.

@@ -21,7 +21,7 @@ class UltrasoundSimulator:
         ele_pos=None,
         batch_size=1,
         fc=6.25e6,
-        c=1540,
+        sound_speed=1540,
         N_scatterers=(20, 40),
     ):
         """Initialize ultrasound simulator
@@ -35,7 +35,7 @@ class UltrasoundSimulator:
             ele_pos (ndarray, optional): Array geometry. Defaults to None.
             batch_size (int, optional): Number of batches. Defaults to 1.
             fc (float, optional): Center frequency. Defaults to 6.25e6.
-            c (int, optional): Speed-of-Sound. Defaults to 1540.
+            sound_speed (int, optional): Speed-of-Sound. Defaults to 1540.
             N_scatterers (tuple, optional): [min, max] number of point scatterers.
                 Will be used when no specific points are provided.
                 Defaults to [20, 40].
@@ -45,14 +45,14 @@ class UltrasoundSimulator:
         if scan and probe:
             print("Probe and scanclass recognized, ignoring manual parameters")
             self.fc = scan.fc
-            self.c = scan.c
+            self.sound_speed = scan.sound_speed
             self.ele_pos = probe.ele_pos
             self.wvln = scan.wvln
 
         else:
             self.fc = fc
-            self.c = c
-            self.wvln = c / fc
+            self.sound_speed = sound_speed
+            self.wvln = sound_speed / fc
 
             if ele_pos:
                 self.ele_pos = ele_pos
@@ -132,10 +132,10 @@ class UltrasoundSimulator:
             y_i = 0
 
             for j in range(scatterers):
-                d_trans = points_z[j] / self.c
+                d_trans = points_z[j] / self.sound_speed
                 tau_j = d_trans + np.sqrt(
-                    ((points_x[j] - self.ele_pos) / self.c) ** 2
-                    + (points_z[j] / self.c) ** 2
+                    ((points_x[j] - self.ele_pos) / self.sound_speed) ** 2
+                    + (points_z[j] / self.sound_speed) ** 2
                 )
                 s_i = s_i + np.array(
                     [self.pulse(tau_j[k]) for k in range(0, len(tau_j))]
