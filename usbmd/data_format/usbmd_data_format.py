@@ -137,7 +137,7 @@ def generate_usbmd_dataset(
             shape (n_frames, n_z, n_x).
         image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
         image_sc (np.ndarray): The scan converted ultrasound images to be saved
-            of shape (n_frames, n_z, n_x).
+            of shape (n_frames, output_size_z, output_size_x).
         probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).
         sampling_frequency (float): The sampling frequency in Hz.
         center_frequency (float): The center frequency in Hz.
@@ -242,7 +242,7 @@ def generate_usbmd_dataset(
         name="image_sc",
         data=image_sc.astype(np.float32),
         unit="unitless",
-        description="The scan converted images of shape [n_frames, n_z, n_x]",
+        description="The scan converted images of shape [n_frames, output_size_z, output_size_x]",
     )
 
     # Write scan group
