@@ -101,11 +101,6 @@ class DataLoaderUI:
         plot_lib = self.config.plot.plot_lib
 
         if self.config.data.get("frame_no") == "all":
-            if to_dtype != "image":
-                warnings.warn(
-                    f"Image to_dtype: {to_dtype} not yet supported for movies.         "
-                    "               falling back to  to_dtype: `image`"
-                )
             # run movie
             self.run_movie(save=save, to_dtype=to_dtype)
         else:
