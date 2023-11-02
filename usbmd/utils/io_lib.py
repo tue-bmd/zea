@@ -53,7 +53,7 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
 
     # open in foreground
     root.wm_attributes("-topmost", True)
-    if "inline" in matplotlib.get_backend():
+    if "inline" not in matplotlib.get_backend():
         root.wm_attributes("-topmost", False)
     # we don't want a full GUI, so keep the root window from appearing
     root.withdraw()
