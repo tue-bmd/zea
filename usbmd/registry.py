@@ -18,3 +18,5 @@ probe_registry = RegisterDecorator()
 tf_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
 
 torch_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
+
+post_processing_registry = RegisterDecorator(items_to_register=["name", "framework"])

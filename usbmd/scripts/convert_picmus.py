@@ -55,7 +55,7 @@ if __name__ == "__main__":
                 file.endswith("iq.hdf5") or file.endswith("rf.hdf5")
             ) and not "img" in file:
                 # Get the full path to the file
-                path = os.path.join(root, file)
+                path = Path(root) / file
 
                 # Find the folder relative to the base directory to retain the
                 # folder structure in the output directory
