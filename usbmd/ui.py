@@ -304,15 +304,10 @@ class DataLoaderUI:
                 self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
             )
 
-            if "postprocess" in self.config:
-                image = self.postprocess(image)
+            if self.process.postprocess:
+                image = self.process.postprocess.run(image[None, ..., None])
+                image = np.squeeze(image)
             images.append(image)
-
-        # plot initial frame
-        self.image = self.process.run(self.data, dtype=self.config.data.dtype)
-        if self.process.postprocess:
-            self.image = self.process.postprocess.run(self.image[None, ..., None])
-            self.image = np.squeeze(self.image)
 
         if plot_lib == "matplotlib":
             self.plot(images[0], plot_lib=plot_lib, block=False)
@@ -349,18 +344,12 @@ class DataLoaderUI:
         """
         while True:
             for i, image in enumerate(images):
+                self.image = image
+
                 if self.gui:
                     self.gui.check_freeze()
 
-                self.config.data.frame_no = i
-                self.data = self.get_data()
-
-                image = self.process.run(self.data, dtype=self.config.data.dtype)
-                if self.process.postprocess:
-                    image = self.process.postprocess.run(image[None, ..., None])
-                    image = np.squeeze(image)
-
-                image = self.plot(image, movie=True, plot_lib=plot_lib)
+                self.plot(image, movie=True, plot_lib=plot_lib)
                 if plot_lib == "opencv" and cv2.waitKey(25) & 0xFF == ord("q"):
                     cv2.destroyAllWindows()
                     return
