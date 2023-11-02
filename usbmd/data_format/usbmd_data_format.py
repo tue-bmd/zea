@@ -134,10 +134,10 @@ def generate_usbmd_dataset(
         envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
             shape (n_frames, n_z, n_x).
         beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
-            shape (n_frames, n_el, n_ax).
-        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_el, n_ax).
+            shape (n_frames, n_z, n_x).
+        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
         image_sc (np.ndarray): The scan converted ultrasound images to be saved
-            of shape (n_frames, output_size_z, output_size_x).
+            of shape (n_frames, n_z, n_x).
         probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).
         sampling_frequency (float): The sampling frequency in Hz.
         center_frequency (float): The center frequency in Hz.
@@ -207,23 +207,43 @@ def generate_usbmd_dataset(
 
     add_dataset(
         group=data_group,
+        name="aligned_data",
+        data=aligned_data.astype(np.float32),
+        description="The aligned_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
+        unit="unitless",
+    )
+
+    add_dataset(
+        group=data_group,
+        name="envelope_data",
+        data=envelope_data.astype(np.float32),
+        description="The envelope_data of shape (n_frames, n_z, n_x).",
+        unit="unitless",
+    )
+
+    add_dataset(
+        group=data_group,
+        name="beamformed_data",
+        data=beamformed_data.astype(np.float32),
+        description="The beamformed_data of shape (n_frames, n_z, n_x).",
+        unit="unitless",
+    )
+
+    add_dataset(
+        group=data_group,
+        name="image",
+        data=image.astype(np.float32),
+        unit="unitless",
+        description="The images of shape [n_frames, n_z, n_x]",
+    )
+
+    add_dataset(
+        group=data_group,
         name="image_sc",
         data=image_sc.astype(np.float32),
         unit="unitless",
-        description=(
-            "The scan converted images of shape [n_frames, output_size_z,"
-            " output_size_x]"
-        ),
+        description="The scan converted images of shape [n_frames, n_z, n_x]",
     )
-
-    # TODO implement the other data types
-    if (
-        aligned_data is not None
-        or envelope_data is not None
-        or beamformed_data is not None
-        or image is not None
-    ):
-        raise NotImplementedError
 
     # Write scan group
     scan_group = dataset.create_group("scan")
