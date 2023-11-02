@@ -122,15 +122,40 @@ def generate_usbmd_dataset(
     tx_apodizations=None,
     bandwidth_percent=None,
 ):
-    # TODO update docstring
-    """Generates a dataset in the USBMD format.
+    """
+    Generates a dataset in the USBMD format.
 
     Args:
         path (str): The path to write the dataset to.
         raw_data (np.ndarray): The raw data of the ultrasound measurement of
             shape (n_frames, n_tx, n_el, n_ax, n_ch).
+        aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_el, n_ax, n_ch).
+        envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
+            shape (n_frames, n_z, n_x).
+        beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
+            shape (n_frames, n_el, n_ax).
+        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_el, n_ax).
         image_sc (np.ndarray): The scan converted ultrasound images to be saved
             of shape (n_frames, output_size_z, output_size_x).
+        probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).
+        sampling_frequency (float): The sampling frequency in Hz.
+        center_frequency (float): The center frequency in Hz.
+        initial_times (list): The times when the A/D converter starts sampling
+            in seconds of shape (n_tx,). This is the time between the first element
+            firing and the first recorded sample.
+        t0_delays (np.ndarray): The t0_delays of shape (n_tx, n_el).
+        sound_speed (float): The speed of sound in m/s.
+        probe_name (str): The name of the probe.
+        description (str): The description of the dataset.
+        focus_distances (np.ndarray): The focus distances of shape (n_tx, n_el).
+        polar_angles (np.ndarray): The polar angles of shape (n_el,).
+        azimuth_angles (np.ndarray): The azimuth angles of shape (n_tx,).
+        tx_apodizations (np.ndarray): The transmit delays for each element defining
+            the wavefront in seconds of shape (n_tx, n_elem).
+            This is the time between the first element firing and the last element firing.
+        bandwidth_percent (float): The bandwidth of the transducer as a
+            percentage of the center frequency.
 
     Returns:
         (h5py.File): The example dataset.
