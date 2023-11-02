@@ -90,7 +90,9 @@ class RegisterDecorator:
         if isinstance(cls_or_name, str):
             cls_or_name = self.registry[cls_or_name.lower()]
         # Assert that key is a class type
-        assert isinstance(cls_or_name, type), "Key must be a class type"
+        assert isinstance(cls_or_name, type) or callable(
+            cls_or_name
+        ), "Key must be a class type or function"
         return self.additional_registries[parameter.lower()][cls_or_name]
 
     def __str__(self) -> str:
@@ -140,3 +142,12 @@ class RegisterDecorator:
 
         for reg in items_to_register:
             self.additional_registries[reg.lower()] = {}
+
+    def filter_by_argument(self, argument, value):
+        """Returns a list of names of classes that have the given value for the
+        given argument."""
+        return [
+            name
+            for name, cls in self.registry.items()
+            if self.get_parameter(cls, argument) == value
+        ]

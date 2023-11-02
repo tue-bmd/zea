@@ -10,6 +10,7 @@ import warnings
 from pathlib import Path
 
 import cv2
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -18,18 +19,11 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.processing import (
-    _DATA_TYPES,
-    Process,
-    get_contrast_boost_func,
-    threshold_signal,
-    to_8bit,
-)
-from usbmd.setup_usbmd import setup_config
+from usbmd.processing import _DATA_TYPES, Process, to_8bit
+from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.config import Config
 from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
@@ -81,30 +75,19 @@ class DataLoaderUI:
         self.mpl_img = None
         self.fig = None
         self.ax = None
-        self.headless = False
         self.gui = None
 
-        # initialize post processing tools
-        if "postprocess" in self.config:
-            if "contrast_boost" in self.config.postprocess:
-                self.contrast_boost = get_contrast_boost_func()
-            if "lista" in self.config.postprocess:
-                # initialize neural network
-                pass
-            # etc...
+        if self.config.plot.headless is None:
+            self.headless = False
+        else:
+            self.headless = self.config.plot.headless
 
         self.check_for_display()
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
-        # first read from config, headless could be an option
-        if self.config.plot.headless is not None:
-            self.headless = self.config.plot.headless
-        else:
-            self.headles = False
-        # check if non headless mode is possible
         if self.headless is False:
-            if plt.rcParams["backend"].lower() == "agg":
+            if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
                 warnings.warn("Could not connect to display, running headless.")
         else:
@@ -118,6 +101,11 @@ class DataLoaderUI:
         plot_lib = self.config.plot.plot_lib
 
         if self.config.data.get("frame_no") == "all":
+            if to_dtype != "image":
+                warnings.warn(
+                    f"Image to_dtype: {to_dtype} not yet supported for movies.         "
+                    "               falling back to  to_dtype: `image`"
+                )
             # run movie
             self.run_movie(save=save, to_dtype=to_dtype)
         else:
@@ -125,8 +113,13 @@ class DataLoaderUI:
             self.data = self.get_data()
 
             self.image = self.process.run(
-                self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+                self.data,
+                dtype=self.config.data.dtype,
+                to_dtype=to_dtype,
             )
+            if self.process.postprocess:
+                self.image = self.process.postprocess.run(self.image[None, ..., None])
+                self.image = np.squeeze(self.image)
 
             if plot:
                 if self.gui:
@@ -177,30 +170,6 @@ class DataLoaderUI:
         data = self.dataset[file_idx]
 
         return data
-
-    def postprocess(self, image):
-        """Post processing in image domain."""
-        if "postprocess" not in self.config:
-            return image
-
-        if self.config.postprocess.contrast_boost is not None:
-            if self.config.data.dtype not in ["raw_data", "aligned_data"]:
-                warnings.warn(
-                    f"contrast boost not possible with {self.config.data.dtype}"
-                )
-                return image
-            apodization = self.config.data.apodization
-            self.config.data.apodization = "checkerboard"
-            noise = self.process.run(self.data, dtype=self.config.data.dtype)
-            self.config.data.apodization = apodization
-            image = self.contrast_boost(
-                image, noise, **self.config.postprocess.contrast_boost
-            )
-
-        if self.config.postprocess.thresholding is not None:
-            image = threshold_signal(image, **self.config.postprocess.thresholding)
-
-        return image
 
     def plot(
         self,
@@ -340,6 +309,11 @@ class DataLoaderUI:
             images.append(image)
 
         # plot initial frame
+        self.image = self.process.run(self.data, dtype=self.config.data.dtype)
+        if self.process.postprocess:
+            self.image = self.process.postprocess.run(self.image[None, ..., None])
+            self.image = np.squeeze(self.image)
+
         if plot_lib == "matplotlib":
             self.plot(images[0], plot_lib=plot_lib, block=False)
         elif plot_lib == "opencv":
@@ -377,6 +351,14 @@ class DataLoaderUI:
             for i, image in enumerate(images):
                 if self.gui:
                     self.gui.check_freeze()
+
+                self.config.data.frame_no = i
+                self.data = self.get_data()
+
+                image = self.process.run(self.data, dtype=self.config.data.dtype)
+                if self.process.postprocess:
+                    image = self.process.postprocess.run(image[None, ..., None])
+                    image = np.squeeze(image)
 
                 image = self.plot(image, movie=True, plot_lib=plot_lib)
                 if plot_lib == "opencv" and cv2.waitKey(25) & 0xFF == ord("q"):
@@ -484,8 +466,7 @@ def main():
         warnings.warn("GUI is very much in beta, please report any bugs to the Github.")
         gui = USBMDApp(title="USBMD GUI", resolution=(600, 300), verbose=True)
 
-    config = setup_config(file=args.config)
-    config.data.user = set_data_paths(local=config.data.local)
+    config = setup(args.config)
 
     if args.task == "run":
         ui = DataLoaderUI(config)
@@ -512,6 +493,7 @@ def main():
             filetype=filetype,
         )
         generator.generate()
+
 
 if __name__ == "__main__":
     main()

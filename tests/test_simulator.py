@@ -18,11 +18,12 @@ def test_simulator():
         fs=probe_parameters["fs"],
         fc=probe_parameters["fc"],
         angles=[0],
-        )
+    )
 
     simulator = UltrasoundSimulator(probe, scan)
     simulator.generate(200)
     simulator.generate()
+
 
 def test_simulator_without_scan_probe():
     """Test ultrasound the simulator without scan and probe class."""

@@ -52,7 +52,9 @@ any_number = Or(
 )
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
+positive_float = And(float, lambda f: f > 0)
 list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
+list_of_positive_integers = And(list, lambda l: all(_l > 0 for _l in l))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
 
 # optional sub schemas go here, to allow for nested defaults
@@ -115,7 +117,16 @@ postprocess_schema = Schema(
                 Optional("threshold_type", default="hard"): "hard",
             },
         ),
-        Optional("lista", default=False): bool,
+        Optional("lista", default=None): Or(bool, None),
+        Optional("bm3d", default=None): Or(
+            None,
+            {
+                Optional("sigma", default=0.1): positive_float,
+                Optional("stage", default="all_stages"): Or(
+                    "all_stages", "hard_thresholding"
+                ),
+            },
+        ),
     }
 )
 
@@ -125,7 +136,13 @@ scan_schema = Schema(
         Optional("xlims", default=None): Or(None, list_of_size_two),
         Optional("zlims", default=None): Or(None, list_of_size_two),
         Optional("ylims", default=None): Or(None, list_of_size_two),
-        Optional("selected_transmits", default=None): Or(None, int, list),
+        Optional("selected_transmits", default=None): Or(
+            None,
+            positive_integer,
+            list_of_positive_integers,
+            "all",
+            "center",
+        ),
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
         Optional("n_ax", default=None): Or(None, int),
