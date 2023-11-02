@@ -11,6 +11,39 @@ from usbmd.probes import Probe, get_probe
 from usbmd.processing import _DATA_TYPES
 from usbmd.scan import Scan
 
+# TODO: think of different solution for these global constants
+# as now we have to keep these up to date.
+REQUIRED_SCAN_KEYS = [
+    "n_ax",
+    "n_el",
+    "n_tx",
+    "n_frames",
+    "probe_geometry",
+    "sampling_frequency",
+    "center_frequency",
+]
+
+NON_IMAGE_DATA_TYPES = [
+    "raw_data",
+    "beamformed_data",
+    "aligned_data",
+    "envelope_data",
+]
+
+
+def first_not_none_item(arr):
+    """
+    Finds and returns the first non-None item in the given array.
+
+    Args:
+        arr (list): The input array.
+
+    Returns:
+        The first non-None item found in the array, or None if no such item exists.
+    """
+    non_none_items = [item for item in arr if item is not None]
+    return non_none_items[0] if non_none_items else None
+
 
 def generate_example_dataset(path, add_optional_fields=False):
     """Generates an example dataset that contains all the necessary fields.
@@ -119,33 +152,45 @@ def generate_usbmd_dataset(
     dataset.attrs["description"] = description
 
     def add_dataset(group, name, data, description, unit):
-        """Adds a dataset to the given group with a description and unit."""
+        """Adds a dataset to the given group with a description and unit.
+        If data is None, the dataset is not added."""
         if data is None:
-            data = 0  # TODO: replace this hack
+            return
         dataset = group.create_dataset(name, data=data)
         dataset.attrs["description"] = description
         dataset.attrs["unit"] = unit
 
+    n_frames = first_not_none_item(
+        [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
+    ).shape[0]
     n_frames = raw_data.shape[0] if raw_data else image_sc.shape[0]
-    # TODO: what to do if there is no raw data?
     n_tx = raw_data.shape[1] if raw_data else None
     n_el = raw_data.shape[2] if raw_data else None
     n_ax = raw_data.shape[3] if raw_data else None
-    # TODO: why is this not used?
-    n_ch = raw_data.shape[4] if raw_data else None
 
     # Write data group
     data_group = dataset.create_group("data")
     data_group.attrs["description"] = "This group contains the data."
 
-    if raw_data is not None:
-        add_dataset(
-            group=data_group,
-            name="raw_data",
-            data=raw_data.astype(np.float32),
-            description="The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
-            unit="unitless",
-        )
+    add_dataset(
+        group=data_group,
+        name="raw_data",
+        data=raw_data.astype(np.float32),
+        description="The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
+        unit="unitless",
+    )
+
+    add_dataset(
+        group=data_group,
+        name="image_sc",
+        data=image_sc.astype(np.float32),
+        unit="unitless",
+        description=(
+            "The scan converted images of shape [n_frames, output_size_z,"
+            " output_size_x]"
+        ),
+    )
+
     # TODO implement the other data types
     if (
         aligned_data is not None
@@ -154,17 +199,6 @@ def generate_usbmd_dataset(
         or image is not None
     ):
         raise NotImplementedError
-    if image_sc is not None:
-        add_dataset(
-            group=data_group,
-            name="image_sc",
-            data=image_sc.astype(np.float32),
-            unit="unitless",
-            description=(
-                "The scan converted images of shape [n_frames, output_size_z,"
-                " output_size_x]"
-            ),
-        )
 
     # Write scan group
     scan_group = dataset.create_group("scan")
@@ -254,65 +288,59 @@ def generate_usbmd_dataset(
         unit="s",
     )
 
-    if tx_apodizations is not None:
-        add_dataset(
-            group=scan_group,
-            name="tx_apodizations",
-            data=tx_apodizations,
-            description=(
-                "The transmit delays for each element defining the"
-                " wavefront in seconds of shape (n_tx, n_elem). This is"
-                " the time at which each element fires shifted such that"
-                " the first element fires at t=0."
-            ),
-            unit="unitless",
-        )
+    add_dataset(
+        group=scan_group,
+        name="tx_apodizations",
+        data=tx_apodizations,
+        description=(
+            "The transmit delays for each element defining the"
+            " wavefront in seconds of shape (n_tx, n_elem). This is"
+            " the time at which each element fires shifted such that"
+            " the first element fires at t=0."
+        ),
+        unit="unitless",
+    )
 
-    if focus_distances is not None:
-        add_dataset(
-            group=scan_group,
-            name="focus_distances",
-            data=focus_distances,
-            description=(
-                "The transmit focus distances in meters of "
-                "shape (n_tx,). For planewaves this is set to Inf."
-            ),
-            unit="m",
-        )
+    add_dataset(
+        group=scan_group,
+        name="focus_distances",
+        data=focus_distances,
+        description=(
+            "The transmit focus distances in meters of "
+            "shape (n_tx,). For planewaves this is set to Inf."
+        ),
+        unit="m",
+    )
 
-    if polar_angles is not None:
-        add_dataset(
-            group=scan_group,
-            name="polar_angles",
-            data=polar_angles,
-            description=(
-                "The polar angles of the transmit beams in radians of shape (n_tx,)."
-            ),
-            unit="rad",
-        )
+    add_dataset(
+        group=scan_group,
+        name="polar_angles",
+        data=polar_angles,
+        description=(
+            "The polar angles of the transmit beams in radians of shape (n_tx,)."
+        ),
+        unit="rad",
+    )
 
-    if azimuth_angles is not None:
-        add_dataset(
-            group=scan_group,
-            name="azimuth_angles",
-            data=azimuth_angles,
-            description=(
-                "The azimuthal angles of the transmit beams "
-                "in radians of shape (n_tx,)."
-            ),
-            unit="rad",
-        )
+    add_dataset(
+        group=scan_group,
+        name="azimuth_angles",
+        data=azimuth_angles,
+        description=(
+            "The azimuthal angles of the transmit beams in radians of shape (n_tx,)."
+        ),
+        unit="rad",
+    )
 
-    if bandwidth_percent is not None:
-        add_dataset(
-            group=scan_group,
-            name="bandwidth_percent",
-            data=bandwidth_percent,
-            description=(
-                "The receive bandwidth of RF signal in percentage of center frequency."
-            ),
-            unit="unitless",
-        )
+    add_dataset(
+        group=scan_group,
+        name="bandwidth_percent",
+        data=bandwidth_percent,
+        description=(
+            "The receive bandwidth of RF signal in percentage of center frequency."
+        ),
+        unit="unitless",
+    )
 
     dataset.close()
     validate_dataset(path)
@@ -334,15 +362,8 @@ def validate_dataset(path):
     check_key(dataset, "data")
 
     # Check if there is only image data
-    # TODO: neater way to do this, now we have to update this list
-    non_image_data_types = [
-        "raw_data",
-        "beamformed_data",
-        "aligned_data",
-        "envelope_data",
-    ]
     not_only_image_data = (
-        len([i for i in non_image_data_types if i in dataset["data"].keys()]) > 0
+        len([i for i in NON_IMAGE_DATA_TYPES if i in dataset["data"].keys()]) > 0
     )
 
     # Only check scan group if there is non-image data
@@ -400,18 +421,8 @@ def validate_dataset(path):
             ), "The image_sc group does not have a shape of length 3."
 
     if not_only_image_data:
-        required_scan_keys = [
-            "n_ax",
-            "n_el",
-            "n_tx",
-            "n_frames",
-            "probe_geometry",
-            "sampling_frequency",
-            "center_frequency",
-        ]
-
         # Ensure that all required keys are present
-        for required_key in required_scan_keys:
+        for required_key in REQUIRED_SCAN_KEYS:
             assert (
                 required_key in dataset["scan"].keys()
             ), f"The scan group does not contain the required key {required_key}."
