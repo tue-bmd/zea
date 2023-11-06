@@ -51,7 +51,7 @@ def test_all_configs_valid(file):
         check_config(configuration)
 
     except SchemaError as se:
-        raise ValueError(f"Error in config {f}") from se
+        raise ValueError(f"Error in config {file}") from se
 
 
 @pytest.mark.parametrize("dictionary", config_initializers)
