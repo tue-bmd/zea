@@ -169,7 +169,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
     data = np.random.random(size)
     _data = to_image(data, dynamic_range, input_range)
-    _data = to_8bit(data, dynamic_range)
+    _data = to_8bit(data, dynamic_range, pillow=False)
     assert _data.dtype == "uint8"
 
 
