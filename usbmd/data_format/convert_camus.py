@@ -28,6 +28,7 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
         - Collection of metadata.
     """
     # Load image and save info
+    # pylint: disable=used-before-assignment
     image = sitk.ReadImage(str(filepath))
 
     all_metadata = {}
@@ -87,7 +88,13 @@ def get_args():
 
 
 if __name__ == "__main__":
-    import SimpleITK as sitk
+    try:
+        import SimpleITK as sitk
+    except ImportError:
+        print(
+            "SimpleITK not installed. Please install SimpleITK: pip install SimpleITK"
+        )
+        sys.exit()
 
     args = get_args()
 
