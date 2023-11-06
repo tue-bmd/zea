@@ -18,10 +18,11 @@ REQUIRED_SCAN_KEYS = [
     "n_ax",
     "n_el",
     "n_tx",
-    "n_frames",
     "probe_geometry",
     "sampling_frequency",
     "center_frequency",
+    "t0_delays",
+    "n_frames",
 ]
 
 NON_IMAGE_DATA_TYPES = [
@@ -405,20 +406,12 @@ def validate_dataset(path):
     if not_only_image_data:
         check_key(dataset, "scan")
 
-        # validate the scan group
-        check_key(dataset["scan"], "n_ax")
-        check_key(dataset["scan"], "n_el")
-        check_key(dataset["scan"], "n_tx")
-        check_key(dataset["scan"], "probe_geometry")
-        check_key(dataset["scan"], "sampling_frequency")
-        check_key(dataset["scan"], "center_frequency")
-        check_key(dataset["scan"], "t0_delays")
+        for key in REQUIRED_SCAN_KEYS:
+            check_key(dataset["scan"], key)
 
     # validate the data group
-    allowed_data_keys = _DATA_TYPES
-
     for key in dataset["data"].keys():
-        assert key in allowed_data_keys, "The data group contains an unexpected key."
+        assert key in _DATA_TYPES, "The data group contains an unexpected key."
 
         # Validate data shape
         data_shape = dataset["data"][key].shape
@@ -456,80 +449,91 @@ def validate_dataset(path):
             ), "The image_sc group does not have a shape of length 3."
 
     if not_only_image_data:
-        # Ensure that all required keys are present
-        for required_key in REQUIRED_SCAN_KEYS:
-            assert (
-                required_key in dataset["scan"].keys()
-            ), f"The scan group does not contain the required key {required_key}."
-
-        # Ensure that all keys have the correct shape
-        for key in dataset["scan"].keys():
-            if key == "probe_geometry":
-                correct_shape = (dataset["scan"]["n_el"][()], 3)
-                assert (
-                    dataset["scan"][key].shape == correct_shape
-                ), "The probe_geometry does not have the correct shape."
-
-            elif key == "t0_delays":
-                correct_shape = (
-                    dataset["scan"]["n_tx"][()],
-                    dataset["scan"]["n_el"][()],
-                )
-                assert (
-                    dataset["scan"][key].shape == correct_shape
-                ), "The t0_delays does not have the correct shape."
-
-            elif key == "tx_apodizations":
-                correct_shape = (
-                    dataset["scan"]["n_tx"][()],
-                    dataset["scan"]["n_el"][()],
-                )
-                assert (
-                    dataset["scan"][key].shape == correct_shape
-                ), "The tx_apodizations does not have the correct shape."
-
-            elif key == "focus_distances":
-                correct_shape = (dataset["scan"]["n_tx"][()],)
-                assert (
-                    dataset["scan"][key].shape == correct_shape
-                ), "The focus_distances does not have the correct shape."
-
-            elif key == "polar_angles":
-                correct_shape = (dataset["scan"]["n_tx"][()],)
-                assert (
-                    dataset["scan"][key].shape == correct_shape
-                ), "The polar_angles does not have the correct shape."
-
-            elif key == "azimuth_angles":
-                correct_shape = (dataset["scan"]["n_tx"][()],)
-                assert (
-                    dataset["scan"][key].shape == correct_shape
-                ), "The azimuthal_angles does not have the correct shape."
-
-            elif key == "initial_times":
-                correct_shape = (dataset["scan"]["n_tx"][()],)
-                assert (
-                    dataset["scan"][key].shape == correct_shape
-                ), "The initial_times does not have the correct shape."
-
-            elif key in (
-                "sampling_frequency",
-                "bandwidth_percent",
-                "center_frequency",
-                "n_frames",
-                "n_tx",
-                "n_el",
-                "n_ax",
-                "sound_speed",
-            ):
-                assert (
-                    dataset["scan"][key].size == 1
-                ), f"{key} does not have the correct shape."
-
-            else:
-                logging.warning("No validation has been defined for %s.", key)
+        assert_scan_keys_present(dataset)
 
     assert_unit_and_description_present(dataset)
+
+
+def assert_scan_keys_present(dataset):
+    """Ensure that all required keys are present.
+
+    Args:
+        dataset (h5py.File): The dataset instance to check.
+
+    Raises:
+        AssertionError: If a required key is missing or does not have the right shape.
+    """
+    for required_key in REQUIRED_SCAN_KEYS:
+        assert (
+            required_key in dataset["scan"].keys()
+        ), f"The scan group does not contain the required key {required_key}."
+
+    # Ensure that all keys have the correct shape
+    for key in dataset["scan"].keys():
+        if key == "probe_geometry":
+            correct_shape = (dataset["scan"]["n_el"][()], 3)
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The probe_geometry does not have the correct shape."
+
+        elif key == "t0_delays":
+            correct_shape = (
+                dataset["scan"]["n_tx"][()],
+                dataset["scan"]["n_el"][()],
+            )
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The t0_delays does not have the correct shape."
+
+        elif key == "tx_apodizations":
+            correct_shape = (
+                dataset["scan"]["n_tx"][()],
+                dataset["scan"]["n_el"][()],
+            )
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The tx_apodizations does not have the correct shape."
+
+        elif key == "focus_distances":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The focus_distances does not have the correct shape."
+
+        elif key == "polar_angles":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The polar_angles does not have the correct shape."
+
+        elif key == "azimuth_angles":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The azimuthal_angles does not have the correct shape."
+
+        elif key == "initial_times":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The initial_times does not have the correct shape."
+
+        elif key in (
+            "sampling_frequency",
+            "bandwidth_percent",
+            "center_frequency",
+            "n_frames",
+            "n_tx",
+            "n_el",
+            "n_ax",
+            "sound_speed",
+        ):
+            assert (
+                dataset["scan"][key].size == 1
+            ), f"{key} does not have the correct shape."
+
+        else:
+            logging.warning("No validation has been defined for %s.", key)
 
 
 def assert_unit_and_description_present(hdf5_file, _prefix=""):
