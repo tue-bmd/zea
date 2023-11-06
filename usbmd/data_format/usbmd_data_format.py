@@ -32,7 +32,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     n_ch = 1
     n_frames = 2
 
-    raw_data = np.ones((n_frames, n_tx, n_el, n_ax, n_ch))
+    raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
 
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
     tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
@@ -130,16 +130,17 @@ def generate_usbmd_dataset(
         dataset.attrs["description"] = description
         dataset.attrs["unit"] = unit
 
+    # Get the dimensions of the data
     n_frames = raw_data.shape[0]
     n_tx = raw_data.shape[1]
-    n_el = raw_data.shape[2]
-    n_ax = raw_data.shape[3]
+    n_ax = raw_data.shape[2]
+    n_el = raw_data.shape[3]
     n_ch = raw_data.shape[4]
 
     # Write data group
     data_group = dataset.create_group("data")
     data_group.attrs["description"] = "This group contains the data."
-    data_shape = (n_frames, n_tx, n_el, n_ax, n_ch)
+    data_shape = (n_frames, n_tx, n_ax, n_el, n_ch)
     assert raw_data.shape == data_shape, (
         f"The raw_data has the wrong shape. Expected {data_shape}, "
         f"got {raw_data.shape}."
@@ -149,7 +150,7 @@ def generate_usbmd_dataset(
         group=data_group,
         name="raw_data",
         data=raw_data.astype(np.float32),
-        description="The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
+        description="The raw_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).",
         unit="unitless",
     )
 
@@ -336,15 +337,18 @@ def validate_dataset(path):
                 data_shape[1] == dataset["scan"]["n_tx"][()]
             ), "n_tx does not match the second dimension of raw_data."
             assert (
-                data_shape[2] == dataset["scan"]["n_el"][()]
-            ), "n_el does not match the third dimension of raw_data."
+                data_shape[2] == dataset["scan"]["n_ax"][()]
+            ), "n_ax does not match the third dimension of raw_data."
             assert (
-                data_shape[3] == dataset["scan"]["n_ax"][()]
-            ), "n_ax does not match the fourth dimension of raw_data."
+                data_shape[3] == dataset["scan"]["n_el"][()]
+            ), "n_el does not match the fourth dimension of raw_data."
             assert data_shape[4] in (
                 1,
                 2,
-            ), "The fifth dimension of raw_data is not 1 or 2."
+            ), (
+                "The fifth dimension of raw_data, which is the complex channel "
+                "dimension is not 1 or 2."
+            )
 
         elif key == "aligned_data":
             logging.warning("No validation has been defined for aligned data.")
@@ -481,7 +485,7 @@ def load_usbmd_file(
             This function only uses parameters from config.scan.
 
     Returns:
-        (np.ndarray): The raw data of shape (n_frames, n_tx, n_el, n_ax, n_ch).
+        (np.ndarray): The raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
         (Scan): A scan object containing the parameters of the acquisition.
         (Probe): A probe object containing the parameters of the probe.
     """
