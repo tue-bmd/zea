@@ -92,11 +92,30 @@ def generate_usbmd_dataset(
             shape (n_frames, n_tx, n_el, n_ax, n_ch).
         add_optional_fields (bool, optional): Whether to add optional fields to
             the dataset. Defaults to False.
-
-    Returns:
-        (h5py.File): The example dataset.
+        probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).
+        sampling_frequency (float): The sampling frequency in Hz.
+        center_frequency (float): The center frequency in Hz.
+        initial_times (np.ndarray): The times when the A/D converter starts
+            sampling in seconds of shape (n_tx,). This is the time between the
+            first element firing and the first recorded sample.
+        t0_delays (np.ndarray): The t0_delays of shape (n_tx, n_el).
+        sound_speed (float): The speed of sound in m/s.
+        probe_name (str): The name of the probe.
+        description (str, optional): A description of the dataset. Defaults to
+            "No description was supplied".
+        focus_distances (np.ndarray, optional): The transmit focus distances in
+            meters of shape (n_tx,). For planewaves this is set to Inf.
+        polar_angles (np.ndarray, optional): The polar angles of the transmit
+            beams in radians of shape (n_tx,).
+        azimuth_angles (np.ndarray, optional): The azimuthal angles of the
+            transmit beams in radians of shape (n_tx,).
+        tx_apodizations (np.ndarray, optional): The transmit delays for each
+            element defining the wavefront in seconds of shape (n_tx, n_elem).
+        bandwidth_percent (float, optional): The receive bandwidth of the transmit
+            waveform. This is given in percentage of the center frequency.
     """
 
+    # Create the dataset file
     dataset = h5py.File(path, "w")
 
     dataset.attrs["probe"] = probe_name
