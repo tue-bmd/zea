@@ -286,6 +286,10 @@ class DataLoaderUI:
 
         print('Playing video, press/hold "q" while the window is active to exit...')
         plot_lib = self.config.plot.plot_lib
+
+        # Get n_frames
+        self.config.data.frame_no = 0
+        self.data = self.get_data()
         n_frames = len(self.dataset.h5_reader)
 
         # Process all data
