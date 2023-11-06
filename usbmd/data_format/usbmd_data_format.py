@@ -129,6 +129,11 @@ def generate_usbmd_dataset(
     if path.exists():
         raise FileExistsError(f"The file {path} already exists.")
 
+    assert isinstance(probe_name, str), "The probe name must be a string."
+    assert description is None or isinstance(
+        description, str
+    ), "The description must be a string or None."
+
     # Create the dataset file
     with h5py.File(path, "w") as dataset:
         dataset.attrs["probe"] = probe_name
