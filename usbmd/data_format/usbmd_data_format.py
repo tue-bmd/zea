@@ -116,7 +116,11 @@ def generate_usbmd_dataset(
     """
 
     assert isinstance(path, (str, Path)), "The path must be a string or a Path."
-    assert Path(path).exists(), "The path does not exist."
+    # Convert the path to a Path object
+    path = Path(path)
+    assert path.suffix == ".hdf5", "The path must end with .hdf5."
+    # Create the directory if it does not exist
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     # Create the dataset file
     dataset = h5py.File(path, "w")
