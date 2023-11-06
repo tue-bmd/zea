@@ -130,180 +130,178 @@ def generate_usbmd_dataset(
         raise FileExistsError(f"The file {path} already exists.")
 
     # Create the dataset file
-    dataset = h5py.File(path, "w")
-
-    dataset.attrs["probe"] = probe_name
-    dataset.attrs["description"] = description
-
-    def add_dataset(group, name, data, description, unit):
-        """Adds a dataset to the given group with a description and unit."""
-        dataset = group.create_dataset(name, data=data)
+    with h5py.File(path, "w") as dataset:
+        dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
-        dataset.attrs["unit"] = unit
 
-    # Get the dimensions of the data
-    n_frames = raw_data.shape[0]
-    n_tx = raw_data.shape[1]
-    n_ax = raw_data.shape[2]
-    n_el = raw_data.shape[3]
-    n_ch = raw_data.shape[4]
+        def add_dataset(group, name, data, description, unit):
+            """Adds a dataset to the given group with a description and unit."""
+            dataset = group.create_dataset(name, data=data)
+            dataset.attrs["description"] = description
+            dataset.attrs["unit"] = unit
 
-    # Write data group
-    data_group = dataset.create_group("data")
-    data_group.attrs["description"] = "This group contains the data."
-    data_shape = (n_frames, n_tx, n_ax, n_el, n_ch)
-    assert raw_data.shape == data_shape, (
-        f"The raw_data has the wrong shape. Expected {data_shape}, "
-        f"got {raw_data.shape}."
-    )
+        # Get the dimensions of the data
+        n_frames = raw_data.shape[0]
+        n_tx = raw_data.shape[1]
+        n_ax = raw_data.shape[2]
+        n_el = raw_data.shape[3]
+        n_ch = raw_data.shape[4]
 
-    add_dataset(
-        group=data_group,
-        name="raw_data",
-        data=raw_data.astype(np.float32),
-        description="The raw_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).",
-        unit="unitless",
-    )
+        # Write data group
+        data_group = dataset.create_group("data")
+        data_group.attrs["description"] = "This group contains the data."
+        data_shape = (n_frames, n_tx, n_ax, n_el, n_ch)
+        assert raw_data.shape == data_shape, (
+            f"The raw_data has the wrong shape. Expected {data_shape}, "
+            f"got {raw_data.shape}."
+        )
 
-    # Write scan group
-    scan_group = dataset.create_group("scan")
-    scan_group.attrs["description"] = "This group contains the scan parameters."
-
-    add_dataset(
-        group=scan_group,
-        name="n_ax",
-        data=n_ax,
-        description="The number of axial samples.",
-        unit="unitless",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="n_el",
-        data=n_el,
-        description="The number of elements in the probe.",
-        unit="unitless",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="n_tx",
-        data=n_tx,
-        description="The number of transmits per frame.",
-        unit="unitless",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="n_frames",
-        data=n_frames,
-        description="The number of frames.",
-        unit="unitless",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="sound_speed",
-        data=sound_speed,
-        description="The speed of sound in m/s",
-        unit="m/s",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="probe_geometry",
-        data=probe_geometry,
-        description="The probe geometry of shape (n_el, 3).",
-        unit="m",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="sampling_frequency",
-        data=sampling_frequency,
-        description="The sampling frequency in Hz.",
-        unit="Hz",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="center_frequency",
-        data=center_frequency,
-        description="The center frequency in Hz.",
-        unit="Hz",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="initial_times",
-        data=initial_times,
-        description="The times when the A/D converter starts sampling "
-        "in seconds of shape (n_tx,). This is the time between the "
-        "first element firing and the first recorded sample.",
-        unit="s",
-    )
-
-    add_dataset(
-        group=scan_group,
-        name="t0_delays",
-        data=t0_delays,
-        description="The t0_delays of shape (n_tx, n_el).",
-        unit="s",
-    )
-
-    if tx_apodizations is not None:
         add_dataset(
-            group=scan_group,
-            name="tx_apodizations",
-            data=tx_apodizations,
-            description="The transmit delays for each element defining the"
-            " wavefront in seconds of shape (n_tx, n_elem). This is"
-            " the time at which each element fires shifted such that"
-            " the first element fires at t=0.",
+            group=data_group,
+            name="raw_data",
+            data=raw_data.astype(np.float32),
+            description="The raw_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).",
             unit="unitless",
         )
 
-    if focus_distances is not None:
+        # Write scan group
+        scan_group = dataset.create_group("scan")
+        scan_group.attrs["description"] = "This group contains the scan parameters."
+
         add_dataset(
             group=scan_group,
-            name="focus_distances",
-            data=focus_distances,
-            description="The transmit focus distances in meters of "
-            "shape (n_tx,). For planewaves this is set to Inf.",
+            name="n_ax",
+            data=n_ax,
+            description="The number of axial samples.",
+            unit="unitless",
+        )
+
+        add_dataset(
+            group=scan_group,
+            name="n_el",
+            data=n_el,
+            description="The number of elements in the probe.",
+            unit="unitless",
+        )
+
+        add_dataset(
+            group=scan_group,
+            name="n_tx",
+            data=n_tx,
+            description="The number of transmits per frame.",
+            unit="unitless",
+        )
+
+        add_dataset(
+            group=scan_group,
+            name="n_frames",
+            data=n_frames,
+            description="The number of frames.",
+            unit="unitless",
+        )
+
+        add_dataset(
+            group=scan_group,
+            name="sound_speed",
+            data=sound_speed,
+            description="The speed of sound in m/s",
+            unit="m/s",
+        )
+
+        add_dataset(
+            group=scan_group,
+            name="probe_geometry",
+            data=probe_geometry,
+            description="The probe geometry of shape (n_el, 3).",
             unit="m",
         )
 
-    if polar_angles is not None:
         add_dataset(
             group=scan_group,
-            name="polar_angles",
-            data=polar_angles,
-            description="The polar angles of the transmit beams in "
-            "radians of shape (n_tx,).",
-            unit="rad",
+            name="sampling_frequency",
+            data=sampling_frequency,
+            description="The sampling frequency in Hz.",
+            unit="Hz",
         )
 
-    if azimuth_angles is not None:
         add_dataset(
             group=scan_group,
-            name="azimuth_angles",
-            data=azimuth_angles,
-            description="The azimuthal angles of the transmit beams "
-            "in radians of shape (n_tx,).",
-            unit="rad",
+            name="center_frequency",
+            data=center_frequency,
+            description="The center frequency in Hz.",
+            unit="Hz",
         )
 
-    if bandwidth_percent is not None:
         add_dataset(
             group=scan_group,
-            name="bandwidth_percent",
-            data=bandwidth_percent,
-            description="The receive bandwidth of RF signal in "
-            "percentage of center frequency.",
-            unit="unitless",
+            name="initial_times",
+            data=initial_times,
+            description="The times when the A/D converter starts sampling "
+            "in seconds of shape (n_tx,). This is the time between the "
+            "first element firing and the first recorded sample.",
+            unit="s",
         )
 
-    dataset.close()
+        add_dataset(
+            group=scan_group,
+            name="t0_delays",
+            data=t0_delays,
+            description="The t0_delays of shape (n_tx, n_el).",
+            unit="s",
+        )
+
+        if tx_apodizations is not None:
+            add_dataset(
+                group=scan_group,
+                name="tx_apodizations",
+                data=tx_apodizations,
+                description="The transmit delays for each element defining the"
+                " wavefront in seconds of shape (n_tx, n_elem). This is"
+                " the time at which each element fires shifted such that"
+                " the first element fires at t=0.",
+                unit="unitless",
+            )
+
+        if focus_distances is not None:
+            add_dataset(
+                group=scan_group,
+                name="focus_distances",
+                data=focus_distances,
+                description="The transmit focus distances in meters of "
+                "shape (n_tx,). For planewaves this is set to Inf.",
+                unit="m",
+            )
+
+        if polar_angles is not None:
+            add_dataset(
+                group=scan_group,
+                name="polar_angles",
+                data=polar_angles,
+                description="The polar angles of the transmit beams in "
+                "radians of shape (n_tx,).",
+                unit="rad",
+            )
+
+        if azimuth_angles is not None:
+            add_dataset(
+                group=scan_group,
+                name="azimuth_angles",
+                data=azimuth_angles,
+                description="The azimuthal angles of the transmit beams "
+                "in radians of shape (n_tx,).",
+                unit="rad",
+            )
+
+        if bandwidth_percent is not None:
+            add_dataset(
+                group=scan_group,
+                name="bandwidth_percent",
+                data=bandwidth_percent,
+                description="The receive bandwidth of RF signal in "
+                "percentage of center frequency.",
+                unit="unitless",
+            )
+
     validate_dataset(path)
 
 
