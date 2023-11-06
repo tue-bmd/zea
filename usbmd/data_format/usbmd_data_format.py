@@ -115,6 +115,9 @@ def generate_usbmd_dataset(
             waveform. This is given in percentage of the center frequency.
     """
 
+    assert isinstance(path, (str, Path)), "The path must be a string or a Path."
+    assert Path(path).exists(), "The path does not exist."
+
     # Create the dataset file
     dataset = h5py.File(path, "w")
 
