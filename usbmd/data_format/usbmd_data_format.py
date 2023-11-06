@@ -122,6 +122,13 @@ def generate_usbmd_dataset(
     # Create the directory if it does not exist
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
+    assert (
+        isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
+    ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
+
+    if path.exists():
+        raise FileExistsError(f"The file {path} already exists.")
+
     # Create the dataset file
     dataset = h5py.File(path, "w")
 
