@@ -164,6 +164,9 @@ def generate_usbmd_dataset(
     dataset.attrs["probe"] = probe_name
     dataset.attrs["description"] = description
 
+    def convert_datatype(x, astype=np.float32):
+        return x.astype(astype) if x is not None else None
+
     def add_dataset(group, name, data, description, unit):
         """Adds a dataset to the given group with a description and unit.
         If data is None, the dataset is not added."""
@@ -188,7 +191,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=data_group,
         name="raw_data",
-        data=raw_data.astype(np.float32),
+        data=convert_datatype(raw_data),
         description="The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
         unit="unitless",
     )
@@ -196,7 +199,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=data_group,
         name="aligned_data",
-        data=aligned_data.astype(np.float32),
+        data=convert_datatype(aligned_data),
         description="The aligned_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
         unit="unitless",
     )
@@ -204,7 +207,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=data_group,
         name="envelope_data",
-        data=envelope_data.astype(np.float32),
+        data=convert_datatype(envelope_data),
         description="The envelope_data of shape (n_frames, n_z, n_x).",
         unit="unitless",
     )
@@ -212,7 +215,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=data_group,
         name="beamformed_data",
-        data=beamformed_data.astype(np.float32),
+        data=convert_datatype(beamformed_data),
         description="The beamformed_data of shape (n_frames, n_z, n_x).",
         unit="unitless",
     )
@@ -220,7 +223,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=data_group,
         name="image",
-        data=image.astype(np.float32),
+        data=convert_datatype(image),
         unit="unitless",
         description="The images of shape [n_frames, n_z, n_x]",
     )
@@ -228,7 +231,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=data_group,
         name="image_sc",
-        data=image_sc.astype(np.float32),
+        data=convert_datatype(image_sc),
         unit="unitless",
         description=(
             "The scan converted images of shape [n_frames, output_size_z,"
