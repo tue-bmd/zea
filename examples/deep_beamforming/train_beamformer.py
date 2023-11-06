@@ -8,6 +8,10 @@ input, towards an 11 plane wave target. The target is created using the same sca
 input, but with a different number of angles and DAS beamforming.
 
 """
+
+import os
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -19,7 +23,7 @@ from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup, setup_config
-from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer, patch_wise
+from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.utils.utils import update_dictionary
 
@@ -37,6 +41,7 @@ def train_beamformer(config):
     scan_class = dataset.get_scan_class()
     default_scan_params = dataset.get_default_scan_parameters()
     config_scan_params = config.scan
+    config.model.beamformer.patches = 4
 
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
@@ -53,14 +58,14 @@ def train_beamformer(config):
     # Create target data
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
-    target_beamformer = patch_wise(target_beamformer)
     print('Creating target data...')
-    targets = target_beamformer.predict(np.expand_dims(data[scan.selected_transmits], axis=0))
+    targets = target_beamformer.predict(np.expand_dims(data, axis=0))
 
     ## Create the beamforming model
     # Only use the center angle for training
     config.scan.selected_transmits = 1
     config.model.beamformer.type = "able"
+    config.model.beamformer.patches = 1 # No patching needed for the single angle beamformer
     config_scan_params = config.scan
 
     # dict merging of manual config and dataset default scan parameters
@@ -94,7 +99,7 @@ def train_beamformer(config):
 
     ## Augment the data and train the model
     # repeat the inputs and targets N times with noise
-    N = 100
+    N = 10
     inputs = np.repeat(inputs, N, axis=0)
     targets = np.repeat(targets, N, axis=0)
 
@@ -105,7 +110,7 @@ def train_beamformer(config):
     inputs += noise
 
     # Train the model
-    history = beamformer.fit(inputs, targets, epochs=100, batch_size=1, verbose=1)
+    history = beamformer.fit(inputs, targets, epochs=1, batch_size=1, verbose=1)
     predictions = np.array(beamformer(inputs))
     das = np.array(das_beamformer(inputs))
 
