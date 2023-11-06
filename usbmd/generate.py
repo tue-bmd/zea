@@ -16,8 +16,9 @@ import numpy as np
 import tqdm
 
 from usbmd.datasets import get_dataset
+from usbmd.display import to_8bit
 from usbmd.probes import get_probe
-from usbmd.processing import Process, to_8bit
+from usbmd.processing import Process
 from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.utils import update_dictionary

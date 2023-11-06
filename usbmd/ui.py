@@ -20,9 +20,10 @@ wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
 from usbmd.datasets import get_dataset
+from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.processing import Process, to_8bit
+from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.checks import _DATA_TYPES
