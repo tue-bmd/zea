@@ -47,8 +47,8 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
         n_ax=2047,
-        fs=probe_parameters["fs"],
-        fc=probe_parameters["fc"],
+        sampling_frequency=probe_parameters["sampling_frequency"],
+        center_frequency=probe_parameters["center_frequency"],
         angles=np.array(
             [
                 0,
