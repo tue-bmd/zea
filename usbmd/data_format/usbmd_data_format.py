@@ -167,6 +167,10 @@ def generate_usbmd_dataset(
     def convert_datatype(x, astype=np.float32):
         return x.astype(astype) if x is not None else None
 
+    def first_not_none_shape(arr, axis):
+        data = first_not_none_item(arr)
+        return data.shape[axis] if data is not None else None
+
     def add_dataset(group, name, data, description, unit):
         """Adds a dataset to the given group with a description and unit.
         If data is None, the dataset is not added."""
@@ -179,10 +183,9 @@ def generate_usbmd_dataset(
     n_frames = first_not_none_item(
         [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
     ).shape[0]
-    n_frames = raw_data.shape[0] if raw_data else image_sc.shape[0]
-    n_tx = raw_data.shape[1] if raw_data else None
-    n_el = raw_data.shape[2] if raw_data else None
-    n_ax = raw_data.shape[3] if raw_data else None
+    n_tx = first_not_none_shape([raw_data, aligned_data], axis=1)
+    n_el = first_not_none_shape([raw_data, aligned_data], axis=2)
+    n_ax = first_not_none_shape([raw_data, aligned_data], axis=3)
 
     # Write data group
     data_group = dataset.create_group("data")
@@ -310,7 +313,7 @@ def generate_usbmd_dataset(
     add_dataset(
         group=scan_group,
         name="initial_times",
-        data=initial_times if initial_times else [],
+        data=initial_times,
         description=(
             "The times when the A/D converter starts sampling "
             "in seconds of shape (n_tx,). This is the time between the "
