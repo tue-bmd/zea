@@ -72,7 +72,7 @@ def convert_camus(source_path, output_path, overwrite=False):
     generate_usbmd_dataset(
         path=output_path,
         image_sc=image_seq,
-        probe_name="GE_M5S",
+        probe_name="generic",
         description="camus dataset converted to USBMD format",
     )
 
