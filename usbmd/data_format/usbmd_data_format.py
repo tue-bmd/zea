@@ -10,6 +10,7 @@ import numpy as np
 from usbmd.probes import Probe, get_probe
 from usbmd.processing import _DATA_TYPES
 from usbmd.scan import Scan
+from usbmd.utils.utils import first_not_none_item
 
 # TODO: think of different solution for these global constants
 # as now we have to keep these up to date.
@@ -29,20 +30,6 @@ NON_IMAGE_DATA_TYPES = [
     "aligned_data",
     "envelope_data",
 ]
-
-
-def first_not_none_item(arr):
-    """
-    Finds and returns the first non-None item in the given array.
-
-    Args:
-        arr (list): The input array.
-
-    Returns:
-        The first non-None item found in the array, or None if no such item exists.
-    """
-    non_none_items = [item for item in arr if item is not None]
-    return non_none_items[0] if non_none_items else None
 
 
 def generate_example_dataset(path, add_optional_fields=False):
@@ -242,7 +229,10 @@ def generate_usbmd_dataset(
         name="image_sc",
         data=image_sc.astype(np.float32),
         unit="unitless",
-        description="The scan converted images of shape [n_frames, output_size_z, output_size_x]",
+        description=(
+            "The scan converted images of shape [n_frames, output_size_z,"
+            " output_size_x]"
+        ),
     )
 
     # Write scan group
