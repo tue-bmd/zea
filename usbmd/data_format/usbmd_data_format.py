@@ -9,6 +9,7 @@ import numpy as np
 
 from usbmd.probes import Probe, get_probe
 from usbmd.scan import Scan
+from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.utils import first_not_none_item
 
 # TODO: think of different solution for these global constants
@@ -30,7 +31,6 @@ NON_IMAGE_DATA_TYPES = [
     "aligned_data",
     "envelope_data",
 ]
-from usbmd.utils.checks import _DATA_TYPES
 
 
 def generate_example_dataset(path, add_optional_fields=False):
