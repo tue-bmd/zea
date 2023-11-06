@@ -8,6 +8,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 import torch
 
 from usbmd.probes import Verasonics_l11_4v
@@ -22,7 +23,8 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-def test_das_beamforming(debug=False, compare_gt=True):
+@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"])
+def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
 
@@ -45,13 +47,16 @@ def test_das_beamforming(debug=False, compare_gt=True):
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
         n_ax=2047,
-        fs=probe_parameters["fs"],
-        fc=probe_parameters["fc"],
+        sampling_frequency=probe_parameters["sampling_frequency"],
+        center_frequency=probe_parameters["center_frequency"],
         angles=np.array(
             [
                 0,
             ]
         ),
+    )
+    scan.focus_distances = (
+        np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
     # Set scan grid parameters
@@ -77,13 +82,12 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
     # Set device
     device = config.device
-    if not device == 'cpu' and not torch.cuda.is_available():
-        device = 'cpu'
+    if not device == "cpu" and not torch.cuda.is_available():
+        device = "cpu"
         print("Warning: CUDA not available. Using CPU instead.")
 
     # Perform beamforming and convert to numpy array
-    outputs = on_device_torch(
-        beamformer, inputs, device=device, return_numpy=True)
+    outputs = on_device_torch(beamformer, inputs, device=device, return_numpy=True)
 
     # plot results
     if debug:
@@ -95,8 +99,7 @@ def test_das_beamforming(debug=False, compare_gt=True):
         axs[0].set_title("RF data")
         axs[1].imshow(np.squeeze(outputs))
         axs[1].set_title("Beamformed")
-        axs[2].imshow(cv2.GaussianBlur(
-            data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
+        axs[2].imshow(cv2.GaussianBlur(data[1].squeeze(), (5, 5), cv2.BORDER_DEFAULT))
         axs[2].set_title("Ground Truth")
         fig.show()
 
@@ -119,4 +122,4 @@ def test_das_beamforming(debug=False, compare_gt=True):
 
 
 if __name__ == "__main__":
-    test_das_beamforming(debug=True)
+    test_das_beamforming(reconstruction_mode="pw", debug=True)

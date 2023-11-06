@@ -8,8 +8,8 @@ import h5py
 import numpy as np
 
 from usbmd.probes import Probe, get_probe
-from usbmd.processing import _DATA_TYPES
 from usbmd.scan import Scan
+from usbmd.utils.checks import _DATA_TYPES
 
 
 def generate_example_dataset(path, add_optional_fields=False):
@@ -439,7 +439,9 @@ def assert_unit_and_description_present(hdf5_file, _prefix=""):
             ), f"The dataset {_prefix}/{key} does not have a description attribute."
 
 
-def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
+def load_usbmd_file(
+    path, frames=None, transmits=None, data_type="raw_data", config=None
+):
     """Loads a hdf5 file in the USBMD format and returns the data together with
     a scan object containing the parameters of the acquisition and a probe
     object containing the parameters of the probe.
@@ -453,6 +455,8 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
+        config (utils.config.Config, optional): A config object containing parameters.
+            This function only uses parameters from config.scan.
 
     Returns:
         (np.ndarray): The raw data of shape (n_frames, n_tx, n_el, n_ax, n_ch).
@@ -490,7 +494,7 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
 
         # Define the probe
         probe_name = hdf5_file.attrs["probe"]
-        ele_pos = hdf5_file["scan"]["probe_geometry"][:]
+        probe_geometry = hdf5_file["scan"]["probe_geometry"][:]
 
         # Try to load a known probe type. If this fails, use a generic probe
         # instead, but warn the user.
@@ -502,12 +506,12 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
                 probe_name,
             )
 
-            probe = Probe(ele_pos=ele_pos)
+            probe = Probe(probe_geometry=probe_geometry)
 
         # Verify that the probe geometry matches the probe geometry in the
         # dataset
-        if not np.allclose(ele_pos, probe.ele_pos):
-            probe.ele_pos = ele_pos
+        if not np.allclose(probe_geometry, probe.probe_geometry):
+            probe.probe_geometry = probe_geometry
             logging.warning(
                 "The probe geometry in the data file does not "
                 "match the probe geometry of the probe. The probe "
@@ -518,9 +522,10 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         n_frames = int(hdf5_file["scan"]["n_frames"][()])
         n_ax = int(hdf5_file["scan"]["n_ax"][()])
         n_tx = int(hdf5_file["scan"]["n_tx"][()])
-        c = float(hdf5_file["scan"]["sound_speed"][()])
-        fs = float(hdf5_file["scan"]["sampling_frequency"][()])
-        fc = float(hdf5_file["scan"]["center_frequency"][()])
+        sound_speed = float(hdf5_file["scan"]["sound_speed"][()])
+        sampling_frequency = float(hdf5_file["scan"]["sampling_frequency"][()])
+        center_frequency = float(hdf5_file["scan"]["center_frequency"][()])
+        n_el = int(hdf5_file["scan"]["n_el"][()])
         bandwidth_percent = float(hdf5_file["scan"]["bandwidth_percent"][()])
 
         if frames is None:
@@ -528,14 +533,6 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
 
         if transmits is None:
             transmits = np.arange(n_tx, dtype=np.int32)
-
-        # Compute the depth of the scan from the number of axial samples
-        depth = n_ax / fs * c / 2
-
-        # Set the scan limits to the limits of the probe and the depth of the
-        # scan
-        x0, x1 = ele_pos[0, 0], ele_pos[-1, 0]
-        z0, z1 = 0, depth
 
         n_tx = len(transmits)
 
@@ -567,20 +564,21 @@ def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data"):
         # Initialize the scan object
         scan = Scan(
             n_tx=n_tx,
+            n_el=n_el,
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
-            xlims=(x0, x1),
-            zlims=(z0, z1),
-            fc=fc,
-            fs=fs,
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
             bandwidth_percent=bandwidth_percent,
             modtype=modtype,
             n_ax=n_ax,
-            c=c,
+            sound_speed=sound_speed,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
+            probe_geometry=probe_geometry,
+            **config.scan,
         )
 
         return data, scan, probe

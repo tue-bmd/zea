@@ -15,7 +15,7 @@ def get_probe_from_config(config):
     figure out which probe to initialize.
 
     Args:
-        config (Config): The config object to read parameters from.
+        config (utils.config.Config): The config object to read parameters from.
 
     """
     dataset_name = config.data.dataset_name
@@ -53,7 +53,7 @@ def initialize_scan_from_config(config):
     Defines a scan based on parameters in a config.
 
     Args:
-        config (Config): The config object to read parameters from.
+        config (utils.config.Config): The config object to read parameters from.
 
     Raises:
         NotImplementedError: This method is not implemented and always raises
