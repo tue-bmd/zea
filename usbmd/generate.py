@@ -14,7 +14,6 @@ from pathlib import Path
 import h5py
 import numpy as np
 import tqdm
-from PIL import Image
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
