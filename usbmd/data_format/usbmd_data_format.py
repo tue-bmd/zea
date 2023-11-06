@@ -529,9 +529,6 @@ def load_usbmd_file(
     ), f"Data type {data_type} does not exist, should be in {_DATA_TYPES}"
 
     with h5py.File(path, "r") as hdf5_file:
-        # data = hdf5_file['data']['raw_data'][:]
-        # scan = Scan(hdf5_file['scan'])
-
         # Define the probe
         probe_name = hdf5_file.attrs["probe"]
         probe_geometry = hdf5_file["scan"]["probe_geometry"][:]
