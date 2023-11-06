@@ -250,15 +250,15 @@ def test_up_and_down_conversion(factor, batch_size):
     """Test rf2iq and iq2rf in sequence"""
     probe = get_probe("verasonics_l11_4v")
     probe_parameters = probe.get_default_scan_parameters()
-    fs = probe_parameters["fs"]
-    fc = probe_parameters["fc"]
+    fs = probe_parameters["sampling_frequency"]
+    fc = probe_parameters["center_frequency"]
     scan = PlaneWaveScan(
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
         n_ax=2048,
-        fs=fs,
-        fc=fc,
+        sampling_frequency=fs,
+        center_frequency=fc,
         angles=np.array(
             [
                 0,
