@@ -193,8 +193,6 @@ class DataLoaderUI:
             fig (fig): figure object.
 
         """
-        assert plot_lib in ["matplotlib", "opencv"]
-
         if self.probe.probe_type == "phased":
             image = self.process.run(image, dtype="image", to_dtype="image_sc")
 
@@ -222,18 +220,20 @@ class DataLoaderUI:
         if movie:
             if plot_lib == "matplotlib":
                 if self.mpl_img is None:
-                    raise ValueError("First run plot function without movie.")
-                self.mpl_img.set_data(image)
-                self.fig.canvas.draw_idle()
-                self.fig.canvas.flush_events()
-                image = matplotlib_figure_to_numpy(self.fig)
+                    movie = False
+                else:
+                    self.mpl_img.set_data(image)
+                    self.fig.canvas.draw_idle()
+                    self.fig.canvas.flush_events()
+                    image = matplotlib_figure_to_numpy(self.fig)
                 return image
             elif plot_lib == "opencv":
                 image = to_8bit(image, self.config.data.dynamic_range, pillow=False)
                 if not self.headless:
                     cv2.imshow("frame", image)
                 return image
-        else:
+
+        if not movie:
             if plot_lib == "matplotlib":
                 self.mpl_img = self.ax.imshow(
                     image,
@@ -281,83 +281,82 @@ class DataLoaderUI:
 
         if to_dtype not in ["image", "image_sc"]:
             warnings.warn(
-                f"Image to_dtype: {to_dtype} not yet supported for movies."
+                f"Image to_dtype: {to_dtype} not supported for movies."
                 "falling back to  to_dtype: `image`"
             )
             to_dtype = "image"
 
         print('Playing video, press/hold "q" while the window is active to exit...')
-        plot_lib = self.config.plot.plot_lib
-
-        # Get n_frames
-        self.config.data.frame_no = 0
-        self.data = self.get_data()
-        n_frames = len(self.dataset.h5_reader)
-
-        # Process all data
-        images = []
-        self.verbose = False
-        for i in range(n_frames):
-            self.config.data.frame_no = i
-            self.data = self.get_data()
-
-            image = self.process.run(
-                self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
-            )
-
-            if self.process.postprocess:
-                image = self.process.postprocess.run(image[None, ..., None])
-                image = np.squeeze(image)
-            images.append(image)
-
-        if plot_lib == "matplotlib":
-            self.plot(images[0], plot_lib=plot_lib, block=False)
-        elif plot_lib == "opencv":
-            self.plot(images[0], movie=True, plot_lib=plot_lib, block=False)
-        else:
-            raise ValueError(f"plot_lib {plot_lib} not supported")
-
-        # plot remaining frames in a loop
-        if not self.headless:
-            self.plot_loop(images, plot_lib)
+        images = self.run_movie_loop(save, to_dtype)
 
         if save:
             images = [
                 to_8bit(
-                    image,
-                    dynamic_range=self.config.data.dynamic_range,
-                    pillow=False,
+                    image, dynamic_range=self.config.data.dynamic_range, pillow=False
                 )
                 for image in images
             ]
             self.save_video(images)
 
-    def plot_loop(self, images, plot_lib):
+    def run_movie_loop(self, save, to_dtype):
         """
-        Continuously plots a sequence of images using the specified plotting library.
+        Process data and plot it in real time.
+        NOTE: when plot loop is terminated by user, it will only save the shown frames
 
         Args:
-            images (list): A list of images to plot.
-            plot_lib (str): The name of the plotting library to use.
+            plot_lib (str): The plotting library to use (either "matplotlib" or "opencv").
+            n_frames (int): The total number of frames to plot.
+            save (bool): Whether to save the plotted images.
+            to_dtype (str): The data type to convert the plotted images to.
 
         Returns:
-            None
+            list: A list of the plotted images.
         """
-        while True:
-            for i, image in enumerate(images):
-                self.image = image
+        # Initialize list of images
+        images = []
 
+        # Load correct number of frames (needs to get_data first)
+        self.config.data.frame_no = 0
+        self.get_data()
+        n_frames = len(self.dataset.h5_reader)
+
+        self.verbose = False
+        plot_lib = self.config.plot.plot_lib
+        while True:
+            for i in range(n_frames):
                 if self.gui:
                     self.gui.check_freeze()
 
-                self.plot(image, movie=True, plot_lib=plot_lib)
-                if plot_lib == "opencv" and cv2.waitKey(25) & 0xFF == ord("q"):
-                    cv2.destroyAllWindows()
-                    return
-                if plot_lib == "matplotlib" and plt_window_has_been_closed(self.fig):
-                    return
+                self.config.data.frame_no = i
+                self.data = self.get_data()
+
+                image = self.process.run(
+                    self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+                )
+                if self.process.postprocess:
+                    image = self.process.postprocess.run(image[None, ..., None])
+                    image = np.squeeze(image)
+
+                image = self.plot(image, movie=True, plot_lib=plot_lib, block=False)
 
                 print(f"frame {i}", end="\r")
+
+                if save:
+                    if len(images) < n_frames:
+                        images.append(image)
+
+                # For opencv, show frame for 25 ms and check if "q" is pressed
+                if cv2.waitKey(25) & 0xFF == ord("q"):
+                    cv2.destroyAllWindows()
+                    return images
+                # For matplotlib, check if window has been closed
+                if plot_lib == "matplotlib":
+                    if plt_window_has_been_closed(self.fig):
+                        return images
+                # For headless mode, check if all frames have been plotted
+                if self.headless:
+                    if len(images) == n_frames:
+                        return images
 
             # clear line, frame number
             print("\x1b[2K", end="\r")
