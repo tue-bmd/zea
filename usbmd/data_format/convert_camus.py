@@ -108,8 +108,8 @@ if __name__ == "__main__":
 
     # clone folder structure of source to output using pathlib
     # and run convert_camus() for every hdf5 found in there
-    iterator = tqdm(camus_source_folder.glob("**/*_half_sequence.nii.gz"))
-    for source_file in iterator:
+    files = list(camus_source_folder.glob("**/*_half_sequence.nii.gz"))
+    for source_file in tqdm(files):
         # check if source file in camus database (ignore other files)
         if not "database_nifti" in source_file.parts:
             continue
