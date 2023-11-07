@@ -116,9 +116,9 @@ def generate_usbmd_dataset(
     Args:
         path (str): The path to write the dataset to.
         raw_data (np.ndarray): The raw data of the ultrasound measurement of
-            shape (n_frames, n_tx, n_el, n_ax, n_ch).
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
         aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
-            shape (n_frames, n_tx, n_el, n_ax, n_ch).
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
         envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
             shape (n_frames, n_z, n_x).
         beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
