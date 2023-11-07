@@ -14,13 +14,13 @@ num_samples   = size(M,2);
 num_transmits = size(M,3);
 assert(num_elements == num_transmits, 'Expected as many transmit events as receivers');
 
-% Ask user for a start and a stop index of the first acoustic reflection
+% Ask the user for the depth range of interest
 T = sum(M,3);
 figure, plot(T')
 title('Click left and right around the first acoustic reflection')
 drawnow
 [xx,yy] = ginput(2);
-xx = round(xx);
+xx = sort(round(xx));
 
 % Compute all envelopes
 M_env = zeros(num_elements, xx(2)-xx(1)+1, num_transmits);
