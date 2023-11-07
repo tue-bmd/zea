@@ -26,7 +26,7 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils.checks import _DATA_TYPES
+from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
 from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
@@ -52,8 +52,8 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset
-        if config.data.dtype not in ["image", "image_sc"]:
+        # Initialize scan based on dataset (if not image data)
+        if self.config.data.dtype in _NON_IMAGE_DATA_TYPES:
             scan_class = self.dataset.get_scan_class()
             default_scan_params = self.dataset.get_default_scan_parameters()
             config_scan_params = self.config.scan
