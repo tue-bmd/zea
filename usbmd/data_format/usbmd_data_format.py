@@ -9,28 +9,8 @@ import numpy as np
 
 from usbmd.probes import Probe, get_probe
 from usbmd.scan import Scan
-from usbmd.utils.checks import _DATA_TYPES
+from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES, _REQUIRED_SCAN_KEYS
 from usbmd.utils.utils import first_not_none_item
-
-# TODO: think of different solution for these global constants
-# as now we have to keep these up to date.
-REQUIRED_SCAN_KEYS = [
-    "n_ax",
-    "n_el",
-    "n_tx",
-    "probe_geometry",
-    "sampling_frequency",
-    "center_frequency",
-    "t0_delays",
-    "n_frames",
-]
-
-NON_IMAGE_DATA_TYPES = [
-    "raw_data",
-    "beamformed_data",
-    "aligned_data",
-    "envelope_data",
-]
 
 
 def generate_example_dataset(path, add_optional_fields=False):
@@ -405,14 +385,14 @@ def validate_dataset(path):
 
     # Check if there is only image data
     not_only_image_data = (
-        len([i for i in NON_IMAGE_DATA_TYPES if i in dataset["data"].keys()]) > 0
+        len([i for i in _NON_IMAGE_DATA_TYPES if i in dataset["data"].keys()]) > 0
     )
 
     # Only check scan group if there is non-image data
     if not_only_image_data:
         check_key(dataset, "scan")
 
-        for key in REQUIRED_SCAN_KEYS:
+        for key in _REQUIRED_SCAN_KEYS:
             check_key(dataset["scan"], key)
 
     # validate the data group
@@ -469,7 +449,7 @@ def assert_scan_keys_present(dataset):
     Raises:
         AssertionError: If a required key is missing or does not have the right shape.
     """
-    for required_key in REQUIRED_SCAN_KEYS:
+    for required_key in _REQUIRED_SCAN_KEYS:
         assert (
             required_key in dataset["scan"].keys()
         ), f"The scan group does not contain the required key {required_key}."
