@@ -50,13 +50,20 @@ A = M_env(:,:,idx_first_element);
 [~,sorted_indices] = sort(max_indices,'ascend');
 assert(length(unique(sorted_indices)) == size(M,3),'number of unique indices does not correspond to the number of array elements')
 
+OldConnectorES = Trans.ConnectorES;
 NewConnectorES = Trans.ConnectorES(sorted_indices);
 
-fprintf('Trans.ConnectorES = [');
+fprintf('[OldConnectorES, NewConnectorES] = [\n');
 for n = 1 : length(NewConnectorES)
-    fprintf('%d ', NewConnectorES(n));
+    fprintf('%d, %d\n', OldConnectorES(n), NewConnectorES(n));
 end
-fprintf(']'';\n');
+fprintf('];\n');
+if all(OldConnectorES==NewConnectorES)
+    fprintf('old and new Trans.ConnectorES are IDENTICAL\n');
+else
+    fprintf('Update ''Trans.ConnectorES'' inside ''usbmd_InitTrans.m'' for probe ''%s''.\n', Trans.secondName);
+    fprintf('- Use the values inside array ''NewConnectorES'' from the current workspace.\n');
+end
 
 % BEFORE
 Mdiag = zeros(num_elements,num_samples);

@@ -447,7 +447,11 @@ p2phB         = abs(min(hB) - max(hB));
 
 figH = figure(107);
 clf(figH)
-figureName = Trans.name;
+if strcmp(Trans.name,'custom')
+    figureName = sprintf('Probe = %s', Trans.secondName);
+else
+    figureName = sprintf('Probe = %s', Trans.name);
+end
 set(figH,'name',figureName,'NumberTitle','off')
 subplot(311)
   hold all
