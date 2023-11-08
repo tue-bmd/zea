@@ -199,24 +199,6 @@ class DataLoaderUI:
         # match orientation
         image = np.fliplr(image)
 
-        if not movie and plot_lib == "matplotlib":
-            self.fig, self.ax = plt.subplots()
-
-            if self.scan:
-                extent = [
-                    self.scan.xlims[0] * 1e3,
-                    self.scan.xlims[1] * 1e3,
-                    self.scan.zlims[1] * 1e3,
-                    self.scan.zlims[0] * 1e3,
-                ]
-            else:
-                extent = None
-
-            if image_range is None:
-                vmin, vmax = self.config.data.dynamic_range
-            else:
-                vmin, vmax = image_range
-
         if movie:
             if plot_lib == "matplotlib":
                 if self.mpl_img is None:
@@ -226,7 +208,7 @@ class DataLoaderUI:
                     self.fig.canvas.draw_idle()
                     self.fig.canvas.flush_events()
                     image = matplotlib_figure_to_numpy(self.fig)
-                return image
+                    return image
             elif plot_lib == "opencv":
                 image = to_8bit(image, self.config.data.dynamic_range, pillow=False)
                 if not self.headless:
@@ -235,6 +217,23 @@ class DataLoaderUI:
 
         if not movie:
             if plot_lib == "matplotlib":
+                self.fig, self.ax = plt.subplots()
+
+                if self.scan:
+                    extent = [
+                        self.scan.xlims[0] * 1e3,
+                        self.scan.xlims[1] * 1e3,
+                        self.scan.zlims[1] * 1e3,
+                        self.scan.zlims[0] * 1e3,
+                    ]
+                else:
+                    extent = None
+
+                if image_range is None:
+                    vmin, vmax = self.config.data.dynamic_range
+                else:
+                    vmin, vmax = image_range
+
                 self.mpl_img = self.ax.imshow(
                     image,
                     cmap="gray",
