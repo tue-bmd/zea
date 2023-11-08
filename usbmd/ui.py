@@ -289,12 +289,6 @@ class DataLoaderUI:
         images = self.run_movie_loop(save, to_dtype)
 
         if save:
-            images = [
-                to_8bit(
-                    image, dynamic_range=self.config.data.dynamic_range, pillow=False
-                )
-                for image in images
-            ]
             self.save_video(images)
 
     def run_movie_loop(self, save, to_dtype):
