@@ -316,6 +316,7 @@ class DataLoaderUI:
         self.verbose = False
         plot_lib = self.config.plot.plot_lib
         while True:
+            # first frame is already plotted during initialization of plotting
             for i in range(n_frames):
                 if self.gui:
                     self.gui.check_freeze()
