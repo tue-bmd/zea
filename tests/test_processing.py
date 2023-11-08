@@ -109,8 +109,10 @@ def equality_libs_processing(test_func):
                 tf_output,
                 torch_output,
                 decimal=6,
-                err_msg=f"Function {func_name} failed, tensorflow "
-                "and pytorch output not the same.",
+                err_msg=(
+                    f"Function {func_name} failed, tensorflow "
+                    "and pytorch output not the same."
+                ),
             )
 
         # Reset the processing function to the original implementation
