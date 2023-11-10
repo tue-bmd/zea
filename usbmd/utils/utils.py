@@ -173,5 +173,4 @@ def first_not_none_item(arr):
     Returns:
         The first non-None item found in the array, or None if no such item exists.
     """
-    non_none_items = [item for item in arr if item is not None]
-    return non_none_items[0] if non_none_items else None
+    return next((item for item in arr if item is not None), None)
