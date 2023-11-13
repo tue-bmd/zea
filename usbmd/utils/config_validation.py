@@ -64,8 +64,8 @@ model_schema = Schema(
     {
         Optional("batch_size", default=8): positive_integer,
         Optional("patch_shape", default=[8, 8]): list_of_size_two,
-        Optional("beamformer", default=None): {
-            "type": Or(None, *_BEAMFORMER_TYPES),
+        Optional("beamformer", default={}): {
+            Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
             Optional("folds", default=1): positive_integer,
             Optional("end_with_prox", default=False): bool,
             Optional("proxtype", default="softthres"): Or(
