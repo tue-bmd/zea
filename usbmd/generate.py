@@ -14,11 +14,11 @@ from pathlib import Path
 import h5py
 import numpy as np
 import tqdm
-from PIL import Image
 
 from usbmd.datasets import get_dataset
+from usbmd.display import to_8bit
 from usbmd.probes import get_probe
-from usbmd.processing import Process, to_8bit
+from usbmd.processing import Process
 from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.utils import update_dictionary
@@ -105,7 +105,8 @@ class GenerateDataSet:
         if self.destination_folder.exists():
             if not overwrite:
                 raise ValueError(
-                    f"Cannot create dataset in {self.destination_folder}, folder already exists!"
+                    f"Cannot create dataset in {self.destination_folder}, folder"
+                    " already exists!"
                 )
 
     def generate(self):
@@ -184,7 +185,6 @@ class GenerateDataSet:
             path (str): file path
         """
         image = to_8bit(image)
-        image = Image.fromarray(image)
         image.save(path)
 
     def save_data(self, data, path):

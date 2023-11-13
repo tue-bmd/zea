@@ -17,6 +17,21 @@ _ML_LIBRARIES = [None, "torch", "tensorflow"]
 
 _MOD_TYPES = [None, "rf", "iq"]
 
+_REQUIRED_SCAN_KEYS = [
+    "n_ax",
+    "n_el",
+    "n_tx",
+    "probe_geometry",
+    "sampling_frequency",
+    "center_frequency",
+    "t0_delays",
+    "n_frames",
+]
+
+_IMAGE_DATA_TYPES = ["image", "image_sc"]
+
+_NON_IMAGE_DATA_TYPES = ["raw_data", "beamformed_data", "aligned_data", "envelope_data"]
+
 
 def _check_raw_data(data, with_frame_dim=False):
     """Check raw data shape.

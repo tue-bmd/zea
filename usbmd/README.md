@@ -112,23 +112,24 @@ data_file.hdf5                  // [unit], [array shape], [type]
 #### Data Flow Diagram
 
 ![Data flow](../docs/usbmd/diagrams_dataflow.png)
+![Data flow](diagrams_dataflow.png)
 
 #### Data types
 
 The following terminology is used in the code when referring to different data types.
 
 * `raw_data` --> The raw channel data, storing the time-samples from each distinct ultrasound transducer.
-  * [n_frames, n_tx, n_el, n_ax]
+  - [n_frames, n_tx, n_el, n_ax, n_ch]
 * `aligned_data` --> Time-of-flight (TOF) corrected data. This is the data that is time aligned with respect to the array geometry.
-  * [n_frames, n_tx, n_el, n_ax]
+  - [n_frames, n_tx, n_el, n_ax, n_ch]
 * `beamformed_data` --> Beamformed or also known as beamsummed data. Aligned data is coherently summed together along the elements. The data has now been transformed from the aperture domain to the spatial domain.
-  * [n_frames, n_z, n_x]
+  - [n_frames, n_z, n_x]
 * `envelope_data` --> The envelope of the signal is here detected and the center frequency is removed from the signal.
-  * [n_frames, n_z, n_x]
+  - [n_frames, n_z, n_x]
 * `image` --> After log compression of the envelope data, the image is formed.
-  * [n_frames, n_z, n_x]
+  - [n_frames, n_z, n_x]
 * `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
-  * [n_frames, output_size_z, output_size_x]
+  - [n_frames, output_size_z, output_size_x]
 
 ## How to use with Verasonics
 
