@@ -64,7 +64,7 @@ def setup_config(config_path: str = None):
         # if no argument is provided resort to UI window
         filetype = "yaml"
         try:
-            file = filename_from_window_dialog(
+            config_path = filename_from_window_dialog(
                 f"Choose .{filetype} file",
                 filetypes=((filetype, "*." + filetype),),
                 initialdir="./configs",
