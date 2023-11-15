@@ -75,6 +75,7 @@ def strtobool(val: str):
     are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
     'val' is anything else.
     """
+    assert type(val) == str, "Input value must be a string"
     val = val.lower()
     if val in ("y", "yes", "t", "true", "on", "1"):
         return True
