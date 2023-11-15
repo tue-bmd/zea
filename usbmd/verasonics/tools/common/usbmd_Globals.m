@@ -3,7 +3,7 @@
 
 usbmd_g_TransName          = 'S5-1';          % 'ViewFlex' or 'CL15-7' or 'L15-7io' or 'S5-1'
 usbmd_g_MatFilesDir        = 'C:\Users\Administrator\Documents\Vantage-4.6.2-2110271004\Harm\MatFiles';
-usbmd_g_DataSaveDir        = 'C:\Users\Administrator\Documents\Vantage-4.6.2-2110271004\Harm\data';
+usbmd_g_DataSaveDir        = 'C:\data\verasonics\2023-11-08';
 usbmd_g_TransFreq          = [];
 usbmd_g_TransNumElements   = [];
 usbmd_g_TransVoltage       = 40;

@@ -37,21 +37,22 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
         showPlots = false;
     end
     if isempty(inputFile)
-        inputFile = uigetfile(fullfile(usbmd_g_DataSaveDir,'*_allResponses.mat'));
+        [inputFile, inputPath] = uigetfile(fullfile(usbmd_g_DataSaveDir,'*_allResponses.mat'));
     end
     
     %======================================================================
     % Settings (customizable)
     %======================================================================
     usbmd_Globals
-    plot_main_diagonal_only = true;
+    plot_main_diagonal_only = false;
+    plot_3D_data_using_bar3 = false;
     
     %======================================================================
     % Read input data and perform a few assertions.plot_main_diagonal_only
     %======================================================================
     % inputFile = 'D:\Verasonics\Vantage-4.8.4-2211151000\Harm\data\20231016_142738_allResponses.mat';
     % inputFile = 'D:\Verasonics\Vantage-4.8.4-2211151000\Harm\data\20231016_144244_allResponses.mat';
-    load(inputFile, 'M', 'Fs', 'Trans');
+    load(fullfile(inputPath,inputFile), 'M', 'Fs', 'Trans');
     num_elements  = size(M,1);
     num_transmits = size(M,3);
     assert(num_elements >= 2, 'You cannot apply usbmd_PulseEchoStatistics.m on recordings with less than 2 elements.');
@@ -59,6 +60,7 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
     assert(num_elements == num_transmits, 'Expected as many transmit events as receivers');
     
     exampleChannels = round([1/num_elements, 0.25, 0.5, 0.75, 1] * num_elements);
+exampleChannels = [1 21 41 50 
     if strcmp(Trans.name,'custom')
         imageCaption = sprintf('probe = %s', Trans.secondName);
     else
@@ -75,6 +77,7 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
         drawnow
         [xx,~] = ginput(2);
         depthROI = sort(round(xx));
+        depthROI(2) = depthROI(1) + 350;
         close
     end
     
@@ -178,15 +181,23 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             hold off
             xlabel('element index')
             ylabel('peak-to-peak value (lin)')
+            ylim([0 2.5e4])
             title_txt = sprintf('intra-element peak-to-peak value, ($\\mu, \\sigma$) = (%.0f, %.1f)', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.peakToPeak), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; V(5) = 0; V(6) = 2^16; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.peakToPeak), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; V(5) = 0; V(6) = 2^16; axis(V);
+                zlabel('peak-to-peak value (lin)')
+            else
+                imagesc(statistics.peakToPeak)
+                colorbar
+                ax = gca;
+                ax.CLim = [0.9e4 2.4e4];
+            end
             xlabel('transmit event index')
             ylabel('element index')
-            zlabel('peak-to-peak value (lin)')
             title('peak-to-peak value (lin)')        
         end
     
@@ -202,15 +213,23 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             hold off
             xlabel('element index')
             ylabel('peak-to-peak value (dB)')
+            ylim([0 90])
             title_txt = sprintf('intra-element peak-to-peak value, ($\\mu, \\sigma$) = (%.1f, %.1f) dB', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.peakToPeakdB), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; V(5) = 0; V(6) = 100; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.peakToPeakdB), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; V(5) = 0; V(6) = 100; axis(V);
+                zlabel('peak-to-peak value (dB)')
+            else
+                imagesc(statistics.peakToPeakdB)
+                colorbar
+                ax = gca;
+                ax.CLim = [75 90];
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('peak-to-peak value (dB)')
             title('peak-to-peak value (dB)');
         end
     
@@ -229,12 +248,17 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             title_txt = sprintf('intra-element variance, ($\\mu, \\sigma$) = (%.1f, %.1f)', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.variance), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.variance), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; axis(V);
+                zlabel('variance (lin)')
+            else
+                imagesc(statistics.variance)
+                colorbar
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('variance (lin)')
             title('variance (lin)')
         end
         
@@ -254,12 +278,17 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             title_txt = sprintf('intra-element variance, ($\\mu, \\sigma$) = (%.1f, %.1f) dB', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.variancedB), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; V(5) = 0; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.variancedB), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; V(5) = 0; axis(V);
+                zlabel('variance (dB)')
+            else
+                imagesc(statistics.variancedB)
+                colorbar
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('variance (dB)')
             title('intra-element variance (dB)')
         end
         
@@ -276,15 +305,23 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             V = axis; V(1) = 0; V(2) = num_elements; axis(V);
             xlabel('element index');
             ylabel('peak frequency (MHz)');
+            ylim([0 3])
             title_txt = sprintf('peak frequency, ($\\mu, \\sigma$) = (%.1f, %0.1f) MHz', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.peakFrequencyMHz), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.peakFrequencyMHz), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; axis(V);
+                zlabel('peak frequency (MHz)')
+            else
+                imagesc(statistics.peakFrequencyMHz)
+                colorbar
+                ax = gca;
+                ax.CLim = [0 3];
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('peak frequency (MHz)')
             title('peak frequency (MHz)')
         end
         
@@ -300,15 +337,23 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             V = axis; V(1) = 0; V(2) = num_elements; axis(V);
             xlabel('element index')
             ylabel('3dB center frequency (MHz)')
+            ylim([0 3])
             title_txt = sprintf('3dB center frequency, ($\\mu, \\sigma$) = (%.1f, %.1f) MHz', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.centerFrequency3dB), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.centerFrequency3dB), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; axis(V);
+                zlabel('3dB center frequency (MHz)')
+            else
+                imagesc(statistics.centerFrequency3dB)
+                colorbar
+                ax = gca;
+                ax.CLim = [2.5 3];
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('3dB center frequency (MHz)')
             title('3dB center frequency (MHz)');
         end
         
@@ -325,15 +370,23 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             V = axis; V(1) = 0; V(2) = num_elements; axis(V);
             xlabel('element index')
             ylabel('6dB center frequency (MHz)')
+            ylim([0 3])
             title_txt = sprintf('6dB center frequency, ($\\mu, \\sigma$) = (%.1f, %.1f) MHz', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.centerFrequency6dB), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.centerFrequency6dB), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; axis(V);
+                zlabel('6dB center frequency (MHz)')
+            else
+                imagesc(statistics.centerFrequency6dB)
+                colorbar
+                ax = gca;
+                ax.CLim = [2.5 3];
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('6dB center frequency (MHz)')
             title('6dB center frequency (MHz)');
         end
         
@@ -349,16 +402,24 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             V = axis; V(1) = 0; V(2) = num_elements; axis(V);
             xlabel('element index')
             ylabel('3dB bandwidth (MHz)')
+            ylim([0 2])
             title_txt = sprintf('3dB bandwidth, ($\\mu, \\sigma$) = (%.1f MHz, %.1f)', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.bandWidth3dB), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.bandWidth3dB), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; axis(V);
+                zlabel('3dB bandwidth (MHz)')
+            else
+                imagesc(statistics.bandWidth3dB)
+                colorbar
+                ax = gca;
+                ax.CLim = [0.5 2];
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('3dB bandwidth (MHz)')
-            title('')
+            title('3dB bandwidth (MHz)')
         end
         
         hBandWidth6dB = figure;
@@ -374,16 +435,24 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             V = axis; V(1) = 0; V(2) = num_elements; axis(V);
             xlabel('element index')
             ylabel('6dB bandwidth (MHz)')
+            ylim([0 2])
             title_txt = sprintf('6dB bandwidth, ($\\mu, \\sigma$) = (%.1f MHz, %.1f)', mean_val, std_val);
             title(title_txt, 'Interpreter', 'latex')
         else
-            bar3(statistics.bandWidth6dB), view([230 30])
-            V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
-            V(4) = num_elements; axis(V);
+            if plot_3D_data_using_bar3
+                bar3(statistics.bandWidth6dB), view([230 30])
+                V = axis; V(1) = 0; V(2) = num_elements; V(3) = 0;
+                V(4) = num_elements; axis(V);
+                zlabel('6dB bandwidth (MHz)')
+            else
+                imagesc(statistics.bandWidth6dB)
+                colorbar
+                ax = gca;
+                ax.CLim = [0.5 2];
+            end
             xlabel('transmit event index')
             ylabel('receive channel index')
-            zlabel('6dB bandwidth (MHz)')
-            title('')
+            title('6dB bandwidth (MHz)')
         end
     end
     
@@ -400,7 +469,13 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             plot(depthROI(1):depthROI(2),E,'g');
         hold off
         xlim([depthROI(1) depthROI(2)]);
+        ylim([-1e4 1e4])
         title(['Example RF line within indicated depth range, rx=tx=', num2str(idx)])
+        if i==length(exampleChannels)
+           xlabel('sample index $n$','Interpreter','Latex')
+        end
+        txt = sprintf('$r_{%d}[n]$', idx);
+        ylabel(txt, 'Interpreter', 'Latex');
         %print('-dpng',['im',num2str(rrr)]);
         
         f = linspace(0, Fs*1e-6, Nfft+1);
@@ -429,9 +504,15 @@ function statistics = usbmd_PulseEchoStatistics( inputFile, depthROI, showPlots 
             plot([f(idx3) f(idx3)], [0, SdB(idx3)], 'b:');
             plot(f(idx3), SdB(idx3), 'bo' )
         hold off
+        ylim([-20 100])
         title_txt = sprintf('RF line spectrum, -6dB bandwidth = %.1f MHz, Fc = %.1f MHz, rx=tx=%d', bandWidth6dB, centerFreq6dB, idx);
         title(title_txt);
-        xlabel('frequency [MHz]');
+        if i==length(exampleChannels)
+            txt = sprintf('frequency $\\Omega$ [MHz]');
+            xlabel(txt, 'Interpreter', 'Latex');
+        end
+        txt = sprintf('$20 \\log_{10} |R_{%d}[\\Omega]|$', idx);
+        ylabel(txt, 'Interpreter', 'Latex');
         xlim([0 Fs/2*1e-6]);
         %print('-dpng',['im',num2str(rrr)]);++
     end
