@@ -527,6 +527,7 @@ def load_usbmd_file(
         fc = float(hdf5_file["scan"]["center_frequency"][()])
         n_el = int(hdf5_file["scan"]["n_el"][()])
         bandwidth_percent = float(hdf5_file["scan"]["bandwidth_percent"][()])
+        timeToNextTransmit = [float(t) for t in hdf5_file["scan"]["timeToNextTransmit"]]
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
@@ -588,7 +589,7 @@ def load_usbmd_file(
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
-            **config.scan,
+            **{k: v for k, v in config.scan.items() if v is not None},
         )
 
         return data, scan, probe
