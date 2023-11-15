@@ -51,7 +51,7 @@ def test_all_configs_valid(file):
         check_config(configuration)
 
     except SchemaError as se:
-        raise ValueError(f"Error in config {f}") from se
+        raise ValueError(f"Error in config {file}") from se
 
 
 @pytest.mark.parametrize("dictionary", config_initializers)
@@ -144,7 +144,7 @@ def config_check_equal_recursive(config, dictionary):
     equal as to corresponding key in the config.
 
     Args:
-        config (Config): The config to check.
+        config (utils.config.Config): The config to check.
         dictionary (dict): The dictionary to check against.
 
     Raises:

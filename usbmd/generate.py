@@ -14,11 +14,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 import tqdm
-from PIL import Image
 
 from usbmd.datasets import get_dataset
+from usbmd.display import to_8bit
 from usbmd.probes import get_probe
-from usbmd.processing import _DATA_TYPES, Process, to_8bit
+from usbmd.processing import Process
+from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.utils import update_dictionary
 
@@ -47,6 +48,7 @@ class GenerateDataSet:
             retain_folder_structure (bool, optional): Whether to exactly copy
                 the folder structure of the original dataset or put all output
                 files in one folder. Defaults to True.
+            filetype (str, optional): Filetype to save to. Defaults to "hdf5".
             overwrite (bool, optional): Whether to overwrite existing files.
 
         """
@@ -103,7 +105,8 @@ class GenerateDataSet:
         if self.destination_folder.exists():
             if not overwrite:
                 raise ValueError(
-                    f"Cannot create dataset in {self.destination_folder}, folder already exists!"
+                    f"Cannot create dataset in {self.destination_folder}, folder"
+                    " already exists!"
                 )
 
     def generate(self):
@@ -122,18 +125,12 @@ class GenerateDataSet:
         ):
             data = self.dataset[idx]
 
-            # TODO: following logic deals with inconsistencies with rf / iq axis and
-            # batch / frame axis that are sometimes not present. For the future; make sure
-            # dataset just always returns with frame axis
-            if data.shape[-1] == 1:
-                data = np.squeeze(data, axis=-1)
-
             single_frame = False
             if self.config.data.dtype in ["raw_data", "aligned_data"]:
-                if len(data.shape) == 3:
+                if len(data.shape) == 4:
                     single_frame = True
             else:
-                if len(data.shape) == 2:
+                if len(data.shape) == 3:
                     single_frame = True
 
             if single_frame:
@@ -153,7 +150,7 @@ class GenerateDataSet:
                     image = self.process.run(
                         image, self.config.data.dtype, self.to_dtype
                     )
-                    self.save_image(image, path)
+                    self.save_image(np.squeeze(image), path)
 
             elif self.filetype == "hdf5":
                 data_list = []
@@ -188,7 +185,6 @@ class GenerateDataSet:
             path (str): file path
         """
         image = to_8bit(image)
-        image = Image.fromarray(image)
         image.save(path)
 
     def save_data(self, data, path):

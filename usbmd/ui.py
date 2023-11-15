@@ -10,6 +10,7 @@ import warnings
 from pathlib import Path
 
 import cv2
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -18,27 +19,21 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.common import set_data_paths
 from usbmd.datasets import get_dataset
+from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
-from usbmd.processing import (
-    _DATA_TYPES,
-    Process,
-    get_contrast_boost_func,
-    threshold_signal,
-)
-from usbmd.setup_usbmd import setup_config
+from usbmd.processing import Process
+from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
+from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.selection_tool import \
-    interactive_selector_with_plot_and_metric
+from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
+from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
-    filename_from_window_dialog,
     plt_window_has_been_closed,
     save_to_gif,
     strtobool,
-    to_image,
     update_dictionary,
 )
 
@@ -57,14 +52,17 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset
-        scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters()
-        config_scan_params = self.config.scan
+        # Initialize scan based on dataset (if not image data)
+        if self.config.data.dtype in _NON_IMAGE_DATA_TYPES:
+            scan_class = self.dataset.get_scan_class()
+            default_scan_params = self.dataset.get_default_scan_parameters()
+            config_scan_params = self.config.scan
 
-        # dict merging of manual config and dataset default scan parameters
-        scan_params = update_dictionary(default_scan_params, config_scan_params)
-        self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
+            # dict merging of manual config and dataset default scan parameters
+            scan_params = update_dictionary(default_scan_params, config_scan_params)
+            self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
+        else:
+            self.scan = None
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -79,30 +77,19 @@ class DataLoaderUI:
         self.mpl_img = None
         self.fig = None
         self.ax = None
-        self.headless = False
         self.gui = None
 
-        # initialize post processing tools
-        if "postprocess" in self.config:
-            if "contrast_boost" in self.config.postprocess:
-                self.contrast_boost = get_contrast_boost_func()
-            if "lista" in self.config.postprocess:
-                # initialize neural network
-                pass
-            # etc...
+        if self.config.plot.headless is None:
+            self.headless = False
+        else:
+            self.headless = self.config.plot.headless
 
         self.check_for_display()
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
-        # first read from config, headless could be an option
-        if self.config.plot.headless is not None:
-            self.headless = self.config.plot.headless
-        else:
-            self.headles = False
-        # check if non headless mode is possible
         if self.headless is False:
-            if plt.rcParams["backend"].lower() == "agg":
+            if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
                 warnings.warn("Could not connect to display, running headless.")
         else:
@@ -111,31 +98,31 @@ class DataLoaderUI:
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
-        to_dtype = "image" if to_dtype is None else to_dtype
+        to_dtype = self.config.data.to_dtype if to_dtype is None else to_dtype
         save = self.config.plot.save
-        axis = self.config.plot.axis
+        plot_lib = self.config.plot.plot_lib
 
         if self.config.data.get("frame_no") == "all":
-            if to_dtype != "image":
-                warnings.warn(
-                    f"Image to_dtype: {to_dtype} not yet supported for movies.\
-                        falling back to  to_dtype: `image`"
-                )
             # run movie
-            self.run_movie(save=save)
+            self.run_movie(save=save, to_dtype=to_dtype)
         else:
             # plot single frame
             self.data = self.get_data()
 
             self.image = self.process.run(
-                self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+                self.data,
+                dtype=self.config.data.dtype,
+                to_dtype=to_dtype,
             )
+            if self.process.postprocess:
+                self.image = self.process.postprocess.run(self.image[None, ..., None])
+                self.image = np.squeeze(self.image)
 
             if plot:
                 if self.gui:
-                    self.plot(self.image, block=False, save=save, axis=axis)
+                    self.plot(self.image, block=False, save=save, plot_lib=plot_lib)
                 else:
-                    self.plot(self.image, block=True, save=save, axis=axis)
+                    self.plot(self.image, block=True, save=save, plot_lib=plot_lib)
 
         return self.image
 
@@ -181,30 +168,6 @@ class DataLoaderUI:
 
         return data
 
-    def postprocess(self, image):
-        """Post processing in image domain."""
-        if "postprocess" not in self.config:
-            return image
-
-        if self.config.postprocess.contrast_boost is not None:
-            if self.config.data.dtype not in ["raw_data", "aligned_data"]:
-                warnings.warn(
-                    f"contrast boost not possible with {self.config.data.dtype}"
-                )
-                return image
-            apodization = self.config.data.apodization
-            self.config.data.apodization = "checkerboard"
-            noise = self.process.run(self.data, dtype=self.config.data.dtype)
-            self.config.data.apodization = apodization
-            image = self.contrast_boost(
-                image, noise, **self.config.postprocess.contrast_boost
-            )
-
-        if self.config.postprocess.thresholding is not None:
-            image = threshold_signal(image, **self.config.postprocess.thresholding)
-
-        return image
-
     def plot(
         self,
         image,
@@ -212,7 +175,7 @@ class DataLoaderUI:
         save: bool = False,
         movie: bool = False,
         block: bool = True,
-        axis: bool = True,
+        plot_lib: str = "matplotlib",
     ):
         """Plot image.
 
@@ -225,10 +188,7 @@ class DataLoaderUI:
                 already exists and will overwrite the frame (to create a movie).
                 If False will just create a new figure with each call. Defaults to False.
             block (bool, optional): halt program after plotting. Defaults to True.
-            axis (bool, optional): type of plotting, with or without axis.
-                axis set to `True` will result in matplotlib plot with axis.
-                axis set to `False` will result in png image without axis and will
-                use opencv for video rendering. Defaults to True.
+            plot_lib (str, optional): type of plotting, with matplotlib or opencv.
         Returns:
             fig (fig): figure object.
 
@@ -239,36 +199,41 @@ class DataLoaderUI:
         # match orientation
         image = np.fliplr(image)
 
-        if not movie and axis:
-            self.fig, self.ax = plt.subplots()
-
-            extent = [
-                self.scan.xlims[0] * 1e3,
-                self.scan.xlims[1] * 1e3,
-                self.scan.zlims[1] * 1e3,
-                self.scan.zlims[0] * 1e3,
-            ]
-
-            if image_range is None:
-                vmin, vmax = self.config.data.dynamic_range
-            else:
-                vmin, vmax = image_range
-
         if movie:
-            if axis:
+            if plot_lib == "matplotlib":
                 if self.mpl_img is None:
-                    raise ValueError("First run plot function without movie.")
-                self.mpl_img.set_data(image)
-                self.fig.canvas.draw_idle()
-                self.fig.canvas.flush_events()
-                return self.fig
-            else:
-                image = to_image(image, self.config.data.dynamic_range, pillow=False)
+                    movie = False
+                else:
+                    self.mpl_img.set_data(image)
+                    self.fig.canvas.draw_idle()
+                    self.fig.canvas.flush_events()
+                    image = matplotlib_figure_to_numpy(self.fig)
+                    return image
+            elif plot_lib == "opencv":
+                image = to_8bit(image, self.config.data.dynamic_range, pillow=False)
                 if not self.headless:
                     cv2.imshow("frame", image)
                 return image
-        else:
-            if axis:
+
+        if not movie:
+            if plot_lib == "matplotlib":
+                self.fig, self.ax = plt.subplots()
+
+                if self.scan:
+                    extent = [
+                        self.scan.xlims[0] * 1e3,
+                        self.scan.xlims[1] * 1e3,
+                        self.scan.zlims[1] * 1e3,
+                        self.scan.zlims[0] * 1e3,
+                    ]
+                else:
+                    extent = None
+
+                if image_range is None:
+                    vmin, vmax = self.config.data.dynamic_range
+                else:
+                    vmin, vmax = image_range
+
                 self.mpl_img = self.ax.imshow(
                     image,
                     cmap="gray",
@@ -301,65 +266,91 @@ class DataLoaderUI:
                     self.save_image(self.fig)
                 if not self.headless:
                     plt.show(block=block)
-                return self.fig
+                image = matplotlib_figure_to_numpy(self.fig)
+                return image
 
-            else:
-                image = to_image(image, self.config.data.dynamic_range)
+            elif plot_lib == "opencv":
+                image = to_8bit(image, self.config.data.dynamic_range)
                 image.show()
                 self.save_image(image)
                 return image
 
-    def run_movie(self, save: bool = False):
+    def run_movie(self, save: bool = False, to_dtype: str = "image"):
         """Run all frames in file in sequence"""
 
-        print('Playing video, press "q" to exit...')
-        axis = self.config.plot.axis
-        self.config.data.frame_no = 0
-        self.data = self.get_data()
-        n_frames = len(self.dataset.h5object)
+        if to_dtype not in ["image", "image_sc"]:
+            warnings.warn(
+                f"Image to_dtype: {to_dtype} not supported for movies."
+                "falling back to  to_dtype: `image`"
+            )
+            to_dtype = "image"
 
-        # plot initial frame
-        self.image = self.process.run(self.data, dtype=self.config.data.dtype)
-        if axis:
-            self.plot(self.image, axis=axis, block=False)
-        else:
-            self.plot(self.image, movie=True, axis=axis, block=False)
+        print('Playing video, press/hold "q" while the window is active to exit...')
+        images = self.run_movie_loop(save, to_dtype)
 
-        # plot remaining frames in a loop
+        if save:
+            self.save_video(images)
+
+    def run_movie_loop(self, save, to_dtype):
+        """
+        Process data and plot it in real time.
+        NOTE: when plot loop is terminated by user, it will only save the shown frames
+
+        Args:
+            plot_lib (str): The plotting library to use (either "matplotlib" or "opencv").
+            n_frames (int): The total number of frames to plot.
+            save (bool): Whether to save the plotted images.
+            to_dtype (str): The data type to convert the plotted images to.
+
+        Returns:
+            list: A list of the plotted images.
+        """
+        # Initialize list of images
         images = []
+
+        # Load correct number of frames (needs to get_data first)
+        self.config.data.frame_no = 0
+        self.get_data()
+        n_frames = len(self.dataset.h5_reader)
+
         self.verbose = False
+        plot_lib = self.config.plot.plot_lib
         while True:
-            for i in range(1, n_frames):
+            # first frame is already plotted during initialization of plotting
+            for i in range(n_frames):
                 if self.gui:
                     self.gui.check_freeze()
 
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
-                image = self.process.run(self.data, dtype=self.config.data.dtype)
+                image = self.process.run(
+                    self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+                )
+                if self.process.postprocess:
+                    image = self.process.postprocess.run(image[None, ..., None])
+                    image = np.squeeze(image)
 
-                if "postprocess" in self.config:
-                    image = self.postprocess(image)
+                image = self.plot(image, movie=True, plot_lib=plot_lib, block=False)
 
-                image = self.plot(image, movie=True, axis=axis)
                 print(f"frame {i}", end="\r")
 
                 if save:
                     if len(images) < n_frames:
                         images.append(image)
 
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    self.save_video(images)
-                    return
-                if axis:
+                # For opencv, show frame for 25 ms and check if "q" is pressed
+                if cv2.waitKey(25) & 0xFF == ord("q"):
+                    cv2.destroyAllWindows()
+                    return images
+                # For matplotlib, check if window has been closed
+                if plot_lib == "matplotlib":
                     if plt_window_has_been_closed(self.fig):
-                        self.save_video(images)
-                        return
-
+                        return images
+                # For headless mode, check if all frames have been plotted
                 if self.headless:
                     if len(images) == n_frames:
-                        self.save_video(images)
-                        return
+                        return images
 
             # clear line, frame number
             print("\x1b[2K", end="\r")
@@ -410,8 +401,6 @@ class DataLoaderUI:
             path (str, optional): path to save image to. Defaults to None.
 
         TODO: can only save gif and not mp4
-        TODO: plt figures (axis=true in config) are not supported with save_video
-
         """
         if path is None:
             if self.config.plot.tag:
@@ -423,16 +412,11 @@ class DataLoaderUI:
             path = Path("./figures", filename)
             Path("./figures").mkdir(parents=True, exist_ok=True)
 
-        if isinstance(images[0], plt.Figure):
-            raise NotImplementedError(
-                "Saving videos using matplotlib "
-                "(`axis = True` in config) not yet supported"
-            )
-        if isinstance(images[0], np.ndarray):
-            fps = self.config.plot.fps
-            save_to_gif(images, path, fps=fps)
-        else:
-            raise ValueError("Figure is not a numpy array or matplotlib figure object.")
+        if not isinstance(images[0], np.ndarray):
+            raise ValueError("Images are not numpy arrays.")
+
+        fps = self.config.plot.fps
+        save_to_gif(images, path, fps=fps)
 
         if self.verbose:
             print(f"Video saved to {path}")
@@ -465,8 +449,7 @@ def main():
         warnings.warn("GUI is very much in beta, please report any bugs to the Github.")
         gui = USBMDApp(title="USBMD GUI", resolution=(600, 300), verbose=True)
 
-    config = setup_config(file=args.config)
-    config.data.user = set_data_paths(local=config.data.local)
+    config = setup(args.config)
 
     if args.task == "run":
         ui = DataLoaderUI(config)
