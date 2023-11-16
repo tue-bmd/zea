@@ -28,7 +28,11 @@ from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
+from usbmd.utils.io_lib import (
+    filename_from_window_dialog,
+    matplotlib_figure_to_numpy,
+    running_in_notebook,
+)
 from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
     plt_window_has_been_closed,
@@ -85,6 +89,7 @@ class DataLoaderUI:
             self.headless = self.config.plot.headless
 
         self.check_for_display()
+        self.set_backend_for_notebooks()
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
@@ -94,6 +99,11 @@ class DataLoaderUI:
                 warnings.warn("Could not connect to display, running headless.")
         else:
             print("Running in headless mode as set by config.")
+
+    def set_backend_for_notebooks(self):
+        """Set backend to QtAgg if running in notebook"""
+        if running_in_notebook() and not self.headless:
+            matplotlib.use("QtAgg")
 
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
