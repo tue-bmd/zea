@@ -169,8 +169,8 @@ def generate_usbmd_dataset(
         [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
     ).shape[0]
     n_tx = first_not_none_shape([raw_data, aligned_data], axis=1)
-    n_el = first_not_none_shape([raw_data, aligned_data], axis=2)
-    n_ax = first_not_none_shape([raw_data, aligned_data], axis=3)
+        n_el = first_not_none_shape([raw_data, aligned_data], axis=3)
+        n_ax = first_not_none_shape([raw_data, aligned_data], axis=2)
 
     # Write data group
     data_group = dataset.create_group("data")
