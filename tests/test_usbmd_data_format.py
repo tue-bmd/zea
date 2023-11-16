@@ -65,7 +65,7 @@ def test_generate_dataset():
     try:
         generate_usbmd_dataset(**dataset_parameters)
     finally:
-        if Path(dataset_parameters["path"]).exists() and False:
+        if Path(dataset_parameters["path"]).exists():
             os.remove(dataset_parameters["path"])
 
 
