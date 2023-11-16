@@ -139,8 +139,14 @@ def generate_usbmd_dataset(
         or image_sc is not None
     ), f"At least one of the data types {_DATA_TYPES} must be specified."
 
-    if Path(path).exists():
+    # Convert path to Path object
+    path = Path(path)
+
+    if path.exists():
         raise FileExistsError(f"The file {path} already exists.")
+
+    # Create the directory if it does not exist
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     with h5py.File(path, "w") as dataset:
         dataset.attrs["probe"] = probe_name
