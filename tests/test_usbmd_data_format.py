@@ -135,7 +135,7 @@ def test_existing_path():
     """Tests if passing a path that already exists raises an error."""
     # Create a file with the same name
     path = Path(dataset_parameters["path"])
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Ensure that the file exists
     path.touch()
     try:
         with pytest.raises(FileExistsError):
