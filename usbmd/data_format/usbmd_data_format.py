@@ -364,65 +364,65 @@ def generate_usbmd_dataset(
         unit="unitless",
     )
 
+    add_dataset(
+        group=scan_group,
+        name="t0_delays",
+        data=t0_delays,
+        description="The t0_delays of shape (n_tx, n_el).",
+        unit="s",
+    )
+
+    if tx_apodizations is not None:
         add_dataset(
             group=scan_group,
-            name="t0_delays",
-            data=t0_delays,
-            description="The t0_delays of shape (n_tx, n_el).",
-            unit="s",
+            name="tx_apodizations",
+            data=tx_apodizations,
+            description="The transmit delays for each element defining the"
+            " wavefront in seconds of shape (n_tx, n_elem). This is"
+            " the time at which each element fires shifted such that"
+            " the first element fires at t=0.",
+            unit="unitless",
         )
 
-        if tx_apodizations is not None:
-            add_dataset(
-                group=scan_group,
-                name="tx_apodizations",
-                data=tx_apodizations,
-                description="The transmit delays for each element defining the"
-                " wavefront in seconds of shape (n_tx, n_elem). This is"
-                " the time at which each element fires shifted such that"
-                " the first element fires at t=0.",
-                unit="unitless",
-            )
+    if focus_distances is not None:
+        add_dataset(
+            group=scan_group,
+            name="focus_distances",
+            data=focus_distances,
+            description="The transmit focus distances in meters of "
+            "shape (n_tx,). For planewaves this is set to Inf.",
+            unit="m",
+        )
 
-        if focus_distances is not None:
-            add_dataset(
-                group=scan_group,
-                name="focus_distances",
-                data=focus_distances,
-                description="The transmit focus distances in meters of "
-                "shape (n_tx,). For planewaves this is set to Inf.",
-                unit="m",
-            )
+    if polar_angles is not None:
+        add_dataset(
+            group=scan_group,
+            name="polar_angles",
+            data=polar_angles,
+            description="The polar angles of the transmit beams in "
+            "radians of shape (n_tx,).",
+            unit="rad",
+        )
 
-        if polar_angles is not None:
-            add_dataset(
-                group=scan_group,
-                name="polar_angles",
-                data=polar_angles,
-                description="The polar angles of the transmit beams in "
-                "radians of shape (n_tx,).",
-                unit="rad",
-            )
+    if azimuth_angles is not None:
+        add_dataset(
+            group=scan_group,
+            name="azimuth_angles",
+            data=azimuth_angles,
+            description="The azimuthal angles of the transmit beams "
+            "in radians of shape (n_tx,).",
+            unit="rad",
+        )
 
-        if azimuth_angles is not None:
-            add_dataset(
-                group=scan_group,
-                name="azimuth_angles",
-                data=azimuth_angles,
-                description="The azimuthal angles of the transmit beams "
-                "in radians of shape (n_tx,).",
-                unit="rad",
-            )
-
-        if bandwidth_percent is not None:
-            add_dataset(
-                group=scan_group,
-                name="bandwidth_percent",
-                data=bandwidth_percent,
-                description="The receive bandwidth of RF signal in "
-                "percentage of center frequency.",
-                unit="unitless",
-            )
+    if bandwidth_percent is not None:
+        add_dataset(
+            group=scan_group,
+            name="bandwidth_percent",
+            data=bandwidth_percent,
+            description="The receive bandwidth of RF signal in "
+            "percentage of center frequency.",
+            unit="unitless",
+        )
 
     validate_dataset(path)
 
