@@ -129,10 +129,9 @@ class DataLoaderUI:
                 self.image = np.squeeze(self.image)
 
             if plot:
-                if self.gui:
-                    self.plot(self.image, block=False, save=save, plot_lib=plot_lib)
-                else:
-                    self.plot(self.image, block=True, save=save, plot_lib=plot_lib)
+                self.plot(
+                    self.image, block=(not self.gui), save=save, plot_lib=plot_lib
+                )
 
         return self.image
 
@@ -193,7 +192,7 @@ class DataLoaderUI:
             image (ndarray): Log compressed enveloped detected image.
             image_range (tuple, optional): dynamic range of plot. Defaults to None,
                 in that case the dynamic range in config is used.
-            save (bool): wheter to save the image to disk.
+            save (bool): whether to save the image to disk.
             movie (bool, optional): if True it will assume a figure object
                 already exists and will overwrite the frame (to create a movie).
                 If False will just create a new figure with each call. Defaults to False.
@@ -205,6 +204,9 @@ class DataLoaderUI:
         """
         if self.probe.probe_type == "phased":
             image = self.process.run(image, dtype="image", to_dtype="image_sc")
+
+        if image_range is None:
+            image_range = self.config.data.dynamic_range
 
         # match orientation
         image = np.fliplr(image)
@@ -220,7 +222,7 @@ class DataLoaderUI:
                     image = matplotlib_figure_to_numpy(self.fig)
                     return image
             elif plot_lib == "opencv":
-                image = to_8bit(image, self.config.data.dynamic_range, pillow=False)
+                image = to_8bit(image, image_range, pillow=False)
                 if not self.headless:
                     cv2.imshow("frame", image)
                 return image
@@ -239,16 +241,11 @@ class DataLoaderUI:
                 else:
                     extent = None
 
-                if image_range is None:
-                    vmin, vmax = self.config.data.dynamic_range
-                else:
-                    vmin, vmax = image_range
-
                 self.mpl_img = self.ax.imshow(
                     image,
                     cmap="gray",
-                    vmin=vmin,
-                    vmax=vmax,
+                    vmin=image_range[0],
+                    vmax=image_range[1],
                     origin="upper",
                     extent=extent,
                     interpolation="none",
