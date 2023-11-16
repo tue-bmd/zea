@@ -141,6 +141,9 @@ def generate_usbmd_dataset(
 
     dataset = h5py.File(path, "w")
 
+    dataset.attrs["probe"] = probe_name
+    dataset.attrs["description"] = description
+
     assert (
         isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
     ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
@@ -159,6 +162,7 @@ def generate_usbmd_dataset(
             return
         dataset = group.create_dataset(name, data=data)
         dataset.attrs["description"] = description
+        dataset.attrs["unit"] = unit
 
     n_frames = first_not_none_item(
         [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
