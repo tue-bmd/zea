@@ -47,10 +47,10 @@ def test_example_dataset():
     # Create the directory if it does not exist
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Generate the example dataset
-    generate_example_dataset(path)
-
     try:
+        # Generate the example dataset
+        generate_example_dataset(path)
+
         # Validate the dataset
         validate_dataset(path)
     finally:
