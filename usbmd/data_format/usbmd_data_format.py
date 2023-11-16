@@ -139,6 +139,9 @@ def generate_usbmd_dataset(
         or image_sc is not None
     ), f"At least one of the data types {_DATA_TYPES} must be specified."
 
+    assert isinstance(probe_name, str), "The probe name must be a string."
+    assert isinstance(description, str), "The description must be a string."
+
     # Convert path to Path object
     path = Path(path)
 
