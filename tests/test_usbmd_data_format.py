@@ -134,10 +134,12 @@ def test_wrong_shape(key):
 def test_existing_path():
     """Tests if passing a path that already exists raises an error."""
     # Create a file with the same name
-    Path(dataset_parameters["path"]).touch()
+    path = Path(dataset_parameters["path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
     try:
         with pytest.raises(FileExistsError):
             generate_usbmd_dataset(**dataset_parameters)
     finally:
-        if Path(dataset_parameters["path"]).exists():
-            os.remove(dataset_parameters["path"])
+        if path.exists():
+            os.remove(path)
