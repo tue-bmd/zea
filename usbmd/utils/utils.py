@@ -68,29 +68,6 @@ def print_clear_line():
     print(line_up, end=line_clear)
 
 
-def to_image(image, value_range: tuple = None, pillow: bool = True):
-    """Convert numpy array to uint8 image format.
-
-    Args:
-        image (ndarray): input array image
-        value_range (tuple, optional): assumed range of input data.
-            Defaults to None.
-        pillow (bool, optional): whether to convert the image
-            array to pillow object. Defaults to True.
-
-    Returns:
-        image: output image array uint8 [0, 255]
-            (pillow if set to True)
-    """
-    if value_range:
-        image = translate(np.clip(image, *value_range), value_range, (0, 255))
-
-    image = image.astype(np.uint8)
-    if pillow:
-        image = Image.fromarray(image)
-    return image
-
-
 def strtobool(val: str):
     """Convert a string representation of truth to True or False.
 
@@ -184,3 +161,17 @@ def find_first_nonzero_index(arr, axis, invalid_val=-1):
     return np.where(
         nonzero_mask.any(axis=axis), nonzero_mask.argmax(axis=axis), invalid_val
     )
+
+
+def first_not_none_item(arr):
+    """
+    Finds and returns the first non-None item in the given array.
+
+    Args:
+        arr (list): The input array.
+
+    Returns:
+        The first non-None item found in the array, or None if no such item exists.
+    """
+    non_none_items = [item for item in arr if item is not None]
+    return non_none_items[0] if non_none_items else None
