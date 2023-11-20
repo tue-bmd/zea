@@ -20,7 +20,7 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"], "patches", [None, 4]])
+@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"], "patches", [None, 4])
 def test_das_beamforming(reconstruction_mode, patches=4, debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
