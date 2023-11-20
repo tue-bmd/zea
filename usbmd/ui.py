@@ -20,20 +20,24 @@ wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
 from usbmd.datasets import get_dataset
+from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils.checks import _DATA_TYPES
+from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
+from usbmd.utils.io_lib import (
+    filename_from_window_dialog,
+    matplotlib_figure_to_numpy,
+    running_in_notebook,
+)
 from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
     plt_window_has_been_closed,
     save_to_gif,
     strtobool,
-    to_image,
     update_dictionary,
 )
 
@@ -52,14 +56,17 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset
-        scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters()
-        config_scan_params = self.config.scan
+        # Initialize scan based on dataset (if not image data)
+        if self.config.data.dtype in _NON_IMAGE_DATA_TYPES:
+            scan_class = self.dataset.get_scan_class()
+            default_scan_params = self.dataset.get_default_scan_parameters()
+            config_scan_params = self.config.scan
 
-        # dict merging of manual config and dataset default scan parameters
-        scan_params = update_dictionary(default_scan_params, config_scan_params)
-        self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
+            # dict merging of manual config and dataset default scan parameters
+            scan_params = update_dictionary(default_scan_params, config_scan_params)
+            self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
+        else:
+            self.scan = None
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -82,6 +89,7 @@ class DataLoaderUI:
             self.headless = self.config.plot.headless
 
         self.check_for_display()
+        self.set_backend_for_notebooks()
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
@@ -92,21 +100,21 @@ class DataLoaderUI:
         else:
             print("Running in headless mode as set by config.")
 
+    def set_backend_for_notebooks(self):
+        """Set backend to QtAgg if running in notebook"""
+        if running_in_notebook() and not self.headless:
+            matplotlib.use("QtAgg")
+
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
-        to_dtype = "image" if to_dtype is None else to_dtype
+        to_dtype = self.config.data.to_dtype if to_dtype is None else to_dtype
         save = self.config.plot.save
         plot_lib = self.config.plot.plot_lib
 
         if self.config.data.get("frame_no") == "all":
-            if to_dtype != "image":
-                warnings.warn(
-                    f"Image to_dtype: {to_dtype} not yet supported for movies.         "
-                    "               falling back to  to_dtype: `image`"
-                )
             # run movie
-            self.run_movie(save=save)
+            self.run_movie(save=save, to_dtype=to_dtype)
         else:
             # plot single frame
             self.data = self.get_data()
@@ -121,10 +129,9 @@ class DataLoaderUI:
                 self.image = np.squeeze(self.image)
 
             if plot:
-                if self.gui:
-                    self.plot(self.image, block=False, save=save, plot_lib=plot_lib)
-                else:
-                    self.plot(self.image, block=True, save=save, plot_lib=plot_lib)
+                self.plot(
+                    self.image, block=(not self.gui), save=save, plot_lib=plot_lib
+                )
 
         return self.image
 
@@ -185,7 +192,7 @@ class DataLoaderUI:
             image (ndarray): Log compressed enveloped detected image.
             image_range (tuple, optional): dynamic range of plot. Defaults to None,
                 in that case the dynamic range in config is used.
-            save (bool): wheter to save the image to disk.
+            save (bool): whether to save the image to disk.
             movie (bool, optional): if True it will assume a figure object
                 already exists and will overwrite the frame (to create a movie).
                 If False will just create a new figure with each call. Defaults to False.
@@ -195,50 +202,50 @@ class DataLoaderUI:
             fig (fig): figure object.
 
         """
-        assert plot_lib in ["matplotlib", "opencv"]
-
         if self.probe.probe_type == "phased":
             image = self.process.run(image, dtype="image", to_dtype="image_sc")
+
+        if image_range is None:
+            image_range = self.config.data.dynamic_range
 
         # match orientation
         image = np.fliplr(image)
 
-        if not movie and plot_lib == "matplotlib":
-            self.fig, self.ax = plt.subplots()
-
-            extent = [
-                self.scan.xlims[0] * 1e3,
-                self.scan.xlims[1] * 1e3,
-                self.scan.zlims[1] * 1e3,
-                self.scan.zlims[0] * 1e3,
-            ]
-
-            if image_range is None:
-                vmin, vmax = self.config.data.dynamic_range
-            else:
-                vmin, vmax = image_range
-
         if movie:
             if plot_lib == "matplotlib":
                 if self.mpl_img is None:
-                    raise ValueError("First run plot function without movie.")
-                self.mpl_img.set_data(image)
-                self.fig.canvas.draw_idle()
-                self.fig.canvas.flush_events()
-                image = matplotlib_figure_to_numpy(self.fig)
-                return image
+                    movie = False
+                else:
+                    self.mpl_img.set_data(image)
+                    self.fig.canvas.draw_idle()
+                    self.fig.canvas.flush_events()
+                    image = matplotlib_figure_to_numpy(self.fig)
+                    return image
             elif plot_lib == "opencv":
-                image = to_image(image, self.config.data.dynamic_range, pillow=False)
+                image = to_8bit(image, image_range, pillow=False)
                 if not self.headless:
                     cv2.imshow("frame", image)
                 return image
-        else:
+
+        if not movie:
             if plot_lib == "matplotlib":
+                self.fig, self.ax = plt.subplots()
+
+                if self.scan:
+                    extent = [
+                        self.scan.xlims[0] * 1e3,
+                        self.scan.xlims[1] * 1e3,
+                        self.scan.zlims[1] * 1e3,
+                        self.scan.zlims[0] * 1e3,
+                    ]
+                else:
+                    extent = None
+
                 self.mpl_img = self.ax.imshow(
                     image,
                     cmap="gray",
-                    vmin=vmin,
-                    vmax=vmax,
+                    vmin=image_range[0],
+                    vmax=image_range[1],
                     origin="upper",
                     extent=extent,
                     interpolation="none",
@@ -270,50 +277,68 @@ class DataLoaderUI:
                 return image
 
             elif plot_lib == "opencv":
-                image = to_image(image, self.config.data.dynamic_range)
+                image = to_8bit(image, self.config.data.dynamic_range)
                 image.show()
                 self.save_image(image)
                 return image
 
-    def run_movie(self, save: bool = False):
+    def run_movie(self, save: bool = False, to_dtype: str = "image"):
         """Run all frames in file in sequence"""
 
-        print('Playing video, press "q" to exit...')
-        plot_lib = self.config.plot.plot_lib
+        if to_dtype not in ["image", "image_sc"]:
+            warnings.warn(
+                f"Image to_dtype: {to_dtype} not supported for movies."
+                "falling back to  to_dtype: `image`"
+            )
+            to_dtype = "image"
+
+        print('Playing video, press/hold "q" while the window is active to exit...')
+        images = self.run_movie_loop(save, to_dtype)
+
+        if save:
+            self.save_video(images)
+
+    def run_movie_loop(self, save, to_dtype):
+        """
+        Process data and plot it in real time.
+        NOTE: when plot loop is terminated by user, it will only save the shown frames
+
+        Args:
+            plot_lib (str): The plotting library to use (either "matplotlib" or "opencv").
+            n_frames (int): The total number of frames to plot.
+            save (bool): Whether to save the plotted images.
+            to_dtype (str): The data type to convert the plotted images to.
+
+        Returns:
+            list: A list of the plotted images.
+        """
+        # Initialize list of images
+        images = []
+
+        # Load correct number of frames (needs to get_data first)
         self.config.data.frame_no = 0
-        self.data = self.get_data()
+        self.get_data()
         n_frames = len(self.dataset.h5_reader)
 
-        # plot initial frame
-        self.image = self.process.run(self.data, dtype=self.config.data.dtype)
-        if self.process.postprocess:
-            self.image = self.process.postprocess.run(self.image[None, ..., None])
-            self.image = np.squeeze(self.image)
-
-        if plot_lib == "matplotlib":
-            self.plot(self.image, plot_lib=plot_lib, block=False)
-        elif plot_lib == "opencv":
-            self.plot(self.image, movie=True, plot_lib=plot_lib, block=False)
-        else:
-            raise ValueError(f"plot_lib {plot_lib} not supported")
-
-        # plot remaining frames in a loop
-        images = []
         self.verbose = False
+        plot_lib = self.config.plot.plot_lib
         while True:
-            for i in range(1, n_frames):
+            # first frame is already plotted during initialization of plotting
+            for i in range(n_frames):
                 if self.gui:
                     self.gui.check_freeze()
 
                 self.config.data.frame_no = i
                 self.data = self.get_data()
 
-                image = self.process.run(self.data, dtype=self.config.data.dtype)
+                image = self.process.run(
+                    self.data, dtype=self.config.data.dtype, to_dtype=to_dtype
+                )
                 if self.process.postprocess:
                     image = self.process.postprocess.run(image[None, ..., None])
                     image = np.squeeze(image)
 
-                image = self.plot(image, movie=True, plot_lib=plot_lib)
+                image = self.plot(image, movie=True, plot_lib=plot_lib, block=False)
 
                 print(f"frame {i}", end="\r")
 
@@ -321,18 +346,18 @@ class DataLoaderUI:
                     if len(images) < n_frames:
                         images.append(image)
 
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    self.save_video(images)
-                    return
+                # For opencv, show frame for 25 ms and check if "q" is pressed
+                if cv2.waitKey(25) & 0xFF == ord("q"):
+                    cv2.destroyAllWindows()
+                    return images
+                # For matplotlib, check if window has been closed
                 if plot_lib == "matplotlib":
                     if plt_window_has_been_closed(self.fig):
-                        self.save_video(images)
-                        return
-
+                        return images
+                # For headless mode, check if all frames have been plotted
                 if self.headless:
                     if len(images) == n_frames:
-                        self.save_video(images)
-                        return
+                        return images
 
             # clear line, frame number
             print("\x1b[2K", end="\r")
