@@ -2,7 +2,50 @@
 import numpy as np
 import pytest
 
-from usbmd.utils.utils import find_first_nonzero_index, first_not_none_item, strtobool
+from usbmd.utils.utils import (
+    find_first_nonzero_index,
+    find_key,
+    first_not_none_item,
+    strtobool,
+)
+
+
+@pytest.mark.parametrize(
+    "contains, case_sensitive",
+    [["apple", False], ["apple", True], ["pie", True]],
+)
+def test_find_key(contains, case_sensitive):
+    """Tests the find_key function by providing a test dictionary and checking the
+    number of keys found."""
+    dictionary = {
+        "APPLES": 1,
+        "apple pie": 2,
+        "cherry pie": 3,
+        "what apple": 4,
+        "rainbow": 5,
+    }
+
+    result = find_key(dictionary, contains, case_sensitive)
+
+    # Check that the result is a string
+    assert isinstance(result, str), "Result is not a list"
+    # Check that the result is actually in the dictionary
+    assert result in dictionary.keys(), "Key not found in dictionary"
+
+    # Check that the result contains the search string
+    if not case_sensitive:
+        result = result.lower()
+        contains = contains.lower()
+
+    assert contains in result, "Key does not contain the search string"
+
+
+def test_nonexistent_key_raises_keyerror():
+    """Tests that a KeyError is raised if the key is not found."""
+    dictionary = {"APPLES": 1, "apple pie": 2, "cherry pie": 3, "rainbow": 5}
+
+    with pytest.raises(KeyError):
+        find_key(dictionary, "banana", case_sensitive=True)
 
 
 def test_strtobool():

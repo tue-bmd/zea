@@ -48,11 +48,22 @@ def find_key(dictionary, contains, case_sensitive=False):
     Returns:
         str: the key of the dictionary that contains the query string.
 
+    Raises:
+        TypeError: if not all keys are strings.
+        KeyError: if no key is found containing the query string.
     """
+    # Assert that all keys are strings
+    if not all([isinstance(k, str) for k in dictionary.keys()]):
+        raise TypeError("All keys must be strings.")
+
     if case_sensitive:
         key = [k for k in dictionary.keys() if contains in k]
     else:
         key = [k for k in dictionary.keys() if contains in k.lower()]
+
+    if len(key) == 0:
+        raise KeyError(f"Key containing '{contains}' not found in dictionary.")
+
     return key[0]
 
 
