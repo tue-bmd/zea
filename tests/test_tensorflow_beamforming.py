@@ -20,8 +20,8 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"])
-def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
+@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"], "patches", [None, 4]])
+def test_das_beamforming(reconstruction_mode, patches=4, debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
 
@@ -35,6 +35,9 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
 
     config = load_config_from_yaml(r"./tests/config_test.yaml")
     config.ml_library = "tensorflow"
+
+    if patches:
+        config.model.beamformer.patches = patches
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
