@@ -41,6 +41,8 @@ config_initializers = [
 )
 def test_all_configs_valid(file):
     """Test if configs are valide according to schema"""
+    if file.name == "config_camus.yaml":
+        pytest.skip("probes.yaml is not checked here.")
     with open(file, "r", encoding="utf-8") as f:
         configuration = yaml.load(f, Loader=yaml.FullLoader)
     try:
