@@ -19,14 +19,15 @@ class Scan:
         self,
         n_tx: int,
         n_el: int,
+        n_ch: int,
         center_frequency: float,
         sampling_frequency: float,
+        demodulation_frequency: float,
         xlims=None,
         ylims=None,
         zlims=None,
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
-        modtype: str = "rf",
         n_ax: int = None,
         Nx: int = None,
         Nz: int = None,
@@ -51,9 +52,12 @@ class Scan:
         Args:
             n_tx (int): The number of transmits to produce a single frame.
             n_el (int, optional): The number of elements in the array.
+            n_ch (int): The number of channels.
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
+            demodulation_frequency (float): The demodulation frequency. 
+                Set to 0.0 if rf data and to center_frequency if iq data.
             xlims (tuple, optional): The x-limits in the beamforming grid.
                 Defaults to (probe_geometry[0, 0], probe_geometry[-1, 0]).
             ylims (tuple, optional): The y-limits in the beamforming grid.
@@ -63,10 +67,7 @@ class Scan:
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
-                modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
-                to 'rf'
-            modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
-            optional): The number of samples per in a receive
+            n_ax (int, optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
@@ -104,8 +105,7 @@ class Scan:
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
         """
-        assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
-
+        
         # Attributes concerning channel data : The number of transmissions in a frame
         self.n_tx = int(n_tx)
         #: The number of elements in the array
@@ -118,14 +118,12 @@ class Scan:
         self.bandwidth_percent = float(bandwidth_percent)
         #: The speed of sound [m/s]
         self.sound_speed = float(sound_speed)
-        #: The modulation type of the raw data ('rf' or 'iq')
-        self.modtype = modtype
         #: The number of samples per channel per acquisition
         self.n_ax = n_ax // downsample
         #: The demodulation frequency [Hz]
-        self.fdemod = self.fc if modtype == "iq" else 0.0
+        self.fdemod = float(demodulation_frequency)
         #: The number of rf/iq channels (1 for rf, 2 for iq)
-        self.n_ch = 2 if modtype == "iq" else 1
+        self.n_ch = int(n_ch)
         #: The wavelength of the modulation carrier [m]
         self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
@@ -395,13 +393,14 @@ class PlaneWaveScan(Scan):
         angles=None,
         n_tx=75,
         n_el=128,
+        n_ch = 1,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
         center_frequency=7e6,
         sampling_frequency=28e6,
+        demodulation_frequency=0.0,
         sound_speed=1540,
-        modtype="rf",
         n_ax=3328,
         Nx=128,
         Nz=128,
@@ -423,19 +422,17 @@ class PlaneWaveScan(Scan):
                 optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
             n_el (int, optional): The number of elements in the array. Defaults to 128.
+            n_ch (int): The number of channels.
+            center_frequency (float): The modulation carrier frequency.
+            sampling_frequency (float): The sampling rate to sample rf- or
+                iq-signals with.
+            demodulation_frequency (float): The demodulation frequency.
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
                 Defaults to (0,0.04).
-            center_frequency (float, optional): The modulation carrier frequency.
-                Defaults to 7e6.
-            sampling_frequency (float, optional): The sampling rate to sample rf- or
-                iq-signals with. Defaults to 28e6.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
-                modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
-                to 'rf'
-            modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
-            optional): The number of samples per in a receive
+            n_ax (int, optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
@@ -485,13 +482,14 @@ class PlaneWaveScan(Scan):
         super().__init__(
             n_tx=n_tx,
             n_el=n_el,
+            n_ch = n_ch,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
             center_frequency=center_frequency,
             sampling_frequency=sampling_frequency,
+            demodulation_frequency = demodulation_frequency,
             sound_speed=sound_speed,
-            modtype=modtype,
             n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
@@ -513,13 +511,14 @@ class DivergingWaveScan(Scan):
         self,
         n_tx=75,
         n_el=128,
+        n_ch = 1,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
         center_frequency=7e6,
         sampling_frequency=28e6,
+        demodulation_frequency = 0.0,
         sound_speed=1540,
-        modtype="rf",
         n_ax=256,
         Nx=128,
         Nz=128,
@@ -529,13 +528,14 @@ class DivergingWaveScan(Scan):
         super().__init__(
             n_tx=n_tx,
             n_el=n_el,
+            n_ch = n_ch,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
             center_frequency=center_frequency,
             sampling_frequency=sampling_frequency,
+            demodulation_frequency = demodulation_frequency,
             sound_speed=sound_speed,
-            modtype=modtype,
             n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
