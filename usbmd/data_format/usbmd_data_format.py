@@ -713,6 +713,7 @@ def load_usbmd_file(
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
             probe_geometry=probe_geometry,
+            time_to_next_transmit = time_to_next_transmit,
             **config.scan,
         )
 
