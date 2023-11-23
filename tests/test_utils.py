@@ -7,8 +7,24 @@ from usbmd.utils.utils import (
     find_key,
     first_not_none_item,
     strtobool,
+    translate,
 )
 
+@pytest.mark.parametrize(
+    "arr, range_from, range_to",
+    [
+        np.random.randint(100, size=10),
+        (0,100), (2,5)
+    ],
+)
+def test_translate(arr, range_from, range_to):
+    """Tests the translate function by providing a test array with its range_from and
+        a range to."""
+    arr = np.array(arr)
+    right_min, right_max = range_to
+    result = translate(arr, range_from, range_to)
+    np.testing.assert_array_less(right_min, np.min(result))
+    np.testing.assert_array_less(np.max(result), right_max)
 
 @pytest.mark.parametrize(
     "contains, case_sensitive",
