@@ -42,9 +42,9 @@ def test_probe_attributes(probe_name):
     probe = get_probe(probe_name)
 
     assert isinstance(
-        probe.ele_pos, np.ndarray
+        probe.probe_geometry, np.ndarray
     ), "Element positions must be a numpy array"
-    assert probe.ele_pos.shape == (
+    assert probe.probe_geometry.shape == (
         probe.n_el,
         3,
     ), "Element positions must be of shape (n_el, 3)"

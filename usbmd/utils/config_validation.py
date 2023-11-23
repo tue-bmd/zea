@@ -18,7 +18,7 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-from usbmd.processing import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
+from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.metrics import _METRICS
 
@@ -54,7 +54,7 @@ list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
 positive_float = And(float, lambda f: f > 0)
 list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
-list_of_positive_integers = And(list, lambda l: all(_l > 0 for _l in l))
+list_of_positive_integers = And(list, lambda l: all(_l >= 0 for _l in l))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
 
 # optional sub schemas go here, to allow for nested defaults
@@ -64,8 +64,8 @@ model_schema = Schema(
     {
         Optional("batch_size", default=8): positive_integer,
         Optional("patch_shape", default=[8, 8]): list_of_size_two,
-        Optional("beamformer", default=None): {
-            "type": Or(None, *_BEAMFORMER_TYPES),
+        Optional("beamformer", default={}): {
+            Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
             Optional("folds", default=1): positive_integer,
             Optional("end_with_prox", default=False): bool,
             Optional("proxtype", default="softthres"): Or(
@@ -146,8 +146,8 @@ scan_schema = Schema(
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
         Optional("n_ax", default=None): Or(None, int),
-        Optional("fc", default=None): Or(None, any_number),
-        Optional("fs", default=None): Or(None, any_number),
+        Optional("center_frequency", default=None): Or(None, any_number),
+        Optional("sampling_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
     }
 )
