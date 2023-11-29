@@ -101,8 +101,8 @@ class Scan:
                 to None, then all transmits are used. Defaults to None.
             probe_geometry (np.ndarray, optional): (n_el, 3) array with element positions
                 in meters. Necessary for automatic xlim calculation if not set. Defaults to None.
-            time_to_next_transmit (np.ndarray, float, optional): The time between subsequent transmit events
-                of shape (n_tx*n_frames,). Defaults to None.
+            time_to_next_transmit (np.ndarray, float, optional): The time between subsequent transmit
+            events of shape (n_tx*n_frames,). Defaults to None.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -135,6 +135,8 @@ class Scan:
         self.pixels_per_wavelength = pixels_per_wvln
         #: The probe geometry of shape (n_el, 3)
         self.probe_geometry = probe_geometry
+
+        self.time_to_next_transmit = time_to_next_transmit
 
         # Beamforming grid related attributes
         # ---------------------------------------------------------------------
