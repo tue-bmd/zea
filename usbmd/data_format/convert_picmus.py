@@ -51,9 +51,9 @@ def convert_picmus(source_path, output_path, overwrite=False):
     # Add dummy frame dimension (shape (frame=1, tx, el, ax, ch=1))
     raw_data = raw_data[None]
 
-    # raw_data = np.transpose(raw_data, (0, 1, 3, 2, 4))
+    raw_data = np.transpose(raw_data, (0, 1, 3, 2, 4))
 
-    _, n_tx, n_el, _, _ = raw_data.shape
+    _, n_tx, _, n_el, _ = raw_data.shape
 
     center_frequency = int(file["modulation_frequency"][()])
     # Fix a mistake in one of the PICMUS files
