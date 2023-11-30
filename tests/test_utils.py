@@ -8,7 +8,9 @@ from usbmd.utils.utils import (
     first_not_none_item,
     strtobool,
     translate,
+    update_dictionary,
 )
+
 
 @pytest.mark.parametrize(
     "range_from, range_to",
@@ -22,6 +24,38 @@ def test_translate(range_from, range_to):
     result = translate(arr, range_from, range_to)
     assert right_min <= np.min(result), "Minimum value is too small"
     assert np.max(result) <= right_max, "Maximum value is too large"
+
+
+@pytest.mark.parametrize(
+    "dict1, dict2, keep_none, expected_result",
+    [
+        (
+            {1: "one", 2: "two"},
+            {2: "new_two", 3: "three"},
+            False,
+            {1: "one", 2: "new_two", 3: "three"},
+        ),
+        (
+            {1: "one", 2: "two"},
+            {2: None, 3: "three"},
+            False,
+            {1: "one", 2: "two", 3: "three"},
+        ),
+        ({}, {1: "one"}, False, {1: "one"}),
+        ({1: "one"}, {}, False, {1: "one"}),
+        (
+            {1: "one", 2: "two"},
+            {2: None, 3: "three"},
+            True,
+            {1: "one", 2: None, 3: "three"},
+        ),
+        ({}, {}, False, {}),
+    ],
+)
+def test_update_dictionary(dict1, dict2, keep_none, expected_result):
+    result = update_dictionary(dict1, dict2, keep_none)
+    assert result == expected_result
+
 
 @pytest.mark.parametrize(
     "contains, case_sensitive",
