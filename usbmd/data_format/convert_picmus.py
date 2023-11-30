@@ -83,8 +83,6 @@ def convert_picmus(source_path, output_path, overwrite=False):
         )
         # This line changes the data format to work with the old beamformer,
         # which is not in accordance with the new USBMD format
-        # TODO: Remove this line when updating the beamformer.
-        t0_delays[n] -= np.max(t0_delays[n]) * 0.5
 
     generate_usbmd_dataset(
         path=output_path,
