@@ -15,15 +15,16 @@ from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.simulator import UltrasoundSimulator
 
-# pylint: disable=no-member
-
 # Add project folder to path to find config files
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
 # test
-@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"], "patches", [None, 4])
+@pytest.mark.parametrize(
+    "reconstruction_mode, patches",
+    [("generic", None), ("generic", 4), ("pw", None), ("pw", 4)],
+)
 def test_das_beamforming(reconstruction_mode, patches=4, debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
@@ -40,7 +41,7 @@ def test_das_beamforming(reconstruction_mode, patches=4, debug=False, compare_gt
     config.ml_library = "tensorflow"
 
     if patches:
-        config.model.beamformer.patches = patches
+        config.model.beamformer.patches = patches  # pylint: disable=no-member
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
