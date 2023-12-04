@@ -25,7 +25,7 @@ sys.path.append(str(wd))
     "reconstruction_mode, patches",
     [("generic", None), ("generic", 4), ("pw", None), ("pw", 4)],
 )
-def test_das_beamforming(reconstruction_mode, patches=4, debug=False, compare_gt=True):
+def test_das_beamforming(reconstruction_mode, patches, debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
 
@@ -122,4 +122,4 @@ def test_das_beamforming(reconstruction_mode, patches=4, debug=False, compare_gt
 
 
 if __name__ == "__main__":
-    test_das_beamforming(reconstruction_mode="pw", debug=True)
+    test_das_beamforming(reconstruction_mode="pw", patches=None, debug=True)
