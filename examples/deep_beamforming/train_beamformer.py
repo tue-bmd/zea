@@ -10,6 +10,7 @@ input, but with a different number of angles and DAS beamforming.
 """
 
 import os
+
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 from pathlib import Path
@@ -17,12 +18,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from keras.layers import Input
 
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
-from usbmd.setup_usbmd import setup, setup_config
+from usbmd.setup_usbmd import setup
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 from usbmd.tensorflow_ultrasound.losses import smsle
 from usbmd.utils.utils import update_dictionary
@@ -58,14 +58,16 @@ def train_beamformer(config):
     # Create target data
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
-    print('Creating target data...')
+    print("Creating target data...")
     targets = target_beamformer.predict(np.expand_dims(data, axis=0))
 
     ## Create the beamforming model
     # Only use the center angle for training
     config.scan.selected_transmits = 1
     config.model.beamformer.type = "able"
-    config.model.beamformer.patches = 1 # No patching needed for the single angle beamformer
+    config.model.beamformer.patches = (
+        1  # No patching needed for the single angle beamformer
+    )
     config_scan_params = config.scan
 
     # dict merging of manual config and dataset default scan parameters
