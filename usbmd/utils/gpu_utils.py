@@ -257,4 +257,4 @@ def init_device(
 
 
 if __name__ == "__main__":
-    init_device("torch", "auto:1")
+    init_device("torch", "auto:1", hide_devices=None)
