@@ -4,6 +4,8 @@
 - **Date**          : October 25th, 2022
 """
 import datetime
+import functools
+import warnings
 
 import cv2
 import matplotlib.pyplot as plt
@@ -175,3 +177,79 @@ def first_not_none_item(arr):
     """
     non_none_items = [item for item in arr if item is not None]
     return non_none_items[0] if non_none_items else None
+
+
+def deprecated(replacement=None):
+    """Decorator to mark a function, method, or attribute as deprecated.
+
+    Args:
+        replacement (str, optional): The name of the replacement function, method, or attribute.
+
+    Returns:
+        callable: The decorated function, method, or property.
+
+    Raises:
+        DeprecationWarning: A warning is issued when the deprecated item is called or accessed.
+
+    Example:
+        >>> class MyClass:
+        ...     @deprecated(replacement="new_method")
+        ...     def old_method(self):
+        ...         print("This is the old method.")
+        ...
+        ...     @deprecated(replacement="new_attribute")
+        ...     def __init__(self):
+        ...         self._old_attribute = "Old value"
+        ...
+        ...     @deprecated(replacement="new_property")
+        ...     @property
+        ...     def old_property(self):
+        ...         return self._old_attribute
+        ...
+
+        >>> # Using the deprecated method
+        >>> obj = MyClass()
+        >>> obj.old_method()
+        This is the old method.
+
+        >>> # Accessing the deprecated attribute
+        >>> print(obj.old_property)
+        Old value
+
+        >>> # Setting value to the deprecated attribute
+        >>> obj.old_property = "New value"
+        __main__:28: DeprecationWarning: Access to deprecated attribute old_property.
+        __main__:29: DeprecationWarning: Use new_property instead.
+        __main__:32: DeprecationWarning: Setting value to deprecated attribute old_property.
+        __main__:33: DeprecationWarning: Use new_property instead.
+    """
+
+    def decorator(item):
+        if callable(item):
+            # If it's a function or method
+            @functools.wraps(item)
+            def wrapper(*args, **kwargs):
+                warnings.warn(
+                    f"Call to deprecated {item.__name__}.", category=DeprecationWarning
+                )
+                if replacement:
+                    warnings.warn(
+                        f"Use {replacement} instead.", category=DeprecationWarning
+                    )
+                return item(*args, **kwargs)
+
+            return wrapper
+        else:
+            # If it's a property
+            warnings.warn(
+                f"Access to deprecated attribute '{item}'.",
+                category=DeprecationWarning,
+            )
+            if replacement:
+                warnings.warn(
+                    f"Use {replacement} instead.", category=DeprecationWarning
+                )
+
+            return item
+
+    return decorator
