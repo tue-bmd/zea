@@ -13,6 +13,33 @@ def check_nvidia_smi():
     return shutil.which("nvidia-smi") is not None
 
 
+def hide_gpus(gpu_ids=None):
+    """Hides the specified GPUs from the system by setting the
+    CUDA_VISIBLE_DEVICES environment variable.
+
+    This can be useful when some GPUs have too little tensor cores
+    to be useful for training, or when some GPUs are reserved for
+    other tasks.
+
+    Args:
+        gpu_ids (list): list of GPU ids to hide.
+    """
+    if gpu_ids is None:
+        return
+    assert isinstance(
+        gpu_ids, (int, list)
+    ), f"gpu_ids must be an integer or a list of integers, not {type(gpu_ids)}"
+    if not isinstance(gpu_ids, list):
+        gpu_ids = [gpu_ids]
+
+    hide_gpu_ids = gpu_ids
+    all_gpu_ids = list(range(len(get_gpu_memory(verbose=False))))
+    keep_gpu_ids = [x for x in all_gpu_ids if x not in hide_gpu_ids]
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, keep_gpu_ids))
+    print(f"Hiding GPUs {gpu_ids} from the system.")
+
+
 def get_gpu_memory(verbose=True):
     """Retrieve memory allocation information of all gpus.
 
@@ -168,8 +195,7 @@ def select_gpus(
 
     # Hide other GPUs from the system
     if hide_others:
-        # Set the CUDA_VISIBLE_DEVICES environment variable to the selected
-        # GPU(s)
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
+        hide_gpu_ids = [x for x in available_gpu_ids if x not in gpu_ids]
+        hide_gpus(hide_gpu_ids)
 
     return gpu_ids
