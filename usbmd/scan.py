@@ -512,11 +512,11 @@ class PlaneWaveScan(Scan):
             angles is not None or polar_angles is not None
         ), "Please provide angles at which plane wave dataset was recorded"
         if angles is not None:
-            self.angles = angles
-            self.polar_angles = angles
+            self._angles = angles
+            self._polar_angles = angles
         else:
-            self.angles = polar_angles
-            self.polar_angles = polar_angles
+            self._angles = polar_angles
+            self._polar_angles = polar_angles
 
         # Pass all arguments to the Scan base class
         super().__init__(
