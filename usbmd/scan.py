@@ -10,6 +10,7 @@ import numpy as np
 
 from usbmd.utils.checks import _MOD_TYPES
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
+from usbmd.utils.utils import deprecated
 
 
 class Scan:
@@ -31,12 +32,12 @@ class Scan:
         Nx: int = None,
         Nz: int = None,
         pixels_per_wvln: int = 3,
+        downsample: int = 1,
         polar_angles: np.ndarray = None,
         azimuth_angles: np.ndarray = None,
         t0_delays: np.ndarray = None,
         tx_apodizations: np.ndarray = None,
         focus_distances: np.ndarray = None,
-        downsample: int = 1,
         initial_times: np.ndarray = None,
         selected_transmits: list = None,
         probe_geometry: np.ndarray = None,
@@ -65,13 +66,18 @@ class Scan:
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
                 modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
                 to 'rf'
-            modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
-            optional): The number of samples per in a receive
-                recording per channel. Defaults to None.
+            modtype (str, optional): The modulation type. ('rf' or 'iq').
+            n_ax (int, optional): The number of samples in a receive recording per channel.
+                Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
+            pixels_per_wvln (int, optional): The number of pixels per wavelength
+                to use in the beamforming grid. Only used when Nx and Nz are not
+                defined. Defaults to 3.
+            downsample (int, optional): Decimation factor applied after downconverting
+                data to baseband (RF to IQ). Defaults to 1.
             polar_angles (np.ndarray, optional): The polar angles of the
                 transmits in radians of shape (n_tx,). These are the angles usually used
                 in 2D imaging. Defaults to None.
@@ -84,13 +90,8 @@ class Scan:
             tx_apodizations (np.ndarray, float, optional): The transmit
                 apodizations of shape (n_tx, n_el) or a single float to use for all
                 apodizations. Defaults to None.
-            pixels_per_wvln (int, optional): The number of pixels per wavelength
-                to use in the beamforming grid. Only used when Nx and Nz are not
-                defined. Defaults to 3.
             focus_distances (np.ndarray, optional): The focus distances of the
                 transmits in meters of shape (n_tx,). Defaults to None.
-            downsample (int, optional): Decimation factor applied after downconverting
-                data to baseband (RF to IQ). Defaults to 1.
             initial_times (np.ndarray, optional): The initial times of the
                 transmits in seconds of shape (n_tx,). Defaults to None.
             selected_transmits (int, list, optional): Used to select a subset of the
@@ -107,9 +108,9 @@ class Scan:
         assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
 
         # Attributes concerning channel data : The number of transmissions in a frame
-        self.n_tx = int(n_tx)
+        self._n_tx = int(n_tx)
         #: The number of elements in the array
-        self.n_el = int(n_el)
+        self._n_el = int(n_el)
         #: The modulation carrier frequency [Hz]
         self.fc = float(center_frequency)
         #: The sampling rate [Hz]
@@ -121,7 +122,7 @@ class Scan:
         #: The modulation type of the raw data ('rf' or 'iq')
         self.modtype = modtype
         #: The number of samples per channel per acquisition
-        self.n_ax = n_ax // downsample
+        self._n_ax = n_ax
         #: The demodulation frequency [Hz]
         self.fdemod = self.fc if modtype == "iq" else 0.0
         #: The number of rf/iq channels (1 for rf, 2 for iq)
@@ -130,6 +131,8 @@ class Scan:
         self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
         self.pixels_per_wavelength = pixels_per_wvln
+        #: The decimation factor applied after downconverting data to baseband (RF to IQ)
+        self.downsample = downsample
         #: The probe geometry of shape (n_el, 3)
         self.probe_geometry = probe_geometry
 
@@ -142,7 +145,7 @@ class Scan:
         #: The z-limits of the beamforming grid [m]
         self._zlims = zlims
 
-        #: The number of pixels in the lateral direction in the beamforming : grid
+        #: The number of pixels in the lateral direction in the beamforming grid
         self._Nx = int(Nx) if Nx is not None else None
         #: The number of pixels in the axial direction in the beamforming grid
         self._Nz = int(Nz) if Nz is not None else None
@@ -174,85 +177,51 @@ class Scan:
 
         if initial_times is None:
             warnings.warn("No initial times provided. Assuming all zeros.")
-            initial_times = np.zeros(self.n_tx)
-
-        #: The initial times of the transmits in seconds of shape (n_tx,). These are the
-        # time intervals between the first element firing and the first sample in the
-        # receive recording..
-        self.initial_times = initial_times
+            initial_times = np.zeros(self._n_tx)
 
         if t0_delays is None:
             warnings.warn(
                 "No t0_delays provided. Assuming all zeros and 128 element probe."
             )
-            t0_delays = np.zeros((self.n_tx, self.n_el))
+            t0_delays = np.zeros((self._n_tx, self._n_el))
         else:
-            assert t0_delays.shape == (self.n_tx, self.n_el), (
+            assert t0_delays.shape == (self._n_tx, self._n_el), (
                 f"t0_delays must have shape (n_tx, n_el). "
                 f"Got shape {t0_delays.shape}. Please set t0_delays either to None in which "
                 f"case all zeros are assumed, or set the n_tx and n_el params to match the "
                 "t0_delays shape."
             )
-        #: The transmit delays in seconds of shape (n_tx, n_el), shifted such : that the
-        # smallest delay is 0. For instance for a straight planewave : transmit all
-        # delays are zero.
-        self.t0_delays = t0_delays
 
         if tx_apodizations is None:
             warnings.warn(
                 "No tx_apodizations provided. Assuming all ones and "
                 "128 element probe."
             )
-            tx_apodizations = np.ones((n_tx, self.n_el))
-        #: The transmit apodizations of shape (n_tx, n_el) or a single float to : use
-        # for all apodizations. These values indicate both windowing : (apodization) over
-        # the aperture and the subaperture that is used : during transmit.
-        self.tx_apodizations = tx_apodizations
+            tx_apodizations = np.ones((self._n_tx, self._n_el))
 
         if polar_angles is None:
             warnings.warn("No polar_angles provided. Assuming all zeros.")
-            polar_angles = np.zeros(self.n_tx)
-        #: The polar angles of the transmits in radians of shape (n_tx,). These : are
-        # the angles usually used in 2D imaging.
-        self.polar_angles = polar_angles
-        #: Identical to `Scan.polar_angles`. This attribute is added for : backward
-        # compatibility.
-        self.angles = self.polar_angles
+            polar_angles = np.zeros(self._n_tx)
 
         if azimuth_angles is None:
             warnings.warn("No azimuth_angles provided. Assuming all zeros.")
-            azimuth_angles = np.zeros(self.n_tx)
-        #: The azimuth angles of the transmits in radians of shape (n_tx,). : These are
-        # the angles usually only used in 3D imaging.
-        self.azimuth_angles = azimuth_angles
+            azimuth_angles = np.zeros(self._n_tx)
 
         if focus_distances is None:
             warnings.warn("No focus_distances provided. Assuming all zeros.")
-            focus_distances = np.zeros(self.n_tx)
-        #: The focus distances of the transmits in meters of shape (n_tx,). : These are
-        # the distances of the virtual focus points from the origin. : For a planewave
-        # these should be set to Inf.
-        self.focus_distances = focus_distances
+            focus_distances = np.zeros(self._n_tx)
 
-        #: Used to select a subset of the transmits to use for beamforming. If set to an
-        # integer, then that number of transmits is selected as homogeneously as
-        # possible. If set to a list of integers, then the transmits with those indices
-        # are selected. If set to None, then all transmits are used. Defaults to None.
-        self.selected_transmits = self.select_transmits(selected_transmits)
+        self._t0_delays = t0_delays
+        self._tx_apodizations = tx_apodizations
+        self._polar_angles = polar_angles
+        self._angles = polar_angles  # deprecated
+        self._azimuth_angles = azimuth_angles
+        self._focus_distances = focus_distances
+        self._initial_times = initial_times
 
-        # Create subselection of transmit events
-        self.n_tx = len(self.selected_transmits)
-        self.polar_angles = self.polar_angles[self.selected_transmits]
-        self.azimuth_angles = self.azimuth_angles[self.selected_transmits]
-        self.focus_distances = self.focus_distances[self.selected_transmits]
-        self.angles = self.angles[self.selected_transmits]
-        self.tx_apodizations = self.tx_apodizations[self.selected_transmits]
-        self.t0_delays = self.t0_delays[self.selected_transmits]
-        self.initial_times = self.initial_times[self.selected_transmits]
+        self.selected_transmits = selected_transmits
 
-        check_for_aliasing(self)
-
-    def select_transmits(self, selected_transmits):
+    def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
         indices.
 
@@ -267,14 +236,14 @@ class Scan:
             list: The selected transmits as a list of indices
         """
         if selected_transmits is None:
-            return list(range(self.n_tx))
+            return list(range(self._n_tx))
 
         # 'all', 'center'
         if isinstance(selected_transmits, str):
             if selected_transmits == "all":
-                return list(range(self.n_tx))
+                return list(range(self._n_tx))
             elif selected_transmits == "center":
-                return [self.n_tx // 2]
+                return [self._n_tx // 2]
             else:
                 raise ValueError(
                     f"Invalid value for selected_transmits: {selected_transmits}."
@@ -282,23 +251,20 @@ class Scan:
 
         if isinstance(selected_transmits, int):
             # Do an error check if the number of selected transmits is not too large
-            assert selected_transmits <= self.n_tx, (
+            assert selected_transmits <= self._n_tx, (
                 f"Number of selected transmits ({selected_transmits}) "
-                f"exceeds number of transmits in scan ({self.n_tx})."
+                f"exceeds number of transmits in scan ({self._n_tx})."
             )
 
             # If the number of selected transmits is 1, then pick the middle transmit
             if selected_transmits == 1:
-                tx_indices = [self.n_tx // 2]
+                tx_indices = [self._n_tx // 2]
             else:
                 # Compute selected_transmits evenly spaced indices for reduced angles
-                tx_indices = np.linspace(0, self.n_tx - 1, selected_transmits)
+                tx_indices = np.linspace(0, self._n_tx - 1, selected_transmits)
 
                 # Round the computed angles to integers and turn into list
                 tx_indices = list(np.rint(tx_indices).astype("int"))
-
-            # Update the number of transmits
-            self.n_tx = selected_transmits
 
             return list(tx_indices)
 
@@ -307,15 +273,87 @@ class Scan:
                 isinstance(n, int) for n in selected_transmits
             ), "selected_transmits must be a list of integers."
             # Check if the selected transmits are not too large
-            assert all(n < self.n_tx for n in selected_transmits), (
+            assert all(n < self._n_tx for n in selected_transmits), (
                 f"Selected transmits {selected_transmits} exceed the number of "
-                f"transmits in the scan ({self.n_tx})."
+                f"transmits in the scan ({self._n_tx})."
             )
 
-            # Update the number of transmits
-            self.n_tx = len(selected_transmits)
-
             return selected_transmits
+
+    @property
+    def selected_transmits(self):
+        """Used to select a subset of the transmits to use for beamforming. If set to an
+        integer, then that number of transmits is selected as homogeneously as possible.
+        If set to a list of integers, then the transmits with those indices are
+        selected. If set to None, then all transmits are used. Defaults to None."""
+        return self._selected_transmits
+
+    @selected_transmits.setter
+    def selected_transmits(self, value):
+        self._selected_transmits = self._select_transmits(value)
+        check_for_aliasing(self)
+
+    @property
+    def n_tx(self):
+        """The number of transmits to produce a single frame."""
+        return len(self.selected_transmits)
+
+    @property
+    def n_el(self):
+        """The number of elements in the array."""
+        return self._n_el
+
+    @property
+    def n_ax(self):
+        """The number of samples in a receive recording per channel."""
+        return self._n_ax // self.downsample
+
+    @property
+    def t0_delays(self):
+        """The transmit delays in seconds of shape (n_tx, n_el), shifted such that the
+        smallest delay is 0. For instance for a straight planewave transmit all delays
+        are zero."""
+        return self._t0_delays[self.selected_transmits]
+
+    @property
+    def tx_apodizations(self):
+        """The transmit apodizations of shape (n_tx, n_el) or a single float to use for
+        all apodizations. These values indicate both windowing (apodization) over the
+        aperture and the subaperture that is used during transmit."""
+        return self._tx_apodizations[self.selected_transmits]
+
+    @property
+    def polar_angles(self):
+        """The polar angles of the transmits in radians of shape (n_tx,). These are the
+        angles usually used in 2D imaging."""
+        return self._polar_angles[self.selected_transmits]
+
+    @deprecated("Scan.polar_angles")
+    @property
+    def angles(self):
+        """Identical to `Scan.polar_angles`. This attribute is added for backward
+        compatibility."""
+        return self.polar_angles
+
+    @property
+    def azimuth_angles(self):
+        """The azimuth angles of the transmits in radians of shape (n_tx,). These are
+        the angles usually used in 3D imaging."""
+        return self._azimuth_angles[self.selected_transmits]
+
+    @property
+    def focus_distances(self):
+        """The focus distances of the transmits in meters of shape (n_tx,). These are
+        the distances of the virtual focus points from the origin. For a planewave
+        these should be set to Inf."""
+        return self._focus_distances[self.selected_transmits]
+
+    @property
+    def initial_times(self):
+        """The initial times of the transmits in seconds of shape (n_tx,). These are the
+        time intervals between the first element firing and the first sample in the
+        receive recording."""
+        return self._initial_times[self.selected_transmits]
 
     @property
     def Nx(self):
@@ -330,8 +368,7 @@ class Scan:
 
     @property
     def Nz(self):
-        """The number of pixels in the axial direction in the beamforming
-        grid."""
+        """The number of pixels in the axial direction in the beamforming grid."""
         return self._Nz
 
     @Nz.setter
