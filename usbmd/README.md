@@ -55,16 +55,17 @@ If you make your own config, make sure it can be validated using the [config val
 
 #### GPU support
 
-Make sure that before using any GPU enabled functionality the following code is run:
+Make sure that before using any GPU enabled functionality (importing torch / tensorflow) the following code is run:
 
 ```python
-# Init GPU / CPU according to config
-if config.ml_library == 'torch':
-    from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
-    config.device = get_device(config.device)
-elif config.ml_library == 'tensorflow':
-    from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-    set_gpu_usage(config.device)
+# import the init_device function
+from usbmd.utils.gpu_utils import init_device
+
+# initialize device manually
+init_device("torch", "auto:1", hide_devices=None)
+
+# or using your config
+init_device(config.ml_library, config.device, hide_devices=config.hide_devices)
 ```
 
 ## Data
