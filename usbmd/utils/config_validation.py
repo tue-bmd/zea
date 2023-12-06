@@ -18,9 +18,9 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
+from usbmd.registry import metrics_registry
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.metrics import _METRICS
 
 _ML_LIBRARIES = [None, "torch", "tensorflow"]
 
@@ -33,6 +33,9 @@ for lib in _ML_LIBRARIES:
         if lib == "tensorflow":
             # pylint: disable=unused-import
             import usbmd.tensorflow_ultrasound
+
+# pylint: disable=unused-import
+import usbmd.utils.metrics
 
 # Register beamforing types in registry
 from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
@@ -179,7 +182,9 @@ config_schema = Schema(
             Optional("tag", default=None): Or(None, str),
             Optional("headless", default=False): bool,
             Optional("selector", default=None): Or(None, "rectangle", "lasso"),
-            Optional("selector_metric", default="gcnr"): Or(*_METRICS),
+            Optional("selector_metric", default="gcnr"): Or(
+                *metrics_registry.registered_names()
+            ),
         },
         Optional("model", default=model_schema.validate({})): model_schema,
         Optional(
