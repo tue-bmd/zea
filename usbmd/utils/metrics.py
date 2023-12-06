@@ -6,34 +6,15 @@
 
 import numpy as np
 
-_METRICS = {}
-
-
-def register_metric(func=None, *, name=None):
-    """A decorator for registering metric functions."""
-
-    def _register(func):
-        if name is None:
-            local_name = func.__name__
-        else:
-            local_name = name
-        if local_name in _METRICS:
-            raise ValueError(f"Already registered metric with name: {local_name}")
-        _METRICS[local_name] = func
-        return func
-
-    if func is None:
-        return _register
-    else:
-        return _register(func)
+from usbmd.registry import metrics_registry
 
 
 def get_metric(name):
     """Get metric function given name."""
-    return _METRICS[name]
+    return metrics_registry[name]
 
 
-@register_metric(name="cnr")
+@metrics_registry(name="cnr", framework="numpy", supervised=True)
 def cnr(x, y):
     """Calculate contrast to noise ratio"""
     mu_x = np.mean(x)
@@ -45,13 +26,13 @@ def cnr(x, y):
     return 20 * np.log10(np.abs(mu_x - mu_y) / np.sqrt((var_x + var_y) / 2))
 
 
-@register_metric(name="contrast")
+@metrics_registry(name="contrast", framework="numpy", supervised=True)
 def contrast(x, y):
     """Contrast ratio"""
     return 20 * np.log10(x.mean() / y.mean())
 
 
-@register_metric(name="gcnr")
+@metrics_registry(name="gcnr", framework="numpy", supervised=True)
 def gcnr(x, y, bins=256):
     """Generalized contrast-to-noise-ratio"""
     x = x.flatten()
@@ -64,65 +45,65 @@ def gcnr(x, y, bins=256):
     return 1 - np.sum(np.minimum(f, g))
 
 
-@register_metric(name="fwhm")
+@metrics_registry(name="fwhm", framework="numpy", supervised=False)
 def fwhm(img):
     """Resolution full width half maxima"""
     mask = np.nonzero(img >= 0.5 * np.amax(img))[0]
     return mask[-1] - mask[0]
 
 
-@register_metric(name="speckle_res")
+@metrics_registry(name="speckle_res", framework="numpy", supervised=False)
 def speckle_res(img):
     """TODO: Write speckle edge-spread function resolution code"""
     raise NotImplementedError
 
 
-@register_metric(name="snr")
+@metrics_registry(name="snr", framework="numpy", supervised=False)
 def snr(img):
     """Signal to noise ratio"""
     return img.mean() / img.std()
 
 
-@register_metric(name="wopt_mae")
+@metrics_registry(name="wopt_mae", framework="numpy", supervised=True)
 def wopt_mae(ref, img):
     """Find the optimal weight that minimizes the mean absolute error"""
     wopt = np.median(ref / img)
     return wopt
 
 
-@register_metric(name="wopt_mse")
+@metrics_registry(name="wopt_mse", framework="numpy", supervised=True)
 def wopt_mse(ref, img):
     """Find the optimal weight that minimizes the mean squared error"""
     wopt = np.sum(ref * img) / np.sum(img * img)
     return wopt
 
 
-@register_metric(name="l1")
+@metrics_registry(name="l1loss", framework="numpy", supervised=True)
 def l1loss(x, y):
     """L1 loss"""
     return np.abs(x - y).mean()
 
 
-@register_metric(name="l2")
+@metrics_registry(name="l2loss", framework="numpy", supervised=True)
 def l2loss(x, y):
     """L2 loss"""
     return np.sqrt(((x - y) ** 2).mean())
 
 
-@register_metric(name="psnr")
+@metrics_registry(name="psnr", framework="numpy", supervised=True)
 def psnr(x, y):
     """Peak signal to noise ratio"""
     dynamic_range = max(x.max(), y.max()) - min(x.min(), y.min())
     return 20 * np.log10(dynamic_range / l2loss(x, y))
 
 
-@register_metric(name="ncc")
+@metrics_registry(name="ncc", framework="numpy", supervised=True)
 def ncc(x, y):
     """Normalized cross correlation"""
     return (x * y).sum() / np.sqrt((x**2).sum() * (y**2).sum())
 
 
-@register_metric(name="image_entropy")
+@metrics_registry(name="image_entropy", framework="numpy", supervised=False)
 def image_entropy(image):
     """Calculate the entropy of the image
 
@@ -138,7 +119,7 @@ def image_entropy(image):
     return entropy
 
 
-@register_metric(name="image_sharpness")
+@metrics_registry(name="image_sharpness", framework="numpy", supervised=False)
 def image_sharpness(image):
     """Calculate the sharpness of the image
 
@@ -149,17 +130,3 @@ def image_sharpness(image):
         float: The sharpness of the image
     """
     return np.mean(np.abs(np.gradient(image)))
-
-
-if __name__ == "__main__":
-    x = np.random.rayleigh(2, (80, 50))
-    y = np.random.rayleigh(1, (80, 50))
-
-    print(f"Contrast [dB]:  {(20 * np.log10(contrast(x, y)))}")
-    print(f"CNR:            {cnr(x, y)}")
-    print(f"SNR:            {snr(x)}")
-    print(f"GCNR:           {gcnr(x, y)}")
-    print(f"L1 Loss:        {l1loss(x, y)}")
-    print(f"L2 Loss:        {l2loss(x, y)}")
-    print(f"PSNR [dB]:      {psnr(x, y)}")
-    print(f"NCC:            {ncc(x, y)}")
