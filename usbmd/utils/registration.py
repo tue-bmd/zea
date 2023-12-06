@@ -131,6 +131,14 @@ class RegisterDecorator:
         """Returns a list of the names registered."""
         return list(self.registry.keys())
 
+    def __contains__(self, key):
+        """Returns True if the key is registered."""
+        return key.lower() in self.registry
+
+    def __iter__(self):
+        """Returns an iterator over the keys of the registry."""
+        return iter(self.registry)
+
     def clear(self):
         """Clears the registry."""
         self.registry = {}
