@@ -62,10 +62,18 @@ Make sure that before using any GPU enabled functionality (importing torch / ten
 from usbmd.utils.gpu_utils import init_device
 
 # initialize device manually
-init_device("torch", "auto:1", hide_devices=None)
+device = init_device("torch", "auto:1", hide_devices=None)
 
 # or using your config
-init_device(config.ml_library, config.device, hide_devices=config.hide_devices)
+device = init_device(config.ml_library, config.device, hide_devices=config.hide_devices)
+```
+
+Alternatively, you can use the `setup` function using a config file, which will initialize the device and setup the data paths:
+
+```python
+# import the setup function
+from usbmd.setup_usbmd import setup
+config = setup("configs/config_picmus_rf.yaml")
 ```
 
 ## Data
