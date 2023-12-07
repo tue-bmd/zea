@@ -99,6 +99,7 @@ def test_nonexistent_key_raises_keyerror():
 
 
 def test_strtobool():
+    """"Test strtobool function with multiple user inputs."""
     # 1. Non string input raises assertion error
     with pytest.raises(AssertionError, match="Input value must be a string"):
         strtobool(1)
