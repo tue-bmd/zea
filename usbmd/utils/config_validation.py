@@ -52,6 +52,7 @@ any_number = Or(
 )
 list_of_size_two = And(list, lambda l: len(l) == 2)
 positive_integer = And(int, lambda i: i > 0)
+positive_integer_and_zero = And(int, lambda i: i >= 0)
 positive_float = And(float, lambda f: f > 0)
 list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
 list_of_positive_integers = And(list, lambda l: all(_l >= 0 for _l in l))
@@ -198,6 +199,9 @@ config_schema = Schema(
             Regex(r"gpu:\d+"),
             Regex(r"auto:\d+"),
             None,
+        ),
+        Optional("hide_devices", default=None): Or(
+            None, list_of_positive_integers, positive_integer_and_zero
         ),
         Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, "disable"),
         Optional("git", default=None): Or(None, str),

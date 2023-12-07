@@ -24,7 +24,7 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
-from usbmd.tensorflow_ultrasound.losses import smsle
+from usbmd.tensorflow_ultrasound.losses import SMSLE
 from usbmd.utils.utils import update_dictionary
 
 
@@ -93,8 +93,8 @@ def train_beamformer(config):
 
     beamformer.compile(
         optimizer=optimizer,
-        loss=smsle,
-        metrics=smsle,
+        loss=SMSLE(),
+        metrics=SMSLE(),
         run_eagerly=False,
         jit_compile=True,
     )
