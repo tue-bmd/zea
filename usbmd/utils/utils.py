@@ -50,11 +50,22 @@ def find_key(dictionary, contains, case_sensitive=False):
     Returns:
         str: the key of the dictionary that contains the query string.
 
+    Raises:
+        TypeError: if not all keys are strings.
+        KeyError: if no key is found containing the query string.
     """
+    # Assert that all keys are strings
+    if not all(isinstance(k, str) for k in dictionary.keys()):
+        raise TypeError("All keys must be strings.")
+
     if case_sensitive:
         key = [k for k in dictionary.keys() if contains in k]
     else:
         key = [k for k in dictionary.keys() if contains in k.lower()]
+
+    if len(key) == 0:
+        raise KeyError(f"Key containing '{contains}' not found in dictionary.")
+
     return key[0]
 
 
@@ -77,6 +88,7 @@ def strtobool(val: str):
     are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
     'val' is anything else.
     """
+    assert isinstance(val, str), f"Input value must be a string, not {type(val)}"
     val = val.lower()
     if val in ("y", "yes", "t", "true", "on", "1"):
         return True
@@ -134,12 +146,25 @@ def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict
 
 
 def get_date_string(string: str = None):
-    """Generate a date string for current time, according to format specified by `string`."""
+    """Generate a date string for current time, according to format specified by
+    `string`. Refer to the documentation of the datetime module for more information
+    on the formatting options.
+
+    If no string is specified, the default format is used: "%Y_%m_%d_%H%M%S".
+    """
+    if string is not None and not isinstance(string, str):
+        raise TypeError("Input must be a string.")
+
+    # Get the current time
     now = datetime.datetime.now()
+
+    # If no string is specified, use the default format
     if string is None:
         string = "%Y_%m_%d_%H%M%S"
 
+    # Generate the date string
     date_str = now.strftime(string)
+
     return date_str
 
 
