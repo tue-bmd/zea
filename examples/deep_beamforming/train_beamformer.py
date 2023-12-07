@@ -9,10 +9,6 @@ input, but with a different number of angles and DAS beamforming.
 
 """
 
-import os
-
-os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -58,7 +54,9 @@ def train_beamformer(config):
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
     print("Creating target data...")
-    data = dataset[0][scan.selected_transmits] # Select the transmits as defined in the config
+    data = dataset[0][
+        scan.selected_transmits
+    ]  # Select the transmits as defined in the config
     targets = target_beamformer.predict(np.expand_dims(data, axis=0), batch_size=1)
 
     ## Create the beamforming model
