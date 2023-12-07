@@ -81,6 +81,7 @@ def test_find_key(contains, case_sensitive):
     # Check that the result is a string
     assert isinstance(result, str), "Result is not a list"
     # Check that the result is actually in the dictionary
+    # pylint: disable=C0201
     assert result in dictionary.keys(), "Key not found in dictionary"
 
     # Check that the result contains the search string

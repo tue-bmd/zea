@@ -55,7 +55,7 @@ def find_key(dictionary, contains, case_sensitive=False):
         KeyError: if no key is found containing the query string.
     """
     # Assert that all keys are strings
-    if not all([isinstance(k, str) for k in dictionary.keys()]):
+    if not all(isinstance(k, str) for k, _ in dictionary):
         raise TypeError("All keys must be strings.")
 
     if case_sensitive:
@@ -88,7 +88,7 @@ def strtobool(val: str):
     are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
     'val' is anything else.
     """
-    assert type(val) == str, f"Input value must be a string, not {type(val)}"
+    assert isinstance(val, str), f"Input value must be a string, not {type(val)}"
     val = val.lower()
     if val in ("y", "yes", "t", "true", "on", "1"):
         return True
