@@ -48,12 +48,12 @@ def _check_raw_data(data, with_frame_dim=False):
     """
     if not with_frame_dim:
         assert len(data.shape) == 4, (
-            "raw data must be 4D, with expected shape [n_tx, n_el, n_ax, n_ch], "
+            "raw data must be 4D, with expected shape [n_tx, n_ax, n_el, n_ch], "
             f"got {data.shape}"
         )
     else:
         assert len(data.shape) == 5, (
-            "raw data must be 5D, with expected shape [n_fr, n_tx, n_el, n_ax, n_ch], "
+            "raw data must be 5D, with expected shape [n_fr, n_tx, n_ax, n_el, n_ch], "
             f"got {data.shape}"
         )
     assert data.shape[-1] in [1, 2], (
@@ -78,12 +78,12 @@ def _check_aligned_data(data, with_frame_dim=False):
 
     if not with_frame_dim:
         assert len(data.shape) == 4, (
-            "aligned data must be 4D, with expected shape [n_tx, n_el, n_ax, n_ch], "
+            "aligned data must be 4D, with expected shape [n_tx, n_ax, n_el, n_ch], "
             f"got {data.shape}"
         )
     else:
         assert len(data.shape) == 5, (
-            "aligned data must be 5D, with expected shape [n_fr, n_tx, n_el, n_ax, n_ch], "
+            "aligned data must be 5D, with expected shape [n_fr, n_tx, n_ax, n_el, n_ch], "
             f"got {data.shape}"
         )
     assert data.shape[-1] in [1, 2], (
