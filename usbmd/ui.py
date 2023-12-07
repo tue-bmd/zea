@@ -208,8 +208,9 @@ class DataLoaderUI:
         if image_range is None:
             image_range = self.config.data.dynamic_range
 
-        # match orientation
-        image = np.fliplr(image)
+        # match orientation if necessary
+        if self.config.plot.fliplr:
+            image = np.fliplr(image)
 
         if movie:
             if plot_lib == "matplotlib":

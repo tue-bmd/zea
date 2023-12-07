@@ -181,6 +181,7 @@ config_schema = Schema(
             Optional("headless", default=False): bool,
             Optional("selector", default=None): Or(None, "rectangle", "lasso"),
             Optional("selector_metric", default="gcnr"): Or(*_METRICS),
+            Optional("fliplr", default=False): bool,
         },
         Optional("model", default=model_schema.validate({})): model_schema,
         Optional(
