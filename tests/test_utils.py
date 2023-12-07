@@ -56,6 +56,7 @@ def test_translate(range_from, range_to):
     ],
 )
 def test_update_dictionary(dict1, dict2, keep_none, expected_result):
+    """Tests the update_dictionary function using simple equality check."""
     result = update_dictionary(dict1, dict2, keep_none)
     assert result == expected_result
 
@@ -99,15 +100,15 @@ def test_nonexistent_key_raises_keyerror():
 
 
 def test_strtobool():
-    """"Test strtobool function with multiple user inputs."""
+    """ "Test strtobool function with multiple user inputs."""
     # 1. Non string input raises assertion error
     with pytest.raises(AssertionError, match="Input value must be a string"):
         strtobool(1)
 
     # 2. strtobool is case insensitive
-    assert strtobool("TRUE") == True
-    assert strtobool("TruE") == True
-    assert strtobool("true") == True
+    assert strtobool("TRUE") is True
+    assert strtobool("TruE") is True
+    assert strtobool("true") is True
 
     # 3. valid 'true' values get mapped to True
     valid_true_values = ["y", "yes", "t", "true", "on", "1"]
