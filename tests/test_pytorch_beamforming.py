@@ -55,7 +55,7 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
             ]
         ),
     )
-    scan.focus_distances = (
+    scan._focus_distances = (
         np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
