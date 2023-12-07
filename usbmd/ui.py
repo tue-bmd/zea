@@ -28,7 +28,11 @@ from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.io_lib import filename_from_window_dialog, matplotlib_figure_to_numpy
+from usbmd.utils.io_lib import (
+    filename_from_window_dialog,
+    matplotlib_figure_to_numpy,
+    running_in_notebook,
+)
 from usbmd.utils.selection_tool import interactive_selector_with_plot_and_metric
 from usbmd.utils.utils import (
     plt_window_has_been_closed,
@@ -85,6 +89,7 @@ class DataLoaderUI:
             self.headless = self.config.plot.headless
 
         self.check_for_display()
+        self.set_backend_for_notebooks()
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
@@ -94,6 +99,11 @@ class DataLoaderUI:
                 warnings.warn("Could not connect to display, running headless.")
         else:
             print("Running in headless mode as set by config.")
+
+    def set_backend_for_notebooks(self):
+        """Set backend to QtAgg if running in notebook"""
+        if running_in_notebook() and not self.headless:
+            matplotlib.use("QtAgg")
 
     def run(self, plot=True, to_dtype=None):
         """Run ui. Will retrieve, process and plot data if set to True."""
@@ -119,10 +129,9 @@ class DataLoaderUI:
                 self.image = np.squeeze(self.image)
 
             if plot:
-                if self.gui:
-                    self.plot(self.image, block=False, save=save, plot_lib=plot_lib)
-                else:
-                    self.plot(self.image, block=True, save=save, plot_lib=plot_lib)
+                self.plot(
+                    self.image, block=(not self.gui), save=save, plot_lib=plot_lib
+                )
 
         return self.image
 
@@ -183,7 +192,7 @@ class DataLoaderUI:
             image (ndarray): Log compressed enveloped detected image.
             image_range (tuple, optional): dynamic range of plot. Defaults to None,
                 in that case the dynamic range in config is used.
-            save (bool): wheter to save the image to disk.
+            save (bool): whether to save the image to disk.
             movie (bool, optional): if True it will assume a figure object
                 already exists and will overwrite the frame (to create a movie).
                 If False will just create a new figure with each call. Defaults to False.
@@ -195,6 +204,9 @@ class DataLoaderUI:
         """
         if self.probe.probe_type == "phased":
             image = self.process.run(image, dtype="image", to_dtype="image_sc")
+
+        if image_range is None:
+            image_range = self.config.data.dynamic_range
 
         # match orientation
         image = np.fliplr(image)
@@ -210,9 +222,9 @@ class DataLoaderUI:
                     image = matplotlib_figure_to_numpy(self.fig)
                     return image
             elif plot_lib == "opencv":
-                image = to_8bit(image, self.config.data.dynamic_range, pillow=False)
+                image = to_8bit(image, image_range, pillow=False)
                 if not self.headless:
-                    cv2.imshow("frame", image)
+                    cv2.imshow(str(self.dataset.file_name.name), image)
                 return image
 
         if not movie:
@@ -229,16 +241,11 @@ class DataLoaderUI:
                 else:
                     extent = None
 
-                if image_range is None:
-                    vmin, vmax = self.config.data.dynamic_range
-                else:
-                    vmin, vmax = image_range
-
                 self.mpl_img = self.ax.imshow(
                     image,
                     cmap="gray",
-                    vmin=vmin,
-                    vmax=vmax,
+                    vmin=image_range[0],
+                    vmax=image_range[1],
                     origin="upper",
                     extent=extent,
                     interpolation="none",
@@ -331,6 +338,13 @@ class DataLoaderUI:
                     image = self.process.postprocess.run(image[None, ..., None])
                     image = np.squeeze(image)
 
+                if i == 0:
+                    if plot_lib == "opencv":
+                        height, width = image.shape[1], image.shape[0]
+                        window_name = str(self.dataset.file_name.name)
+                        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                        cv2.resizeWindow(window_name, height, width)
+
                 image = self.plot(image, movie=True, plot_lib=plot_lib, block=False)
 
                 print(f"frame {i}", end="\r")
@@ -340,9 +354,10 @@ class DataLoaderUI:
                         images.append(image)
 
                 # For opencv, show frame for 25 ms and check if "q" is pressed
-                if cv2.waitKey(25) & 0xFF == ord("q"):
-                    cv2.destroyAllWindows()
-                    return images
+                if plot_lib == "opencv":
+                    if cv2.waitKey(25) & 0xFF == ord("q"):
+                        cv2.destroyAllWindows()
+                        return images
                 # For matplotlib, check if window has been closed
                 if plot_lib == "matplotlib":
                     if plt_window_has_been_closed(self.fig):
