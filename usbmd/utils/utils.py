@@ -144,12 +144,25 @@ def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict
 
 
 def get_date_string(string: str = None):
-    """Generate a date string for current time, according to format specified by `string`."""
+    """Generate a date string for current time, according to format specified by
+    `string`. Refer to the documentation of the datetime module for more information
+    on the formatting options.
+
+    If no string is specified, the default format is used: "%Y_%m_%d_%H%M%S".
+    """
+    if string is not None and not isinstance(string, str):
+        raise TypeError("Input must be a string.")
+
+    # Get the current time
     now = datetime.datetime.now()
+
+    # If no string is specified, use the default format
     if string is None:
         string = "%Y_%m_%d_%H%M%S"
 
+    # Generate the date string
     date_str = now.strftime(string)
+
     return date_str
 
 
