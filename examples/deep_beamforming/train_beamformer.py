@@ -35,7 +35,6 @@ def train_beamformer(config):
     ## Dataloading and parameter initialization
     # Intialize dataset
     dataset = get_dataset(config.data)
-    data = dataset[0]
 
     # Initialize scan based on dataset
     scan_class = dataset.get_scan_class()
@@ -59,7 +58,8 @@ def train_beamformer(config):
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
     print("Creating target data...")
-    targets = target_beamformer.predict(np.expand_dims(data, axis=0))
+    data = dataset[0][scan.selected_transmits] # Select the transmits as defined in the config
+    targets = target_beamformer.predict(np.expand_dims(data, axis=0), batch_size=1)
 
     ## Create the beamforming model
     # Only use the center angle for training
@@ -80,7 +80,7 @@ def train_beamformer(config):
     scan = scan_class(**scan_params, modtype=config.data.modtype)
     scan.angles = np.array([0])
 
-    inputs = np.expand_dims(data[37:38], axis=0)
+    inputs = np.expand_dims(dataset[0][37:38], axis=0)
 
     beamformer = get_beamformer(probe, scan, config)
     beamformer.summary()
@@ -112,26 +112,26 @@ def train_beamformer(config):
     inputs += noise
 
     # Train the model
-    history = beamformer.fit(inputs, targets, epochs=1, batch_size=1, verbose=1)
-    predictions = np.array(beamformer(inputs))
+    history = beamformer.fit(inputs, targets, epochs=50, batch_size=1, verbose=1)
+    prediction = np.array(beamformer(inputs))
     das = np.array(das_beamformer(inputs))
 
     # Create a Process class to convert the data to an image
     process = Process(config, scan, probe)
-    targets = process.run(targets, "beamformed_data", "image")
-    predictions = process.run(predictions, "beamformed_data", "image")
-    das = process.run(das, "beamformed_data", "image")
+    img_target = process.run(targets[0], "beamformed_data", "image")
+    img_prediction = process.run(prediction[0], "beamformed_data", "image")
+    img_das = process.run(das[0], "beamformed_data", "image")
 
     # plot the resulting image
     plt.figure()
     plt.subplot(1, 3, 1)
-    plt.imshow(targets[0], cmap="gray")
+    plt.imshow(img_target, cmap="gray")
     plt.title("Target")
     plt.subplot(1, 3, 2)
-    plt.imshow(predictions[0], cmap="gray")
+    plt.imshow(img_prediction, cmap="gray")
     plt.title("Prediction")
     plt.subplot(1, 3, 3)
-    plt.imshow(das[0], cmap="gray")
+    plt.imshow(img_das, cmap="gray")
     plt.title("DAS")
 
     return history, beamformer
