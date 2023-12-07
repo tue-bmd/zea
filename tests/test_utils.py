@@ -1,4 +1,6 @@
 """Tests for the usbmd.utils.utils module."""
+import re
+
 import numpy as np
 import pytest
 
@@ -6,6 +8,7 @@ from usbmd.utils.utils import (
     find_first_nonzero_index,
     find_key,
     first_not_none_item,
+    get_date_string,
     strtobool,
     translate,
     update_dictionary,
@@ -118,6 +121,32 @@ def test_strtobool():
     for invalid_value in sample_invalid_values:
         with pytest.raises(ValueError, match=f"invalid truth value {invalid_value}"):
             strtobool(invalid_value)
+
+
+def test_get_date_string():
+    """Tests the get_date_string function."""
+
+    # Test default date format
+    date_string = get_date_string()
+    assert isinstance(date_string, str), "Result is not a string"
+    date_string = get_date_string()
+
+    # Check if date string matches pattern YYYY_MM_DD_HHMMSS
+    regex_pattern = r"^\d{4}_\d{2}_\d{2}_\d{6}$"
+    assert re.match(regex_pattern, date_string), "Date string does not match pattern"
+
+    # Test alternative date format
+    date_string = get_date_string(string="%d-%m-%Y")
+    assert isinstance(date_string, str), "Result is not a string"
+    regex_pattern = r"^\d{2}-\d{2}-\d{4}$"
+    assert re.match(regex_pattern, date_string), "Date string does not match pattern"
+
+    # Test if the function raises an error at invalid input
+    with pytest.raises(TypeError):
+        get_date_string(string=1)
+
+    with pytest.raises(TypeError):
+        get_date_string(string=lambda x: x)
 
 
 @pytest.mark.parametrize(
