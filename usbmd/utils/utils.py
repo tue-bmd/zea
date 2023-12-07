@@ -55,7 +55,7 @@ def find_key(dictionary, contains, case_sensitive=False):
         KeyError: if no key is found containing the query string.
     """
     # Assert that all keys are strings
-    if not all(isinstance(k, str) for k, _ in dictionary):
+    if not all(isinstance(k, str) for k in dictionary.keys()):
         raise TypeError("All keys must be strings.")
 
     if case_sensitive:
