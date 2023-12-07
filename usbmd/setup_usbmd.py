@@ -16,6 +16,7 @@ from usbmd.common import set_data_paths
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
+from usbmd.utils.gpu_utils import init_device
 from usbmd.utils.io_lib import filename_from_window_dialog
 
 
@@ -43,7 +44,7 @@ def setup(
     config.data.user = set_data_paths(user_config, local=config.data.local)
 
     # Init GPU / CPU according to config
-    config.device = init_device(config.ml_library, config.device)
+    config.device = init_device(config.ml_library, config.device, config.hide_devices)
 
     return config
 
@@ -85,40 +86,3 @@ def setup_config(config_path: str = None):
         config["git"] = get_git_summary()
 
     return config
-
-
-def init_device(ml_library: str, device: Union[str, int, list]):
-    """Selects a GPU or CPU device based on the config.
-    For PyTorch, this will return the device.
-    For TensorFlow, this will hide all other GPUs from the system
-    by setting the CUDA_VISIBLE_DEVICES.
-
-    Args:
-        ml_library (str): String indicating which ml library to use.
-        device (str/int/list): device(s) to select.
-            Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
-
-            for more details see:
-                pytorch_ultrasound.utils.gpu_config.get_device and
-                tensorflow_ultrasound.utils.gpu_config.set_gpu_usage.
-    Returns:
-        device (str/int/list): selected device(s).
-    """
-
-    # Init GPU / CPU according to config
-    if ml_library == "torch":
-        # pylint: disable=import-outside-toplevel
-        from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
-
-        device = get_device(device)
-    elif ml_library == "tensorflow":
-        # pylint: disable=import-outside-toplevel
-        from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-
-        set_gpu_usage(device)
-    elif ml_library == "disable" or ml_library is None:
-        device = "cpu"
-    else:
-        raise ValueError(f"Unknown ml_library ({ml_library}) in config.")
-
-    return device
