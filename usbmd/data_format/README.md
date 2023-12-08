@@ -23,6 +23,8 @@ The USBMD data format has the following structure:
     - `sampling_frequency`: The sampling frequency of the data.
     - `center_frequency`: The center frequency of the transducer.
     - `initial_times`: The times when the A/D converter starts sampling in seconds of shape (n_tx,). This is the time between the first element firing and the first recorded sample.
+    - `bandwidth_percent`: Receive bandwidth of RF signal in % of center frequency.
+    - `time_to_next_transmit`: The time between subsequent transmit events in seconds of shape (n_tx*n_frames, ). 
 
 This information is combined in a hdf5 file consisting of one sequence. A dataset then consists of multiple hdf5 files.
 
