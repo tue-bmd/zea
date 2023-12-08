@@ -44,7 +44,8 @@ def hide_gpus(gpu_ids=None):
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, keep_gpu_ids))
-        print(f"Hiding GPUs {hide_gpu_ids} from the system.")
+        if len(hide_gpu_ids) > 0:
+            print(f"Hiding GPUs {hide_gpu_ids} from the system.")
 
 
 def get_gpu_memory(verbose=True):
