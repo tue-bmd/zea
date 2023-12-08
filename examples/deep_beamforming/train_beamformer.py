@@ -4,8 +4,10 @@ Author(s): Ben Luijten
 Date: 09/12/2022
 
 Summary: This script trains a deep learning based beamformer (ABLE) on a single angle plane wave
-input, towards an 11 plane wave target. The target is created using the same scan parameters as the
-input, but with a different number of angles and DAS beamforming.
+input, towards a multi angle plane wave target. As such, the target is created using the same scan
+parameters as the input, but with a different number of angles and DAS beamforming.
+
+This script should be compatible with plane wave data in USBMD format.
 
 """
 
@@ -54,14 +56,14 @@ def train_beamformer(config):
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
     print("Creating target data...")
-    data = dataset[0][
+    data = dataset[0][0][
         scan.selected_transmits
     ]  # Select the transmits as defined in the config
     targets = target_beamformer.predict(np.expand_dims(data, axis=0), batch_size=1)
 
     ## Create the beamforming model
     # Only use the center angle for training
-    config.scan.selected_transmits = 1
+    config.scan.selected_transmits = "center"
     config.model.beamformer.type = "able"
     config.model.beamformer.patches = (
         1  # No patching needed for the single angle beamformer
@@ -78,7 +80,7 @@ def train_beamformer(config):
     scan = scan_class(**scan_params, modtype=config.data.modtype)
     scan.angles = np.array([0])
 
-    inputs = np.expand_dims(dataset[0][37:38], axis=0)
+    inputs = np.expand_dims(dataset[0][0][scan.selected_transmits], axis=0)
 
     beamformer = get_beamformer(probe, scan, config)
     beamformer.summary()
@@ -137,7 +139,7 @@ def train_beamformer(config):
 
 if __name__ == "__main__":
     # Load config
-    path_to_config_file = Path.cwd() / "configs/config_picmus_iq.yaml"
+    path_to_config_file = Path.cwd() / "configs/config_usbmd_cirs.yaml"
     config = setup(path_to_config_file)
 
     # Train
