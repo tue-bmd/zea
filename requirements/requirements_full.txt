@@ -15,6 +15,7 @@ papermill
 pydicom
 PyQt5
 bm3d
+deepdiff
 
 tensorflow-gpu<2.11
 --extra-index-url https://download.pytorch.org/whl/cu117

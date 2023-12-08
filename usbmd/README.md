@@ -55,16 +55,25 @@ If you make your own config, make sure it can be validated using the [config val
 
 #### GPU support
 
-Make sure that before using any GPU enabled functionality the following code is run:
+Make sure that before using any GPU enabled functionality (importing torch / tensorflow) the following code is run:
 
 ```python
-# Init GPU / CPU according to config
-if config.ml_library == 'torch':
-    from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
-    config.device = get_device(config.device)
-elif config.ml_library == 'tensorflow':
-    from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
-    set_gpu_usage(config.device)
+# import the init_device function
+from usbmd.utils.gpu_utils import init_device
+
+# initialize device manually
+device = init_device("torch", "auto:1", hide_devices=None)
+
+# or using your config
+device = init_device(config.ml_library, config.device, hide_devices=config.hide_devices)
+```
+
+Alternatively, you can use the `setup` function using a config file, which will initialize the device and setup the data paths:
+
+```python
+# import the setup function
+from usbmd.setup_usbmd import setup
+config = setup("configs/config_picmus_rf.yaml")
 ```
 
 ## Data
@@ -112,23 +121,24 @@ data_file.hdf5                  // [unit], [array shape], [type]
 #### Data Flow Diagram
 
 ![Data flow](../docs/usbmd/diagrams_dataflow.png)
+![Data flow](diagrams_dataflow.png)
 
 #### Data types
 
 The following terminology is used in the code when referring to different data types.
 
 * `raw_data` --> The raw channel data, storing the time-samples from each distinct ultrasound transducer.
-  * [n_frames, n_tx, n_el, n_ax]
+  - [n_frames, n_tx, n_el, n_ax, n_ch]
 * `aligned_data` --> Time-of-flight (TOF) corrected data. This is the data that is time aligned with respect to the array geometry.
-  * [n_frames, n_tx, n_el, n_ax]
+  - [n_frames, n_tx, n_el, n_ax, n_ch]
 * `beamformed_data` --> Beamformed or also known as beamsummed data. Aligned data is coherently summed together along the elements. The data has now been transformed from the aperture domain to the spatial domain.
-  * [n_frames, n_z, n_x]
+  - [n_frames, n_z, n_x]
 * `envelope_data` --> The envelope of the signal is here detected and the center frequency is removed from the signal.
-  * [n_frames, n_z, n_x]
+  - [n_frames, n_z, n_x]
 * `image` --> After log compression of the envelope data, the image is formed.
-  * [n_frames, n_z, n_x]
+  - [n_frames, n_z, n_x]
 * `image_sc` --> The scan converted image is transformed cartesian (`x, y`) format to account for possible curved arrays. Possibly interpolation is performed to obtain the preferred pixel resolution.
-  * [n_frames, output_size_z, output_size_x]
+  - [n_frames, output_size_z, output_size_x]
 
 ## How to use with Verasonics
 
