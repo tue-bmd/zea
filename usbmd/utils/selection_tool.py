@@ -4,6 +4,7 @@ displayed as an image with matplotlib.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 24/02/2023
 """
+import tkinter as tk
 import warnings
 from collections.abc import Iterable
 from pathlib import Path
@@ -31,7 +32,7 @@ from usbmd.utils.io_lib import (
     move_matplotlib_figure,
 )
 from usbmd.utils.metrics import get_metric
-from usbmd.utils.utils import strtobool, translate
+from usbmd.utils.utils import translate
 
 
 def crop_array(array, value=None):
@@ -53,7 +54,7 @@ def interactive_selector(
     extent: list = None,
     verbose: bool = True,
     num_selections: int = None,
-    confirm_selection: bool = False,
+    confirm_selection: bool = True,
 ) -> tuple:
     """Interactively select part of an array displayed as an image with matplotlib.
 
@@ -67,6 +68,7 @@ def interactive_selector(
         verbose (bool): verbosity of print statements. Defaults to False.
         num_selections (int): number of selections to make. Defaults to None.
         confirm_selection (bool): whether to confirm selection before moving on.
+            Defaults to True.
 
     Returns:
         patches (list): list of selected parts of data
@@ -161,9 +163,17 @@ def interactive_selector(
 
     while not like_selection:
         print(f"You have made {len(patches)} selection(s).")
-        like_selection = strtobool(input("Do you like your selection? (y/n) "))
+        # draw masks on top of data
+        for mask in masks:
+            add_shape_from_mask(ax, mask, alpha=0.5)
+        plt.draw()
+        # tkinter yes / no dialog
+        like_selection = tk.messagebox.askyesno(
+            "Like Selection", "Do you like your selection?"
+        )
 
         if not like_selection:
+            remove_masks_from_axs(ax)
             mask = np.tile(False, data.shape)
             masks = []
             select_idx = 0
@@ -667,6 +677,16 @@ def ask_save_animation_with_fps():
     return fps
 
 
+def remove_masks_from_axs(axs: matplotlib.axes.Axes) -> None:
+    """Remove all masks from the given axes object."""
+    for obj in axs.findobj():
+        if isinstance(obj, (PathPatch, Rectangle)):
+            try:
+                obj.remove()
+            except:
+                pass
+
+
 def update_imshow_with_mask(
     frame_no: int,
     axs: matplotlib.axes.Axes,
@@ -691,12 +711,7 @@ def update_imshow_with_mask(
         tuple: A tuple containing the updated imshow object and the mask object.
     """
     imshow_obj.set_array(images[frame_no])
-    for obj in axs.findobj():
-        if isinstance(obj, (PathPatch, Rectangle)):
-            try:
-                obj.remove()
-            except:
-                pass
+    remove_masks_from_axs(axs)
     if selector == "rectangle":
         mask_obj = add_rectangle_from_mask(axs, masks[frame_no])
     else:

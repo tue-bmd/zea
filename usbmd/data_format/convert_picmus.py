@@ -51,16 +51,16 @@ def convert_picmus(source_path, output_path, overwrite=False):
     # Add dummy frame dimension (shape (frame=1, tx, el, ax, ch=1))
     raw_data = raw_data[None]
 
-    # raw_data = np.transpose(raw_data, (0, 1, 3, 2, 4))
+    raw_data = np.transpose(raw_data, (0, 1, 3, 2, 4))
 
-    _, n_tx, n_el, _, _ = raw_data.shape
+    _, n_tx, _, n_el, _ = raw_data.shape
 
     center_frequency = int(file["modulation_frequency"][()])
     # Fix a mistake in one of the PICMUS files
     if center_frequency == 0:
         center_frequency = 5.208e6
     sampling_frequency = int(file["sampling_frequency"][()])
-    probe_geomtry = np.transpose(file["probe_geometry"][()], (1, 0))
+    probe_geometry = np.transpose(file["probe_geometry"][()], (1, 0))
 
     sound_speed = float(file["sound_speed"][()])
     focus_distances = np.zeros((n_tx,), dtype=np.float32)
@@ -73,23 +73,23 @@ def convert_picmus(source_path, output_path, overwrite=False):
     for n in range(n_tx):
         v = np.array([np.sin(polar_angles[n]), 0, np.cos(0)])
         initial_times[n] = (
-            -np.min(np.sum(probe_geomtry * v[None], axis=1)) / sound_speed
+            -np.min(np.sum(probe_geometry * v[None], axis=1)) / sound_speed
         )
 
         t0_delays[n] = compute_t0_delays_planewave(
-            ele_pos=probe_geomtry, polar_angle=polar_angles[n], c=sound_speed
+            probe_geometry=probe_geometry,
+            polar_angle=polar_angles[n],
+            sound_speed=sound_speed,
         )
         # This line changes the data format to work with the old beamformer,
         # which is not in accordance with the new USBMD format
-        # TODO: Remove this line when updating the beamformer.
-        t0_delays[n] -= np.max(t0_delays[n]) * 0.5
 
     generate_usbmd_dataset(
         path=output_path,
         raw_data=raw_data,
         center_frequency=center_frequency,
         sampling_frequency=sampling_frequency,
-        probe_geometry=probe_geomtry,
+        probe_geometry=probe_geometry,
         initial_times=initial_times,
         sound_speed=sound_speed,
         t0_delays=t0_delays,

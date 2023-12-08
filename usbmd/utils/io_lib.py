@@ -6,6 +6,7 @@ Use to quickly read and write files or interact with file system.
 - **Date**          : October 12th, 2023
 """
 import os
+import sys
 import warnings
 from io import BytesIO
 from pathlib import Path
@@ -28,6 +29,11 @@ from PyQt5.QtCore import QRect
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
+
+
+def running_in_notebook():
+    """Check whether code is running in a Jupyter Notebook or not."""
+    return "ipykernel_launcher" in sys.argv[0]
 
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
@@ -56,7 +62,9 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
     root.wm_attributes("-topmost", False)
 
     # we don't want a full GUI, so keep the root window from appearing
-    root.withdraw()
+    if not running_in_notebook():
+        root.withdraw()
+
     # show an "Open" dialog box and return the path to the selected file
     filename = askopenfilename(
         parent=root,
@@ -64,6 +72,8 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
         filetypes=filetypes,
         initialdir=initialdir,
     )
+    root.destroy()
+
     # check whether a file was selected
     if filename:
         return Path(filename)

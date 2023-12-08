@@ -140,7 +140,11 @@ def recursively_load_dict_contents_from_group(
             if squeeze:
                 ans[key] = np.squeeze(item[()])
                 if ans[key].shape == ():
-                    ans[key] = float(ans[key])
+                    # check for integers
+                    if int(ans[key]) == float(ans[key]):
+                        ans[key] = int(ans[key])
+                    else:
+                        ans[key] = float(ans[key])
             else:
                 ans[key] = item[()]
         elif isinstance(item, h5py._hl.group.Group):

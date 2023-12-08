@@ -41,6 +41,8 @@ config_initializers = [
 )
 def test_all_configs_valid(file):
     """Test if configs are valide according to schema"""
+    if file.name == "probes.yaml":
+        pytest.skip("probes.yaml is not checked here.")
     with open(file, "r", encoding="utf-8") as f:
         configuration = yaml.load(f, Loader=yaml.FullLoader)
     try:
@@ -51,7 +53,7 @@ def test_all_configs_valid(file):
         check_config(configuration)
 
     except SchemaError as se:
-        raise ValueError(f"Error in config {f}") from se
+        raise ValueError(f"Error in config {file}") from se
 
 
 @pytest.mark.parametrize("dictionary", config_initializers)
