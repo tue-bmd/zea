@@ -44,8 +44,11 @@ def train_beamformer(config):
     scan_params = update_dictionary(default_scan_params, config_scan_params)
 
     # Setting the grid size to automatic mode based on pixels per wavelength
-    scan_params["Nx"] = None
-    scan_params["Nz"] = None
+    # We are setting the grid size to 128x128 pixels, which is relatively small, but allows for
+    # faster build and training times. For a real application, we recommend using a larger grid,
+    # e.g. by setting Nx and Nz to None, such that the grid size is determined automatically.
+    scan_params["Nx"] = 128
+    scan_params["Nz"] = 128
 
     scan = scan_class(**scan_params, modtype=config.data.modtype)
 
@@ -74,8 +77,8 @@ def train_beamformer(config):
     scan_params = update_dictionary(default_scan_params, config_scan_params)
 
     # Setting the grid size to automatic mode based on pixels per wavelength
-    scan_params["Nx"] = None
-    scan_params["Nz"] = None
+    scan_params["Nx"] = 128
+    scan_params["Nz"] = 128
 
     scan = scan_class(**scan_params, modtype=config.data.modtype)
     scan.angles = np.array([0])
@@ -112,7 +115,7 @@ def train_beamformer(config):
     inputs += noise
 
     # Train the model
-    history = beamformer.fit(inputs, targets, epochs=50, batch_size=1, verbose=1)
+    history = beamformer.fit(inputs, targets, epochs=100, batch_size=1, verbose=1)
     prediction = np.array(beamformer(inputs))
     das = np.array(das_beamformer(inputs))
 
@@ -133,6 +136,7 @@ def train_beamformer(config):
     plt.subplot(1, 3, 3)
     plt.imshow(img_das, cmap="gray")
     plt.title("DAS")
+    plt.show()
 
     return history, beamformer
 
