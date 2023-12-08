@@ -4,7 +4,7 @@
 - **Date**          : October 30 2023
 """
 
-from registry import checks_registry
+from usbmd.registry import checks_registry
 
 _DATA_TYPES = [
     "raw_data",
