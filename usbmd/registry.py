@@ -24,3 +24,5 @@ post_processing_registry = RegisterDecorator(items_to_register=["name", "framewo
 metrics_registry = RegisterDecorator(
     items_to_register=["name", "framework", "supervised"]
 )
+
+checks_registry = RegisterDecorator(items_to_register=["data_type"])
