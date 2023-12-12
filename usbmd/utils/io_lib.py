@@ -434,7 +434,19 @@ class ImageViewer(abc.ABC):
 
 
 class ImageViewerOpenCV(ImageViewer):
-    """ImageViewer displays frames using OpenCV's imshow function in a non-blocking way."""
+    """ImageViewer displays frames using OpenCV's imshow function in a non-blocking way.
+
+    Example:
+        >>> import numpy as np
+        >>> from usbmd.utils.io_lib import ImageViewerOpenCV
+        >>> def generate_frame():
+        >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
+        >>> image_viewer = ImageViewerOpenCV(generate_frame, threading=True, num_threads=1)
+        >>> while True:
+        >>>     image_viewer.show()
+        >>>     if cv2.waitKey(25) & 0xFF == ord("q"):
+        >>>         break
+    """
 
     def __init__(
         self,
@@ -478,6 +490,17 @@ class ImageViewerOpenCV(ImageViewer):
 class ImageViewerMatplotlib(ImageViewer):
     """ImageViewerMatplotlib displays frames using matplotlib's imshow function
     in a non-blocking way.
+
+    Example:
+        >>> import numpy as np
+        >>> from usbmd.utils.io_lib import ImageViewerMatplotlib, plt_window_has_been_closed
+        >>> def generate_frame():
+        >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
+        >>> image_viewer = ImageViewerMatplotlib(generate_frame, threading=True, num_threads=1)
+        >>> while True:
+        >>>     image_show.show()
+        >>>     if cv2.waitKey(25) & plt_window_has_been_closed(image_viewer.fig):
+        >>>         break
     """
 
     def __init__(
