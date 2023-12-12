@@ -95,7 +95,11 @@ class DataLoaderUI:
         self.check_for_display()
         self.set_backend_for_notebooks()
 
-        window_name = str(self.dataset.file_name.name)
+        if hasattr(self.dataset.file_name, "name"):
+            window_name = str(self.dataset.file_name.name)
+        else:
+            window_name = "usbmd"
+
         if not self.headless:
             if self.plot_lib == "opencv":
                 self.image_viewer = ImageViewerOpenCV(
@@ -223,6 +227,11 @@ class DataLoaderUI:
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
+        if self.headless:
+            return self.data_to_display()
+
+        assert self.image_viewer is not None, "Image viewer not initialized."
+
         self.image_viewer.threading = False
 
         if self.plot_lib == "matplotlib":
