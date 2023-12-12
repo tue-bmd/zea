@@ -464,9 +464,10 @@ class ImageViewerOpenCV(ImageViewer):
 
     def _create_window(self):
         if self.resizable_window:
-            self.window = cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+            cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         else:
-            self.window = cv2.namedWindow(self.window_name)
+            cv2.namedWindow(self.window_name)
+        self.window = True
 
     def show(self) -> None:
         """Displays a frame using OpenCV's imshow function.

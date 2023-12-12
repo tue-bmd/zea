@@ -368,14 +368,12 @@ class DataLoaderUI:
                         f"frame {frame_counter} / {n_frames} ({fps:.2f} fps)",
                         end="\r",
                     )
-                    if save:
-                        if len(images) < n_frames:
-                            if self.plot_lib == "matplotlib":
-                                # grab image from plt figure
-                                image = matplotlib_figure_to_numpy(self.fig)
-                            else:
-                                image = np.array(self.image)
-                            images.append(image)
+                    if save and (len(images) < n_frames):
+                        if self.plot_lib == "matplotlib":
+                            # grab image from plt figure
+                            image = matplotlib_figure_to_numpy(self.fig)
+                        image = np.array(self.image)
+                        images.append(image)
 
                 # For opencv, show frame for 25 ms and check if "q" is pressed
                 if self.plot_lib == "opencv":
