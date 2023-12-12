@@ -21,6 +21,9 @@ python -m pip install -e .
 
 ### Install from github
 
+You can also directly install the package from github. This is useful if you want to install a specific release or branch and keep it fixed in your environment.
+Note that this is supported from usbmd v1.2.6 onward.
+
 #### Step by step with personal access token
 
 Prepare: [Setup personal access tokens for organisation](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/setting-a-personal-access-token-policy-for-your-organization#enforcing-an-approval-policy-for-fine-grained-personal-access-tokens)
@@ -31,7 +34,7 @@ Prepare: [Setup personal access tokens for organisation](https://docs.github.com
     - **Repository permissions**: Contents = _Read-only_
 2. Find the release you want to install, e.g. [the latest](https://github.com/tue-bmd/ultrasound-toolbox/releases/latest)
 3. `pip install git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}`
-    - e.g. `RELEASE`=v1.2.4
+    - e.g. `RELEASE`=v1.2.6
     - e.g. `RELEASE`=develop
 
 #### SSH key
