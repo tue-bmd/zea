@@ -372,13 +372,14 @@ class DataLoaderUI:
                         if self.plot_lib == "matplotlib":
                             # grab image from plt figure
                             image = matplotlib_figure_to_numpy(self.fig)
-                        image = np.array(self.image)
+                        else:
+                            image = np.array(self.image)
                         images.append(image)
 
                 # For opencv, show frame for 25 ms and check if "q" is pressed
                 if self.plot_lib == "opencv":
                     if cv2.waitKey(25) & 0xFF == ord("q"):
-                        cv2.destroyAllWindows()
+                        self.image_viewer.close()
                         return images
                 # For matplotlib, check if window has been closed
                 if self.plot_lib == "matplotlib":
