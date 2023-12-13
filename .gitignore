@@ -2,6 +2,13 @@
 figures/
 custom_configs/
 data/
+.ideas/
+
+# any png / gifs in root directory
+*.gif
+*.png
+*.jpeg
+*.jpg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -17,6 +24,9 @@ __pycache__/
 # Data files
 *.hdf5
 *.h5
+*.npy
+*.npz
+*.mat
 
 # Distribution / packaging
 .Python
