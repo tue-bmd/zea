@@ -252,7 +252,7 @@ class DataLoaderUI:
             return self.image
 
     def _init_plt_figure(self):
-        figsize = (5, 5)
+        figsize = (10, 10)
         if self.scan:
             extent = [
                 self.scan.xlims[0] * 1e3,
@@ -261,7 +261,7 @@ class DataLoaderUI:
                 self.scan.zlims[0] * 1e3,
             ]
             # set figure aspect ratio to match scan
-            aspect_ratio = (extent[1] - extent[0]) / (extent[3] - extent[2])
+            aspect_ratio = abs(extent[1] - extent[0]) / abs(extent[3] - extent[2])
             figsize = tuple(np.array(figsize) * aspect_ratio)
         else:
             extent = None
