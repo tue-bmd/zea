@@ -8,9 +8,10 @@ import h5py
 import numpy as np
 
 from usbmd.probes import Probe, get_probe
-from usbmd.scan import Scan
+from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES, _REQUIRED_SCAN_KEYS
-from usbmd.utils.utils import first_not_none_item
+from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
+from usbmd.utils.utils import first_not_none_item, update_dictionary
 
 
 def generate_example_dataset(path, add_optional_fields=False):
@@ -650,39 +651,27 @@ def load_usbmd_file(
                 "geometry has been updated to match the data file."
             )
 
-        # Define the scan
-        n_frames = int(hdf5_file["scan"]["n_frames"][()])
-        n_ax = int(hdf5_file["scan"]["n_ax"][()])
-        n_tx = int(hdf5_file["scan"]["n_tx"][()])
-        sound_speed = float(hdf5_file["scan"]["sound_speed"][()])
-        sampling_frequency = float(hdf5_file["scan"]["sampling_frequency"][()])
-        center_frequency = float(hdf5_file["scan"]["center_frequency"][()])
-        n_el = int(hdf5_file["scan"]["n_el"][()])
-        bandwidth_percent = float(hdf5_file["scan"]["bandwidth_percent"][()])
+        file_scan_parameters = recursively_load_dict_contents_from_group(
+            hdf5_file, "scan"
+        )
+        file_scan_parameters = cast_scan_parameters(file_scan_parameters)
+
+        n_frames = file_scan_parameters.pop(
+            "n_frames"
+        )  # this is not part of Scan class
+        remove_params = ["PRF", "origin"]
+        for param in remove_params:
+            if param in file_scan_parameters:
+                file_scan_parameters.pop(param)
 
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
 
-        if transmits is None:
-            transmits = np.arange(n_tx, dtype=np.int32)
-
-        n_tx = len(transmits)
-
-        initial_times = hdf5_file["scan"]["initial_times"][transmits]
-        tx_apodizations = hdf5_file["scan"]["tx_apodizations"][transmits]
-        t0_delays = hdf5_file["scan"]["t0_delays"][transmits]
-        polar_angles = hdf5_file["scan"]["polar_angles"][transmits]
-        azimuth_angles = hdf5_file["scan"]["azimuth_angles"][transmits]
-        focus_distances = hdf5_file["scan"]["focus_distances"][transmits]
-        time_to_next_transmit = [
-            float(t) for t in hdf5_file["scan"]["time_to_next_transmit"]
-        ]
+        if transmits is not None:
+            config.scan.selected_transmits = transmits
 
         # Load the desired frames from the file
         data = hdf5_file["data"][data_type][frames]
-
-        if data_type in ["raw_data", "aligned_data"]:
-            data = data[:, transmits]
 
         if data_type in ["raw_data", "aligned_data", "beamformed_data"]:
             if data.shape[-1] == 1:
@@ -696,25 +685,13 @@ def load_usbmd_file(
                     f"{data_type}."
                 )
 
+        # merge file scan parameters with config scan parameters
+        scan_params = update_dictionary(file_scan_parameters, config.scan)
+
         # Initialize the scan object
-        scan = Scan(
-            n_tx=n_tx,
-            n_el=n_el,
-            t0_delays=t0_delays,
-            initial_times=initial_times,
-            tx_apodizations=tx_apodizations,
-            center_frequency=center_frequency,
-            sampling_frequency=sampling_frequency,
-            bandwidth_percent=bandwidth_percent,
-            modtype=modtype,
-            n_ax=n_ax,
-            sound_speed=sound_speed,
-            polar_angles=polar_angles,
-            azimuth_angles=azimuth_angles,
-            focus_distances=focus_distances,
-            probe_geometry=probe_geometry,
-            time_to_next_transmit=time_to_next_transmit,
-            **config.scan,
-        )
+        scan = Scan(**scan_params, modtype=modtype)
+
+        if data_type in ["raw_data", "aligned_data"]:
+            data = data[:, scan.selected_transmits]
 
         return data, scan, probe
