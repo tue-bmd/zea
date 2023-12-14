@@ -4,6 +4,8 @@
 - **Date**          : October 30 2023
 """
 
+from usbmd.registry import checks_registry
+
 _DATA_TYPES = [
     "raw_data",
     "aligned_data",
@@ -33,6 +35,26 @@ _IMAGE_DATA_TYPES = ["image", "image_sc"]
 _NON_IMAGE_DATA_TYPES = ["raw_data", "beamformed_data", "aligned_data", "envelope_data"]
 
 
+def get_check(data_type):
+    """Get check function for data type.
+
+    Args:
+        data_type (str): data type to get check function for
+
+    Raises:
+        ValueError: if data type is not valid
+
+    Returns:
+        function: check function for data type
+    """
+    if data_type not in _DATA_TYPES:
+        raise ValueError(
+            f"Data type {data_type} not valid. Must be one of {_DATA_TYPES}"
+        )
+    return checks_registry[data_type]
+
+
+@checks_registry("raw_data")
 def _check_raw_data(data, with_frame_dim=False):
     """Check raw data shape.
 
@@ -62,6 +84,7 @@ def _check_raw_data(data, with_frame_dim=False):
     )
 
 
+@checks_registry("aligned_data")
 def _check_aligned_data(data, with_frame_dim=False):
     """Check aligned data shape.
 
@@ -92,6 +115,7 @@ def _check_aligned_data(data, with_frame_dim=False):
     )
 
 
+@checks_registry("beamformed_data")
 def _check_beamformed_data(data, with_frame_dim=False):
     """Check beamformed data shape.
 
@@ -121,6 +145,7 @@ def _check_beamformed_data(data, with_frame_dim=False):
     )
 
 
+@checks_registry("envelope_data")
 def _check_envelope_data(data, with_frame_dim=False):
     """Check envelope data shape.
 
@@ -145,6 +170,7 @@ def _check_envelope_data(data, with_frame_dim=False):
         )
 
 
+@checks_registry("image")
 def _check_image(data, with_frame_dim=False):
     """Check image data shape.
 
@@ -168,6 +194,7 @@ def _check_image(data, with_frame_dim=False):
         )
 
 
+@checks_registry("image_sc")
 def _check_image_sc(data, with_frame_dim=False):
     """Check image data shape.
 

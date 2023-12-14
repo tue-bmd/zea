@@ -89,6 +89,7 @@ def generate_usbmd_dataset(
     azimuth_angles=None,
     tx_apodizations=None,
     bandwidth_percent=None,
+    time_to_next_transmit=None,
 ):
     """
     Generates a dataset in the USBMD format.
@@ -124,6 +125,7 @@ def generate_usbmd_dataset(
             This is the time between the first element firing and the last element firing.
         bandwidth_percent (float): The bandwidth of the transducer as a
             percentage of the center frequency.
+        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s.
 
     Returns:
         (h5py.File): The example dataset.
@@ -379,6 +381,14 @@ def generate_usbmd_dataset(
             unit="unitless",
         )
 
+        add_dataset(
+            group=scan_group,
+            name="time_to_next_transmit",
+            data=time_to_next_transmit,
+            description=("The time between subsequent transmit events."),
+            unit="s",
+        )
+
     validate_dataset(path)
 
 
@@ -523,13 +533,14 @@ def assert_scan_keys_present(dataset):
 
         elif key in (
             "sampling_frequency",
-            "bandwidth_percent",
             "center_frequency",
             "n_frames",
             "n_tx",
             "n_el",
             "n_ax",
             "sound_speed",
+            "bandwidth_percent",
+            "time_to_next_transmit",
         ):
             assert (
                 dataset["scan"][key].size == 1
@@ -663,6 +674,9 @@ def load_usbmd_file(
         polar_angles = hdf5_file["scan"]["polar_angles"][transmits]
         azimuth_angles = hdf5_file["scan"]["azimuth_angles"][transmits]
         focus_distances = hdf5_file["scan"]["focus_distances"][transmits]
+        time_to_next_transmit = [
+            float(t) for t in hdf5_file["scan"]["time_to_next_transmit"]
+        ]
 
         # Load the desired frames from the file
         data = hdf5_file["data"][data_type][frames]
@@ -700,6 +714,7 @@ def load_usbmd_file(
             azimuth_angles=azimuth_angles,
             focus_distances=focus_distances,
             probe_geometry=probe_geometry,
+            time_to_next_transmit=time_to_next_transmit,
             **config.scan,
         )
 

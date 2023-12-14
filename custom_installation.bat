@@ -6,7 +6,7 @@ REM Date: 2023-09-25
 REM For windows only! Note: this is not a general purpose installation script for usbmd as every machine is different.
 REM simple pip install usbmd should work for most users.
 
-REM Example usage: custom_installation.bat "D:\Username\Projects\Ultrasound-BMd" "D:\Username\conda\envs\usbmd"
+REM Example usage: custom_installation.bat "D:\Username\Projects\ultrasound-toolbox" "D:\Username\conda\envs\usbmd"
 REM if you specify the env_path, the last folder will also be the env name.
 
 REM Parse command line arguments
@@ -23,7 +23,7 @@ echo Conda already installed
 
 REM Set default value for repo root if not provided
 if "%repo_root%" == "" (
-    set "repo_root=D:\usbmd\Ultrasound-BMd"
+    set "repo_root=D:\usbmd\ultrasound-toolbox"
 )
 echo Repo root: %repo_root%
 echo Environment path: %env_path%

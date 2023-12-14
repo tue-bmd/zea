@@ -208,8 +208,9 @@ class DataLoaderUI:
         if image_range is None:
             image_range = self.config.data.dynamic_range
 
-        # match orientation
-        image = np.fliplr(image)
+        # match orientation if necessary
+        if self.config.plot.fliplr:
+            image = np.fliplr(image)
 
         if movie:
             if plot_lib == "matplotlib":
@@ -224,7 +225,7 @@ class DataLoaderUI:
             elif plot_lib == "opencv":
                 image = to_8bit(image, image_range, pillow=False)
                 if not self.headless:
-                    cv2.imshow("frame", image)
+                    cv2.imshow(str(self.dataset.file_name.name), image)
                 return image
 
         if not movie:
@@ -338,6 +339,13 @@ class DataLoaderUI:
                     image = self.process.postprocess.run(image[None, ..., None])
                     image = np.squeeze(image)
 
+                if i == 0:
+                    if plot_lib == "opencv":
+                        height, width = image.shape[1], image.shape[0]
+                        window_name = str(self.dataset.file_name.name)
+                        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                        cv2.resizeWindow(window_name, height, width)
+
                 image = self.plot(image, movie=True, plot_lib=plot_lib, block=False)
 
                 print(f"frame {i}", end="\r")
@@ -347,9 +355,10 @@ class DataLoaderUI:
                         images.append(image)
 
                 # For opencv, show frame for 25 ms and check if "q" is pressed
-                if cv2.waitKey(25) & 0xFF == ord("q"):
-                    cv2.destroyAllWindows()
-                    return images
+                if plot_lib == "opencv":
+                    if cv2.waitKey(25) & 0xFF == ord("q"):
+                        cv2.destroyAllWindows()
+                        return images
                 # For matplotlib, check if window has been closed
                 if plot_lib == "matplotlib":
                     if plt_window_has_been_closed(self.fig):
