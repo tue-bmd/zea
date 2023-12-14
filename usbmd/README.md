@@ -157,7 +157,7 @@ conda activate usbmd
 python -m pip install --upgrade pip
 
 # Install usbmd
-cd "<repo_root>" # e.g. cd "C:\Users\Projects\Ultrasound-BMd"
+cd "<repo_root>" # e.g. cd "C:\Users\Projects\ultrasound-toolbox"
 python -m pip install -e .
 # which runs the following under the hood as well:
 # pip install -r requirements.txt
