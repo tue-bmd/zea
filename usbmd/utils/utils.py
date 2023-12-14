@@ -4,6 +4,8 @@
 - **Date**          : October 25th, 2022
 """
 import datetime
+import functools
+import warnings
 
 import cv2
 import matplotlib.pyplot as plt
@@ -48,11 +50,22 @@ def find_key(dictionary, contains, case_sensitive=False):
     Returns:
         str: the key of the dictionary that contains the query string.
 
+    Raises:
+        TypeError: if not all keys are strings.
+        KeyError: if no key is found containing the query string.
     """
+    # Assert that all keys are strings
+    if not all(isinstance(k, str) for k in dictionary.keys()):
+        raise TypeError("All keys must be strings.")
+
     if case_sensitive:
         key = [k for k in dictionary.keys() if contains in k]
     else:
         key = [k for k in dictionary.keys() if contains in k.lower()]
+
+    if len(key) == 0:
+        raise KeyError(f"Key containing '{contains}' not found in dictionary.")
+
     return key[0]
 
 
@@ -75,6 +88,7 @@ def strtobool(val: str):
     are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
     'val' is anything else.
     """
+    assert isinstance(val, str), f"Input value must be a string, not {type(val)}"
     val = val.lower()
     if val in ("y", "yes", "t", "true", "on", "1"):
         return True
@@ -132,12 +146,25 @@ def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict
 
 
 def get_date_string(string: str = None):
-    """Generate a date string for current time, according to format specified by `string`."""
+    """Generate a date string for current time, according to format specified by
+    `string`. Refer to the documentation of the datetime module for more information
+    on the formatting options.
+
+    If no string is specified, the default format is used: "%Y_%m_%d_%H%M%S".
+    """
+    if string is not None and not isinstance(string, str):
+        raise TypeError("Input must be a string.")
+
+    # Get the current time
     now = datetime.datetime.now()
+
+    # If no string is specified, use the default format
     if string is None:
         string = "%Y_%m_%d_%H%M%S"
 
+    # Generate the date string
     date_str = now.strftime(string)
+
     return date_str
 
 
@@ -175,3 +202,79 @@ def first_not_none_item(arr):
     """
     non_none_items = [item for item in arr if item is not None]
     return non_none_items[0] if non_none_items else None
+
+
+def deprecated(replacement=None):
+    """Decorator to mark a function, method, or attribute as deprecated.
+
+    Args:
+        replacement (str, optional): The name of the replacement function, method, or attribute.
+
+    Returns:
+        callable: The decorated function, method, or property.
+
+    Raises:
+        DeprecationWarning: A warning is issued when the deprecated item is called or accessed.
+
+    Example:
+        >>> class MyClass:
+        ...     @deprecated(replacement="new_method")
+        ...     def old_method(self):
+        ...         print("This is the old method.")
+        ...
+        ...     @deprecated(replacement="new_attribute")
+        ...     def __init__(self):
+        ...         self._old_attribute = "Old value"
+        ...
+        ...     @deprecated(replacement="new_property")
+        ...     @property
+        ...     def old_property(self):
+        ...         return self._old_attribute
+        ...
+
+        >>> # Using the deprecated method
+        >>> obj = MyClass()
+        >>> obj.old_method()
+        This is the old method.
+
+        >>> # Accessing the deprecated attribute
+        >>> print(obj.old_property)
+        Old value
+
+        >>> # Setting value to the deprecated attribute
+        >>> obj.old_property = "New value"
+        __main__:28: DeprecationWarning: Access to deprecated attribute old_property.
+        __main__:29: DeprecationWarning: Use new_property instead.
+        __main__:32: DeprecationWarning: Setting value to deprecated attribute old_property.
+        __main__:33: DeprecationWarning: Use new_property instead.
+    """
+
+    def decorator(item):
+        if callable(item):
+            # If it's a function or method
+            @functools.wraps(item)
+            def wrapper(*args, **kwargs):
+                warnings.warn(
+                    f"Call to deprecated {item.__name__}.", category=DeprecationWarning
+                )
+                if replacement:
+                    warnings.warn(
+                        f"Use {replacement} instead.", category=DeprecationWarning
+                    )
+                return item(*args, **kwargs)
+
+            return wrapper
+        else:
+            # If it's a property
+            warnings.warn(
+                f"Access to deprecated attribute '{item}'.",
+                category=DeprecationWarning,
+            )
+            if replacement:
+                warnings.warn(
+                    f"Use {replacement} instead.", category=DeprecationWarning
+                )
+
+            return item
+
+    return decorator

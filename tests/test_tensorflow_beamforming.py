@@ -20,8 +20,12 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-@pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"])
-def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
+# test
+@pytest.mark.parametrize(
+    "reconstruction_mode, patches",
+    [("generic", None), ("generic", 4), ("pw", None), ("pw", 4)],
+)
+def test_das_beamforming(reconstruction_mode, patches, debug=False, compare_gt=True):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
 
@@ -35,6 +39,9 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
 
     config = load_config_from_yaml(r"./tests/config_test.yaml")
     config.ml_library = "tensorflow"
+
+    if patches:
+        config.model.beamformer.patches = patches  # pylint: disable=no-member
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
@@ -54,7 +61,7 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
     )
     # We override the focus parameter for now to force the beamformer to use the generic delay
     # calculation if reconstruction_mode == "generic".
-    scan.focus_distances = (
+    scan._focus_distances = (
         np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
@@ -115,4 +122,4 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
 
 
 if __name__ == "__main__":
-    test_das_beamforming(reconstruction_mode="pw", debug=True)
+    test_das_beamforming(reconstruction_mode="pw", patches=None, debug=True)
