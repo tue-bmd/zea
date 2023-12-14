@@ -685,11 +685,7 @@ def load_usbmd_file(
             data = data[:, transmits]
 
         if data_type in ["raw_data", "aligned_data", "beamformed_data"]:
-            if data.shape[-1] == 1:
-                modtype = "rf"
-            elif data.shape[-1] == 2:
-                modtype = "iq"
-            else:
+            if data.shape[-1] != 1 and data.shape[-1] != 2:
                 raise ValueError(
                     f"The data has an unexpected shape: {data.shape}. Last "
                     "dimension must be 1 (RF) or 2 (IQ), when data_type is "
@@ -700,13 +696,13 @@ def load_usbmd_file(
         scan = Scan(
             n_tx=n_tx,
             n_el=n_el,
-            n_ch = data.shape[-1],
+            n_ch=data.shape[-1],
             t0_delays=t0_delays,
             initial_times=initial_times,
             tx_apodizations=tx_apodizations,
             center_frequency=center_frequency,
             sampling_frequency=sampling_frequency,
-            demodulation_frequency = center_frequency if data.shape[-1] == 2 else 0.0,
+            demodulation_frequency=center_frequency if data.shape[-1] == 2 else 0.0,
             bandwidth_percent=bandwidth_percent,
             n_ax=n_ax,
             sound_speed=sound_speed,
