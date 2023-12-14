@@ -696,6 +696,13 @@ def load_usbmd_file(
                     f"{data_type}."
                 )
 
+        # Define the additional keyword parameters from the config object or an emtpy
+        # dict if no config object is provided.
+        if config is None:
+            config_scan_dict = {}
+        else:
+            config_scan_dict = config.scan
+
         # Initialize the scan object
         scan = Scan(
             n_tx=n_tx,
@@ -714,7 +721,7 @@ def load_usbmd_file(
             focus_distances=focus_distances,
             probe_geometry=probe_geometry,
             time_to_next_transmit=time_to_next_transmit,
-            **config.scan,
+            **config_scan_dict,
         )
 
         return data, scan, probe
