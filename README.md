@@ -13,7 +13,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 ### Editable install
 
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](setup.py) file is located and run the following command from terminal:
+Make sure you are in the root folder (`ultrasound-toolbox`) where the [`setup.py`](setup.py) file is located and run the following command from terminal:
 
 ```bash
 python -m pip install -e .
