@@ -382,7 +382,7 @@ class DataLoaderUI:
                         self.image_viewer.close()
                         return images
                 # For matplotlib, check if window has been closed
-                if self.plot_lib == "matplotlib":
+                elif self.plot_lib == "matplotlib":
                     if cv2.waitKey(25) & plt_window_has_been_closed(self.fig):
                         return images
                 # For headless mode, check if all frames have been plotted
