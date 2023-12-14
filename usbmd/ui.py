@@ -9,6 +9,7 @@ import sys
 import time
 import warnings
 from pathlib import Path
+from typing import List
 
 import cv2
 import matplotlib
@@ -58,7 +59,7 @@ class DataLoaderUI:
         self.dataset = get_dataset(self.config.data)
 
         # Initialize scan based on dataset (if not image data)
-        if self.config.data.dtype in _NON_IMAGE_DATA_TYPES:
+        if self.dtype in _NON_IMAGE_DATA_TYPES:
             scan_class = self.dataset.get_scan_class()
             default_scan_params = self.dataset.get_default_scan_parameters()
             config_scan_params = self.config.scan
@@ -113,6 +114,24 @@ class DataLoaderUI:
                     window_name=window_name,
                     num_threads=1,
                 )
+
+    @property
+    def dtype(self):
+        """Data type of data when loaded from file."""
+        return self.config.data.dtype
+
+    @dtype.setter
+    def dtype(self, value):
+        self.config.data.dtype = value
+
+    @property
+    def to_dtype(self):
+        """Data type to convert to for display."""
+        return self.config.data.to_dtype
+
+    @to_dtype.setter
+    def to_dtype(self, value):
+        self.config.data.to_dtype = value
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
@@ -170,25 +189,45 @@ class DataLoaderUI:
 
         return data
 
-    def data_to_display(self, to_dtype: str = "image_sc"):
-        """Get data and convert to display dtype."""
+    def data_to_display(self):
+        """Get data and convert to display to_dtype."""
         self.data = self.get_data()
 
-        # if image_sc, first to image for postprocessing and afterwards to image_sc
-        _to_dtype = to_dtype if to_dtype != "image_sc" else "image"
-        self.image = self.process.run(
-            self.data,
-            dtype=self.config.data.dtype,
-            to_dtype=_to_dtype,
-        )
+        if self.to_dtype not in ["image", "image_sc"]:
+            warnings.warn(
+                f"Image to_dtype: {self.to_dtype} not supported for displaying data."
+                "falling back to  to_dtype: `image_sc`"
+            )
+            self.to_dtype = "image_sc"
 
-        if self.process.postprocess:
-            self.image = self.process.postprocess.run(self.image[None, ..., None])
-            self.image = np.squeeze(self.image)
+        # we only need processing for dtypes other than image_sc
+        if self.dtype != "image_sc":
+            # if to_dtype == image_sc, first to go to dtype = image
+            # then do processing and then convert to image_sc
+            if self.to_dtype == "image_sc":
+                to_dtype = "image"
+            else:
+                to_dtype = self.to_dtype
 
-        if to_dtype == "image_sc":
             self.image = self.process.run(
-                self.image, dtype="image", to_dtype="image_sc"
+                self.data,
+                dtype=self.dtype,
+                to_dtype=to_dtype,
+            )
+
+            if self.process.postprocess:
+                self.image = self.process.postprocess.run(self.image[None, ..., None])
+                self.image = np.squeeze(self.image)
+
+        else:
+            # data is already in image_sc format
+            self.image = self.data
+
+        if self.to_dtype == "image_sc":
+            self.image = self.process.run(
+                self.image,
+                dtype="image",
+                to_dtype="image_sc",
             )
 
         # match orientation if necessary
@@ -199,20 +238,18 @@ class DataLoaderUI:
             self.image = to_8bit(self.image, self.config.data.dynamic_range)
         return self.image
 
-    def run(self, plot=False, to_dtype=None):
+    def run(self, plot=False):
         """Run ui. Will retrieve, process and plot data if set to True."""
 
-        to_dtype = self.config.data.to_dtype if to_dtype is None else to_dtype
-
         if self.config.data.get("frame_no") == "all":
-            self.run_movie(save=self.config.plot.save, to_dtype=to_dtype)
+            self.run_movie(save=self.config.plot.save)
         else:
             if plot:
                 self.image = self.plot(
                     save=self.config.plot.save,
                 )
             else:
-                self.image = self.data_to_display(to_dtype=to_dtype)
+                self.image = self.data_to_display()
 
         return self.image
 
@@ -301,26 +338,19 @@ class DataLoaderUI:
         self.image_viewer.fig = self.fig
         self.image_viewer.ax = self.ax
 
-    def run_movie(self, save: bool = False, to_dtype: str = "image"):
+    def run_movie(self, save: bool = False):
         """Run all frames in file in sequence"""
-
-        if to_dtype not in ["image", "image_sc"]:
-            warnings.warn(
-                f"Image to_dtype: {to_dtype} not supported for movies."
-                "falling back to  to_dtype: `image`"
-            )
-            to_dtype = "image"
 
         print('Playing video, press/hold "q" while the window is active to exit...')
         self.image_viewer.threading = True
-        images = self.run_movie_loop(save)
+        images = self._movie_loop(save)
 
         if save:
             self.save_video(images)
 
-    def run_movie_loop(self, save):
-        """
-        Process data and plot it in real time.
+    def _movie_loop(self, save: bool = False) -> List[np.ndarray]:
+        """Process data and plot it in real time.
+
         NOTE: when plot loop is terminated by user, it will only save the shown frames.
         This is to prevent long waiting times when saving a movie (for large datasets).
 
@@ -335,7 +365,7 @@ class DataLoaderUI:
 
         # Load correct number of frames (needs to get_data first)
         self.config.data.frame_no = 0
-        # self.get_data()
+        self.get_data()
         n_frames = len(self.dataset.h5_reader)
 
         self.verbose = False
