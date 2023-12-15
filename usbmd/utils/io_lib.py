@@ -5,13 +5,17 @@ Use to quickly read and write files or interact with file system.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : October 12th, 2023
 """
+import abc
 import os
 import sys
 import warnings
+from collections import deque
 from io import BytesIO
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
+from typing import Callable, Optional
 
 import cv2
 import imageio
@@ -23,6 +27,7 @@ import tqdm
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
@@ -287,7 +292,7 @@ def raise_matplotlib_window(figname=None):
 
     cfm = plt.get_current_fig_manager()
 
-    if backend == "Qt5Agg":
+    if backend in ["QtAgg", "Qt4Agg", "Qt5Agg"]:
         cfm.window.activateWindow()
         cfm.window.raise_()
     elif backend == "TkAgg":
@@ -334,3 +339,266 @@ def matplotlib_figure_to_numpy(fig):
     except:
         warnings.warn("Could not convert figure to numpy array.")
         return np.array([])
+
+
+class DummyTask:
+    """Dummy task that returns the data passed to it.
+
+    Used in ImageViewer to pass data to the ImageViewer without using threads.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def ready(self):
+        """Always returns True."""
+        return True
+
+    def get(self):
+        """Gets the data passed to the DummyTask."""
+        return self.data
+
+
+class ImageViewer(abc.ABC):
+    """ImageViewer is an abstract class for displaying frames in a non-blocking way."""
+
+    def __init__(
+        self,
+        get_frame: Callable[[], np.ndarray],
+        window_name: Optional[str] = "frame",
+        num_threads: Optional[int] = None,
+        resizable_window: Optional[bool] = True,
+        threading: Optional[bool] = True,
+        collect_frames: Optional[bool] = False,
+    ) -> None:
+        """Initializes the ImageViewer object.
+        Args:
+            get_frame (function): A function that returns the current frame.
+            window_name (str): The name of the window to display the frame.
+            num_threads (int, optional): The number of threads to use for processing frames.
+            resizable_window (bool, optional): Whether the window should be resizable or not.
+            threading (bool, optional): Whether to use threading or not.
+            collect_frames (bool, optional): Whether to collect frames or not.
+        """
+        self.get_frame_func = get_frame
+        self.window_name = window_name
+        self.num_threads = num_threads
+        self.resizable_window = resizable_window
+        self.threading = threading
+        self.collect_frames = collect_frames
+
+        if self.num_threads is None:
+            self.num_threads = cv2.getNumberOfCPUs()
+
+        if self.threading:
+            self.pool = ThreadPool(processes=num_threads)
+
+        self.pending = deque()
+        self.frame_no = 0
+        self.frames = []
+
+    @abc.abstractmethod
+    def show(self) -> None:
+        """Displays a frame.
+        Frame is generated using the get_frame function passed during initialization.
+
+        This function is non-blocking, and will return immediately.
+        """
+        self._add_task()
+        # show the frame
+
+    def _add_task(self):
+        if self.threading:
+            if len(self.pending) < self.num_threads:
+                task = self.pool.apply_async(self.get_frame_func, ())
+                self.pending.append(task)
+        else:
+            task = DummyTask(self.get_frame_func())
+            self.pending.append(task)
+
+    def _get_frame(self):
+        """Returns the most recent frame in the queue."""
+        if len(self.pending) == 0:
+            raise ValueError("No frames available.")
+        if not self.pending[0].ready():
+            raise ValueError("Frame not ready.")
+        frame = self.pending.popleft().get()
+        if self.collect_frames:
+            self.frames.append(frame)
+        return frame
+
+    @property
+    def frame_is_ready(self):
+        """Returns True if a frame is ready to be displayed."""
+        return len(self.pending) > 0 and self.pending[0].ready()
+
+
+class ImageViewerOpenCV(ImageViewer):
+    """ImageViewer displays frames using OpenCV's imshow function in a non-blocking way.
+
+    Example:
+        >>> import numpy as np
+        >>> from usbmd.utils.io_lib import ImageViewerOpenCV
+        >>> def generate_frame():
+        >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
+        >>> image_viewer = ImageViewerOpenCV(generate_frame, threading=True, num_threads=1)
+        >>> while True:
+        >>>     image_viewer.show()
+        >>>     if cv2.waitKey(25) & 0xFF == ord("q"):
+        >>>         break
+    """
+
+    def __init__(
+        self,
+        get_frame: Callable[[], np.ndarray],
+        window_name: Optional[str] = "frame",
+        num_threads: Optional[int] = None,
+        resizable_window: Optional[bool] = True,
+        threading: Optional[bool] = True,
+    ) -> None:
+        """Initializes the ImageViewerOpenCV object."""
+        super().__init__(
+            get_frame, window_name, num_threads, resizable_window, threading
+        )
+        self.window = None
+
+    def _create_window(self):
+        if self.resizable_window:
+            cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        else:
+            cv2.namedWindow(self.window_name)
+        self.window = True
+
+    def show(self) -> None:
+        """Displays a frame using OpenCV's imshow function.
+        Frame is generated using the get_frame function passed during initialization.
+
+        This function is non-blocking, and will return immediately.
+        Imshow is called asynchronously in a separate thread.
+        """
+        super().show()
+        while self.frame_is_ready:
+            frame = self._get_frame()
+            frame = np.array(frame, dtype=np.uint8)
+            if self.frame_no == 0:
+                if self.window is None:
+                    self._create_window()
+                    cv2.resizeWindow(self.window_name, frame.shape[1], frame.shape[0])
+
+            self._retain_aspect_ratio_resize(frame)
+
+            cv2.imshow(self.window_name, frame)
+            self.frame_no += 1
+
+    def _retain_aspect_ratio_resize(self, frame):
+        """Resize frame to retain aspect ratio."""
+        # get frame size of cv2 and change it to preserve aspect ratio (keep height same)
+        aspect_ratio = frame.shape[1] / frame.shape[0]
+        # get height of the window
+        height = cv2.getWindowImageRect(self.window_name)[3]
+        # calculate width based on aspect ratio
+        width = int(height * aspect_ratio)
+        # resize the window
+        cv2.resizeWindow(self.window_name, width, height)
+
+    def close(self):
+        """Closes the window."""
+        cv2.destroyWindow(self.window_name)
+
+
+class ImageViewerMatplotlib(ImageViewer):
+    """ImageViewerMatplotlib displays frames using matplotlib's imshow function
+    in a non-blocking way.
+
+    Example:
+        >>> import numpy as np
+        >>> from usbmd.utils.io_lib import ImageViewerMatplotlib, plt_window_has_been_closed
+        >>> def generate_frame():
+        >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
+        >>> image_viewer = ImageViewerMatplotlib(generate_frame, threading=True, num_threads=1)
+        >>> while True:
+        >>>     image_show.show()
+        >>>     if cv2.waitKey(25) & plt_window_has_been_closed(image_viewer.fig):
+        >>>         break
+    """
+
+    def __init__(
+        self,
+        get_frame: Callable[[], np.ndarray],
+        window_name: Optional[str] = "frame",
+        num_threads: Optional[int] = None,
+        resizable_window: Optional[bool] = True,
+        threading: Optional[bool] = True,
+        imshow_kwargs: Optional[dict] = None,
+        cax_kwargs: Optional[dict] = None,
+    ) -> None:
+        """Initializes the ImageViewerMatplotlib object."""
+        super().__init__(
+            get_frame, window_name, num_threads, resizable_window, threading
+        )
+        plt.ion()
+        self.fig = None
+        self.ax = None
+        self.image_obj = None
+        self.imshow_kwargs = imshow_kwargs
+        self.cax_kwargs = cax_kwargs
+
+        self.init_figure_props = True
+
+    def _create_figure(self):
+        # create figure but do not show it already
+        self.fig = plt.figure(self.window_name)
+        self.ax = self.fig.add_subplot(111)
+
+        # move to foreground
+        raise_matplotlib_window(self.window_name)
+
+        if not self.resizable_window:
+            backend = matplotlib.get_backend()
+            if backend == "Qt4Agg":
+                win = self.fig.canvas.window()
+                win.setFixedSize(win.size())
+            else:
+                warnings.warn(f"Backend {backend} does not support fixed size windows.")
+
+    def show(self) -> None:
+        """Displays a frame using matplotlib's imshow function.
+        Frame is generated using the get_frame function passed during initialization.
+
+        This function is non-blocking, and will return immediately.
+        """
+        super().show()
+
+        while self.frame_is_ready:
+            frame = self._get_frame()
+
+            if self.image_obj is None:
+                if self.fig is None:
+                    self._create_figure()
+
+                if self.imshow_kwargs:
+                    self.image_obj = self.ax.imshow(frame, **self.imshow_kwargs)
+                else:
+                    self.image_obj = self.ax.imshow(frame)
+
+                # these only need to be set once
+                if self.init_figure_props:
+                    if self.cax_kwargs is not None:
+                        divider = make_axes_locatable(self.ax)
+                        if "color" in self.cax_kwargs:
+                            color = self.cax_kwargs.pop("color")
+                        cax = divider.append_axes(**self.cax_kwargs)
+                        cax.yaxis.label.set_color(color)
+                        cax.tick_params(axis="y", colors=color)
+                        cax.title.set_color(color)
+                        plt.colorbar(self.image_obj, cax=cax)
+                    self.fig.tight_layout()
+                    self.init_figure_props = False
+
+                self.fig.canvas.draw_idle()
+            else:
+                self.image_obj.set_data(frame)
+                self.fig.canvas.draw_idle()
+
+            self.image_obj.figure.canvas.flush_events()
+            self.frame_no += 1
