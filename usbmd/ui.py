@@ -5,6 +5,7 @@ the results in a GUI.
 - **Date**          : November 18th, 2021
 """
 import argparse
+import asyncio
 import sys
 import time
 import warnings
@@ -35,13 +36,9 @@ from usbmd.utils.io_lib import (
     filename_from_window_dialog,
     matplotlib_figure_to_numpy,
     running_in_notebook,
+    start_async_app,
 )
-from usbmd.utils.utils import (
-    plt_window_has_been_closed,
-    save_to_gif,
-    strtobool,
-    update_dictionary,
-)
+from usbmd.utils.utils import save_to_gif, strtobool, update_dictionary
 
 
 class DataLoaderUI:
@@ -238,15 +235,21 @@ class DataLoaderUI:
             self.image = to_8bit(self.image, self.config.data.dynamic_range)
         return self.image
 
-    def run(self, plot=False):
+    def run(self, plot=False, block=True):
         """Run ui. Will retrieve, process and plot data if set to True."""
+        save = self.config.plot.save
 
         if self.config.data.get("frame_no") == "all":
-            self.run_movie(save=self.config.plot.save)
+            if not asyncio.get_event_loop().is_running():
+                asyncio.run(self.run_movie(save))
+            else:
+                asyncio.create_task(self.run_movie(save))
+
         else:
             if plot:
                 self.image = self.plot(
-                    save=self.config.plot.save,
+                    save=save,
+                    block=block,
                 )
             else:
                 self.image = self.data_to_display()
@@ -256,11 +259,13 @@ class DataLoaderUI:
     def plot(
         self,
         save: bool = False,
+        block: bool = True,
     ):
         """Plot image using matplotlib or opencv.
 
         Args:
             save (bool): whether to save the image to disk.
+            block (bool): whether to block the UI while plotting.
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
@@ -277,15 +282,16 @@ class DataLoaderUI:
             self.image_viewer.show()
             if save:
                 self.save_image(self.fig)
-            if not self.headless:
+            if not self.headless and block:
                 plt.show(block=True)
             self.image = matplotlib_figure_to_numpy(self.fig)
             return self.image
 
         elif self.plot_lib == "opencv":
             self.image_viewer.show()
+            if not self.headless and block:
+                cv2.waitKey(0)
             self.save_image(self.image)
-            cv2.waitKey(0)
             return self.image
 
     def _init_plt_figure(self):
@@ -338,17 +344,17 @@ class DataLoaderUI:
         self.image_viewer.fig = self.fig
         self.image_viewer.ax = self.ax
 
-    def run_movie(self, save: bool = False):
+    async def run_movie(self, save: bool = False):
         """Run all frames in file in sequence"""
 
         print('Playing video, press/hold "q" while the window is active to exit...')
         self.image_viewer.threading = True
-        images = self._movie_loop(save)
+        images = await self._movie_loop(save)
 
         if save:
             self.save_video(images)
 
-    def _movie_loop(self, save: bool = False) -> List[np.ndarray]:
+    async def _movie_loop(self, save: bool = False) -> List[np.ndarray]:
         """Process data and plot it in real time.
 
         NOTE: when plot loop is terminated by user, it will only save the shown frames.
@@ -374,10 +380,11 @@ class DataLoaderUI:
             start_time = time.time()
             frame_counter = 0
             self.image_viewer.frame_no = 0
-
             while frame_counter < n_frames:
                 if self.gui:
-                    self.gui.check_freeze()
+                    await self.gui.check_freeze()
+
+                await asyncio.sleep(0.01)
 
                 self.config.data.frame_no = frame_counter
 
@@ -411,9 +418,11 @@ class DataLoaderUI:
                     if cv2.waitKey(25) & 0xFF == ord("q"):
                         self.image_viewer.close()
                         return images
+                    if self.image_viewer.has_been_closed():
+                        return images
                 # For matplotlib, check if window has been closed
                 elif self.plot_lib == "matplotlib":
-                    if cv2.waitKey(25) & plt_window_has_been_closed(self.fig):
+                    if cv2.waitKey(25) and self.image_viewer.has_been_closed():
                         return images
                 # For headless mode, check if all frames have been plotted
                 if self.headless:
@@ -513,20 +522,33 @@ def get_args():
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
-    if args.gui:
-        warnings.warn("GUI is very much in beta, please report any bugs to the Github.")
-        gui = USBMDApp(title="USBMD GUI", resolution=(600, 300), verbose=True)
-
     config = setup(args.config)
 
     if args.task == "run":
         ui = DataLoaderUI(config)
 
         if args.gui:
-            gui.ui = ui
-            ui.gui = gui  # haha
-            gui.build(config)
-            gui.mainloop()
+            warnings.warn(
+                "GUI is very much in beta, please report any bugs to "
+                "https://github.com/tue-bmd/ultrasound-toolbox."
+            )
+            try:
+                asyncio.run(
+                    start_async_app(
+                        USBMDApp,
+                        title="USBMD GUI",
+                        ui=ui,
+                        resolution=(600, 300),
+                        verbose=True,
+                        config=config,
+                    )
+                )
+            except RuntimeError as e:
+                # probably a better way to handle this...
+                if str(e) == "Event loop stopped before Future completed.":
+                    print("GUI closed.")
+                else:
+                    raise e
         else:
             ui.run(plot=True)
 

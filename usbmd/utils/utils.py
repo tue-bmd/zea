@@ -69,11 +69,6 @@ def find_key(dictionary, contains, case_sensitive=False):
     return key[0]
 
 
-def plt_window_has_been_closed(fig):
-    """Checks whether matplotlib plot window is closed"""
-    return not plt.fignum_exists(fig.number)
-
-
 def print_clear_line():
     """Clears line. Helpful when printing in a loop on the same line."""
     line_up = "\033[1A"
