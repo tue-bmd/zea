@@ -590,44 +590,49 @@ class DivergingWaveScan(Scan):
 
 
 def compute_t0_delays_planewave(
-    probe_geometry, polar_angle, azimuth_angle=0, sound_speed=1540
+    probe_geometry, polar_angles, azimuth_angles=0, sound_speed=1540
 ):
     """Computes the transmit delays for a planewave, shifted such that the
     first element fires at t=0.
 
     Args:
         probe_geometry (np.ndarray): The positions of the elements in the array of
-            shape (element, 3).
-        polar_angle (float): The polar angle of the planewave in radians.
-        azimuth_angle (float, optional): The azimuth angle of the planewave
-            in radians. Defaults to 0.
+            shape (n_el, 3).
+        polar_angles (np.ndarray): The polar angles of the planewave in radians of shape (n_tx,).
+        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave
+            in radians of shape (n_tx,). Defaults to 0.
         sound_speed (float, optional): The speed of sound. Defaults to 1540.
 
     Returns:
-        np.ndarray: The transmit delays for each element of shape (element,).
+        np.ndarray: The transmit delays for each element of shape (n_tx, n_el).
     """
-    # The wave vector of the planewave of shape (1, 3)
+    # Convert single angles to arrays for broadcasting
+    polar_angles = np.atleast_1d(polar_angles)
+    azimuth_angles = np.atleast_1d(azimuth_angles)
+
+    # Compute v for all angles
     v = np.stack(
         [
-            np.sin(polar_angle) * np.cos(azimuth_angle),
-            np.sin(polar_angle) * np.sin(azimuth_angle),
-            np.cos(polar_angle),
-        ]
-    )[None]
+            np.sin(polar_angles) * np.cos(azimuth_angles),
+            np.sin(polar_angles) * np.sin(azimuth_angles),
+            np.cos(polar_angles),
+        ],
+        axis=-1,
+    )
 
-    # Compute the projection of the element positions onto the wave vector
-    projection = np.sum(probe_geometry * v, axis=1)
+    # Compute the projection of the element positions onto the wave vectors
+    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1)
 
     # Convert from distance to time to compute the transmit delays.
-    t0_delays_not_zero_algined = projection / sound_speed
+    t0_delays_not_zero_aligned = projection / sound_speed
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.
-    t_first_fire = np.min(projection) / sound_speed
+    t_first_fire = np.min(projection, axis=-1) / sound_speed
 
     # The transmit delays are the projection minus the offset. This ensures
     # that the first element fires at t=0.
-    t0_delays = t0_delays_not_zero_algined - t_first_fire
+    t0_delays = t0_delays_not_zero_aligned - t_first_fire[:, None]
 
     return t0_delays
 
