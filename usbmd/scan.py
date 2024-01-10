@@ -641,8 +641,8 @@ def compute_t0_delays_focused(
     origin,
     focus_distance,
     probe_geometry,
-    polar_angle,
-    azimuth_angle=0,
+    polar_angles,
+    azimuth_angles=0,
     sound_speed=1540,
 ):
     """Computes the transmit delays for a focused transmit, shifted such that
@@ -653,33 +653,39 @@ def compute_t0_delays_focused(
         focus_distance (float): The distance to the focus.
         probe_geometry (np.ndarray): The positions of the elements in the array of
             shape (element, 3).
-        polar_angle (float): The polar angle of the planewave in radians.
-        azimuth_angle (float, optional): The azimuth angle of the planewave
+        polar_angles (np.ndarray): The polar angles of the planewave in radians.
+        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave
             in radians. Defaults to 0.
         sound_speed (float, optional): The speed of sound. Defaults to 1540.
 
     Returns:
-        np.ndarray: The transmit delays for each element of shape (element,).
+        np.ndarray: The transmit delays for each element of shape (n_tx, element).
     """
-    # Compute the wave vector of shape (1, 3)
+    # Convert single angles to arrays for broadcasting
+    polar_angles = np.atleast_1d(polar_angles)
+    azimuth_angles = np.atleast_1d(azimuth_angles)
+
+    # Compute v for all angles
     v = np.stack(
         [
-            np.sin(polar_angle) * np.cos(azimuth_angle),
-            np.sin(polar_angle) * np.sin(azimuth_angle),
-            np.cos(polar_angle),
-        ]
+            np.sin(polar_angles) * np.cos(azimuth_angles),
+            np.sin(polar_angles) * np.sin(azimuth_angles),
+            np.cos(polar_angles),
+        ],
+        axis=-1,
     )
 
+    # Add a new dimension for broadcasting
+    v = np.expand_dims(v, axis=1)
+
     # Compute the location of the virtual source by adding the focus distance
-    # to the origin along the wave vector.
-    virtual_source = origin + focus_distance * v
+    # to the origin along the wave vectors.
+    virtual_sources = origin + focus_distance * v
 
-    # Add a dummy dimension for the element dimension
-    virtual_source = virtual_source[None]
+    # Compute the distances between the virtual sources and each element
+    dist = np.linalg.norm(virtual_sources - probe_geometry, axis=-1)
 
-    # Compute the distance between the virtual source and each element
-    dist = np.linalg.norm(virtual_source - probe_geometry, axis=1)
-
+    # Adjust distances based on the direction of focus
     dist *= -np.sign(focus_distance)
 
     # Convert from distance to time to compute the
@@ -688,9 +694,9 @@ def compute_t0_delays_focused(
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.
-    t_first_fire = np.min(travel_times, axis=0)
+    t_first_fire = np.min(travel_times, axis=1)
 
     # Shift the transmit delays such that the first element fires at t=0.
-    t0_delays = travel_times - t_first_fire
+    t0_delays = travel_times - t_first_fire[:, None]
 
     return t0_delays
