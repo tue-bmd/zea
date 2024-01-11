@@ -8,7 +8,6 @@ import functools
 import warnings
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
@@ -67,11 +66,6 @@ def find_key(dictionary, contains, case_sensitive=False):
         raise KeyError(f"Key containing '{contains}' not found in dictionary.")
 
     return key[0]
-
-
-def plt_window_has_been_closed(fig):
-    """Checks whether matplotlib plot window is closed"""
-    return not plt.fignum_exists(fig.number)
 
 
 def print_clear_line():
