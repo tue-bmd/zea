@@ -3,6 +3,7 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : -
 """
+import warnings
 from pathlib import Path
 
 import h5py
@@ -99,6 +100,8 @@ class ReadH5:
 
     def __len__(self):
         key = self.get_largest_group_name()
+        if key is None:
+            return 0
         return len(self.file[key])
 
     @property
@@ -125,6 +128,9 @@ class ReadH5:
                 group_info.append((name, n_elements))
 
         self.file.visititems(visit_func)
+        if group_info == []:
+            warnings.warn("hdf5 file does not contain any datasets")
+            return None
         idx = np.argmax([gi[1] for gi in group_info])
         key_name, _ = group_info[idx]
         return key_name
