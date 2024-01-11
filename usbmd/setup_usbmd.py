@@ -82,7 +82,7 @@ def setup_config(config_path: str = None):
 
     ## git
     cwd = Path.cwd().stem
-    if cwd in ("Ultrasound-BMd", "usbmd"):
+    if cwd in ("Ultrasound-BMd", "ultrasound-toolbox", "usbmd"):
         config["git"] = get_git_summary()
 
     return config
