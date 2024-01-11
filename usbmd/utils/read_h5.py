@@ -128,7 +128,7 @@ class ReadH5:
                 group_info.append((name, n_elements))
 
         self.file.visititems(visit_func)
-        if group_info == []:
+        if not group_info:
             warnings.warn("hdf5 file does not contain any datasets")
             return None
         idx = np.argmax([gi[1] for gi in group_info])
