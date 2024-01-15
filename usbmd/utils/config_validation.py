@@ -173,8 +173,12 @@ config_schema = Schema(
             Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
             Optional("input_range", default=None): Or(None, list_of_size_two),
             Optional("apodization", default=None): Or(None, str),
-            Optional("modtype", default=None): Or(*_MOD_TYPES),
-            Optional("from_modtype", default=None): Or(*_MOD_TYPES),
+            Optional("modtype", default=None): Or(
+                *_MOD_TYPES
+            ),  # ONLY FOR LEGACY DATASET
+            Optional("from_modtype", default=None): Or(
+                *_MOD_TYPES
+            ),  # ONLY FOR LEGACY DATASET
             Optional("user", default=None): Or(None, dict),
             Optional("dataset_folder", default=None): Or(None, str),
         },
