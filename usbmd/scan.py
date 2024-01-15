@@ -53,7 +53,8 @@ class Scan:
         Args:
             n_tx (int): The number of transmits to produce a single frame.
             n_el (int, optional): The number of elements in the array.
-            n_ch (int): The number of channels.
+            n_ch (int): The number of channels. This will determine the modulation type.
+                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
@@ -463,11 +464,11 @@ class PlaneWaveScan(Scan):
                 optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
             n_el (int, optional): The number of elements in the array. Defaults to 128.
-            n_ch (int): The number of channels.
+            n_ch (int): The number of channels. Defaults to 1.
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
-            demodulation_frequency (float): The demodulation frequency.
+            demodulation_frequency (float): The demodulation frequency. Defaults to 0.
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
