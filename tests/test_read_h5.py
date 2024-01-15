@@ -1,3 +1,5 @@
+"""Tests for the read_h5 module."""
+
 import os
 from pathlib import Path
 
