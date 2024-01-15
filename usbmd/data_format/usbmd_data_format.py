@@ -534,6 +534,15 @@ def assert_scan_keys_present(dataset):
                 dataset["scan"][key].shape == correct_shape
             ), "The initial_times does not have the correct shape."
 
+        elif key == "time_to_next_transmit":
+            correct_shape = (
+                dataset["scan"]["n_frames"][()],
+                dataset["scan"]["n_tx"][()],
+            )
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The time_to_next_transmit does not have the correct shape."
+
         elif key in (
             "sampling_frequency",
             "center_frequency",
@@ -543,7 +552,6 @@ def assert_scan_keys_present(dataset):
             "n_ax",
             "sound_speed",
             "bandwidth_percent",
-            "time_to_next_transmit",
         ):
             assert (
                 dataset["scan"][key].size == 1
