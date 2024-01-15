@@ -634,7 +634,7 @@ def compute_t0_delays_planewave(
     # that the first element fires at t=0.
     t0_delays = t0_delays_not_zero_aligned - t_first_fire[:, None]
 
-    return t0_delays
+    return t0_delays.T
 
 
 def compute_t0_delays_focused(
@@ -699,4 +699,4 @@ def compute_t0_delays_focused(
     # Shift the transmit delays such that the first element fires at t=0.
     t0_delays = travel_times - t_first_fire[:, None]
 
-    return t0_delays
+    return t0_delays.T
