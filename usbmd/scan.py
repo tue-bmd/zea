@@ -59,7 +59,8 @@ class Scan:
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
             demodulation_frequency (float): The demodulation frequency.
-                Set to 0.0 if rf data and to center_frequency if iq data.
+                Usually set to 0.0 if rf data and to transmit frequency (center_frequency) if iq data.
+                For iq data it can vary depending on the approach used to defined the ultrasound echo center frequency.
             xlims (tuple, optional): The x-limits in the beamforming grid.
                 Defaults to (probe_geometry[0, 0], probe_geometry[-1, 0]).
             ylims (tuple, optional): The y-limits in the beamforming grid.
