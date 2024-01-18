@@ -19,15 +19,15 @@ class Scan:
         self,
         n_tx: int,
         n_el: int,
-        n_ch: int,
         center_frequency: float,
         sampling_frequency: float,
-        demodulation_frequency: float,
+        demodulation_frequency: float = None,
         xlims=None,
         ylims=None,
         zlims=None,
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
+        n_ch: int = None,
         n_ax: int = None,
         Nx: int = None,
         Nz: int = None,
@@ -53,8 +53,6 @@ class Scan:
         Args:
             n_tx (int): The number of transmits to produce a single frame.
             n_el (int, optional): The number of elements in the array.
-            n_ch (int): The number of channels. This will determine the modulation type.
-                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
@@ -71,6 +69,8 @@ class Scan:
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
+            n_ch (int): The number of channels. This will determine the modulation type.
+                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
             n_ax (int, optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
@@ -124,12 +124,12 @@ class Scan:
         self.bandwidth_percent = float(bandwidth_percent)
         #: The speed of sound [m/s]
         self.sound_speed = float(sound_speed)
+        #: The number of rf/iq channels (1 for rf, 2 for iq)
+        self._n_ch = n_ch
         #: The number of samples per channel per acquisition
         self._n_ax = n_ax
         #: The demodulation frequency [Hz]
-        self.fdemod = float(demodulation_frequency)
-        #: The number of rf/iq channels (1 for rf, 2 for iq)
-        self.n_ch = int(n_ch)
+        self._fdemod = demodulation_frequency
         #: The wavelength of the modulation carrier [m]
         self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
@@ -138,7 +138,7 @@ class Scan:
         self.downsample = downsample
         #: The probe geometry of shape (n_el, 3)
         self.probe_geometry = probe_geometry
-
+        #: The time between subsequent transmit events of shape (n_tx*n_frames,)
         self.time_to_next_transmit = time_to_next_transmit
 
         # Beamforming grid related attributes
@@ -312,6 +312,35 @@ class Scan:
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
         return self._n_ax // self.downsample
+
+    @property
+    def n_ch(self):
+        """The number of channels."""
+        return self._n_ch
+
+    @n_ch.setter
+    def n_ch(self, value):
+        self._n_ch = value
+        self._fdemod = None  # Reset fdemod
+
+    @property
+    def fdemod(self):
+        """The demodulation frequency."""
+        if self._fdemod is not None:
+            return self._fdemod
+
+        if self.n_ch is None:
+            raise ValueError(
+                "Please set n_ch or fdemod. Currently neither is set.\n"
+                "\tif n_ch is set to 1 (RF), then fdemod is set to 0.0.\n"
+                "\tif n_ch is set to 2 (IQ), then fdemod is set to fc."
+            )
+
+        return self.fc if self.n_ch == 2 else 0.0
+
+    @fdemod.setter
+    def fdemod(self, value):
+        self._fdemod = value
 
     @property
     def t0_delays(self):
