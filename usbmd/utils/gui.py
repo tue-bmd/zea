@@ -222,6 +222,8 @@ class App(tk.Tk):
 
         def _save(data, entries):
             for key, entry in entries.items():
+                if key == "user":
+                    continue
                 if isinstance(entry, dict):
                     _save(data[key], entries[key])
                 else:
@@ -229,7 +231,21 @@ class App(tk.Tk):
                     new_val = self._get_entry_val(entry, key)
                     if old_val != new_val:
                         try:
-                            data[key] = new_val
+                            # since all entries in the GUI are strings, we need to convert
+                            # to the correct type if possible. Definitely not best practice
+                            # but it works for now.
+                            try:
+                                new_val_float = float(new_val)
+                                new_val_int = int(new_val_float)
+                            except:
+                                new_val_float = None
+                                new_val_int = None
+                            if new_val_float is None:
+                                data[key] = new_val
+                            elif new_val_float == new_val_int:
+                                data[key] = new_val_int
+                            else:
+                                data[key] = new_val_float
                             if self.schema:
                                 self.schema.validate(dict(self.data))
                             if self.verbose:
@@ -249,11 +265,18 @@ class App(tk.Tk):
 
         def _load(data, entries):
             for key, value in data.items():
+                if key == "user":
+                    continue
+                if key == "frame_no":
+                    pass
                 if isinstance(value, dict):
                     _load(data[key], entries[key])
                 else:
-                    entries[key].delete(0, tk.END)
-                    entries[key].insert(1, str(data[key]))
+                    if key in entries:
+                        entries[key].delete(0, tk.END)
+                        entries[key].insert(1, str(data[key]))
+                    else:
+                        print(f"Key {key} not found in GUI")
 
         _load(data, entries)
         self.data = data
@@ -289,6 +312,8 @@ class App(tk.Tk):
                 self.save_to_file()
             self.quit()
             self.destroy()
+        else:
+            return False
 
     def save_to_file(self, name=None):
         """Save current data to file"""
@@ -320,11 +345,18 @@ class BooleanEntry(tk.Frame):
 
     def delete(self, first, last=None):
         """Delete the entry"""
-        raise NotImplementedError
+        # pylint: disable=unnecessary-pass
+        pass
 
+    # pylint: disable=unused-argument
     def insert(self, first, last=None):
-        """Delete the entry"""
-        raise NotImplementedError
+        """Insert the entry"""
+        if last == "True":
+            self.var.set(True)
+        elif last == "False":
+            self.var.set(False)
+        else:
+            raise ValueError(f"Unsupported boolean value: {last}")
 
 
 class ListEntry(ttk.Frame):
@@ -406,11 +438,21 @@ class ListEntry(ttk.Frame):
 
     def delete(self, first, last=None):
         """Delete the entry"""
-        raise NotImplementedError
+        # pylint: disable=unnecessary-pass
+        pass
 
+    # pylint: disable=unused-argument
     def insert(self, first, last=None):
         """Insert an entry"""
-        raise NotImplementedError
+        # parsing list from string
+        if last is None:
+            last = "[]"
+        last = last.replace("[", "").replace("]", "").replace(" ", "")
+        last = last.split(",")
+        # update entries
+        for i, entry in enumerate(self.entries):
+            entry.delete(0, tk.END)
+            entry.insert(1, last[i])
 
 
 if __name__ == "__main__":
