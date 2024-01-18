@@ -5,6 +5,7 @@
 """
 import datetime
 import functools
+import hashlib
 import warnings
 
 import cv2
@@ -272,3 +273,22 @@ def deprecated(replacement=None):
             return item
 
     return decorator
+
+
+def calculate_file_hash(file_path, omit_line_str=None):
+    """Calculates the hash of a file.
+    Args:
+        file_path (str): Path to file.
+        omit_line_str (str): If this string is found in a line, the line will
+            be omitted when calculating the hash. This is useful for example
+            when the file contains the hash itself.
+    Returns:
+        str: The hash of the file.
+    """
+    hash_object = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for line in f:
+            if omit_line_str is not None and omit_line_str in str(line):
+                continue
+            hash_object.update(line)
+    return hash_object.hexdigest()

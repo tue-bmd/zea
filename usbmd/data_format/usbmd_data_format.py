@@ -674,11 +674,7 @@ def load_usbmd_file(
         data = hdf5_file["data"][data_type][frames]
 
         if data_type in ["raw_data", "aligned_data", "beamformed_data"]:
-            if data.shape[-1] == 1:
-                modtype = "rf"
-            elif data.shape[-1] == 2:
-                modtype = "iq"
-            else:
+            if data.shape[-1] != 1 and data.shape[-1] != 2:
                 raise ValueError(
                     f"The data has an unexpected shape: {data.shape}. Last "
                     "dimension must be 1 (RF) or 2 (IQ), when data_type is "
@@ -689,7 +685,7 @@ def load_usbmd_file(
         scan_params = update_dictionary(file_scan_parameters, config.scan)
 
         # Initialize the scan object
-        scan = Scan(**scan_params, modtype=modtype)
+        scan = Scan(**scan_params)
 
         if data_type in ["raw_data", "aligned_data"]:
             data = data[:, scan.selected_transmits]

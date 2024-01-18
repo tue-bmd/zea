@@ -6,8 +6,6 @@ data:
   file_path: 'dummy_file'
   dataset_name: 'dummy'
   dtype: 'raw_data'
-  modtype: 'rf'
-  from_modtype: 'rf'
   dynamic_range: [-60, 0]
 
 scan:
