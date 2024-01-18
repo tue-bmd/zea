@@ -79,7 +79,7 @@ class GenerateDataSet:
 
         # dict merging of manual config and dataset default scan parameters
         scan_params = update_dictionary(default_scan_params, config_scan_params)
-        self.scan = scan_class(**scan_params, modtype=self.config.data.modtype)
+        self.scan = scan_class(**scan_params)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
