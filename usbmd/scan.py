@@ -322,6 +322,9 @@ class Scan:
     def n_ch(self, value):
         self._n_ch = value
         self._fdemod = None  # Reset fdemod
+        warnings.warn(
+            f"Resetting fdemod to {self.fdemod} because n_ch was changed to {value}."
+        )
 
     @property
     def fdemod(self):
@@ -331,9 +334,10 @@ class Scan:
 
         if self.n_ch is None:
             raise ValueError(
-                "Please set n_ch or fdemod. Currently neither is set.\n"
+                "Please set scan.n_ch or scan.fdemod. Currently neither is set.\n"
                 "\tif n_ch is set to 1 (RF), then fdemod is set to 0.0.\n"
-                "\tif n_ch is set to 2 (IQ), then fdemod is set to fc."
+                "\tif n_ch is set to 2 (IQ), then fdemod is set to fc.\n"
+                "\tfdemod can be set to any other value manually."
             )
 
         return self.fc if self.n_ch == 2 else 0.0
