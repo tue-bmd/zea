@@ -5,10 +5,10 @@ data/
 .ideas/
 
 # any png / gifs in root directory
-*.gif
-*.png
-*.jpeg
-*.jpg
+/*.png
+/*.gif
+/*.jpg
+/*.jpeg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
