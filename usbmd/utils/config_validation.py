@@ -151,9 +151,11 @@ scan_schema = Schema(
         ),
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
+        Optional("n_ch", default=None): Or(None, int),
         Optional("n_ax", default=None): Or(None, int),
         Optional("center_frequency", default=None): Or(None, any_number),
         Optional("sampling_frequency", default=None): Or(None, any_number),
+        Optional("demodulation_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
     }
 )
