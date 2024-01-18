@@ -37,7 +37,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
     # Get the group containing the dataset
     file = file["US"]["US_DATASET0000"]
 
-    if not "data" in file:
+    if "data" not in file:
         return
 
     # Extract I- and Q-data (shape (tx, el, ax))
