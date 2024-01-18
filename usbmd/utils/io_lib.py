@@ -404,22 +404,24 @@ class ImageViewer(abc.ABC):
         self.frames = []
 
     @abc.abstractmethod
-    def show(self) -> None:
+    def show(self, *args, **kwargs) -> None:
         """Displays a frame.
         Frame is generated using the get_frame function passed during initialization.
 
         This function is non-blocking, and will return immediately.
         """
-        self._add_task()
+        self._add_task(*args, **kwargs)
         # show the frame
 
-    def _add_task(self):
+    def _add_task(self, *args, **kwargs):
         if self.threading:
             if len(self.pending) < self.num_threads:
-                task = self.pool.apply_async(self.get_frame_func, ())
+                task = self.pool.apply_async(
+                    self.get_frame_func, args=args, kwds=kwargs
+                )
                 self.pending.append(task)
         else:
-            task = DummyTask(self.get_frame_func())
+            task = DummyTask(self.get_frame_func(*args, **kwargs))
             self.pending.append(task)
 
     def _get_frame(self):
@@ -475,14 +477,14 @@ class ImageViewerOpenCV(ImageViewer):
             cv2.namedWindow(self.window_name)
         self.window = True
 
-    def show(self) -> None:
+    def show(self, *args, **kwargs) -> None:
         """Displays a frame using OpenCV's imshow function.
         Frame is generated using the get_frame function passed during initialization.
 
         This function is non-blocking, and will return immediately.
         Imshow is called asynchronously in a separate thread.
         """
-        super().show()
+        super().show(*args, **kwargs)
         while self.frame_is_ready:
             frame = self._get_frame()
             frame = np.array(frame, dtype=np.uint8)
@@ -581,13 +583,13 @@ class ImageViewerMatplotlib(ImageViewer):
             else:
                 warnings.warn(f"Backend {backend} does not support fixed size windows.")
 
-    def show(self) -> None:
+    def show(self, *args, **kwargs) -> None:
         """Displays a frame using matplotlib's imshow function.
         Frame is generated using the get_frame function passed during initialization.
 
         This function is non-blocking, and will return immediately.
         """
-        super().show()
+        super().show(*args, **kwargs)
 
         while self.frame_is_ready:
             frame = self._get_frame()
