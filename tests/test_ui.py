@@ -25,11 +25,13 @@ def test_ui_initialization():
 
     dataloader_ui = ui.DataLoaderUI(config)
     dataloader_ui.run()
+    dataloader_ui.run(plot=True)
 
     config = setup_config("./tests/config_test.yaml")
     config.ml_library = "tensorflow"
     dataloader_ui = ui.DataLoaderUI(config)
     dataloader_ui.run()
+    dataloader_ui.run(plot=True)
 
 
 def test_get_data():
