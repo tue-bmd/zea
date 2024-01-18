@@ -186,9 +186,12 @@ class DataLoaderUI:
 
         return data
 
-    def data_to_display(self):
+    def data_to_display(self, data=None):
         """Get data and convert to display to_dtype."""
-        self.data = self.get_data()
+        if data is None:
+            self.data = self.get_data()
+        else:
+            self.data = data
 
         if self.to_dtype not in ["image", "image_sc"]:
             warnings.warn(
@@ -258,6 +261,7 @@ class DataLoaderUI:
 
     def plot(
         self,
+        data: np.ndarray = None,
         save: bool = False,
         block: bool = True,
     ):
@@ -270,7 +274,7 @@ class DataLoaderUI:
             image (np.ndarray): plotted image (grabbed from figure).
         """
         if self.headless:
-            return self.data_to_display()
+            return self.data_to_display(data)
 
         assert self.image_viewer is not None, "Image viewer not initialized."
 
@@ -279,7 +283,7 @@ class DataLoaderUI:
         if self.plot_lib == "matplotlib":
             if self.image_viewer.fig is None:
                 self._init_plt_figure()
-            self.image_viewer.show()
+            self.image_viewer.show(data)
             if save:
                 self.save_image(self.fig)
             if not self.headless and block:
@@ -288,7 +292,7 @@ class DataLoaderUI:
             return self.image
 
         elif self.plot_lib == "opencv":
-            self.image_viewer.show()
+            self.image_viewer.show(data)
             if not self.headless and block:
                 cv2.waitKey(0)
             self.save_image(self.image)

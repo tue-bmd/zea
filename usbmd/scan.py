@@ -11,6 +11,49 @@ import numpy as np
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
 
+SCAN_PARAM_TYPES = {
+    "n_ax": int,
+    "n_el": int,
+    "n_tx": int,
+    "n_frames": int,
+    "PRF": float,  # deprecated
+    "sampling_frequency": float,
+    "center_frequency": float,
+    "sound_speed": float,
+    "bandwidth_percent": float,
+    "t0_delays": np.array,
+    "initial_times": np.array,
+    "tx_apodizations": np.array,
+    "polar_angles": np.array,
+    "azimuth_angles": np.array,
+    "angles": np.array,  # deprecated
+    "focus_distances": np.array,
+    "time_to_next_transmit": np.array,
+    "probe_geometry": np.array,
+    "origin": np.array,
+}
+
+
+def cast_scan_parameters(scan_parameters: dict) -> dict:
+    """Casts scan parameters (from hdf5 file) to the correct type.
+
+    Args:
+        scan_parameters (dict): The scan parameters.
+
+    Raises:
+        ValueError: If an unknown scan parameter is encountered.
+    Returns:
+        dict: The scan parameters with the correct types.
+    """
+    # Cast all parameters to the correct type
+    for key, value in scan_parameters.items():
+        if key in SCAN_PARAM_TYPES:
+            scan_parameters[key] = SCAN_PARAM_TYPES[key](value)
+        else:
+            raise ValueError(f"Unknown scan parameter: {key}.")
+
+    return scan_parameters
+
 
 class Scan:
     """Scan base class."""
@@ -311,7 +354,7 @@ class Scan:
     @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
-        return self._n_ax // self.downsample
+        return int(np.ceil(self._n_ax / self.downsample))
 
     @property
     def n_ch(self):
