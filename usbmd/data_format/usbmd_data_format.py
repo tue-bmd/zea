@@ -386,7 +386,10 @@ def generate_usbmd_dataset(
             group=scan_group,
             name="time_to_next_transmit",
             data=time_to_next_transmit,
-            description=("The time between subsequent transmit events."),
+            description=(
+                "The time between subsequent transmit events of shape "
+                "(n_frames, n_tx)."
+            ),
             unit="s",
         )
 
@@ -532,6 +535,12 @@ def assert_scan_keys_present(dataset):
                 dataset["scan"][key].shape == correct_shape
             ), "The initial_times does not have the correct shape."
 
+        elif key == "time_to_next_transmit":
+            correct_shape = (dataset["scan"]["n_frames"][()],)
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The time_to_next_transmit does not have the correct shape."
+
         elif key in (
             "sampling_frequency",
             "center_frequency",
@@ -541,7 +550,6 @@ def assert_scan_keys_present(dataset):
             "n_ax",
             "sound_speed",
             "bandwidth_percent",
-            "time_to_next_transmit",
         ):
             assert (
                 dataset["scan"][key].size == 1
@@ -667,8 +675,18 @@ def load_usbmd_file(
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
 
-        if transmits is not None:
-            config.scan.selected_transmits = transmits
+        if transmits is None:
+            transmits = np.arange(n_tx, dtype=np.int32)
+
+        n_tx = len(transmits)
+
+        initial_times = hdf5_file["scan"]["initial_times"][transmits]
+        tx_apodizations = hdf5_file["scan"]["tx_apodizations"][transmits]
+        t0_delays = hdf5_file["scan"]["t0_delays"][transmits]
+        polar_angles = hdf5_file["scan"]["polar_angles"][transmits]
+        azimuth_angles = hdf5_file["scan"]["azimuth_angles"][transmits]
+        focus_distances = hdf5_file["scan"]["focus_distances"][transmits]
+        time_to_next_transmit = hdf5_file["scan"]["time_to_next_transmit"][:, transmits]
 
         # Load the desired frames from the file
         data = hdf5_file["data"][data_type][frames]
@@ -680,14 +698,21 @@ def load_usbmd_file(
                     "dimension must be 1 (RF) or 2 (IQ), when data_type is "
                     f"{data_type}."
                 )
+        # Define the additional keyword parameters from the config object or an emtpy
+        # dict if no config object is provided.
+        if config is None:
+            config_scan_dict = {}
+        else:
+            config_scan_dict = config.scan
 
         # merge file scan parameters with config scan parameters
-        scan_params = update_dictionary(file_scan_parameters, config.scan)
+        scan_params = update_dictionary(file_scan_parameters, config_scan_dict)
 
         # Initialize the scan object
         scan = Scan(**scan_params)
 
+        # Select only the desired transmits if
         if data_type in ["raw_data", "aligned_data"]:
-            data = data[:, scan.selected_transmits]
+            data = data[:, transmits]
 
         return data, scan, probe
