@@ -672,6 +672,8 @@ def load_usbmd_file(
             if param in file_scan_parameters:
                 file_scan_parameters.pop(param)
 
+        n_tx = file_scan_parameters["n_tx"]
+
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
 
@@ -679,14 +681,6 @@ def load_usbmd_file(
             transmits = np.arange(n_tx, dtype=np.int32)
 
         n_tx = len(transmits)
-
-        initial_times = hdf5_file["scan"]["initial_times"][transmits]
-        tx_apodizations = hdf5_file["scan"]["tx_apodizations"][transmits]
-        t0_delays = hdf5_file["scan"]["t0_delays"][transmits]
-        polar_angles = hdf5_file["scan"]["polar_angles"][transmits]
-        azimuth_angles = hdf5_file["scan"]["azimuth_angles"][transmits]
-        focus_distances = hdf5_file["scan"]["focus_distances"][transmits]
-        time_to_next_transmit = hdf5_file["scan"]["time_to_next_transmit"][:, transmits]
 
         # Load the desired frames from the file
         data = hdf5_file["data"][data_type][frames]
