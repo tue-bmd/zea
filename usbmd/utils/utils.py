@@ -6,6 +6,7 @@
 import datetime
 import functools
 import hashlib
+import platform
 import warnings
 
 import cv2
@@ -292,3 +293,8 @@ def calculate_file_hash(file_path, omit_line_str=None):
                 continue
             hash_object.update(line)
     return hash_object.hexdigest()
+
+
+def check_architercture():
+    """Checks the architecture of the system."""
+    return platform.uname()[-1]
