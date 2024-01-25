@@ -12,6 +12,7 @@ import numpy as np
 import scipy.io as sio
 
 from usbmd.utils.io_lib import filename_from_window_dialog
+from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
 
 
 def load_mat(filename):
@@ -109,22 +110,6 @@ def load_dict_from_file(filename, squeeze=True):
     if (filetype == ".hdf5") or (v_7_3 is True):
         with h5py.File(filename, "r") as h5file:
             return recursively_load_dict_contents_from_group(h5file, "/", squeeze)
-
-
-def recursively_load_dict_contents_from_group(h5file, path, squeeze=True):
-    """Load dict from contents of group"""
-    ans = {}
-    for key, item in h5file[path].items():
-        if isinstance(item, h5py._hl.dataset.Dataset):
-            if squeeze:
-                ans[key] = np.squeeze(item[()])
-            else:
-                ans[key] = item[()]
-        elif isinstance(item, h5py._hl.group.Group):
-            ans[key] = recursively_load_dict_contents_from_group(
-                h5file, path + key + "/"
-            )
-    return ans
 
 
 def strip_matfile_keys(dic):
