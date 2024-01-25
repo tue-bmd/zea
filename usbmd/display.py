@@ -182,13 +182,16 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
     """
     Transform a scan converted input image (cone) into square
         using radial stretching and downsampling. Note that it assumes the background to be zero!
-        Please verify if your results make sense, especially if the image contains black parts at the edges.
-        This function is not perfect by any means, but it works for most cases.
+        Please verify if your results make sense, especially if the image contains black parts
+        at the edges. This function is not perfect by any means, but it works for most cases.
 
     Args:
         image (numpy.ndarray): Input image as a 2D numpy array (height, width).
-        output_size (tuple, optional): Output size of the image as a tuple. Defaults to image_sc.shape.
-        fit_outline (bool, optional): Whether to fit the outline of the image. Defaults to True. If this is set to False, and the ultrasound image contains some black parts at the edges, weird artifacts can occur.
+        output_size (tuple, optional): Output size of the image as a tuple.
+            Defaults to image_sc.shape.
+        fit_outline (bool, optional): Whether to fit the outline of the image. Defaults to True.
+            If this is set to False, and the ultrasound image contains
+            some black parts at the edges, weird artifacts can occur.
 
     Returns:
         numpy.ndarray: Squared image as a 2D numpy array (height, width).
