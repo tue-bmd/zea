@@ -178,28 +178,26 @@ def cart2pol(x, y):
     return (theta, rho)
 
 
-def transform_sc_image_to_polar(image_sc, output_size=None):
+def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
     """
     Transform a scan converted input image (cone) into square
         using radial stretching and downsampling. Note that it assumes the background to be zero!
-    TODO: remove assumption of background being zero. Do this by fitting lines.
+        Please verify if your results make sense, especially if the image contains black parts at the edges.
+        This function is not perfect by any means, but it works for most cases.
 
     Args:
         image (numpy.ndarray): Input image as a 2D numpy array (height, width).
+        output_size (tuple, optional): Output size of the image as a tuple. Defaults to image_sc.shape.
+        fit_outline (bool, optional): Whether to fit the outline of the image. Defaults to True. If this is set to False, and the ultrasound image contains some black parts at the edges, weird artifacts can occur.
 
     Returns:
         numpy.ndarray: Squared image as a 2D numpy array (height, width).
     """
     assert len(image_sc.shape) == 2, "function only allows for 2D data"
 
-    # Find dimensions of the input image
-    (height, width) = image_sc.shape
-
+    # Default output size is the input size
     if output_size is None:
         output_size = image_sc.shape
-
-    # Find the middle of the width of the image
-    width_middle = round(width / 2)
 
     # Initialize an empty target array for polar_image
     polar_image = np.zeros_like(image_sc)
@@ -208,8 +206,25 @@ def transform_sc_image_to_polar(image_sc, output_size=None):
     flipped_image = np.flip(image_sc, axis=0)
 
     # Find index of first non zero element along y axis (for every vertical line)
-    non_zeros_flipped = find_first_nonzero_index(flipped_image, 0, height)
-    non_zeros = height - non_zeros_flipped
+    non_zeros_flipped = find_first_nonzero_index(flipped_image, 0)
+
+    # Remove any black vertical lines that are not part of the image
+    remove_vertical_lines = np.where(non_zeros_flipped == -1)[0]
+    polar_image = np.delete(polar_image, remove_vertical_lines, axis=1)
+    non_zeros_flipped = np.delete(non_zeros_flipped, remove_vertical_lines)
+
+    if fit_outline:
+        model_fitted_bottom = np.poly1d(
+            np.polyfit(range(len(non_zeros_flipped)), non_zeros_flipped, 4)
+        )
+        non_zeros_flipped = model_fitted_bottom(range(len(non_zeros_flipped)))
+        non_zeros_flipped = non_zeros_flipped.round().astype(np.int64)
+
+    non_zeros = polar_image.shape[0] - non_zeros_flipped
+
+    # Find the middle of the width of the image
+    width = polar_image.shape[1]
+    width_middle = round(width / 2)
 
     # For every vertical line in the image
     for x_i in range(width):
@@ -228,6 +243,19 @@ def transform_sc_image_to_polar(image_sc, output_size=None):
     non_zeros_left = non_zeros_left[remove_horizontal_lines:]
     non_zeros_right = non_zeros_right[remove_horizontal_lines:]
 
+    if fit_outline:
+        model_fitted_left = np.poly1d(
+            np.polyfit(range(len(non_zeros_left)), non_zeros_left, 2)
+        )
+        non_zeros_left = model_fitted_left(range(len(non_zeros_left)))
+        non_zeros_left = non_zeros_left.round().astype(np.int64)
+
+        model_fitted_right = np.poly1d(
+            np.polyfit(range(len(non_zeros_right)), non_zeros_right, 2)
+        )
+        non_zeros_right = model_fitted_right(range(len(non_zeros_right)))
+        non_zeros_right = non_zeros_right.round().astype(np.int64)
+
     # For every horizontal line in the image
     for y_i in range(polar_image.shape[0]):
         small_array = polar_image[y_i, non_zeros_left[y_i] : non_zeros_right[y_i]]
@@ -245,4 +273,4 @@ def transform_sc_image_to_polar(image_sc, output_size=None):
             )
 
     # Resize image to output_size
-    return resize(polar_image, output_size)
+    return resize(polar_image, output_size, preserve_range=True)
