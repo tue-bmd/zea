@@ -189,9 +189,10 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
         image (numpy.ndarray): Input image as a 2D numpy array (height, width).
         output_size (tuple, optional): Output size of the image as a tuple.
             Defaults to image_sc.shape.
-        fit_outline (bool, optional): Whether to fit the outline of the image. Defaults to True.
-            If this is set to False, and the ultrasound image contains
-            some black parts at the edges, weird artifacts can occur.
+        fit_outline (bool, optional): Whether to fit a polynomial the outline of the image.
+            Defaults to True. If this is set to False, and the ultrasound image contains
+            some black parts at the edges, weird artifacts can occur, because the jagged outline
+            is stretched to the desired width.
 
     Returns:
         numpy.ndarray: Squared image as a 2D numpy array (height, width).
@@ -211,7 +212,7 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
     # Find index of first non zero element along y axis (for every vertical line)
     non_zeros_flipped = find_first_nonzero_index(flipped_image, 0)
 
-    # Remove any black vertical lines that are not part of the image
+    # Remove any black vertical lines (columns) that do not contain image data
     remove_vertical_lines = np.where(non_zeros_flipped == -1)[0]
     polar_image = np.delete(polar_image, remove_vertical_lines, axis=1)
     non_zeros_flipped = np.delete(non_zeros_flipped, remove_vertical_lines)
@@ -240,7 +241,7 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
         np.flip(polar_image, 1), 1, width_middle
     )
 
-    # Remove any black horizontal lines that are not part of the image
+    # Remove any black horizontal lines (rows) that do not contain image data
     remove_horizontal_lines = np.max(np.where(non_zeros_left == -1)) + 1
     polar_image = polar_image[remove_horizontal_lines:, :]
     non_zeros_left = non_zeros_left[remove_horizontal_lines:]
