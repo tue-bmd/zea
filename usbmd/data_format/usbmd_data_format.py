@@ -126,7 +126,8 @@ def generate_usbmd_dataset(
             This is the time between the first element firing and the last element firing.
         bandwidth_percent (float): The bandwidth of the transducer as a
             percentage of the center frequency.
-        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s.
+        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s of
+            shape (n_frames, n_tx).
 
     Returns:
         (h5py.File): The example dataset.
