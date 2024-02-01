@@ -711,6 +711,6 @@ def load_usbmd_file(
 
         # Select only the desired transmits if
         if data_type in ["raw_data", "aligned_data"]:
-            data = data[:, transmits]
+            data = data[:, scan.selected_transmits]
 
         return data, scan, probe
