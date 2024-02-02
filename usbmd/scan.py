@@ -8,9 +8,52 @@ import warnings
 
 import numpy as np
 
-from usbmd.utils.checks import _MOD_TYPES
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
+
+SCAN_PARAM_TYPES = {
+    "n_ax": int,
+    "n_el": int,
+    "n_tx": int,
+    "n_ch": int,
+    "n_frames": int,
+    "PRF": float,  # deprecated
+    "sampling_frequency": float,
+    "center_frequency": float,
+    "sound_speed": float,
+    "bandwidth_percent": float,
+    "t0_delays": np.array,
+    "initial_times": np.array,
+    "tx_apodizations": np.array,
+    "polar_angles": np.array,
+    "azimuth_angles": np.array,
+    "angles": np.array,  # deprecated
+    "focus_distances": np.array,
+    "time_to_next_transmit": np.array,
+    "probe_geometry": np.array,
+    "origin": np.array,
+}
+
+
+def cast_scan_parameters(scan_parameters: dict) -> dict:
+    """Casts scan parameters (from hdf5 file) to the correct type.
+
+    Args:
+        scan_parameters (dict): The scan parameters.
+
+    Raises:
+        ValueError: If an unknown scan parameter is encountered.
+    Returns:
+        dict: The scan parameters with the correct types.
+    """
+    # Cast all parameters to the correct type
+    for key, value in scan_parameters.items():
+        if key in SCAN_PARAM_TYPES:
+            scan_parameters[key] = SCAN_PARAM_TYPES[key](value)
+        else:
+            raise ValueError(f"Unknown scan parameter: {key}.")
+
+    return scan_parameters
 
 
 class Scan:
@@ -22,12 +65,13 @@ class Scan:
         n_el: int,
         center_frequency: float,
         sampling_frequency: float,
+        demodulation_frequency: float = None,
         xlims=None,
         ylims=None,
         zlims=None,
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
-        modtype: str = "rf",
+        n_ch: int = None,
         n_ax: int = None,
         Nx: int = None,
         Nz: int = None,
@@ -56,6 +100,10 @@ class Scan:
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
+            demodulation_frequency (float): The demodulation frequency.
+                Usually set to 0.0 if rf data and to transmit frequency if iq data.
+                For iq data it can vary depending on the approach used to defined
+                the ultrasound echo center frequency.
             xlims (tuple, optional): The x-limits in the beamforming grid.
                 Defaults to (probe_geometry[0, 0], probe_geometry[-1, 0]).
             ylims (tuple, optional): The y-limits in the beamforming grid.
@@ -65,11 +113,10 @@ class Scan:
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
-                modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
-                to 'rf'
-            modtype (str, optional): The modulation type. ('rf' or 'iq').
-            n_ax (int, optional): The number of samples in a receive recording per channel.
-                Defaults to None.
+            n_ch (int): The number of channels. This will determine the modulation type.
+                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
+            n_ax (int, optional): The number of samples per in a receive
+                recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
@@ -108,7 +155,6 @@ class Scan:
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
         """
-        assert modtype in _MOD_TYPES, "modtype must be either 'rf' or 'iq'."
 
         # Attributes concerning channel data : The number of transmissions in a frame
         self._n_tx = int(n_tx)
@@ -122,14 +168,12 @@ class Scan:
         self.bandwidth_percent = float(bandwidth_percent)
         #: The speed of sound [m/s]
         self.sound_speed = float(sound_speed)
-        #: The modulation type of the raw data ('rf' or 'iq')
-        self.modtype = modtype
+        #: The number of rf/iq channels (1 for rf, 2 for iq)
+        self._n_ch = n_ch
         #: The number of samples per channel per acquisition
         self._n_ax = n_ax
         #: The demodulation frequency [Hz]
-        self.fdemod = self.fc if modtype == "iq" else 0.0
-        #: The number of rf/iq channels (1 for rf, 2 for iq)
-        self.n_ch = 2 if modtype == "iq" else 1
+        self._fdemod = demodulation_frequency
         #: The wavelength of the modulation carrier [m]
         self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
@@ -138,7 +182,7 @@ class Scan:
         self.downsample = downsample
         #: The probe geometry of shape (n_el, 3)
         self.probe_geometry = probe_geometry
-
+        #: The time between subsequent transmit events of shape (n_tx*n_frames,)
         self.time_to_next_transmit = time_to_next_transmit
 
         # Beamforming grid related attributes
@@ -311,7 +355,40 @@ class Scan:
     @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
-        return self._n_ax // self.downsample
+        return int(np.ceil(self._n_ax / self.downsample))
+
+    @property
+    def n_ch(self):
+        """The number of channels."""
+        return self._n_ch
+
+    @n_ch.setter
+    def n_ch(self, value):
+        self._n_ch = value
+        self._fdemod = None  # Reset fdemod
+        warnings.warn(
+            f"Resetting fdemod to {self.fdemod} because n_ch was changed to {value}."
+        )
+
+    @property
+    def fdemod(self):
+        """The demodulation frequency."""
+        if self._fdemod is not None:
+            return self._fdemod
+
+        if self.n_ch is None:
+            raise ValueError(
+                "Please set scan.n_ch or scan.fdemod. Currently neither is set.\n"
+                "\tif n_ch is set to 1 (RF), then fdemod is set to 0.0.\n"
+                "\tif n_ch is set to 2 (IQ), then fdemod is set to fc.\n"
+                "\tfdemod can be set to any other value manually."
+            )
+
+        return self.fc if self.n_ch == 2 else 0.0
+
+    @fdemod.setter
+    def fdemod(self, value):
+        self._fdemod = value
 
     @property
     def t0_delays(self):
@@ -437,13 +514,14 @@ class PlaneWaveScan(Scan):
         angles=None,
         n_tx=75,
         n_el=128,
+        n_ch=1,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
         center_frequency=7e6,
         sampling_frequency=28e6,
+        demodulation_frequency=0.0,
         sound_speed=1540,
-        modtype="rf",
         n_ax=3328,
         Nx=128,
         Nz=128,
@@ -465,19 +543,17 @@ class PlaneWaveScan(Scan):
                 optional): The x-limits in the beamforming grid.
                 Defaults to (-0.01, 0.01).
             n_el (int, optional): The number of elements in the array. Defaults to 128.
+            n_ch (int): The number of channels. Defaults to 1.
+            center_frequency (float): The modulation carrier frequency.
+            sampling_frequency (float): The sampling rate to sample rf- or
+                iq-signals with.
+            demodulation_frequency (float): The demodulation frequency. Defaults to 0.
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
                 Defaults to (0,0.04).
-            center_frequency (float, optional): The modulation carrier frequency.
-                Defaults to 7e6.
-            sampling_frequency (float, optional): The sampling rate to sample rf- or
-                iq-signals with. Defaults to 28e6.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
-                modtype(string, optional): The modulation type. ('rf' or 'iq'). Defaults
-                to 'rf'
-            modtype (str, optional): The modulation type. ('rf' or 'iq'). n_ax (int,
-            optional): The number of samples per in a receive
+            n_ax (int, optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
@@ -527,13 +603,14 @@ class PlaneWaveScan(Scan):
         super().__init__(
             n_tx=n_tx,
             n_el=n_el,
+            n_ch=n_ch,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
             center_frequency=center_frequency,
             sampling_frequency=sampling_frequency,
+            demodulation_frequency=demodulation_frequency,
             sound_speed=sound_speed,
-            modtype=modtype,
             n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
@@ -555,13 +632,14 @@ class DivergingWaveScan(Scan):
         self,
         n_tx=75,
         n_el=128,
+        n_ch=1,
         xlims=(-0.01, 0.01),
         ylims=(0, 0),
         zlims=(0, 0.04),
         center_frequency=7e6,
         sampling_frequency=28e6,
+        demodulation_frequency=0.0,
         sound_speed=1540,
-        modtype="rf",
         n_ax=256,
         Nx=128,
         Nz=128,
@@ -571,13 +649,14 @@ class DivergingWaveScan(Scan):
         super().__init__(
             n_tx=n_tx,
             n_el=n_el,
+            n_ch=n_ch,
             xlims=xlims,
             ylims=ylims,
             zlims=zlims,
             center_frequency=center_frequency,
             sampling_frequency=sampling_frequency,
+            demodulation_frequency=demodulation_frequency,
             sound_speed=sound_speed,
-            modtype=modtype,
             n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
