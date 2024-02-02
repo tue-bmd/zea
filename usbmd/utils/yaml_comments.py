@@ -264,6 +264,25 @@ def add_comments_to_yaml(file_path, descriptions):
         file.writelines(modified_content)
 
 
+def compile_comments_to_markdown_doc(descriptions, indent_level=0):
+    """Compiles the descriptions dictionary into a nicely formatted markdown document.
+    descriptions are in the form of nested dictionaries, where the keys are the sections
+    and the values are either strings or nested dictionaries. The function recursively
+    processes the dictionary and compiles it into a markdown document.
+    """
+    markdown_doc = ""
+    indent = " " * 4 * indent_level
+
+    for key, value in descriptions.items():
+        if isinstance(value, str):
+            markdown_doc += f"{indent}- **{key}**: {value}\n"
+        elif isinstance(value, dict):
+            markdown_doc += f"{indent}- **{key}**:\n"
+            markdown_doc += compile_comments_to_markdown_doc(value, indent_level + 1)
+
+    return markdown_doc
+
+
 if __name__ == "__main__":
     # Assuming your YAML files are in the configs directory
     config_dir = Path("configs")
@@ -272,8 +291,17 @@ if __name__ == "__main__":
     yaml_files = [
         f for f in os.listdir(config_dir) if f.endswith(".yaml") or f.endswith(".yml")
     ]
+    # exclude the probe.yaml file
+    yaml_files = [f for f in yaml_files if f != "probes.yaml"]
 
     # Add comments to each YAML file
     for file_name in yaml_files:
         print(f"Adding comments to {config_dir/file_name}")
         add_comments_to_yaml(config_dir / file_name, descriptions)
+
+    # Compile the descriptions into a markdown document
+    markdown_doc = compile_comments_to_markdown_doc(descriptions)
+    markdown_doc_path = config_dir / "config_doc.md"
+    with open(markdown_doc_path, "w", encoding="utf-8") as file:
+        file.write(markdown_doc)
+    print(f"Markdown document updated and saved to {markdown_doc_path}")
