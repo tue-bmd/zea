@@ -79,13 +79,13 @@ def convert_picmus(source_path, output_path, overwrite=False):
             -np.min(np.sum(probe_geometry * v[None], axis=1)) / sound_speed
         )
 
-        t0_delays[n] = compute_t0_delays_planewave(
-            probe_geometry=probe_geometry,
-            polar_angle=polar_angles[n],
-            sound_speed=sound_speed,
-        )
-        # This line changes the data format to work with the old beamformer,
-        # which is not in accordance with the new USBMD format
+    t0_delays = compute_t0_delays_planewave(
+        probe_geometry=probe_geometry,
+        polar_angles=polar_angles,
+        sound_speed=sound_speed,
+    )
+    # This line changes the data format to work with the old beamformer,
+    # which is not in accordance with the new USBMD format
 
     generate_usbmd_dataset(
         path=output_path,
