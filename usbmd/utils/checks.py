@@ -239,8 +239,8 @@ def validate_dataset(path: str = None, dataset: h5py.File = None):
 
     if path is not None:
         path = Path(path)
-        with h5py.File(path, "r") as dataset:
-            _validate_hdf5_dataset(dataset)
+        with h5py.File(path, "r") as _dataset:
+            _validate_hdf5_dataset(_dataset)
     else:
         _validate_hdf5_dataset(dataset)
 
@@ -377,7 +377,10 @@ def _assert_scan_keys_present(dataset):
             ), "The initial_times does not have the correct shape."
 
         elif key == "time_to_next_transmit":
-            correct_shape = (dataset["scan"]["n_frames"][()], dataset["scan"]["n_tx"][()])
+            correct_shape = (
+                dataset["scan"]["n_frames"][()],
+                dataset["scan"]["n_tx"][()],
+            )
             assert (
                 dataset["scan"][key].shape == correct_shape
             ), "The time_to_next_transmit does not have the correct shape."
