@@ -151,7 +151,7 @@ descriptions = {
 def wrap_string_as_comment(
     input_string, indent_level=0, max_line_length=100, indent_size=2
 ):
-    """Limit the length of lines in a string and add a comment prefix."""
+    """Limit the length of lines in a string and adds a comment prefix."""
     # Calculate the prefix (indent + comment symbol)
     indent = " " * (indent_level * indent_size)  # Assuming 4 spaces per indent level
     prefix = indent + "# "
@@ -194,6 +194,14 @@ def process_yaml_content(lines, descriptions, indent_size=2):
     Recursive function to process YAML content line by line and add comments.
     If no model and scan keys are found in the top level, the function assumes that the
     YAML file is not in the correct format and does not add comments.
+
+    Args:
+        lines (list): List of lines in the YAML file.
+        descriptions (dict): Dictionary with descriptions for the keys in the YAML file.
+        indent_size (int): Number of spaces per indent level.
+
+    Returns:
+        list: List of lines with comments added.
     """
     modified_lines = []
     current_keys = []
@@ -261,8 +269,10 @@ def add_comments_to_yaml(file_path, descriptions):
 
 
 if __name__ == "__main__":
-    # Assuming your YAML files are in the current directory
+    # Assuming your YAML files are in the configs directory
     config_dir = Path("configs")
+
+    # List all YAML files in the directory
     yaml_files = [
         f for f in os.listdir(config_dir) if f.endswith(".yaml") or f.endswith(".yml")
     ]
