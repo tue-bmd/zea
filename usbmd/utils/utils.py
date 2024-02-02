@@ -295,6 +295,6 @@ def calculate_file_hash(file_path, omit_line_str=None):
     return hash_object.hexdigest()
 
 
-def check_architercture():
+def check_architecture():
     """Checks the architecture of the system."""
     return platform.uname()[-1]
