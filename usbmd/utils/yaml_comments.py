@@ -13,7 +13,6 @@ from usbmd.utils.config_validation import (
     _ALLOWED_DEMODULATION,
     _ALLOWED_KEYS_PROXTYPE,
     _ALLOWED_PLOT_LIBS,
-    _BEAMFORMER_TYPES,
     _DATA_TYPES,
     _ML_LIBRARIES,
     _MOD_TYPES,
@@ -36,10 +35,7 @@ descriptions = {
         ),
         "beamformer": {
             "description": "Settings used to configure the beamformer.",
-            "type": (
-                "The beamforming method to use "
-                f"({allows_type_to_str(_BEAMFORMER_TYPES)})"
-            ),
+            "type": "The beamforming method to use (das,)",
             "proxtype": (
                 "The type of proximal operator to use "
                 f"({allows_type_to_str(_ALLOWED_KEYS_PROXTYPE)})"
@@ -192,8 +188,8 @@ def wrap_string_as_comment(
 def process_yaml_content(lines, descriptions, indent_size=2):
     """
     Recursive function to process YAML content line by line and add comments.
-    If no model and scan keys are found in the top level, the function assumes that the
-    YAML file is not in the correct format and does not add comments.
+    If no `data` and `plot` keys are found in the top level, the function assumes that
+    the YAML file is not in the correct format and does not add comments.
 
     Args:
         lines (list): List of lines in the YAML file.
@@ -206,8 +202,8 @@ def process_yaml_content(lines, descriptions, indent_size=2):
     modified_lines = []
     current_keys = []
 
-    model_found = False
-    scan_found = False
+    data_found = False
+    plot_found = False
 
     # Go through all the lines. If the line contains a key, try to look for its description
     # and add it. If the description is not found, add no comment.
@@ -222,10 +218,10 @@ def process_yaml_content(lines, descriptions, indent_size=2):
             key = line.split(":")[0].strip()
             current_keys.append(key)
 
-            if key == "model":
-                model_found = True
-            if key == "scan":
-                scan_found = True
+            if key == "data" and indent_level == 0:
+                data_found = True
+            if key == "plot" and indent_level == 0:
+                plot_found = True
 
             # Recursively index into the descriptions dictionary to find the description
             description = descriptions
@@ -248,10 +244,10 @@ def process_yaml_content(lines, descriptions, indent_size=2):
             modified_lines.append(line)
         else:
             modified_lines.append(line)
-    if model_found and scan_found:
+    if data_found and plot_found:
         return modified_lines
     else:
-        print("model or scan not found")
+        print("data and/or plot key not found. Not adding comments.")
         return lines
 
 
