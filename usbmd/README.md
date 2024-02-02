@@ -59,7 +59,7 @@ Make sure that before using any GPU enabled functionality (importing torch / ten
 
 ```python
 # import the init_device function
-from usbmd.utils.gpu_utils import init_device
+from usbmd.utils.device import init_device
 
 # initialize device manually
 device = init_device("torch", "auto:1", hide_devices=None)
