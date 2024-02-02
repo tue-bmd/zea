@@ -12,6 +12,7 @@ Also if that parameter is optional, add a default value.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 31/01/2023
 """
+
 import importlib
 from pathlib import Path
 from typing import Union
@@ -60,6 +61,8 @@ positive_float = And(float, lambda f: f > 0)
 list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
 list_of_positive_integers = And(list, lambda l: all(_l >= 0 for _l in l))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
+
+_ALLOWED_KEYS_PROXTYPE = (None, "wavelet", "softthres", "fourier", "neural")
 
 # optional sub schemas go here, to allow for nested defaults
 
