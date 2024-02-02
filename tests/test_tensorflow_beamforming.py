@@ -127,6 +127,7 @@ def test_das_beamforming(
 
 
 def test_jit_compile():
+    """Test that the jit compilation works and gives the same result as the non-jit	version. """
     jit_output = test_das_beamforming(
         reconstruction_mode="pw", patches=None, debug=False, compare_gt=False, jit=True
     )
