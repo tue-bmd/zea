@@ -151,9 +151,11 @@ scan_schema = Schema(
         ),
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
+        Optional("n_ch", default=None): Or(None, int),
         Optional("n_ax", default=None): Or(None, int),
         Optional("center_frequency", default=None): Or(None, any_number),
         Optional("sampling_frequency", default=None): Or(None, any_number),
+        Optional("demodulation_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
     }
 )
@@ -173,8 +175,12 @@ config_schema = Schema(
             Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
             Optional("input_range", default=None): Or(None, list_of_size_two),
             Optional("apodization", default=None): Or(None, str),
-            Optional("modtype", default=None): Or(*_MOD_TYPES),
-            Optional("from_modtype", default=None): Or(*_MOD_TYPES),
+            Optional("modtype", default=None): Or(
+                *_MOD_TYPES
+            ),  # ONLY FOR LEGACY DATASET
+            Optional("from_modtype", default=None): Or(
+                *_MOD_TYPES
+            ),  # ONLY FOR LEGACY DATASET
             Optional("user", default=None): Or(None, dict),
             Optional("dataset_folder", default=None): Or(None, str),
         },

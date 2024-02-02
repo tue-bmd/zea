@@ -6,6 +6,7 @@ Use to quickly read and write files or interact with file system.
 - **Date**          : October 12th, 2023
 """
 import abc
+import asyncio
 import os
 import sys
 import warnings
@@ -39,6 +40,11 @@ _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
 def running_in_notebook():
     """Check whether code is running in a Jupyter Notebook or not."""
     return "ipykernel_launcher" in sys.argv[0]
+
+
+def plt_window_has_been_closed(fig):
+    """Checks whether matplotlib plot window is closed"""
+    return not plt.fignum_exists(fig.number)
 
 
 def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
@@ -398,22 +404,24 @@ class ImageViewer(abc.ABC):
         self.frames = []
 
     @abc.abstractmethod
-    def show(self) -> None:
+    def show(self, *args, **kwargs) -> None:
         """Displays a frame.
         Frame is generated using the get_frame function passed during initialization.
 
         This function is non-blocking, and will return immediately.
         """
-        self._add_task()
+        self._add_task(*args, **kwargs)
         # show the frame
 
-    def _add_task(self):
+    def _add_task(self, *args, **kwargs):
         if self.threading:
             if len(self.pending) < self.num_threads:
-                task = self.pool.apply_async(self.get_frame_func, ())
+                task = self.pool.apply_async(
+                    self.get_frame_func, args=args, kwds=kwargs
+                )
                 self.pending.append(task)
         else:
-            task = DummyTask(self.get_frame_func())
+            task = DummyTask(self.get_frame_func(*args, **kwargs))
             self.pending.append(task)
 
     def _get_frame(self):
@@ -469,14 +477,14 @@ class ImageViewerOpenCV(ImageViewer):
             cv2.namedWindow(self.window_name)
         self.window = True
 
-    def show(self) -> None:
+    def show(self, *args, **kwargs) -> None:
         """Displays a frame using OpenCV's imshow function.
         Frame is generated using the get_frame function passed during initialization.
 
         This function is non-blocking, and will return immediately.
         Imshow is called asynchronously in a separate thread.
         """
-        super().show()
+        super().show(*args, **kwargs)
         while self.frame_is_ready:
             frame = self._get_frame()
             frame = np.array(frame, dtype=np.uint8)
@@ -492,18 +500,31 @@ class ImageViewerOpenCV(ImageViewer):
 
     def _retain_aspect_ratio_resize(self, frame):
         """Resize frame to retain aspect ratio."""
-        # get frame size of cv2 and change it to preserve aspect ratio (keep height same)
-        aspect_ratio = frame.shape[1] / frame.shape[0]
-        # get height of the window
-        height = cv2.getWindowImageRect(self.window_name)[3]
-        # calculate width based on aspect ratio
-        width = int(height * aspect_ratio)
-        # resize the window
-        cv2.resizeWindow(self.window_name, width, height)
+        try:
+            # get frame size of cv2 and change it to preserve aspect ratio (keep height same)
+            aspect_ratio = frame.shape[1] / frame.shape[0]
+            # get height of the window
+            height = cv2.getWindowImageRect(self.window_name)[3]
+            # calculate width based on aspect ratio
+            width = int(height * aspect_ratio)
+            # resize the window
+            cv2.resizeWindow(self.window_name, width, height)
+        except Exception as error:
+            warnings.warn(f"Could not resize window: {error}")
 
     def close(self):
         """Closes the window."""
+        if not self.window:
+            return
+        if self.has_been_closed():
+            return
         cv2.destroyWindow(self.window_name)
+
+    def has_been_closed(self):
+        """Returns True if the window has been closed."""
+        if self.window is None:
+            return False
+        return cv2.getWindowProperty(self.window_name, cv2.WND_PROP_VISIBLE) < 1
 
 
 class ImageViewerMatplotlib(ImageViewer):
@@ -539,6 +560,7 @@ class ImageViewerMatplotlib(ImageViewer):
         plt.ion()
         self.fig = None
         self.ax = None
+        self.bg = None
         self.image_obj = None
         self.imshow_kwargs = imshow_kwargs
         self.cax_kwargs = cax_kwargs
@@ -549,7 +571,7 @@ class ImageViewerMatplotlib(ImageViewer):
         # create figure but do not show it already
         self.fig = plt.figure(self.window_name)
         self.ax = self.fig.add_subplot(111)
-
+        self.bg = self.fig.canvas.copy_from_bbox(self.fig.bbox)
         # move to foreground
         raise_matplotlib_window(self.window_name)
 
@@ -561,13 +583,13 @@ class ImageViewerMatplotlib(ImageViewer):
             else:
                 warnings.warn(f"Backend {backend} does not support fixed size windows.")
 
-    def show(self) -> None:
+    def show(self, *args, **kwargs) -> None:
         """Displays a frame using matplotlib's imshow function.
         Frame is generated using the get_frame function passed during initialization.
 
         This function is non-blocking, and will return immediately.
         """
-        super().show()
+        super().show(*args, **kwargs)
 
         while self.frame_is_ready:
             frame = self._get_frame()
@@ -575,11 +597,15 @@ class ImageViewerMatplotlib(ImageViewer):
             if self.image_obj is None:
                 if self.fig is None:
                     self._create_figure()
+                if self.bg is None:
+                    self.bg = self.fig.canvas.copy_from_bbox(self.fig.bbox)
 
                 if self.imshow_kwargs:
-                    self.image_obj = self.ax.imshow(frame, **self.imshow_kwargs)
+                    self.image_obj = self.ax.imshow(
+                        frame, **self.imshow_kwargs, animated=True
+                    )
                 else:
-                    self.image_obj = self.ax.imshow(frame)
+                    self.image_obj = self.ax.imshow(frame, animated=True)
 
                 # these only need to be set once
                 if self.init_figure_props:
@@ -595,10 +621,36 @@ class ImageViewerMatplotlib(ImageViewer):
                     self.fig.tight_layout()
                     self.init_figure_props = False
 
-                self.fig.canvas.draw_idle()
+                self.fig.canvas.draw()
             else:
                 self.image_obj.set_data(frame)
-                self.fig.canvas.draw_idle()
+                self.fig.canvas.blit(self.fig.bbox)
+                self.fig.canvas.draw()
 
-            self.image_obj.figure.canvas.flush_events()
+            self.fig.canvas.flush_events()
             self.frame_no += 1
+
+    def close(self):
+        """Closes the window."""
+        plt.close(self.fig)
+
+    def has_been_closed(self):
+        """Returns True if the window has been closed."""
+        return plt_window_has_been_closed(self.fig)
+
+
+async def start_async_app(app: Tk, *args, **kwargs):
+    """
+    Starts the asynchronous app.
+
+    Args:
+        app (Tk): The Tkinter app object.
+
+    Raises:
+        AssertionError: If the app is not an instance of Tk or does not have the "show" attribute.
+
+    Returns:
+        MyWindow: The instance of MyWindow.
+    """
+    my_app = app(asyncio.get_event_loop(), *args, **kwargs)
+    await my_app.show()
