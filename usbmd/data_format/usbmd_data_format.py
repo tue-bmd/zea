@@ -409,7 +409,7 @@ def generate_usbmd_dataset(
 
     validate_dataset(path)
 
-    
+
 def load_usbmd_file(
     path, frames=None, transmits=None, data_type="raw_data", config=None
 ):
