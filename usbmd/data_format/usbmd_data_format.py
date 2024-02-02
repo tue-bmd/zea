@@ -1,6 +1,7 @@
 """
 Functions to write and validate datasets in the USBMD format.
 """
+
 import logging
 from pathlib import Path
 
@@ -185,6 +186,7 @@ def generate_usbmd_dataset(
         n_tx = first_not_none_shape([raw_data, aligned_data], axis=1)
         n_el = first_not_none_shape([raw_data, aligned_data], axis=3)
         n_ax = first_not_none_shape([raw_data, aligned_data], axis=2)
+        n_ch = first_not_none_shape([raw_data, aligned_data], axis=4)
 
         # Write data group
         data_group = dataset.create_group("data")
@@ -266,6 +268,17 @@ def generate_usbmd_dataset(
             name="n_tx",
             data=n_tx,
             description="The number of transmits per frame.",
+            unit="unitless",
+        )
+
+        add_dataset(
+            group=scan_group,
+            name="n_ch",
+            data=n_ch,
+            description=(
+                "The number of channels. For RF data this is 1. For IQ data "
+                "this is 2."
+            ),
             unit="unitless",
         )
 
@@ -552,6 +565,7 @@ def assert_scan_keys_present(dataset):
             "n_tx",
             "n_el",
             "n_ax",
+            "n_ch",
             "sound_speed",
             "bandwidth_percent",
         ):
