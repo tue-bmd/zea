@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from usbmd.utils.checks import _REQUIRED_SCAN_KEYS
+
 n_frames = 2
 n_tx = 4
 n_el = 16
@@ -71,14 +73,7 @@ def test_example_dataset():
 
 @pytest.mark.parametrize(
     "key",
-    [
-        "description",
-        "focus_distances",
-        "polar_angles",
-        "azimuth_angles",
-        "tx_apodizations",
-        "bandwidth_percent",
-    ],
+    [key for key in dataset_parameters if key not in _REQUIRED_SCAN_KEYS],
 )
 def test_omit_key(key):
     """Tests if omitting an optional key in the dataset_parameters dictionary
