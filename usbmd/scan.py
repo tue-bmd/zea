@@ -15,6 +15,7 @@ SCAN_PARAM_TYPES = {
     "n_ax": int,
     "n_el": int,
     "n_tx": int,
+    "n_ch": int,
     "n_frames": int,
     "PRF": float,  # deprecated
     "sampling_frequency": float,
