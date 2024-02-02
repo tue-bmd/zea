@@ -392,6 +392,7 @@ def _assert_scan_keys_present(dataset):
             "n_tx",
             "n_el",
             "n_ax",
+            "n_ch",
             "sound_speed",
             "bandwidth_percent",
         ):
