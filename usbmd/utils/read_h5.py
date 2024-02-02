@@ -3,6 +3,7 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : -
 """
+import warnings
 from pathlib import Path
 
 import h5py
@@ -99,6 +100,8 @@ class ReadH5:
 
     def __len__(self):
         key = self.get_largest_group_name()
+        if key is None:
+            return 0
         return len(self.file[key])
 
     @property
@@ -125,28 +128,46 @@ class ReadH5:
                 group_info.append((name, n_elements))
 
         self.file.visititems(visit_func)
+        if not group_info:
+            warnings.warn("hdf5 file does not contain any datasets")
+            return None
         idx = np.argmax([gi[1] for gi in group_info])
         key_name, _ = group_info[idx]
         return key_name
 
 
 def recursively_load_dict_contents_from_group(
-    h5file: h5py._hl.files.File, path: str, squeeze=True
+    h5file: h5py._hl.files.File, path: str, squeeze: bool = False
 ) -> dict:
-    """Load dict from contents of group"""
+    """Load dict from contents of group
+
+    Values inside the group are converted to numpy arrays
+    or primitive types (int, float, str). Single element
+    arrays are converted to the corresponding primitive type (if squeeze=True)
+
+    Args:
+        h5file (h5py._hl.files.File): h5py file object
+        path (str): path to group
+        squeeze (bool, optional): squeeze arrays with single element.
+            Defaults to False.
+    Returns:
+        dict: dictionary with contents of group
+    """
     ans = {}
     for key, item in h5file[path].items():
         if isinstance(item, h5py._hl.dataset.Dataset):
+            ans[key] = item[()]
+            # all ones in shape
             if squeeze:
-                ans[key] = np.squeeze(item[()])
-                if ans[key].shape == ():
+                if ans[key].shape == () or all(i == 1 for i in ans[key].shape):
+                    # check for strings
+                    if isinstance(ans[key], str):
+                        ans[key] = str(ans[key])
                     # check for integers
-                    if int(ans[key]) == float(ans[key]):
+                    elif int(ans[key]) == float(ans[key]):
                         ans[key] = int(ans[key])
                     else:
                         ans[key] = float(ans[key])
-            else:
-                ans[key] = item[()]
         elif isinstance(item, h5py._hl.group.Group):
             ans[key] = recursively_load_dict_contents_from_group(
                 h5file, path + key + "/"
