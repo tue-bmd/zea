@@ -81,7 +81,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
 
         t0_delays[n] = compute_t0_delays_planewave(
             probe_geometry=probe_geometry,
-            polar_angle=polar_angles[n],
+            polar_angles=polar_angles[n],
             sound_speed=sound_speed,
         )
         # This line changes the data format to work with the old beamformer,
