@@ -127,7 +127,8 @@ def generate_usbmd_dataset(
             This is the time between the first element firing and the last element firing.
         bandwidth_percent (float): The bandwidth of the transducer as a
             percentage of the center frequency.
-        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s.
+        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s of
+            shape (n_frames, n_tx).
 
     Returns:
         (h5py.File): The example dataset.
@@ -399,7 +400,10 @@ def generate_usbmd_dataset(
             group=scan_group,
             name="time_to_next_transmit",
             data=time_to_next_transmit,
-            description=("The time between subsequent transmit events."),
+            description=(
+                "The time between subsequent transmit events of shape "
+                "(n_frames, n_tx)."
+            ),
             unit="s",
         )
 
@@ -545,6 +549,15 @@ def assert_scan_keys_present(dataset):
                 dataset["scan"][key].shape == correct_shape
             ), "The initial_times does not have the correct shape."
 
+        elif key == "time_to_next_transmit":
+            correct_shape = (
+                dataset["scan"]["n_frames"][()],
+                dataset["scan"]["n_tx"][()],
+            )
+            assert (
+                dataset["scan"][key].shape == correct_shape
+            ), "The time_to_next_transmit does not have the correct shape."
+
         elif key in (
             "sampling_frequency",
             "center_frequency",
@@ -555,7 +568,6 @@ def assert_scan_keys_present(dataset):
             "n_ch",
             "sound_speed",
             "bandwidth_percent",
-            "time_to_next_transmit",
         ):
             assert (
                 dataset["scan"][key].size == 1
@@ -678,11 +690,15 @@ def load_usbmd_file(
             if param in file_scan_parameters:
                 file_scan_parameters.pop(param)
 
+        n_tx = file_scan_parameters["n_tx"]
+
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
 
-        if transmits is not None:
-            config.scan.selected_transmits = transmits
+        if transmits is None:
+            transmits = np.arange(n_tx, dtype=np.int32)
+
+        n_tx = len(transmits)
 
         # Load the desired frames from the file
         data = hdf5_file["data"][data_type][frames]
@@ -694,13 +710,20 @@ def load_usbmd_file(
                     "dimension must be 1 (RF) or 2 (IQ), when data_type is "
                     f"{data_type}."
                 )
+        # Define the additional keyword parameters from the config object or an emtpy
+        # dict if no config object is provided.
+        if config is None:
+            config_scan_dict = {}
+        else:
+            config_scan_dict = config.scan
 
         # merge file scan parameters with config scan parameters
-        scan_params = update_dictionary(file_scan_parameters, config.scan)
+        scan_params = update_dictionary(file_scan_parameters, config_scan_dict)
 
         # Initialize the scan object
         scan = Scan(**scan_params)
 
+        # Select only the desired transmits if
         if data_type in ["raw_data", "aligned_data"]:
             data = data[:, scan.selected_transmits]
 
