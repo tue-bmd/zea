@@ -332,7 +332,7 @@ def _assert_scan_keys_present(dataset):
             correct_shape = (dataset["scan"]["n_el"][()], 3)
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The probe_geometry does not have the correct shape."
+            ), "`probe_geometry` does not have the correct shape."
 
         elif key == "t0_delays":
             correct_shape = (
@@ -341,7 +341,7 @@ def _assert_scan_keys_present(dataset):
             )
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The t0_delays does not have the correct shape."
+            ), "`t0_delays` does not have the correct shape."
 
         elif key == "tx_apodizations":
             correct_shape = (
@@ -350,31 +350,31 @@ def _assert_scan_keys_present(dataset):
             )
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The tx_apodizations does not have the correct shape."
+            ), "`tx_apodizations` does not have the correct shape."
 
         elif key == "focus_distances":
             correct_shape = (dataset["scan"]["n_tx"][()],)
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The focus_distances does not have the correct shape."
+            ), "`focus_distances` does not have the correct shape."
 
         elif key == "polar_angles":
             correct_shape = (dataset["scan"]["n_tx"][()],)
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The polar_angles does not have the correct shape."
+            ), "`polar_angles` does not have the correct shape."
 
         elif key == "azimuth_angles":
             correct_shape = (dataset["scan"]["n_tx"][()],)
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The azimuthal_angles does not have the correct shape."
+            ), "`azimuth_angles` does not have the correct shape."
 
         elif key == "initial_times":
             correct_shape = (dataset["scan"]["n_tx"][()],)
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The initial_times does not have the correct shape."
+            ), "`initial_times` does not have the correct shape."
 
         elif key == "time_to_next_transmit":
             correct_shape = (
@@ -383,7 +383,7 @@ def _assert_scan_keys_present(dataset):
             )
             assert (
                 dataset["scan"][key].shape == correct_shape
-            ), "The time_to_next_transmit does not have the correct shape."
+            ), "`time_to_next_transmit` does not have the correct shape."
 
         elif key in (
             "sampling_frequency",
