@@ -12,6 +12,7 @@ Also if that parameter is optional, add a default value.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 31/01/2023
 """
+
 import importlib
 from pathlib import Path
 from typing import Union
@@ -61,6 +62,10 @@ list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
 list_of_positive_integers = And(list, lambda l: all(_l >= 0 for _l in l))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
 
+_ALLOWED_KEYS_PROXTYPE = (None, "wavelet", "softthres", "fourier", "neural")
+_ALLOWED_DEMODULATION = ("manual", "hilbert", "gabor")
+_ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
+
 # optional sub schemas go here, to allow for nested defaults
 
 # model
@@ -72,9 +77,7 @@ model_schema = Schema(
             Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
             Optional("folds", default=1): positive_integer,
             Optional("end_with_prox", default=False): bool,
-            Optional("proxtype", default="softthres"): Or(
-                None, "wavelet", "softthres", "fourier", "neural"
-            ),
+            Optional("proxtype", default="softthres"): Or(*_ALLOWED_KEYS_PROXTYPE),
             Optional("kernel_size", default=3): positive_integer,
             Optional("aux_inputs", default=None): Or(None, list),
             Optional("patches", default=1): positive_integer,
@@ -96,7 +99,7 @@ preprocess_schema = Schema(
                 Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
             },
         ),
-        Optional("demodulation", default="manual"): Or("manual", "hilbert", "gabor"),
+        Optional("demodulation", default="manual"): Or(*_ALLOWED_DEMODULATION),
     }
 )
 
@@ -151,9 +154,11 @@ scan_schema = Schema(
         ),
         Optional("Nx", default=None): Or(None, positive_integer),
         Optional("Nz", default=None): Or(None, positive_integer),
+        Optional("n_ch", default=None): Or(None, int),
         Optional("n_ax", default=None): Or(None, int),
         Optional("center_frequency", default=None): Or(None, any_number),
         Optional("sampling_frequency", default=None): Or(None, any_number),
+        Optional("demodulation_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
     }
 )
@@ -173,14 +178,18 @@ config_schema = Schema(
             Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
             Optional("input_range", default=None): Or(None, list_of_size_two),
             Optional("apodization", default=None): Or(None, str),
-            Optional("modtype", default=None): Or(*_MOD_TYPES),
-            Optional("from_modtype", default=None): Or(*_MOD_TYPES),
+            Optional("modtype", default=None): Or(
+                *_MOD_TYPES
+            ),  # ONLY FOR LEGACY DATASET
+            Optional("from_modtype", default=None): Or(
+                *_MOD_TYPES
+            ),  # ONLY FOR LEGACY DATASET
             Optional("user", default=None): Or(None, dict),
             Optional("dataset_folder", default=None): Or(None, str),
         },
         "plot": {
             Optional("save", default=False): bool,
-            Optional("plot_lib", default="opencv"): Or("opencv", "matplotlib"),
+            Optional("plot_lib", default="opencv"): Or(*_ALLOWED_PLOT_LIBS),
             Optional("fps", default=20): int,
             Optional("tag", default=None): Or(None, str),
             Optional("headless", default=False): bool,

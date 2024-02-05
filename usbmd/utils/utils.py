@@ -5,10 +5,11 @@
 """
 import datetime
 import functools
+import hashlib
+import platform
 import warnings
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
@@ -67,11 +68,6 @@ def find_key(dictionary, contains, case_sensitive=False):
         raise KeyError(f"Key containing '{contains}' not found in dictionary.")
 
     return key[0]
-
-
-def plt_window_has_been_closed(fig):
-    """Checks whether matplotlib plot window is closed"""
-    return not plt.fignum_exists(fig.number)
 
 
 def print_clear_line():
@@ -278,3 +274,27 @@ def deprecated(replacement=None):
             return item
 
     return decorator
+
+
+def calculate_file_hash(file_path, omit_line_str=None):
+    """Calculates the hash of a file.
+    Args:
+        file_path (str): Path to file.
+        omit_line_str (str): If this string is found in a line, the line will
+            be omitted when calculating the hash. This is useful for example
+            when the file contains the hash itself.
+    Returns:
+        str: The hash of the file.
+    """
+    hash_object = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for line in f:
+            if omit_line_str is not None and omit_line_str in str(line):
+                continue
+            hash_object.update(line)
+    return hash_object.hexdigest()
+
+
+def check_architecture():
+    """Checks the architecture of the system."""
+    return platform.uname()[-1]

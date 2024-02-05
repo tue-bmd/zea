@@ -16,7 +16,7 @@ from usbmd.common import set_data_paths
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.git_info import get_git_summary
-from usbmd.utils.gpu_utils import init_device
+from usbmd.utils.device import init_device
 from usbmd.utils.io_lib import filename_from_window_dialog
 
 
@@ -82,7 +82,7 @@ def setup_config(config_path: str = None):
 
     ## git
     cwd = Path.cwd().stem
-    if cwd in ("Ultrasound-BMd", "usbmd"):
+    if cwd in ("Ultrasound-BMd", "ultrasound-toolbox", "usbmd"):
         config["git"] = get_git_summary()
 
     return config

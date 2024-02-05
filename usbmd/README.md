@@ -1,7 +1,7 @@
 <!-- This is the readme for the pdoc documentation (used as header in index.html) -->
-# Ultrasound-BMd
+# Ultrasound toolbox
 
-Ultrasound-BMd (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
+The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
 The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox. This repository is being maintained by researchers from the [BM/d lab](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab/) at Eindhoven University of Technology. Currently for [internal](LICENSE) use only.
 
 In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
@@ -19,7 +19,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 ### Installation
 
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`Ultrasound-BMd`) where the [`setup.py`](../../setup.py) file is located and run the following command from terminal:
+Make sure you are in the root folder (`ultrasound-toolbox`) where the [`setup.py`](../../setup.py) file is located and run the following command from terminal:
 
 ```shell
 python -m pip install -e .
@@ -59,7 +59,7 @@ Make sure that before using any GPU enabled functionality (importing torch / ten
 
 ```python
 # import the init_device function
-from usbmd.utils.gpu_utils import init_device
+from usbmd.utils.device import init_device
 
 # initialize device manually
 device = init_device("torch", "auto:1", hide_devices=None)
@@ -157,7 +157,7 @@ conda activate usbmd
 python -m pip install --upgrade pip
 
 # Install usbmd
-cd "<repo_root>" # e.g. cd "C:\Users\Projects\Ultrasound-BMd"
+cd "<repo_root>" # e.g. cd "C:\Users\Projects\ultrasound-toolbox"
 python -m pip install -e .
 # which runs the following under the hood as well:
 # pip install -r requirements.txt
