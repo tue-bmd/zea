@@ -37,9 +37,12 @@ def convert_picmus(source_path, output_path, overwrite=False):
     # Get the group containing the dataset
     file = file["US"]["US_DATASET0000"]
 
+    if "data" not in file:
+        return
+
     # Extract I- and Q-data (shape (tx, el, ax))
-    i_data = np.array(file["data"]["real"], dtype="float32")
-    q_data = np.array(file["data"]["imag"], dtype="float32")
+    i_data = file["data"]["real"][:]
+    q_data = file["data"]["imag"][:]
 
     if np.abs(np.sum(q_data)) < 0.1:
         # Use only the I-data, add dummy dimension (shape (tx, el, ax, ch=1))
@@ -55,16 +58,16 @@ def convert_picmus(source_path, output_path, overwrite=False):
 
     _, n_tx, _, n_el, _ = raw_data.shape
 
-    center_frequency = int(file["modulation_frequency"][()])
+    center_frequency = int(file["modulation_frequency"][:][0])
     # Fix a mistake in one of the PICMUS files
     if center_frequency == 0:
         center_frequency = 5.208e6
-    sampling_frequency = int(file["sampling_frequency"][()])
-    probe_geometry = np.transpose(file["probe_geometry"][()], (1, 0))
+    sampling_frequency = int(file["sampling_frequency"][:][0])
+    probe_geometry = np.transpose(file["probe_geometry"][:], (1, 0))
 
-    sound_speed = float(file["sound_speed"][()])
+    sound_speed = float(file["sound_speed"][:][0])
     focus_distances = np.zeros((n_tx,), dtype=np.float32)
-    polar_angles = file["angles"][()]
+    polar_angles = file["angles"][:]
     azimuth_angles = np.zeros((n_tx,), dtype=np.float32)
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
     tx_apodizations = np.ones((n_tx, n_el), dtype=np.float32)
@@ -78,7 +81,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
 
         t0_delays[n] = compute_t0_delays_planewave(
             probe_geometry=probe_geometry,
-            polar_angle=polar_angles[n],
+            polar_angles=polar_angles[n],
             sound_speed=sound_speed,
         )
         # This line changes the data format to work with the old beamformer,
@@ -134,11 +137,15 @@ if __name__ == "__main__":
         output_file = picmus_output_folder / source_file.relative_to(
             picmus_source_folder
         )
-        # make sure folder exists
-        output_file.parent.mkdir(parents=True, exist_ok=True)
+        # create a subfolder for each file. This is necessary because the
+        # usbmd format expects all files in a folder to have the same scan parameters
+        output_file = output_file.parent / output_file.stem / f"{output_file.stem}.hdf5"
+
         try:
             convert_picmus(source_file, output_file, overwrite=False)
         except Exception as e:
             print(f"Error converting {source_file}")
             print(e)
             continue
+
+    print("Finished converting PICMUS dataset.")

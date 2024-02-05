@@ -15,9 +15,10 @@ TODO:
 - **Author(s)**     : Tristan Stevens
 - **Date**          : April 19th, 2023
 """
+import asyncio
 import warnings
-from threading import Thread
 from tkinter import ttk
+from typing import Dict, Optional, Tuple
 
 import usbmd
 from usbmd.common import set_data_paths
@@ -30,10 +31,33 @@ from usbmd.utils.gui import App
 class USBMDApp(App):
     """App class for building a GUI from a dictionary"""
 
-    def __init__(self, ui=None, resolution=None, title=None, verbose=False):
+    def __init__(
+        self,
+        loop: Optional[object] = None,
+        ui: Optional[object] = None,
+        resolution: Optional[Tuple[int, int]] = None,
+        title: Optional[str] = None,
+        verbose: bool = False,
+        config: Optional[Dict] = None,
+    ):
+        """
+        Initialize the USBMD GUI.
+
+        Args:
+            loop (object, optional): The event loop to use. Defaults to None.
+            ui (object, optional): The user interface object. Defaults to None.
+            resolution (tuple, optional): The resolution of the GUI window. Defaults to None.
+            title (str, optional): The title of the GUI window. Defaults to None.
+            verbose (bool, optional): Whether to enable verbose mode. Defaults to False.
+            config (dict, optional): The configuration settings. Defaults to None.
+        """
         super().__init__(
             config_schema, resolution, title, button=False, verbose=verbose
         )
+
+        if loop:
+            self.loop = loop
+
         self.ui = ui
         if self.ui:
             self.ui.gui = self
@@ -75,6 +99,18 @@ class USBMDApp(App):
         self.pause_var = False
         self.display_path_label = False
 
+        # run loop flag
+        self.running = True
+
+        if config:
+            self.build(config)
+
+    async def show(self):
+        """Shows and updates the window (asyncronously)"""
+        while self.running:
+            self.update()
+            await asyncio.sleep(0.1)
+
     def build(self, data):
         """Build the application"""
         self.version_label = ttk.Label(
@@ -107,13 +143,17 @@ class USBMDApp(App):
         self.set_button.pack(side="top", padx=5, pady=5)
 
         # create the run button and pack it
-        self.run_button = ttk.Button(button_frame, text="Run", command=self.run)
+        self.run_button = ttk.Button(
+            button_frame, text="Run", command=self._asyncio_task_wrapper(self.run)
+        )
         self.run_button.configure(style="Run.TButton")
         self.run_button.pack(side="top", padx=5, pady=5)
 
         # create the freeze button and pack it
         self.freeze_button = ttk.Button(
-            button_frame, text="Freeze", command=self.freeze
+            button_frame,
+            text="Freeze",
+            command=self._asyncio_task_wrapper(self.freeze),
         )
         self.freeze_button.configure(style="Freeze.TButton")
         self.freeze_button.pack(side="top", padx=5, pady=5)
@@ -128,32 +168,36 @@ class USBMDApp(App):
 
         return button_frame
 
+    def _asyncio_task_wrapper(self, coro):
+        """Wrap a coroutine in an asyncio task"""
+        return lambda: self.loop.create_task(coro())
+
     def set(self):
+        """Set config data and initialize the UI
+        TODO: probably do not want to re-init the entire UI every time
+        """
         super().set()
         # pylint: disable=bad-option-value, unnecessary-dunder-call
         self.ui.__init__(self.data)
+        self.ui.gui = self
 
-    def run(self):
+    async def run(self):
         """TBA, run function"""
         print("Congratz, you clicked run.")
-        # https://www.geeksforgeeks.org/how-to-use-thread-in-tkinter-python/
         if self.ui:
-            # thread is necessary to not interfere with GUI mainloop
             try:
+                self.set()
                 self.style.configure("Run.TButton", background=self.button_color_active)
-                thread = Thread(target=lambda: self.ui.run(plot=False))
-                thread.start()
+                self.run_button.configure(state="disabled")
+
+                self.ui.run(plot=True, block=False)
+                self.run_button.configure(state="normal")
+                self.style.configure("Run.TButton", background=self.button_color)
+
             except Exception as e:
                 warnings.warn(f"Run failed: {e}")
 
-            # can only plot after thread is finished and image is processed
-            while thread.is_alive():
-                pass
-
-            self.style.configure("Run.TButton", background=self.button_color)
-            self.ui.plot(self.ui.image, block=False, save=True, plot_lib="matplotlib")
-
-    def freeze(self):
+    async def freeze(self):
         """Freeze function"""
         print("Congratz, you are now frozen.")
         if self.pause_var is False:
@@ -164,11 +208,12 @@ class USBMDApp(App):
             self.pause_var = False
             self.style.configure("Freeze.TButton", background="#d9d9d9")
             print("resuming")
+        await asyncio.sleep(0.1)
 
-    def check_freeze(self):
+    async def check_freeze(self):
         """Wait until pause var is set to 0"""
         while self.pause_var is True:
-            pass
+            await asyncio.sleep(0.1)
 
     def save_to_file(self, name=None):
         """Save config to file"""
@@ -181,17 +226,31 @@ class USBMDApp(App):
 
     def load(self, data=None, entries=None):
         """Load in a new config file"""
+        warnings.warn(
+            "Loading new config file, functionality not yet robustly implemented. "
+            "Excpect some bugs..."
+        )
         self.style.configure("Load.TButton", background=self.button_color_active)
-        try:
-            new_config = setup_config()
-            super().load(new_config, self.entries)
-        except:
-            print("No new config loaded.")
+        self.load_button.configure(state="disabled")
+        new_config = setup_config()
+        super().load(new_config, self.entries)
         self.style.configure("Load.TButton", background=self.button_color)
+        self.load_button.configure(state="normal")
+
+    def on_closing(self):
+        """Close the app"""
+        # destroy the app
+        closed = super().on_closing()
+        if closed is False:
+            return
+        # stop show update loop
+        self.running = False
+        # stop the asyncio loop
+        self.loop.stop()
 
 
 if __name__ == "__main__":
-    file = "./configs/config_picmus_rf.yaml"
+    file = "./configs/config_camus.yaml"
 
     config = load_config_from_yaml(file)
     check_config(check_config(config))

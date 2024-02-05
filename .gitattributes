@@ -20,3 +20,6 @@ docs/usbmd/**/*.html linguist-generated=true
 
 # Jupyter notebook
 *.ipynb  text
+*.ipynb filter=nbstripout
+*.zpln filter=nbstripout
+*.ipynb diff=ipynb
