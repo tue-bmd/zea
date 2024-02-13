@@ -72,7 +72,7 @@ _ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
 model_schema = Schema(
     {
         Optional("batch_size", default=1): positive_integer,
-        Optional("patch_shape", default=None): list_of_size_two,
+        Optional("patch_shape", default=None): Or(None, list_of_size_two),
         Optional("beamformer", default={}): {
             Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
             Optional("folds", default=1): positive_integer,
