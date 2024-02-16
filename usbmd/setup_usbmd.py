@@ -25,6 +25,7 @@ def setup(
     config_path: str = None,
     user_config: Union[str, dict] = None,
     verbose: bool = True,
+    disable_config_check: bool = False,
 ):
     """General setup function for usbmd. Loads config, sets data paths and
     initializes gpu if available. Will return config object.
@@ -35,12 +36,19 @@ def setup(
         user_config (str or dict, optional): path that points to yaml file with user info.
             Alternively dictionary with user info. Defaults to None.
         verbose (bool, optional): print config file path and git summary. Defaults to True.
+        disable_config_check (bool, optional): whether to check for usbmd config validity.
+            Defaults to False. Can be set to True if you are using some other config that
+            does not have to adhere to usbmd config standards.
     Returns:
         config (dict): config object / dict.
     """
 
     # Load config
-    config = setup_config(config_path, verbose=verbose)
+    config = setup_config(
+        config_path,
+        verbose=verbose,
+        disable_config_check=disable_config_check,
+    )
 
     # Set data paths
     config.data.user = set_data_paths(user_config, local=config.data.local)
@@ -51,7 +59,9 @@ def setup(
     return config
 
 
-def setup_config(config_path: str = None, verbose: bool = True):
+def setup_config(
+    config_path: str = None, verbose: bool = True, disable_config_check: bool = False
+):
     """Setup function for config. Retrieves config file and checks for validity.
 
     Args:
@@ -59,6 +69,9 @@ def setup_config(config_path: str = None, verbose: bool = True):
             if None, argparser is checked. If that is None as well, the window
             ui will pop up for choosing the config file manually.
         verbose (bool, optional): print config file path and git summary. Defaults to True.
+        disable_config_check (bool, optional): whether to check for usbmd config validity.
+            Defaults to False. Can be set to True if you are using some other config that
+            does not have to adhere to usbmd config standards.
     Returns:
         config (dict): config object / dict.
 
@@ -79,10 +92,13 @@ def setup_config(config_path: str = None, verbose: bool = True):
             ) from e
 
     config = load_config_from_yaml(Path(config_path))
+
     if verbose:
         print(f"Using config file: {config_path}")
-    config = check_config(config)
 
     config["git"] = get_git_summary(verbose=verbose)
+
+    if not disable_config_check:
+        config = check_config(config)
 
     return config

@@ -160,7 +160,7 @@ def select_gpus(
             # Automatically select GPUs based on available memory
             num_gpus = int(device.split(":")[1])  # number of GPUs to use
 
-            print(f"Selecting {num_gpus} GPUs based on available memory.")
+            print(f"Selecting {abs(num_gpus)} GPUs based on available memory.")
 
             if not isinstance(num_gpus, int):
                 raise ValueError(
