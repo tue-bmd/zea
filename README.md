@@ -138,3 +138,4 @@ image = process.run(data_frame, dtype="raw_data", to_dtype="image")
 
 plt.figure()
 plt.imshow(image, cmap="gray")
+```
