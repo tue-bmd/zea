@@ -75,6 +75,8 @@ More complete examples can be found in the [examples](examples) folder.
 
 The easiest way to get started is to use the DataloaderUI class
 ```python
+import matplotlib.pyplot as plt
+
 from usbmd.setup_usbmd import setup
 from usbmd.ui import DataLoaderUI
 
@@ -100,6 +102,12 @@ plt.show()
 The DataloaderUI class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
 
 ```python
+import matplotlib.pyplot as plt
+
+from usbmd.data_format.usbmd_data_format import load_usbmd_file
+from usbmd.processing import Process
+from usbmd.setup_usbmd import setup_config
+
 # choose your config file
 # all necessary settings should be in the config file
 config_path = "configs/config_picmus_rf.yaml"
@@ -138,3 +146,4 @@ image = process.run(data_frame, dtype="raw_data", to_dtype="image")
 
 plt.figure()
 plt.imshow(image, cmap="gray")
+```
