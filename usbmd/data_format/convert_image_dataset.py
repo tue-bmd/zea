@@ -116,14 +116,25 @@ def convert_image_dataset(
             group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
             sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
         )
+
+        convert_image_dataset(
+            "/mnt/z/Ultrasound-BMd/data/oisin/beep",
+            "/mnt/z/Ultrasound-BMd/data/oisin/camus_test_h5",
+            group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
+            sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
+        )
         ```
     """
+    assert os.path.exists(
+        existing_dataset_root
+    ), f"The directory '{existing_dataset_root}' does not exist."
 
-    for curent_dir, _, files in os.walk(existing_dataset_root):
+    for current_dir, _, files in os.walk(existing_dataset_root):
+        print(f"Mapping {current_dir}")
         img_dir_to_h5_dir(
             existing_dataset_root,
             new_dataset_root,
-            curent_dir,
+            current_dir,
             files,
             dataset_name,
             group_pattern=group_pattern,
