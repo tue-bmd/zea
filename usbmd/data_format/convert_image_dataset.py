@@ -116,13 +116,6 @@ def convert_image_dataset(
             group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
             sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
         )
-
-        convert_image_dataset(
-            "/mnt/z/Ultrasound-BMd/data/oisin/beep",
-            "/mnt/z/Ultrasound-BMd/data/oisin/camus_test_h5",
-            group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
-            sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
-        )
         ```
     """
     assert os.path.exists(
