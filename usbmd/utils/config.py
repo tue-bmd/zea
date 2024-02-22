@@ -51,6 +51,8 @@ class Config(dict):
         for key, value in self.items():
             if isinstance(value, Config):
                 dictionary[key] = value.serialize()
+            elif isinstance(value, Path):
+                dictionary[key] = str(value)
             else:
                 dictionary[key] = value
         return dictionary
@@ -73,7 +75,7 @@ class Config(dict):
 def load_config_from_yaml(path):
     """Load config object from yaml file"""
     with open(Path(path), "r", encoding="utf-8") as file:
-        dictionary = yaml.load(file, Loader=yaml.FullLoader)
+        dictionary = yaml.load(file, Loader=yaml.UnsafeLoader)
     if dictionary:
         return Config(dictionary)
     else:
