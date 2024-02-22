@@ -73,7 +73,14 @@ class Config(dict):
 
 
 def load_config_from_yaml(path, loader=yaml.FullLoader):
-    """Load config object from yaml file"""
+    """Load config object from yaml file
+    Args:
+        path (str): path to yaml file.
+        loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
+            for custom objects, you might want to use yaml.UnsafeLoader.
+    Returns:
+        Config: config object.
+    """
     with open(Path(path), "r", encoding="utf-8") as file:
         dictionary = yaml.load(file, Loader=loader)
     if dictionary:
