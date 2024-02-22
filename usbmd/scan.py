@@ -201,9 +201,6 @@ class Scan:
         #: The number of pixels in the axial direction in the beamforming grid
         self._Nz = int(Nz) if Nz is not None else None
 
-        #: The beamforming grid of shape (Nx, Nz, 3)
-        self._grid = None
-
         # Compute the zlims from the other values if not supplied
         if zlims:
             self.zlims = zlims
@@ -225,6 +222,9 @@ class Scan:
             self.xlims = self.probe_geometry[0, 0], self.probe_geometry[-1, 0]
 
         self.z_axis = np.linspace(*self.zlims, self.n_ax)
+
+        #: The beamforming grid of shape (Nx, Nz, 3)
+        self._grid = self.grid
 
         if initial_times is None:
             warnings.warn("No initial times provided. Assuming all zeros.")
@@ -495,6 +495,7 @@ class Scan:
         """The beamforming grid of shape (Nx, Nz, 3)."""
         if self._grid is None:
             self._grid = get_grid(self)
+            self._Nz, self._Nx, _ = self._grid.shape
         return self._grid
 
 
@@ -525,8 +526,8 @@ class PlaneWaveScan(Scan):
         demodulation_frequency=0.0,
         sound_speed=1540,
         n_ax=3328,
-        Nx=128,
-        Nz=128,
+        Nx=None,
+        Nz=None,
         pixels_per_wvln=3,
         polar_angles=None,
         azimuth_angles=None,
