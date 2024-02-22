@@ -72,10 +72,10 @@ class Config(dict):
             )
 
 
-def load_config_from_yaml(path):
+def load_config_from_yaml(path, loader=yaml.FullLoader):
     """Load config object from yaml file"""
     with open(Path(path), "r", encoding="utf-8") as file:
-        dictionary = yaml.load(file, Loader=yaml.UnsafeLoader)
+        dictionary = yaml.load(file, Loader=loader)
     if dictionary:
         return Config(dictionary)
     else:
