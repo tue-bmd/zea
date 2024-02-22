@@ -15,6 +15,7 @@ import numpy as np
 from tqdm import tqdm
 
 from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
+from usbmd.display import transform_sc_image_to_polar
 from usbmd.utils.utils import translate
 
 
@@ -71,11 +72,19 @@ def convert_camus(source_path, output_path, overwrite=False):
     # Open the file
     image_seq, _ = sitk_load(source_path)
 
+    # Convert to polar coordinates
+    image_seq_polar = []
+    for image in image_seq:
+        image_seq_polar.append(transform_sc_image_to_polar(image))
+    image_seq_polar = np.stack(image_seq_polar, axis=0)
+
     # Change range to [-60, 0] dB
     image_seq = translate(image_seq, (0, 255), (-60, 0))
+    image_seq_polar = translate(image_seq_polar, (0, 255), (-60, 0))
 
     generate_usbmd_dataset(
         path=output_path,
+        image=image_seq_polar,
         image_sc=image_seq,
         probe_name="generic",
         description="camus dataset converted to USBMD format",
