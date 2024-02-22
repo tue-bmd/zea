@@ -10,7 +10,7 @@ import numpy as np
 
 from usbmd.probes import Probe, get_probe
 from usbmd.scan import Scan, cast_scan_parameters
-from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES, _REQUIRED_SCAN_KEYS
+from usbmd.utils.checks import _DATA_TYPES, validate_dataset
 from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
 from usbmd.utils.utils import first_not_none_item, update_dictionary
 
@@ -127,7 +127,8 @@ def generate_usbmd_dataset(
             This is the time between the first element firing and the last element firing.
         bandwidth_percent (float): The bandwidth of the transducer as a
             percentage of the center frequency.
-        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s.
+        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s
+            of shape (n_frames, n_tx).
 
     Returns:
         (h5py.File): The example dataset.
@@ -159,9 +160,10 @@ def generate_usbmd_dataset(
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
 
-        assert (
-            isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
-        ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
+        if raw_data is not None:
+            assert (
+                isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
+            ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
 
         def convert_datatype(x, astype=np.float32):
             return x.astype(astype) if x is not None else None
@@ -399,194 +401,14 @@ def generate_usbmd_dataset(
             group=scan_group,
             name="time_to_next_transmit",
             data=time_to_next_transmit,
-            description=("The time between subsequent transmit events."),
+            description=(
+                "The time between subsequent transmit events of shape "
+                "(n_frames, n_tx)."
+            ),
             unit="s",
         )
 
     validate_dataset(path)
-
-
-def validate_dataset(path):
-    """Reads the hdf5 dataset at the given path and validates its structure.
-
-    Args:
-        path (str, pathlike): The path to the hdf5 dataset.
-
-    """
-    with h5py.File(path, "r") as dataset:
-
-        def check_key(dataset, key):
-            assert key in dataset.keys(), f"The dataset does not contain the key {key}."
-
-        # Validate the root group
-        check_key(dataset, "data")
-
-        # Check if there is only image data
-        not_only_image_data = (
-            len([i for i in _NON_IMAGE_DATA_TYPES if i in dataset["data"].keys()]) > 0
-        )
-
-        # Only check scan group if there is non-image data
-        if not_only_image_data:
-            check_key(dataset, "scan")
-
-            for key in _REQUIRED_SCAN_KEYS:
-                check_key(dataset["scan"], key)
-
-        # validate the data group
-        for key in dataset["data"].keys():
-            assert key in _DATA_TYPES, "The data group contains an unexpected key."
-
-            # Validate data shape
-            data_shape = dataset["data"][key].shape
-            if key == "raw_data":
-                assert (
-                    len(data_shape) == 5
-                ), "The raw_data group does not have a shape of length 5."
-                assert (
-                    data_shape[1] == dataset["scan"]["n_tx"][()]
-                ), "n_tx does not match the second dimension of raw_data."
-                assert (
-                    data_shape[2] == dataset["scan"]["n_ax"][()]
-                ), "n_ax does not match the third dimension of raw_data."
-                assert (
-                    data_shape[3] == dataset["scan"]["n_el"][()]
-                ), "n_el does not match the fourth dimension of raw_data."
-                assert data_shape[4] in (
-                    1,
-                    2,
-                ), (
-                    "The fifth dimension of raw_data, which is the complex channel "
-                    "dimension is not 1 or 2."
-                )
-
-            elif key == "aligned_data":
-                logging.warning("No validation has been defined for aligned data.")
-            elif key == "beamformed_data":
-                logging.warning("No validation has been defined for beamformed data.")
-            elif key == "envelope_data":
-                logging.warning("No validation has been defined for envelope data.")
-            elif key == "image":
-                assert (
-                    len(data_shape) == 3
-                ), "The image group does not have a shape of length 3."
-            elif key == "image_sc":
-                assert (
-                    len(data_shape) == 3
-                ), "The image_sc group does not have a shape of length 3."
-
-        if not_only_image_data:
-            assert_scan_keys_present(dataset)
-
-        assert_unit_and_description_present(dataset)
-
-
-def assert_scan_keys_present(dataset):
-    """Ensure that all required keys are present.
-
-    Args:
-        dataset (h5py.File): The dataset instance to check.
-
-    Raises:
-        AssertionError: If a required key is missing or does not have the right shape.
-    """
-    for required_key in _REQUIRED_SCAN_KEYS:
-        assert (
-            required_key in dataset["scan"].keys()
-        ), f"The scan group does not contain the required key {required_key}."
-
-    # Ensure that all keys have the correct shape
-    for key in dataset["scan"].keys():
-        if key == "probe_geometry":
-            correct_shape = (dataset["scan"]["n_el"][()], 3)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The probe_geometry does not have the correct shape."
-
-        elif key == "t0_delays":
-            correct_shape = (
-                dataset["scan"]["n_tx"][()],
-                dataset["scan"]["n_el"][()],
-            )
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The t0_delays does not have the correct shape."
-
-        elif key == "tx_apodizations":
-            correct_shape = (
-                dataset["scan"]["n_tx"][()],
-                dataset["scan"]["n_el"][()],
-            )
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The tx_apodizations does not have the correct shape."
-
-        elif key == "focus_distances":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The focus_distances does not have the correct shape."
-
-        elif key == "polar_angles":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The polar_angles does not have the correct shape."
-
-        elif key == "azimuth_angles":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The azimuthal_angles does not have the correct shape."
-
-        elif key == "initial_times":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "The initial_times does not have the correct shape."
-
-        elif key in (
-            "sampling_frequency",
-            "center_frequency",
-            "n_frames",
-            "n_tx",
-            "n_el",
-            "n_ax",
-            "n_ch",
-            "sound_speed",
-            "bandwidth_percent",
-            "time_to_next_transmit",
-        ):
-            assert (
-                dataset["scan"][key].size == 1
-            ), f"{key} does not have the correct shape."
-
-        else:
-            logging.warning("No validation has been defined for %s.", key)
-
-
-def assert_unit_and_description_present(hdf5_file, _prefix=""):
-    """Checks that all datasets have a unit and description attribute.
-
-    Args:
-        hdf5_file (h5py.File): The hdf5 file to check.
-
-    Raises:
-        AssertionError: If a dataset does not have a unit or description
-            attribute.
-    """
-    for key in hdf5_file.keys():
-        if isinstance(hdf5_file[key], h5py.Group):
-            assert_unit_and_description_present(
-                hdf5_file[key], _prefix=_prefix + key + "/"
-            )
-        else:
-            assert (
-                "unit" in hdf5_file[key].attrs.keys()
-            ), f"The dataset {_prefix}/{key} does not have a unit attribute."
-            assert (
-                "description" in hdf5_file[key].attrs.keys()
-            ), f"The dataset {_prefix}/{key} does not have a description attribute."
 
 
 def load_usbmd_file(
@@ -678,11 +500,15 @@ def load_usbmd_file(
             if param in file_scan_parameters:
                 file_scan_parameters.pop(param)
 
+        n_tx = file_scan_parameters["n_tx"]
+
         if frames is None:
             frames = np.arange(n_frames, dtype=np.int32)
 
-        if transmits is not None:
-            config.scan.selected_transmits = transmits
+        if transmits is None:
+            transmits = np.arange(n_tx, dtype=np.int32)
+
+        n_tx = len(transmits)
 
         # Load the desired frames from the file
         data = hdf5_file["data"][data_type][frames]
@@ -694,14 +520,17 @@ def load_usbmd_file(
                     "dimension must be 1 (RF) or 2 (IQ), when data_type is "
                     f"{data_type}."
                 )
+        # Define the additional keyword parameters from the config object or an emtpy
+        # dict if no config object is provided.
+        if config is None:
+            config_scan_dict = {}
+        else:
+            config_scan_dict = config.scan
 
         # merge file scan parameters with config scan parameters
-        scan_params = update_dictionary(file_scan_parameters, config.scan)
+        scan_params = update_dictionary(file_scan_parameters, config_scan_dict)
 
         # Initialize the scan object
         scan = Scan(**scan_params)
-
-        if data_type in ["raw_data", "aligned_data"]:
-            data = data[:, scan.selected_transmits]
 
         return data, scan, probe

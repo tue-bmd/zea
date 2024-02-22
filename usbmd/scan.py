@@ -64,6 +64,7 @@ class Scan:
     def __init__(
         self,
         n_tx: int,
+        n_ax: int,
         n_el: int,
         center_frequency: float,
         sampling_frequency: float,
@@ -74,7 +75,6 @@ class Scan:
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
         n_ch: int = None,
-        n_ax: int = None,
         Nx: int = None,
         Nz: int = None,
         pixels_per_wvln: int = 3,
@@ -98,6 +98,8 @@ class Scan:
 
         Args:
             n_tx (int): The number of transmits to produce a single frame.
+            n_ax (int, optional): The number of samples per in a receive
+                recording per channel. Defaults to None.
             n_el (int, optional): The number of elements in the array.
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
@@ -117,8 +119,6 @@ class Scan:
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
             n_ch (int): The number of channels. This will determine the modulation type.
                 Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
-            n_ax (int, optional): The number of samples per in a receive
-                recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
@@ -160,6 +160,8 @@ class Scan:
 
         # Attributes concerning channel data : The number of transmissions in a frame
         self._n_tx = int(n_tx)
+        #: The number of samples per channel per acquisition
+        self._n_ax = n_ax
         #: The number of elements in the array
         self._n_el = int(n_el)
         #: The modulation carrier frequency [Hz]
@@ -172,8 +174,6 @@ class Scan:
         self.sound_speed = float(sound_speed)
         #: The number of rf/iq channels (1 for rf, 2 for iq)
         self._n_ch = n_ch
-        #: The number of samples per channel per acquisition
-        self._n_ax = n_ax
         #: The demodulation frequency [Hz]
         self._fdemod = demodulation_frequency
         #: The wavelength of the modulation carrier [m]
@@ -350,14 +350,14 @@ class Scan:
         return len(self.selected_transmits)
 
     @property
-    def n_el(self):
-        """The number of elements in the array."""
-        return self._n_el
-
-    @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
         return int(np.ceil(self._n_ax / self.downsample))
+
+    @property
+    def n_el(self):
+        """The number of elements in the array."""
+        return self._n_el
 
     @property
     def n_ch(self):
