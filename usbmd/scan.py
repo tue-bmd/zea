@@ -4,8 +4,10 @@ beamforming grid.
 - **Author(s)**     : Vincent van de Schaft
 - **Date**          : Wed Feb 15 2024
 """
+
 import warnings
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -700,20 +702,19 @@ def compute_t0_delays_planewave(
     )
 
     # Compute the projection of the element positions onto the wave vectors
-    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1)
+    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1).T
 
     # Convert from distance to time to compute the transmit delays.
     t0_delays_not_zero_aligned = projection / sound_speed
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.
-    t_first_fire = np.min(projection, axis=-1) / sound_speed
+    t_first_fire = np.min(t0_delays_not_zero_aligned, axis=1)
 
     # The transmit delays are the projection minus the offset. This ensures
     # that the first element fires at t=0.
     t0_delays = t0_delays_not_zero_aligned - t_first_fire[:, None]
-
-    return t0_delays.T
+    return t0_delays
 
 
 def compute_t0_delays_focused(
@@ -779,3 +780,16 @@ def compute_t0_delays_focused(
     t0_delays = travel_times - t_first_fire[:, None]
 
     return t0_delays.T
+
+
+def plot_t0_delays(t0_delays):
+    """Plot the t0_delays for each transducer element
+    Elements are on the x-axis, and the t0_delays are on the y-axis.
+    We plot multiple lines for each angle/transmit in the scan object."""
+    n_tx = t0_delays.shape[0]
+    _, ax = plt.subplots()
+    for tx in range(n_tx):
+        ax.plot(t0_delays[tx], label=f"Transmit {tx}")
+    ax.set_xlabel("Element number")
+    ax.set_ylabel("t0 delay [s]")
+    plt.show()
