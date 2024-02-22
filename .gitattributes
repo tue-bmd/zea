@@ -17,9 +17,3 @@ docs/usbmd/**/*.html linguist-generated=true
 *.pyc    binary
 *.pyd    binary
 *.pyo    binary
-
-# Jupyter notebook
-*.ipynb  text
-*.ipynb filter=nbstripout
-*.zpln filter=nbstripout
-*.ipynb diff=ipynb
