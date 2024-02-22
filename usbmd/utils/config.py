@@ -62,7 +62,12 @@ class Config(dict):
     def save_to_yaml(self, path):
         """Save config contents to yaml"""
         with open(Path(path), "w", encoding="utf-8") as save_file:
-            yaml.dump(self.serialize(), save_file, default_flow_style=False)
+            yaml.dump(
+                self.serialize(),
+                save_file,
+                default_flow_style=False,
+                sort_keys=False,
+            )
 
 
 def load_config_from_yaml(path):
