@@ -160,11 +160,6 @@ def generate_usbmd_dataset(
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
 
-        if raw_data is not None:
-            assert (
-                isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
-            ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
-
         def convert_datatype(x, astype=np.float32):
             return x.astype(astype) if x is not None else None
 
@@ -172,11 +167,18 @@ def generate_usbmd_dataset(
             data = first_not_none_item(arr)
             return data.shape[axis] if data is not None else None
 
+        def validate_input_data(name, data):
+            if name == "raw_data":
+                assert (
+                    isinstance(data, np.ndarray) and data.ndim == 5
+                ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
+
         def add_dataset(group, name, data, description, unit):
             """Adds a dataset to the given group with a description and unit.
             If data is None, the dataset is not added."""
             if data is None:
                 return
+            validate_input_data(name, data)
             dataset = group.create_dataset(name, data=data)
             dataset.attrs["description"] = description
             dataset.attrs["unit"] = unit
