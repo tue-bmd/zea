@@ -160,9 +160,10 @@ def generate_usbmd_dataset(
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
 
-        assert (
-            isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
-        ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
+        if raw_data is not None:
+            assert (
+                isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
+            ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
 
         def convert_datatype(x, astype=np.float32):
             return x.astype(astype) if x is not None else None
