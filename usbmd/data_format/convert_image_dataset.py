@@ -5,29 +5,13 @@ or sequences of images to USBMD format.
 
 import os
 import re
+from pathlib import Path
 from itertools import groupby
 
-from PIL import Image
 import numpy as np
 
 from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
-
-IMG_EXTENSIONS = [".png", ".jpg", ".jpeg"]
-
-
-def img_to_np(path):
-    """
-    Reads an image at {path} in grayscale as a 1d np array and adds an n_frames dimension.
-
-    Params:
-        path (str): the path for the image you would like to read.
-
-    Returns:
-        np.array of shape [1, img_height, img_width]
-    """
-    image = np.array(Image.open(path).convert("L"))  # Read grayscale = 1 channel
-    image = image[None, ...]  # add n_frames dimension
-    return image
+from usbmd.utils.io_lib import load_image, _SUPPORTED_IMG_TYPES
 
 
 def img_dir_to_h5_dir(
@@ -58,14 +42,16 @@ def img_dir_to_h5_dir(
     """
     # Make a new directory in new_dataset_root to match the directory tree in existing_dataset_root
     relative_dir = os.path.relpath(current_dir, existing_dataset_root)
-    new_dir_path = f"{new_dataset_root}/{relative_dir}/"
+    new_dir_path = Path(new_dataset_root) / Path(relative_dir)
     if not os.path.exists(new_dir_path):
         os.makedirs(new_dir_path)
 
     # Select only image files
     img_files = list(
         filter(
-            lambda path: any(path.lower().endswith(ext) for ext in IMG_EXTENSIONS),
+            lambda path: any(
+                path.lower().endswith(ext) for ext in _SUPPORTED_IMG_TYPES
+            ),
             files,
         )
     )
@@ -83,10 +69,13 @@ def img_dir_to_h5_dir(
     # Convert each group of images to a stacked np array and save as hdf5
     for group_id, imgs_in_group in grouped_sorted_files:
         frames = np.vstack(
-            [img_to_np(f"{current_dir}/{img_file}") for img_file in imgs_in_group]
+            [
+                load_image(Path(current_dir) / img_file)[None, ...]
+                for img_file in imgs_in_group
+            ]
         )
 
-        new_h5_file_path = f"{new_dir_path}/{group_id}.hdf5"
+        new_h5_file_path = new_dir_path / f"{group_id}.hdf5"
         generate_usbmd_dataset(
             path=new_h5_file_path,
             image=frames,
@@ -131,7 +120,7 @@ def convert_image_dataset(
         ```
         convert_image_dataset(
             "/mnt/z/Ultrasound-BMd/data/oisin/camus_test",
-            "/mnt/z/Ultrasound-BMd/data/oisin/camus_test_h5",
+            "~/latent-ultrasound-diffusion/camus_test_h5",
             group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
             sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
         )
