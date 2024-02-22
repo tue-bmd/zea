@@ -120,7 +120,7 @@ def convert_image_dataset(
         ```
         convert_image_dataset(
             "/mnt/z/Ultrasound-BMd/data/oisin/camus_test",
-            "~/latent-ultrasound-diffusion/camus_test_h5",
+            "/mnt/z/Ultrasound-BMd/data/oisin/camus_test_h5",
             group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
             sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
         )
