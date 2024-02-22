@@ -534,6 +534,8 @@ class PlaneWaveScan(Scan):
         downsample=1,
         initial_times=None,
         selected_transmits=None,
+        probe_geometry: np.ndarray = None,
+        time_to_next_transmit: np.ndarray = None,
     ):
         """
         Initializes a PlaneWaveScan object.
@@ -596,10 +598,26 @@ class PlaneWaveScan(Scan):
         ), "Please provide angles at which plane wave dataset was recorded"
         if angles is not None:
             self._angles = angles
-            self._polar_angles = angles
+            polar_angles = angles
         else:
-            self._angles = polar_angles
-            self._polar_angles = polar_angles
+            angles = polar_angles
+            polar_angles = polar_angles
+
+        if not azimuth_angles:
+            # We assume azimuth angles are zero for plane wave scans if not provided
+            azimuth_angles = np.zeros(len(polar_angles))
+
+        if not n_tx:
+            n_tx = len(polar_angles)
+        else:
+            assert n_tx == len(polar_angles), (
+                "Number of transmits does not match the number of polar angles. "
+                "Please provide the correct number of transmits, or let the Scan object set it."
+            )
+
+        t0_delays = compute_t0_delays_planewave(
+            probe_geometry, polar_angles, azimuth_angles, sound_speed
+        )
 
         # Pass all arguments to the Scan base class
         super().__init__(
@@ -619,11 +637,14 @@ class PlaneWaveScan(Scan):
             pixels_per_wvln=pixels_per_wvln,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
+            t0_delays=t0_delays,
             tx_apodizations=tx_apodizations,
             downsample=downsample,
             initial_times=initial_times,
             selected_transmits=selected_transmits,
             focus_distances=np.inf * np.ones(n_tx),
+            probe_geometry=probe_geometry,
+            time_to_next_transmit=time_to_next_transmit,
         )
 
 
