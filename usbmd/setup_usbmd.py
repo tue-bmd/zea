@@ -28,6 +28,7 @@ def setup(
     user_config: Union[str, dict] = None,
     verbose: bool = True,
     disable_config_check: bool = False,
+    loader=yaml.FullLoader,
 ):
     """General setup function for usbmd. Loads config, sets data paths and
     initializes gpu if available. Will return config object.
@@ -41,6 +42,7 @@ def setup(
         disable_config_check (bool, optional): whether to check for usbmd config validity.
             Defaults to False. Can be set to True if you are using some other config that
             does not have to adhere to usbmd config standards.
+        loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
     Returns:
         config (dict): config object / dict.
     """
@@ -50,6 +52,7 @@ def setup(
         config_path,
         verbose=verbose,
         disable_config_check=disable_config_check,
+        loader=loader,
     )
 
     # Set data paths
