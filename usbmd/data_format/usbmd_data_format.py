@@ -70,6 +70,24 @@ def generate_example_dataset(path, add_optional_fields=False):
     )
 
 
+def validate_input_data(
+    raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc
+):
+    assert (
+        raw_data is not None
+        or aligned_data is not None
+        or envelope_data is not None
+        or beamformed_data is not None
+        or image is not None
+        or image_sc is not None
+    ), f"At least one of the data types {_DATA_TYPES} must be specified."
+
+    if raw_data is not None:
+        assert (
+            isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
+        ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
+
+
 def generate_usbmd_dataset(
     path,
     raw_data=None,
@@ -134,18 +152,17 @@ def generate_usbmd_dataset(
         (h5py.File): The example dataset.
     """
 
-    # Assertions
-    assert (
-        raw_data is not None
-        or aligned_data is not None
-        or envelope_data is not None
-        or beamformed_data is not None
-        or image is not None
-        or image_sc is not None
-    ), f"At least one of the data types {_DATA_TYPES} must be specified."
-
     assert isinstance(probe_name, str), "The probe name must be a string."
     assert isinstance(description, str), "The description must be a string."
+
+    validate_input_data(
+        raw_data=raw_data,
+        aligned_data=aligned_data,
+        envelope_data=envelope_data,
+        beamformed_data=beamformed_data,
+        image=image,
+        image_sc=image_sc,
+    )
 
     # Convert path to Path object
     path = Path(path)
@@ -167,18 +184,11 @@ def generate_usbmd_dataset(
             data = first_not_none_item(arr)
             return data.shape[axis] if data is not None else None
 
-        def validate_input_data(name, data):
-            if name == "raw_data":
-                assert (
-                    isinstance(data, np.ndarray) and data.ndim == 5
-                ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
-
         def add_dataset(group, name, data, description, unit):
             """Adds a dataset to the given group with a description and unit.
             If data is None, the dataset is not added."""
             if data is None:
                 return
-            validate_input_data(name, data)
             dataset = group.create_dataset(name, data=data)
             dataset.attrs["description"] = description
             dataset.attrs["unit"] = unit
