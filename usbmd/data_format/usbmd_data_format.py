@@ -73,6 +73,22 @@ def generate_example_dataset(path, add_optional_fields=False):
 def validate_input_data(
     raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc
 ):
+    """
+    Validates input data for generate_usbmd_dataset
+
+    Args:
+        raw_data (np.ndarray): The raw data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
+            shape (n_frames, n_z, n_x).
+        beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
+            shape (n_frames, n_z, n_x).
+        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
+        image_sc (np.ndarray): The scan converted ultrasound images to be saved
+            of shape (n_frames, output_size_z, output_size_x).
+    """
     assert (
         raw_data is not None
         or aligned_data is not None
