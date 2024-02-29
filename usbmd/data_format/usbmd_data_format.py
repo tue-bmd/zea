@@ -70,6 +70,40 @@ def generate_example_dataset(path, add_optional_fields=False):
     )
 
 
+def validate_input_data(
+    raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc
+):
+    """
+    Validates input data for generate_usbmd_dataset
+
+    Args:
+        raw_data (np.ndarray): The raw data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
+            shape (n_frames, n_z, n_x).
+        beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
+            shape (n_frames, n_z, n_x).
+        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
+        image_sc (np.ndarray): The scan converted ultrasound images to be saved
+            of shape (n_frames, output_size_z, output_size_x).
+    """
+    assert (
+        raw_data is not None
+        or aligned_data is not None
+        or envelope_data is not None
+        or beamformed_data is not None
+        or image is not None
+        or image_sc is not None
+    ), f"At least one of the data types {_DATA_TYPES} must be specified."
+
+    if raw_data is not None:
+        assert (
+            isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
+        ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
+
+
 def generate_usbmd_dataset(
     path,
     raw_data=None,
@@ -134,18 +168,17 @@ def generate_usbmd_dataset(
         (h5py.File): The example dataset.
     """
 
-    # Assertions
-    assert (
-        raw_data is not None
-        or aligned_data is not None
-        or envelope_data is not None
-        or beamformed_data is not None
-        or image is not None
-        or image_sc is not None
-    ), f"At least one of the data types {_DATA_TYPES} must be specified."
-
     assert isinstance(probe_name, str), "The probe name must be a string."
     assert isinstance(description, str), "The description must be a string."
+
+    validate_input_data(
+        raw_data=raw_data,
+        aligned_data=aligned_data,
+        envelope_data=envelope_data,
+        beamformed_data=beamformed_data,
+        image=image,
+        image_sc=image_sc,
+    )
 
     # Convert path to Path object
     path = Path(path)
@@ -159,11 +192,6 @@ def generate_usbmd_dataset(
     with h5py.File(path, "w") as dataset:
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
-
-        if raw_data is not None:
-            assert (
-                isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
-            ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
 
         def convert_datatype(x, astype=np.float32):
             return x.astype(astype) if x is not None else None

@@ -31,4 +31,3 @@ pytest
 ipykernel
 black
 isort
-nbstripout
