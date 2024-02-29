@@ -56,17 +56,22 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset (if not image data)
-        if self.dtype in _NON_IMAGE_DATA_TYPES:
-            scan_class = self.dataset.get_scan_class()
-            default_scan_params = self.dataset.get_default_scan_parameters()
-            config_scan_params = self.config.scan
+        # Initialize scan based on dataset (if it can find proper scan parameters)
+        scan_class = self.dataset.get_scan_class()
+        default_scan_params = self.dataset.get_default_scan_parameters()
 
+        if len(default_scan_params) == 0:
+            print(
+                f"Could not find proper scan parameters in {self.dataset} at "
+                f"{str(self.dataset.datafolder)}.\n"
+                "Proceeding without scan class."
+            )
+            self.scan = None
+        else:
+            config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
             scan_params = update_dictionary(default_scan_params, config_scan_params)
             self.scan = scan_class(**scan_params)
-        else:
-            self.scan = None
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -138,6 +143,7 @@ class DataLoaderUI:
                 self.headless = True
                 warnings.warn("Could not connect to display, running headless.")
         else:
+            matplotlib.use("agg")
             print("Running in headless mode as set by config.")
 
     def set_backend_for_notebooks(self):
