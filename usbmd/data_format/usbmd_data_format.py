@@ -120,8 +120,8 @@ def generate_usbmd_dataset(
         probe_name (str): The name of the probe.
         description (str): The description of the dataset.
         focus_distances (np.ndarray): The focus distances of shape (n_tx, n_el).
-        polar_angles (np.ndarray): The polar angles of shape (n_el,).
-        azimuth_angles (np.ndarray): The azimuth angles of shape (n_tx,).
+        polar_angles (np.ndarray): The polar angles (radians) of shape (n_el,).
+        azimuth_angles (np.ndarray): The azimuth angles (radians) of shape (n_tx,).
         tx_apodizations (np.ndarray): The transmit delays for each element defining
             the wavefront in seconds of shape (n_tx, n_elem).
             This is the time between the first element firing and the last element firing.
@@ -187,7 +187,7 @@ def generate_usbmd_dataset(
         n_tx = first_not_none_shape([raw_data, aligned_data], axis=1)
         n_el = first_not_none_shape([raw_data, aligned_data], axis=3)
         n_ax = first_not_none_shape([raw_data, aligned_data], axis=2)
-        n_ch = first_not_none_shape([raw_data, aligned_data], axis=4)
+        n_ch = first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-1)
 
         # Write data group
         data_group = dataset.create_group("data")
