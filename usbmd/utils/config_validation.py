@@ -123,7 +123,7 @@ postprocess_schema = Schema(
                     "min", "max", "threshold", any_number
                 ),
                 Optional("below_threshold", default=True): bool,
-                Optional("threshold_type", default="hard"): "hard",
+                Optional("threshold_type", default="hard"): Or("hard", "soft"),
             },
         ),
         Optional("lista", default=None): Or(bool, None),
@@ -163,42 +163,49 @@ scan_schema = Schema(
     }
 )
 
+# plot
+plot_schema = Schema(
+    {
+        Optional("save", default=False): bool,
+        Optional("plot_lib", default="opencv"): Or(*_ALLOWED_PLOT_LIBS),
+        Optional("fps", default=20): int,
+        Optional("tag", default=None): Or(None, str),
+        Optional("headless", default=False): bool,
+        Optional("selector", default=None): Or(None, "rectangle", "lasso"),
+        Optional("selector_metric", default="gcnr"): Or(
+            *metrics_registry.registered_names()
+        ),
+        Optional("fliplr", default=False): bool,
+    }
+)
+
+data_schema = Schema(
+    {
+        "dtype": Or(*_DATA_TYPES),
+        "dataset_folder": str,
+        Optional("dataset_name", default="usbmd"): str,
+        Optional("output_size", default=500): positive_integer,
+        Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
+        Optional("file_path", default=None): Or(None, str, Path),
+        Optional("local", default=True): bool,
+        Optional("subset", default=None): Or(None, str),
+        Optional("frame_no", default=None): Or(None, "all", int),
+        Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
+        Optional("input_range", default=None): Or(None, list_of_size_two),
+        Optional("apodization", default=None): Or(None, str),
+        Optional("modtype", default=None): Or(*_MOD_TYPES),  # ONLY FOR LEGACY DATASET
+        Optional("from_modtype", default=None): Or(
+            *_MOD_TYPES
+        ),  # ONLY FOR LEGACY DATASET
+        Optional("user", default=None): Or(None, dict),
+    }
+)
+
 # top level schema
 config_schema = Schema(
     {
-        "data": {
-            "dataset_name": str,
-            "dtype": Or(*_DATA_TYPES),
-            Optional("output_size", default=500): positive_integer,
-            Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
-            Optional("file_path", default=None): Or(None, str, Path),
-            Optional("local", default=True): bool,
-            Optional("subset", default=None): Or(None, str),
-            Optional("frame_no", default=None): Or(None, "all", int),
-            Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
-            Optional("input_range", default=None): Or(None, list_of_size_two),
-            Optional("apodization", default=None): Or(None, str),
-            Optional("modtype", default=None): Or(
-                *_MOD_TYPES
-            ),  # ONLY FOR LEGACY DATASET
-            Optional("from_modtype", default=None): Or(
-                *_MOD_TYPES
-            ),  # ONLY FOR LEGACY DATASET
-            Optional("user", default=None): Or(None, dict),
-            Optional("dataset_folder", default=None): Or(None, str),
-        },
-        "plot": {
-            Optional("save", default=False): bool,
-            Optional("plot_lib", default="opencv"): Or(*_ALLOWED_PLOT_LIBS),
-            Optional("fps", default=20): int,
-            Optional("tag", default=None): Or(None, str),
-            Optional("headless", default=False): bool,
-            Optional("selector", default=None): Or(None, "rectangle", "lasso"),
-            Optional("selector_metric", default="gcnr"): Or(
-                *metrics_registry.registered_names()
-            ),
-            Optional("fliplr", default=False): bool,
-        },
+        "data": data_schema,
+        Optional("plot", default=plot_schema.validate({})): plot_schema,
         Optional("model", default=model_schema.validate({})): model_schema,
         Optional(
             "preprocess", default=preprocess_schema.validate({})
@@ -219,7 +226,7 @@ config_schema = Schema(
         Optional("hide_devices", default=None): Or(
             None, list_of_positive_integers, positive_integer_and_zero
         ),
-        Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, "disable"),
+        Optional("ml_library", default="disable"): Or(None, *_ML_LIBRARIES, "disable"),
         Optional("git", default=None): Or(None, str),
     }
 )
