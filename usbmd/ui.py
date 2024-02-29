@@ -4,6 +4,7 @@ the results in a GUI.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : November 18th, 2021
 """
+
 import argparse
 import asyncio
 import sys
@@ -98,19 +99,19 @@ class DataLoaderUI:
         else:
             window_name = "usbmd"
 
-        if not self.headless:
-            if self.plot_lib == "opencv":
-                self.image_viewer = ImageViewerOpenCV(
-                    self.data_to_display,
-                    window_name=window_name,
-                    num_threads=1,
-                )
-            elif self.plot_lib == "matplotlib":
-                self.image_viewer = ImageViewerMatplotlib(
-                    self.data_to_display,
-                    window_name=window_name,
-                    num_threads=1,
-                )
+        # if not self.headless:
+        if self.plot_lib == "opencv":
+            self.image_viewer = ImageViewerOpenCV(
+                self.data_to_display,
+                window_name=window_name,
+                num_threads=1,
+            )
+        elif self.plot_lib == "matplotlib":
+            self.image_viewer = ImageViewerMatplotlib(
+                self.data_to_display,
+                window_name=window_name,
+                num_threads=1,
+            )
 
     @property
     def dtype(self):
@@ -159,6 +160,11 @@ class DataLoaderUI:
             else:
                 self.file_path = self.dataset.data_root / path
         else:
+            if self.headless:
+                raise ValueError(
+                    "No file path specified for data file, which is required "
+                    "in headless mode as window dialog cannot be opened."
+                )
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
             self.file_path = filename_from_window_dialog(
@@ -274,7 +280,10 @@ class DataLoaderUI:
             image (np.ndarray): plotted image (grabbed from figure).
         """
         if self.headless:
-            return self.data_to_display(data)
+            image = self.data_to_display(data)
+            if save:
+                self.save_image(image)
+            return image
 
         assert self.image_viewer is not None, "Image viewer not initialized."
 
@@ -435,6 +444,10 @@ class DataLoaderUI:
 
             # clear line, frame number
             print("\x1b[2K", end="\r")
+
+            # only loop once if in headless mode
+            if self.headless:
+                return images
 
     def save_image(self, fig, path=None):
         """Save image to disk.
