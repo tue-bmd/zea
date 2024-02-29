@@ -29,7 +29,7 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
+from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
