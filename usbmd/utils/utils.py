@@ -3,6 +3,7 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : October 25th, 2022
 """
+
 import datetime
 import functools
 import hashlib
@@ -101,6 +102,10 @@ def save_to_gif(images, filename, fps=20):
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
+    if fps > 50:
+        warnings.warn(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
+        fps = 50
+
     duration = 1 / (fps) * 1000  # milliseconds per frame
 
     # convert grayscale images to RGB

@@ -9,6 +9,7 @@ def init_device(
     ml_library: str,
     device: Union[str, int, list],
     hide_devices: Union[int, list] = None,
+    verbose: bool = True,
 ):
     """Selects a GPU or CPU device based on the config.
     For PyTorch, this will return the device.
@@ -28,6 +29,7 @@ def init_device(
             little tensor cores to be useful for training, or when some GPUs
             are reserved for other tasks. Defaults to None, in which case no
             GPUs are hidden and all are available for use.
+        verbose (bool, optional): print device selection. Defaults to True.
     Returns:
         device (str/int/list): selected device(s).
     """
@@ -39,12 +41,12 @@ def init_device(
         # pylint: disable=import-outside-toplevel
         from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
 
-        device = get_device(device)
+        device = get_device(device, verbose=verbose)
     elif ml_library == "tensorflow":
         # pylint: disable=import-outside-toplevel
         from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
 
-        set_gpu_usage(device)
+        set_gpu_usage(device, verbose=verbose)
     elif ml_library == "disable" or ml_library is None:
         device = "cpu"
     else:

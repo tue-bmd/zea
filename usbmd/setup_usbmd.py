@@ -9,20 +9,23 @@ setup: General setup function for usbmd. Runs setup_config, sets data paths and
 Author(s): Tristan Stevens
 Date: 25/09/2023
 """
+
 from pathlib import Path
 from typing import Union
 
 from usbmd.common import set_data_paths
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config
-from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.device import init_device
+from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.io_lib import filename_from_window_dialog
 
 
 def setup(
     config_path: str = None,
     user_config: Union[str, dict] = None,
+    verbose: bool = True,
+    disable_config_check: bool = False,
 ):
     """General setup function for usbmd. Loads config, sets data paths and
     initializes gpu if available. Will return config object.
@@ -32,13 +35,20 @@ def setup(
             Defaults to None, in which case a window dialog will pop up.
         user_config (str or dict, optional): path that points to yaml file with user info.
             Alternively dictionary with user info. Defaults to None.
-
+        verbose (bool, optional): print config file path and git summary. Defaults to True.
+        disable_config_check (bool, optional): whether to check for usbmd config validity.
+            Defaults to False. Can be set to True if you are using some other config that
+            does not have to adhere to usbmd config standards.
     Returns:
         config (dict): config object / dict.
     """
 
     # Load config
-    config = setup_config(config_path)
+    config = setup_config(
+        config_path,
+        verbose=verbose,
+        disable_config_check=disable_config_check,
+    )
 
     # Set data paths
     config.data.user = set_data_paths(user_config, local=config.data.local)
@@ -49,14 +59,19 @@ def setup(
     return config
 
 
-def setup_config(config_path: str = None):
+def setup_config(
+    config_path: str = None, verbose: bool = True, disable_config_check: bool = False
+):
     """Setup function for config. Retrieves config file and checks for validity.
 
     Args:
         config_path (str, optional): file path to config yaml. Defaults to None.
             if None, argparser is checked. If that is None as well, the window
             ui will pop up for choosing the config file manually.
-
+        verbose (bool, optional): print config file path and git summary. Defaults to True.
+        disable_config_check (bool, optional): whether to check for usbmd config validity.
+            Defaults to False. Can be set to True if you are using some other config that
+            does not have to adhere to usbmd config standards.
     Returns:
         config (dict): config object / dict.
 
@@ -77,12 +92,13 @@ def setup_config(config_path: str = None):
             ) from e
 
     config = load_config_from_yaml(Path(config_path))
-    print(f"Using config file: {config_path}")
-    config = check_config(config)
 
-    ## git
-    cwd = Path.cwd().stem
-    if cwd in ("Ultrasound-BMd", "ultrasound-toolbox", "usbmd"):
-        config["git"] = get_git_summary()
+    if verbose:
+        print(f"Using config file: {config_path}")
+
+    config["git"] = get_git_summary(verbose=verbose)
+
+    if not disable_config_check:
+        config = check_config(config)
 
     return config
