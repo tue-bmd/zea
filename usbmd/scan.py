@@ -607,7 +607,7 @@ class PlaneWaveScan(Scan):
             angles = polar_angles
             polar_angles = polar_angles
 
-        if not azimuth_angles:
+        if azimuth_angles is None:
             # We assume azimuth angles are zero for plane wave scans if not provided
             azimuth_angles = np.zeros(len(polar_angles))
 
