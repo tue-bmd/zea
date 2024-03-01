@@ -63,7 +63,13 @@ def test_example_dataset():
 
         # Create config and load dataset using Dataset class
         config = Config(
-            {"data": {"dataset_folder": str(path.parent), "dtype": "raw_data"}}
+            {
+                "data": {
+                    "dataset_name": "usbmd",
+                    "dataset_folder": str(path.parent),
+                    "dtype": "raw_data",
+                }
+            }
         )
         config = check_config(config)
         dataset = USBMDDataSet(config.data)
