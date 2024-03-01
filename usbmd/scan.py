@@ -596,6 +596,7 @@ class PlaneWaveScan(Scan):
         Raises:
             ValueError: If selected_transmits has an invalid value.
         """
+
         assert (
             angles is not None or polar_angles is not None
         ), "Please provide angles at which plane wave dataset was recorded"
@@ -711,6 +712,10 @@ def compute_t0_delays_planewave(
     Returns:
         np.ndarray: The transmit delays for each element of shape (n_tx, n_el).
     """
+    assert (
+        probe_geometry is not None
+    ), "Probe geometry must be provided to compute t0_delays."
+
     # Convert single angles to arrays for broadcasting
     polar_angles = np.atleast_1d(polar_angles)
     azimuth_angles = np.atleast_1d(azimuth_angles)
