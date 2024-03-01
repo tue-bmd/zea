@@ -1,4 +1,5 @@
 """Tests for the processing module."""
+
 import random
 
 import decorator
@@ -219,7 +220,6 @@ def test_complex_to_channels(size, axis):
     _data = complex_to_channels(data, axis=axis)
     __data = channels_to_complex(_data, axis=axis)
     np.testing.assert_almost_equal(data, __data)
-    return _data
 
 
 @pytest.mark.parametrize(
@@ -237,7 +237,6 @@ def test_channels_to_complex(size, axis):
     _data = channels_to_complex(data, axis=axis)
     __data = complex_to_channels(_data, axis=axis)
     np.testing.assert_almost_equal(data, __data)
-    return _data
 
 
 @pytest.mark.parametrize(
