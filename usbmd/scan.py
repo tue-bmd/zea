@@ -514,6 +514,7 @@ class PlaneWaveScan(Scan):
 
     def __init__(
         self,
+        probe_geometry: np.ndarray,
         angles=None,
         n_tx=75,
         n_el=128,
@@ -535,13 +536,14 @@ class PlaneWaveScan(Scan):
         downsample=1,
         initial_times=None,
         selected_transmits=None,
-        probe_geometry: np.ndarray = None,
         time_to_next_transmit: np.ndarray = None,
     ):
         """
         Initializes a PlaneWaveScan object.
 
         Args:
+            probe_geometry (np.ndarray): The positions of the elements in the array of
+                shape (n_el, 3).
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
             n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
