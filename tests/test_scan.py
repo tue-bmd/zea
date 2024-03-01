@@ -30,8 +30,8 @@ scan_args = {
 }
 
 planewave_scan_args = {
-    "probe_geometry": np.concatenate(
-        np.linspace(-19e-3, 19e-3, 128), np.zeros(128), np.zeros(128)
+    "probe_geometry": np.stack(
+        [np.linspace(-19e-3, 19e-3, 128), np.zeros(128), np.zeros(128)], axis=1
     ),
     "n_tx": 10,
     "n_el": 128,
