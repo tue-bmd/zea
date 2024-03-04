@@ -1,4 +1,5 @@
 """Tests for the processing module."""
+
 import random
 
 import decorator

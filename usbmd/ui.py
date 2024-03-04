@@ -4,6 +4,7 @@ the results in a GUI.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : November 18th, 2021
 """
+
 import argparse
 import asyncio
 import sys
@@ -28,7 +29,7 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
+from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
@@ -55,17 +56,22 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset (if not image data)
-        if self.dtype in _NON_IMAGE_DATA_TYPES:
-            scan_class = self.dataset.get_scan_class()
-            default_scan_params = self.dataset.get_default_scan_parameters()
-            config_scan_params = self.config.scan
+        # Initialize scan based on dataset (if it can find proper scan parameters)
+        scan_class = self.dataset.get_scan_class()
+        default_scan_params = self.dataset.get_default_scan_parameters()
 
+        if len(default_scan_params) == 0:
+            print(
+                f"Could not find proper scan parameters in {self.dataset} at "
+                f"{str(self.dataset.datafolder)}.\n"
+                "Proceeding without scan class."
+            )
+            self.scan = None
+        else:
+            config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
             scan_params = update_dictionary(default_scan_params, config_scan_params)
             self.scan = scan_class(**scan_params)
-        else:
-            self.scan = None
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -98,19 +104,19 @@ class DataLoaderUI:
         else:
             window_name = "usbmd"
 
-        if not self.headless:
-            if self.plot_lib == "opencv":
-                self.image_viewer = ImageViewerOpenCV(
-                    self.data_to_display,
-                    window_name=window_name,
-                    num_threads=1,
-                )
-            elif self.plot_lib == "matplotlib":
-                self.image_viewer = ImageViewerMatplotlib(
-                    self.data_to_display,
-                    window_name=window_name,
-                    num_threads=1,
-                )
+        # if not self.headless:
+        if self.plot_lib == "opencv":
+            self.image_viewer = ImageViewerOpenCV(
+                self.data_to_display,
+                window_name=window_name,
+                num_threads=1,
+            )
+        elif self.plot_lib == "matplotlib":
+            self.image_viewer = ImageViewerMatplotlib(
+                self.data_to_display,
+                window_name=window_name,
+                num_threads=1,
+            )
 
     @property
     def dtype(self):
@@ -137,6 +143,7 @@ class DataLoaderUI:
                 self.headless = True
                 warnings.warn("Could not connect to display, running headless.")
         else:
+            matplotlib.use("agg")
             print("Running in headless mode as set by config.")
 
     def set_backend_for_notebooks(self):
@@ -159,6 +166,11 @@ class DataLoaderUI:
             else:
                 self.file_path = self.dataset.data_root / path
         else:
+            if self.headless:
+                raise ValueError(
+                    "No file path specified for data file, which is required "
+                    "in headless mode as window dialog cannot be opened."
+                )
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
             self.file_path = filename_from_window_dialog(
@@ -274,7 +286,10 @@ class DataLoaderUI:
             image (np.ndarray): plotted image (grabbed from figure).
         """
         if self.headless:
-            return self.data_to_display(data)
+            image = self.data_to_display(data)
+            if save:
+                self.save_image(image)
+            return image
 
         assert self.image_viewer is not None, "Image viewer not initialized."
 
@@ -435,6 +450,10 @@ class DataLoaderUI:
 
             # clear line, frame number
             print("\x1b[2K", end="\r")
+
+            # only loop once if in headless mode
+            if self.headless:
+                return images
 
     def save_image(self, fig, path=None):
         """Save image to disk.
