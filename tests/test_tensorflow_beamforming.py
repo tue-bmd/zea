@@ -1,5 +1,6 @@
 """Test the tf implementation of the beamformers.
 """
+
 import sys
 from pathlib import Path
 
@@ -25,7 +26,9 @@ sys.path.append(str(wd))
     "reconstruction_mode, patches",
     [("generic", None), ("generic", 4), ("pw", None), ("pw", 4)],
 )
-def test_das_beamforming(reconstruction_mode, patches, debug=False, compare_gt=True):
+def test_das_beamforming(
+    reconstruction_mode, patches, debug=False, compare_gt=True, jit=False
+):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
 
@@ -39,6 +42,8 @@ def test_das_beamforming(reconstruction_mode, patches, debug=False, compare_gt=T
 
     config = load_config_from_yaml(r"./tests/config_test.yaml")
     config.ml_library = "tensorflow"
+    if jit:
+        config.model.beamformer.jit = True  # pylint: disable=no-member
 
     if patches:
         config.model.beamformer.patches = patches  # pylint: disable=no-member
@@ -122,5 +127,15 @@ def test_das_beamforming(reconstruction_mode, patches, debug=False, compare_gt=T
         return y_pred
 
 
-if __name__ == "__main__":
-    test_das_beamforming(reconstruction_mode="pw", patches=None, debug=True)
+def test_jit_compile():
+    """Test that the jit compilation works and gives the same result as the non-jit	version."""
+    jit_output = test_das_beamforming(
+        reconstruction_mode="pw", patches=None, debug=False, compare_gt=False, jit=True
+    )
+    non_jit_output = test_das_beamforming(
+        reconstruction_mode="pw", patches=None, debug=False, compare_gt=False, jit=False
+    )
+    # Numerical difference between XLA and non-XLA compiled models are expected, we are here
+    # only checking if images are similar on a global scale. Users should always manually check
+    # the output of the model.
+    assert np.allclose(jit_output, non_jit_output, atol=1e-2)
