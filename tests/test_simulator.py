@@ -11,6 +11,7 @@ def test_simulator():
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_default_scan_parameters()
     scan = PlaneWaveScan(
+        probe_geometry=probe.probe_geometry,
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),

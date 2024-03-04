@@ -1,5 +1,6 @@
 """Tests for the Scan class.
 """
+
 import numpy as np
 
 from usbmd.scan import PlaneWaveScan, Scan
@@ -29,9 +30,12 @@ scan_args = {
 }
 
 planewave_scan_args = {
+    "probe_geometry": np.stack(
+        [np.linspace(-19e-3, 19e-3, 128), np.zeros(128), np.zeros(128)], axis=1
+    ),
     "n_tx": 10,
     "n_el": 128,
-    "n_ch" : 1,
+    "n_ch": 1,
     "xlims": (-0.019, 0.019),
     "ylims": (0, 0),
     "zlims": (0, 0.04),
@@ -80,7 +84,7 @@ def test_initialization():
 def test_planewave_scan():
     """Test initialization of PlaneWaveScan class."""
     scan = PlaneWaveScan(**planewave_scan_args)
-
+    assert np.all(scan.probe_geometry == planewave_scan_args["probe_geometry"])
     assert scan.n_tx == planewave_scan_args["n_tx"]
     assert scan.n_el == planewave_scan_args["n_el"]
     assert scan.n_ch == planewave_scan_args["n_ch"]

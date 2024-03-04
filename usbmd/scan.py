@@ -7,6 +7,7 @@ beamforming grid.
 
 import warnings
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -200,9 +201,6 @@ class Scan:
         #: The number of pixels in the axial direction in the beamforming grid
         self._Nz = int(Nz) if Nz is not None else None
 
-        #: The beamforming grid of shape (Nx, Nz, 3)
-        self._grid = None
-
         # Compute the zlims from the other values if not supplied
         if zlims:
             self.zlims = zlims
@@ -224,6 +222,9 @@ class Scan:
             self.xlims = self.probe_geometry[0, 0], self.probe_geometry[-1, 0]
 
         self.z_axis = np.linspace(*self.zlims, self.n_ax)
+
+        #: The beamforming grid of shape (Nx, Nz, 3)
+        self._grid = self.grid
 
         if initial_times is None:
             warnings.warn("No initial times provided. Assuming all zeros.")
@@ -494,6 +495,7 @@ class Scan:
         """The beamforming grid of shape (Nx, Nz, 3)."""
         if self._grid is None:
             self._grid = get_grid(self)
+            self._Nz, self._Nx, _ = self._grid.shape
         return self._grid
 
 
@@ -512,6 +514,7 @@ class PlaneWaveScan(Scan):
 
     def __init__(
         self,
+        probe_geometry: np.ndarray,
         angles=None,
         n_tx=75,
         n_el=128,
@@ -524,8 +527,8 @@ class PlaneWaveScan(Scan):
         demodulation_frequency=0.0,
         sound_speed=1540,
         n_ax=3328,
-        Nx=128,
-        Nz=128,
+        Nx=None,
+        Nz=None,
         pixels_per_wvln=3,
         polar_angles=None,
         azimuth_angles=None,
@@ -533,11 +536,14 @@ class PlaneWaveScan(Scan):
         downsample=1,
         initial_times=None,
         selected_transmits=None,
+        time_to_next_transmit: np.ndarray = None,
     ):
         """
         Initializes a PlaneWaveScan object.
 
         Args:
+            probe_geometry (np.ndarray): The positions of the elements in the array of
+                shape (n_el, 3).
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
             n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
@@ -590,15 +596,32 @@ class PlaneWaveScan(Scan):
         Raises:
             ValueError: If selected_transmits has an invalid value.
         """
+
         assert (
             angles is not None or polar_angles is not None
         ), "Please provide angles at which plane wave dataset was recorded"
         if angles is not None:
             self._angles = angles
-            self._polar_angles = angles
+            polar_angles = angles
         else:
-            self._angles = polar_angles
-            self._polar_angles = polar_angles
+            angles = polar_angles
+            polar_angles = polar_angles
+
+        if azimuth_angles is None:
+            # We assume azimuth angles are zero for plane wave scans if not provided
+            azimuth_angles = np.zeros(len(polar_angles))
+
+        if not n_tx:
+            n_tx = len(polar_angles)
+        else:
+            assert n_tx == len(polar_angles), (
+                "Number of transmits does not match the number of polar angles. "
+                "Please provide the correct number of transmits, or let the Scan object set it."
+            )
+
+        t0_delays = compute_t0_delays_planewave(
+            probe_geometry, polar_angles, azimuth_angles, sound_speed
+        )
 
         # Pass all arguments to the Scan base class
         super().__init__(
@@ -618,11 +641,14 @@ class PlaneWaveScan(Scan):
             pixels_per_wvln=pixels_per_wvln,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
+            t0_delays=t0_delays,
             tx_apodizations=tx_apodizations,
             downsample=downsample,
             initial_times=initial_times,
             selected_transmits=selected_transmits,
             focus_distances=np.inf * np.ones(n_tx),
+            probe_geometry=probe_geometry,
+            time_to_next_transmit=time_to_next_transmit,
         )
 
 
@@ -686,6 +712,10 @@ def compute_t0_delays_planewave(
     Returns:
         np.ndarray: The transmit delays for each element of shape (n_tx, n_el).
     """
+    assert (
+        probe_geometry is not None
+    ), "Probe geometry must be provided to compute t0_delays."
+
     # Convert single angles to arrays for broadcasting
     polar_angles = np.atleast_1d(polar_angles)
     azimuth_angles = np.atleast_1d(azimuth_angles)
@@ -701,20 +731,19 @@ def compute_t0_delays_planewave(
     )
 
     # Compute the projection of the element positions onto the wave vectors
-    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1)
+    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1).T
 
     # Convert from distance to time to compute the transmit delays.
     t0_delays_not_zero_aligned = projection / sound_speed
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.
-    t_first_fire = np.min(projection, axis=-1) / sound_speed
+    t_first_fire = np.min(t0_delays_not_zero_aligned, axis=1)
 
     # The transmit delays are the projection minus the offset. This ensures
     # that the first element fires at t=0.
     t0_delays = t0_delays_not_zero_aligned - t_first_fire[:, None]
-
-    return t0_delays.T
+    return t0_delays
 
 
 def compute_t0_delays_focused(
@@ -780,3 +809,16 @@ def compute_t0_delays_focused(
     t0_delays = travel_times - t_first_fire[:, None]
 
     return t0_delays.T
+
+
+def plot_t0_delays(t0_delays):
+    """Plot the t0_delays for each transducer element
+    Elements are on the x-axis, and the t0_delays are on the y-axis.
+    We plot multiple lines for each angle/transmit in the scan object."""
+    n_tx = t0_delays.shape[0]
+    _, ax = plt.subplots()
+    for tx in range(n_tx):
+        ax.plot(t0_delays[tx], label=f"Transmit {tx}")
+    ax.set_xlabel("Element number")
+    ax.set_ylabel("t0 delay [s]")
+    plt.show()
