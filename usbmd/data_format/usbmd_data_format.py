@@ -63,7 +63,7 @@ def generate_example_dataset(path, add_optional_fields=False):
         t0_delays=t0_delays,
         sound_speed=1540,
         tx_apodizations=tx_apodizations,
-        probe_name="example_probe",
+        probe_name="generic",
         focus_distances=focus_distances,
         polar_angles=polar_angles,
         azimuth_angles=azimuth_angles,
@@ -154,8 +154,8 @@ def generate_usbmd_dataset(
         probe_name (str): The name of the probe.
         description (str): The description of the dataset.
         focus_distances (np.ndarray): The focus distances of shape (n_tx, n_el).
-        polar_angles (np.ndarray): The polar angles of shape (n_el,).
-        azimuth_angles (np.ndarray): The azimuth angles of shape (n_tx,).
+        polar_angles (np.ndarray): The polar angles (radians) of shape (n_el,).
+        azimuth_angles (np.ndarray): The azimuth angles (radians) of shape (n_tx,).
         tx_apodizations (np.ndarray): The transmit delays for each element defining
             the wavefront in seconds of shape (n_tx, n_elem).
             This is the time between the first element firing and the last element firing.
@@ -213,9 +213,12 @@ def generate_usbmd_dataset(
             [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
         ).shape[0]
         n_tx = first_not_none_shape([raw_data, aligned_data], axis=1)
-        n_el = first_not_none_shape([raw_data, aligned_data], axis=3)
-        n_ax = first_not_none_shape([raw_data, aligned_data], axis=2)
-        n_ch = first_not_none_shape([raw_data, aligned_data], axis=4)
+        n_ax = first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
+        n_el = first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-2)
+        n_ch = first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-1)
+
+        if n_tx is None:
+            n_tx = 1
 
         # Write data group
         data_group = dataset.create_group("data")
@@ -437,6 +440,7 @@ def generate_usbmd_dataset(
         )
 
     validate_dataset(path)
+    print(f"USBMD dataset written to {path}")
 
 
 def load_usbmd_file(
