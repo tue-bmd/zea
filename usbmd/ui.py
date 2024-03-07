@@ -22,6 +22,7 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
+import usbmd.utils.log as log
 from usbmd.datasets import get_dataset
 from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
@@ -61,9 +62,9 @@ class DataLoaderUI:
         default_scan_params = self.dataset.get_default_scan_parameters()
 
         if len(default_scan_params) == 0:
-            print(
+            log.info(
                 f"Could not find proper scan parameters in {self.dataset} at "
-                f"{str(self.dataset.datafolder)}.\n"
+                f"{log.yellow(str(self.dataset.datafolder))}.\n"
                 "Proceeding without scan class."
             )
             self.scan = None
@@ -144,7 +145,7 @@ class DataLoaderUI:
                 warnings.warn("Could not connect to display, running headless.")
         else:
             matplotlib.use("agg")
-            print("Running in headless mode as set by config.")
+            log.info("Running in headless mode as set by config.")
 
     def set_backend_for_notebooks(self):
         """Set backend to QtAgg if running in notebook"""
@@ -181,7 +182,7 @@ class DataLoaderUI:
             self.config.data.file_path = self.file_path
 
         if self.verbose:
-            print(f"Selected {self.file_path}")
+            log.info(f"Selected {log.yellow(self.file_path)}")
 
         # find file in dataset
         if self.file_path in self.dataset.file_paths:
@@ -192,7 +193,7 @@ class DataLoaderUI:
             )
 
         if self.config.data.get("frame_no") == "all":
-            print("Will run all frames as `all` was chosen in config...")
+            log.info("Will run all frames as `all` was chosen in config...")
 
         data = self.dataset[file_idx]
 
@@ -366,7 +367,7 @@ class DataLoaderUI:
     async def run_movie(self, save: bool = False):
         """Run all frames in file in sequence"""
 
-        print('Playing video, press/hold "q" while the window is active to exit...')
+        log.info('Playing video, press/hold "q" while the window is active to exit...')
         self.image_viewer.threading = True
         images = await self._movie_loop(save)
 
@@ -491,7 +492,7 @@ class DataLoaderUI:
             raise ValueError("Figure is not PIL image or matplotlib figure object.")
 
         if self.verbose:
-            print(f"Image saved to {path}")
+            log.info(f"Image saved to {log.yellow(path)}")
 
     def save_video(self, images, path=None):
         """Save video to disk.
@@ -519,7 +520,7 @@ class DataLoaderUI:
         save_to_gif(images, path, fps=fps)
 
         if self.verbose:
-            print(f"Video saved to {path}")
+            log.info(f"Video saved to {log.yellow(path)}")
 
 
 def get_args():
@@ -569,7 +570,7 @@ def main():
             except RuntimeError as e:
                 # probably a better way to handle this...
                 if str(e) == "Event loop stopped before Future completed.":
-                    print("GUI closed.")
+                    log.info("GUI closed.")
                 else:
                     raise e
         else:
