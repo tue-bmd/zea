@@ -270,6 +270,13 @@ class Scan:
 
         self.selected_transmits = selected_transmits
 
+    def __setattr__(self, name, value):
+        # We cast each value set in the scan to the correct type
+        if isinstance(value, np.ndarray):
+            if value.dtype == np.float64:
+                value = value.astype(np.float32)
+        super().__setattr__(name, value)
+
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
         indices.
