@@ -171,7 +171,7 @@ def warning(message, *args, **kwargs):
 
 
 def deprecated(message, *args, **kwargs):
-    """Prints a message with log level warning."""
+    """Prints a message with log level warning prefixed with 'DEPRECATED: '."""
     logger.warning(f"DEPRECATED: {message}", *args, **kwargs)
     file_logger.warning(
         remove_color_escape_codes(f"DEPRECATED: {message}"), *args, **kwargs
