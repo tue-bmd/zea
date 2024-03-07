@@ -162,16 +162,6 @@ def load_image(filename, grayscale=True):
     return image
 
 
-def green(text):
-    """Print text in green color."""
-    return f"\033[92m{text}\033[0m"
-
-
-def red(text):
-    """Print text in red color."""
-    return f"\033[91m{text}\033[0m"
-
-
 def search_file_tree(directory, filetypes=None, write=True):
     """Lists all files in directory and sub-directories.
 
