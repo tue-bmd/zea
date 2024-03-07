@@ -2,6 +2,7 @@
 figures/
 custom_configs/
 data/
+log/
 .ideas/
 
 # any png / gifs in root directory
