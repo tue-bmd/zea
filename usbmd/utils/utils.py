@@ -95,13 +95,29 @@ def strtobool(val: str):
         raise ValueError(f"invalid truth value {val}")
 
 
+def grayscale_to_rgb(image):
+    """Converts a grayscale image to an RGB image.
+
+    Args:
+        image (ndarray): Grayscale image.
+
+    Returns:
+        ndarray: RGB image.
+    """
+    return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+
 def save_to_gif(images, filename, fps=20):
     """Saves a sequence of images to .gif file.
     Args:
-        images: list of images (numpy arrays).
+        images: list of images (numpy arrays). Must have shape
+            (n_frames, height, width, channels). If channel axis is not present,
+            grayscale image is assumed, which is then converted to RGB.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
+    images = np.array(images)
+
     if fps > 50:
         warnings.warn(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
         fps = 50
@@ -110,7 +126,7 @@ def save_to_gif(images, filename, fps=20):
 
     # convert grayscale images to RGB
     if len(images[0].shape) == 2:
-        images = [cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) for img in images]
+        images = [grayscale_to_rgb(image) for image in images]
 
     pillow_img, *pillow_imgs = [Image.fromarray(img) for img in images]
 
@@ -125,6 +141,33 @@ def save_to_gif(images, filename, fps=20):
         optimize=False,
     )
     return print(f"Succesfully saved GIF to -> {filename}")
+
+
+def save_to_mp4(images, filename, fps=20):
+    """Saves a sequence of images to .mp4 file.
+    Args:
+        images: list of images (numpy arrays). Must have shape
+            (n_frames, height, width, channels). If channel axis is not present,
+            grayscale image is assumed, which is then converted to RGB.
+        filename: string containing filename to which data should be written.
+        fps: frames per second of rendered format.
+    """
+    images = np.array(images)
+
+    # convert grayscale images to RGB
+    if len(images[0].shape) == 2:
+        images = np.array([grayscale_to_rgb(image) for image in images])
+
+    filename = str(filename)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    _, height, width, _ = images.shape
+    video_writer = cv2.VideoWriter(filename, fourcc, fps, (width, height))
+
+    for image in images:
+        video_writer.write(image)
+
+    video_writer.release()
+    return print(f"Successfully saved MP4 to -> {filename}")
 
 
 def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict:

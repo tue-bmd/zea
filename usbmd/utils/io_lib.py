@@ -5,6 +5,7 @@ Use to quickly read and write files or interact with file system.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : October 12th, 2023
 """
+
 import abc
 import asyncio
 import os
@@ -159,6 +160,7 @@ def load_image(filename, grayscale=True):
         image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     return image
 
+
 def green(text):
     """Print text in green color."""
     return f"\033[92m{text}\033[0m"
@@ -167,6 +169,7 @@ def green(text):
 def red(text):
     """Print text in red color."""
     return f"\033[91m{text}\033[0m"
+
 
 def search_file_tree(directory, filetypes=None, write=True):
     """Lists all files in directory and sub-directories.
@@ -617,7 +620,7 @@ class ImageViewerMatplotlib(ImageViewer):
 
                 # these only need to be set once
                 if self.init_figure_props:
-                    if self.cax_kwargs is not None:
+                    if self.cax_kwargs:
                         divider = make_axes_locatable(self.ax)
                         if "color" in self.cax_kwargs:
                             color = self.cax_kwargs.pop("color")
