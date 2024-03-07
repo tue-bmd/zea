@@ -288,6 +288,17 @@ class Scan:
         if selected_transmits is None:
             return list(range(self._n_tx))
 
+        # Convert numpy array to list or single integer
+        if isinstance(selected_transmits, np.ndarray):
+            if len(np.shape(selected_transmits)) == 0:
+                selected_transmits = int(selected_transmits)
+            elif len(np.shape(selected_transmits)) == 1:
+                selected_transmits = selected_transmits.tolist()
+            else:
+                raise ValueError(
+                    f"Invalid shape for selected_transmits: {np.shape(selected_transmits)}."
+                )
+
         # 'all', 'center'
         if isinstance(selected_transmits, str):
             if selected_transmits == "all":
