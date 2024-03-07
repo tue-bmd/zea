@@ -8,11 +8,12 @@ import datetime
 import functools
 import hashlib
 import platform
-import warnings
 
 import cv2
 import numpy as np
 from PIL import Image
+
+from usbmd.utils import log
 
 
 def translate(array, range_from, range_to):
@@ -103,7 +104,7 @@ def save_to_gif(images, filename, fps=20):
         fps: frames per second of rendered format.
     """
     if fps > 50:
-        warnings.warn(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
+        log.warning(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
         fps = 50
 
     duration = 1 / (fps) * 1000  # milliseconds per frame
@@ -124,7 +125,7 @@ def save_to_gif(images, filename, fps=20):
         interlace=False,
         optimize=False,
     )
-    return print(f"Succesfully saved GIF to -> {filename}")
+    return print(f"Succesfully saved GIF to -> {log.yellow(filename)}")
 
 
 def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict:
@@ -167,6 +168,24 @@ def get_date_string(string: str = None):
     date_str = now.strftime(string)
 
     return date_str
+
+
+def date_string_to_readable(date_string: str, include_time: bool = False):
+    """Converts a date string to a more readable format.
+
+    Args:
+        date_string (str): The input date string.
+        include_time (bool, optional): Whether to include the time in the output.
+            Defaults to False.
+
+    Returns:
+        str: The date string in a more readable format.
+    """
+    date = datetime.datetime.strptime(date_string, "%Y_%m_%d_%H%M%S")
+    if include_time:
+        return date.strftime("%B %d, %Y %I:%M %p")
+    else:
+        return date.strftime("%B %d, %Y")
 
 
 def find_first_nonzero_index(arr, axis, invalid_val=-1):
@@ -255,26 +274,17 @@ def deprecated(replacement=None):
             # If it's a function or method
             @functools.wraps(item)
             def wrapper(*args, **kwargs):
-                warnings.warn(
-                    f"Call to deprecated {item.__name__}.", category=DeprecationWarning
-                )
+                log.deprecated(f"Call to deprecated {item.__name__}.")
                 if replacement:
-                    warnings.warn(
-                        f"Use {replacement} instead.", category=DeprecationWarning
-                    )
+                    log.deprecated(f"Use {replacement} instead.")
                 return item(*args, **kwargs)
 
             return wrapper
         else:
             # If it's a property
-            warnings.warn(
-                f"Access to deprecated attribute '{item}'.",
-                category=DeprecationWarning,
-            )
+            log.deprecated(f"Access to deprecated attribute '{item}'.")
             if replacement:
-                warnings.warn(
-                    f"Use {replacement} instead.", category=DeprecationWarning
-                )
+                log.deprecated(f"Use {replacement} instead.")
 
             return item
 
