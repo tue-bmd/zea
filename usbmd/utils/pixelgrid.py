@@ -3,9 +3,10 @@
 - **Author(s)**     : Dongwoon Hyun, Ben Luijten
 - **Date**          : 2020-04-03
 """
-import warnings
 
 import numpy as np
+
+from usbmd.utils import log
 
 eps = 1e-10
 
@@ -46,23 +47,23 @@ def check_for_aliasing(scan):
 
     if scan.Nx and scan.Nz:
         if width / scan.Nx > wvln / 2:
-            warnings.warn(
+            log.warning(
                 f"width/Nx = {width/scan.Nx:.7f} < wvln/2 = {wvln/2}. "
                 f"Consider increasing scan.Nx to {int(width/(wvln/2))} or more."
             )
         if depth / scan.Nz > wvln / 2:
-            warnings.warn(
+            log.warning(
                 f"depth/Nz = {depth/scan.Nz:.7f} < wvln/2 = {wvln/2:.7f}. "
                 f"Consider increasing scan.Nz to {int(depth/(wvln/2))} or more."
             )
     else:
         if dx > wvln / 2:
-            warnings.warn(
+            log.warning(
                 f"dx = {dx:.7f} > wvln/2 = {wvln/2:.7f}. "
                 f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
         if dz > wvln / 2:
-            warnings.warn(
+            log.warning(
                 f"dz = {dz:.7f} > wvln/2 = {wvln/2:.7f}. "
                 f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
