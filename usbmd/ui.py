@@ -39,7 +39,7 @@ from usbmd.utils.io_lib import (
     running_in_notebook,
     start_async_app,
 )
-from usbmd.utils.utils import save_to_gif, strtobool, update_dictionary
+from usbmd.utils.utils import save_to_gif, save_to_mp4, strtobool, update_dictionary
 
 
 class DataLoaderUI:
@@ -500,14 +500,15 @@ class DataLoaderUI:
             images (list): list of images.
             path (str, optional): path to save image to. Defaults to None.
 
-        TODO: can only save gif and not mp4
         """
         if path is None:
             if self.config.plot.tag:
                 tag = "_" + self.config.plot.tag
             else:
                 tag = ""
-            filename = self.file_path.stem + tag + ".gif"
+            filename = (
+                self.file_path.stem + tag + "." + self.config.plot.video_extension
+            )
 
             path = Path("./figures", filename)
             Path("./figures").mkdir(parents=True, exist_ok=True)
@@ -516,7 +517,11 @@ class DataLoaderUI:
             raise ValueError("Images are not numpy arrays.")
 
         fps = self.config.plot.fps
-        save_to_gif(images, path, fps=fps)
+
+        if self.config.plot.video_extension == "gif":
+            save_to_gif(images, path, fps=fps)
+        elif self.config.plot.video_extension == "mp4":
+            save_to_mp4(images, path, fps=fps)
 
         if self.verbose:
             print(f"Video saved to {path}")
