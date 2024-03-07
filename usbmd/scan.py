@@ -5,11 +5,10 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 
-import warnings
-
 import matplotlib.pyplot as plt
 import numpy as np
 
+from usbmd.utils import log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
 
@@ -227,11 +226,11 @@ class Scan:
         self._grid = self.grid
 
         if initial_times is None:
-            warnings.warn("No initial times provided. Assuming all zeros.")
+            log.warning("No initial times provided. Assuming all zeros.")
             initial_times = np.zeros(self._n_tx)
 
         if t0_delays is None:
-            warnings.warn(
+            log.warning(
                 "No t0_delays provided. Assuming all zeros and 128 element probe."
             )
             t0_delays = np.zeros((self._n_tx, self._n_el))
@@ -244,22 +243,22 @@ class Scan:
             )
 
         if tx_apodizations is None:
-            warnings.warn(
+            log.warning(
                 "No tx_apodizations provided. Assuming all ones and "
                 "128 element probe."
             )
             tx_apodizations = np.ones((self._n_tx, self._n_el))
 
         if polar_angles is None:
-            warnings.warn("No polar_angles provided. Assuming all zeros.")
+            log.warning("No polar_angles provided. Assuming all zeros.")
             polar_angles = np.zeros(self._n_tx)
 
         if azimuth_angles is None:
-            warnings.warn("No azimuth_angles provided. Assuming all zeros.")
+            log.warning("No azimuth_angles provided. Assuming all zeros.")
             azimuth_angles = np.zeros(self._n_tx)
 
         if focus_distances is None:
-            warnings.warn("No focus_distances provided. Assuming all zeros.")
+            log.warning("No focus_distances provided. Assuming all zeros.")
             focus_distances = np.zeros(self._n_tx)
 
         self._t0_delays = t0_delays
@@ -368,7 +367,7 @@ class Scan:
     def n_ch(self, value):
         self._n_ch = value
         self._fdemod = None  # Reset fdemod
-        warnings.warn(
+        log.warning(
             f"Resetting fdemod to {self.fdemod} because n_ch was changed to {value}."
         )
 

@@ -15,14 +15,15 @@ TODO:
 - **Author(s)**     : Tristan Stevens
 - **Date**          : April 19th, 2023
 """
+
 import asyncio
-import warnings
 from tkinter import ttk
 from typing import Dict, Optional, Tuple
 
 import usbmd
 from usbmd.common import set_data_paths
 from usbmd.setup_usbmd import setup_config
+from usbmd.utils import log
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config, config_schema
 from usbmd.utils.gui import App
@@ -195,7 +196,7 @@ class USBMDApp(App):
                 self.style.configure("Run.TButton", background=self.button_color)
 
             except Exception as e:
-                warnings.warn(f"Run failed: {e}")
+                log.warning(f"Run failed: {e}")
 
     async def freeze(self):
         """Freeze function"""
@@ -226,7 +227,7 @@ class USBMDApp(App):
 
     def load(self, data=None, entries=None):
         """Load in a new config file"""
-        warnings.warn(
+        log.warning(
             "Loading new config file, functionality not yet robustly implemented. "
             "Excpect some bugs..."
         )
