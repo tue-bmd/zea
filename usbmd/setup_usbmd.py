@@ -16,6 +16,7 @@ from typing import Union
 import yaml
 
 from usbmd.common import set_data_paths
+from usbmd.utils import log
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config
 from usbmd.utils.device import init_device
@@ -104,7 +105,7 @@ def setup_config(
     config = load_config_from_yaml(Path(config_path), loader=loader)
 
     if verbose:
-        print(f"Using config file: {config_path}")
+        log.info(f"Using config file: {log.yellow(config_path)}")
 
     config["git"] = get_git_summary(verbose=verbose)
 
