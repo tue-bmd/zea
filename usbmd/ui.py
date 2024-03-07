@@ -9,7 +9,6 @@ import argparse
 import asyncio
 import sys
 import time
-import warnings
 from pathlib import Path
 from typing import List
 
@@ -142,7 +141,7 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                warnings.warn("Could not connect to display, running headless.")
+                log.warning("Could not connect to display, running headless.")
         else:
             matplotlib.use("agg")
             log.info("Running in headless mode as set by config.")
@@ -207,7 +206,7 @@ class DataLoaderUI:
             self.data = data
 
         if self.to_dtype not in ["image", "image_sc"]:
-            warnings.warn(
+            log.warning(
                 f"Image to_dtype: {self.to_dtype} not supported for displaying data."
                 "falling back to  to_dtype: `image_sc`"
             )
@@ -568,7 +567,7 @@ def main():
         ui = DataLoaderUI(config)
 
         if args.gui:
-            warnings.warn(
+            log.warning(
                 "GUI is very much in beta, please report any bugs to "
                 "https://github.com/tue-bmd/ultrasound-toolbox."
             )
