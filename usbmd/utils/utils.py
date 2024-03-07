@@ -154,6 +154,17 @@ def save_to_mp4(images, filename, fps=20):
     """
     images = np.array(images)
 
+    assert (
+        images.dtype == np.uint8
+    ), f"dtype of images should be uint8 for saving to mp4, got {images.dtype}"
+    assert len(images.shape) in [
+        3,
+        4,
+    ], (
+        "images must have shape (n_frames, height, width, channels),"
+        f" or (n_frames, height, width) for grayscale images. Got {images.shape}"
+    )
+
     # convert grayscale images to RGB
     if len(images[0].shape) == 2:
         images = np.array([grayscale_to_rgb(image) for image in images])
