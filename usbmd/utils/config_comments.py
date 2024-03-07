@@ -168,6 +168,8 @@ DESCRIPTIONS = {
         ),
         "tag": "The name for the plot",
         "fliplr": "Set to true to flip the image left to right",
+        "image_extension": "The file extension to use when saving the image (png, jpg)",
+        "video_extension": "The file extension to use when saving the video (mp4, gif)",
     },
 }
 
