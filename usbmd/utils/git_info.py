@@ -8,7 +8,8 @@ Data          : January 27th, 2023
 
 import subprocess
 import sys
-import warnings
+
+from usbmd.utils import log
 
 
 def get_git_commit_hash():
@@ -35,11 +36,10 @@ def get_git_summary(verbose=False):
     try:
         git_summary = get_git_branch() + "=" + get_git_commit_hash()
         if verbose:
-            print("Git branch and commit: ")
-            print(git_summary)
+            log.info(f"Git branch and commit: {git_summary}")
         return git_summary
     except Exception:
-        warnings.warn("Cannot find Git")
+        log.warning("Cannot find Git")
 
 
 if __name__ == "__main__":

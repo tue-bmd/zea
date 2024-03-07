@@ -4,8 +4,8 @@ displayed as an image with matplotlib.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 24/02/2023
 """
+
 import tkinter as tk
-import warnings
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Union
@@ -23,6 +23,7 @@ from skimage import measure
 from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
 
+from usbmd.utils import log
 from usbmd.utils.io_lib import (
     _SUPPORTED_VID_TYPES,
     filename_from_window_dialog,
@@ -415,11 +416,9 @@ def extract_polygon_from_mask(mask, tolerance: float = 0.01):
     if len(contours) > 1:
         contour_lengths = [len(contour) for contour in contours]
         contour = contours[np.argmax(contour_lengths)]
-        warnings.warn(
-            "Warning: multiple contours found. Returning the largest contour."
-        )
+        log.warning("Warning: multiple contours found. Returning the largest contour.")
     elif len(contours) == 0:
-        warnings.warn("Warning: no contours found. Returning None.")
+        log.warning("Warning: no contours found. Returning None.")
         return None
     else:
         contour = contours[0]
@@ -527,7 +526,7 @@ def equalize_polygons(polygons, mode="max"):
 
     # give warning if difference in min / max vertices is large
     if num_vertices < 0.8 * max(polygon.shape[0] for polygon in polygons):
-        warnings.warn(
+        log.warning(
             "Warning: difference in number of vertices is large. "
             "Possibly due to large difference in polygon size."
         )
