@@ -7,7 +7,6 @@ beamforming grid.
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 from usbmd.utils import log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
@@ -340,6 +339,9 @@ class Scan:
             )
 
             return selected_transmits
+
+        # Catch all other cases
+        raise ValueError(f"Invalid value for selected_transmits: {selected_transmits}.")
 
     @property
     def selected_transmits(self):
