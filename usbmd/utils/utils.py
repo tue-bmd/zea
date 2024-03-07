@@ -125,7 +125,7 @@ def save_to_gif(images, filename, fps=20):
         interlace=False,
         optimize=False,
     )
-    return print(f"Succesfully saved GIF to -> {log.yellow(filename)}")
+    return log.succes(f"Succesfully saved GIF to -> {log.yellow(filename)}")
 
 
 def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict:
