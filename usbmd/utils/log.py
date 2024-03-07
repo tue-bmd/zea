@@ -3,12 +3,13 @@ to the console and to a file with color support.
 
 ## Example usage
 ```python
-import usbmd.utils.log as log
+from usbmd.utils import log
 
 log.info("This is an info message")
 path = "data/datafile.hdf5"
 print(f"Saved to {log.yellow(path)}")
 """
+
 import logging
 import re
 import sys
@@ -167,6 +168,14 @@ def warning(message, *args, **kwargs):
     """Prints a message with log level warning."""
     logger.warning(message, *args, **kwargs)
     file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
+
+
+def deprecated(message, *args, **kwargs):
+    """Prints a message with log level warning."""
+    logger.warning(f"DEPRECATED: {message}", *args, **kwargs)
+    file_logger.warning(
+        remove_color_escape_codes(f"DEPRECATED: {message}"), *args, **kwargs
+    )
 
 
 def error(message, *args, **kwargs):

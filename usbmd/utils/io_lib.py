@@ -5,11 +5,11 @@ Use to quickly read and write files or interact with file system.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : October 12th, 2023
 """
+
 import abc
 import asyncio
 import os
 import sys
-import warnings
 from collections import deque
 from io import BytesIO
 from multiprocessing.pool import ThreadPool
@@ -32,6 +32,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
+
+from usbmd.utils import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
@@ -159,6 +161,7 @@ def load_image(filename, grayscale=True):
         image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     return image
 
+
 def green(text):
     """Print text in green color."""
     return f"\033[92m{text}\033[0m"
@@ -167,6 +170,7 @@ def green(text):
 def red(text):
     """Print text in red color."""
     return f"\033[91m{text}\033[0m"
+
 
 def search_file_tree(directory, filetypes=None, write=True):
     """Lists all files in directory and sub-directories.
@@ -283,7 +287,7 @@ def get_matplotlib_figure_props(figure):
         else:
             raise ValueError(f"Unsupported backend: {backend_name}")
     except Exception as error:
-        warnings.warn(f"Could not get figure properties: {error}")
+        log.warning(f"Could not get figure properties: {error}")
         position, size = None, None
 
     return position, size
@@ -299,7 +303,7 @@ def raise_matplotlib_window(figname=None):
     # check for backend
     backend = matplotlib.get_backend()
     if backend in ["Qt5Agg", "TkAgg"]:
-        warnings.warn("This function only works with a Qt or Tk graphics backend")
+        log.warning("This function only works with a Qt or Tk graphics backend")
 
     if figname:
         plt.figure(figname)
@@ -351,7 +355,7 @@ def matplotlib_figure_to_numpy(fig):
         image = image.reshape((height, width, 3))
         return image
     except:
-        warnings.warn("Could not convert figure to numpy array.")
+        log.warning("Could not convert figure to numpy array.")
         return np.array([])
 
 
@@ -518,7 +522,7 @@ class ImageViewerOpenCV(ImageViewer):
             # resize the window
             cv2.resizeWindow(self.window_name, width, height)
         except Exception as error:
-            warnings.warn(f"Could not resize window: {error}")
+            log.warning(f"Could not resize window: {error}")
 
     def close(self):
         """Closes the window."""
@@ -589,7 +593,7 @@ class ImageViewerMatplotlib(ImageViewer):
                 win = self.fig.canvas.window()
                 win.setFixedSize(win.size())
             else:
-                warnings.warn(f"Backend {backend} does not support fixed size windows.")
+                log.warning(f"Backend {backend} does not support fixed size windows.")
 
     def show(self, *args, **kwargs) -> None:
         """Displays a frame using matplotlib's imshow function.
