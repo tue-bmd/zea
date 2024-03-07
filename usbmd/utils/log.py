@@ -1,3 +1,14 @@
+"""Wrapper around python logging module to provide a simple interface for logging both
+to the console and to a file with color support.
+
+## Example usage
+```python
+import usbmd.utils.log as log
+
+log.info("This is an info message")
+path = "data/datafile.hdf5"
+print(f"Saved to {log.yellow(path)}")
+"""
 import logging
 import re
 import sys
@@ -190,6 +201,8 @@ def set_level(level):
 
 def set_file_logger_directory(directory):
     """Sets the log level of the logger."""
+    # Add pylint exception
+    # pylint: disable=global-statement
     global LOG_DIR, file_logger
     LOG_DIR = directory
     # Remove all handlers from the file logger
