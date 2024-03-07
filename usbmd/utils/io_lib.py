@@ -611,7 +611,7 @@ class ImageViewerMatplotlib(ImageViewer):
 
                 # these only need to be set once
                 if self.init_figure_props:
-                    if self.cax_kwargs is not None:
+                    if self.cax_kwargs:
                         divider = make_axes_locatable(self.ax)
                         if "color" in self.cax_kwargs:
                             color = self.cax_kwargs.pop("color")

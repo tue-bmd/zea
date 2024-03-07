@@ -176,6 +176,8 @@ plot_schema = Schema(
             *metrics_registry.registered_names()
         ),
         Optional("fliplr", default=False): bool,
+        Optional("image_extension", default="png"): Or("png", "jpg"),
+        Optional("video_extension", default="gif"): Or("mp4", "gif"),
     }
 )
 
