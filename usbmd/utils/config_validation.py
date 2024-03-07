@@ -177,7 +177,7 @@ plot_schema = Schema(
         ),
         Optional("fliplr", default=False): bool,
         Optional("image_extension", default="png"): Or("png", "jpg"),
-        Optional("video_extension", default="avi"): Or("mp4", "gif"),
+        Optional("video_extension", default="gif"): Or("mp4", "gif"),
     }
 )
 
