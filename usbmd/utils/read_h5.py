@@ -3,11 +3,13 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : -
 """
-import warnings
+
 from pathlib import Path
 
 import h5py
 import numpy as np
+
+from usbmd.utils import log
 
 
 class ReadH5:
@@ -129,7 +131,7 @@ class ReadH5:
 
         self.file.visititems(visit_func)
         if not group_info:
-            warnings.warn("hdf5 file does not contain any datasets")
+            log.warning("hdf5 file does not contain any datasets")
             return None
         idx = np.argmax([gi[1] for gi in group_info])
         key_name, _ = group_info[idx]
