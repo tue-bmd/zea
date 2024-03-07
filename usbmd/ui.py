@@ -39,7 +39,7 @@ from usbmd.utils.io_lib import (
     running_in_notebook,
     start_async_app,
 )
-from usbmd.utils.utils import save_to_gif, strtobool, update_dictionary
+from usbmd.utils.utils import save_to_gif, save_to_mp4, strtobool, update_dictionary
 
 
 class DataLoaderUI:
@@ -394,66 +394,74 @@ class DataLoaderUI:
         n_frames = len(self.dataset.h5_reader)
 
         self.verbose = False
-        while True:
-            # first frame is already plotted during initialization of plotting
-            start_time = time.time()
-            frame_counter = 0
-            self.image_viewer.frame_no = 0
-            while frame_counter < n_frames:
-                if self.gui:
-                    await self.gui.check_freeze()
+        # pylint: disable=too-many-nested-blocks
+        try:
+            while True:
+                # first frame is already plotted during initialization of plotting
+                start_time = time.time()
+                frame_counter = 0
+                self.image_viewer.frame_no = 0
+                while frame_counter < n_frames:
+                    if self.gui:
+                        await self.gui.check_freeze()
 
-                await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.01)
 
-                self.config.data.frame_no = frame_counter
+                    self.config.data.frame_no = frame_counter
 
-                if frame_counter == 0:
-                    if self.plot_lib == "matplotlib":
-                        if self.image_viewer.fig is None:
-                            self._init_plt_figure()
-
-                self.image_viewer.show()
-
-                # set counter to frame number of image viewer (possibly not updated)
-                frame_counter = self.image_viewer.frame_no
-
-                # check if frame counter updated
-                if frame_counter != self.config.data.frame_no:
-                    fps = frame_counter / (time.time() - start_time)
-                    print(
-                        f"frame {frame_counter} / {n_frames} ({fps:.2f} fps)",
-                        end="\r",
-                    )
-                    if save and (len(images) < n_frames):
+                    if frame_counter == 0:
                         if self.plot_lib == "matplotlib":
-                            # grab image from plt figure
-                            image = matplotlib_figure_to_numpy(self.fig)
-                        else:
-                            image = np.array(self.image)
-                        images.append(image)
+                            if self.image_viewer.fig is None:
+                                self._init_plt_figure()
 
-                # For opencv, show frame for 25 ms and check if "q" is pressed
-                if self.plot_lib == "opencv":
-                    if cv2.waitKey(25) & 0xFF == ord("q"):
-                        self.image_viewer.close()
-                        return images
-                    if self.image_viewer.has_been_closed():
-                        return images
-                # For matplotlib, check if window has been closed
-                elif self.plot_lib == "matplotlib":
-                    if cv2.waitKey(25) and self.image_viewer.has_been_closed():
-                        return images
-                # For headless mode, check if all frames have been plotted
+                    self.image_viewer.show()
+
+                    # set counter to frame number of image viewer (possibly not updated)
+                    frame_counter = self.image_viewer.frame_no
+
+                    # check if frame counter updated
+                    if frame_counter != self.config.data.frame_no:
+                        fps = frame_counter / (time.time() - start_time)
+                        print(
+                            f"frame {frame_counter} / {n_frames} ({fps:.2f} fps)",
+                            end="\r",
+                        )
+                        if save and (len(images) < n_frames):
+                            if self.plot_lib == "matplotlib":
+                                # grab image from plt figure
+                                image = matplotlib_figure_to_numpy(self.fig)
+                            else:
+                                image = np.array(self.image)
+                            images.append(image)
+
+                    # For opencv, show frame for 25 ms and check if "q" is pressed
+                    if self.plot_lib == "opencv":
+                        if cv2.waitKey(25) & 0xFF == ord("q"):
+                            self.image_viewer.close()
+                            return images
+                        if self.image_viewer.has_been_closed():
+                            return images
+                    # For matplotlib, check if window has been closed
+                    elif self.plot_lib == "matplotlib":
+                        if cv2.waitKey(25) and self.image_viewer.has_been_closed():
+                            return images
+                    # For headless mode, check if all frames have been plotted
+                    if self.headless:
+                        if len(images) == n_frames:
+                            return images
+
+                # clear line, frame number
+                print("\x1b[2K", end="\r")
+
+                # only loop once if in headless mode
                 if self.headless:
-                    if len(images) == n_frames:
-                        return images
+                    return images
 
-            # clear line, frame number
-            print("\x1b[2K", end="\r")
-
-            # only loop once if in headless mode
-            if self.headless:
-                return images
+        except KeyboardInterrupt:
+            if save:
+                if len(images) > 0:
+                    self.save_video(images)
+            raise
 
     def save_image(self, fig, path=None):
         """Save image to disk.
@@ -475,10 +483,13 @@ class DataLoaderUI:
                     + "-"
                     + str(self.dataset.frame_no)
                     + tag
-                    + ".png"
+                    + "."
+                    + self.config.plot.image_extension
                 )
             else:
-                filename = self.file_path.stem + tag + ".png"
+                filename = (
+                    self.file_path.stem + tag + "." + self.config.plot.image_extension
+                )
 
             path = Path("./figures", filename)
             Path("./figures").mkdir(parents=True, exist_ok=True)
@@ -500,14 +511,15 @@ class DataLoaderUI:
             images (list): list of images.
             path (str, optional): path to save image to. Defaults to None.
 
-        TODO: can only save gif and not mp4
         """
         if path is None:
             if self.config.plot.tag:
                 tag = "_" + self.config.plot.tag
             else:
                 tag = ""
-            filename = self.file_path.stem + tag + ".gif"
+            filename = (
+                self.file_path.stem + tag + "." + self.config.plot.video_extension
+            )
 
             path = Path("./figures", filename)
             Path("./figures").mkdir(parents=True, exist_ok=True)
@@ -516,7 +528,11 @@ class DataLoaderUI:
             raise ValueError("Images are not numpy arrays.")
 
         fps = self.config.plot.fps
-        save_to_gif(images, path, fps=fps)
+
+        if self.config.plot.video_extension == "gif":
+            save_to_gif(images, path, fps=fps)
+        elif self.config.plot.video_extension == "mp4":
+            save_to_mp4(images, path, fps=fps)
 
         if self.verbose:
             log.info(f"Video saved to {log.yellow(path)}")
