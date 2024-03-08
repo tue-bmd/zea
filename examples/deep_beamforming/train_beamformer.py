@@ -11,12 +11,15 @@ This script should be compatible with plane wave data in USBMD format.
 
 """
 
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
@@ -50,7 +53,7 @@ def train_beamformer(config):
     scan_params["Nx"] = 128
     scan_params["Nz"] = 128
 
-    scan = scan_class(**scan_params, modtype=config.data.modtype)
+    scan = scan_class(**scan_params)
 
     # initialize probe
     probe = get_probe(dataset.get_probe_name())
@@ -80,8 +83,8 @@ def train_beamformer(config):
     scan_params["Nx"] = 128
     scan_params["Nz"] = 128
 
-    scan = scan_class(**scan_params, modtype=config.data.modtype)
-    scan.angles = np.array([0])
+    scan = scan_class(**scan_params)
+    scan.polar_angles = np.array([0])
 
     inputs = np.expand_dims(dataset[0][0][scan.selected_transmits], axis=0)
 
