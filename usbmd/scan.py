@@ -4,9 +4,10 @@ beamforming grid.
 - **Author(s)**     : Vincent van de Schaft
 - **Date**          : Wed Feb 15 2024
 """
-import tensorflow as tf
+
 import matplotlib.pyplot as plt
 import numpy as np
+import tensorflow as tf
 from usbmd.utils import log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
@@ -275,26 +276,7 @@ class Scan:
         if isinstance(value, np.ndarray):
             if value.dtype == np.float64:
                 value = value.astype(np.float32)
-
-        value = self.convert_to_tensor(name, value)
         super().__setattr__(name, value)
-
-    def convert_to_tensor(self, name, value):
-        """Converts a value to a tf tensor if it is not already a tensor."""
-        if value is None and name != 'grid': # Do not convert None to tensor
-            return None
-        if name == '_selected_transmits' or name == 'selected_transmits':
-            return value # Do not convert selected_transmits to tensor
-        if not isinstance(value, tf.Tensor):
-            try:
-                # if isinstance(value, np.ndarray):
-                #     dtype = value.dtype
-                # else:
-                #     dtype = type(value)
-                value = tf.convert_to_tensor(value)
-            except Exception as e:
-                log.warning(f"Failed to convert value of type {type(value)} to tensor.")
-        return value
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -535,6 +517,28 @@ class Scan:
             self._grid = get_grid(self)
             self._Nz, self._Nx, _ = self._grid.shape
         return self._grid
+
+    def tf_snapshot(self) -> dict:
+        """Returns a snapshot of the scan parameters as a dictionary of tensors.
+
+        Returns:
+            dict: The scan parameters as a dictionary of tensors.
+        """
+        class dotdict(dict):
+            """dot.notation access to dictionary attributes"""
+            __getattr__ = dict.get
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        snapshot = dotdict()
+        for key, value in self.__dict__.items():
+            if key[0] == "_":
+                    key = key[1:]
+            if isinstance(value, (np.ndarray, int, float)):
+                snapshot[key] = tf.convert_to_tensor(value)
+            elif value is None:
+                snapshot[key] = tf.constant(False)
+        return snapshot
 
 
 class FocussedScan(Scan):
