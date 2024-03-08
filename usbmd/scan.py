@@ -281,8 +281,8 @@ class Scan:
 
     def convert_to_tensor(self, name, value):
         """Converts a value to a tf tensor if it is not already a tensor."""
-        if value is None: # Do not convert None to tensor
-            return value
+        if value is None and name != 'grid': # Do not convert None to tensor
+            return None
         if name == '_selected_transmits' or name == 'selected_transmits':
             return value # Do not convert selected_transmits to tensor
         if not isinstance(value, tf.Tensor):
