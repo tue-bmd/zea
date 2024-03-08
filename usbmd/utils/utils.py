@@ -141,7 +141,7 @@ def save_to_gif(images, filename, fps=20):
         interlace=False,
         optimize=False,
     )
-    return log.succes(f"Succesfully saved GIF to -> {log.yellow(filename)}")
+    return log.success(f"Succesfully saved GIF to -> {log.yellow(filename)}")
 
 
 def save_to_mp4(images, filename, fps=20):
@@ -179,7 +179,7 @@ def save_to_mp4(images, filename, fps=20):
         video_writer.write(image)
 
     video_writer.release()
-    return log.succes(f"Successfully saved MP4 to -> {filename}")
+    return log.success(f"Successfully saved MP4 to -> {filename}")
 
 
 def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict:

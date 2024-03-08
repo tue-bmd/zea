@@ -168,7 +168,7 @@ def remove_color_escape_codes(text):
     return escape_code_pattern.sub("", text)
 
 
-def succes(message):
+def success(message):
     """Prints a message to the console in green."""
     logger.info(green(message))
     file_logger.info(remove_color_escape_codes(message))
