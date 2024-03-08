@@ -12,7 +12,6 @@ import platform
 import cv2
 import numpy as np
 from PIL import Image
-
 from usbmd.utils import log
 
 
@@ -328,19 +327,60 @@ def deprecated(replacement=None):
             # If it's a function or method
             @functools.wraps(item)
             def wrapper(*args, **kwargs):
-                log.deprecated(f"Call to deprecated {item.__name__}.")
                 if replacement:
-                    log.deprecated(f"Use {replacement} instead.")
+                    log.deprecated(
+                        f"Call to deprecated {item.__name__}."
+                        f" Use {replacement} instead."
+                    )
+                else:
+                    log.deprecated(f"Call to deprecated {item.__name__}.")
                 return item(*args, **kwargs)
 
             return wrapper
-        else:
-            # If it's a property
-            log.deprecated(f"Access to deprecated attribute '{item}'.")
-            if replacement:
-                log.deprecated(f"Use {replacement} instead.")
+        elif isinstance(item, property):
+            # If it's a property of a class
+            def getter(self):
+                if replacement:
+                    log.deprecated(
+                        f"Access to deprecated attribute {item.fget.__name__}, "
+                        f"use {replacement} instead."
+                    )
+                else:
+                    log.deprecated(
+                        f"Access to deprecated attribute {item.fget.__name__}."
+                    )
+                return item.fget(self)
 
-            return item
+            def setter(self, value):
+                if replacement:
+                    log.deprecated(
+                        f"Setting value to deprecated attribute {item.fget.__name__}, "
+                        f"use {replacement} instead."
+                    )
+                else:
+                    log.deprecated(
+                        f"Setting value to deprecated attribute {item.fget.__name__}."
+                    )
+                item.fset(self, value)
+
+            def deleter(self):
+                if replacement:
+                    log.deprecated(
+                        f"Deleting deprecated attribute {item.fget.__name__}, "
+                        f"use {replacement} instead."
+                    )
+                else:
+                    log.deprecated(
+                        f"Deleting deprecated attribute {item.fget.__name__}."
+                    )
+                item.fdel(self)
+
+            return property(getter, setter, deleter)
+
+        else:
+            raise TypeError(
+                "Decorator can only be applied to functions, methods, or properties."
+            )
 
     return decorator
 
