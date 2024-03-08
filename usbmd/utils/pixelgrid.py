@@ -46,12 +46,12 @@ def check_for_aliasing(scan):
     depth = scan.zlims[1] - scan.zlims[0]
 
     if scan.Nx and scan.Nz:
-        if width / scan.Nx > wvln / 2:
+        if width / float(scan.Nx) > wvln / 2:
             log.warning(
                 f"width/Nx = {width/scan.Nx:.7f} < wvln/2 = {wvln/2}. "
                 f"Consider increasing scan.Nx to {int(width/(wvln/2))} or more."
             )
-        if depth / scan.Nz > wvln / 2:
+        if depth / float(scan.Nz) > wvln / 2:
             log.warning(
                 f"depth/Nz = {depth/scan.Nz:.7f} < wvln/2 = {wvln/2:.7f}. "
                 f"Consider increasing scan.Nz to {int(depth/(wvln/2))} or more."
