@@ -22,6 +22,11 @@ file_logger = None
 LOG_DIR = Path("log")
 
 
+DEPRECATED_LEVEL_NUM = logging.WARNING + 5
+logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
+logging.DEPRECATED = DEPRECATED_LEVEL_NUM
+
+
 def red(string):
     """Adds ANSI escape codes to print a string in red around the string."""
     return "\033[38;5;196m" + str(string) + "\033[0m"
@@ -71,6 +76,9 @@ class CustomFormatter(logging.Formatter):
             logging.DEBUG: logging.Formatter(
                 ("".join([yellow_fn("%(levelname)s"), " - %(message)s"]))
             ),
+            logging.DEPRECATED: logging.Formatter(
+                ("".join([orange_fn("%(levelname)s"), " - %(message)s"]))
+            ),
             "DEFAULT": logging.Formatter(
                 ("".join([yellow_fn("%(levelname)s"), " - %(message)s"]))
             ),
@@ -89,6 +97,7 @@ def configure_console_logger(level="INFO", color=True):
     assert level in [
         "DEBUG",
         "INFO",
+        "DEPRECATED",
         "WARNING",
         "ERROR",
         "CRITICAL",
@@ -118,6 +127,7 @@ def configure_file_logger(level="INFO"):
     assert level in [
         "DEBUG",
         "INFO",
+        "DEPRECATED",
         "WARNING",
         "ERROR",
         "CRITICAL",
@@ -158,7 +168,7 @@ def remove_color_escape_codes(text):
     return escape_code_pattern.sub("", text)
 
 
-def succes(message):
+def success(message):
     """Prints a message to the console in green."""
     logger.info(green(message))
     file_logger.info(remove_color_escape_codes(message))
@@ -171,10 +181,10 @@ def warning(message, *args, **kwargs):
 
 
 def deprecated(message, *args, **kwargs):
-    """Prints a message with log level warning prefixed with 'DEPRECATED: '."""
-    logger.warning(f"DEPRECATED: {message}", *args, **kwargs)
-    file_logger.warning(
-        remove_color_escape_codes(f"DEPRECATED: {message}"), *args, **kwargs
+    """Prints a message with custom log level DEPRECATED."""
+    logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
+    file_logger.log(
+        DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs
     )
 
 

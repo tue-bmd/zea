@@ -63,9 +63,10 @@ class DataLoaderUI:
         if len(default_scan_params) == 0:
             log.info(
                 f"Could not find proper scan parameters in {self.dataset} at "
-                f"{log.yellow(str(self.dataset.datafolder))}.\n"
-                "Proceeding without scan class."
+                f"{log.yellow(str(self.dataset.datafolder))}."
             )
+            log.info("Proceeding without scan class.")
+
             self.scan = None
         else:
             config_scan_params = self.config.scan
