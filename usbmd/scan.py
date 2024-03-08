@@ -4,7 +4,7 @@ beamforming grid.
 - **Author(s)**     : Vincent van de Schaft
 - **Date**          : Wed Feb 15 2024
 """
-
+import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
 from usbmd.utils import log
@@ -177,7 +177,7 @@ class Scan:
         #: The wavelength of the modulation carrier [m]
         self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
-        self.pixels_per_wavelength = pixels_per_wvln
+        self.pixels_per_wavelength = float(pixels_per_wvln)
         #: The decimation factor applied after downconverting data to baseband (RF to IQ)
         self.downsample = downsample
         #: The probe geometry of shape (n_el, 3)
@@ -275,7 +275,26 @@ class Scan:
         if isinstance(value, np.ndarray):
             if value.dtype == np.float64:
                 value = value.astype(np.float32)
+
+        value = self.convert_to_tensor(name, value)
         super().__setattr__(name, value)
+
+    def convert_to_tensor(self, name, value):
+        """Converts a value to a tf tensor if it is not already a tensor."""
+        if value is None: # Do not convert None to tensor
+            return value
+        if name == '_selected_transmits' or name == 'selected_transmits':
+            return value # Do not convert selected_transmits to tensor
+        if not isinstance(value, tf.Tensor):
+            try:
+                # if isinstance(value, np.ndarray):
+                #     dtype = value.dtype
+                # else:
+                #     dtype = type(value)
+                value = tf.convert_to_tensor(value)
+            except Exception as e:
+                log.warning(f"Failed to convert value of type {type(value)} to tensor.")
+        return value
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
