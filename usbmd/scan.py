@@ -7,7 +7,6 @@ beamforming grid.
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tensorflow as tf
 from usbmd.utils import log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
