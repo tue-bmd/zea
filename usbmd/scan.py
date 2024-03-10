@@ -518,48 +518,6 @@ class Scan:
             self._Nz, self._Nx, _ = self._grid.shape
         return self._grid
 
-    def tf_snapshot2(self) -> dict:
-        """Returns a snapshot of the scan parameters as a dictionary of tensors.
-
-        Returns:
-            dict: The scan parameters as a dictionary of tensors.
-        """
-        class dotdict(dict):
-            """dot.notation access to dictionary attributes"""
-            __getattr__ = dict.get
-            __setattr__ = dict.__setitem__
-            __delattr__ = dict.__delitem__
-
-        snapshot = dotdict()
-        for key, value in self.__dict__.items():
-            if key[0] == "_":
-                    key = key[1:]
-            if isinstance(value, (np.ndarray, int, float)):
-                snapshot[key] = tf.convert_to_tensor(value)
-            elif value is None:
-                snapshot[key] = tf.constant(False)
-        return snapshot
-
-    def tf_snapshot(self) -> dict:
-        """Returns a snapshot of the scan parameters as a dictionary of tensors.
-
-        Returns:
-            dict: The scan parameters as a dictionary of tensors.
-        """
-        class dotdict(dict):
-            """dot.notation access to dictionary attributes"""
-            __getattr__ = dict.get
-            __setattr__ = dict.__setitem__
-            __delattr__ = dict.__delitem__
-        snapshot = dotdict()
-
-        for key in dir(self):
-            if key[0] != "_":
-                value = getattr(self, key)
-                if isinstance(value, (np.ndarray, int, float)):
-                    snapshot[key] = tf.convert_to_tensor(value)
-        return snapshot
-
 
 class FocussedScan(Scan):
     """
