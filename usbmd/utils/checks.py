@@ -37,7 +37,7 @@ _REQUIRED_SCAN_KEYS = [
 
 _IMAGE_DATA_TYPES = ["image", "image_sc", "envelope_data", "beamformed_data"]
 
-_NON_IMAGE_DATA_TYPES = ["raw_data", "aligned_data", "beamformed_data"]
+_NON_IMAGE_DATA_TYPES = ["raw_data", "aligned_data"]
 
 
 def get_check(data_type):
