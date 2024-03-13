@@ -98,7 +98,7 @@ class CustomFormatter(logging.Formatter):
                 ("".join([name, red_fn("%(levelname)s"), " %(message)s"]))
             ),
             logging.DEBUG: logging.Formatter(
-                ("".join([name, name, yellow_fn("%(levelname)s"), " %(message)s"]))
+                ("".join([name, yellow_fn("%(levelname)s"), " %(message)s"]))
             ),
             logging.DEPRECATED: logging.Formatter(
                 ("".join([name, orange_fn("%(levelname)s"), " %(message)s"]))
