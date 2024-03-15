@@ -174,6 +174,7 @@ class DataLoaderUI:
                 )
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
+            log.info("Please select file from window dialog...")
             self.file_path = filename_from_window_dialog(
                 f"Choose .{filtetype} file",
                 filetypes=((filtetype, "*." + filtetype),),
