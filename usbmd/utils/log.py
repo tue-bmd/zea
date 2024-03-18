@@ -7,7 +7,8 @@ from usbmd.utils import log
 
 log.info("This is an info message")
 path = "data/datafile.hdf5"
-print(f"Saved to {log.yellow(path)}")
+log.info(f"Saved to {log.yellow(path)}")
+
 """
 
 import logging
@@ -20,6 +21,23 @@ logger = None
 file_logger = None
 
 LOG_DIR = Path("log")
+
+
+DEPRECATED_LEVEL_NUM = logging.WARNING + 5
+logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
+logging.DEPRECATED = DEPRECATED_LEVEL_NUM
+
+
+def get_format_fn(name_format):
+    """Returns the format function for the given format name."""
+    return {
+        "red": red,
+        "green": green,
+        "yellow": yellow,
+        "darkgreen": darkgreen,
+        "orange": orange,
+        "bold": bold,
+    }.get(name_format)
 
 
 def red(string):
@@ -37,7 +55,7 @@ def yellow(string):
     return "\033[38;5;226m" + str(string) + "\033[0m"
 
 
-def blue(string):
+def darkgreen(string):
     """Adds ANSI escape codes to print a string in blue around the string."""
     return "\033[38;5;36m" + str(string) + "\033[0m"
 
@@ -47,32 +65,46 @@ def orange(string):
     return "\033[38;5;214m" + str(string) + "\033[0m"
 
 
+def bold(string):
+    """Adds ANSI escape codes to print a string in bold around the string."""
+    return "\033[1m" + str(string) + "\033[0m"
+
+
 class CustomFormatter(logging.Formatter):
     """Custom formatter to use different format strings for different log levels"""
 
-    def __init__(self, color=True):
+    def __init__(self, name=None, color=True, name_color="darkgreen"):
         super().__init__()
 
-        blue_fn = blue if color else lambda x: x
+        if name is None:
+            name = ""
+        else:
+            if color:
+                color_fn_name = get_format_fn(name_color)
+                name = f"{bold(color_fn_name(name))}: "
+            else:
+                name = f"{name}: "
+
         orange_fn = orange if color else lambda x: x
         red_fn = red if color else lambda x: x
         yellow_fn = yellow if color else lambda x: x
 
         self.FORMATS = {
-            logging.INFO: logging.Formatter(
-                ("".join([blue_fn("%(levelname)s"), " - %(message)s"]))
-            ),
+            logging.INFO: logging.Formatter(("".join([name, "%(message)s"]))),
             logging.WARNING: logging.Formatter(
-                ("".join([orange_fn("%(levelname)s"), " - %(message)s"]))
+                ("".join([name, orange_fn("%(levelname)s"), " %(message)s"]))
             ),
             logging.ERROR: logging.Formatter(
-                ("".join([red_fn("%(levelname)s"), " - %(message)s"]))
+                ("".join([name, red_fn("%(levelname)s"), " %(message)s"]))
             ),
             logging.DEBUG: logging.Formatter(
-                ("".join([yellow_fn("%(levelname)s"), " - %(message)s"]))
+                ("".join([name, yellow_fn("%(levelname)s"), " %(message)s"]))
+            ),
+            logging.DEPRECATED: logging.Formatter(
+                ("".join([name, orange_fn("%(levelname)s"), " %(message)s"]))
             ),
             "DEFAULT": logging.Formatter(
-                ("".join([yellow_fn("%(levelname)s"), " - %(message)s"]))
+                ("".join([name, yellow_fn("%(levelname)s"), " %(message)s"]))
             ),
         }
 
@@ -81,7 +113,9 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def configure_console_logger(level="INFO", color=True):
+def configure_console_logger(
+    level="INFO", name=None, color=True, name_color="darkgreen"
+):
     """
     Configures a simple console logger with the givel level.
     A usecase is to change the formatting of the default handler of the root logger
@@ -89,6 +123,7 @@ def configure_console_logger(level="INFO", color=True):
     assert level in [
         "DEBUG",
         "INFO",
+        "DEPRECATED",
         "WARNING",
         "ERROR",
         "CRITICAL",
@@ -98,7 +133,7 @@ def configure_console_logger(level="INFO", color=True):
     new_logger = logging.getLogger("my_logger")
     new_logger.setLevel(level)
 
-    formatter = CustomFormatter(color)
+    formatter = CustomFormatter(name, color, name_color)
 
     # stdout stream handler if no handler is configured
     if not new_logger.hasHandlers():
@@ -118,6 +153,7 @@ def configure_file_logger(level="INFO"):
     assert level in [
         "DEBUG",
         "INFO",
+        "DEPRECATED",
         "WARNING",
         "ERROR",
         "CRITICAL",
@@ -158,48 +194,55 @@ def remove_color_escape_codes(text):
     return escape_code_pattern.sub("", text)
 
 
-def succes(message):
+def success(message):
     """Prints a message to the console in green."""
     logger.info(green(message))
     file_logger.info(remove_color_escape_codes(message))
+    return message
 
 
 def warning(message, *args, **kwargs):
     """Prints a message with log level warning."""
     logger.warning(message, *args, **kwargs)
     file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
+    return message
 
 
 def deprecated(message, *args, **kwargs):
-    """Prints a message with log level warning prefixed with 'DEPRECATED: '."""
-    logger.warning(f"DEPRECATED: {message}", *args, **kwargs)
-    file_logger.warning(
-        remove_color_escape_codes(f"DEPRECATED: {message}"), *args, **kwargs
+    """Prints a message with custom log level DEPRECATED."""
+    logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
+    file_logger.log(
+        DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs
     )
+    return message
 
 
 def error(message, *args, **kwargs):
     """Prints a message with log level error."""
     logger.error(message, *args, **kwargs)
     file_logger.error(remove_color_escape_codes(message), *args, **kwargs)
+    return message
 
 
 def debug(message, *args, **kwargs):
     """Prints a message with log level debug."""
     logger.debug(message, *args, **kwargs)
     file_logger.debug(remove_color_escape_codes(message), *args, **kwargs)
+    return message
 
 
 def info(message, *args, **kwargs):
     """Prints a message with log level info."""
     logger.info(message, *args, **kwargs)
     file_logger.info(remove_color_escape_codes(message), *args, **kwargs)
+    return message
 
 
 def critical(message, *args, **kwargs):
     """Prints a message with log level critical."""
     logger.critical(message, *args, **kwargs)
     file_logger.critical(message, *args, **kwargs)
+    return message
 
 
 def set_level(level):
@@ -222,5 +265,10 @@ def set_file_logger_directory(directory):
     file_logger = configure_file_logger(level="DEBUG")
 
 
-logger = configure_console_logger(level="DEBUG", color=True)
+logger = configure_console_logger(
+    level="DEBUG",
+    name="usbmd",
+    color=True,
+    name_color="darkgreen",
+)
 file_logger = configure_file_logger(level="DEBUG")

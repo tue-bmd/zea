@@ -8,7 +8,6 @@ import logging
 from pathlib import Path
 
 import h5py
-
 from usbmd.registry import checks_registry
 
 _DATA_TYPES = [
