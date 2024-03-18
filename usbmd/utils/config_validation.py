@@ -160,6 +160,7 @@ scan_schema = Schema(
         Optional("sampling_frequency", default=None): Or(None, any_number),
         Optional("demodulation_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
+        Optional("f_number", default=None): Or(None, positive_float),
     }
 )
 
