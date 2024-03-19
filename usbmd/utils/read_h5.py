@@ -6,9 +6,9 @@
 
 from pathlib import Path
 
+import sys
 import h5py
 import numpy as np
-import sys
 from usbmd.utils import log
 
 
