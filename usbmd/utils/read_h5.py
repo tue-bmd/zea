@@ -6,9 +6,9 @@
 
 from pathlib import Path
 
+import sys
 import h5py
 import numpy as np
-
 from usbmd.utils import log
 
 
@@ -30,7 +30,16 @@ class ReadH5:
         try:
             self.file = h5py.File(self.file_path, "r")
         except Exception as e:
-            raise ValueError(f"Unable to open HDF5 file: {str(e)}") from e
+            if "Unable to open file" in str(e):
+                log.error(
+                    f"Unable to open file {self.file_path}. It may be locked by another process."
+                )
+                sys.exit(1)
+            elif "No such file or directory" in str(e):
+                log.error(f"File {self.file_path} not found.")
+                sys.exit(1)
+            else:
+                raise e
         return self.file
 
     def close(self):

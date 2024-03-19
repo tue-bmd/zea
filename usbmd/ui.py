@@ -105,7 +105,6 @@ class DataLoaderUI:
         else:
             window_name = "usbmd"
 
-        # if not self.headless:
         if self.plot_lib == "opencv":
             self.image_viewer = ImageViewerOpenCV(
                 self.data_to_display,
@@ -287,12 +286,6 @@ class DataLoaderUI:
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
-        if self.headless:
-            image = self.data_to_display(data)
-            if save:
-                self.save_image(image)
-            return image
-
         assert self.image_viewer is not None, "Image viewer not initialized."
 
         self.image_viewer.threading = False
@@ -501,7 +494,9 @@ class DataLoaderUI:
         elif isinstance(fig, Image.Image):
             fig.save(path)
         else:
-            raise ValueError("Figure is not PIL image or matplotlib figure object.")
+            raise ValueError(
+                f"Figure is not PIL image or matplotlib figure object, got {type(fig)}"
+            )
 
         if self.verbose:
             log.info(f"Image saved to {log.yellow(path)}")
