@@ -493,7 +493,9 @@ class DataLoaderUI:
         elif isinstance(fig, Image.Image):
             fig.save(path)
         else:
-            raise ValueError(f"Figure is not PIL image or matplotlib figure object, got {type(fig)}")
+            raise ValueError(
+                f"Figure is not PIL image or matplotlib figure object, got {type(fig)}"
+            )
 
         if self.verbose:
             log.info(f"Image saved to {log.yellow(path)}")

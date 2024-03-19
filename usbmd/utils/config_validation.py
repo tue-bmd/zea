@@ -32,10 +32,12 @@ for lib in _ML_LIBRARIES:
         if lib == "torch":
             # pylint: disable=unused-import
             import usbmd.pytorch_ultrasound
+
             _ML_LIB_SET = True
         if lib == "tensorflow":
             # pylint: disable=unused-import
             import usbmd.tensorflow_ultrasound
+
             _ML_LIB_SET = True
 
 # pylint: disable=unused-import
@@ -240,6 +242,7 @@ config_schema = Schema(
 
 def check_config(config: Union[dict, Config], verbose: bool = False):
     """Check a config given dictionary"""
+
     def _try_validate_config(config):
         if not _ML_LIB_SET:
             log.warning(
