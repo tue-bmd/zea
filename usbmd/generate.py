@@ -11,7 +11,6 @@ Example:
 """
 from pathlib import Path
 
-import h5py
 import numpy as np
 import tqdm
 
@@ -21,8 +20,9 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.utils import update_dictionary
-
+from usbmd.utils.utils import update_dictionary, get_function_args
+from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
+from usbmd.utils import log
 
 class GenerateDataSet:
     """Class for generating and saving ultrasound dataset to disk."""
@@ -161,7 +161,7 @@ class GenerateDataSet:
                 path = self.get_path_from_name(base_name, ".hdf5")
                 self.save_data(data, path)
 
-        print(f"Succesfully created dataset in {self.destination_folder}")
+        log.success(f"Created dataset in {self.destination_folder}")
         return True
 
     def get_path_from_name(self, name, suffix):
@@ -194,5 +194,25 @@ class GenerateDataSet:
             image (ndarray): input data
             path (str): file path
         """
-        with h5py.File(path, "w") as h5file:
-            h5file[f"data/{self.to_dtype}"] = data
+        file_scan_parameters = self.dataset.get_scan_parameters_from_file(self.dataset.file)
+
+        gen_kwargs = {
+            str(self.to_dtype): data,
+            **file_scan_parameters,
+            "probe_name": self.dataset.file.attrs["probe"],
+            "description": self.dataset.file.attrs["description"],
+        }
+
+        # automatically get correct gen_kwargs for generate_usbmd_dataset function
+        # some scan parameters are not needed for the function and derived from
+        # other parameters. we are only passing the necessary parameters
+        func_args = get_function_args(generate_usbmd_dataset)
+        gen_kwargs = {
+            key: value
+            for key, value in gen_kwargs.items()
+            if key in func_args
+        }
+        generate_usbmd_dataset(
+            path=path,
+            **gen_kwargs,
+        )
