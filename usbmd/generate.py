@@ -123,43 +123,47 @@ class GenerateDataSet:
             range(len(self.dataset)),
             desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
         ):
-            data = self.dataset[idx]
+            try:
+                data = self.dataset[idx]
 
-            single_frame = False
-            if self.config.data.dtype in ["raw_data", "aligned_data"]:
-                if len(data.shape) == 4:
-                    single_frame = True
-            else:
-                if len(data.shape) == 3:
-                    single_frame = True
+                single_frame = False
+                if self.config.data.dtype in ["raw_data", "aligned_data"]:
+                    if len(data.shape) == 4:
+                        single_frame = True
+                else:
+                    if len(data.shape) == 3:
+                        single_frame = True
 
-            if single_frame:
-                data = np.expand_dims(data, axis=0)
+                if single_frame:
+                    data = np.expand_dims(data, axis=0)
 
-            base_name = self.dataset.file_paths[idx]
+                base_name = self.dataset.file_paths[idx]
 
-            if self.filetype == "png":
-                for i, image in enumerate(data):
-                    if single_frame:
-                        name = base_name
-                    else:
-                        name = base_name.parent / str(i)
+                if self.filetype == "png":
+                    for i, image in enumerate(data):
+                        if single_frame:
+                            name = base_name
+                        else:
+                            name = base_name.parent / str(i)
 
-                    path = self.get_path_from_name(name, ".png")
+                        path = self.get_path_from_name(name, ".png")
 
-                    image = self.process.run(
-                        image, self.config.data.dtype, self.to_dtype
-                    )
-                    self.save_image(np.squeeze(image), path)
+                        image = self.process.run(
+                            image, self.config.data.dtype, self.to_dtype
+                        )
+                        self.save_image(np.squeeze(image), path)
 
-            elif self.filetype == "hdf5":
-                data_list = []
-                for d in data:
-                    d = self.process.run(d, self.config.data.dtype, self.to_dtype)
-                    data_list.append(d)
-                data = np.stack(data_list, axis=0)
-                path = self.get_path_from_name(base_name, ".hdf5")
-                self.save_data(data, path)
+                elif self.filetype == "hdf5":
+                    data_list = []
+                    for d in data:
+                        d = self.process.run(d, self.config.data.dtype, self.to_dtype)
+                        data_list.append(d)
+                    data = np.stack(data_list, axis=0)
+                    path = self.get_path_from_name(base_name, ".hdf5")
+                    self.save_data(data, path)
+            except Exception as e:
+                log.error(f"Error processing {base_name}: {e}")
+                raise
 
         log.success(f"Created dataset in {self.destination_folder}")
         return True
