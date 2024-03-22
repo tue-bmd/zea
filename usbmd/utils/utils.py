@@ -411,4 +411,4 @@ def check_architecture():
 def get_function_args(func):
     """Get the names of the arguments of a function."""
     sig = inspect.signature(func)
-    return [param for param in sig.parameters]
+    return tuple(sig.parameters)
