@@ -95,7 +95,7 @@ class GenerateDataSet:
         if destination_folder is None:
             self.destination_folder = (
                 self.dataset.datafolder.parent
-                / f"{self.dataset.config.dataset_name}_image"
+                / f"{self.dataset.config.dataset_name}_{to_dtype}"
             )
         else:
             self.destination_folder = Path(destination_folder)

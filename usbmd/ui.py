@@ -612,7 +612,7 @@ def main():
             ui.run(plot=True)
 
     elif args.task == "generate":
-        destination_folder = _try(lambda: input(">> Give destination folder path: "))
+        destination_folder = _try(lambda: input(">> Give destination folder path (if relative path, will be relative to the original dataset): "))
         to_dtype = _try(
             lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
             required_set=_DATA_TYPES,
