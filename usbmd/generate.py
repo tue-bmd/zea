@@ -9,20 +9,22 @@ Example:
 - **Author(s)**     : Tristan Stevens
 - **Date**          : November 18th, 2021
 """
+
 from pathlib import Path
 
 import numpy as np
 import tqdm
 
+from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
 from usbmd.datasets import get_dataset
 from usbmd.display import to_8bit
 from usbmd.probes import get_probe
 from usbmd.processing import Process
+from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.utils import update_dictionary, get_function_args
-from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
-from usbmd.utils import log
+from usbmd.utils.utils import get_function_args, update_dictionary
+
 
 class GenerateDataSet:
     """Class for generating and saving ultrasound dataset to disk."""
@@ -198,7 +200,9 @@ class GenerateDataSet:
             image (ndarray): input data
             path (str): file path
         """
-        file_scan_parameters = self.dataset.get_scan_parameters_from_file(self.dataset.file)
+        file_scan_parameters = self.dataset.get_scan_parameters_from_file(
+            self.dataset.file
+        )
 
         gen_kwargs = {
             str(self.to_dtype): data,
@@ -212,9 +216,7 @@ class GenerateDataSet:
         # other parameters. we are only passing the necessary parameters
         func_args = get_function_args(generate_usbmd_dataset)
         gen_kwargs = {
-            key: value
-            for key, value in gen_kwargs.items()
-            if key in func_args
+            key: value for key, value in gen_kwargs.items() if key in func_args
         }
         generate_usbmd_dataset(
             path=path,
