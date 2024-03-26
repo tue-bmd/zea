@@ -535,6 +535,25 @@ class DataLoaderUI:
             log.info(f"Video saved to {log.yellow(path)}")
 
 
+def _try(fn, args=None, required_set=None):
+    """Keep trying to run a function until it succeeds.
+    Args:
+        fn (function): function to run
+        args (dict, optional): arguments to pass to function
+        required_set (set, optional): set of required outputs
+            if output is not in required_set, function will be rerun
+    """
+    while True:
+        try:
+            out = fn(**args) if args is not None else fn()
+            if required_set is not None:
+                assert out is not None
+                assert out in required_set, f"Output {out} not in {required_set}"
+            return out
+        except Exception as e:
+            print(e)
+
+
 def get_args():
     """Command line argument parser"""
     parser = argparse.ArgumentParser(description="Process ultrasound data.")
@@ -589,11 +608,23 @@ def main():
             ui.run(plot=True)
 
     elif args.task == "generate":
-        destination_folder = input(">> Give destination folder path: ")
-        to_dtype = input(f">> Specify data type \n{_DATA_TYPES}: ")
-        retain_folder_structure = input(">> Retain folder structure? (Y/N): ")
-        retain_folder_structure = strtobool(retain_folder_structure)
-        filetype = input(">> Filetype (hdf5, png): ")
+        destination_folder = _try(
+            lambda: input(
+                ">> Give destination folder path"
+                + " (if relative path, will be relative to the original dataset): "
+            )
+        )
+        to_dtype = _try(
+            lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
+            required_set=_DATA_TYPES,
+        )
+        retain_folder_structure = _try(
+            lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
+        )
+        filetype = _try(
+            lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
+        )
+
         generator = GenerateDataSet(
             config,
             to_dtype=to_dtype,
