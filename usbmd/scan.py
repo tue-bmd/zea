@@ -7,6 +7,7 @@ beamforming grid.
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 from usbmd.utils import log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
@@ -178,7 +179,7 @@ class Scan:
         #: The wavelength of the modulation carrier [m]
         self.wvln = self.sound_speed / self.fc
         #: The number of pixels per wavelength in the beamforming grid
-        self.pixels_per_wavelength = pixels_per_wvln
+        self.pixels_per_wavelength = float(pixels_per_wvln)
         #: The decimation factor applied after downconverting data to baseband (RF to IQ)
         self.downsample = downsample
         #: The probe geometry of shape (n_el, 3)
@@ -290,6 +291,17 @@ class Scan:
         if selected_transmits is None:
             return list(range(self._n_tx))
 
+        # Convert numpy array to list or single integer
+        if isinstance(selected_transmits, np.ndarray):
+            if len(np.shape(selected_transmits)) == 0:
+                selected_transmits = int(selected_transmits)
+            elif len(np.shape(selected_transmits)) == 1:
+                selected_transmits = selected_transmits.tolist()
+            else:
+                raise ValueError(
+                    f"Invalid shape for selected_transmits: {np.shape(selected_transmits)}."
+                )
+
         # 'all', 'center'
         if isinstance(selected_transmits, str):
             if selected_transmits == "all":
@@ -331,6 +343,9 @@ class Scan:
             )
 
             return selected_transmits
+
+        # Catch all other cases
+        raise ValueError(f"Invalid value for selected_transmits: {selected_transmits}.")
 
     @property
     def selected_transmits(self):
