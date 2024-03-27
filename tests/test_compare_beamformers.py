@@ -3,8 +3,8 @@
 
 import numpy as np
 
-from .test_pytorch_beamforming import test_das_beamforming as test_torch
-from .test_tensorflow_beamforming import test_das_beamforming as test_tf
+from test_pytorch_beamforming import test_das_beamforming as test_torch
+from test_tensorflow_beamforming import test_das_beamforming as test_tf
 
 
 def test_compare_beamformers():
@@ -16,7 +16,7 @@ def test_compare_beamformers():
         reconstruction_mode="generic", patches=None, compare_gt=False
     )
 
-    MSE = np.mean(np.square(output_torch_pw - output_tf_pw))
+    MSE = np.mean(np.square(output_torch_gen - output_tf_gen))
     print(f"MSE: {MSE}")
     assert MSE < 1e-9
     np.testing.assert_almost_equal(output_torch_pw, output_tf_pw, decimal=2)
