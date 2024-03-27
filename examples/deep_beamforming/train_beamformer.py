@@ -20,6 +20,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+
 from usbmd.datasets import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
@@ -45,14 +46,6 @@ def train_beamformer(config):
 
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
-
-    # Setting the grid size to automatic mode based on pixels per wavelength
-    # We are setting the grid size to 128x128 pixels, which is relatively small, but allows for
-    # faster build and training times. For a real application, we recommend using a larger grid,
-    # e.g. by setting Nx and Nz to None, such that the grid size is determined automatically.
-    scan_params["Nx"] = 128
-    scan_params["Nz"] = 128
-
     scan = scan_class(**scan_params)
 
     # initialize probe
@@ -62,34 +55,23 @@ def train_beamformer(config):
     # pylint: disable=unexpected-keyword-arg
     target_beamformer = get_beamformer(probe, scan, config)
     print("Creating target data...")
-    data = dataset[0][0][
-        scan.selected_transmits
-    ]  # Select the transmits as defined in the config
-    targets = target_beamformer.predict(np.expand_dims(data, axis=0), batch_size=1)
+    data = dataset[0][scan.selected_transmits][None, ...]
+    targets = target_beamformer.predict(data, batch_size=1)
 
     ## Create the beamforming model
     # Only use the center angle for training
     config.scan.selected_transmits = "center"
     config.model.beamformer.type = "able"
-    config.model.beamformer.patches = (
-        1  # No patching needed for the single angle beamformer
-    )
+    config.model.beamformer.patches = 4
     config_scan_params = config.scan
 
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
-
-    # Setting the grid size to automatic mode based on pixels per wavelength
-    scan_params["Nx"] = 128
-    scan_params["Nz"] = 128
-
     scan = scan_class(**scan_params)
-    scan.polar_angles = np.array([0])
 
-    inputs = np.expand_dims(dataset[0][0][scan.selected_transmits], axis=0)
+    inputs = dataset[0][scan.selected_transmits][None, ...]
 
     beamformer = get_beamformer(probe, scan, config)
-    beamformer.summary()
 
     # Get DAS beamformer as reference
     config.model.beamformer.type = "das"
@@ -101,26 +83,27 @@ def train_beamformer(config):
         optimizer=optimizer,
         loss=SMSLE(),
         metrics=SMSLE(),
-        run_eagerly=False,
         jit_compile=True,
     )
 
     ## Augment the data and train the model
     # repeat the inputs and targets N times with noise
-    N = 10
-    inputs = np.repeat(inputs, N, axis=0)
-    targets = np.repeat(targets, N, axis=0)
+    N = 32
+    train_inputs = np.repeat(inputs, N, axis=0)
+    train_targets = np.repeat(targets, N, axis=0)
 
-    # add noise to the inputs based on SNR
-    SNR = 5
-    noise = np.random.normal(0, 1, inputs.shape)
-    noise = noise / np.linalg.norm(noise) * np.linalg.norm(inputs) / SNR
-    inputs += noise
+    # Add noise to the inputs based on SNR
+    SNR = 20
+    noise = np.random.normal(0, 1, train_inputs.shape)
+    noise = noise / np.linalg.norm(noise) * np.linalg.norm(train_inputs) / SNR
+    train_inputs += noise
 
     # Train the model
-    history = beamformer.fit(inputs, targets, epochs=100, batch_size=1, verbose=1)
-    prediction = np.array(beamformer(inputs))
-    das = np.array(das_beamformer(inputs))
+    history = beamformer.fit(
+        train_inputs, train_targets, epochs=100, batch_size=1, verbose=1
+    )
+    prediction = beamformer.predict(inputs, batch_size=1)
+    das = das_beamformer.predict(inputs, batch_size=1)
 
     # Create a Process class to convert the data to an image
     process = Process(config, scan, probe)
@@ -146,10 +129,8 @@ def train_beamformer(config):
 
 if __name__ == "__main__":
     # Load config
-    path_to_config_file = Path.cwd() / "configs/config_usbmd_cirs.yaml"
+    path_to_config_file = Path.cwd() / "configs/config_picmus_rf.yaml"
     config = setup(path_to_config_file)
 
     # Train
     _, beamformer = train_beamformer(config)
-
-    plt.show()
