@@ -62,9 +62,7 @@ def train_beamformer(config):
     # Only use the center angle for training
     config.scan.selected_transmits = "center"
     config.model.beamformer.type = "able"
-    config.model.beamformer.patches = (
-        1  # No patching needed for the single angle beamformer
-    )
+    config.model.beamformer.patches = 4
     config_scan_params = config.scan
 
     # dict merging of manual config and dataset default scan parameters
@@ -90,7 +88,7 @@ def train_beamformer(config):
 
     ## Augment the data and train the model
     # repeat the inputs and targets N times with noise
-    N = 128
+    N = 32
     train_inputs = np.repeat(inputs, N, axis=0)
     train_targets = np.repeat(targets, N, axis=0)
 
@@ -102,7 +100,7 @@ def train_beamformer(config):
 
     # Train the model
     history = beamformer.fit(
-        train_inputs, train_targets, epochs=10, batch_size=1, verbose=1
+        train_inputs, train_targets, epochs=100, batch_size=1, verbose=1
     )
     prediction = beamformer.predict(inputs, batch_size=1)
     das = das_beamformer.predict(inputs, batch_size=1)
