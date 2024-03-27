@@ -37,9 +37,9 @@ class Operation(ABC):
         self._ops = ops
 
     @abstractmethod
-    def process(self, *args, **kwargs):
+    def process(self, data):
         # Process the input data
-        pass
+        return data
 
     def set_ops_pkg(self, ops):
         self.ops = ops
@@ -50,9 +50,20 @@ class Operation(ABC):
             check(data, self.batch_dim)
         return self.process(data, *args, **kwargs)
 
-    def set_params(self, config: Config):
-        # Set the arguments using the config dictionary
+    @property
+    def _ready(self):
+        # Check if the operation is ready to be used
+        # and see if necessary parameters are set
+        return True
+
+    def initialize(self):
+        # Initialize the operation
         pass
+
+    def set_params(self, config: Config, scan: Scan, probe: Probe):
+        self.assign_probe_params(probe)
+        self.assign_scan_params(scan)
+        self.assign_config_params(config)
 
     def assign_config_params(self, config: Config):
         # Assign the config parameters to the operation
@@ -322,6 +333,36 @@ class Demodulate(Operation):
         # self.bandwidth = config.scan.bandwidth_percent
 
 
+class BandPassFilter(Operation):
+    def __init__(self, num_taps=None, fs=None, fc=None, f1=None, f2=None):
+        super().__init__(
+            name="BandPassFilter",
+            input_data_type=None,
+            output_data_type=None,
+        )
+        self.num_taps = num_taps
+        self.fs = fs
+        self.fc = fc
+        self.f1 = f1
+        self.f2 = f2
+
+        if self._ready:
+            self.initialize()
+
+    def initialize(self):
+        self.filter = band_pass_filter(self.num_taps, self.fs, self.f1, self.f2)
+
+    @property
+    def _ready(self):
+        return self.num_taps is not None and self.fs is not None and self.f1 is not None and self.f2 is not None
+
+    def process(self, data):
+        return
+
+    def set_params(self, config):
+
+
+
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
     """Demodulates an RF signal to complex base-band (IQ).
 
@@ -440,3 +481,178 @@ def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
         iq_data = scipy.signal.lfilter(b, a, rf_data, axis=-2) * 2
 
     return iq_data
+
+def apply_multi_band_pass_filter(
+    beamformed_data,
+    params,
+    process=None,
+    to_image=True,
+    with_frame_dim=False,
+):
+    """Applies multiply band pass filters on beamformed data.
+
+    Takes average in image domain of differend band passed filtered data if `to_image` set to true.
+    Data is filtered in the RF / IQ domain. This function also can convert to image domain, since
+    the compounding of filtered beamformed data takes place there (incoherent compounding).
+
+    Args:
+        beamformed_data (ndarray): input data, RF / IQ with shape [..., n_ax, n_el, n_ch].
+            filtering is always applied over the n_ax axis.
+        params (dict): dict with parameters for filter.
+            Should include `num_taps`, `fs`, `fc` and two lists: `freqs` and `bandwidths`
+            which define the filter characteristics. Lengths of those lists should
+            be the same and is equal to the number of filters applied. Optionally the
+            `units` can be specified, which is for instance `Hz` or `MHz`. Defaults to `Hz`.
+        process (processing.Process, optional): process class for converting
+            beamformed data to image domain. Defaults to None. Should be provided if `to_image`
+            is set to True.
+        to_image (bool, optional): Whether to convert to image domain or not.
+        with_frame_dim (bool, optional): Whether to process data with frame (batch of images).
+            Defaults to False. In that case data is processed for a single image.
+
+    Returns:
+        image: resulting image in image domain if `to_image` is set to True. Otherwise, a list
+            is returned with the filtered beamformed_data with size of number of filters applied.
+            each filtered beamformed_data has same shape as input [..., n_ax, n_el, n_ch].
+
+    Example:
+        >>> params = {
+        >>>     'num_taps': 128,
+        >>>     'fs': 50e6,
+        >>>     'fc': 5e6,
+        >>>     'freqs': [-2.5, 0, 2.5],
+        >>>     'bandwidths': [1, 1, 1],
+        >>>     'units': 'MHz'
+        >>> }
+        >>> process = usbmd.processing.Process()
+        >>> image = apply_multi_band_pass_filter(beamformed_data, params, process)
+    """
+    # removing channel axis here (going to complex if IQ) for filtering
+    # adding it back later
+    if (beamformed_data).shape[-1] == 1:
+        modtype = "rf"
+        beamformed_data = np.squeeze(beamformed_data, axis=-1)
+    elif (beamformed_data).shape[-1] == 2:
+        modtype = "iq"
+        beamformed_data = channels_to_complex(beamformed_data, axis=-1)
+    else:
+        raise ValueError(
+            f"Unknown number of channels: {beamformed_data.shape[-1]}, "
+            "should be 1 or 2 for RF / IQ respectively."
+        )
+
+    if to_image:
+        assert (
+            process is not None
+        ), "Please provide process class to convert beamformed data to image domain."
+
+    if "units" in params:
+        units = ["Hz", "kHz", "MHz", "GHz"]
+        factors = [1, 1e3, 1e6, 1e9]
+        unit_factor = factors[units.index(params["units"])]
+    else:
+        unit_factor = 1
+
+    offsets = params["freqs"] * unit_factor
+    bandwidths = params["bandwidths"] * unit_factor
+    num_taps = params["num_taps"]
+    # make sure fs is correct for IQ (downsampled)
+    fs = params["fs"] * unit_factor
+    fc = params["fc"] * unit_factor  # fc is only used when RF
+
+    if modtype == "iq":
+        fc = 0  # fc is automatically set to zero if IQ
+        params = [
+            {"num_taps": num_taps, "fs": fs, "f": fc - offset, "bw": bw}
+            for offset, bw in zip(offsets, bandwidths)
+        ]
+    elif modtype == "rf":
+        params = [
+            {
+                "num_taps": num_taps,
+                "fs": fs,
+                "f1": fc - offset - bw / 2,
+                "f2": fc - offset + bw / 2,
+            }
+            for offset, bw in zip(offsets, bandwidths)
+        ]
+
+    images = []
+    for param in params:
+        if modtype == "iq":
+            filter_weights = low_pass_iq_filter(**param)
+        elif modtype == "rf":
+            filter_weights = band_pass_filter(**param)
+
+        axial_axis = -2
+        data_filtered = ndimage.convolve1d(
+            beamformed_data, filter_weights, mode="wrap", axis=axial_axis
+        )
+
+        # adding back the channel dimension for process pipeline
+        if modtype == "iq":
+            data_filtered = complex_to_channels(data_filtered, axis=-1)
+        else:
+            data_filtered = np.expand_dims(data_filtered, axis=-1)
+        if to_image:
+            env_data = process.envelope_detect(
+                data_filtered, with_frame_dim=with_frame_dim
+            )
+            images_filtered = process.run(
+                env_data,
+                dtype="envelope_data",
+                to_dtype="image",
+                with_frame_dim=with_frame_dim,
+            )
+        else:
+            images_filtered = data_filtered
+
+        images.append(images_filtered)
+
+    # only compound the result in image domain
+    if to_image:
+        images = np.mean(np.stack(images), axis=0)
+    return images
+
+
+def band_pass_filter(num_taps, fs, f1, f2):
+    """Band pass filter
+
+    Args:
+        num_taps (int): number of taps in filter.
+        fs (float): sample frequency in Hz.
+        f1 (float): cutoff frequency in Hz of left band edge.
+        f2 (float): cutoff frequency in Hz of right band edge.
+
+    Returns:
+        ndarray: band pass filter
+    """
+    bpf = signal.firwin(num_taps, [f1, f2], pass_zero=False, fs=fs)
+    return bpf
+
+
+def low_pass_iq_filter(num_taps, fs, f, bw):
+    """Design low pass filter.
+
+    LPF with num_taps points and cutoff at bw / 2
+
+    Args:
+        num_taps (int): number of taps in filter.
+        fs (float): sample frequency.
+        f (float): center frequency.
+        bw (float): bandwidth in Hz.
+    Raises:
+        AssertionError: if cutoff frequency (bw / 2) is not within (0, fs / 2)
+
+    Returns:
+        ndarray: complex LP filter
+    """
+    assert (bw / 2 > 0) & (bw / 2 < fs / 2), log.error(
+        "Cutoff frequency must be within (0, fs / 2), "
+        f"got {bw / 2} Hz, must be within (0, {fs / 2}) Hz"
+    )
+    t_qbp = np.arange(num_taps) / fs
+    lpf = signal.firwin(num_taps, bw / 2, pass_zero=True, fs=fs) * np.exp(
+        1j * 2 * np.pi * f * t_qbp
+    )
+    return lpf
