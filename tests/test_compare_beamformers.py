@@ -3,8 +3,8 @@
 
 import numpy as np
 
-from test_pytorch_beamforming import test_das_beamforming as test_torch
-from test_tensorflow_beamforming import test_das_beamforming as test_tf
+from .test_pytorch_beamforming import test_das_beamforming as test_torch
+from .test_tensorflow_beamforming import test_das_beamforming as test_tf
 
 
 def test_compare_beamformers():
