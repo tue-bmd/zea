@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
-
+from usbmd.utils import log
 from usbmd.registry import metrics_registry
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
@@ -26,14 +26,19 @@ from usbmd.utils.config import Config
 _ML_LIBRARIES = [None, "torch", "tensorflow"]
 
 # need to import ML libraries first for registry
+_ML_LIB_SET = False
 for lib in _ML_LIBRARIES:
     if importlib.util.find_spec(str(lib)):
         if lib == "torch":
             # pylint: disable=unused-import
             import usbmd.pytorch_ultrasound
+
+            _ML_LIB_SET = True
         if lib == "tensorflow":
             # pylint: disable=unused-import
             import usbmd.tensorflow_ultrasound
+
+            _ML_LIB_SET = True
 
 # pylint: disable=unused-import
 import usbmd.utils.metrics
@@ -223,6 +228,7 @@ config_schema = Schema(
             Regex(r"cuda:\d+"),
             Regex(r"gpu:\d+"),
             Regex(r"auto:\d+"),
+            Regex(r"auto:-\d+"),
             None,
         ),
         Optional("hide_devices", default=None): Or(
@@ -236,16 +242,35 @@ config_schema = Schema(
 
 def check_config(config: Union[dict, Config], verbose: bool = False):
     """Check a config given dictionary"""
+
+    def _try_validate_config(config):
+        if not _ML_LIB_SET:
+            log.warning(
+                "No ML library found, note that some functionality may not be available. "
+            )
+            if config.get("ml_library") != "disable":
+                log.warning(
+                    "Setting `ml_library` to `disable`. "
+                    "Make sure to not use any ml_library specific parameters."
+                )
+                config["ml_library"] = "disable"
+        try:
+            config = config_schema.validate(config)
+            return config
+        except Exception as e:
+            log.error(f"Config is not valid: {e}")
+            raise e
+
     assert type(config) in [
         dict,
         Config,
     ], f"Config must be a dictionary or Config object, not {type(config)}"
     if isinstance(config, Config):
         config = config.serialize()
-        config = config_schema.validate(config)
+        config = _try_validate_config(config)
         config = Config(config)
     else:
-        config = config_schema.validate(config)
+        config = _try_validate_config(config)
     if verbose:
-        print("Config is correct")
+        log.success("Config is correct")
     return config
