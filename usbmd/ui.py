@@ -72,7 +72,11 @@ class DataLoaderUI:
             config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
             scan_params = update_dictionary(default_scan_params, config_scan_params)
-            self.scan = scan_class(**scan_params)
+
+            if "n_ax" not in scan_params:
+                self.scan = scan_class(**scan_params, n_ax=2000, n_el=192, n_ch=1)
+            else:
+                self.scan = scan_class(**scan_params)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())

@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 import h5py
+
 from usbmd.registry import checks_registry
 
 _DATA_TYPES = [
@@ -37,7 +38,7 @@ _REQUIRED_SCAN_KEYS = [
 
 _IMAGE_DATA_TYPES = ["image", "image_sc", "envelope_data", "beamformed_data"]
 
-_NON_IMAGE_DATA_TYPES = ["raw_data", "aligned_data"]
+_NON_IMAGE_DATA_TYPES = ["raw_data"]
 
 
 def get_check(data_type):
@@ -334,9 +335,10 @@ def _assert_scan_keys_present(dataset):
     for key in dataset["scan"].keys():
         if key == "probe_geometry":
             correct_shape = (dataset["scan"]["n_el"][()], 3)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`probe_geometry` does not have the correct shape."
+            assert dataset["scan"][key].shape == correct_shape, (
+                "`probe_geometry` does not have the correct shape. "
+                f"Expected shape: {correct_shape}, got shape: {dataset['scan'][key].shape}"
+            )
 
         elif key == "t0_delays":
             correct_shape = (
