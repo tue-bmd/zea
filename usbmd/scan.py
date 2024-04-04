@@ -76,7 +76,7 @@ class Scan:
         n_ch: int = None,
         Nx: int = None,
         Nz: int = None,
-        pixels_per_wvln: int = 3,
+        pixels_per_wvln: int = 4,
         downsample: int = 1,
         polar_angles: np.ndarray = None,
         azimuth_angles: np.ndarray = None,
@@ -236,7 +236,7 @@ class Scan:
             t0_delays = np.zeros((self._n_tx, self._n_el))
         else:
             assert t0_delays.shape == (self._n_tx, self._n_el), (
-                f"t0_delays must have shape (n_tx, n_el). "
+                f"t0_delays must have shape (n_tx, n_el): {self._n_tx, self._n_el}. "
                 f"Got shape {t0_delays.shape}. Please set t0_delays either to None in which "
                 f"case all zeros are assumed, or set the n_tx and n_el params to match the "
                 "t0_delays shape."
@@ -542,7 +542,7 @@ class PlaneWaveScan(Scan):
         n_ax=3328,
         Nx=None,
         Nz=None,
-        pixels_per_wvln=3,
+        pixels_per_wvln=4,
         polar_angles=None,
         azimuth_angles=None,
         tx_apodizations=None,
