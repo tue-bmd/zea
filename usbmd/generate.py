@@ -9,19 +9,21 @@ Example:
 - **Author(s)**     : Tristan Stevens
 - **Date**          : November 18th, 2021
 """
+
 from pathlib import Path
 
-import h5py
 import numpy as np
 import tqdm
 
+from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
 from usbmd.datasets import get_dataset
 from usbmd.display import to_8bit
 from usbmd.probes import get_probe
 from usbmd.processing import Process
+from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
-from usbmd.utils.utils import update_dictionary
+from usbmd.utils.utils import get_function_args, update_dictionary
 
 
 class GenerateDataSet:
@@ -93,7 +95,7 @@ class GenerateDataSet:
         if destination_folder is None:
             self.destination_folder = (
                 self.dataset.datafolder.parent
-                / f"{self.dataset.config.dataset_name}_image"
+                / f"{self.dataset.config.dataset_name}_{to_dtype}"
             )
         else:
             self.destination_folder = Path(destination_folder)
@@ -123,45 +125,49 @@ class GenerateDataSet:
             range(len(self.dataset)),
             desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
         ):
-            data = self.dataset[idx]
+            try:
+                data = self.dataset[idx]
 
-            single_frame = False
-            if self.config.data.dtype in ["raw_data", "aligned_data"]:
-                if len(data.shape) == 4:
-                    single_frame = True
-            else:
-                if len(data.shape) == 3:
-                    single_frame = True
+                single_frame = False
+                if self.config.data.dtype in ["raw_data", "aligned_data"]:
+                    if len(data.shape) == 4:
+                        single_frame = True
+                else:
+                    if len(data.shape) == 3:
+                        single_frame = True
 
-            if single_frame:
-                data = np.expand_dims(data, axis=0)
+                if single_frame:
+                    data = np.expand_dims(data, axis=0)
 
-            base_name = self.dataset.file_paths[idx]
+                base_name = self.dataset.file_paths[idx]
 
-            if self.filetype == "png":
-                for i, image in enumerate(data):
-                    if single_frame:
-                        name = base_name
-                    else:
-                        name = base_name.parent / str(i)
+                if self.filetype == "png":
+                    for i, image in enumerate(data):
+                        if single_frame:
+                            name = base_name
+                        else:
+                            name = base_name.parent / str(i)
 
-                    path = self.get_path_from_name(name, ".png")
+                        path = self.get_path_from_name(name, ".png")
 
-                    image = self.process.run(
-                        image, self.config.data.dtype, self.to_dtype
-                    )
-                    self.save_image(np.squeeze(image), path)
+                        image = self.process.run(
+                            image, self.config.data.dtype, self.to_dtype
+                        )
+                        self.save_image(np.squeeze(image), path)
 
-            elif self.filetype == "hdf5":
-                data_list = []
-                for d in data:
-                    d = self.process.run(d, self.config.data.dtype, self.to_dtype)
-                    data_list.append(d)
-                data = np.stack(data_list, axis=0)
-                path = self.get_path_from_name(base_name, ".hdf5")
-                self.save_data(data, path)
+                elif self.filetype == "hdf5":
+                    data_list = []
+                    for d in data:
+                        d = self.process.run(d, self.config.data.dtype, self.to_dtype)
+                        data_list.append(d)
+                    data = np.stack(data_list, axis=0)
+                    path = self.get_path_from_name(base_name, ".hdf5")
+                    self.save_data(data, path)
+            except Exception as e:
+                log.error(f"Error processing {base_name}: {e}")
+                raise
 
-        print(f"Succesfully created dataset in {self.destination_folder}")
+        log.success(f"Created dataset in {self.destination_folder}")
         return True
 
     def get_path_from_name(self, name, suffix):
@@ -194,5 +200,25 @@ class GenerateDataSet:
             image (ndarray): input data
             path (str): file path
         """
-        with h5py.File(path, "w") as h5file:
-            h5file[f"data/{self.to_dtype}"] = data
+        file_scan_parameters = self.dataset.get_scan_parameters_from_file(
+            self.dataset.file
+        )
+
+        gen_kwargs = {
+            str(self.to_dtype): data,
+            **file_scan_parameters,
+            "probe_name": self.dataset.file.attrs["probe"],
+            "description": self.dataset.file.attrs["description"],
+        }
+
+        # automatically get correct gen_kwargs for generate_usbmd_dataset function
+        # some scan parameters are not needed for the function and derived from
+        # other parameters. we are only passing the necessary parameters
+        func_args = get_function_args(generate_usbmd_dataset)
+        gen_kwargs = {
+            key: value for key, value in gen_kwargs.items() if key in func_args
+        }
+        generate_usbmd_dataset(
+            path=path,
+            **gen_kwargs,
+        )

@@ -105,7 +105,6 @@ class DataLoaderUI:
         else:
             window_name = "usbmd"
 
-        # if not self.headless:
         if self.plot_lib == "opencv":
             self.image_viewer = ImageViewerOpenCV(
                 self.data_to_display,
@@ -286,12 +285,6 @@ class DataLoaderUI:
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
-        if self.headless:
-            image = self.data_to_display(data)
-            if save:
-                self.save_image(image)
-            return image
-
         assert self.image_viewer is not None, "Image viewer not initialized."
 
         self.image_viewer.threading = False
@@ -500,7 +493,9 @@ class DataLoaderUI:
         elif isinstance(fig, Image.Image):
             fig.save(path)
         else:
-            raise ValueError("Figure is not PIL image or matplotlib figure object.")
+            raise ValueError(
+                f"Figure is not PIL image or matplotlib figure object, got {type(fig)}"
+            )
 
         if self.verbose:
             log.info(f"Image saved to {log.yellow(path)}")
@@ -537,6 +532,25 @@ class DataLoaderUI:
 
         if self.verbose:
             log.info(f"Video saved to {log.yellow(path)}")
+
+
+def _try(fn, args=None, required_set=None):
+    """Keep trying to run a function until it succeeds.
+    Args:
+        fn (function): function to run
+        args (dict, optional): arguments to pass to function
+        required_set (set, optional): set of required outputs
+            if output is not in required_set, function will be rerun
+    """
+    while True:
+        try:
+            out = fn(**args) if args is not None else fn()
+            if required_set is not None:
+                assert out is not None
+                assert out in required_set, f"Output {out} not in {required_set}"
+            return out
+        except Exception as e:
+            print(e)
 
 
 def get_args():
@@ -593,11 +607,23 @@ def main():
             ui.run(plot=True)
 
     elif args.task == "generate":
-        destination_folder = input(">> Give destination folder path: ")
-        to_dtype = input(f">> Specify data type \n{_DATA_TYPES}: ")
-        retain_folder_structure = input(">> Retain folder structure? (Y/N): ")
-        retain_folder_structure = strtobool(retain_folder_structure)
-        filetype = input(">> Filetype (hdf5, png): ")
+        destination_folder = _try(
+            lambda: input(
+                ">> Give destination folder path"
+                + " (if relative path, will be relative to the original dataset): "
+            )
+        )
+        to_dtype = _try(
+            lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
+            required_set=_DATA_TYPES,
+        )
+        retain_folder_structure = _try(
+            lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
+        )
+        filetype = _try(
+            lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
+        )
+
         generator = GenerateDataSet(
             config,
             to_dtype=to_dtype,

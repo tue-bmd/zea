@@ -8,7 +8,7 @@ import datetime
 import functools
 import hashlib
 import platform
-
+import inspect
 import cv2
 import numpy as np
 from PIL import Image
@@ -407,3 +407,8 @@ def calculate_file_hash(file_path, omit_line_str=None):
 def check_architecture():
     """Checks the architecture of the system."""
     return platform.uname()[-1]
+
+def get_function_args(func):
+    """Get the names of the arguments of a function."""
+    sig = inspect.signature(func)
+    return tuple(sig.parameters)

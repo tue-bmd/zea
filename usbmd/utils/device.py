@@ -23,7 +23,7 @@ def init_device(
 
             for more details see:
                 pytorch_ultrasound.utils.gpu_config.get_device and
-                tensorflow_ultrasound.utils.gpu_config.set_gpu_usage.
+                tensorflow_ultrasound.utils.gpu_config.get_device.
         hide_devices (int/list): device(s) to hide from the system.
             Examples: 0, or [0,1,2,3]. Can be useful when some GPUs have too
             little tensor cores to be useful for training, or when some GPUs
@@ -44,9 +44,10 @@ def init_device(
         device = get_device(device, verbose=verbose)
     elif ml_library == "tensorflow":
         # pylint: disable=import-outside-toplevel
-        from usbmd.tensorflow_ultrasound.utils.gpu_config import set_gpu_usage
+        from usbmd.tensorflow_ultrasound.utils.gpu_config import get_device
 
-        set_gpu_usage(device, verbose=verbose)
+        device = get_device(device, verbose=verbose)
+
     elif ml_library == "disable" or ml_library is None:
         device = "cpu"
     else:
