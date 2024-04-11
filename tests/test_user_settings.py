@@ -6,9 +6,8 @@ import socket
 from pathlib import Path
 
 import pytest
-import yaml
 
-from usbmd.common import DEFAULT_USER, DEFAULT_USERS_CONFIG_PATH, set_data_paths
+from usbmd.common import set_data_paths
 
 
 def test_set_data_paths():
