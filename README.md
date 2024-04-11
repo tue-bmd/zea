@@ -33,14 +33,14 @@ Prepare: [Setup personal access tokens for organisation](https://docs.github.com
     - **Only select repositories**: _ultrasound-toolbox_
     - **Repository permissions**: Contents = _Read-only_
 2. Find the release you want to install, e.g. [the latest](https://github.com/tue-bmd/ultrasound-toolbox/releases/latest)
-3. `pip install git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}`
-    - e.g. `RELEASE`=v1.2.6
-    - e.g. `RELEASE`=develop
+3. `pip install --no-deps --force-reinstall git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}`
+    - e.g. `RELEASE`=v1.2.7
+    - e.g. `RELEASE`=main
 
 #### Using an SSH key
 
 Alternatively you could use ssh access to the repository and install using:
-`pip install git+ssh://git@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}`
+`pip install --no-deps --force-reinstall git+ssh://git@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}`
 
 SSH might be a bit harder to setup, but is more convenient in the end.
 
@@ -57,6 +57,7 @@ If you get host key errors, you may need to update your known host for Github, s
 - https://stackoverflow.com/questions/40898981/how-to-discover-where-pip-install-gitssh-is-searching-for-ssh-keys
 - https://stackoverflow.com/questions/18683092/how-to-run-ssh-add-on-windows
 - https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement
+- https://stackoverflow.com/questions/19548957/can-i-force-pip-to-reinstall-the-current-version
 
 
 ## Example usage
