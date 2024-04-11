@@ -63,11 +63,45 @@ def generate_example_dataset(path, add_optional_fields=False):
         t0_delays=t0_delays,
         sound_speed=1540,
         tx_apodizations=tx_apodizations,
-        probe_name="example_probe",
+        probe_name="generic",
         focus_distances=focus_distances,
         polar_angles=polar_angles,
         azimuth_angles=azimuth_angles,
     )
+
+
+def validate_input_data(
+    raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc
+):
+    """
+    Validates input data for generate_usbmd_dataset
+
+    Args:
+        raw_data (np.ndarray): The raw data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
+            shape (n_frames, n_z, n_x).
+        beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
+            shape (n_frames, n_z, n_x).
+        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
+        image_sc (np.ndarray): The scan converted ultrasound images to be saved
+            of shape (n_frames, output_size_z, output_size_x).
+    """
+    assert (
+        raw_data is not None
+        or aligned_data is not None
+        or envelope_data is not None
+        or beamformed_data is not None
+        or image is not None
+        or image_sc is not None
+    ), f"At least one of the data types {_DATA_TYPES} must be specified."
+
+    if raw_data is not None:
+        assert (
+            isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
+        ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
 
 
 def generate_usbmd_dataset(
@@ -120,8 +154,8 @@ def generate_usbmd_dataset(
         probe_name (str): The name of the probe.
         description (str): The description of the dataset.
         focus_distances (np.ndarray): The focus distances of shape (n_tx, n_el).
-        polar_angles (np.ndarray): The polar angles of shape (n_el,).
-        azimuth_angles (np.ndarray): The azimuth angles of shape (n_tx,).
+        polar_angles (np.ndarray): The polar angles (radians) of shape (n_el,).
+        azimuth_angles (np.ndarray): The azimuth angles (radians) of shape (n_tx,).
         tx_apodizations (np.ndarray): The transmit delays for each element defining
             the wavefront in seconds of shape (n_tx, n_elem).
             This is the time between the first element firing and the last element firing.
@@ -134,18 +168,17 @@ def generate_usbmd_dataset(
         (h5py.File): The example dataset.
     """
 
-    # Assertions
-    assert (
-        raw_data is not None
-        or aligned_data is not None
-        or envelope_data is not None
-        or beamformed_data is not None
-        or image is not None
-        or image_sc is not None
-    ), f"At least one of the data types {_DATA_TYPES} must be specified."
-
     assert isinstance(probe_name, str), "The probe name must be a string."
     assert isinstance(description, str), "The description must be a string."
+
+    validate_input_data(
+        raw_data=raw_data,
+        aligned_data=aligned_data,
+        envelope_data=envelope_data,
+        beamformed_data=beamformed_data,
+        image=image,
+        image_sc=image_sc,
+    )
 
     # Convert path to Path object
     path = Path(path)
@@ -159,10 +192,6 @@ def generate_usbmd_dataset(
     with h5py.File(path, "w") as dataset:
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
-
-        assert (
-            isinstance(raw_data, np.ndarray) and raw_data.ndim == 5
-        ), "The raw_data must be a numpy array of shape (n_frames, n_tx, n_ax, n_el, n_ch)."
 
         def convert_datatype(x, astype=np.float32):
             return x.astype(astype) if x is not None else None
@@ -184,9 +213,12 @@ def generate_usbmd_dataset(
             [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
         ).shape[0]
         n_tx = first_not_none_shape([raw_data, aligned_data], axis=1)
-        n_el = first_not_none_shape([raw_data, aligned_data], axis=3)
-        n_ax = first_not_none_shape([raw_data, aligned_data], axis=2)
-        n_ch = first_not_none_shape([raw_data, aligned_data], axis=4)
+        n_ax = first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
+        n_el = first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-2)
+        n_ch = first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-1)
+
+        if n_tx is None:
+            n_tx = 1
 
         # Write data group
         data_group = dataset.create_group("data")
@@ -408,6 +440,7 @@ def generate_usbmd_dataset(
         )
 
     validate_dataset(path)
+    print(f"USBMD dataset written to {path}")
 
 
 def load_usbmd_file(
@@ -531,9 +564,5 @@ def load_usbmd_file(
 
         # Initialize the scan object
         scan = Scan(**scan_params)
-
-        # Select only the desired transmits if
-        if data_type in ["raw_data", "aligned_data"]:
-            data = data[:, scan.selected_transmits]
 
         return data, scan, probe

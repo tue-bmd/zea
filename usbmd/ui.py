@@ -4,11 +4,11 @@ the results in a GUI.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : November 18th, 2021
 """
+
 import argparse
 import asyncio
 import sys
 import time
-import warnings
 from pathlib import Path
 from typing import List
 
@@ -28,7 +28,8 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
 from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
+from usbmd.utils import log
+from usbmd.utils.checks import _DATA_TYPES
 from usbmd.utils.config import Config
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
@@ -38,7 +39,7 @@ from usbmd.utils.io_lib import (
     running_in_notebook,
     start_async_app,
 )
-from usbmd.utils.utils import save_to_gif, strtobool, update_dictionary
+from usbmd.utils.utils import save_to_gif, save_to_mp4, strtobool, update_dictionary
 
 
 class DataLoaderUI:
@@ -55,17 +56,23 @@ class DataLoaderUI:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset (if not image data)
-        if self.dtype in _NON_IMAGE_DATA_TYPES:
-            scan_class = self.dataset.get_scan_class()
-            default_scan_params = self.dataset.get_default_scan_parameters()
-            config_scan_params = self.config.scan
+        # Initialize scan based on dataset (if it can find proper scan parameters)
+        scan_class = self.dataset.get_scan_class()
+        default_scan_params = self.dataset.get_default_scan_parameters()
 
+        if len(default_scan_params) == 0:
+            log.info(
+                f"Could not find proper scan parameters in {self.dataset} at "
+                f"{log.yellow(str(self.dataset.datafolder))}."
+            )
+            log.info("Proceeding without scan class.")
+
+            self.scan = None
+        else:
+            config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
             scan_params = update_dictionary(default_scan_params, config_scan_params)
             self.scan = scan_class(**scan_params)
-        else:
-            self.scan = None
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -98,19 +105,18 @@ class DataLoaderUI:
         else:
             window_name = "usbmd"
 
-        if not self.headless:
-            if self.plot_lib == "opencv":
-                self.image_viewer = ImageViewerOpenCV(
-                    self.data_to_display,
-                    window_name=window_name,
-                    num_threads=1,
-                )
-            elif self.plot_lib == "matplotlib":
-                self.image_viewer = ImageViewerMatplotlib(
-                    self.data_to_display,
-                    window_name=window_name,
-                    num_threads=1,
-                )
+        if self.plot_lib == "opencv":
+            self.image_viewer = ImageViewerOpenCV(
+                self.data_to_display,
+                window_name=window_name,
+                num_threads=1,
+            )
+        elif self.plot_lib == "matplotlib":
+            self.image_viewer = ImageViewerMatplotlib(
+                self.data_to_display,
+                window_name=window_name,
+                num_threads=1,
+            )
 
     @property
     def dtype(self):
@@ -135,9 +141,10 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                warnings.warn("Could not connect to display, running headless.")
+                log.warning("Could not connect to display, running headless.")
         else:
-            print("Running in headless mode as set by config.")
+            matplotlib.use("agg")
+            log.info("Running in headless mode as set by config.")
 
     def set_backend_for_notebooks(self):
         """Set backend to QtAgg if running in notebook"""
@@ -159,6 +166,11 @@ class DataLoaderUI:
             else:
                 self.file_path = self.dataset.data_root / path
         else:
+            if self.headless:
+                raise ValueError(
+                    "No file path specified for data file, which is required "
+                    "in headless mode as window dialog cannot be opened."
+                )
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
             self.file_path = filename_from_window_dialog(
@@ -169,7 +181,7 @@ class DataLoaderUI:
             self.config.data.file_path = self.file_path
 
         if self.verbose:
-            print(f"Selected {self.file_path}")
+            log.info(f"Selected {log.yellow(self.file_path)}")
 
         # find file in dataset
         if self.file_path in self.dataset.file_paths:
@@ -180,7 +192,7 @@ class DataLoaderUI:
             )
 
         if self.config.data.get("frame_no") == "all":
-            print("Will run all frames as `all` was chosen in config...")
+            log.info("Will run all frames as `all` was chosen in config...")
 
         data = self.dataset[file_idx]
 
@@ -194,7 +206,7 @@ class DataLoaderUI:
             self.data = data
 
         if self.to_dtype not in ["image", "image_sc"]:
-            warnings.warn(
+            log.warning(
                 f"Image to_dtype: {self.to_dtype} not supported for displaying data."
                 "falling back to  to_dtype: `image_sc`"
             )
@@ -273,9 +285,6 @@ class DataLoaderUI:
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
-        if self.headless:
-            return self.data_to_display(data)
-
         assert self.image_viewer is not None, "Image viewer not initialized."
 
         self.image_viewer.threading = False
@@ -351,7 +360,7 @@ class DataLoaderUI:
     async def run_movie(self, save: bool = False):
         """Run all frames in file in sequence"""
 
-        print('Playing video, press/hold "q" while the window is active to exit...')
+        log.info('Playing video, press/hold "q" while the window is active to exit...')
         self.image_viewer.threading = True
         images = await self._movie_loop(save)
 
@@ -379,62 +388,74 @@ class DataLoaderUI:
         n_frames = len(self.dataset.h5_reader)
 
         self.verbose = False
-        while True:
-            # first frame is already plotted during initialization of plotting
-            start_time = time.time()
-            frame_counter = 0
-            self.image_viewer.frame_no = 0
-            while frame_counter < n_frames:
-                if self.gui:
-                    await self.gui.check_freeze()
+        # pylint: disable=too-many-nested-blocks
+        try:
+            while True:
+                # first frame is already plotted during initialization of plotting
+                start_time = time.time()
+                frame_counter = 0
+                self.image_viewer.frame_no = 0
+                while frame_counter < n_frames:
+                    if self.gui:
+                        await self.gui.check_freeze()
 
-                await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.01)
 
-                self.config.data.frame_no = frame_counter
+                    self.config.data.frame_no = frame_counter
 
-                if frame_counter == 0:
-                    if self.plot_lib == "matplotlib":
-                        if self.image_viewer.fig is None:
-                            self._init_plt_figure()
-
-                self.image_viewer.show()
-
-                # set counter to frame number of image viewer (possibly not updated)
-                frame_counter = self.image_viewer.frame_no
-
-                # check if frame counter updated
-                if frame_counter != self.config.data.frame_no:
-                    fps = frame_counter / (time.time() - start_time)
-                    print(
-                        f"frame {frame_counter} / {n_frames} ({fps:.2f} fps)",
-                        end="\r",
-                    )
-                    if save and (len(images) < n_frames):
+                    if frame_counter == 0:
                         if self.plot_lib == "matplotlib":
-                            # grab image from plt figure
-                            image = matplotlib_figure_to_numpy(self.fig)
-                        else:
-                            image = np.array(self.image)
-                        images.append(image)
+                            if self.image_viewer.fig is None:
+                                self._init_plt_figure()
 
-                # For opencv, show frame for 25 ms and check if "q" is pressed
-                if self.plot_lib == "opencv":
-                    if cv2.waitKey(25) & 0xFF == ord("q"):
-                        self.image_viewer.close()
-                        return images
-                    if self.image_viewer.has_been_closed():
-                        return images
-                # For matplotlib, check if window has been closed
-                elif self.plot_lib == "matplotlib":
-                    if cv2.waitKey(25) and self.image_viewer.has_been_closed():
-                        return images
-                # For headless mode, check if all frames have been plotted
+                    self.image_viewer.show()
+
+                    # set counter to frame number of image viewer (possibly not updated)
+                    frame_counter = self.image_viewer.frame_no
+
+                    # check if frame counter updated
+                    if frame_counter != self.config.data.frame_no:
+                        fps = frame_counter / (time.time() - start_time)
+                        print(
+                            f"frame {frame_counter} / {n_frames} ({fps:.2f} fps)",
+                            end="\r",
+                        )
+                        if save and (len(images) < n_frames):
+                            if self.plot_lib == "matplotlib":
+                                # grab image from plt figure
+                                image = matplotlib_figure_to_numpy(self.fig)
+                            else:
+                                image = np.array(self.image)
+                            images.append(image)
+
+                    # For opencv, show frame for 25 ms and check if "q" is pressed
+                    if self.plot_lib == "opencv":
+                        if cv2.waitKey(25) & 0xFF == ord("q"):
+                            self.image_viewer.close()
+                            return images
+                        if self.image_viewer.has_been_closed():
+                            return images
+                    # For matplotlib, check if window has been closed
+                    elif self.plot_lib == "matplotlib":
+                        if cv2.waitKey(25) and self.image_viewer.has_been_closed():
+                            return images
+                    # For headless mode, check if all frames have been plotted
+                    if self.headless:
+                        if len(images) == n_frames:
+                            return images
+
+                # clear line, frame number
+                print("\x1b[2K", end="\r")
+
+                # only loop once if in headless mode
                 if self.headless:
-                    if len(images) == n_frames:
-                        return images
+                    return images
 
-            # clear line, frame number
-            print("\x1b[2K", end="\r")
+        except KeyboardInterrupt:
+            if save:
+                if len(images) > 0:
+                    self.save_video(images)
+            raise
 
     def save_image(self, fig, path=None):
         """Save image to disk.
@@ -456,10 +477,13 @@ class DataLoaderUI:
                     + "-"
                     + str(self.dataset.frame_no)
                     + tag
-                    + ".png"
+                    + "."
+                    + self.config.plot.image_extension
                 )
             else:
-                filename = self.file_path.stem + tag + ".png"
+                filename = (
+                    self.file_path.stem + tag + "." + self.config.plot.image_extension
+                )
 
             path = Path("./figures", filename)
             Path("./figures").mkdir(parents=True, exist_ok=True)
@@ -469,10 +493,12 @@ class DataLoaderUI:
         elif isinstance(fig, Image.Image):
             fig.save(path)
         else:
-            raise ValueError("Figure is not PIL image or matplotlib figure object.")
+            raise ValueError(
+                f"Figure is not PIL image or matplotlib figure object, got {type(fig)}"
+            )
 
         if self.verbose:
-            print(f"Image saved to {path}")
+            log.info(f"Image saved to {log.yellow(path)}")
 
     def save_video(self, images, path=None):
         """Save video to disk.
@@ -481,14 +507,15 @@ class DataLoaderUI:
             images (list): list of images.
             path (str, optional): path to save image to. Defaults to None.
 
-        TODO: can only save gif and not mp4
         """
         if path is None:
             if self.config.plot.tag:
                 tag = "_" + self.config.plot.tag
             else:
                 tag = ""
-            filename = self.file_path.stem + tag + ".gif"
+            filename = (
+                self.file_path.stem + tag + "." + self.config.plot.video_extension
+            )
 
             path = Path("./figures", filename)
             Path("./figures").mkdir(parents=True, exist_ok=True)
@@ -497,10 +524,33 @@ class DataLoaderUI:
             raise ValueError("Images are not numpy arrays.")
 
         fps = self.config.plot.fps
-        save_to_gif(images, path, fps=fps)
+
+        if self.config.plot.video_extension == "gif":
+            save_to_gif(images, path, fps=fps)
+        elif self.config.plot.video_extension == "mp4":
+            save_to_mp4(images, path, fps=fps)
 
         if self.verbose:
-            print(f"Video saved to {path}")
+            log.info(f"Video saved to {log.yellow(path)}")
+
+
+def _try(fn, args=None, required_set=None):
+    """Keep trying to run a function until it succeeds.
+    Args:
+        fn (function): function to run
+        args (dict, optional): arguments to pass to function
+        required_set (set, optional): set of required outputs
+            if output is not in required_set, function will be rerun
+    """
+    while True:
+        try:
+            out = fn(**args) if args is not None else fn()
+            if required_set is not None:
+                assert out is not None
+                assert out in required_set, f"Output {out} not in {required_set}"
+            return out
+        except Exception as e:
+            print(e)
 
 
 def get_args():
@@ -532,7 +582,7 @@ def main():
         ui = DataLoaderUI(config)
 
         if args.gui:
-            warnings.warn(
+            log.warning(
                 "GUI is very much in beta, please report any bugs to "
                 "https://github.com/tue-bmd/ultrasound-toolbox."
             )
@@ -550,18 +600,30 @@ def main():
             except RuntimeError as e:
                 # probably a better way to handle this...
                 if str(e) == "Event loop stopped before Future completed.":
-                    print("GUI closed.")
+                    log.info("GUI closed.")
                 else:
                     raise e
         else:
             ui.run(plot=True)
 
     elif args.task == "generate":
-        destination_folder = input(">> Give destination folder path: ")
-        to_dtype = input(f">> Specify data type \n{_DATA_TYPES}: ")
-        retain_folder_structure = input(">> Retain folder structure? (Y/N): ")
-        retain_folder_structure = strtobool(retain_folder_structure)
-        filetype = input(">> Filetype (hdf5, png): ")
+        destination_folder = _try(
+            lambda: input(
+                ">> Give destination folder path"
+                + " (if relative path, will be relative to the original dataset): "
+            )
+        )
+        to_dtype = _try(
+            lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
+            required_set=_DATA_TYPES,
+        )
+        retain_folder_structure = _try(
+            lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
+        )
+        filetype = _try(
+            lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
+        )
+
         generator = GenerateDataSet(
             config,
             to_dtype=to_dtype,

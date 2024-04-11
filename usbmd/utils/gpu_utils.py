@@ -3,9 +3,10 @@
 import os
 import shutil
 import subprocess as sp
-import warnings
 
 import pandas as pd
+
+from usbmd.utils import log
 
 
 def check_nvidia_smi():
@@ -37,7 +38,7 @@ def hide_gpus(gpu_ids=None):
     keep_gpu_ids = [x for x in all_gpu_ids if x not in hide_gpu_ids]
 
     if len(keep_gpu_ids) == 0:
-        warnings.warn(
+        log.warning(
             "All GPUs are hidden. Setting CUDA_VISIBLE_DEVICES to an empty string."
         )
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -57,7 +58,7 @@ def get_gpu_memory(verbose=True):
         memory_free_values: list of available memory for each gpu in MiB.
     """
     if not check_nvidia_smi():
-        warnings.warn(
+        log.warning(
             "nvidia-smi is not available. Cannot retrieve GPU memory. Falling back to"
             " CPU.."
         )
@@ -160,7 +161,15 @@ def select_gpus(
             # Automatically select GPUs based on available memory
             num_gpus = int(device.split(":")[1])  # number of GPUs to use
 
-            print(f"Selecting {num_gpus} GPUs based on available memory.")
+            # num_gpus can be -1 which means use all available GPUs
+            if num_gpus == -1:
+                print("Selecting all available GPUs.")
+            elif num_gpus == 0:
+                print("Not using any GPUs.")
+            elif num_gpus == 1:
+                print("Selecting 1 GPU based on available memory.")
+            else:
+                print(f"Selecting {num_gpus} GPUs based on available memory.")
 
             if not isinstance(num_gpus, int):
                 raise ValueError(

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
-
+from usbmd.utils import log
 from usbmd.registry import metrics_registry
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
@@ -26,14 +26,19 @@ from usbmd.utils.config import Config
 _ML_LIBRARIES = [None, "torch", "tensorflow"]
 
 # need to import ML libraries first for registry
+_ML_LIB_SET = False
 for lib in _ML_LIBRARIES:
     if importlib.util.find_spec(str(lib)):
         if lib == "torch":
             # pylint: disable=unused-import
             import usbmd.pytorch_ultrasound
+
+            _ML_LIB_SET = True
         if lib == "tensorflow":
             # pylint: disable=unused-import
             import usbmd.tensorflow_ultrasound
+
+            _ML_LIB_SET = True
 
 # pylint: disable=unused-import
 import usbmd.utils.metrics
@@ -71,8 +76,8 @@ _ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
 # model
 model_schema = Schema(
     {
-        Optional("batch_size", default=8): positive_integer,
-        Optional("patch_shape", default=[8, 8]): list_of_size_two,
+        Optional("batch_size", default=1): positive_integer,
+        Optional("patch_shape", default=None): Or(None, list_of_size_two),
         Optional("beamformer", default={}): {
             Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
             Optional("folds", default=1): positive_integer,
@@ -123,7 +128,7 @@ postprocess_schema = Schema(
                     "min", "max", "threshold", any_number
                 ),
                 Optional("below_threshold", default=True): bool,
-                Optional("threshold_type", default="hard"): "hard",
+                Optional("threshold_type", default="hard"): Or("hard", "soft"),
             },
         ),
         Optional("lista", default=None): Or(bool, None),
@@ -163,42 +168,51 @@ scan_schema = Schema(
     }
 )
 
+# plot
+plot_schema = Schema(
+    {
+        Optional("save", default=False): bool,
+        Optional("plot_lib", default="opencv"): Or(*_ALLOWED_PLOT_LIBS),
+        Optional("fps", default=20): int,
+        Optional("tag", default=None): Or(None, str),
+        Optional("headless", default=False): bool,
+        Optional("selector", default=None): Or(None, "rectangle", "lasso"),
+        Optional("selector_metric", default="gcnr"): Or(
+            *metrics_registry.registered_names()
+        ),
+        Optional("fliplr", default=False): bool,
+        Optional("image_extension", default="png"): Or("png", "jpg"),
+        Optional("video_extension", default="gif"): Or("mp4", "gif"),
+    }
+)
+
+data_schema = Schema(
+    {
+        "dtype": Or(*_DATA_TYPES),
+        "dataset_folder": str,
+        Optional("dataset_name", default="usbmd"): str,
+        Optional("output_size", default=500): positive_integer,
+        Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
+        Optional("file_path", default=None): Or(None, str, Path),
+        Optional("local", default=True): bool,
+        Optional("subset", default=None): Or(None, str),
+        Optional("frame_no", default=None): Or(None, "all", int),
+        Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
+        Optional("input_range", default=None): Or(None, list_of_size_two),
+        Optional("apodization", default=None): Or(None, str),
+        Optional("modtype", default=None): Or(*_MOD_TYPES),  # ONLY FOR LEGACY DATASET
+        Optional("from_modtype", default=None): Or(
+            *_MOD_TYPES
+        ),  # ONLY FOR LEGACY DATASET
+        Optional("user", default=None): Or(None, dict),
+    }
+)
+
 # top level schema
 config_schema = Schema(
     {
-        "data": {
-            "dataset_name": str,
-            "dtype": Or(*_DATA_TYPES),
-            Optional("output_size", default=500): positive_integer,
-            Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
-            Optional("file_path", default=None): Or(None, str, Path),
-            Optional("local", default=True): bool,
-            Optional("subset", default=None): Or(None, str),
-            Optional("frame_no", default=None): Or(None, "all", int),
-            Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
-            Optional("input_range", default=None): Or(None, list_of_size_two),
-            Optional("apodization", default=None): Or(None, str),
-            Optional("modtype", default=None): Or(
-                *_MOD_TYPES
-            ),  # ONLY FOR LEGACY DATASET
-            Optional("from_modtype", default=None): Or(
-                *_MOD_TYPES
-            ),  # ONLY FOR LEGACY DATASET
-            Optional("user", default=None): Or(None, dict),
-            Optional("dataset_folder", default=None): Or(None, str),
-        },
-        "plot": {
-            Optional("save", default=False): bool,
-            Optional("plot_lib", default="opencv"): Or(*_ALLOWED_PLOT_LIBS),
-            Optional("fps", default=20): int,
-            Optional("tag", default=None): Or(None, str),
-            Optional("headless", default=False): bool,
-            Optional("selector", default=None): Or(None, "rectangle", "lasso"),
-            Optional("selector_metric", default="gcnr"): Or(
-                *metrics_registry.registered_names()
-            ),
-            Optional("fliplr", default=False): bool,
-        },
+        "data": data_schema,
+        Optional("plot", default=plot_schema.validate({})): plot_schema,
         Optional("model", default=model_schema.validate({})): model_schema,
         Optional(
             "preprocess", default=preprocess_schema.validate({})
@@ -214,12 +228,13 @@ config_schema = Schema(
             Regex(r"cuda:\d+"),
             Regex(r"gpu:\d+"),
             Regex(r"auto:\d+"),
+            Regex(r"auto:-\d+"),
             None,
         ),
         Optional("hide_devices", default=None): Or(
             None, list_of_positive_integers, positive_integer_and_zero
         ),
-        Optional("ml_library", default=None): Or(None, *_ML_LIBRARIES, "disable"),
+        Optional("ml_library", default="disable"): Or(None, *_ML_LIBRARIES, "disable"),
         Optional("git", default=None): Or(None, str),
     }
 )
@@ -227,16 +242,35 @@ config_schema = Schema(
 
 def check_config(config: Union[dict, Config], verbose: bool = False):
     """Check a config given dictionary"""
+
+    def _try_validate_config(config):
+        if not _ML_LIB_SET:
+            log.warning(
+                "No ML library found, note that some functionality may not be available. "
+            )
+            if config.get("ml_library") != "disable":
+                log.warning(
+                    "Setting `ml_library` to `disable`. "
+                    "Make sure to not use any ml_library specific parameters."
+                )
+                config["ml_library"] = "disable"
+        try:
+            config = config_schema.validate(config)
+            return config
+        except Exception as e:
+            log.error(f"Config is not valid: {e}")
+            raise e
+
     assert type(config) in [
         dict,
         Config,
     ], f"Config must be a dictionary or Config object, not {type(config)}"
     if isinstance(config, Config):
         config = config.serialize()
-        config = config_schema.validate(config)
+        config = _try_validate_config(config)
         config = Config(config)
     else:
-        config = config_schema.validate(config)
+        config = _try_validate_config(config)
     if verbose:
-        print("Config is correct")
+        log.success("Config is correct")
     return config
