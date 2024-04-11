@@ -3,7 +3,7 @@
 import shutil
 import sys
 from pathlib import Path
-
+import pytest
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -43,35 +43,31 @@ def test_get_data():
     assert isinstance(data, np.ndarray), "Data is not a numpy array"
     assert len(data.shape) == 4, "Data must be 4d (n_tx, n_el, n_ax, N_ch)"
 
-
-def test_generate():
+@pytest.mark.parametrize(
+    "ml_library, dtype, to_dtype, filetype",
+    [
+        ("torch", "raw_data", "image", "png"),
+        ("torch", "beamformed_data", "image", "hdf5"),
+        ("tensorflow", "raw_data", "image", "png"),
+        ("tensorflow", "beamformed_data", "image", "hdf5"),
+     ]
+)
+def test_generate(ml_library, dtype, to_dtype, filetype):
     """Test generate class"""
     config = setup_config("./tests/config_test.yaml")
-    config.ml_library = "tensorflow"
-    config.data.dtype = "beamformed_data"  # TODO: fix for raw_data
+    config.ml_library = ml_library
+    config.data.dtype = dtype
 
     temp_folder = Path("./tests/temp")
+    shutil.rmtree(temp_folder, ignore_errors=True)
 
     generator = GenerateDataSet(
         config,
-        to_dtype="image",
         destination_folder=temp_folder,
+        to_dtype=to_dtype,
         retain_folder_structure=True,
-        filetype="png",
+        filetype=filetype,
         overwrite=True,
     )
     generator.generate()
-
-    config.ml_library = "torch"
-
-    generator = GenerateDataSet(
-        config,
-        to_dtype="image",
-        destination_folder=temp_folder,
-        retain_folder_structure=True,
-        filetype="hdf5",
-        overwrite=True,
-    )
-    generator.generate()
-
     shutil.rmtree(temp_folder)

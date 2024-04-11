@@ -2,6 +2,7 @@
 figures/
 custom_configs/
 data/
+log/
 .ideas/
 
 # any png / gifs in root directory
@@ -17,6 +18,7 @@ __pycache__/
 
 # VSCode
 .vscode/
+.DS_Store
 
 # C extensions
 *.so

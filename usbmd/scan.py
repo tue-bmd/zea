@@ -4,10 +4,10 @@ beamforming grid.
 - **Author(s)**     : Vincent van de Schaft
 - **Date**          : Wed Feb 15 2024
 """
-import warnings
 
+import matplotlib.pyplot as plt
 import numpy as np
-
+from usbmd.utils import log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 from usbmd.utils.utils import deprecated
 
@@ -62,6 +62,7 @@ class Scan:
     def __init__(
         self,
         n_tx: int,
+        n_ax: int,
         n_el: int,
         center_frequency: float,
         sampling_frequency: float,
@@ -72,7 +73,6 @@ class Scan:
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
         n_ch: int = None,
-        n_ax: int = None,
         Nx: int = None,
         Nz: int = None,
         pixels_per_wvln: int = 3,
@@ -96,6 +96,8 @@ class Scan:
 
         Args:
             n_tx (int): The number of transmits to produce a single frame.
+            n_ax (int, optional): The number of samples per in a receive
+                recording per channel. Defaults to None.
             n_el (int, optional): The number of elements in the array.
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
@@ -115,8 +117,6 @@ class Scan:
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
             n_ch (int): The number of channels. This will determine the modulation type.
                 Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
-            n_ax (int, optional): The number of samples per in a receive
-                recording per channel. Defaults to None.
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
@@ -158,6 +158,8 @@ class Scan:
 
         # Attributes concerning channel data : The number of transmissions in a frame
         self._n_tx = int(n_tx)
+        #: The number of samples per channel per acquisition
+        self._n_ax = n_ax
         #: The number of elements in the array
         self._n_el = int(n_el)
         #: The modulation carrier frequency [Hz]
@@ -170,8 +172,6 @@ class Scan:
         self.sound_speed = float(sound_speed)
         #: The number of rf/iq channels (1 for rf, 2 for iq)
         self._n_ch = n_ch
-        #: The number of samples per channel per acquisition
-        self._n_ax = n_ax
         #: The demodulation frequency [Hz]
         self._fdemod = demodulation_frequency
         #: The wavelength of the modulation carrier [m]
@@ -199,9 +199,6 @@ class Scan:
         #: The number of pixels in the axial direction in the beamforming grid
         self._Nz = int(Nz) if Nz is not None else None
 
-        #: The beamforming grid of shape (Nx, Nz, 3)
-        self._grid = None
-
         # Compute the zlims from the other values if not supplied
         if zlims:
             self.zlims = zlims
@@ -224,12 +221,15 @@ class Scan:
 
         self.z_axis = np.linspace(*self.zlims, self.n_ax)
 
+        #: The beamforming grid of shape (Nx, Nz, 3)
+        self._grid = self.grid
+
         if initial_times is None:
-            warnings.warn("No initial times provided. Assuming all zeros.")
+            log.warning("No initial times provided. Assuming all zeros.")
             initial_times = np.zeros(self._n_tx)
 
         if t0_delays is None:
-            warnings.warn(
+            log.warning(
                 "No t0_delays provided. Assuming all zeros and 128 element probe."
             )
             t0_delays = np.zeros((self._n_tx, self._n_el))
@@ -242,22 +242,22 @@ class Scan:
             )
 
         if tx_apodizations is None:
-            warnings.warn(
+            log.warning(
                 "No tx_apodizations provided. Assuming all ones and "
                 "128 element probe."
             )
             tx_apodizations = np.ones((self._n_tx, self._n_el))
 
         if polar_angles is None:
-            warnings.warn("No polar_angles provided. Assuming all zeros.")
+            log.warning("No polar_angles provided. Assuming all zeros.")
             polar_angles = np.zeros(self._n_tx)
 
         if azimuth_angles is None:
-            warnings.warn("No azimuth_angles provided. Assuming all zeros.")
+            log.warning("No azimuth_angles provided. Assuming all zeros.")
             azimuth_angles = np.zeros(self._n_tx)
 
         if focus_distances is None:
-            warnings.warn("No focus_distances provided. Assuming all zeros.")
+            log.warning("No focus_distances provided. Assuming all zeros.")
             focus_distances = np.zeros(self._n_tx)
 
         self._t0_delays = t0_delays
@@ -348,14 +348,14 @@ class Scan:
         return len(self.selected_transmits)
 
     @property
-    def n_el(self):
-        """The number of elements in the array."""
-        return self._n_el
-
-    @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
         return int(np.ceil(self._n_ax / self.downsample))
+
+    @property
+    def n_el(self):
+        """The number of elements in the array."""
+        return self._n_el
 
     @property
     def n_ch(self):
@@ -366,7 +366,7 @@ class Scan:
     def n_ch(self, value):
         self._n_ch = value
         self._fdemod = None  # Reset fdemod
-        warnings.warn(
+        log.warning(
             f"Resetting fdemod to {self.fdemod} because n_ch was changed to {value}."
         )
 
@@ -493,6 +493,7 @@ class Scan:
         """The beamforming grid of shape (Nx, Nz, 3)."""
         if self._grid is None:
             self._grid = get_grid(self)
+            self._Nz, self._Nx, _ = self._grid.shape
         return self._grid
 
 
@@ -511,6 +512,7 @@ class PlaneWaveScan(Scan):
 
     def __init__(
         self,
+        probe_geometry: np.ndarray,
         angles=None,
         n_tx=75,
         n_el=128,
@@ -523,8 +525,8 @@ class PlaneWaveScan(Scan):
         demodulation_frequency=0.0,
         sound_speed=1540,
         n_ax=3328,
-        Nx=128,
-        Nz=128,
+        Nx=None,
+        Nz=None,
         pixels_per_wvln=3,
         polar_angles=None,
         azimuth_angles=None,
@@ -532,11 +534,14 @@ class PlaneWaveScan(Scan):
         downsample=1,
         initial_times=None,
         selected_transmits=None,
+        time_to_next_transmit: np.ndarray = None,
     ):
         """
         Initializes a PlaneWaveScan object.
 
         Args:
+            probe_geometry (np.ndarray): The positions of the elements in the array of
+                shape (n_el, 3).
             angles (list, optional): The angles of the planewaves. Defaults to
                 None.
             n_tx (int): The number of transmits to produce a single frame. xlims (tuple,
@@ -589,15 +594,32 @@ class PlaneWaveScan(Scan):
         Raises:
             ValueError: If selected_transmits has an invalid value.
         """
+
         assert (
             angles is not None or polar_angles is not None
         ), "Please provide angles at which plane wave dataset was recorded"
         if angles is not None:
             self._angles = angles
-            self._polar_angles = angles
+            polar_angles = angles
         else:
-            self._angles = polar_angles
-            self._polar_angles = polar_angles
+            angles = polar_angles
+            polar_angles = polar_angles
+
+        if azimuth_angles is None:
+            # We assume azimuth angles are zero for plane wave scans if not provided
+            azimuth_angles = np.zeros(len(polar_angles))
+
+        if not n_tx:
+            n_tx = len(polar_angles)
+        else:
+            assert n_tx == len(polar_angles), (
+                "Number of transmits does not match the number of polar angles. "
+                "Please provide the correct number of transmits, or let the Scan object set it."
+            )
+
+        t0_delays = compute_t0_delays_planewave(
+            probe_geometry, polar_angles, azimuth_angles, sound_speed
+        )
 
         # Pass all arguments to the Scan base class
         super().__init__(
@@ -617,11 +639,14 @@ class PlaneWaveScan(Scan):
             pixels_per_wvln=pixels_per_wvln,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
+            t0_delays=t0_delays,
             tx_apodizations=tx_apodizations,
             downsample=downsample,
             initial_times=initial_times,
             selected_transmits=selected_transmits,
             focus_distances=np.inf * np.ones(n_tx),
+            probe_geometry=probe_geometry,
+            time_to_next_transmit=time_to_next_transmit,
         )
 
 
@@ -685,6 +710,10 @@ def compute_t0_delays_planewave(
     Returns:
         np.ndarray: The transmit delays for each element of shape (n_tx, n_el).
     """
+    assert (
+        probe_geometry is not None
+    ), "Probe geometry must be provided to compute t0_delays."
+
     # Convert single angles to arrays for broadcasting
     polar_angles = np.atleast_1d(polar_angles)
     azimuth_angles = np.atleast_1d(azimuth_angles)
@@ -700,19 +729,18 @@ def compute_t0_delays_planewave(
     )
 
     # Compute the projection of the element positions onto the wave vectors
-    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1)
+    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1).T
 
     # Convert from distance to time to compute the transmit delays.
     t0_delays_not_zero_aligned = projection / sound_speed
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.
-    t_first_fire = np.min(projection, axis=-1) / sound_speed
+    t_first_fire = np.min(t0_delays_not_zero_aligned, axis=1)
 
     # The transmit delays are the projection minus the offset. This ensures
     # that the first element fires at t=0.
     t0_delays = t0_delays_not_zero_aligned - t_first_fire[:, None]
-
     return t0_delays
 
 
@@ -720,8 +748,8 @@ def compute_t0_delays_focused(
     origin,
     focus_distance,
     probe_geometry,
-    polar_angle,
-    azimuth_angle=0,
+    polar_angles,
+    azimuth_angles=0,
     sound_speed=1540,
 ):
     """Computes the transmit delays for a focused transmit, shifted such that
@@ -732,33 +760,39 @@ def compute_t0_delays_focused(
         focus_distance (float): The distance to the focus.
         probe_geometry (np.ndarray): The positions of the elements in the array of
             shape (element, 3).
-        polar_angle (float): The polar angle of the planewave in radians.
-        azimuth_angle (float, optional): The azimuth angle of the planewave
+        polar_angles (np.ndarray): The polar angles of the planewave in radians.
+        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave
             in radians. Defaults to 0.
         sound_speed (float, optional): The speed of sound. Defaults to 1540.
 
     Returns:
-        np.ndarray: The transmit delays for each element of shape (element,).
+        np.ndarray: The transmit delays for each element of shape (n_tx, element).
     """
-    # Compute the wave vector of shape (1, 3)
+    # Convert single angles to arrays for broadcasting
+    polar_angles = np.atleast_1d(polar_angles)
+    azimuth_angles = np.atleast_1d(azimuth_angles)
+
+    # Compute v for all angles
     v = np.stack(
         [
-            np.sin(polar_angle) * np.cos(azimuth_angle),
-            np.sin(polar_angle) * np.sin(azimuth_angle),
-            np.cos(polar_angle),
-        ]
+            np.sin(polar_angles) * np.cos(azimuth_angles),
+            np.sin(polar_angles) * np.sin(azimuth_angles),
+            np.cos(polar_angles),
+        ],
+        axis=-1,
     )
 
+    # Add a new dimension for broadcasting
+    v = np.expand_dims(v, axis=1)
+
     # Compute the location of the virtual source by adding the focus distance
-    # to the origin along the wave vector.
-    virtual_source = origin + focus_distance * v
+    # to the origin along the wave vectors.
+    virtual_sources = origin + focus_distance * v
 
-    # Add a dummy dimension for the element dimension
-    virtual_source = virtual_source[None]
+    # Compute the distances between the virtual sources and each element
+    dist = np.linalg.norm(virtual_sources - probe_geometry, axis=-1)
 
-    # Compute the distance between the virtual source and each element
-    dist = np.linalg.norm(virtual_source - probe_geometry, axis=1)
-
+    # Adjust distances based on the direction of focus
     dist *= -np.sign(focus_distance)
 
     # Convert from distance to time to compute the
@@ -767,9 +801,22 @@ def compute_t0_delays_focused(
 
     # The smallest (possibly negative) time corresponds to the moment when
     # the first element fires.
-    t_first_fire = np.min(travel_times, axis=0)
+    t_first_fire = np.min(travel_times, axis=1)
 
     # Shift the transmit delays such that the first element fires at t=0.
-    t0_delays = travel_times - t_first_fire
+    t0_delays = travel_times - t_first_fire[:, None]
 
-    return t0_delays
+    return t0_delays.T
+
+
+def plot_t0_delays(t0_delays):
+    """Plot the t0_delays for each transducer element
+    Elements are on the x-axis, and the t0_delays are on the y-axis.
+    We plot multiple lines for each angle/transmit in the scan object."""
+    n_tx = t0_delays.shape[0]
+    _, ax = plt.subplots()
+    for tx in range(n_tx):
+        ax.plot(t0_delays[tx], label=f"Transmit {tx}")
+    ax.set_xlabel("Element number")
+    ax.set_ylabel("t0 delay [s]")
+    plt.show()

@@ -8,7 +8,6 @@ import logging
 from pathlib import Path
 
 import h5py
-
 from usbmd.registry import checks_registry
 
 _DATA_TYPES = [
@@ -28,6 +27,7 @@ _REQUIRED_SCAN_KEYS = [
     "n_ax",
     "n_el",
     "n_tx",
+    "n_ch",
     "probe_geometry",
     "sampling_frequency",
     "center_frequency",
@@ -35,9 +35,9 @@ _REQUIRED_SCAN_KEYS = [
     "n_frames",
 ]
 
-_IMAGE_DATA_TYPES = ["image", "image_sc"]
+_IMAGE_DATA_TYPES = ["image", "image_sc", "envelope_data", "beamformed_data"]
 
-_NON_IMAGE_DATA_TYPES = ["raw_data", "beamformed_data", "aligned_data", "envelope_data"]
+_NON_IMAGE_DATA_TYPES = ["raw_data", "aligned_data"]
 
 
 def get_check(data_type):
@@ -271,9 +271,10 @@ def _validate_hdf5_dataset(dataset):
         # Validate data shape
         data_shape = dataset["data"][key].shape
         if key == "raw_data":
+            get_check(key)(dataset["data"][key][()], with_frame_dim=True)
             assert (
-                len(data_shape) == 5
-            ), "The raw_data group does not have a shape of length 5."
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of raw_data."
             assert (
                 data_shape[1] == dataset["scan"]["n_tx"][()]
             ), "n_tx does not match the second dimension of raw_data."
@@ -283,28 +284,31 @@ def _validate_hdf5_dataset(dataset):
             assert (
                 data_shape[3] == dataset["scan"]["n_el"][()]
             ), "n_el does not match the fourth dimension of raw_data."
-            assert data_shape[4] in (
-                1,
-                2,
-            ), (
-                "The fifth dimension of raw_data, which is the complex channel "
-                "dimension is not 1 or 2."
-            )
-
         elif key == "aligned_data":
-            logging.warning("No validation has been defined for aligned data.")
+            get_check(key)(dataset["data"][key][()], with_frame_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of aligned_data."
         elif key == "beamformed_data":
-            logging.warning("No validation has been defined for beamformed data.")
+            get_check(key)(dataset["data"][key][()], with_frame_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of beamformed_data."
         elif key == "envelope_data":
-            logging.warning("No validation has been defined for envelope data.")
+            get_check(key)(dataset["data"][key][()], with_frame_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of envelope_data."
         elif key == "image":
+            get_check(key)(dataset["data"][key][()], with_frame_dim=True)
             assert (
-                len(data_shape) == 3
-            ), "The image group does not have a shape of length 3."
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of image."
         elif key == "image_sc":
+            get_check(key)(dataset["data"][key][()], with_frame_dim=True)
             assert (
-                len(data_shape) == 3
-            ), "The image_sc group does not have a shape of length 3."
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of image_sc."
 
     if not_only_image_data:
         _assert_scan_keys_present(dataset)

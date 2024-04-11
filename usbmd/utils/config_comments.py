@@ -25,7 +25,7 @@ def allows_type_to_str(allowed_types):
     return ouput_str
 
 
-descriptions = {
+DESCRIPTIONS = {
     "model": {
         "description": "The model section contains the parameters for the model.",
         "batch_size": "The number of frames to process in a batch",
@@ -67,8 +67,8 @@ descriptions = {
         ),
         "local": "true: use local data on this device, false: use data from NAS",
         "dataset_name": (
-            "Determines the dataset class that is initialized (usbmd, picmus, "
-            "verasonics, abledata, vsms2020, vsms2022, dummy)"
+            "Determines the dataset class that is initialized, most likely will be `usbmd`, else "
+            "one of the legacy datasets (picmus, verasonics, abledata, vsms2020, vsms2022, dummy)"
         ),
         "dtype": (
             "The form of data to load (raw_data, rf_data, iq_data, beamformed_data, "
@@ -126,6 +126,34 @@ descriptions = {
             f"({allows_type_to_str(_ALLOWED_DEMODULATION)})"
         ),
     },
+    "postprocess": {
+        "description": (
+            "The postprocess section contains the parameters for the postprocessing."
+        ),
+        "contrast_boost": {
+            "description": "Settings for the contrast boost.",
+            "k_p": "The positive contrast boost factor",
+            "k_n": "The negative contrast boost factor",
+            "threshold": "The threshold for the contrast boost",
+        },
+        "thresholding": {
+            "description": "Settings for the thresholding.",
+            "percentile": "The percentile to use for thresholding",
+            "threshold": "The threshold to use for thresholding",
+            "fill_value": (
+                "The value to fill the data with when thresholding (min, max, threshold, "
+                "any_number)"
+            ),
+            "below_threshold": "Set to true to threshold below the threshold",
+            "threshold_type": "The type of thresholding to use (soft, hard)",
+        },
+        "lista": "Set to true to use the lista algorithm",
+        "bm3d": {
+            "description": "Settings for the bm3d algorithm.",
+            "sigma": "The sigma value for the bm3d algorithm",
+            "stage": "The stage of the bm3d algorithm to use (all_stages, hard_thresholding)",
+        },
+    },
     "device": "The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)",
     "ml_library": f"The library to use ({allows_type_to_str(_ML_LIBRARIES)}, disable)",
     "plot": {
@@ -140,6 +168,8 @@ descriptions = {
         ),
         "tag": "The name for the plot",
         "fliplr": "Set to true to flip the image left to right",
+        "image_extension": "The file extension to use when saving the image (png, jpg)",
+        "video_extension": "The file extension to use when saving the video (mp4, gif)",
     },
 }
 
@@ -297,10 +327,10 @@ if __name__ == "__main__":
     # Add comments to each YAML file
     for file_name in yaml_files:
         print(f"Adding comments to {config_dir/file_name}")
-        add_comments_to_yaml(config_dir / file_name, descriptions)
+        add_comments_to_yaml(config_dir / file_name, DESCRIPTIONS)
 
     # Compile the descriptions into a markdown document
-    markdown_doc = compile_comments_to_markdown_doc(descriptions)
+    markdown_doc = compile_comments_to_markdown_doc(DESCRIPTIONS)
     markdown_doc_path = config_dir / "config_doc.md"
     with open(markdown_doc_path, "w", encoding="utf-8") as file:
         file.write(markdown_doc)

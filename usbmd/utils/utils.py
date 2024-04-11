@@ -3,15 +3,16 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : October 25th, 2022
 """
+
 import datetime
 import functools
 import hashlib
 import platform
-import warnings
-
+import inspect
 import cv2
 import numpy as np
 from PIL import Image
+from usbmd.utils import log
 
 
 def translate(array, range_from, range_to):
@@ -94,18 +95,38 @@ def strtobool(val: str):
         raise ValueError(f"invalid truth value {val}")
 
 
+def grayscale_to_rgb(image):
+    """Converts a grayscale image to an RGB image.
+
+    Args:
+        image (ndarray): Grayscale image.
+
+    Returns:
+        ndarray: RGB image.
+    """
+    return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+
 def save_to_gif(images, filename, fps=20):
     """Saves a sequence of images to .gif file.
     Args:
-        images: list of images (numpy arrays).
+        images: list of images (numpy arrays). Must have shape
+            (n_frames, height, width, channels). If channel axis is not present,
+            grayscale image is assumed, which is then converted to RGB.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
+    images = np.array(images)
+
+    if fps > 50:
+        log.warning(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
+        fps = 50
+
     duration = 1 / (fps) * 1000  # milliseconds per frame
 
     # convert grayscale images to RGB
     if len(images[0].shape) == 2:
-        images = [cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) for img in images]
+        images = [grayscale_to_rgb(image) for image in images]
 
     pillow_img, *pillow_imgs = [Image.fromarray(img) for img in images]
 
@@ -119,7 +140,45 @@ def save_to_gif(images, filename, fps=20):
         interlace=False,
         optimize=False,
     )
-    return print(f"Succesfully saved GIF to -> {filename}")
+    return log.success(f"Succesfully saved GIF to -> {log.yellow(filename)}")
+
+
+def save_to_mp4(images, filename, fps=20):
+    """Saves a sequence of images to .mp4 file.
+    Args:
+        images: list of images (numpy arrays). Must have shape
+            (n_frames, height, width, channels). If channel axis is not present,
+            grayscale image is assumed, which is then converted to RGB.
+        filename: string containing filename to which data should be written.
+        fps: frames per second of rendered format.
+    """
+    images = np.array(images)
+
+    assert (
+        images.dtype == np.uint8
+    ), f"dtype of images should be uint8 for saving to mp4, got {images.dtype}"
+    assert len(images.shape) in [
+        3,
+        4,
+    ], (
+        "images must have shape (n_frames, height, width, channels),"
+        f" or (n_frames, height, width) for grayscale images. Got {images.shape}"
+    )
+
+    # convert grayscale images to RGB
+    if len(images[0].shape) == 2:
+        images = np.array([grayscale_to_rgb(image) for image in images])
+
+    filename = str(filename)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    _, height, width, _ = images.shape
+    video_writer = cv2.VideoWriter(filename, fourcc, fps, (width, height))
+
+    for image in images:
+        video_writer.write(image)
+
+    video_writer.release()
+    return log.success(f"Successfully saved MP4 to -> {filename}")
 
 
 def update_dictionary(dict1: dict, dict2: dict, keep_none: bool = False) -> dict:
@@ -162,6 +221,24 @@ def get_date_string(string: str = None):
     date_str = now.strftime(string)
 
     return date_str
+
+
+def date_string_to_readable(date_string: str, include_time: bool = False):
+    """Converts a date string to a more readable format.
+
+    Args:
+        date_string (str): The input date string.
+        include_time (bool, optional): Whether to include the time in the output.
+            Defaults to False.
+
+    Returns:
+        str: The date string in a more readable format.
+    """
+    date = datetime.datetime.strptime(date_string, "%Y_%m_%d_%H%M%S")
+    if include_time:
+        return date.strftime("%B %d, %Y %I:%M %p")
+    else:
+        return date.strftime("%B %d, %Y")
 
 
 def find_first_nonzero_index(arr, axis, invalid_val=-1):
@@ -250,28 +327,60 @@ def deprecated(replacement=None):
             # If it's a function or method
             @functools.wraps(item)
             def wrapper(*args, **kwargs):
-                warnings.warn(
-                    f"Call to deprecated {item.__name__}.", category=DeprecationWarning
-                )
                 if replacement:
-                    warnings.warn(
-                        f"Use {replacement} instead.", category=DeprecationWarning
+                    log.deprecated(
+                        f"Call to deprecated {item.__name__}."
+                        f" Use {replacement} instead."
                     )
+                else:
+                    log.deprecated(f"Call to deprecated {item.__name__}.")
                 return item(*args, **kwargs)
 
             return wrapper
-        else:
-            # If it's a property
-            warnings.warn(
-                f"Access to deprecated attribute '{item}'.",
-                category=DeprecationWarning,
-            )
-            if replacement:
-                warnings.warn(
-                    f"Use {replacement} instead.", category=DeprecationWarning
-                )
+        elif isinstance(item, property):
+            # If it's a property of a class
+            def getter(self):
+                if replacement:
+                    log.deprecated(
+                        f"Access to deprecated attribute {item.fget.__name__}, "
+                        f"use {replacement} instead."
+                    )
+                else:
+                    log.deprecated(
+                        f"Access to deprecated attribute {item.fget.__name__}."
+                    )
+                return item.fget(self)
 
-            return item
+            def setter(self, value):
+                if replacement:
+                    log.deprecated(
+                        f"Setting value to deprecated attribute {item.fget.__name__}, "
+                        f"use {replacement} instead."
+                    )
+                else:
+                    log.deprecated(
+                        f"Setting value to deprecated attribute {item.fget.__name__}."
+                    )
+                item.fset(self, value)
+
+            def deleter(self):
+                if replacement:
+                    log.deprecated(
+                        f"Deleting deprecated attribute {item.fget.__name__}, "
+                        f"use {replacement} instead."
+                    )
+                else:
+                    log.deprecated(
+                        f"Deleting deprecated attribute {item.fget.__name__}."
+                    )
+                item.fdel(self)
+
+            return property(getter, setter, deleter)
+
+        else:
+            raise TypeError(
+                "Decorator can only be applied to functions, methods, or properties."
+            )
 
     return decorator
 
@@ -298,3 +407,8 @@ def calculate_file_hash(file_path, omit_line_str=None):
 def check_architecture():
     """Checks the architecture of the system."""
     return platform.uname()[-1]
+
+def get_function_args(func):
+    """Get the names of the arguments of a function."""
+    sig = inspect.signature(func)
+    return tuple(sig.parameters)

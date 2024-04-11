@@ -1,4 +1,5 @@
 """Tests for the processing module."""
+
 import random
 
 import decorator
@@ -255,6 +256,7 @@ def test_up_and_down_conversion(factor, batch_size):
     fs = probe_parameters["sampling_frequency"]
     fc = probe_parameters["center_frequency"]
     scan = PlaneWaveScan(
+        probe.probe_geometry,
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
