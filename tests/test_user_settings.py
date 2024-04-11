@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from ipykernel.kernelbase import StdinNotImplementedError
 
 from usbmd.common import DEFAULT_USER, DEFAULT_USERS_CONFIG_PATH, set_data_paths
 
