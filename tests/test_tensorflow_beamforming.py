@@ -138,3 +138,36 @@ def test_jit_compile():
     # only checking if images are similar on a global scale. Users should always manually check
     # the output of the model.
     assert np.allclose(jit_output, non_jit_output, atol=1e-2)
+
+
+def test_snapshot():
+    from usbmd.tensorflow_ultrasound.utils.utils import tf_snapshot
+
+    probe = Verasonics_l11_4v()
+    probe_parameters = probe.get_default_scan_parameters()
+
+    scan = PlaneWaveScan(
+        probe_geometry=probe.probe_geometry,
+        n_tx=1,
+        xlims=(-19e-3, 19e-3),
+        zlims=(0, 63e-3),
+        n_ax=2047,
+        sampling_frequency=probe_parameters["sampling_frequency"],
+        center_frequency=probe_parameters["center_frequency"],
+        angles=np.array(
+            [
+                0,
+            ]
+        ),
+    )
+
+    probe_snapshot = tf_snapshot(probe)
+    scan_snapshot = tf_snapshot(scan)
+
+    def check_snapshot(snapshot, obj):
+        for key, value in snapshot.items():
+            assert isinstance(value, tf.Tensor)
+            np.testing.assert_allclose(value.numpy(), getattr(obj, key))
+
+    check_snapshot(probe_snapshot, probe)
+    check_snapshot(scan_snapshot, scan)
