@@ -111,13 +111,13 @@ class Pipeline:
     def ops(self):
         return self.operations[0].ops
 
-    def on_device(self, on_device, data, device=None):
+    def on_device(self, func, data, device=None):
         if self.ops == np:
-            return lambda func, inputs, *args, **kwargs: func(inputs)
+            return func(data)
         elif self.ops == tf:
-            return on_device_tf(on_device, data, device=device)
+            return on_device_tf(func, data, device=device)
         elif self.ops == torch:
-            return on_device_torch(on_device, data, device=device)
+            return on_device_torch(func, data, device=device)
         else:
             raise ValueError("Unsupported operations package.")
 
@@ -126,14 +126,16 @@ class Pipeline:
             operation.set_params(config, scan, probe)
 
     def process(self, data):
-        if not all([operation._ready for operation in self.operations]):
+        data = self.prepare_tensor(data)
+        if not all(operation._ready for operation in self.operations):
             operations_not_ready = [
                 operation.name for operation in self.operations if not operation._ready
             ]
             raise ValueError(
                 log.error(
-                    f"Operations {operations_not_ready} are not ready to be used, please set parameters "
-                    "using `op.set_params(config, scan, probe)` and initialize them using `op.initialize()`."
+                    f"Operations {operations_not_ready} are not ready to be used, "
+                    "please set parameters using `op.set_params(config, scan, probe)` "
+                    "and initialize them using `op.initialize()`."
                 )
             )
 
@@ -161,13 +163,23 @@ class Pipeline:
     #             return
     #         self.process = jax.jit(self.process)
 
+    def prepare_tensor(self, x):
+        if self.ops == np:
+            return np.array(x)
+        elif self.ops == tf:
+            return tf.convert_to_tensor(x)
+        elif self.ops == torch:
+            return torch.tensor(x)
+        else:
+            raise ValueError("Unsupported operations package.")
+
 
 class Beamform(Operation):
     def __init__(self, beamformer=None):
         super().__init__(
             name="Beamform",
-            input_data_type=None,
-            output_data_type=None,
+            input_data_type="raw_data",
+            output_data_type="beamformed_data",
         )
 
         self.beamformer = beamformer
@@ -216,7 +228,7 @@ class Beamform(Operation):
     def process(self, data):
         if self.batch_dim is False:
             data = self.ops.expand_dims(data, axis=0)
-        data = self.beamformer(data)  # , self.config, self.scan, self.probe)
+        data = self.beamformer(data, probe=self.probe, scan=self.scan)
         if self.batch_dim is False:
             data = self.ops.squeeze(data, axis=0)
         return data
@@ -262,8 +274,8 @@ class Normalize(Operation):
             self.output_range = (0, 1)
 
         if self.input_range is None:
-            minimum = np.min(data)
-            maximum = np.max(data)
+            minimum = self.ops.min(data)
+            maximum = self.ops.max(data)
             self.input_range = (minimum, maximum)
         else:
             a_min, a_max = self.input_range
@@ -288,7 +300,7 @@ class LogCompress(Operation):
             self.dynamic_range = (-60, 0)
 
         data[data == 0] = np.finfo(float).eps
-        compressed_data = 20 * np.log10(data)
+        compressed_data = 20 * self.ops.log10(data)
         compressed_data = self.ops.clip(compressed_data, *self.dynamic_range)
         return compressed_data
 
@@ -392,8 +404,8 @@ class EnvelopeDetect(Operation):
     def __init__(self, axis=-3):
         super().__init__(
             name="EnvelopeDetection",
-            input_data_type=None,
-            output_data_type=None,
+            input_data_type="beamformed_data",
+            output_data_type="envelope_data",
         )
         self.axis = axis
 
