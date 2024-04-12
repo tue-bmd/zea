@@ -1,9 +1,62 @@
+"""Ops module for processing ultrasound data.
+
+Each step in the processing pipeline is defined as an operation. The operations
+are then combined into a pipeline which can be used to process the data.
+
+The pipeline as a whole has some additional functionality such as setting parameters
+to all operations at once, initializing all operations at once, and running the
+pipeline on a specific device and using a specific package.
+
+Operations can also be run individually / standalone.
+Examples:
+```python
+data = np.random.randn(2000, 128, 1)
+envelope_detect = EnvelopeDetect(fs=5e6)
+envelope_data = envelope_detect(data)
+```
+
+We can leave the arguments to the operation empty and set them later using the
+`set_params` method. This is useful when using the operations in a pipeline.
+```python
+operations = [
+    Beamform(),
+    Demodulate(),
+    EnvelopeDetect(),
+    Downsample(),
+    Normalize(),
+    LogCompress(),
+    ScanConvert(),
+]
+
+config = ...
+scan = ...
+probe = ...
+
+pipeline = Pipeline(operations, ops=np, device="cpu")
+pipeline.set_params(config, scan, probe)
+pipeline.initialize()
+
+raw_data = np.random.randn(11, 2000, 128, 1)
+image = pipeline.process(data)
+
+```
+If you do not have a config, scan, or probe, you can set the parameters to the
+operations individually during initialization.
+
+TODO:
+- Test all operations with different packages (currently only np tested)
+- Find a way to make the ops.<method> calls work for every package
+- Compilation of the pipeline using jit
+
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 12/04/2024
+"""
+
+import importlib
 from abc import ABC, abstractmethod
 
 import numpy as np
 import scipy
-import tensorflow as tf
-import torch
 from scipy import ndimage, signal
 
 from usbmd.display import scan_convert
@@ -13,9 +66,22 @@ from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 from usbmd.scan import Scan
 from usbmd.tensorflow_ultrasound.processing import on_device_tf
 from usbmd.utils import log
-from usbmd.utils.checks import get_check
+from usbmd.utils.checks import _ML_LIBRARIES, get_check
 from usbmd.utils.config import Config
 from usbmd.utils.utils import translate
+
+# need to import ML libraries first
+for lib in _ML_LIBRARIES:
+    if importlib.util.find_spec(str(lib)):
+        if lib == "torch":
+            # pylint: disable=unused-import
+            import torch
+        if lib == "tensorflow":
+            # pylint: disable=unused-import
+            import tensorflow as tf
+        if lib == "jax":
+            # pylint: disable=unused-import
+            import jax
 
 
 class Operation(ABC):
@@ -35,19 +101,18 @@ class Operation(ABC):
 
     @property
     def ops(self):
+        """Get the operations package used in the operation."""
         assert self._ops is not None, "ops package is not set"
         return self._ops
 
     @ops.setter
     def ops(self, ops):
+        """Set the package for the operation."""
         self._ops = ops
 
     @abstractmethod
     def process(self, data):
         return data
-
-    def set_ops_pkg(self, ops):
-        self.ops = ops
 
     def __call__(self, data, *args, **kwargs):
         if self.input_data_type:
@@ -109,9 +174,11 @@ class Pipeline:
 
     @property
     def ops(self):
+        """Get the operations package used in the pipeline."""
         return self.operations[0].ops
 
     def on_device(self, func, data, device=None):
+        """On device function for running pipeline on specific device."""
         if self.ops == np:
             return func(data)
         elif self.ops == tf:
@@ -126,6 +193,7 @@ class Pipeline:
             operation.set_params(config, scan, probe)
 
     def process(self, data):
+        """Process input data through the pipeline."""
         data = self.prepare_tensor(data)
         if not all(operation._ready for operation in self.operations):
             operations_not_ready = [
@@ -149,10 +217,12 @@ class Pipeline:
         return data
 
     def initialize(self):
+        """Initialize all operations in the pipeline."""
         for operation in self.operations:
             operation.initialize()
 
     # def compile(self, jit=False):
+    #     """Compile the pipeline using jit."""
     #     if self.ops == np:
     #         return
     #     elif self.ops == tf:
@@ -164,6 +234,7 @@ class Pipeline:
     #         self.process = jax.jit(self.process)
 
     def prepare_tensor(self, x):
+        """Convert input array to appropriate tensor type for the operations package."""
         if self.ops == np:
             return np.array(x)
         elif self.ops == tf:
@@ -401,11 +472,14 @@ class Companding(Operation):
 
 
 class EnvelopeDetect(Operation):
+    envelope_data = envelope_detect(data)
     def __init__(self, axis=-3):
         super().__init__(
             name="EnvelopeDetection",
+            envelope_data = envelope_detect(data)
             input_data_type="beamformed_data",
             output_data_type="envelope_data",
+            envelope_data = envelope_detect(data)
         )
         self.axis = axis
 
@@ -660,6 +734,7 @@ def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
         b, a = scipy.signal.butter(N, Wn, "low")
 
         # factor 2: to preserve the envelope amplitude
+        envelope_data = envelope_detect(data)
         iq_data = scipy.signal.filtfilt(b, a, iq_data, axis=-2) * 2
 
         # Display a warning message if harmful aliasing is suspected
@@ -846,11 +921,13 @@ def apply_multi_band_pass_filter(
             data_filtered = np.expand_dims(data_filtered, axis=-1)
         if to_image:
             env_data = process.envelope_detect(
+                envelope_data = envelope_detect(data)
                 data_filtered, with_frame_dim=with_frame_dim
             )
             images_filtered = process.run(
                 env_data,
                 dtype="envelope_data",
+                envelope_data = envelope_detect(data)
                 to_dtype="image",
                 with_frame_dim=with_frame_dim,
             )
@@ -949,9 +1026,7 @@ def channels_to_complex(data, axis=-1, ops=np):
 
 # def to_image(envelope_data, dynamic_range=None, input_range=None):
 #     """Convert envelope data to image.
-
 #     envelope_data -> normalize [0, 1] -> log compress -> [*dynamic_range]
-
 #     Args:
 #         envelope_data (ndarray): Input array of envelope data.
 #         dynamic_range (tuple): Dynamic range of output image values.
@@ -985,7 +1060,6 @@ def channels_to_complex(data, axis=-1, ops=np):
 #     separate_channels=False,
 # ):
 #     """Convert rf to iq.
-
 #     TODO:
 #         - add different type of demodulation methods
 #             gabor
