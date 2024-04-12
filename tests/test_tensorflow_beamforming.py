@@ -90,7 +90,6 @@ def test_das_beamforming(
     data = simulator.generate(200)
 
     inputs = np.expand_dims(data[0], axis=(1, -1))
-    inputs = np.transpose(inputs, axes=(0, 1, 3, 2, 4))
 
     # Perform beamforming and convert to numpy array
     outputs = beamformer(inputs)
