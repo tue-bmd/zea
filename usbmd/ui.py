@@ -236,12 +236,12 @@ class DataLoaderUI:
             # data is already in image_sc format
             self.image = self.data
 
-        # if self.to_dtype == "image_sc":
-        #     self.image = self.process.run(
-        #         self.image,
-        #         dtype="image",
-        #         to_dtype="image_sc",
-        #     )
+        if self.to_dtype == "image_sc":
+            self.image = self.process.run(
+                self.image,
+                dtype="image",
+                to_dtype="image_sc",
+            )
 
         # match orientation if necessary
         if self.config.plot.fliplr:
