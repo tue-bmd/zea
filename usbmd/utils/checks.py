@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 import h5py
+
 from usbmd.registry import checks_registry
 
 _DATA_TYPES = [
@@ -63,6 +64,9 @@ def get_check(data_type):
 def _check_raw_data(data=None, shape=None, with_frame_dim=False):
     """Check raw data shape.
 
+    If data is provided, shape is derived from data.
+    If shape is provided, data is ignored. Only supply one of data or shape.
+
     Args:
         data (np.ndarray, optional): raw data. Defaults to None.
             either data or shape must be provided.
@@ -76,7 +80,9 @@ def _check_raw_data(data=None, shape=None, with_frame_dim=False):
         AssertionError: if data does not have expected shape
         AssertionError: if data does not have expected number of channels
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
+    assert (
+        data is not None or shape is not None
+    ), "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
 
@@ -100,6 +106,9 @@ def _check_raw_data(data=None, shape=None, with_frame_dim=False):
 def _check_aligned_data(data=None, shape=None, with_frame_dim=False):
     """Check aligned data shape.
 
+    If data is provided, shape is derived from data.
+    If shape is provided, data is ignored. Only supply one of data or shape.
+
     Args:
         data (np.ndarray, optional): aligned data. Defaults to None.
             either data or shape must be provided.
@@ -113,7 +122,9 @@ def _check_aligned_data(data=None, shape=None, with_frame_dim=False):
         AssertionError: if data does not have expected shape
         AssertionError: if data does not have expected number of channels
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
+    assert (
+        data is not None or shape is not None
+    ), "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
 
@@ -137,6 +148,9 @@ def _check_aligned_data(data=None, shape=None, with_frame_dim=False):
 def _check_beamformed_data(data=None, shape=None, with_frame_dim=False):
     """Check beamformed data shape.
 
+    If data is provided, shape is derived from data.
+    If shape is provided, data is ignored. Only supply one of data or shape.
+
     Args:
         data (np.ndarray, optional): beamformed data. Defaults to None.
             either data or shape must be provided.
@@ -150,7 +164,9 @@ def _check_beamformed_data(data=None, shape=None, with_frame_dim=False):
         AssertionError: if data does not have expected shape
         AssertionError: if data does not have expected number of channels
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
+    assert (
+        data is not None or shape is not None
+    ), "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
 
@@ -174,6 +190,9 @@ def _check_beamformed_data(data=None, shape=None, with_frame_dim=False):
 def _check_envelope_data(data=None, shape=None, with_frame_dim=False):
     """Check envelope data shape.
 
+    If data is provided, shape is derived from data.
+    If shape is provided, data is ignored. Only supply one of data or shape.
+
     Args:
         data (np.ndarray, optional): envelope data. Defaults to None.
             either data or shape must be provided.
@@ -186,14 +205,15 @@ def _check_envelope_data(data=None, shape=None, with_frame_dim=False):
     Raises:
         AssertionError: if data does not have expected shape
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
+    assert (
+        data is not None or shape is not None
+    ), "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
 
     if not with_frame_dim:
         assert len(shape) == 2, (
-            "envelope data must be 2D, with expected shape [Ny, Nx], "
-            f"got {shape}"
+            "envelope data must be 2D, with expected shape [Ny, Nx], " f"got {shape}"
         )
     else:
         assert len(shape) == 3, (
@@ -205,6 +225,9 @@ def _check_envelope_data(data=None, shape=None, with_frame_dim=False):
 @checks_registry("image")
 def _check_image(data=None, shape=None, with_frame_dim=False):
     """Check image data shape.
+
+    If data is provided, shape is derived from data.
+    If shape is provided, data is ignored. Only supply one of data or shape.
 
     Args:
         data (np.ndarray, optional): image data. Defaults to None.
@@ -218,7 +241,9 @@ def _check_image(data=None, shape=None, with_frame_dim=False):
     Raises:
         AssertionError: if data does not have expected shape.
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
+    assert (
+        data is not None or shape is not None
+    ), "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
 
@@ -228,14 +253,16 @@ def _check_image(data=None, shape=None, with_frame_dim=False):
         )
     else:
         assert len(shape) == 3, (
-            "image data must be 3D, with expected shape [n_fr, Ny, Nx], "
-            f"got {shape}"
+            "image data must be 3D, with expected shape [n_fr, Ny, Nx], " f"got {shape}"
         )
 
 
 @checks_registry("image_sc")
 def _check_image_sc(data=None, shape=None, with_frame_dim=False):
     """Check image data shape.
+
+    If data is provided, shape is derived from data.
+    If shape is provided, data is ignored. Only supply one of data or shape.
 
     Args:
         data (np.ndarray, optional): scan-converted data. Defaults to None.
@@ -249,7 +276,9 @@ def _check_image_sc(data=None, shape=None, with_frame_dim=False):
     Raises:
         AssertionError: if data does not have expected shape.
     """
-    assert data is not None or shape is not None, "Either data or shape must be provided."
+    assert (
+        data is not None or shape is not None
+    ), "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
 
@@ -259,8 +288,7 @@ def _check_image_sc(data=None, shape=None, with_frame_dim=False):
         )
     else:
         assert len(shape) == 3, (
-            "image data must be 3D, with expected shape [n_fr, Ny, Nx], "
-            f"got {shape}"
+            "image data must be 3D, with expected shape [n_fr, Ny, Nx], " f"got {shape}"
         )
 
 
