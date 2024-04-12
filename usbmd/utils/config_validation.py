@@ -81,7 +81,7 @@ model_schema = Schema(
             Optional("kernel_size", default=3): positive_integer,
             Optional("aux_inputs", default=None): Or(None, list),
             Optional("patches", default=1): positive_integer,
-            Optional("jit", default=True): bool,
+            Optional("jit", default=False): bool,
         },
     }
 )
