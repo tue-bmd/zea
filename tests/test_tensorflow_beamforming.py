@@ -182,10 +182,10 @@ def test_dynamic_beamforming():
     beamformer = get_beamformer(probe, scan, config)
 
     # Check that the beamformer can be called with different inputs
-    outputs = beamformer(inputs)
-    outputs = beamformer(inputs, probe=probe, scan=scan)
-    outputs = beamformer(inputs, probe=probe2, scan=scan2)
-    outputs = beamformer(inputs, probe=probe2, scan=scan2, sound_speed=sound_speed)
+    beamformer(inputs)
+    beamformer(inputs, probe=probe, scan=scan)
+    beamformer(inputs, probe=probe2, scan=scan2)
+    beamformer(inputs, probe=probe2, scan=scan2, sound_speed=sound_speed)
 
 
 def test_snapshot():
