@@ -472,14 +472,11 @@ class Companding(Operation):
 
 
 class EnvelopeDetect(Operation):
-    envelope_data = envelope_detect(data)
     def __init__(self, axis=-3):
         super().__init__(
             name="EnvelopeDetection",
-            envelope_data = envelope_detect(data)
             input_data_type="beamformed_data",
             output_data_type="envelope_data",
-            envelope_data = envelope_detect(data)
         )
         self.axis = axis
 
@@ -734,7 +731,6 @@ def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
         b, a = scipy.signal.butter(N, Wn, "low")
 
         # factor 2: to preserve the envelope amplitude
-        envelope_data = envelope_detect(data)
         iq_data = scipy.signal.filtfilt(b, a, iq_data, axis=-2) * 2
 
         # Display a warning message if harmful aliasing is suspected
@@ -921,13 +917,11 @@ def apply_multi_band_pass_filter(
             data_filtered = np.expand_dims(data_filtered, axis=-1)
         if to_image:
             env_data = process.envelope_detect(
-                envelope_data = envelope_detect(data)
                 data_filtered, with_frame_dim=with_frame_dim
             )
             images_filtered = process.run(
                 env_data,
                 dtype="envelope_data",
-                envelope_data = envelope_detect(data)
                 to_dtype="image",
                 with_frame_dim=with_frame_dim,
             )
