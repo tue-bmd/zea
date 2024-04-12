@@ -1,16 +1,22 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
-
-from usbmd.utils.checks import get_check
-from usbmd.utils.utils import translate
-from usbmd.scan import Scan
-from usbmd.probes import Probe
-from usbmd.utils.config import Config
-
-# import tensorflow as tf
-
 import scipy
+import tensorflow as tf
+import torch
+from scipy import ndimage, signal
+
+from usbmd.display import scan_convert
+from usbmd.probes import Probe
+from usbmd.pytorch_ultrasound.processing import on_device_torch
+from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
+from usbmd.scan import Scan
+from usbmd.tensorflow_ultrasound.processing import on_device_tf
+from usbmd.utils import log
+from usbmd.utils.checks import get_check
+from usbmd.utils.config import Config
+from usbmd.utils.utils import translate
+
 
 class Operation(ABC):
     def __init__(
@@ -38,7 +44,6 @@ class Operation(ABC):
 
     @abstractmethod
     def process(self, data):
-        # Process the input data
         return data
 
     def set_ops_pkg(self, ops):
@@ -61,26 +66,28 @@ class Operation(ABC):
         pass
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
-        self.assign_probe_params(probe)
-        self.assign_scan_params(scan)
-        self.assign_config_params(config)
+        self._assign_probe_params(probe)
+        self._assign_scan_params(scan)
+        self._assign_config_params(config)
 
-    def assign_config_params(self, config: Config):
+    def _assign_config_params(self, config: Config):
         # Assign the config parameters to the operation
         pass
 
-    def assign_scan_params(self, scan: Scan):
+    def _assign_scan_params(self, scan: Scan):
         # Assign the scan parameters to the operation
         pass
 
-    def assign_probe_params(self, probe: Probe):
+    def _assign_probe_params(self, probe: Probe):
         # Assign the probe parameters to the operation
         pass
 
 
 class Pipeline:
-    def __init__(self, operations, ops=np, batch_dim=True):
+    def __init__(self, operations, ops=np, batch_dim=True, device=None):
         self.operations = operations
+        self.device = device
+
         for operation in self.operations:
             operation.ops = ops
             operation.batch_dim = batch_dim
@@ -104,20 +111,115 @@ class Pipeline:
     def ops(self):
         return self.operations[0].ops
 
-    def set_params(self, config):
+    def on_device(self, on_device, data, device=None):
+        if self.ops == np:
+            return lambda func, inputs, *args, **kwargs: func(inputs)
+        elif self.ops == tf:
+            return on_device_tf(on_device, data, device=device)
+        elif self.ops == torch:
+            return on_device_torch(on_device, data, device=device)
+        else:
+            raise ValueError("Unsupported operations package.")
+
+    def set_params(self, config: Config, scan: Scan, probe: Probe):
         for operation in self.operations:
-            operation.set_params(config)
+            operation.set_params(config, scan, probe)
 
     def process(self, data):
+        if not all([operation._ready for operation in self.operations]):
+            operations_not_ready = [
+                operation.name for operation in self.operations if not operation._ready
+            ]
+            raise ValueError(
+                log.error(
+                    f"Operations {operations_not_ready} are not ready to be used, please set parameters "
+                    "using `op.set_params(config, scan, probe)` and initialize them using `op.initialize()`."
+                )
+            )
+
+        if self.device:
+            return self.on_device(self._process, data, device=self.device)
+        return self._process(data)
+
+    def _process(self, data):
         for operation in self.operations:
             data = operation(data)
         return data
 
-    def compile(self, jit=False):
-        if self.ops == np:
+    def initialize(self):
+        for operation in self.operations:
+            operation.initialize()
+
+    # def compile(self, jit=False):
+    #     if self.ops == np:
+    #         return
+    #     elif self.ops == tf:
+    #         # jit compile the pipeline
+    #         self.process = tf.function(self.process, jit_compile=jit)
+    #     elif self.ops == jax:
+    #         if not jit:
+    #             return
+    #         self.process = jax.jit(self.process)
+
+
+class Beamform(Operation):
+    def __init__(self, beamformer=None):
+        super().__init__(
+            name="Beamform",
+            input_data_type=None,
+            output_data_type=None,
+        )
+
+        self.beamformer = beamformer
+
+    def initialize(self):
+        if self.beamformer is not None:
             return
-        # if self.ops == tf:
-        #     tf.function(self.process, jit=jit)
+
+        beamformer_type = self.config.model.beamformer.type
+        # pylint: disable=import-outside-toplevel
+        if self.config.get("ml_library") == "torch":
+            from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
+
+            _BEAMFORMER_TYPES = torch_beamformer_registry.registered_names()
+        elif self.config.get("ml_library") == "tensorflow":
+            from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
+
+            _BEAMFORMER_TYPES = tf_beamformer_registry.registered_names()
+        elif self.config.get("ml_library") == "disable":
+            get_beamformer = None
+            _BEAMFORMER_TYPES = []
+        else:
+            log.warning(
+                "Cannot find ML library, proceeding without. Be aware of limitations."
+            )
+            get_beamformer = None
+            _BEAMFORMER_TYPES = []
+
+        assert beamformer_type in _BEAMFORMER_TYPES
+
+        self.beamformer = get_beamformer(self.probe, self.scan, self.config)
+
+    @property
+    def _ready(self):
+        return self.beamformer is not None
+
+    def _assign_config_params(self, config: Config):
+        self.config = config
+
+    def _assign_scan_params(self, scan: Scan):
+        self.scan = scan
+
+    def _assign_probe_params(self, probe: Probe):
+        self.probe = probe
+
+    def process(self, data):
+        if self.batch_dim is False:
+            data = self.ops.expand_dims(data, axis=0)
+        data = self.beamformer(data)  # , self.config, self.scan, self.probe)
+        if self.batch_dim is False:
+            data = self.ops.squeeze(data, axis=0)
+        return data
 
 
 class Mean(Operation):
@@ -151,7 +253,7 @@ class Normalize(Operation):
         self.output_range = output_range
         self.input_range = input_range
 
-    def set_params(self, config):
+    def _assign_config_params(self, config):
         self.input_range = config.data.input_range
         self.output_range = None
 
@@ -178,7 +280,7 @@ class LogCompress(Operation):
         )
         self.dynamic_range = dynamic_range
 
-    def set_params(self, config):
+    def _assign_config_params(self, config):
         self.dynamic_range = config.data.dynamic_range
 
     def process(self, data):
@@ -202,7 +304,7 @@ class Downsample(Operation):
         self.phase = phase
         self.axis = axis
 
-    def set_params(self, config):
+    def _assign_config_params(self, config):
         self.factor = config.scan.downsample
 
     def process(self, data):
@@ -225,7 +327,7 @@ class Companding(Operation):
         self.mu = mu
         self.A = A
 
-    def set_params(self, config):
+    def _assign_config_params(self, config):
         self.expand = config.expand
         self.comp_type = config.comp_type
         self.mu = config.mu
@@ -287,7 +389,7 @@ class Companding(Operation):
 
 
 class EnvelopeDetect(Operation):
-    def __init__(self, axis=-2):
+    def __init__(self, axis=-3):
         super().__init__(
             name="EnvelopeDetection",
             input_data_type=None,
@@ -297,12 +399,16 @@ class EnvelopeDetect(Operation):
 
     def process(self, data):
         if data.shape[-1] == 2:
-            data = self.ops.take(data, 0, axis=-1) + 1j * self.ops.take(data, 1, axis=-1)
+            data = channels_to_complex(data, axis=-1)
+        else:
             n_ax = data.shape[self.axis]
             M = 2 ** int(np.ceil(np.log2(n_ax)))
             data = scipy.signal.hilbert(data, N=M, axis=self.axis)
             data = self.ops.take(data, np.arange(n_ax), axis=self.axis)
+            data = self.ops.squeeze(data, axis=-1)
+
         return self.ops.abs(data)
+
 
 class Demodulate(Operation):
     def __init__(self, fs=None, fc=None, bandwidth=None, filter_coeff=None):
@@ -317,29 +423,33 @@ class Demodulate(Operation):
         self.filter_coeff = filter_coeff
 
     def process(self, data):
-        return demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
+        if data.shape[-1] == 2:
+            log.warning("Demodulation is not applicable to IQ data.")
+            return data
+        data = self.ops.squeeze(data, axis=-1)
+        data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
+        return complex_to_channels(data, axis=-1)
 
-    def assign_scan_params(self, scan):
-        self.fs = scan.sampling_frequency
-        self.fc = scan.center_frequency
+    def _assign_scan_params(self, scan):
+        self.fs = scan.fs
+        self.fc = scan.fc
         self.bandwidth = scan.bandwidth_percent
 
-    def assign_probe_params(self, probe):
-        pass
-
-    def set_params(self, config):
-        self.fs = config.scan.sampling_frequency
-        self.fc = config.scan.center_frequency
-        # self.bandwidth = config.scan.bandwidth_percent
+    def _assign_config_params(self, config):
+        if config.scan.sampling_frequency is not None:
+            self.fs = config.scan.sampling_frequency
+        if config.scan.center_frequency is not None:
+            self.fc = config.scan.center_frequency
 
 
 class BandPassFilter(Operation):
-    def __init__(self, num_taps=None, fs=None, fc=None, f1=None, f2=None):
+    def __init__(self, axis=None, num_taps=None, fs=None, fc=None, f1=None, f2=None):
         super().__init__(
             name="BandPassFilter",
             input_data_type=None,
             output_data_type=None,
         )
+        self.axis = axis
         self.num_taps = num_taps
         self.fs = fs
         self.fc = fc
@@ -350,17 +460,96 @@ class BandPassFilter(Operation):
             self.initialize()
 
     def initialize(self):
-        self.filter = band_pass_filter(self.num_taps, self.fs, self.f1, self.f2)
+        self.filter = get_band_pass_filter(self.num_taps, self.fs, self.f1, self.f2)
 
     @property
     def _ready(self):
-        return self.num_taps is not None and self.fs is not None and self.f1 is not None and self.f2 is not None
+        return (
+            self.axis is not None
+            and self.num_taps is not None
+            and self.fs is not None
+            and self.f1 is not None
+            and self.f2 is not None
+        )
 
     def process(self, data):
-        return
+        return ndimage.convolve1d(data, self.filter, mode="wrap", axis=self.axis)
 
-    def set_params(self, config):
 
+class ScanConvert(Operation):
+    def __init__(
+        self,
+        x_axis=None,
+        z_axis=None,
+        spline_order=1,
+        fill_value=None,
+        n_pixels=None,
+    ):
+        """Scan convert image.
+
+        Args:
+            image (ndarray): Input image (in polar coordinates).
+            spline_order (int, optional): Order of spline interpolation.
+                Defaults to 1.
+            fill_value (float, optional): Value of the points that cannot be
+                mapped from sample_points to grid. Defaults to None, which sets
+                value to minimun of dynamic range.
+            n_pixels (int, optional): Number of pixels (widht) in output image.
+                height is derived by division of sqrt(2) of width. Defaults to None.
+                in this case n_pixels is set using default arg of scan_convert func.
+
+        Returns:
+            image_sc (ndarray): Output image (converted to cartesian coordinates).
+
+        """
+        super().__init__(
+            name="ScanConvert",
+            input_data_type=None,
+            output_data_type=None,
+        )
+        self.x_axis = x_axis
+        self.z_axis = z_axis
+        self.spline_order = spline_order
+        self.fill_value = fill_value
+        self.n_pixels = n_pixels
+        self.probe_type = None
+
+    @property
+    def _ready(self):
+        if self.probe_type != "phased":
+            return True
+        return (
+            self.x_axis is not None
+            and self.z_axis is not None
+            and self.spline_order is not None
+            and self.fill_value is not None
+            and self.n_pixels is not None
+        )
+
+    def process(self, data):
+        if self.probe_type != "phased":
+            return data
+
+        return scan_convert(
+            data,
+            self.x_axis,
+            self.z_axis,
+            n_pixels=self.n_pixels,
+            spline_order=self.spline_order,
+            fill_value=self.fill_value,
+        )
+
+    def _assign_config_params(self, config):
+        self.n_pixels = config.data.output_size
+        self.fill_value = config.data.dynamic_range[0]
+
+    def _assign_probe_params(self, probe):
+        self.probe_type = probe.probe_type
+        if self.probe_type == "phased":
+            self.x_axis = probe.angle_deg_axis
+
+    def _assign_scan_params(self, scan):
+        self.z_axis = scan.z_axis
 
 
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
@@ -482,6 +671,55 @@ def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
 
     return iq_data
 
+
+def upmix(iq_data, fs, fc, upsampling_rate=6):
+    """Upsamples and upmixes complex base-band signals (IQ) to RF.
+
+    Args:
+        iq_data (ndarray): complex valued input array of size [..., n_ax, n_el]. second
+            to last axis is fast-time axis.
+        fs (float): the sampling frequency of the input IQ signal (in Hz).
+            resulting fs of RF data is upsampling_rate times higher.
+        fc (float, optional): represents the center frequency (in Hz).
+
+    Returns:
+        rf_data (ndarray): output real valued rf data.
+
+    """
+    assert iq_data.dtype in [
+        "complex64",
+        "complex128",
+    ], "IQ must contain all complex signals."
+
+    input_shape = iq_data.shape
+    n_dim = len(input_shape)
+    if n_dim > 2:
+        *_, n_ax, _ = input_shape
+    else:
+        n_ax, _ = input_shape
+
+    # Time vector
+    n_ax *= upsampling_rate
+    fs *= upsampling_rate
+
+    t = np.arange(n_ax) / fs
+    t0 = 0
+    t = t + t0
+
+    # interpolation
+    iq_data_upsampled = signal.resample(iq_data, num=n_ax, axis=-2)
+
+    # Up-mixing of the IQ signals
+    carrier = np.exp(1j * 2 * np.pi * fc * t)
+    # add the singleton dimensions
+    carrier = np.reshape(carrier, (*[1] * (n_dim - 2), n_ax, 1))
+
+    rf_data = iq_data_upsampled * carrier
+    rf_data = np.real(rf_data) * np.sqrt(2)
+
+    return rf_data.astype(np.float32)
+
+
 def apply_multi_band_pass_filter(
     beamformed_data,
     params,
@@ -580,9 +818,9 @@ def apply_multi_band_pass_filter(
     images = []
     for param in params:
         if modtype == "iq":
-            filter_weights = low_pass_iq_filter(**param)
+            filter_weights = get_low_pass_iq_filter(**param)
         elif modtype == "rf":
-            filter_weights = band_pass_filter(**param)
+            filter_weights = get_band_pass_filter(**param)
 
         axial_axis = -2
         data_filtered = ndimage.convolve1d(
@@ -615,7 +853,7 @@ def apply_multi_band_pass_filter(
     return images
 
 
-def band_pass_filter(num_taps, fs, f1, f2):
+def get_band_pass_filter(num_taps, fs, f1, f2):
     """Band pass filter
 
     Args:
@@ -631,7 +869,7 @@ def band_pass_filter(num_taps, fs, f1, f2):
     return bpf
 
 
-def low_pass_iq_filter(num_taps, fs, f, bw):
+def get_low_pass_iq_filter(num_taps, fs, f, bw):
     """Design low pass filter.
 
     LPF with num_taps points and cutoff at bw / 2
@@ -656,3 +894,123 @@ def low_pass_iq_filter(num_taps, fs, f, bw):
         1j * 2 * np.pi * f * t_qbp
     )
     return lpf
+
+
+def complex_to_channels(complex_data, axis=-1, ops=np):
+    """Unroll complex data to separate channels.
+
+    Args:
+        complex_data (complex ndarray): complex input data.
+        axis (int, optional): on which axis to extend. Defaults to -1.
+
+    Returns:
+        ndarray: real array with real and imaginary components
+            unrolled over two channels at axis.
+    """
+    assert ops.iscomplex(complex_data).any()
+    q_data = ops.imag(complex_data)
+    i_data = ops.real(complex_data)
+
+    i_data = ops.expand_dims(i_data, axis=axis)
+    q_data = ops.expand_dims(q_data, axis=axis)
+
+    iq_data = ops.concatenate((i_data, q_data), axis=axis)
+    return iq_data
+
+
+def channels_to_complex(data, axis=-1, ops=np):
+    """Convert array with real and imaginary components at
+    different channels to complex data array.
+
+    Args:
+        data (ndarray): input data, with at 0 index of axis
+            real component and 1 index of axis the imaginary.
+        axis (int, optional): axis with real and imag component
+            as separate channels. Defaults to -1.
+
+    Returns:
+        ndarray: complex array with real and imaginary components.
+    """
+    assert data.shape[axis] == 2
+    return ops.take(data, 0, axis=axis) + 1j * ops.take(data, 1, axis=axis)
+
+
+# def to_image(envelope_data, dynamic_range=None, input_range=None):
+#     """Convert envelope data to image.
+
+#     envelope_data -> normalize [0, 1] -> log compress -> [*dynamic_range]
+
+#     Args:
+#         envelope_data (ndarray): Input array of envelope data.
+#         dynamic_range (tuple): Dynamic range of output image values.
+#             Defaults to [-60, 0] dB.
+#         input_range (tuple): Range of input values (if none, min max is used).
+#     Returns:
+#         image (ndarray): Output image.
+
+#     """
+#     if dynamic_range is None:
+#         dynamic_range = (-60, 0)
+
+#     assert (
+#         dynamic_range[0] < dynamic_range[1]
+#     ), "dynamic range must be increasing tuple of size 2"
+#     assert dynamic_range[0] < 0, "dynamic range must be negative (dB)"
+#     assert (np.array(dynamic_range) <= 0).all(), "dynamic range must be negative (dB)"
+#     output_range = (0, 1)
+#     image = normalize(envelope_data, output_range, input_range)
+#     image = log_compress(image, dynamic_range)
+#     return image
+
+
+# def rf2iq(
+#     rf_data,
+#     demod_type=None,
+#     fs=None,
+#     fc=None,
+#     bandwidth=None,
+#     filter_coeff=None,
+#     separate_channels=False,
+# ):
+#     """Convert rf to iq.
+
+#     TODO:
+#         - add different type of demodulation methods
+#             gabor
+#             manual demodulation
+#     Args:
+#         rf_data (ndarray): real valued input array of size [..., n_ax, n_el].
+#             second to last axis is fast-time axis.
+#         demod_type (str, optional): demodulation type. Defaults to 'manual'.
+#         fs (float): the sampling frequency of the RF signals (in Hz).
+#             Only not necessary when filter_coeff is provided.
+#         fc (float, optional): represents the center frequency (in Hz).
+#             Defaults to None.
+#         bandwidth (float, optional): Bandwidth of RF signal in % of center
+#             frequency. Defaults to None.
+#         filter_coeff (list, optional): (b, a), numerator and denominator coefficients
+#             of FIR filter. see demodulation for description.
+#         separate_channels (bool, optional): Whether to output the iq, imag and
+#             real componants as separates channels. Defaults to False. If False,
+#             iq is not split in channels and data is complex type.
+
+#     Returns:
+#         iq_data (ndarray): output iq data of size [n_ax, n_el] or [n_ax, n_el, 2].
+
+#     """
+#     if demod_type in [None, "manual"]:
+#         if fs is None:
+#             raise ValueError("fs must be provided if demod_type is manual")
+#         iq_data = demodulate(rf_data, fs, fc, bandwidth, filter_coeff)
+#     elif demod_type == "hilbert":
+#         n_ax = rf_data.shape[-2]
+#         M = 2 ** int(np.ceil(np.log2(n_ax)))
+#         iq_data = signal.hilbert(rf_data, N=M, axis=-2)
+#         iq_data = np.take(iq_data, np.arange(n_ax), axis=-2)
+#     else:
+#         raise ValueError(f"Unknown demodulation type: {demod_type}")
+
+#     if separate_channels:
+#         iq_data = complex_to_channels(iq_data, axis=-1)
+
+#     return iq_data
