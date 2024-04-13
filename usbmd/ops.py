@@ -82,6 +82,9 @@ for lib in _ML_LIBRARIES:
         if lib == "jax":
             # pylint: disable=unused-import
             import jax
+        if lib == "keras":
+            # pylint: disable=unused-import
+            import keras
 
 
 class Operation(ABC):
@@ -221,17 +224,21 @@ class Pipeline:
         for operation in self.operations:
             operation.initialize()
 
-    # def compile(self, jit=False):
-    #     """Compile the pipeline using jit."""
-    #     if self.ops == np:
-    #         return
-    #     elif self.ops == tf:
-    #         # jit compile the pipeline
-    #         self.process = tf.function(self.process, jit_compile=jit)
-    #     elif self.ops == jax:
-    #         if not jit:
-    #             return
-    #         self.process = jax.jit(self.process)
+    def compile(self, jit=True):
+        """Compile the pipeline using jit."""
+        log.info(f"Compiling pipeline, with ops: {self.ops}")
+        if self.ops == np:
+            return
+        elif self.ops == tf:
+            # jit compile the pipeline
+            self.process = tf.function(self.process, jit_compile=jit)
+        elif self.ops == keras.ops:
+            self.process = tf.function(self.process, jit_compile=jit)
+
+        elif self.ops == jax:
+            if not jit:
+                return
+            self.process = jax.jit(self.process)
 
     def prepare_tensor(self, x):
         """Convert input array to appropriate tensor type for the operations package."""
