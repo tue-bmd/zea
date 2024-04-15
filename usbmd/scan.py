@@ -368,7 +368,7 @@ class Scan:
     @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
-        return int(np.ceil(self._n_ax / self.downsample))
+        return self._n_ax
 
     @property
     def n_el(self):

@@ -3,7 +3,7 @@ model:
   beamformer:
     type: das
 data:
-  file_path: 'dummy_file'
+  file_path: 'dummy_file_1.hdf5'
   dataset_name: 'dummy'
   dtype: 'raw_data'
   dynamic_range: [-60, 0]
