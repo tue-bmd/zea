@@ -34,4 +34,4 @@ jobs:
 
       - name: Perform tests
         run: |
-          pytest -s ./tests
+          pytest -s ./tests -j 0 
