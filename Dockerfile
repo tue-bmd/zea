@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Install python, pip, git, opencv dependencies, ffmpeg, imagemagick, and ssh keyscan github
 RUN apt-get update && \
     apt-get install -y python3 python3-pip git \
-                       libsm6 libxext6 libxrender-dev tk \
+                       libsm6 libxext6 libxrender-dev tk libqt5gui5 \
                        ffmpeg imagemagick sudo && \
     python3 -m pip install pip -U && \
     apt-get clean && \
