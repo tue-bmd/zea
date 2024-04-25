@@ -18,23 +18,23 @@ RUN apt-get update && \
     mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts && \
     ln -s /usr/bin/python3 /usr/bin/python
 
-# Add non root user
-ARG USERNAME=devcontainer
-ARG USER_UID=1000
-ARG USER_GID=$USER_UID
+# Add non-root users
+ARG BASE_UID=1000
+ARG NUM_USERS=51
 
-# Create the user
-RUN groupadd --gid $USER_GID $USERNAME \
-    && useradd --uid $USER_UID --gid $USER_GID -m --shell /bin/bash $USERNAME \
-    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
-    && chmod 0440 /etc/sudoers.d/$USERNAME
+# Create users in a loop
+RUN for i in $(seq 0 $NUM_USERS); do \
+        USER_UID=$((BASE_UID + i)); \
+        USERNAME="devcontainer$i"; \
+        groupadd --gid $USER_UID $USERNAME && \
+        useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
+        echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME && \
+        chmod 0440 /etc/sudoers.d/$USERNAME; \
+    done
 
 # Set working directory
 WORKDIR /usbmd
 COPY . /usbmd
 
 # Install usbmd
-RUN pip install --no-cache-dir -e . [test,linter]
-
-COPY entrypoint.sh /entrypoint.sh
-ENTRYPOINT [ "/entrypoint.sh" ]
+RUN pip install --no-cache-dir -e .[test,linter]
