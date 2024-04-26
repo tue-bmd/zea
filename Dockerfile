@@ -44,7 +44,7 @@ ARG KERAS3=False
 RUN if [ "$KERAS3" = "True" ]; then \
         pip install --no-cache-dir --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
         pip install --no-cache-dir --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.20 && \
-        pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.1.2+cu121 torchvision==0.16.2+cu121 && \
+        pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision && \
         pip install --no-cache-dir --upgrade keras-cv && \
         pip install --no-cache-dir --upgrade keras && \
         pip install wandb albumentations torchmetrics ax-platform; \
