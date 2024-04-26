@@ -120,3 +120,21 @@ docker attach {CONTAINER-NAME}
 ```
 
 Starting and stopping with `docker start {CONTAINER-NAME}` and `docker stop {CONTAINER-NAME}`.
+
+### Development in the container using vscode
+
+You can use vscode to attach to the running container and develop in it.
+You can install your vscode extensions in the container.
+The easiest is to keep re-using this container so do not delete it after use.
+
+#### Using git
+
+Make sure that the the ssh-agent is running and your ssh key is added to it. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found [here](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials).
+
+#### Installing more packages
+
+If you want to install some packages after the image has been build and you are in the container as your user, make sure to use `sudo`.
+
+```shell
+sudo pip install {PACKAGE}
+```
