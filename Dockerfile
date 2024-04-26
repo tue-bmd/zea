@@ -47,5 +47,5 @@ RUN if [ "$KERAS3" = "True" ]; then \
         pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.1.2+cu121 torchvision==0.16.2+cu121 && \
         pip install --no-cache-dir --upgrade keras-cv && \
         pip install --no-cache-dir --upgrade keras && \
-        pip install wandb albumentations torchmetrics; \
+        pip install wandb albumentations torchmetrics ax-platform; \
     fi
