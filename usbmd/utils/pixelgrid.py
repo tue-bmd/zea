@@ -96,8 +96,9 @@ def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
         x = np.linspace(xlims[0], xlims[1] + eps, Nx)
         z = np.linspace(zlims[0], zlims[1] + eps, Nz)
     elif dx is not None and dz is not None:
-        x = np.arange(xlims[0], xlims[1] + eps, dx)
-        z = np.arange(zlims[0], zlims[1] + eps, dz)
+        sign = np.sign(xlims[1] - xlims[0])
+        x = np.arange(xlims[0], xlims[1] + eps, sign * dx)
+        z = np.arange(zlims[0], zlims[1] + eps, sign * dz)
     else:
         raise ValueError("Either Nx and Nz or dx and dz must be defined.")
 
