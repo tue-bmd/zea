@@ -8,11 +8,29 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from dataclasses import dataclass
+
 from usbmd.probes import Probe, get_probe
 from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
 from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
 from usbmd.utils.utils import first_not_none_item, update_dictionary
+
+
+@dataclass
+class DatasetElement:
+    """Class to store a dataset element with a name, data, description and unit. Used to
+    supply additional dataset elements to the generate_usbmd_dataset function."""
+
+    # The group name to store the dataset under. This can be a nested group, e.g.
+    # "scan/waveforms"
+    group_name: str
+    # The name of the dataset. This will be the key in the group.
+    dataset_name: str
+    # The data to store in the dataset.
+    data: np.ndarray
+    description: str
+    unit: str
 
 
 def generate_example_dataset(path, add_optional_fields=False):
@@ -126,6 +144,7 @@ def generate_usbmd_dataset(
     tx_apodizations=None,
     bandwidth_percent=None,
     time_to_next_transmit=None,
+    additional_elements=None,
 ):
     """
     Generates a dataset in the USBMD format.
@@ -163,6 +182,9 @@ def generate_usbmd_dataset(
             percentage of the center frequency.
         time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s
             of shape (n_frames, n_tx).
+        additional_elements (List[DatasetElement]): A list of additional dataset
+            elements to be added to the dataset. Each element should be a DatasetElement
+            object. The additional elements are added under the scan group.
 
     Returns:
         (h5py.File): The example dataset.
@@ -200,14 +222,23 @@ def generate_usbmd_dataset(
             data = first_not_none_item(arr)
             return data.shape[axis] if data is not None else None
 
-        def add_dataset(group, name, data, description, unit):
+        def add_dataset(
+            group_name: str, name: str, data: np.ndarray, description: str, unit: str
+        ):
             """Adds a dataset to the given group with a description and unit.
             If data is None, the dataset is not added."""
             if data is None:
                 return
-            dataset = group.create_dataset(name, data=data)
-            dataset.attrs["description"] = description
-            dataset.attrs["unit"] = unit
+
+            # Create the group if it does not exist
+            if group_name not in dataset:
+                group = dataset.create_group(group_name)
+            else:
+                group = dataset[group_name]
+
+            new_dataset = group.create_dataset(name, data=data)
+            new_dataset.attrs["description"] = description
+            new_dataset.attrs["unit"] = unit
 
         n_frames = first_not_none_item(
             [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
@@ -221,11 +252,12 @@ def generate_usbmd_dataset(
             n_tx = 1
 
         # Write data group
-        data_group = dataset.create_group("data")
+        data_group_name = "data"
+        data_group = dataset.create_group(data_group_name)
         data_group.attrs["description"] = "This group contains the data."
 
         add_dataset(
-            group=data_group,
+            group_name=data_group_name,
             name="raw_data",
             data=convert_datatype(raw_data),
             description="The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
@@ -233,7 +265,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=data_group,
+            group_name=data_group_name,
             name="aligned_data",
             data=convert_datatype(aligned_data),
             description="The aligned_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
@@ -241,7 +273,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=data_group,
+            group_name=data_group_name,
             name="envelope_data",
             data=convert_datatype(envelope_data),
             description="The envelope_data of shape (n_frames, n_z, n_x).",
@@ -249,7 +281,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=data_group,
+            group_name=data_group_name,
             name="beamformed_data",
             data=convert_datatype(beamformed_data),
             description="The beamformed_data of shape (n_frames, n_z, n_x).",
@@ -257,7 +289,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=data_group,
+            group_name=data_group_name,
             name="image",
             data=convert_datatype(image),
             unit="unitless",
@@ -265,7 +297,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=data_group,
+            group_name=data_group_name,
             name="image_sc",
             data=convert_datatype(image_sc),
             unit="unitless",
@@ -276,11 +308,12 @@ def generate_usbmd_dataset(
         )
 
         # Write scan group
-        scan_group = dataset.create_group("scan")
+        scan_group_name = "scan"
+        scan_group = dataset.create_group(scan_group_name)
         scan_group.attrs["description"] = "This group contains the scan parameters."
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="n_ax",
             data=n_ax,
             description="The number of axial samples.",
@@ -288,7 +321,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="n_el",
             data=n_el,
             description="The number of elements in the probe.",
@@ -296,7 +329,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="n_tx",
             data=n_tx,
             description="The number of transmits per frame.",
@@ -304,7 +337,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="n_ch",
             data=n_ch,
             description=(
@@ -315,7 +348,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="n_frames",
             data=n_frames,
             description="The number of frames.",
@@ -323,7 +356,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="sound_speed",
             data=sound_speed,
             description="The speed of sound in m/s",
@@ -331,7 +364,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="probe_geometry",
             data=probe_geometry,
             description="The probe geometry of shape (n_el, 3).",
@@ -339,7 +372,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="sampling_frequency",
             data=sampling_frequency,
             description="The sampling frequency in Hz.",
@@ -347,7 +380,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="center_frequency",
             data=center_frequency,
             description="The center frequency in Hz.",
@@ -355,7 +388,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="initial_times",
             data=initial_times,
             description=(
@@ -367,7 +400,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="t0_delays",
             data=t0_delays,
             description="The t0_delays of shape (n_tx, n_el).",
@@ -375,7 +408,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="tx_apodizations",
             data=tx_apodizations,
             description=(
@@ -388,7 +421,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="focus_distances",
             data=focus_distances,
             description=(
@@ -399,7 +432,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="polar_angles",
             data=polar_angles,
             description=(
@@ -409,7 +442,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="azimuth_angles",
             data=azimuth_angles,
             description=(
@@ -419,7 +452,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="bandwidth_percent",
             data=bandwidth_percent,
             description=(
@@ -429,7 +462,7 @@ def generate_usbmd_dataset(
         )
 
         add_dataset(
-            group=scan_group,
+            group_name=scan_group_name,
             name="time_to_next_transmit",
             data=time_to_next_transmit,
             description=(
@@ -438,6 +471,17 @@ def generate_usbmd_dataset(
             ),
             unit="s",
         )
+
+        # Add additional elements
+        if additional_elements is not None:
+            for element in additional_elements:
+                add_dataset(
+                    group_name=element.group_name,
+                    name=element.dataset_name,
+                    data=element.data,
+                    description=element.description,
+                    unit=element.unit,
+                )
 
     validate_dataset(path)
     print(f"USBMD dataset written to {path}")
