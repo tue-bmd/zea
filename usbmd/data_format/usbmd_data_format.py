@@ -15,6 +15,7 @@ from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
 from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
 from usbmd.utils.utils import first_not_none_item, update_dictionary
+import usbmd.utils.log as log
 
 
 @dataclass
@@ -484,7 +485,7 @@ def generate_usbmd_dataset(
                 )
 
     validate_dataset(path)
-    print(f"USBMD dataset written to {path}")
+    log.info(f"USBMD dataset written to {log.yellow(path)}")
 
 
 def load_usbmd_file(
