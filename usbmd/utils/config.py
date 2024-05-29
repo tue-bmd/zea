@@ -32,7 +32,14 @@ class Config(dict):
         # Class attributes
         for k in self.__class__.__dict__:
             if not (k.startswith("__") and k.endswith("__")):
-                if k not in ["update", "serialize", "deep_copy", "save_to_yaml"]:
+                if k not in [
+                    "update",
+                    "serialize",
+                    "deep_copy",
+                    "save_to_yaml",
+                    "freeze",
+                    "unfreeze",
+                ]:
                     setattr(self, k, getattr(self, k))
 
     def __setattr__(self, name, value):
@@ -79,8 +86,15 @@ class Config(dict):
             )
 
     def freeze(self):
-        """Freeze config object. This means that no new attributes can be added. Only existing attributes can be modified."""
+        """
+        Freeze config object. This means that no new attributes can be added.
+        Only existing attributes can be modified.
+        """
         self.__frozen__ = True
+
+    def unfreeze(self):
+        """Unfreeze config object. This means that new attributes can be added."""
+        self.__frozen__ = False
 
 
 def load_config_from_yaml(path, loader=yaml.FullLoader):
