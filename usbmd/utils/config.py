@@ -20,6 +20,8 @@ class Config(dict):
 
     """
 
+    __frozen__ = False
+
     def __init__(self, dictionary=None, **kwargs):
         if dictionary is None:
             dictionary = {}
@@ -34,6 +36,11 @@ class Config(dict):
                     setattr(self, k, getattr(self, k))
 
     def __setattr__(self, name, value):
+        if self.__frozen__ and not hasattr(self, name):
+            raise TypeError(
+                f"Config is a frozen, no new attributes can be added. Tried to add: `{name}`"
+            )
+
         if isinstance(value, (list, tuple)):
             value = [self.__class__(x) if isinstance(x, dict) else x for x in value]
         else:
@@ -70,6 +77,10 @@ class Config(dict):
                 default_flow_style=False,
                 sort_keys=False,
             )
+
+    def freeze(self):
+        """Freeze config object. This means that no new attributes can be added. Only existing attributes can be modified."""
+        self.__frozen__ = True
 
 
 def load_config_from_yaml(path, loader=yaml.FullLoader):
