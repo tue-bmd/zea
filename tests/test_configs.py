@@ -182,16 +182,11 @@ def test_freeze():
     config.new_attribute = 1
 
 
-def test_protected_attribute():
+@pytest.mark.parametrize("dictionary", [{"freeze": "Yes"}, {"save_to_yaml": "No"}])
+def test_protected_attribute(dictionary):
     """Tests if protected attributes cannot be overridden."""
-    config = Config(dictionary=simple_dict)
     with pytest.raises(AttributeError):
-        config.freeze = 1  # pylint: disable=not-callable
-    with pytest.raises(AttributeError):
-        config.save_to_yaml = 1  # pylint: disable=not-callable
-    with pytest.raises(AttributeError):
-        config.deep_copy = 1  # pylint: disable=not-callable
-    # There are more methods that are protected, but these are enough to test
+        Config(dictionary=dictionary)
 
 
 @pytest.mark.parametrize("dictionary", config_initializers)
