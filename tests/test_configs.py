@@ -1,4 +1,5 @@
 """Test configs"""
+
 import shutil
 import sys
 from pathlib import Path
@@ -181,3 +182,25 @@ def test_check_equal():
         config_check_equal_recursive(config, config4)
     with pytest.raises(AssertionError):
         config_check_equal_recursive(config, config5)
+
+
+def test_freeze():
+    """Tests if the config can be frozen and no new attributes can be added."""
+    config = Config(dictionary=simple_dict)
+    config.freeze()
+    with pytest.raises(TypeError):
+        config.new_attribute = 1
+    config.unfreeze()
+    config.new_attribute = 1
+
+
+def test_protected_attribute():
+    """Tests if protected attributes cannot be overridden."""
+    config = Config(dictionary=simple_dict)
+    with pytest.raises(AttributeError):
+        config.freeze = 1
+    with pytest.raises(AttributeError):
+        config.save_to_yaml = 1
+    with pytest.raises(AttributeError):
+        config.deep_copy = 1
+    # There are more methods that are protected, but these are enough to test
