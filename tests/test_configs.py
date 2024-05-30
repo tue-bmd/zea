@@ -57,18 +57,6 @@ def test_all_configs_valid(file):
         raise ValueError(f"Error in config {file}") from se
 
 
-@pytest.mark.parametrize("dictionary", config_initializers)
-def test_getitem(dictionary):
-    """Tests if the getitem method works for simple dictionaries."""
-    config = Config(dictionary=dictionary)
-    for key, value in dictionary.items():
-        assert config[key] == value
-
-    # Check if config raises an error when indexing a missing key
-    with pytest.raises(KeyError):
-        print(config["key_not_in_config"])
-
-
 def test_dot_indexing():
     """Tests if the dot indexing works for simple dictionaries."""
     dictionary = {"a": 3, "b": 4}
@@ -198,9 +186,30 @@ def test_protected_attribute():
     """Tests if protected attributes cannot be overridden."""
     config = Config(dictionary=simple_dict)
     with pytest.raises(AttributeError):
-        config.freeze = 1
+        config.freeze = 1  # pylint: disable=not-callable
     with pytest.raises(AttributeError):
-        config.save_to_yaml = 1
+        config.save_to_yaml = 1  # pylint: disable=not-callable
     with pytest.raises(AttributeError):
-        config.deep_copy = 1
+        config.deep_copy = 1  # pylint: disable=not-callable
     # There are more methods that are protected, but these are enough to test
+
+
+@pytest.mark.parametrize("dictionary", config_initializers)
+def test_dict_and_attributes_equal(dictionary):
+    """Tests if the dictionary and attributes are equal."""
+
+    def test_getitem(config):
+        """Tests if the getitem method works for simple dictionaries."""
+        for key, value in config.items():
+            assert getattr(config, key) == value
+
+        # Check if config raises an error when indexing a missing key
+        with pytest.raises(KeyError):
+            print(config["key_not_in_config"])
+
+    config = Config(dictionary=dictionary)
+    test_getitem(config)
+    config["update_with_dict"] = 1
+    config.update({"update_with_update": 2})
+    config.update_with_attribute = 3
+    test_getitem(config)

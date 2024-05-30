@@ -68,7 +68,10 @@ class Config(dict):
 
         # Set attribute and update dictionary
         super().__setattr__(name, value)
-        self[name] = value
+        super().__setitem__(name, value)
+
+    def __setitem__(self, key, value):
+        return self.__setattr__(key, value)
 
     def update(self, override_dict):
         """
@@ -133,3 +136,11 @@ def load_config_from_yaml(path, loader=yaml.FullLoader):
         return Config(dictionary)
     else:
         return {}
+
+
+if __name__ == "__main__":
+    # config = {"deep_copy": True}
+    config = Config()
+    config.test = 2
+    config["test"] = 1
+    print(config.items())
