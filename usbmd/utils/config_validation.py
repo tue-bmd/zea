@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
-from usbmd.utils import log
+
 from usbmd.registry import metrics_registry
+from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
 
@@ -270,6 +271,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
         config = config.serialize()
         config = _try_validate_config(config)
         config = Config(config)
+        config.freeze()  # freeze because schema will add all defaults
     else:
         config = _try_validate_config(config)
     if verbose:
