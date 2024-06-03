@@ -37,6 +37,7 @@ dataset_parameters = {
 from usbmd.data_format.usbmd_data_format import (
     generate_example_dataset,
     generate_usbmd_dataset,
+    DatasetElement,
 )
 from usbmd.datasets import USBMDDataSet
 from usbmd.utils.checks import validate_dataset
@@ -164,3 +165,48 @@ def test_existing_path():
     finally:
         if path.exists():
             os.remove(path)
+
+
+def test_additional_dataset_element():
+    """Tests the functionality of the additional_elements parameter in the
+    generate_usbmd_dataset function by adding additional elements to the
+    dataset."""
+
+    elements = []
+    elements.append(
+        DatasetElement(
+            group_name="scan",
+            dataset_name="lens_correction",
+            data=np.array([0.1]),
+            description="The additional path length due to the lens in wavelengths.",
+            unit="wavelengths",
+        )
+    )
+    elements.append(
+        DatasetElement(
+            group_name="scan",
+            dataset_name="sound_speed_map",
+            data=np.random.rand(10, 10),
+            description="The local speed of sound in the medium.",
+            unit="m/s",
+        )
+    )
+
+    # Add elements to subgroup
+    t = np.arange(100) / dataset_parameters["sampling_frequency"]
+    for n in range(4):
+        elements.append(
+            DatasetElement(
+                group_name="scan/waveforms",
+                dataset_name=f"waveform{n}",
+                data=np.sin(2 * np.pi * 1e6 * t),
+                description="element3 description",
+                unit="m",
+            )
+        )
+
+    try:
+        generate_usbmd_dataset(**dataset_parameters, additional_elements=elements)
+    finally:
+        if Path(dataset_parameters["path"]).exists():
+            os.remove(dataset_parameters["path"])

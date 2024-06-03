@@ -1,6 +1,7 @@
 """Test the tf implementation of the beamformers.
 """
 
+import pickle
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import tensorflow as tf
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
+from usbmd.tensorflow_ultrasound.utils.utils import tf_snapshot
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.simulator import UltrasoundSimulator
 
@@ -138,3 +140,81 @@ def test_jit_compile():
     # only checking if images are similar on a global scale. Users should always manually check
     # the output of the model.
     assert np.allclose(jit_output, non_jit_output, atol=1e-2)
+
+
+def test_dynamic_beamforming():
+    """Test that the beamformer can be called with different inputs and configurations."""
+    config = load_config_from_yaml(r"./tests/config_test.yaml")
+    config.ml_library = "tensorflow"
+
+    probe = Verasonics_l11_4v()
+    probe_parameters = probe.get_default_scan_parameters()
+
+    scan = PlaneWaveScan(
+        probe_geometry=probe.probe_geometry,
+        n_tx=1,
+        xlims=(-19e-3, 19e-3),
+        zlims=(0, 63e-3),
+        n_ax=2048,
+        sampling_frequency=probe_parameters["sampling_frequency"],
+        center_frequency=probe_parameters["center_frequency"],
+        angles=np.array(
+            [
+                0,
+            ]
+        ),
+    )
+
+    probe2 = pickle.loads(pickle.dumps(probe))
+    scan2 = pickle.loads(pickle.dumps(scan))
+    scan2.fc = 5e6
+    scan2.fs = 4 * 5e6
+    probe2.probe_type = "new_probe_type"
+
+    sound_speed = 1600
+
+    # Generate pseudorandom input tensor
+    simulator = UltrasoundSimulator(probe, scan)
+    data = simulator.generate(20)
+    inputs = np.expand_dims(data[0], axis=(1, -1))
+
+    # Initialize beamformer
+    beamformer = get_beamformer(probe, scan, config)
+
+    # Check that the beamformer can be called with different inputs
+    beamformer(inputs)
+    beamformer(inputs, probe=probe, scan=scan)
+    beamformer(inputs, probe=probe2, scan=scan2)
+    beamformer(inputs, probe=probe2, scan=scan2, sound_speed=sound_speed)
+
+
+def test_snapshot():
+    """Test that the snapshot function works."""
+    probe = Verasonics_l11_4v()
+    probe_parameters = probe.get_default_scan_parameters()
+
+    scan = PlaneWaveScan(
+        probe_geometry=probe.probe_geometry,
+        n_tx=1,
+        xlims=(-19e-3, 19e-3),
+        zlims=(0, 63e-3),
+        n_ax=2047,
+        sampling_frequency=probe_parameters["sampling_frequency"],
+        center_frequency=probe_parameters["center_frequency"],
+        angles=np.array(
+            [
+                0,
+            ]
+        ),
+    )
+
+    probe_snapshot = tf_snapshot(probe)
+    scan_snapshot = tf_snapshot(scan)
+
+    def check_snapshot(snapshot, obj):
+        for key, value in snapshot.items():
+            assert isinstance(value, tf.Tensor)
+            np.testing.assert_allclose(value.numpy(), getattr(obj, key))
+
+    check_snapshot(probe_snapshot, probe)
+    check_snapshot(scan_snapshot, scan)

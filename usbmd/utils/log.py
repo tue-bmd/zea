@@ -272,3 +272,8 @@ logger = configure_console_logger(
     name_color="darkgreen",
 )
 file_logger = configure_file_logger(level="DEBUG")
+
+# Do not propagate the log messages to the root logger
+# Prevents double logging when using the logger in multiple modules
+logger.propagate = False
+file_logger.propagate = False
