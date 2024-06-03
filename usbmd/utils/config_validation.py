@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
-from usbmd.utils import log
+
 from usbmd.registry import metrics_registry
+from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
 
@@ -86,7 +87,7 @@ model_schema = Schema(
             Optional("kernel_size", default=3): positive_integer,
             Optional("aux_inputs", default=None): Or(None, list),
             Optional("patches", default=1): positive_integer,
-            Optional("jit", default=True): bool,
+            Optional("jit", default=False): bool,
         },
     }
 )
@@ -165,6 +166,7 @@ scan_schema = Schema(
         Optional("sampling_frequency", default=None): Or(None, any_number),
         Optional("demodulation_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
+        Optional("f_number", default=None): Or(None, positive_float),
     }
 )
 
@@ -269,6 +271,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
         config = config.serialize()
         config = _try_validate_config(config)
         config = Config(config)
+        config.freeze()  # freeze because schema will add all defaults
     else:
         config = _try_validate_config(config)
     if verbose:

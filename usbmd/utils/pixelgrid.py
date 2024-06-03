@@ -49,12 +49,12 @@ def check_for_aliasing(scan):
         if width / scan.Nx > wvln / 2:
             log.warning(
                 f"width/Nx = {width/scan.Nx:.7f} < wvln/2 = {wvln/2}. "
-                f"Consider increasing scan.Nx to {int(width/(wvln/2))} or more."
+                f"Consider increasing scan.Nx to {int(np.ceil(width/(wvln/2)))} or more."
             )
         if depth / scan.Nz > wvln / 2:
             log.warning(
                 f"depth/Nz = {depth/scan.Nz:.7f} < wvln/2 = {wvln/2:.7f}. "
-                f"Consider increasing scan.Nz to {int(depth/(wvln/2))} or more."
+                f"Consider increasing scan.Nz to {int(np.ceil(depth/(wvln/2)))} or more."
             )
     else:
         if dx > wvln / 2:
@@ -96,8 +96,9 @@ def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
         x = np.linspace(xlims[0], xlims[1] + eps, Nx)
         z = np.linspace(zlims[0], zlims[1] + eps, Nz)
     elif dx is not None and dz is not None:
-        x = np.arange(xlims[0], xlims[1] + eps, dx)
-        z = np.arange(zlims[0], zlims[1] + eps, dz)
+        sign = np.sign(xlims[1] - xlims[0])
+        x = np.arange(xlims[0], xlims[1] + eps, sign * dx)
+        z = np.arange(zlims[0], zlims[1] + eps, sign * dz)
     else:
         raise ValueError("Either Nx and Nz or dx and dz must be defined.")
 
