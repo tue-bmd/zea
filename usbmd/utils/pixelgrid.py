@@ -49,12 +49,12 @@ def check_for_aliasing(scan):
         if width / scan.Nx > wvln / 2:
             log.warning(
                 f"width/Nx = {width/scan.Nx:.7f} < wvln/2 = {wvln/2}. "
-                f"Consider increasing scan.Nx to {int(width/(wvln/2))} or more."
+                f"Consider increasing scan.Nx to {int(np.ceil(width/(wvln/2)))} or more."
             )
         if depth / scan.Nz > wvln / 2:
             log.warning(
                 f"depth/Nz = {depth/scan.Nz:.7f} < wvln/2 = {wvln/2:.7f}. "
-                f"Consider increasing scan.Nz to {int(depth/(wvln/2))} or more."
+                f"Consider increasing scan.Nz to {int(np.ceil(depth/(wvln/2)))} or more."
             )
     else:
         if dx > wvln / 2:
