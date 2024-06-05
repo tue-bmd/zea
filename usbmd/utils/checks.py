@@ -525,6 +525,7 @@ def _assert_uint8_images(images: np.ndarray):
     )
 
     if images.ndim == 4:
-        assert images.shape[-1] in (1, 3), (
-            "grayscale images must have 1 channel, " "RGB images must have 3 channels"
-        )
+        assert images.shape[-1] in (
+            1,
+            3,
+        ), "grayscale images must have 1 channel, RGB images must have 3 channels"

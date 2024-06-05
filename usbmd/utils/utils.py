@@ -136,8 +136,9 @@ def save_to_gif(images, filename, fps=20):
     """Saves a sequence of images to .gif file.
     Args:
         images: list of images (numpy arrays). Must have shape
-            (n_frames, height, width, channels). If channel axis is not present, or is 1,
-            grayscale image is assumed, which is then converted to RGB. Images should be uint8.
+            (n_frames, height, width, channels) or (n_frames, height, width).
+            If channel axis is not present, or is 1, grayscale image is assumed,
+            which is then converted to RGB. Images should be uint8.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
@@ -168,8 +169,9 @@ def save_to_mp4(images, filename, fps=20):
     """Saves a sequence of images to .mp4 file.
     Args:
         images: list of images (numpy arrays). Must have shape
-            (n_frames, height, width, channels). If channel axis is not present,
-            grayscale image is assumed, which is then converted to RGB.
+            (n_frames, height, width, channels) or (n_frames, height, width).
+            If channel axis is not present, or is 1, grayscale image is assumed,
+            which is then converted to RGB. Images should be uint8.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
