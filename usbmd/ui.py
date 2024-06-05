@@ -58,7 +58,9 @@ class DataLoaderUI:
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters()
+        default_scan_params = self.dataset.get_default_scan_parameters(
+            file_idx=0, event=0
+        )
 
         if len(default_scan_params) == 0:
             log.info(
@@ -69,14 +71,13 @@ class DataLoaderUI:
 
             self.scan = None
         else:
-            config_scan_params = self.config.scan
+            self.config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
-            scan_params = update_dictionary(default_scan_params, config_scan_params)
+            self.scan_params = update_dictionary(
+                default_scan_params, self.config_scan_params
+            )
 
-            if "n_ax" not in scan_params:
-                self.scan = scan_class(**scan_params, n_ax=2000, n_el=192, n_ch=1)
-            else:
-                self.scan = scan_class(**scan_params)
+            self.scan = scan_class(**self.scan_params)
 
         # initialize probe
         self.probe = get_probe(self.dataset.get_probe_name())
@@ -200,6 +201,20 @@ class DataLoaderUI:
 
         data = self.dataset[file_idx]
 
+        ## Update scan class (probably a cleaner way to do this)
+        scan_params = self.dataset.get_default_scan_parameters(
+            file=self.dataset.file, event=self.dataset.frame_no
+        )
+        scan_class = self.dataset.get_scan_class()
+
+        scan_params = update_dictionary(scan_params, self.config_scan_params)
+        self.scan_params = update_dictionary(self.scan_params, scan_params)
+        self.scan = scan_class(**self.scan_params)
+
+        # TODO: use adaptive beamformer processing instead of reinit
+        self.process = Process(self.config, self.scan, self.probe)
+
+        # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
         return data
 
     def data_to_display(self, data=None):
@@ -389,7 +404,7 @@ class DataLoaderUI:
         # Load correct number of frames (needs to get_data first)
         self.config.data.frame_no = 0
         self.get_data()
-        n_frames = len(self.dataset.h5_reader)
+        n_frames = self.dataset.num_frames
 
         self.verbose = False
         # pylint: disable=too-many-nested-blocks
