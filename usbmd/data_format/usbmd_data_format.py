@@ -148,7 +148,11 @@ def _write_datasets(
     bandwidth_percent=None,
     time_to_next_transmit=None,
     additional_elements=None,
+    **kwargs,
 ):
+    # weird pylint work around
+    if kwargs:
+        raise ValueError(f"Unknown arguments: {list(kwargs.keys())}")
 
     def _convert_datatype(x, astype=np.float32):
         return x.astype(astype) if x is not None else None
@@ -594,7 +598,6 @@ def generate_usbmd_dataset(
                 )
 
         else:
-            # pylint: disable=unexpected-keyword-arg
             _write_datasets(
                 dataset,
                 data_group_name="data",
