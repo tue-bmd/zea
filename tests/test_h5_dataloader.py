@@ -102,8 +102,9 @@ def test_h5_dataset_from_directory(
         )
     else:
         assert (batch_shape[-2] / n_frames) == (batch_shape[-2] // n_frames), (
-            f"Something went wrong as the second to last dimension of the batch shape {batch_shape[-2]}"
-            " is not divisible by the number of frames {n_frames}"
+            "Something went wrong as the second to last dimension of "
+            f"the batch shape {batch_shape[-2]} "
+            f"is not divisible by the number of frames {n_frames}"
         )
 
     real_len_dataset = len(dataset)
