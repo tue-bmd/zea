@@ -523,7 +523,10 @@ def generate_usbmd_dataset(
     assert (
         len(data_and_parameters)
         == len(signature(generate_usbmd_dataset).parameters) - 2
-    ), "All arguments should be put in data_and_parameters except `path` and `event_structure` arguments."
+    ), (
+        "All arguments should be put in data_and_parameters except "
+        "`path` and `event_structure` arguments."
+    )
 
     if event_structure:
         for argument, argument_value in data_and_parameters.items():
@@ -543,7 +546,8 @@ def generate_usbmd_dataset(
             len(set(probe_name)) == 1
         ), "Probe names for all events should be the same"
         log.info(
-            f"Event structure is set to True. Writing dataset with event structure (found {len(probe_name)} events)."
+            f"Event structure is set to True. Writing dataset with event "
+            f"structure (found {len(probe_name)} events)."
         )
         num_events = len(probe_name)
         probe_name = probe_name[0]
@@ -590,6 +594,7 @@ def generate_usbmd_dataset(
                 )
 
         else:
+            # pylint: disable=unexpected-keyword-arg
             _write_datasets(
                 dataset,
                 data_group_name="data",
