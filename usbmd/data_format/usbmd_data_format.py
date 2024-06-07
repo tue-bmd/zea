@@ -545,6 +545,12 @@ def load_usbmd_file(
         # instead, but warn the user.
         try:
             probe = get_probe(probe_name)
+
+            # If we received the empty "generic" probe, we need to set the
+            # probe geometry manually
+            if probe.probe_geometry is None:
+                probe.probe_geometry = probe_geometry
+
         except NotImplementedError:
             logging.warning(
                 "The probe %s is not implemented. Using a generic probe instead.",
