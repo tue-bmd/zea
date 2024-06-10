@@ -176,14 +176,23 @@ class Operation(ABC):
         # Assign the probe parameters to the operation
         pass
 
-    def prepare_tensor(self, x):
+    def prepare_tensor(self, x, dtype=None):
         """Convert input array to appropriate tensor type for the operations package."""
         if self.ops == np:
-            return np.array(x)
+            x = np.array(x)
+            if dtype is not None:
+                x = x.astype(dtype)
+            return x
         elif self.ops == tf:
-            return tf.convert_to_tensor(x)
+            x = tf.convert_to_tensor(x)
+            if dtype is not None:
+                x = tf.cast(x, dtype)
+            return x
         elif self.ops == torch:
-            return torch.tensor(x)
+            x = torch.tensor(x)
+            if dtype is not None:
+                x = x.type(dtype)
+            return x
         else:
             raise ValueError("Unsupported operations package.")
 
@@ -507,6 +516,7 @@ class Companding(Operation):
         self.comp_type = comp_type
         self.mu = mu
         self.A = A
+        self.one = None
 
     def _assign_config_params(self, config):
         self.expand = config.expand
@@ -515,18 +525,30 @@ class Companding(Operation):
         self.A = config.A
 
     def process(self, data):
+        self.one = self.prepare_tensor(1.0, dtype=data.dtype)
+        self.A = self.prepare_tensor(self.A, dtype=data.dtype)
+        self.mu = self.prepare_tensor(self.mu, dtype=data.dtype)
+
         data = self.ops.clip(data, -1, 1)
+
+        if self.comp_type is None:
+            self.comp_type = "mu"
+        assert self.comp_type.lower() in ["a", "mu"]
 
         def mu_law_compress(x):
             y = (
                 self.ops.sign(x)
-                * self.ops.log(1 + self.mu * self.ops.abs(x))
-                / self.ops.log(1 + self.mu)
+                * self.ops.log(self.one + self.mu * self.ops.abs(x))
+                / self.ops.log(self.one + self.mu)
             )
             return y
 
         def mu_law_expand(y):
-            x = self.ops.sign(y) * ((1 + self.mu) ** (self.ops.abs(y)) - 1) / self.mu
+            x = (
+                self.ops.sign(y)
+                * ((self.one + self.mu) ** (self.ops.abs(y)) - self.one)
+                / self.mu
+            )
             return x
 
         def a_law_compress(x):
@@ -534,12 +556,12 @@ class Companding(Operation):
             x_abs = self.ops.abs(x)
             A_log = self.ops.log(self.A)
 
-            idx_1 = self.ops.where((x_abs >= 0) & (x_abs < (1 / self.A)))
-            idx_2 = self.ops.where((x_abs >= (1 / self.A)) & (x_abs <= 1))
+            val1 = x_sign * self.A * x_abs / (self.one + A_log)
+            val2 = (
+                x_sign * (self.one + self.ops.log(self.A * x_abs)) / (self.one + A_log)
+            )
 
-            y = x_sign
-            y[idx_1] *= self.A * x_abs[idx_1] / (1 + A_log)
-            y[idx_2] *= (1 + self.ops.log(self.A * x_abs[idx_2])) / (1 + A_log)
+            y = self.ops.where((x_abs >= 0) & (x_abs < (self.one / self.A)), val1, val2)
             return y
 
         def a_law_expand(y):
@@ -547,26 +569,26 @@ class Companding(Operation):
             y_abs = self.ops.abs(y)
             A_log = self.ops.log(self.A)
 
-            idx_1 = self.ops.where((y_abs >= 0) & (y_abs < (1 / (1 + A_log))))
-            idx_2 = self.ops.where((y_abs >= (1 / (1 + A_log))) & (y_abs <= 1))
+            val1 = y_sign * y_abs * (self.one + A_log) / self.A
+            val2 = y_sign * self.ops.exp(y_abs * (self.one + A_log) - self.one) / self.A
 
-            x = y_sign
-            x[idx_1] *= y_abs[idx_1] * (1 + A_log) / self.A
-            x[idx_2] *= self.ops.exp(y_abs[idx_2] * (1 + A_log) - 1) / self.A
+            x = self.ops.where(
+                (y_abs >= 0) & (y_abs < (self.one / (self.one + A_log))), val1, val2
+            )
             return x
 
         if self.comp_type.lower() == "mu":
             if self.expand:
-                array_out = mu_law_expand(data)
+                data_out = mu_law_expand(data)
             else:
-                array_out = mu_law_compress(data)
+                data_out = mu_law_compress(data)
         elif self.comp_type.lower() == "a":
             if self.expand:
-                array_out = a_law_expand(data)
+                data_out = a_law_expand(data)
             else:
-                array_out = a_law_compress(data)
+                data_out = a_law_compress(data)
 
-        return array_out
+        return data_out
 
 
 class EnvelopeDetect(Operation):
