@@ -80,9 +80,9 @@ for lib in _ML_LIBRARIES:
             import usbmd.pytorch_ultrasound.ops
         if lib == "tensorflow":
             # pylint: disable=unused-import
-            # pylint: disbale=ungrouped-imports
             import tensorflow as tf
 
+            # pylint: disable=ungrouped-imports
             import usbmd.tensorflow_ultrasound.ops
         if lib == "jax":
             # pylint: disable=unused-import
@@ -611,7 +611,8 @@ class Demodulate(Operation):
         if data.shape[-1] == 2:
             log.warning("Demodulation is not applicable to IQ data.")
             return data
-        data = self.ops.squeeze(data, axis=-1)
+        elif data.shape[-1] == 1:
+            data = self.ops.squeeze(data, axis=-1)
         data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
         return complex_to_channels(data, axis=-1)
 
@@ -619,6 +620,40 @@ class Demodulate(Operation):
         self.fs = scan.fs
         self.fc = scan.fc
         self.bandwidth = scan.bandwidth_percent
+
+    def _assign_config_params(self, config):
+        if config.scan.sampling_frequency is not None:
+            self.fs = config.scan.sampling_frequency
+        if config.scan.center_frequency is not None:
+            self.fc = config.scan.center_frequency
+
+
+class UpMix(Operation):
+    """Upmix IQ data to RF data."""
+
+    def __init__(self, fs=None, fc=None, upsampling_rate=6):
+        super().__init__(
+            name="UpMix",
+            input_data_type=None,
+            output_data_type=None,
+        )
+        self.fs = fs
+        self.fc = fc
+        self.upsampling_rate = upsampling_rate
+
+    def process(self, data):
+        if data.shape[-1] == 1:
+            log.warning("Upmixing is not applicable to RF data.")
+            return data
+        elif data.shape[-1] == 2:
+            data = channels_to_complex(data, axis=-1)
+        data = upmix(data, self.fs, self.fc, self.upsampling_rate)
+        data = self.ops.expand_dims(data, axis=-1)
+        return data
+
+    def _assign_scan_params(self, scan):
+        self.fs = scan.fs
+        self.fc = scan.fc
 
     def _assign_config_params(self, config):
         if config.scan.sampling_frequency is not None:

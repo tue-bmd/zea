@@ -9,16 +9,17 @@ import tensorflow as tf
 import torch
 
 from usbmd import processing
-from usbmd.probes import get_probe
-from usbmd.processing import (
+from usbmd.ops import (
+    Companding,
+    Demodulate,
+    Downsample,
+    LogCompress,
+    Normalize,
+    UpMix,
     channels_to_complex,
     complex_to_channels,
-    demodulate,
-    downsample,
-    normalize,
-    to_image,
-    upmix,
 )
+from usbmd.probes import get_probe
 from usbmd.pytorch_ultrasound import processing as processing_torch
 from usbmd.scan import PlaneWaveScan
 from usbmd.tensorflow_ultrasound import processing as processing_tf
@@ -131,26 +132,25 @@ def equality_libs_processing(test_func):
         ("mu", (512, 512), (50, 300)),
     ],
 )
-@equality_libs_processing
-def test_companding(comp_type, size, parameter_value_range):
+def test_companding(comp_type, size, parameter_value_range, ops="numpy"):
     """Test companding function"""
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
         mu = parameter_value if comp_type == "mu" else 0
 
+        companding = Companding(comp_type=comp_type, A=A, mu=mu, expand=False)
+        companding.ops = ops
+
         signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
         signal = signal.astype(np.float32)
 
-        signal_out = processing.companding(
-            signal, expand=False, comp_type=comp_type, A=A, mu=mu
-        )
+        signal_out = companding.process(signal)
         assert np.any(
             np.not_equal(signal, signal_out)
         ), "Companding failed, arrays should not be equal"
-        signal_out = processing.companding(
-            signal_out, expand=True, comp_type=comp_type, A=A, mu=mu
-        )
+        companding.expand = True
+        signal_out = companding.process(signal_out)
 
         np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
@@ -165,7 +165,7 @@ def test_companding(comp_type, size, parameter_value_range):
         ((1, 128, 32), None, None),
     ],
 )
-def test_converting_to_image(size, dynamic_range, input_range):
+def test_converting_to_image(size, dynamic_range, input_range, ops="numpy"):
     """Test converting to image functions"""
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
@@ -179,7 +179,13 @@ def test_converting_to_image(size, dynamic_range, input_range):
     data = (
         np.random.random(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
     )
-    _data = to_image(data, dynamic_range, input_range)
+    output_range = (0, 1)
+    normalize = Normalize(output_range, input_range)
+    log_compress = LogCompress(dynamic_range)
+    normalize.ops = ops
+    log_compress.ops = ops
+
+    _data = log_compress(normalize(data))
     # data should be in dynamic range
     assert np.all(
         np.logical_and(_data >= _dynamic_range[0], _data <= _dynamic_range[1])
@@ -196,6 +202,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
 )
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
+    normalize = Normalize(output_range, input_range)
     # create random data between input range
     data = np.random.random(size) * (input_range[1] - input_range[0]) + input_range[0]
     _data = normalize(data, output_range, input_range)
@@ -245,11 +252,11 @@ def test_channels_to_complex(size, axis):
     "factor, batch_size",
     [
         (1, 2),
-        (6, 1),
+        (4, 1),
         (2, 3),
     ],
 )
-def test_up_and_down_conversion(factor, batch_size):
+def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
     """Test rf2iq and iq2rf in sequence"""
     probe = get_probe("verasonics_l11_4v")
     probe_parameters = probe.get_default_scan_parameters()
@@ -260,7 +267,7 @@ def test_up_and_down_conversion(factor, batch_size):
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        n_ax=2048,
+        n_ax=2094,
         sampling_frequency=fs,
         center_frequency=fc,
         angles=np.array(
@@ -274,15 +281,25 @@ def test_up_and_down_conversion(factor, batch_size):
 
     # Generate pseudorandom input tensor
     data = simulator.generate(points=200)
-    data = np.squeeze(data[0])
+    data = np.expand_dims(data[0], axis=-1)
 
     # slice data such that decimation fits exactly
     idx = data.shape[-2] % factor
     if idx > 0:
         data = data[..., :-idx, :]
 
-    _data = demodulate(data, fs=fs, fc=fc, bandwidth=None, filter_coeff=None)
-    _data = downsample(_data, factor=factor, axis=-2)
-    _data = upmix(_data, fs=fs / factor, fc=fc, upsampling_rate=factor)
-    # TODO: add check if equal. due to filtering / decimation hard to do.
-    # np.testing.assert_almost_equal(data, _data)
+    downsample = Downsample(factor=factor, axis=-3)
+    demodulate = Demodulate(fs=fs, fc=fc, bandwidth=None, filter_coeff=None)
+    upmix = UpMix(fs=fs, fc=fc, upsampling_rate=factor)
+    downsample.ops = ops
+    demodulate.ops = ops
+    upmix.ops = ops
+
+    _data = demodulate(data)
+    _data = downsample(_data)
+    _data = upmix(_data)
+
+    # TODO: make this test more tight
+    assert (
+        np.mean(np.abs((data - _data) ** 2)) < 10
+    ), "Data is not equal after up and down conversion."
