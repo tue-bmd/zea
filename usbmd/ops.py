@@ -80,6 +80,7 @@ for lib in _ML_LIBRARIES:
             import usbmd.pytorch_ultrasound.ops
         if lib == "tensorflow":
             # pylint: disable=unused-import
+            # pylint: disbale=ungrouped-imports
             import tensorflow as tf
 
             import usbmd.tensorflow_ultrasound.ops
@@ -107,6 +108,10 @@ class Operation(ABC):
         self.batch_dim = batch_dim
 
         self._ops = None
+
+        self.config = None
+        self.scan = None
+        self.probe = None
 
     @property
     def ops(self):
@@ -141,7 +146,7 @@ class Operation(ABC):
 
     def initialize(self):
         """Intialize the operation."""
-        pass
+        return
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
         """Set the parameters for the operation.
@@ -170,6 +175,17 @@ class Operation(ABC):
     def _assign_probe_params(self, probe: Probe):
         # Assign the probe parameters to the operation
         pass
+
+    def prepare_tensor(self, x):
+        """Convert input array to appropriate tensor type for the operations package."""
+        if self.ops == np:
+            return np.array(x)
+        elif self.ops == tf:
+            return tf.convert_to_tensor(x)
+        elif self.ops == torch:
+            return torch.tensor(x)
+        else:
+            raise ValueError("Unsupported operations package.")
 
 
 class Pipeline:
@@ -259,19 +275,21 @@ class Pipeline:
         if not jit:
             return
         log.warning("JIT compmilation is not yet supported.")
-        # log.info(f"Compiling pipeline, with ops library: {self.ops.__name__}")
-        # if self.ops.__name__ == "numpy":
-        #     return
-        # elif self.ops.__name__ == "tensorflow":
-        #     # jit compile the pipeline
-        #     return
-        #     # self._jitted_process = tf.function(self._process, jit_compile=jit)
-        # elif self.ops.__name__ == "torch":
-        #     return
-        # elif self.ops.__name__ == "keras.ops":
-        #     self._jitted_process = tf.function(self._process, jit_compile=jit)
-        # elif self.ops.__name__ == "jax":
-        #     self._jitted_process = jax.jit(self._process)
+        log.info(f"Compiling pipeline, with ops library: {self.ops.__name__}")
+        if self.ops.__name__ == "numpy":
+            return
+        elif self.ops.__name__ == "tensorflow":
+            # jit compile the pipeline
+            return
+            # self._jitted_process = tf.function(self._process, jit_compile=jit)
+        elif self.ops.__name__ == "torch":
+            return
+        elif self.ops.__name__ == "keras.ops":
+            return
+            # self._jitted_process = tf.function(self._process, jit_compile=jit)
+        elif self.ops.__name__ == "jax":
+            return
+            # self._jitted_process = jax.jit(self._process)
 
     def prepare_tensor(self, x):
         """Convert input array to appropriate tensor type for the operations package."""
@@ -286,6 +304,8 @@ class Pipeline:
 
 
 class Beamform(Operation):
+    """Beamforming operation for ultrasound data."""
+
     def __init__(self, beamformer=None):
         super().__init__(
             name="Beamform",
@@ -347,6 +367,8 @@ class Beamform(Operation):
 
 
 class Mean(Operation):
+    """Take the mean of the input data along a specific axis."""
+
     def __init__(self, axis):
         super().__init__(
             name="Mean",
@@ -360,8 +382,10 @@ class Mean(Operation):
 
 
 class Normalize(Operation):
+    """Normalize data to a given range."""
+
     def __init__(self, output_range=None, input_range=None):
-        """Normalize data to a given range.
+        """Initialize the Normalize operation.
 
         Args:
             output_range (Tuple, optional): Range to which data should be mapped.
@@ -396,6 +420,8 @@ class Normalize(Operation):
 
 
 class LogCompress(Operation):
+    """Logarithmic compression of data."""
+
     def __init__(self, dynamic_range=None):
         super().__init__(
             name="LogCompress",
@@ -418,6 +444,8 @@ class LogCompress(Operation):
 
 
 class Downsample(Operation):
+    """Downsample data along a specific axis."""
+
     def __init__(self, factor: int = None, phase: int = None, axis: int = -1):
         super().__init__(
             name="Downsample",
@@ -432,15 +460,43 @@ class Downsample(Operation):
         self.factor = config.scan.downsample
 
     def process(self, data):
+        if self.factor is None:
+            return data
         length = self.ops.shape(data)[self.axis]
         if self.phase is None:
             self.phase = 0
         sample_idx = self.ops.arange(self.phase, length, self.factor)
-        sample_idx = self.ops.expand_dims(sample_idx, 0)
-        return self.ops.take_along_axis(data, sample_idx, axis=self.axis)
+        return take(data, sample_idx, axis=self.axis, ops=self.ops)
 
 
 class Companding(Operation):
+    """Companding according to the A- or μ-law algorithm.
+    Tensorflow versions of companding.
+
+    Invertible compressing operation. Used to compress
+    dynamic range of input data (and subsequently expand).
+
+    μ-law companding:
+    https://en.wikipedia.org/wiki/%CE%9C-law_algorithm
+    A-law companding:
+    https://en.wikipedia.org/wiki/A-law_algorithm
+
+    The μ-law algorithm provides a slightly larger dynamic range
+    than the A-law at the cost of worse proportional distortion
+    for small signals.
+
+    Args:
+    array (ndarray): input array. expected to be in range [-1, 1].
+        expand (bool, optional): If set to False (default),
+            data is compressed, else expanded.
+        comp_type (str): either `a` or `mu`.
+        mu (float, optional): compression parameter. Defaults to 255.
+        A (float, optional): compression parameter. Defaults to 255.
+
+    Returns:
+        ndarray: companded array. has values in range [-1, 1].
+    """
+
     def __init__(self, expand=False, comp_type=None, mu=255, A=87.6):
         super().__init__(
             name="Companding",
@@ -514,11 +570,11 @@ class Companding(Operation):
 
 
 class EnvelopeDetect(Operation):
+    """Envelope detection of RF signals."""
+
     def __init__(self, axis=-3):
         super().__init__(
             name="EnvelopeDetection",
-            input_data_type="beamformed_data",
-            output_data_type="envelope_data",
         )
         self.axis = axis
 
@@ -529,7 +585,8 @@ class EnvelopeDetect(Operation):
             n_ax = data.shape[self.axis]
             M = 2 ** int(np.ceil(np.log2(n_ax)))
             data = scipy.signal.hilbert(data, N=M, axis=self.axis)
-            data = self.ops.take(data, self.ops.arange(n_ax), axis=self.axis)
+            data = self.ops.convert_to_tensor(data)
+            data = take(data, self.ops.arange(n_ax), axis=self.axis, ops=self.ops)
             data = self.ops.squeeze(data, axis=-1)
 
         data = self.ops.convert_to_tensor(data)
@@ -537,6 +594,8 @@ class EnvelopeDetect(Operation):
 
 
 class Demodulate(Operation):
+    """Demodulate RF signals to IQ data (complex baseband)."""
+
     def __init__(self, fs=None, fc=None, bandwidth=None, filter_coeff=None):
         super().__init__(
             name="Demodulate",
@@ -569,6 +628,8 @@ class Demodulate(Operation):
 
 
 class BandPassFilter(Operation):
+    """Band pass filter data."""
+
     def __init__(self, axis=None, num_taps=None, fs=None, fc=None, f1=None, f2=None):
         super().__init__(
             name="BandPassFilter",
@@ -603,6 +664,8 @@ class BandPassFilter(Operation):
 
 
 class ScanConvert(Operation):
+    """Scan convert images to cartesian coordinates."""
+
     def __init__(
         self,
         x_axis=None,
@@ -611,7 +674,7 @@ class ScanConvert(Operation):
         fill_value=None,
         n_pixels=None,
     ):
-        """Scan convert image.
+        """Initialize the ScanConvert operation.
 
         Args:
             image (ndarray): Input image (in polar coordinates).
@@ -1062,6 +1125,22 @@ def channels_to_complex(data, axis=-1, ops=np):
     """
     assert data.shape[axis] == 2
     return ops.take(data, 0, axis=axis) + 1j * ops.take(data, 1, axis=axis)
+
+
+def take(data, indices, axis=-1, ops=np):
+    """Take values from data along axis.
+
+    Args:
+        data (ndarray): input data.
+        indices (ndarray): indices to take from data.
+        axis (int, optional): axis to take from. Defaults to -1.
+    """
+
+    # make indices broadcastable by adding singleton dimensions around axis
+    if axis < 0:
+        axis = data.ndim + axis
+    indices = ops.reshape(indices, [1] * axis + [-1] + [1] * (data.ndim - axis - 1))
+    return ops.take_along_axis(data, indices, axis=axis)
 
 
 # def to_image(envelope_data, dynamic_range=None, input_range=None):
