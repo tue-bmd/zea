@@ -76,9 +76,13 @@ for lib in _ML_LIBRARIES:
         if lib == "torch":
             # pylint: disable=unused-import
             import torch
+
+            import usbmd.pytorch_ultrasound.ops
         if lib == "tensorflow":
             # pylint: disable=unused-import
             import tensorflow as tf
+
+            import usbmd.tensorflow_ultrasound.ops
         if lib == "jax":
             # pylint: disable=unused-import
             import jax
@@ -88,6 +92,8 @@ for lib in _ML_LIBRARIES:
 
 
 class Operation(ABC):
+    """Basic operation class as building block for processing pipeline and standalone operations."""
+
     def __init__(
         self,
         name=None,
@@ -111,10 +117,14 @@ class Operation(ABC):
     @ops.setter
     def ops(self, ops):
         """Set the package for the operation."""
+        if isinstance(ops, str):
+            ops = importlib.import_module(ops)
+        assert ops.__name__ in _ML_LIBRARIES, f"Unsupported operations package {ops}"
         self._ops = ops
 
     @abstractmethod
     def process(self, data):
+        """Process the input data through the operation."""
         return data
 
     def __call__(self, data, *args, **kwargs):
@@ -130,10 +140,21 @@ class Operation(ABC):
         return True
 
     def initialize(self):
-        # Initialize the operation
+        """Intialize the operation."""
         pass
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
+        """Set the parameters for the operation.
+
+        Parameters are assigned to the operation from the config, scan, and probe
+        and in that order of priority (i.e. config > scan > probe will be assigned
+        for shared parameters between the three).
+
+        Args:
+            config (Config): Configuration parameters for the operation.
+            scan (Scan): Scan parameters for the operation.
+            probe (Probe): Probe parameters for the operation.
+        """
         self._assign_probe_params(probe)
         self._assign_scan_params(scan)
         self._assign_config_params(config)
@@ -152,6 +173,8 @@ class Operation(ABC):
 
 
 class Pipeline:
+    """Pipeline class for processing ultrasound data through a series of operations."""
+
     def __init__(self, operations, ops=np, batch_dim=True, device=None):
         self.operations = operations
         self.device = device
@@ -175,6 +198,8 @@ class Pipeline:
                     f"with the input data type of operation {self.operations[i + 1].name}"
                 )
 
+        self._jitted_process = None
+
     @property
     def ops(self):
         """Get the operations package used in the pipeline."""
@@ -192,6 +217,7 @@ class Pipeline:
             raise ValueError("Unsupported operations package.")
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
+        """Set the parameters for the pipeline. See Operation.set_params for more info."""
         for operation in self.operations:
             operation.set_params(config, scan, probe)
 
@@ -209,10 +235,14 @@ class Pipeline:
                     "and initialize them using `op.initialize()`."
                 )
             )
+        if self._jitted_process is None:
+            processing_func = self._process
+        else:
+            processing_func = self._jitted_process
 
-        if self.device:
-            return self.on_device(self._process, data, device=self.device)
-        return self._process(data)
+        # if self.device:
+        #     return self.on_device(processing_func, data, device=self.device)
+        return processing_func(data)
 
     def _process(self, data):
         for operation in self.operations:
@@ -226,19 +256,22 @@ class Pipeline:
 
     def compile(self, jit=True):
         """Compile the pipeline using jit."""
-        log.info(f"Compiling pipeline, with ops: {self.ops}")
-        if self.ops == np:
+        if not jit:
             return
-        elif self.ops == tf:
-            # jit compile the pipeline
-            self.process = tf.function(self.process, jit_compile=jit)
-        elif self.ops == keras.ops:
-            self.process = tf.function(self.process, jit_compile=jit)
-
-        elif self.ops == jax:
-            if not jit:
-                return
-            self.process = jax.jit(self.process)
+        log.warning("JIT compmilation is not yet supported.")
+        # log.info(f"Compiling pipeline, with ops library: {self.ops.__name__}")
+        # if self.ops.__name__ == "numpy":
+        #     return
+        # elif self.ops.__name__ == "tensorflow":
+        #     # jit compile the pipeline
+        #     return
+        #     # self._jitted_process = tf.function(self._process, jit_compile=jit)
+        # elif self.ops.__name__ == "torch":
+        #     return
+        # elif self.ops.__name__ == "keras.ops":
+        #     self._jitted_process = tf.function(self._process, jit_compile=jit)
+        # elif self.ops.__name__ == "jax":
+        #     self._jitted_process = jax.jit(self._process)
 
     def prepare_tensor(self, x):
         """Convert input array to appropriate tensor type for the operations package."""
@@ -268,20 +301,21 @@ class Beamform(Operation):
 
         beamformer_type = self.config.model.beamformer.type
         # pylint: disable=import-outside-toplevel
-        if self.config.get("ml_library") == "torch":
+        if self.ops.__name__ == "torch":
             from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
 
             _BEAMFORMER_TYPES = torch_beamformer_registry.registered_names()
-        elif self.config.get("ml_library") == "tensorflow":
+        elif self.ops.__name__ == "tensorflow":
             from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 
             _BEAMFORMER_TYPES = tf_beamformer_registry.registered_names()
-        elif self.config.get("ml_library") == "disable":
+        elif self.ops.__name__ == "disable":
             get_beamformer = None
             _BEAMFORMER_TYPES = []
         else:
             log.warning(
-                "Cannot find ML library, proceeding without. Be aware of limitations."
+                f"Beamformer is not supported for the operations package: {self.ops.__name__}"
+                f"Please use on of the supported beamformer packages: {['torch', 'tensorflow']}"
             )
             get_beamformer = None
             _BEAMFORMER_TYPES = []
@@ -377,7 +411,7 @@ class LogCompress(Operation):
         if self.dynamic_range is None:
             self.dynamic_range = (-60, 0)
 
-        data[data == 0] = np.finfo(float).eps
+        data = self.ops.where(data == 0, np.finfo(float).eps, data)
         compressed_data = 20 * self.ops.log10(data)
         compressed_data = self.ops.clip(compressed_data, *self.dynamic_range)
         return compressed_data
@@ -402,7 +436,8 @@ class Downsample(Operation):
         if self.phase is None:
             self.phase = 0
         sample_idx = self.ops.arange(self.phase, length, self.factor)
-        return self.ops.take(data, sample_idx, axis=self.axis)
+        sample_idx = self.ops.expand_dims(sample_idx, 0)
+        return self.ops.take_along_axis(data, sample_idx, axis=self.axis)
 
 
 class Companding(Operation):
@@ -494,9 +529,10 @@ class EnvelopeDetect(Operation):
             n_ax = data.shape[self.axis]
             M = 2 ** int(np.ceil(np.log2(n_ax)))
             data = scipy.signal.hilbert(data, N=M, axis=self.axis)
-            data = self.ops.take(data, np.arange(n_ax), axis=self.axis)
+            data = self.ops.take(data, self.ops.arange(n_ax), axis=self.axis)
             data = self.ops.squeeze(data, axis=-1)
 
+        data = self.ops.convert_to_tensor(data)
         return self.ops.abs(data)
 
 
@@ -676,7 +712,10 @@ def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
         iq_data (ndarray): complex valued base-band signal.
 
     """
-    assert np.isreal(rf_data).all(), "RF must contain real RF signals."
+    rf_data = np.array(rf_data)
+    assert np.isreal(
+        rf_data
+    ).all(), f"RF must contain real RF signals, got {rf_data.dtype}"
 
     input_shape = rf_data.shape
     n_dim = len(input_shape)
