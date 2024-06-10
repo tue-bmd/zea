@@ -79,6 +79,8 @@ class DataLoaderUI:
 
         # intialize process class
         self.process = Process(self.config, self.scan, self.probe)
+        # initialize a second process class for postprocessing (faster this way)
+        self.process_image = Process(self.config, self.scan, self.probe)
 
         # initialize attributes for UI class
         self.data = None
@@ -222,7 +224,7 @@ class DataLoaderUI:
             else:
                 to_dtype = self.to_dtype
 
-            self.image = self.process.run(
+            self.image = self.process_image.run(
                 self.data,
                 dtype=self.dtype,
                 to_dtype=to_dtype,

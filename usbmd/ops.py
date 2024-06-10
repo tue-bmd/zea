@@ -338,9 +338,6 @@ class Beamform(Operation):
             from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
 
             _BEAMFORMER_TYPES = tf_beamformer_registry.registered_names()
-        elif self.ops.__name__ == "disable":
-            get_beamformer = None
-            _BEAMFORMER_TYPES = []
         else:
             log.warning(
                 f"Beamformer is not supported for the operations package: {self.ops.__name__}"
@@ -628,10 +625,13 @@ class Demodulate(Operation):
         self.fc = fc
         self.bandwidth = bandwidth
         self.filter_coeff = filter_coeff
+        self.warning_produced = False
 
     def process(self, data):
         if data.shape[-1] == 2:
-            log.warning("Demodulation is not applicable to IQ data.")
+            if not self.warning_produced:
+                log.warning("Demodulation is not applicable to IQ data.")
+                self.warning_produced = True
             return data
         elif data.shape[-1] == 1:
             data = self.ops.squeeze(data, axis=-1)
