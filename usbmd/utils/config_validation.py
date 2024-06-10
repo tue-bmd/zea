@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
-from usbmd.utils import log
+
 from usbmd.registry import metrics_registry
+from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
 
@@ -234,7 +235,7 @@ config_schema = Schema(
         Optional("hide_devices", default=None): Or(
             None, list_of_positive_integers, positive_integer_and_zero
         ),
-        Optional("ml_library", default="disable"): Or(None, *_ML_LIBRARIES, "disable"),
+        Optional("ml_library", default="numpy"): Or(None, *_ML_LIBRARIES),
         Optional("git", default=None): Or(None, str),
     }
 )
@@ -246,14 +247,15 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
     def _try_validate_config(config):
         if not _ML_LIB_SET:
             log.warning(
-                "No ML library found, note that some functionality may not be available. "
+                "No ML library (i.e. `torch` or `tensorflow` was found or set, "
+                "note that some functionality may not be available. "
             )
-            if config.get("ml_library") != "disable":
+            if config.get("ml_library") != "numpy":
                 log.warning(
-                    "Setting `ml_library` to `disable`. "
-                    "Make sure to not use any ml_library specific parameters."
+                    "Setting `ml_library` to `numpy`. "
+                    "Make sure to not use any ml_library specific functionality or parameters."
                 )
-                config["ml_library"] = "disable"
+                config["ml_library"] = "numpy"
         try:
             config = config_schema.validate(config)
             return config
