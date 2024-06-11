@@ -247,16 +247,16 @@ def test_normalize(size, output_range, input_range, ops="numpy"):
 @pytest.mark.parametrize(
     "size, axis",
     [
-        ((2, 1, 128, 32), (2)),
+        ((2, 1, 128, 32), (-1)),
         ((512, 512), (-1)),
-        ((1, 128, 32), (0)),
+        ((1, 128, 32), (-1)),
     ],
 )
 def test_complex_to_channels(size, axis):
     """Test complex to channels and back"""
     data = np.random.random(size) + 1j * np.random.random(size)
     _data = complex_to_channels(data, axis=axis)
-    __data = channels_to_complex(_data, axis=axis)
+    __data = channels_to_complex(_data)
     np.testing.assert_almost_equal(data, __data)
     return _data
 
@@ -264,15 +264,15 @@ def test_complex_to_channels(size, axis):
 @pytest.mark.parametrize(
     "size, axis",
     [
-        ((222, 1, 2, 32), (2)),
+        ((222, 1, 2, 2), (-1)),
         ((512, 512, 2), (-1)),
-        ((2, 1, 128, 32), (0)),
+        ((2, 20, 128, 2), (-1)),
     ],
 )
 def test_channels_to_complex(size, axis):
     """Test channels to complex and back"""
     data = np.random.random(size)
-    _data = channels_to_complex(data, axis=axis)
+    _data = channels_to_complex(data)
     __data = complex_to_channels(_data, axis=axis)
     np.testing.assert_almost_equal(data, __data)
     return _data
