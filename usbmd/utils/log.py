@@ -31,28 +31,61 @@ logging.DEPRECATED = DEPRECATED_LEVEL_NUM
 def get_format_fn(name_format):
     """Returns the format function for the given format name."""
     return {
+        # Different consoles render these codes at different values
         "red": red,
         "green": green,
         "yellow": yellow,
+        "blue": blue,
+        "magenta": magenta,
+        "cyan": cyan,
+        "white": white,
+        # Custom colors
+        "purple": purple,
         "darkgreen": darkgreen,
         "orange": orange,
+        # Formatting
         "bold": bold,
     }.get(name_format)
 
 
 def red(string):
     """Adds ANSI escape codes to print a string in red around the string."""
-    return "\033[38;5;196m" + str(string) + "\033[0m"
+    return "\033[31m" + str(string) + "\033[0m"
 
 
 def green(string):
     """Adds ANSI escape codes to print a string in green around the string."""
-    return "\033[38;5;46m" + str(string) + "\033[0m"
+    return "\033[32m" + str(string) + "\033[0m"
 
 
 def yellow(string):
     """Adds ANSI escape codes to print a string in yellow around the string."""
-    return "\033[38;5;226m" + str(string) + "\033[0m"
+    return "\033[33m" + str(string) + "\033[0m"
+
+
+def blue(string):
+    """Adds ANSI escape codes to print a string in blue around the string."""
+    return "\033[34m" + str(string) + "\033[0m"
+
+
+def magenta(string):
+    """Adds ANSI escape codes to print a string in magenta around the string."""
+    return "\033[35m" + str(string) + "\033[0m"
+
+
+def cyan(string):
+    """Adds ANSI escape codes to print a string in cyan around the string."""
+    return "\033[36m" + str(string) + "\033[0m"
+
+
+def white(string):
+    """Adds ANSI escape codes to print a string in white around the string."""
+    return "\033[37m" + str(string) + "\033[0m"
+
+
+def purple(string):
+    """Adds ANSI escape codes to print a string in purple around the string."""
+    return "\033[38;5;93m" + str(string) + "\033[0m"
 
 
 def darkgreen(string):
