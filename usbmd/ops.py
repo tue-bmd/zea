@@ -1218,12 +1218,11 @@ def hilbert(x, N: int = None, axis=-1, ops=np):
     if N is not None:
         if N < n_ax:
             raise ValueError("N must be greater or equal to n_ax.")
-        else:
-            # only pad along the axis, use manual padding
-            pad = N - n_ax
-            zeros = ops.zeros(input_shape[:axis] + (pad,) + input_shape[axis + 1 :])
-            x = ops.concatenate((x, zeros), axis=axis)
-            n_ax = N
+        # only pad along the axis, use manual padding
+        pad = N - n_ax
+        zeros = ops.zeros(input_shape[:axis] + (pad,) + input_shape[axis + 1 :])
+        x = ops.concatenate((x, zeros), axis=axis)
+        n_ax = N
 
     h = np.zeros(n_ax)
 
