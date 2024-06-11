@@ -584,6 +584,8 @@ def main():
     if args.task == "run":
         ui = DataLoaderUI(config)
 
+        log.info(f"Using {config.ml_library} backend")
+
         if args.gui:
             log.warning(
                 "GUI is very much in beta, please report any bugs to "
