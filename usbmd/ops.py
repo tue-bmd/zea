@@ -70,22 +70,6 @@ from usbmd.utils.checks import _ML_LIBRARIES, get_check
 from usbmd.utils.config import Config
 from usbmd.utils.utils import translate
 
-# need to import ML libraries first
-for lib in _ML_LIBRARIES:
-    if importlib.util.find_spec(str(lib)):
-        if lib == "torch":
-            # pylint: disable=unused-import
-            import torch
-        if lib == "tensorflow":
-            # pylint: disable=unused-import
-            import tensorflow as tf
-        if lib == "jax":
-            # pylint: disable=unused-import
-            import jax
-        if lib == "keras":
-            # pylint: disable=unused-import
-            import keras
-
 
 class Operation(ABC):
     """Basic operation class as building block for processing pipeline and standalone operations."""
@@ -96,13 +80,24 @@ class Operation(ABC):
         input_data_type=None,
         output_data_type=None,
         batch_dim=True,
+        ops="numpy",
     ):
+        """Initialize the operation.
+
+        Args:
+            name (str): The name of the operation.
+            input_data_type (type): The expected data type of the input data.
+            output_data_type (type): The expected data type of the output data.
+            batch_dim (bool): Whether the input data has a batch dimension.
+            ops (module, str): The operations package used in the operation.
+                Can be a module or a string to import the module. Defaults to "numpy".
+
+        """
         self.name = name
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
         self.batch_dim = batch_dim
-
-        self._ops = None
+        self.ops = ops
 
         self.config = None
         self.scan = None
@@ -124,10 +119,29 @@ class Operation(ABC):
 
     @abstractmethod
     def process(self, data):
-        """Process the input data through the operation."""
+        """Process the input data through the operation.
+
+        Args:
+            data: The input data to be processed.
+
+        Returns:
+            The processed data.
+
+        """
         return data
 
     def __call__(self, data, *args, **kwargs):
+        """Call the operation on the input data.
+
+        Args:
+            data: The input data to be processed.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            The processed data.
+
+        """
         if self.input_data_type:
             check = get_check(self.input_data_type)
             check(data, self.batch_dim)
@@ -135,12 +149,16 @@ class Operation(ABC):
 
     @property
     def _ready(self):
-        # Check if the operation is ready to be used
-        # and see if necessary parameters are set
+        """Check if the operation is ready to be used.
+
+        Returns:
+            bool: True if the operation is ready, False otherwise.
+
+        """
         return True
 
     def initialize(self):
-        """Intialize the operation."""
+        """Initialize the operation."""
         return
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
@@ -154,37 +172,67 @@ class Operation(ABC):
             config (Config): Configuration parameters for the operation.
             scan (Scan): Scan parameters for the operation.
             probe (Probe): Probe parameters for the operation.
+
         """
         self._assign_probe_params(probe)
         self._assign_scan_params(scan)
         self._assign_config_params(config)
 
     def _assign_config_params(self, config: Config):
+        """Assign the config parameters to the operation.
+
+        Args:
+            config (Config): Configuration parameters for the operation.
+
+        """
         # Assign the config parameters to the operation
-        pass
+        return
 
     def _assign_scan_params(self, scan: Scan):
-        # Assign the scan parameters to the operation
-        pass
+        """Assign the scan parameters to the operation.
+
+        Args:
+            scan (Scan): Scan parameters for the operation.
+
+        """
+        return
 
     def _assign_probe_params(self, probe: Probe):
-        # Assign the probe parameters to the operation
-        pass
+        """Assign the probe parameters to the operation.
+
+        Args:
+            probe (Probe): Probe parameters for the operation.
+
+        """
+        return
 
     def prepare_tensor(self, x, dtype=None, device=None):
-        """Convert input array to appropriate tensor type for the operations package."""
-        if self.ops == np:
+        """Convert input array to appropriate tensor type for the operations package.
+
+        Args:
+            x: The input array to be converted.
+            dtype: The desired data type of the converted tensor.
+            device: The desired device for the converted tensor.
+
+        Returns:
+            The converted tensor.
+
+        Raises:
+            ValueError: If the operations package is not supported.
+
+        """
+        if self.ops.__name__ == "numpy":
             x = np.array(x)
             if dtype is not None:
                 x = x.astype(dtype)
             return x
-        elif self.ops == tf:
-            x = tf.convert_to_tensor(x)
+        elif self.ops.__name__ == "tensorflow":
+            x = self.ops.convert_to_tensor(x)
             if dtype is not None:
-                x = tf.cast(x, dtype)
+                x = self.ops.cast(x, dtype)
             return x
-        elif self.ops == torch:
-            x = torch.tensor(x)
+        elif self.ops.__name__ == "torch":
+            x = self.ops.tensor(x)
             if dtype is not None:
                 x = x.type(dtype)
             if device is not None:
@@ -225,15 +273,21 @@ class Pipeline:
     @property
     def ops(self):
         """Get the operations package used in the pipeline."""
+        assert all(
+            operation.ops == self.operations[0].ops for operation in self.operations
+        ), (
+            "Operations in pipeline are not compatible, "
+            "please use the same operations package for all operations."
+        )
         return self.operations[0].ops
 
     def on_device(self, func, data, device=None, return_numpy=False):
         """On device function for running pipeline on specific device."""
-        if self.ops == np:
+        if self.ops.__name__ == "numpy":
             return func(data)
-        elif self.ops == tf:
+        elif self.ops.__name__ == "tensorflow":
             return on_device_tf(func, data, device=device, return_numpy=return_numpy)
-        elif self.ops == torch:
+        elif self.ops.__name__ == "torch":
             return on_device_torch(func, data, device=device, return_numpy=return_numpy)
         else:
             raise ValueError("Unsupported operations package.")
@@ -286,13 +340,15 @@ class Pipeline:
         if self.ops.__name__ == "numpy":
             return
         elif self.ops.__name__ == "tensorflow":
-            self._jitted_process = tf.function(self._process, jit_compile=jit)
+            self._jitted_process = self.ops.function(
+                self._process, jit_compile=jit
+            )  # tf.function
             return
         elif self.ops.__name__ == "torch":
             log.warning("JIT compmilation is not yet supported for torch.")
             return
         elif self.ops.__name__ == "jax":
-            self._jitted_process = jax.jit(self._process)
+            self._jitted_process = self.ops.jit(self._process)  # jax.jit
             return
 
     def prepare_tensor(self, x, dtype=None, device=None):
@@ -305,11 +361,12 @@ class Pipeline:
 class Beamform(Operation):
     """Beamforming operation for ultrasound data."""
 
-    def __init__(self, beamformer=None):
+    def __init__(self, beamformer=None, **kwargs):
         super().__init__(
             name="Beamform",
             input_data_type="raw_data",
             output_data_type="beamformed_data",
+            **kwargs,
         )
 
         self.beamformer = beamformer
@@ -365,11 +422,12 @@ class Beamform(Operation):
 class Mean(Operation):
     """Take the mean of the input data along a specific axis."""
 
-    def __init__(self, axis):
+    def __init__(self, axis, **kwargs):
         super().__init__(
             name="Mean",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.axis = axis
 
@@ -380,7 +438,7 @@ class Mean(Operation):
 class Normalize(Operation):
     """Normalize data to a given range."""
 
-    def __init__(self, output_range=None, input_range=None):
+    def __init__(self, output_range=None, input_range=None, **kwargs):
         """Initialize the Normalize operation.
 
         Args:
@@ -393,6 +451,7 @@ class Normalize(Operation):
             name="Normalize",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.output_range = output_range
         self.input_range = input_range
@@ -418,11 +477,12 @@ class Normalize(Operation):
 class LogCompress(Operation):
     """Logarithmic compression of data."""
 
-    def __init__(self, dynamic_range=None):
+    def __init__(self, dynamic_range=None, **kwargs):
         super().__init__(
             name="LogCompress",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.dynamic_range = dynamic_range
 
@@ -447,11 +507,12 @@ class LogCompress(Operation):
 class Downsample(Operation):
     """Downsample data along a specific axis."""
 
-    def __init__(self, factor: int = None, phase: int = None, axis: int = -1):
+    def __init__(self, factor: int = None, phase: int = None, axis: int = -1, **kwargs):
         super().__init__(
             name="Downsample",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.factor = factor
         self.phase = phase
@@ -498,11 +559,12 @@ class Companding(Operation):
         ndarray: companded array. has values in range [-1, 1].
     """
 
-    def __init__(self, expand=False, comp_type=None, mu=255, A=87.6):
+    def __init__(self, expand=False, comp_type=None, mu=255, A=87.6, **kwargs):
         super().__init__(
             name="Companding",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.expand = expand
         self.comp_type = comp_type
@@ -586,9 +648,10 @@ class Companding(Operation):
 class EnvelopeDetect(Operation):
     """Envelope detection of RF signals."""
 
-    def __init__(self, axis=-3):
+    def __init__(self, axis=-3, **kwargs):
         super().__init__(
             name="EnvelopeDetection",
+            **kwargs,
         )
         self.axis = axis
 
@@ -611,11 +674,12 @@ class EnvelopeDetect(Operation):
 class Demodulate(Operation):
     """Demodulate RF signals to IQ data (complex baseband)."""
 
-    def __init__(self, fs=None, fc=None, bandwidth=None, filter_coeff=None):
+    def __init__(self, fs=None, fc=None, bandwidth=None, filter_coeff=None, **kwargs):
         super().__init__(
             name="Demodulate",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.fs = fs
         self.fc = fc
@@ -658,11 +722,12 @@ class Demodulate(Operation):
 class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
-    def __init__(self, fs=None, fc=None, upsampling_rate=6):
+    def __init__(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
         super().__init__(
             name="UpMix",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.fs = fs
         self.fc = fc
@@ -692,11 +757,14 @@ class UpMix(Operation):
 class BandPassFilter(Operation):
     """Band pass filter data."""
 
-    def __init__(self, axis=None, num_taps=None, fs=None, fc=None, f1=None, f2=None):
+    def __init__(
+        self, axis=None, num_taps=None, fs=None, fc=None, f1=None, f2=None, **kwargs
+    ):
         super().__init__(
             name="BandPassFilter",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.axis = axis
         self.num_taps = num_taps
@@ -735,6 +803,7 @@ class ScanConvert(Operation):
         spline_order=1,
         fill_value=None,
         n_pixels=None,
+        **kwargs,
     ):
         """Initialize the ScanConvert operation.
 
@@ -757,6 +826,7 @@ class ScanConvert(Operation):
             name="ScanConvert",
             input_data_type=None,
             output_data_type=None,
+            **kwargs,
         )
         self.x_axis = x_axis
         self.z_axis = z_axis

@@ -150,8 +150,7 @@ def test_companding(comp_type, size, parameter_value_range, ops="numpy"):
         A = parameter_value if comp_type == "a" else 0
         mu = parameter_value if comp_type == "mu" else 0
 
-        companding = Companding(comp_type=comp_type, A=A, mu=mu, expand=False)
-        companding.ops = ops
+        companding = Companding(comp_type=comp_type, A=A, mu=mu, expand=False, ops=ops)
 
         signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
         signal = signal.astype("float32")
@@ -195,10 +194,8 @@ def test_converting_to_image(size, dynamic_range, input_range, ops="numpy"):
         np.random.random(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
     )
     output_range = (0, 1)
-    normalize = Normalize(output_range, input_range)
-    log_compress = LogCompress(dynamic_range)
-    normalize.ops = ops
-    log_compress.ops = ops
+    normalize = Normalize(output_range, input_range, ops=ops)
+    log_compress = LogCompress(dynamic_range, ops=ops)
 
     data = normalize.prepare_tensor(data)
     _data = log_compress(normalize(data))
@@ -221,13 +218,11 @@ def test_converting_to_image(size, dynamic_range, input_range, ops="numpy"):
 @equality_libs_processing
 def test_normalize(size, output_range, input_range, ops="numpy"):
     """Test normalize function"""
-    normalize = Normalize(output_range, input_range)
+    normalize = Normalize(output_range, input_range, ops=ops)
 
     _input_range = output_range
     _output_range = input_range
-    normalize_back = Normalize(_output_range, _input_range)
-    normalize.ops = ops
-    normalize_back.ops = ops
+    normalize_back = Normalize(_output_range, _input_range, ops=ops)
 
     # create random data between input range
     data = np.random.random(size) * (input_range[1] - input_range[0]) + input_range[0]
@@ -236,8 +231,7 @@ def test_normalize(size, output_range, input_range, ops="numpy"):
     input_range, output_range = output_range, input_range
     _data = normalize_back(_data)
     # test if default args work too
-    normalize = Normalize()
-    normalize.ops = ops
+    normalize = Normalize(ops=ops)
     _ = normalize(data)
 
     np.testing.assert_almost_equal(np.array(data), np.array(_data))
@@ -318,12 +312,9 @@ def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
     if idx > 0:
         data = data[..., :-idx, :]
 
-    downsample = Downsample(factor=factor, axis=-3)
-    demodulate = Demodulate(fs=fs, fc=fc, bandwidth=None, filter_coeff=None)
-    upmix = UpMix(fs=fs, fc=fc, upsampling_rate=factor)
-    downsample.ops = ops
-    demodulate.ops = ops
-    upmix.ops = ops
+    downsample = Downsample(factor=factor, axis=-3, ops=ops)
+    demodulate = Demodulate(fs=fs, fc=fc, bandwidth=None, filter_coeff=None, ops=ops)
+    upmix = UpMix(fs=fs, fc=fc, upsampling_rate=factor, ops=ops)
 
     _data = demodulate(data)
     _data = downsample(_data)
@@ -348,8 +339,7 @@ def test_hilbert_transform(ops="numpy"):
     data = data + np.random.random(data.shape) * 0.1
 
     # just getting this operation for the utils
-    envelope_detect = EnvelopeDetect(axis=-3)
-    envelope_detect.ops = ops
+    envelope_detect = EnvelopeDetect(axis=-3, ops=ops)
     ops = envelope_detect.ops
 
     data = envelope_detect.prepare_tensor(data)
