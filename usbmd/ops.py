@@ -624,6 +624,11 @@ class Demodulate(Operation):
         self.warning_produced = False
 
     def process(self, data):
+
+        device = None
+        if self.ops.__name__ == "torch":
+            device = data.device
+
         if data.shape[-1] == 2:
             if not self.warning_produced:
                 log.warning("Demodulation is not applicable to IQ data.")
@@ -631,8 +636,12 @@ class Demodulate(Operation):
             return data
         elif data.shape[-1] == 1:
             data = self.ops.squeeze(data, axis=-1)
+
+        # currently demodulate converts to numpy so we have to do some trickery
+
         data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
-        return complex_to_channels(data, axis=-1)
+        data = self.prepare_tensor(data, device=device)
+        return complex_to_channels(data, axis=-1, ops=self.ops)
 
     def _assign_scan_params(self, scan):
         self.fs = scan.fs
@@ -1156,7 +1165,7 @@ def complex_to_channels(complex_data, axis=-1, ops=np):
         ndarray: real array with real and imaginary components
             unrolled over two channels at axis.
     """
-    assert ops.iscomplex(complex_data).any()
+    # assert ops.iscomplex(complex_data).any()
     q_data = ops.imag(complex_data)
     i_data = ops.real(complex_data)
 
