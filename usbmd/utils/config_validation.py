@@ -24,7 +24,7 @@ from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
 
-_ML_LIBRARIES = [None, "torch", "tensorflow"]
+_ML_LIBRARIES = [None, "torch", "tensorflow", "numpy"]
 
 # need to import ML libraries first for registry
 _ML_LIB_SET = False
