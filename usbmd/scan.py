@@ -87,6 +87,7 @@ class Scan:
         selected_transmits: list = None,
         probe_geometry: np.ndarray = None,
         time_to_next_transmit: np.ndarray = None,
+        f_number: float = 1.0,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -185,6 +186,8 @@ class Scan:
         self.probe_geometry = probe_geometry
         #: The time between subsequent transmit events of shape (n_tx*n_frames,)
         self.time_to_next_transmit = time_to_next_transmit
+        #: The f-number, e.g. dynamic aperture, used for receive beamforming
+        self.f_number = f_number
 
         # Beamforming grid related attributes
         # ---------------------------------------------------------------------

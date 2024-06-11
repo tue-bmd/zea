@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 
 from usbmd.utils import log
+from usbmd.utils.checks import _assert_uint8_images
 
 
 def translate(array, range_from, range_to):
@@ -101,34 +102,53 @@ def grayscale_to_rgb(image):
     """Converts a grayscale image to an RGB image.
 
     Args:
-        image (ndarray): Grayscale image.
+        image (ndarray): Grayscale image. Must have shape (height, width).
 
     Returns:
         ndarray: RGB image.
     """
+    assert image.ndim == 2, "Input image must be grayscale."
     return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+
+def _preprocess_for_saving(images):
+    """Preprocesses images for saving to GIF or MP4.
+
+    Args:
+        images (ndarray, list[ndarray]): Images. Must have shape (n_frames, height, width, channels)
+            or (n_frames, height, width).
+    """
+    images = np.array(images)
+    _assert_uint8_images(images)
+
+    # Remove channel axis if it is 1 (grayscale image)
+    if images.ndim == 4 and images.shape[-1] == 1:
+        images = np.squeeze(images, axis=-1)
+
+    # convert grayscale images to RGB
+    if images.ndim == 3:
+        images = [grayscale_to_rgb(image) for image in images]
+
+    return images
 
 
 def save_to_gif(images, filename, fps=20):
     """Saves a sequence of images to .gif file.
     Args:
         images: list of images (numpy arrays). Must have shape
-            (n_frames, height, width, channels). If channel axis is not present,
-            grayscale image is assumed, which is then converted to RGB.
+            (n_frames, height, width, channels) or (n_frames, height, width).
+            If channel axis is not present, or is 1, grayscale image is assumed,
+            which is then converted to RGB. Images should be uint8.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
-    images = np.array(images)
+    images = _preprocess_for_saving(images)
 
     if fps > 50:
         log.warning(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
         fps = 50
 
     duration = 1 / (fps) * 1000  # milliseconds per frame
-
-    # convert grayscale images to RGB
-    if len(images[0].shape) == 2:
-        images = [grayscale_to_rgb(image) for image in images]
 
     pillow_img, *pillow_imgs = [Image.fromarray(img) for img in images]
 
@@ -149,27 +169,13 @@ def save_to_mp4(images, filename, fps=20):
     """Saves a sequence of images to .mp4 file.
     Args:
         images: list of images (numpy arrays). Must have shape
-            (n_frames, height, width, channels). If channel axis is not present,
-            grayscale image is assumed, which is then converted to RGB.
+            (n_frames, height, width, channels) or (n_frames, height, width).
+            If channel axis is not present, or is 1, grayscale image is assumed,
+            which is then converted to RGB. Images should be uint8.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
-    images = np.array(images)
-
-    assert (
-        images.dtype == np.uint8
-    ), f"dtype of images should be uint8 for saving to mp4, got {images.dtype}"
-    assert len(images.shape) in [
-        3,
-        4,
-    ], (
-        "images must have shape (n_frames, height, width, channels),"
-        f" or (n_frames, height, width) for grayscale images. Got {images.shape}"
-    )
-
-    # convert grayscale images to RGB
-    if len(images[0].shape) == 2:
-        images = np.array([grayscale_to_rgb(image) for image in images])
+    images = _preprocess_for_saving(images)
 
     filename = str(filename)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")

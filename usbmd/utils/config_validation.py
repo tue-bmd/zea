@@ -166,6 +166,7 @@ scan_schema = Schema(
         Optional("sampling_frequency", default=None): Or(None, any_number),
         Optional("demodulation_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
+        Optional("f_number", default=None): Or(None, positive_float),
     }
 )
 
@@ -271,6 +272,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
         config = config.serialize()
         config = _try_validate_config(config)
         config = Config(config)
+        config.freeze()  # freeze because schema will add all defaults
     else:
         config = _try_validate_config(config)
     if verbose:
