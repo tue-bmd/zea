@@ -61,10 +61,10 @@ from scipy import ndimage, signal
 
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
-from usbmd.pytorch_ultrasound.processing import on_device_torch
+from usbmd.pytorch_ultrasound import on_device_torch
 from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 from usbmd.scan import Scan
-from usbmd.tensorflow_ultrasound.processing import on_device_tf
+from usbmd.tensorflow_ultrasound import on_device_tf
 from usbmd.utils import log
 from usbmd.utils.checks import _ML_LIBRARIES, get_check
 from usbmd.utils.config import Config
@@ -76,25 +76,15 @@ for lib in _ML_LIBRARIES:
         if lib == "torch":
             # pylint: disable=unused-import
             import torch
-
-            import usbmd.pytorch_ultrasound.ops
         if lib == "tensorflow":
             # pylint: disable=unused-import
             import tensorflow as tf
-
-            # pylint: disable=ungrouped-imports
-            import usbmd.tensorflow_ultrasound.ops
         if lib == "jax":
             # pylint: disable=unused-import
             import jax
         if lib == "keras":
             # pylint: disable=unused-import
             import keras
-
-np.cast = lambda x, dtype: x.astype(dtype)
-np.convert_to_tensor = lambda x: x
-np.complex = lambda x, y: x + 1j * y
-np.permute = np.transpose
 
 
 class Operation(ABC):
@@ -288,22 +278,18 @@ class Pipeline:
         """Compile the pipeline using jit."""
         if not jit:
             return
-        log.warning("JIT compmilation is not yet supported.")
         log.info(f"Compiling pipeline, with ops library: {self.ops.__name__}")
         if self.ops.__name__ == "numpy":
             return
         elif self.ops.__name__ == "tensorflow":
-            # jit compile the pipeline
+            self._jitted_process = tf.function(self._process, jit_compile=jit)
             return
-            # self._jitted_process = tf.function(self._process, jit_compile=jit)
         elif self.ops.__name__ == "torch":
+            log.warning("JIT compmilation is not yet supported for torch.")
             return
-        elif self.ops.__name__ == "keras.ops":
-            return
-            # self._jitted_process = tf.function(self._process, jit_compile=jit)
         elif self.ops.__name__ == "jax":
+            self._jitted_process = jax.jit(self._process)
             return
-            # self._jitted_process = jax.jit(self._process)
 
     def prepare_tensor(self, x):
         """Convert input array to appropriate tensor type for the operations package."""
@@ -345,7 +331,7 @@ class Beamform(Operation):
             _BEAMFORMER_TYPES = tf_beamformer_registry.registered_names()
         else:
             log.warning(
-                f"Beamformer is not supported for the operations package: {self.ops.__name__}"
+                f"Beamformer is not supported for the operations package: {self.ops.__name__} "
                 f"Please use on of the supported beamformer packages: {['torch', 'tensorflow']}"
             )
             get_beamformer = None
@@ -448,7 +434,8 @@ class LogCompress(Operation):
         if self.dynamic_range is None:
             self.dynamic_range = (-60, 0)
 
-        data = self.ops.where(data == 0, np.finfo(float).eps, data)
+        small_number = self.prepare_tensor(1e-16, dtype=data.dtype)
+        data = self.ops.where(data == 0, small_number, data)
         compressed_data = 20 * self.ops.log10(data)
         compressed_data = self.ops.clip(compressed_data, *self.dynamic_range)
         return compressed_data
@@ -610,11 +597,9 @@ class EnvelopeDetect(Operation):
             M = 2 ** int(np.ceil(np.log2(n_ax)))
             # data = scipy.signal.hilbert(data, N=M, axis=self.axis)
             data = hilbert(data, N=M, axis=self.axis, ops=self.ops)
-            data = self.ops.convert_to_tensor(data)
             data = take(data, self.ops.arange(n_ax), axis=self.axis, ops=self.ops)
             data = self.ops.squeeze(data, axis=-1)
 
-        data = self.ops.convert_to_tensor(data)
         data = self.ops.abs(data)
         data = self.ops.cast(data, self.ops.float32)
         return data
