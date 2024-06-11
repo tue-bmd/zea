@@ -178,6 +178,7 @@ class Operation(ABC):
         self._assign_scan_params(scan)
         self._assign_config_params(config)
 
+    # pylint: disable=unused-argument
     def _assign_config_params(self, config: Config):
         """Assign the config parameters to the operation.
 
@@ -188,6 +189,7 @@ class Operation(ABC):
         # Assign the config parameters to the operation
         return
 
+    # pylint: disable=unused-argument
     def _assign_scan_params(self, scan: Scan):
         """Assign the scan parameters to the operation.
 
@@ -197,6 +199,7 @@ class Operation(ABC):
         """
         return
 
+    # pylint: disable=unused-argument
     def _assign_probe_params(self, probe: Probe):
         """Assign the probe parameters to the operation.
 
