@@ -804,7 +804,8 @@ class ScanConvert(Operation):
             self.x_axis = probe.angle_deg_axis
 
     def _assign_scan_params(self, scan):
-        self.z_axis = scan.z_axis
+        if scan is not None:
+            self.z_axis = scan.z_axis
 
 
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
