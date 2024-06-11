@@ -91,6 +91,11 @@ for lib in _ML_LIBRARIES:
             # pylint: disable=unused-import
             import keras
 
+np.cast = lambda x, dtype: x.astype(dtype)
+np.convert_to_tensor = lambda x: x
+np.complex = lambda x, y: x + 1j * y
+np.permute = np.transpose
+
 
 class Operation(ABC):
     """Basic operation class as building block for processing pipeline and standalone operations."""
@@ -603,13 +608,16 @@ class EnvelopeDetect(Operation):
         else:
             n_ax = data.shape[self.axis]
             M = 2 ** int(np.ceil(np.log2(n_ax)))
-            data = scipy.signal.hilbert(data, N=M, axis=self.axis)
+            # data = scipy.signal.hilbert(data, N=M, axis=self.axis)
+            data = hilbert(data, N=M, axis=self.axis, ops=self.ops)
             data = self.ops.convert_to_tensor(data)
             data = take(data, self.ops.arange(n_ax), axis=self.axis, ops=self.ops)
             data = self.ops.squeeze(data, axis=-1)
 
         data = self.ops.convert_to_tensor(data)
-        return self.ops.abs(data)
+        data = self.ops.abs(data)
+        data = self.ops.cast(data, self.ops.float32)
+        return data
 
 
 class Demodulate(Operation):
@@ -1200,79 +1208,66 @@ def take(data, indices, axis=-1, ops=np):
     return ops.take_along_axis(data, indices, axis=axis)
 
 
-# def to_image(envelope_data, dynamic_range=None, input_range=None):
-#     """Convert envelope data to image.
-#     envelope_data -> normalize [0, 1] -> log compress -> [*dynamic_range]
-#     Args:
-#         envelope_data (ndarray): Input array of envelope data.
-#         dynamic_range (tuple): Dynamic range of output image values.
-#             Defaults to [-60, 0] dB.
-#         input_range (tuple): Range of input values (if none, min max is used).
-#     Returns:
-#         image (ndarray): Output image.
+def hilbert(x, N: int = None, axis=-1, ops=np):
+    """Manual implementation of Hilbert transform.
 
-#     """
-#     if dynamic_range is None:
-#         dynamic_range = (-60, 0)
+    Operated in the Fourier domain.
 
-#     assert (
-#         dynamic_range[0] < dynamic_range[1]
-#     ), "dynamic range must be increasing tuple of size 2"
-#     assert dynamic_range[0] < 0, "dynamic range must be negative (dB)"
-#     assert (np.array(dynamic_range) <= 0).all(), "dynamic range must be negative (dB)"
-#     output_range = (0, 1)
-#     image = normalize(envelope_data, output_range, input_range)
-#     image = log_compress(image, dynamic_range)
-#     return image
+    Args:
+        x (ndarray): input data of any shape.
+        N (int, optional): number of points in the FFT. Defaults to None.
+        axis (int, optional): axis to operate on. Defaults to -1.
+        ops (module, optional): operations module. Defaults to np (numpy).
+    Returns:
+        x (ndarray): complex iq data of any shape.k
 
+    """
+    input_shape = x.shape
+    n_dim = len(input_shape)
 
-# def rf2iq(
-#     rf_data,
-#     demod_type=None,
-#     fs=None,
-#     fc=None,
-#     bandwidth=None,
-#     filter_coeff=None,
-#     separate_channels=False,
-# ):
-#     """Convert rf to iq.
-#     TODO:
-#         - add different type of demodulation methods
-#             gabor
-#             manual demodulation
-#     Args:
-#         rf_data (ndarray): real valued input array of size [..., n_ax, n_el].
-#             second to last axis is fast-time axis.
-#         demod_type (str, optional): demodulation type. Defaults to 'manual'.
-#         fs (float): the sampling frequency of the RF signals (in Hz).
-#             Only not necessary when filter_coeff is provided.
-#         fc (float, optional): represents the center frequency (in Hz).
-#             Defaults to None.
-#         bandwidth (float, optional): Bandwidth of RF signal in % of center
-#             frequency. Defaults to None.
-#         filter_coeff (list, optional): (b, a), numerator and denominator coefficients
-#             of FIR filter. see demodulation for description.
-#         separate_channels (bool, optional): Whether to output the iq, imag and
-#             real componants as separates channels. Defaults to False. If False,
-#             iq is not split in channels and data is complex type.
+    n_ax = input_shape[axis]
 
-#     Returns:
-#         iq_data (ndarray): output iq data of size [n_ax, n_el] or [n_ax, n_el, 2].
+    if axis < 0:
+        axis = n_dim + axis
 
-#     """
-#     if demod_type in [None, "manual"]:
-#         if fs is None:
-#             raise ValueError("fs must be provided if demod_type is manual")
-#         iq_data = demodulate(rf_data, fs, fc, bandwidth, filter_coeff)
-#     elif demod_type == "hilbert":
-#         n_ax = rf_data.shape[-2]
-#         M = 2 ** int(np.ceil(np.log2(n_ax)))
-#         iq_data = signal.hilbert(rf_data, N=M, axis=-2)
-#         iq_data = np.take(iq_data, np.arange(n_ax), axis=-2)
-#     else:
-#         raise ValueError(f"Unknown demodulation type: {demod_type}")
+    if N is not None:
+        if N < n_ax:
+            raise ValueError("N must be greater or equal to n_ax.")
+        else:
+            # only pad along the axis, use manual padding
+            pad = N - n_ax
+            zeros = ops.zeros(input_shape[:axis] + (pad,) + input_shape[axis + 1 :])
+            x = ops.concatenate((x, zeros), axis=axis)
+            n_ax = N
 
-#     if separate_channels:
-#         iq_data = complex_to_channels(iq_data, axis=-1)
+    h = np.zeros(n_ax)
 
-#     return iq_data
+    # Create mask to remove the negative frequencies and double the frequencies above 0.
+    if n_ax % 2 == 0:
+        h[0] = h[n_ax // 2] = 1
+        h[1 : n_ax // 2] = 2
+    else:
+        h[0] = 1
+        h[1 : (n_ax + 1) // 2] = 2
+
+    h = ops.convert_to_tensor(h)
+    h = ops.expand_dims(ops.cast(ops.complex(h, h), ops.complex64), axis=0)
+
+    # switch n_ax and n_el elements (based on ndim)
+    idx = list(range(n_dim))
+    # make sure axis gets to the end for fft (operates on last axis)
+    idx.remove(axis)
+    idx.append(axis)
+
+    x = ops.permute(x, idx)
+
+    x = ops.cast(ops.complex(x, x), ops.complex64)
+
+    Xf = ops.fft.fft(x)
+    x = ops.fft.ifft(Xf * h)
+
+    # switch back to original shape
+    idx = list(range(n_dim))
+    idx.insert(axis, idx.pop(-1))
+    x = ops.permute(x, idx)
+    return x
