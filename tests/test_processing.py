@@ -1,6 +1,7 @@
 """Tests for the processing module."""
 
 import random
+from math import e
 
 import decorator
 import numpy as np
@@ -12,11 +13,13 @@ from usbmd.ops import (
     Companding,
     Demodulate,
     Downsample,
+    EnvelopeDetect,
     LogCompress,
     Normalize,
     UpMix,
     channels_to_complex,
     complex_to_channels,
+    hilbert,
 )
 from usbmd.probes import get_probe
 from usbmd.scan import PlaneWaveScan
@@ -54,6 +57,7 @@ def equality_libs_processing(test_func):
             - my_processing_func_tf
             - test_my_processing_func
     """
+    decimal = 6
 
     # @functools.wraps(test_func)
     def wrapper(test_func, *args, **kwargs):
@@ -100,7 +104,7 @@ def equality_libs_processing(test_func):
             np.testing.assert_almost_equal(
                 original_output,
                 tf_output,
-                decimal=6,
+                decimal=decimal,
                 err_msg=f"Function {func_name} failed with tensorflow processing.",
             )
             print(f"Function {func_name} passed with tensorflow output.")
@@ -108,7 +112,7 @@ def equality_libs_processing(test_func):
             np.testing.assert_almost_equal(
                 original_output,
                 torch_output,
-                decimal=6,
+                decimal=decimal,
                 err_msg=f"Function {func_name} failed with pytorch processing.",
             )
             print(f"Function {func_name} passed with pytorch output.")
@@ -116,7 +120,7 @@ def equality_libs_processing(test_func):
             np.testing.assert_almost_equal(
                 tf_output,
                 torch_output,
-                decimal=6,
+                decimal=decimal,
                 err_msg=(
                     f"Function {func_name} failed, tensorflow "
                     "and pytorch output not the same."
@@ -329,3 +333,31 @@ def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
     assert (
         np.mean(np.abs((data - _data) ** 2)) < 10
     ), "Data is not equal after up and down conversion."
+
+
+@equality_libs_processing
+def test_hilbert_transform(ops="numpy"):
+    """Test hilbert transform"""
+    # create some dummy sinusoidal data of size (2, 500, 128, 1)
+    # sinusoids on axis 1
+    data = np.sin(np.linspace(0, 2 * e * np.pi, 500))
+    data = np.expand_dims(data, axis=-1)
+    data = np.expand_dims(data, axis=0)
+    data = np.tile(data, (2, 1, 128, 1))
+
+    data = data + np.random.random(data.shape) * 0.1
+
+    # just getting this operation for the utils
+    envelope_detect = EnvelopeDetect(axis=-3)
+    envelope_detect.ops = ops
+    ops = envelope_detect.ops
+
+    data = envelope_detect.prepare_tensor(data)
+    data_iq = hilbert(data, axis=-3, ops=ops)
+    assert data_iq.dtype in [
+        ops.complex64,
+        ops.complex128,
+    ], f"Data type should be complex, got {data_iq.dtype} instead."
+
+    data_iq = np.array(data_iq)
+    return data_iq
