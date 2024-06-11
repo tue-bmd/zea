@@ -32,7 +32,7 @@ config = ...
 scan = ...
 probe = ...
 
-pipeline = Pipeline(operations, ops=np, device="cpu")
+pipeline = Pipeline(operations, ops="numpy", device="cpu")
 pipeline.set_params(config, scan, probe)
 pipeline.initialize()
 
@@ -248,7 +248,19 @@ class Operation(ABC):
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
-    def __init__(self, operations, ops=np, batch_dim=True, device=None):
+    def __init__(self, operations, ops="numpy", batch_dim=True, device=None):
+        """Initialize a pipeline
+
+        Args:
+            operations (list): A list of Operation instances representing the operations
+                to be performed.
+            ops (module, str, optional): The type of operations to use. Defaults to "numpy".
+            batch_dim (bool, optional): Whether to include batch dimension in the operations.
+                Defaults to True.
+            device (str, optional): The device to use for the operations. Defaults to None.
+                Can be `cpu` or `cuda`, `cuda:0`, etc.
+        """
+
         self.operations = operations
         self.device = device
 
