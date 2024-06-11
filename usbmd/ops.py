@@ -171,7 +171,7 @@ class Operation(ABC):
         # Assign the probe parameters to the operation
         pass
 
-    def prepare_tensor(self, x, dtype=None):
+    def prepare_tensor(self, x, dtype=None, device=None):
         """Convert input array to appropriate tensor type for the operations package."""
         if self.ops == np:
             x = np.array(x)
@@ -187,6 +187,8 @@ class Operation(ABC):
             x = torch.tensor(x)
             if dtype is not None:
                 x = x.type(dtype)
+            if device is not None:
+                x = x.to(device)
             return x
         else:
             raise ValueError("Unsupported operations package.")
@@ -225,14 +227,14 @@ class Pipeline:
         """Get the operations package used in the pipeline."""
         return self.operations[0].ops
 
-    def on_device(self, func, data, device=None):
+    def on_device(self, func, data, device=None, return_numpy=False):
         """On device function for running pipeline on specific device."""
         if self.ops == np:
             return func(data)
         elif self.ops == tf:
-            return on_device_tf(func, data, device=device)
+            return on_device_tf(func, data, device=device, return_numpy=return_numpy)
         elif self.ops == torch:
-            return on_device_torch(func, data, device=device)
+            return on_device_torch(func, data, device=device, return_numpy=return_numpy)
         else:
             raise ValueError("Unsupported operations package.")
 
@@ -241,7 +243,7 @@ class Pipeline:
         for operation in self.operations:
             operation.set_params(config, scan, probe)
 
-    def process(self, data):
+    def process(self, data, return_numpy=False):
         """Process input data through the pipeline."""
         data = self.prepare_tensor(data)
         if not all(operation._ready for operation in self.operations):
@@ -260,8 +262,10 @@ class Pipeline:
         else:
             processing_func = self._jitted_process
 
-        # if self.device:
-        #     return self.on_device(processing_func, data, device=self.device)
+        if self.device:
+            return self.on_device(
+                processing_func, data, device=self.device, return_numpy=return_numpy
+            )
         return processing_func(data)
 
     def _process(self, data):
@@ -291,16 +295,11 @@ class Pipeline:
             self._jitted_process = jax.jit(self._process)
             return
 
-    def prepare_tensor(self, x):
+    def prepare_tensor(self, x, dtype=None, device=None):
         """Convert input array to appropriate tensor type for the operations package."""
-        if self.ops == np:
-            return np.array(x)
-        elif self.ops == tf:
-            return tf.convert_to_tensor(x)
-        elif self.ops == torch:
-            return torch.tensor(x)
-        else:
-            raise ValueError("Unsupported operations package.")
+        if len(self.operations) == 0:
+            return x
+        return self.operations[0].prepare_tensor(x, dtype=dtype, device=device)
 
 
 class Beamform(Operation):
@@ -434,7 +433,11 @@ class LogCompress(Operation):
         if self.dynamic_range is None:
             self.dynamic_range = (-60, 0)
 
-        small_number = self.prepare_tensor(1e-16, dtype=data.dtype)
+        device = None
+        if self.ops.__name__ == "torch":
+            device = data.device
+
+        small_number = self.prepare_tensor(1e-16, dtype=data.dtype, device=device)
         data = self.ops.where(data == 0, small_number, data)
         compressed_data = 20 * self.ops.log10(data)
         compressed_data = self.ops.clip(compressed_data, *self.dynamic_range)
@@ -591,7 +594,7 @@ class EnvelopeDetect(Operation):
 
     def process(self, data):
         if data.shape[-1] == 2:
-            data = channels_to_complex(data, axis=-1)
+            data = channels_to_complex(data, ops=self.ops)
         else:
             n_ax = data.shape[self.axis]
             M = 2 ** int(np.ceil(np.log2(n_ax)))
@@ -661,7 +664,7 @@ class UpMix(Operation):
             log.warning("Upmixing is not applicable to RF data.")
             return data
         elif data.shape[-1] == 2:
-            data = channels_to_complex(data, axis=-1)
+            data = channels_to_complex(data, ops=self.ops)
         data = upmix(data, self.fs, self.fc, self.upsampling_rate)
         data = self.ops.expand_dims(data, axis=-1)
         return data
@@ -768,6 +771,10 @@ class ScanConvert(Operation):
     def process(self, data):
         if self.probe_type != "phased":
             return data
+
+        # TODO: not ready for torch yet
+        if self.ops.__name__ == "torch":
+            data = data.cpu().numpy()
 
         return scan_convert(
             data,
@@ -1014,7 +1021,7 @@ def apply_multi_band_pass_filter(
         beamformed_data = np.squeeze(beamformed_data, axis=-1)
     elif (beamformed_data).shape[-1] == 2:
         modtype = "iq"
-        beamformed_data = channels_to_complex(beamformed_data, axis=-1)
+        beamformed_data = channels_to_complex(beamformed_data)
     else:
         raise ValueError(
             f"Unknown number of channels: {beamformed_data.shape[-1]}, "
@@ -1160,21 +1167,19 @@ def complex_to_channels(complex_data, axis=-1, ops=np):
     return iq_data
 
 
-def channels_to_complex(data, axis=-1, ops=np):
+def channels_to_complex(data, ops=np):
     """Convert array with real and imaginary components at
     different channels to complex data array.
 
     Args:
         data (ndarray): input data, with at 0 index of axis
             real component and 1 index of axis the imaginary.
-        axis (int, optional): axis with real and imag component
-            as separate channels. Defaults to -1.
 
     Returns:
         ndarray: complex array with real and imaginary components.
     """
-    assert data.shape[axis] == 2
-    return ops.take(data, 0, axis=axis) + 1j * ops.take(data, 1, axis=axis)
+    assert data.shape[-1] == 2
+    return ops.complex(data[..., 0], data[..., 1])
 
 
 def take(data, indices, axis=-1, ops=np):
