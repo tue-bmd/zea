@@ -19,6 +19,10 @@ if importlib.util.find_spec("tensorflow"):
     tf.permute = tf.transpose
     tf.concatenate = tf.concat
     tf.fft = tf.signal
+    tf.imag = tf.math.imag
+    tf.real = tf.math.real
+    tf.iscomplex = tf.experimental.numpy.iscomplex
+
 
 """Convert Torch ops to numpy ops syntax used in main ops module."""
 if importlib.util.find_spec("torch"):
@@ -30,6 +34,7 @@ if importlib.util.find_spec("torch"):
     torch.take_along_axis = torch.take_along_dim
     torch.cast = lambda x, dtype: x.type(dtype)
     torch.concatenate = torch.cat
+    torch.iscomplex = torch.is_complex
 
 """Extent numpy ops a bit for main ops module."""
 if importlib.util.find_spec("numpy"):
