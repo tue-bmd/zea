@@ -1,4 +1,5 @@
 """Tests for the probes module."""
+
 import numpy as np
 import pytest
 
@@ -19,7 +20,7 @@ def test_get_probe_error():
     """Tests the get_probe function by calling it on a probe name that is not
     registered and checking that it raises a NotImplementedError."""
     with pytest.raises(NotImplementedError):
-        get_probe("nonexistent_probe")
+        get_probe("nonexistent_probe", fallback=False)
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
