@@ -79,7 +79,7 @@ class Operation(ABC):
         name=None,
         input_data_type=None,
         output_data_type=None,
-        batch_dim=True,
+        with_batch_dim=True,
         ops="numpy",
     ):
         """Initialize the operation.
@@ -88,7 +88,7 @@ class Operation(ABC):
             name (str): The name of the operation.
             input_data_type (type): The expected data type of the input data.
             output_data_type (type): The expected data type of the output data.
-            batch_dim (bool): Whether the input data has a batch dimension.
+            with_batch_dim (bool): Whether the input data has a batch dimension.
             ops (module, str): The operations package used in the operation.
                 Can be a module or a string to import the module. Defaults to "numpy".
 
@@ -96,7 +96,7 @@ class Operation(ABC):
         self.name = name
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
-        self.batch_dim = batch_dim
+        self.with_batch_dim = with_batch_dim
         self.ops = ops
 
         self.config = None
@@ -144,7 +144,7 @@ class Operation(ABC):
         """
         if self.input_data_type:
             check = get_check(self.input_data_type)
-            check(data, self.batch_dim)
+            check(data, with_batch_dim=self.with_batch_dim)
         return self.process(data, *args, **kwargs)
 
     @property
@@ -248,25 +248,26 @@ class Operation(ABC):
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
-    def __init__(self, operations, ops="numpy", batch_dim=True, device=None):
+    def __init__(self, operations, ops="numpy", with_batch_dim=True, device=None):
         """Initialize a pipeline
 
         Args:
             operations (list): A list of Operation instances representing the operations
                 to be performed.
             ops (module, str, optional): The type of operations to use. Defaults to "numpy".
-            batch_dim (bool, optional): Whether to include batch dimension in the operations.
+            with_batch_dim (bool, optional): Whether to include batch dimension in the operations.
                 Defaults to True.
             device (str, optional): The device to use for the operations. Defaults to None.
                 Can be `cpu` or `cuda`, `cuda:0`, etc.
         """
 
         self.operations = operations
-        self.device = device
+
+        self.device = self._check_device(device, ops)
 
         for operation in self.operations:
             operation.ops = ops
-            operation.batch_dim = batch_dim
+            operation.with_batch_dim = with_batch_dim
 
         # check if the operations are compatible
         for i in range(len(self.operations) - 1):
@@ -372,6 +373,39 @@ class Pipeline:
             return x
         return self.operations[0].prepare_tensor(x, dtype=dtype, device=device)
 
+    def _check_device(self, device, ops):
+        if device is None:
+            return None
+
+        if device == "cpu":
+            return "cpu"
+
+        if not isinstance(ops, str):
+            ops = ops.__name__
+
+        if ops == "numpy":
+            if device not in [None, "cpu"]:
+                log.warning(
+                    f"Device {device} is not supported for numpy operations, using cpu."
+                )
+            return "cpu"
+
+        else:
+            # assert device to be cpu, cuda, cuda:{int} or int or None
+            assert isinstance(
+                device, (str, int)
+            ), f"device should be a string or int, got {device}"
+            if isinstance(device, str):
+                if ops in ["tensorflow", "jax"]:
+                    assert device.startswith(
+                        "gpu"
+                    ), f"device should be 'cpu' or 'gpu:*', got {device}"
+                elif ops == "torch":
+                    assert device.startswith(
+                        "cuda"
+                    ), f"device should be 'cpu' or 'cuda:*', got {device}"
+            return device
+
 
 class Beamform(Operation):
     """Beamforming operation for ultrasound data."""
@@ -426,10 +460,10 @@ class Beamform(Operation):
         self.probe = probe
 
     def process(self, data):
-        if self.batch_dim is False:
+        if self.with_batch_dim is False:
             data = self.ops.expand_dims(data, axis=0)
         data = self.beamformer(data, probe=self.probe, scan=self.scan)
-        if self.batch_dim is False:
+        if self.with_batch_dim is False:
             data = self.ops.squeeze(data, axis=0)
         return data
 
@@ -1069,7 +1103,7 @@ def apply_multi_band_pass_filter(
     params,
     process=None,
     to_image=True,
-    with_frame_dim=False,
+    with_batch_dim=False,
 ):
     """Applies multiply band pass filters on beamformed data.
 
@@ -1089,7 +1123,7 @@ def apply_multi_band_pass_filter(
             beamformed data to image domain. Defaults to None. Should be provided if `to_image`
             is set to True.
         to_image (bool, optional): Whether to convert to image domain or not.
-        with_frame_dim (bool, optional): Whether to process data with frame (batch of images).
+        with_batch_dim (bool, optional): Whether to process data with frame (batch of images).
             Defaults to False. In that case data is processed for a single image.
 
     Returns:
@@ -1178,13 +1212,13 @@ def apply_multi_band_pass_filter(
             data_filtered = np.expand_dims(data_filtered, axis=-1)
         if to_image:
             env_data = process.envelope_detect(
-                data_filtered, with_frame_dim=with_frame_dim
+                data_filtered, with_batch_dim=with_batch_dim
             )
             images_filtered = process.run(
                 env_data,
                 dtype="envelope_data",
                 to_dtype="image",
-                with_frame_dim=with_frame_dim,
+                with_batch_dim=with_batch_dim,
             )
         else:
             images_filtered = data_filtered
