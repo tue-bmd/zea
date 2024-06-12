@@ -11,7 +11,7 @@ Operations can also be run individually / standalone.
 Examples:
 ```python
 data = np.random.randn(2000, 128, 1)
-envelope_detect = EnvelopeDetect(fs=5e6)
+envelope_detect = EnvelopeDetect(axis=-1)
 envelope_data = envelope_detect(data)
 ```
 
