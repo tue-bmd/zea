@@ -857,7 +857,8 @@ class ScanConvert(Operation):
         """Initialize the ScanConvert operation.
 
         Args:
-            image (ndarray): Input image (in polar coordinates).
+            x_axis (ndarray, optional): linspace of the angles
+            z_axis (ndarray, optional): linspace of the depth
             spline_order (int, optional): Order of spline interpolation.
                 Defaults to 1.
             fill_value (float, optional): Value of the points that cannot be
