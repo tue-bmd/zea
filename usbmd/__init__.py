@@ -4,7 +4,7 @@ The official documentation for the Python package `usbmd` - a convenient ultraso
 .. include:: ./README.md
 """
 
-from .__version__ import __version__
+__version__ = "1.2.7"
 
 # Main (isort: split)
 from .config import Config, load_config_from_yaml
