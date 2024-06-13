@@ -18,8 +18,8 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-from usbmd import Config
 from usbmd.backend import import_backend
+from usbmd.config import Config
 from usbmd.registry import metrics_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _BACKENDS, _DATA_TYPES, _MOD_TYPES
@@ -29,11 +29,13 @@ _BACKENDS = [None, "torch", "tensorflow", "numpy"]
 # need to import ML libraries first for registry
 _ML_LIB_SET = import_backend()
 
-# pylint: disable=unused-import
-import usbmd.utils.metrics
+import usbmd.utils.metrics  # pylint: disable=unused-import, wrong-import-order
 
 # Register beamforing types in registry
-from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
+from usbmd.registry import (  # pylint: disable=wrong-import-order
+    tf_beamformer_registry,
+    torch_beamformer_registry,
+)
 
 _BEAMFORMER_TYPES = set(
     tf_beamformer_registry.registered_names()
