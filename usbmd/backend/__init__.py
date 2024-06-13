@@ -1,3 +1,5 @@
+"""Loads the environment variable USBMD_BACKEND can import the corresponding backend."""
+
 import os
 
 from usbmd.utils.checks import _BACKENDS
@@ -10,12 +12,13 @@ assert USBMD_BACKEND in _BACKENDS, ValueError(f"Unsupported backend: {USBMD_BACK
 
 
 def import_backend():
+    """Useful to load the registries"""
     if USBMD_BACKEND == "torch":
-        import usbmd.backend.pytorch
+        import usbmd.backend.pytorch  # pylint: disable=import-outside-toplevel, unused-import
 
         return True
     elif USBMD_BACKEND == "tensorflow":
-        import usbmd.backend.tensorflow
+        import usbmd.backend.tensorflow  # pylint: disable=import-outside-toplevel, unused-import
 
         return True
     return False
