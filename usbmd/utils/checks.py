@@ -4,11 +4,13 @@
 - **Date**          : October 30 2023
 """
 
+import importlib
 import logging
 from pathlib import Path
 
 import h5py
 import numpy as np
+
 from usbmd.registry import checks_registry
 
 _DATA_TYPES = [
@@ -21,6 +23,14 @@ _DATA_TYPES = [
 ]
 
 _BACKENDS = [None, "torch", "tensorflow", "keras", "jax", "numpy"]
+
+_ML_LIB_AVAILABLE = False
+for lib in _BACKENDS:
+    if importlib.util.find_spec(str(lib)):
+        if lib == "torch":
+            _ML_LIB_AVAILABLE = True
+        if lib == "tensorflow":
+            _ML_LIB_AVAILABLE = True
 
 _MOD_TYPES = [None, "rf", "iq"]
 
