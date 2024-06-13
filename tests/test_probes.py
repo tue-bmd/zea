@@ -26,10 +26,10 @@ def test_get_probe_error():
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
 def test_get_default_scan_paramters(probe_name):
     """Tests the get_probe function by calling it on all registered probes and
-    calling their get_default_scan_parameters method."""
+    calling their get_parameters() method."""
     probe = get_probe(probe_name)
 
-    probe.get_default_scan_parameters()
+    probe.get_parameters()
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())

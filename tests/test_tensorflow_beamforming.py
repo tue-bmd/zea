@@ -51,7 +51,7 @@ def test_das_beamforming(
         config.model.beamformer.patches = patches  # pylint: disable=no-member
 
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
 
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
@@ -148,7 +148,7 @@ def test_dynamic_beamforming():
     config.ml_library = "tensorflow"
 
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
 
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
@@ -191,7 +191,7 @@ def test_dynamic_beamforming():
 def test_snapshot():
     """Test that the snapshot function works."""
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
 
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
