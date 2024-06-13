@@ -13,33 +13,21 @@ Also if that parameter is optional, add a default value.
 - **Date**          : 31/01/2023
 """
 
-import importlib
 from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
 from usbmd import Config
+from usbmd.backend import import_backend
 from usbmd.registry import metrics_registry
 from usbmd.utils import log
-from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
+from usbmd.utils.checks import _BACKENDS, _DATA_TYPES, _MOD_TYPES
 
-_ML_LIBRARIES = [None, "torch", "tensorflow", "numpy"]
+_BACKENDS = [None, "torch", "tensorflow", "numpy"]
 
 # need to import ML libraries first for registry
-_ML_LIB_SET = False
-for lib in _ML_LIBRARIES:
-    if importlib.util.find_spec(str(lib)):
-        if lib == "torch":
-            # pylint: disable=unused-import
-            import usbmd.backend.pytorch
-
-            _ML_LIB_SET = True
-        if lib == "tensorflow":
-            # pylint: disable=unused-import
-            import usbmd.backend.tensorflow
-
-            _ML_LIB_SET = True
+_ML_LIB_SET = import_backend()
 
 # pylint: disable=unused-import
 import usbmd.utils.metrics
@@ -236,7 +224,7 @@ config_schema = Schema(
         Optional("hide_devices", default=None): Or(
             None, list_of_positive_integers, positive_integer_and_zero
         ),
-        Optional("ml_library", default="numpy"): Or(None, *_ML_LIBRARIES),
+        Optional("ml_library", default="numpy"): Or(None, *_BACKENDS),
         Optional("git", default=None): Or(None, str),
     }
 )

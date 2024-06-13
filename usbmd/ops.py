@@ -67,7 +67,7 @@ from usbmd.probes import Probe
 from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
-from usbmd.utils.checks import _ML_LIBRARIES, get_check
+from usbmd.utils.checks import _BACKENDS, get_check
 from usbmd.utils.utils import translate
 
 
@@ -114,7 +114,7 @@ class Operation(ABC):
         """Set the package for the operation."""
         if isinstance(ops, str):
             ops = importlib.import_module(ops)
-        assert ops.__name__ in _ML_LIBRARIES, f"Unsupported operations package {ops}"
+        assert ops.__name__ in _BACKENDS, f"Unsupported operations package {ops}"
         self._ops = ops
 
     @abstractmethod
