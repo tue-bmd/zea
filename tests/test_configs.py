@@ -11,8 +11,8 @@ from schema import SchemaError
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from usbmd.utils.config import Config, load_config_from_yaml
-from usbmd.utils.config_validation import check_config
+from usbmd import Config, load_config_from_yaml
+from usbmd.config.validation import check_config
 
 # Define some dictionaries to test the Config class
 simple_dict = {"a": 1, "b": 2, "c": 3}

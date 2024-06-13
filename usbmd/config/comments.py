@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-from usbmd.utils.config_validation import (
+from usbmd.config.validation import (
     _ALLOWED_DEMODULATION,
     _ALLOWED_KEYS_PROXTYPE,
     _ALLOWED_PLOT_LIBS,

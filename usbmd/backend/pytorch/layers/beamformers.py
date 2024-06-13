@@ -93,7 +93,7 @@ class Beamformer(torch.nn.Module):
 
         #: The `usbmd.probes.Probe` object to beamform with.
         self.probe = probe
-        #: The `usbmd.utils.config.Config` object to beamform with.
+        #: The `usbmd.config.Config` object to beamform with.
         self.config = config
 
         #: The time-of-flight correction layer.
