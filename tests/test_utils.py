@@ -1,10 +1,11 @@
-"""Tests for the usbmd.utils.utils module."""
+"""Tests for the usbmd.utils module."""
+
 import re
 
 import numpy as np
 import pytest
 
-from usbmd.utils.utils import (
+from usbmd.utils import (
     find_first_nonzero_index,
     find_key,
     first_not_none_item,

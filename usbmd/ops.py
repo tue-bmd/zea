@@ -66,9 +66,8 @@ from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 from usbmd.scan import Scan
-from usbmd.utils import log
+from usbmd.utils import log, translate
 from usbmd.utils.checks import _BACKENDS, get_check
-from usbmd.utils.utils import translate
 
 
 class Operation(ABC):

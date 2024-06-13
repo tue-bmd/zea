@@ -1,3 +1,3 @@
-"""Makes all the usbmd.utils.utils available directly from usbmd.utils."""
+"""Makes all the usbmd.utils available directly from usbmd.utils."""
 
 from .utils import *

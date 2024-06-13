@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.display import transform_sc_image_to_polar
-from usbmd.utils.utils import translate
+from usbmd.utils import translate
 
 
 def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:

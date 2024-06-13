@@ -15,9 +15,8 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import RandomCrop, Resizing
 
-from usbmd.utils import log
+from usbmd.utils import log, translate
 from usbmd.utils.io_lib import search_file_tree
-from usbmd.utils.utils import translate
 
 
 class H5Generator:

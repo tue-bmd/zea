@@ -27,14 +27,14 @@ from usbmd.data.read_h5 import ReadH5, recursively_load_dict_contents_from_group
 from usbmd.probes import get_probe
 from usbmd.registry import dataset_registry
 from usbmd.scan import PlaneWaveScan, Scan, cast_scan_parameters
-from usbmd.utils import log
-from usbmd.utils.checks import get_check, validate_dataset
-from usbmd.utils.utils import (
+from usbmd.utils import (
     calculate_file_hash,
     date_string_to_readable,
     get_date_string,
+    log,
     update_dictionary,
 )
+from usbmd.utils.checks import get_check, validate_dataset
 
 _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
