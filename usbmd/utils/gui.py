@@ -31,7 +31,6 @@ from usbmd.config.validation import check_config, config_schema
 from usbmd.datapaths import set_data_paths
 from usbmd.setup_usbmd import setup_config
 from usbmd.utils import log
-from usbmd.utils.gui import App
 from usbmd.utils.io_lib import filename_from_window_dialog
 from usbmd.utils.utils import get_date_string
 
