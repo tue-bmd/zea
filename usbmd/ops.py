@@ -971,19 +971,19 @@ class BandPassFilter(Operation):
     """Band pass filter data."""
 
     def __init__(
-        self, axis=None, num_taps=None, fs=None, fc=None, f1=None, f2=None, **kwargs
+        self, num_taps=None, fs=None, fc=None, f1=None, f2=None, axis=-3, **kwargs
     ):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
             **kwargs,
         )
-        self.axis = axis
         self.num_taps = num_taps
         self.fs = fs
         self.fc = fc
         self.f1 = f1
         self.f2 = f2
+        self.axis = axis
 
         if self._ready:
             self.initialize()
@@ -1003,8 +1003,32 @@ class BandPassFilter(Operation):
             and self.f2 is not None
         )
 
+    def _assign_scan_params(self, scan):
+        self.fs = scan.fs
+        self.fc = scan.fc
+
+    def _assign_config_params(self, config):
+        if config.scan.sampling_frequency is not None:
+            self.fs = config.scan.sampling_frequency
+        if config.scan.center_frequency is not None:
+            self.fc = config.scan.center_frequency
+
     def process(self, data):
-        return ndimage.convolve1d(data, self.filter, mode="wrap", axis=self.axis)
+        axis = data.ndim + self.axis if self.axis < 0 else self.axis
+
+        if data.shape[-1] == 2:
+            data = channels_to_complex(data, ops=self.ops)
+
+        if self.ops.__name__ == "torch":
+            data = data.cpu().numpy()
+
+        data = ndimage.convolve1d(data, self.filter, mode="wrap", axis=axis)
+        data = self.prepare_tensor(data)
+
+        if data.dtype in [self.ops.complex64, self.ops.complex128]:
+            data = complex_to_channels(data, axis=-1, ops=self.ops)
+
+        return data
 
 
 @ops_registry("multi_bandpass_filter")
@@ -1128,6 +1152,9 @@ class MultiBandPassFilter(Operation):
         if self.modtype == "iq":
             assert data.shape[-1] == 2, "IQ data should have 2 channels."
             data = channels_to_complex(data, ops=self.ops)
+
+        if self.ops.__name__ == "torch":
+            data = data.cpu().numpy()
 
         data_list = []
         for _filter in self.filters:
