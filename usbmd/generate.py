@@ -88,6 +88,7 @@ class GenerateDataSet:
 
         # intialize process class
         self.process = Process(config, self.scan, self.probe)
+        self.process.set_pipeline(dtype=self.config.data.dtype, to_dtype=self.to_dtype)
 
         if self.dataset.datafolder is None:
             self.dataset.datafolder = Path(".")
@@ -150,15 +151,13 @@ class GenerateDataSet:
 
                         path = self.get_path_from_name(name, ".png")
 
-                        image = self.process.run(
-                            image, self.config.data.dtype, self.to_dtype
-                        )
+                        image = self.process.run(image)
                         self.save_image(np.squeeze(image), path)
 
                 elif self.filetype == "hdf5":
                     data_list = []
                     for d in data:
-                        d = self.process.run(d, self.config.data.dtype, self.to_dtype)
+                        d = self.process.run(d)
                         data_list.append(d)
                     data = np.stack(data_list, axis=0)
                     path = self.get_path_from_name(base_name, ".hdf5")
