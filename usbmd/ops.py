@@ -232,7 +232,13 @@ class Operation(ABC):
 
     def initialize(self):
         """Initialize the operation."""
-        return
+        if not self._ready:
+            raise ValueError(
+                f"Operation {self.__class__.__name__} is not ready to be used, "
+                "please set parameters: "
+                "either using `op.set_params(config, scan, probe)` or "
+                "manually setting the parameters during initialization."
+            )
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
         """Set the parameters for the operation.
@@ -247,9 +253,12 @@ class Operation(ABC):
             probe (Probe): Probe parameters for the operation.
 
         """
-        self._assign_probe_params(probe)
-        self._assign_scan_params(scan)
-        self._assign_config_params(config)
+        if config is not None:
+            self._assign_config_params(config)
+        if scan is not None:
+            self._assign_scan_params(scan)
+        if probe is not None:
+            self._assign_probe_params(probe)
 
     # pylint: disable=unused-argument
     def _assign_config_params(self, config: Config):
@@ -551,6 +560,8 @@ class Beamform(Operation):
         self.beamformer = beamformer
 
     def initialize(self):
+        super().initialize()
+
         if self.beamformer is not None:
             return
 
@@ -977,6 +988,8 @@ class BandPassFilter(Operation):
             self.initialize()
 
     def initialize(self):
+        super().initialize()
+
         self.filter = get_band_pass_filter(self.num_taps, self.fs, self.f1, self.f2)
 
     @property
@@ -1048,6 +1061,8 @@ class MultiBandPassFilter(Operation):
             self.initialize()
 
     def initialize(self):
+        super().initialize()
+
         if "units" in self.params:
             units = ["Hz", "kHz", "MHz", "GHz"]
             factors = [1, 1e3, 1e6, 1e9]
@@ -1206,8 +1221,7 @@ class ScanConvert(Operation):
             self.x_axis = probe.angle_deg_axis
 
     def _assign_scan_params(self, scan):
-        if scan is not None:
-            self.z_axis = scan.z_axis
+        self.z_axis = scan.z_axis
 
 
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
