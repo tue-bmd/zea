@@ -15,7 +15,7 @@ from typing import Union
 
 import yaml
 
-from usbmd.common import set_data_paths
+from usbmd.datapaths import set_data_paths
 from usbmd.utils import log
 from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.config_validation import check_config
