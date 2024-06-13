@@ -18,14 +18,34 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
+import usbmd.utils.metrics  # pylint: disable=unused-import
 from usbmd.config import Config
-from usbmd.registry import get_beamformer_types, metrics_registry
+from usbmd.registry import (
+    metrics_registry,
+    tf_beamformer_registry,
+    torch_beamformer_registry,
+)
 from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIB_AVAILABLE, _MOD_TYPES
 
+
+def get_beamformer_types():
+    """Returns a set of all registered beamformer types."""
+    # Needs to import backend to fill registry
+    import usbmd.backend  # pylint: disable=import-outside-toplevel, unused-import
+
+    beamformer_types = set(
+        tf_beamformer_registry.registered_names()
+        + torch_beamformer_registry.registered_names()
+    )
+    assert (
+        len(beamformer_types) > 0
+    ), "No beamformers registered. This could happen when no ML library is installed."
+    return beamformer_types
+
+
 _BACKENDS = [None, "torch", "tensorflow", "numpy"]
 
-import usbmd.utils.metrics  # pylint: disable=unused-import, wrong-import-order
 
 # predefined checks, later used in schema to check validity of parameter
 any_number = Or(
