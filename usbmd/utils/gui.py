@@ -26,7 +26,7 @@ from typing import Dict, Optional, Tuple
 from schema import Schema
 
 import usbmd
-from usbmd.common import set_data_paths
+from usbmd.datapaths import set_data_paths
 from usbmd.setup_usbmd import setup_config
 from usbmd.utils import log
 from usbmd.utils.config import Config, load_config_from_yaml

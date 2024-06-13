@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from usbmd.common import set_data_paths
+from usbmd.datapaths import set_data_paths
 
 
 def test_set_data_paths():

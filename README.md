@@ -48,7 +48,7 @@ from usbmd.ui import DataLoaderUI
 config_path = "configs/config_picmus_rf.yaml"
 
 # setup function handles local data paths, default config settings and GPU usage
-# make sure to create your own users.yaml using usbmd/common.py
+# make sure to create your own users.yaml using usbmd/datapaths.py
 config = setup(config_path, "users.yaml")
 
 # initialize the DataloaderUI class with your config
