@@ -107,9 +107,11 @@ def train_beamformer(config):
 
     # Create a Process class to convert the data to an image
     process = Process(config, scan, probe)
-    img_target = process.run(targets[0], "beamformed_data", "image")
-    img_prediction = process.run(prediction[0], "beamformed_data", "image")
-    img_das = process.run(das[0], "beamformed_data", "image")
+    process.set_pipeline(dtype="beamformed_data", to_dtype="image")
+    img_target = process.run(targets[0])
+
+    img_prediction = process.run(prediction[0])
+    img_das = process.run(das[0])
 
     # plot the resulting image
     plt.figure()

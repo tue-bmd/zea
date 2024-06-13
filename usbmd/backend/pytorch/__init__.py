@@ -47,7 +47,10 @@ def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
     """
     device = device.replace("gpu", "cuda")
 
-    inputs = torch.Tensor(inputs).to(device)
+    if not isinstance(inputs, torch.Tensor):
+        inputs = torch.tensor(inputs)
+
+    inputs = inputs.to(device)
 
     # check that function is a function from torch library
     # assert "torch" in str(type(func)), f"func: {func} should be a torch function"

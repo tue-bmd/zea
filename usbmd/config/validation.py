@@ -85,17 +85,7 @@ model_schema = Schema(
 # preprocess
 preprocess_schema = Schema(
     {
-        Optional("elevation_compounding", default=None): Or(int, "max", "mean", None),
-        Optional("multi_bpf", default=None): Or(
-            None,
-            {
-                "num_taps": positive_integer,
-                "freqs": list_of_floats,
-                "bandwidths": list_of_floats,
-                Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
-            },
-        ),
-        Optional("demodulation", default="manual"): Or(*_ALLOWED_DEMODULATION),
+        Optional("operation_chain", default=None): Or(None, list),
     }
 )
 
