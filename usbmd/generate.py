@@ -15,8 +15,8 @@ from pathlib import Path
 import numpy as np
 import tqdm
 
+from usbmd.data import get_dataset
 from usbmd.data.data_format import generate_usbmd_dataset
-from usbmd.datasets import get_dataset
 from usbmd.display import to_8bit
 from usbmd.probes import get_probe
 from usbmd.processing import Process

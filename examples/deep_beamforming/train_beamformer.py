@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-from usbmd.datasets import get_dataset
+from usbmd.data import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup

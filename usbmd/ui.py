@@ -21,7 +21,7 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.datasets import get_dataset
+from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe

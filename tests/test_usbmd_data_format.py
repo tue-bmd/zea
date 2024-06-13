@@ -34,12 +34,12 @@ dataset_parameters = {
     "bandwidth_percent": 200.0,
 }
 
+from usbmd.data import USBMDDataSet
 from usbmd.data.data_format import (
+    DatasetElement,
     generate_example_dataset,
     generate_usbmd_dataset,
-    DatasetElement,
 )
-from usbmd.datasets import USBMDDataSet
 from usbmd.utils.checks import validate_dataset
 from usbmd.utils.config import Config
 from usbmd.utils.config_validation import check_config

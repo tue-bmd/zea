@@ -6,3 +6,4 @@ all code to convert other datasets into the USBMD data format.
 
 from .convert.camus import sitk_load
 from .data_format import *
+from .datasets import DataSet, USBMDDataSet, get_dataset
