@@ -4,8 +4,6 @@ The official documentation for the Python package `usbmd` - a convenient ultraso
 .. include:: ./README.md
 """
 
-# import usbmd.backend.aliases
-
 from .__version__ import __version__
 
 # Main (isort: split)

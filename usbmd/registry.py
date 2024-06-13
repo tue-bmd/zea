@@ -182,3 +182,4 @@ metrics_registry = RegisterDecorator(
 )
 
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
+ops_registry = RegisterDecorator(items_to_register=["name"])

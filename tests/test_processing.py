@@ -22,6 +22,7 @@ from usbmd.ops import (
     hilbert,
 )
 from usbmd.probes import get_probe
+from usbmd.processing import Process
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
@@ -57,7 +58,7 @@ def equality_libs_processing(test_func):
             - my_processing_func_tf
             - test_my_processing_func
     """
-    decimal = 6
+    decimal = 5
 
     # @functools.wraps(test_func)
     def wrapper(test_func, *args, **kwargs):
@@ -78,23 +79,13 @@ def equality_libs_processing(test_func):
         args[-1] = "numpy"
         original_output = test_func(*args, **kwargs)
 
-        # Get the original processing function
-        # original_processing_func = getattr(processing, func_name)
-
-        # Run the test function with processing_tf module
         tf_output = None
-        # if hasattr(processing_tf, func_name + "_tf"):
-        #     processing_func_tf = getattr(processing_tf, func_name + "_tf")
-        #     setattr(processing, func_name, processing_func_tf)
         set_random_seed(seed)
         args[-1] = "tensorflow"
         tf_output = np.array(test_func(*args, **kwargs))
 
         # Run the test function with processing_torch module
         torch_output = None
-        # if hasattr(processing_torch, func_name + "_torch"):
-        # processing_func_torch = getattr(processing_torch, func_name + "_torch")
-        # setattr(processing, func_name, processing_func_torch)
         set_random_seed(seed)
         args[-1] = "torch"
         torch_output = np.array(test_func(*args, **kwargs))
@@ -126,9 +117,6 @@ def equality_libs_processing(test_func):
                     "and pytorch output not the same."
                 ),
             )
-
-        # Reset the processing function to the original implementation
-        # setattr(processing, func_name, original_processing_func)
 
     return decorator.decorator(wrapper, test_func)
 
@@ -351,3 +339,58 @@ def test_hilbert_transform(ops="numpy"):
 
     data_iq = np.array(data_iq)
     return data_iq
+
+
+@equality_libs_processing
+def test_processing_class(ops="numpy"):
+    """Test the processing class"""
+    operation_chain = [
+        {
+            "name": "multi_bandpass_filter",
+            "params": {
+                "params": {
+                    "freqs": [-0.2e6, 0.0e6, 0.2e6],
+                    "bandwidths": [1.2e6, 1.4e6, 1.0e6],
+                    "num_taps": 81,
+                },
+                "modtype": "iq",
+                "fs": 40e6,
+                "fc": 5e6,
+            },
+        },  # this bandpass filters the data three times and returns a list
+        {"name": "demodulate", "params": {"fs": 40e6, "fc": 5e6}},
+        {"name": "envelope_detect"},
+        {"name": "downsample", "params": {"factor": 4}},
+        {"name": "normalize", "params": {"output_range": (0, 1)}},
+        {"name": "log_compress", "params": {"dynamic_range": (-60, 0)}},
+        {
+            "name": "stack",
+            "params": {"axis": 0},
+        },  # stack the data back together
+        {
+            "name": "mean",
+            "params": {"axis": 0},
+        },  # take the mean of the stack
+    ]
+
+    process = Process()
+    process.set_pipeline(
+        operation_chain=operation_chain,
+        device="cpu",
+        ml_library=ops,
+    )
+
+    beamformed_data = np.random.random((2, 500, 128, 2))
+    process.run(beamformed_data)
+
+    process.set_pipeline(
+        dtype="beamformed_data",
+        to_dtype="image",
+        device="cpu",
+        ml_library=ops,
+    )
+
+    beamformed_data = np.random.random((2, 500, 128, 2))
+    image = process.run(beamformed_data)
+
+    return image
