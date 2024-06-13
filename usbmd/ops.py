@@ -106,6 +106,11 @@ process.set_pipeline(
     ]
 )
 ```
+which will give the following pipeline:
+```bash
+MBPF -> Demodulate -> EnvelopeDetect -> Downsample -> Normalize -> LogCompress -> Stack -> Mean
+    \\-> Demodulate -> EnvelopeDetect -> Downsample -> Normalize -> LogCompress/->
+```
 
 TODO:
 - Test operations for jax (currently only np / torch / tensorflow tested)
@@ -181,6 +186,7 @@ class Operation(ABC):
         """Set the package for the operation."""
         if isinstance(ops, str):
             ops = importlib.import_module(ops)
+            importlib.import_module("usbmd.backend_aliases")
         assert ops.__name__ in _ML_LIBRARIES, f"Unsupported operations package {ops}"
         self._ops = ops
 
