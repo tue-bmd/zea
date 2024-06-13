@@ -386,6 +386,7 @@ class Pipeline:
             split_line = " " * len(string)
             # find the splitting operation and index and print \-> instead of -> after
             split_detected = False
+            merge_detected = False
             for operation in operations:
                 if operation in split_operations:
                     index = string.index(operation)
@@ -394,6 +395,8 @@ class Pipeline:
                         split_line[:index] + "\\->" + split_line[index + len("\\->") :]
                     )
                     split_detected = True
+                    merge_detected = False
+                    split_operation = operation
                     continue
 
                 if operation in merge_operations:
@@ -401,6 +404,7 @@ class Pipeline:
                     index = index - 4
                     split_line = split_line[:index] + "/" + split_line[index + 1 :]
                     split_detected = False
+                    merge_detected = True
                     continue
 
                 if split_detected:
@@ -412,7 +416,11 @@ class Pipeline:
                         + " -> "
                         + split_line[index + len(operation) + len(" -> ") :]
                     )
-
+            assert merge_detected is True, log.error(
+                "Pipeline was never merged back together (with Stack operation), even "
+                f"though it was split with {split_operation}. "
+                "Please properly define your operation chain."
+            )
             return f"\n{string}\n{split_line}\n"
 
         return string
