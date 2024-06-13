@@ -1,8 +1,11 @@
 """Tests for the probes module."""
 
+from os import name
+
 import numpy as np
 import pytest
 
+from usbmd.datasets import DummyDataset
 from usbmd.probes import Probe, get_probe
 from usbmd.registry import probe_registry
 
@@ -39,8 +42,12 @@ def test_probe_attributes(probe_name):
     1. the element positions are of the correct shape
     2. the probe type is either 'linear' or 'phased'
     """
-
-    probe = get_probe(probe_name)
+    if probe_name == "generic":
+        dataset = DummyDataset()
+        probe_params = dataset.get_probe_parameters_from_file()
+        probe = get_probe(probe_name, **probe_params)
+    else:
+        probe = get_probe(probe_name)
 
     assert isinstance(
         probe.probe_geometry, np.ndarray
