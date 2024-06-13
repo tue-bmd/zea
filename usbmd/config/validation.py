@@ -32,12 +32,12 @@ for lib in _ML_LIBRARIES:
     if importlib.util.find_spec(str(lib)):
         if lib == "torch":
             # pylint: disable=unused-import
-            import usbmd.pytorch_ultrasound
+            import usbmd.backend.pytorch
 
             _ML_LIB_SET = True
         if lib == "tensorflow":
             # pylint: disable=unused-import
-            import usbmd.tensorflow_ultrasound
+            import usbmd.backend.tensorflow
 
             _ML_LIB_SET = True
 
