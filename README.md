@@ -67,7 +67,7 @@ The DataloaderUI class is a convenient way to load and inspect your data. Howeve
 ```python
 import matplotlib.pyplot as plt
 
-from usbmd.data_format.usbmd_data_format import load_usbmd_file
+from usbmd.data import load_usbmd_file
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup_config
 

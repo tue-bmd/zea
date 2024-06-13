@@ -14,7 +14,7 @@ from typing import Any, Dict, Tuple
 import numpy as np
 from tqdm import tqdm
 
-from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
+from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.display import transform_sc_image_to_polar
 from usbmd.utils.utils import translate
 
