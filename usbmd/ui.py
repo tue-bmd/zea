@@ -225,11 +225,15 @@ class DataLoaderUI:
             else:
                 to_dtype = self.to_dtype
 
-            self.image = self.process_image.run(
-                self.data,
-                dtype=self.dtype,
-                to_dtype=to_dtype,
-            )
+            if self.process.pipeline is None:
+                if self.config.preprocess.operation_chain is None:
+                    self.process.set_pipeline(dtype=self.dtype, to_dtype=to_dtype)
+                else:
+                    self.process.set_pipeline(
+                        operation_chain=self.config.preprocess.operation_chain
+                    )
+
+            self.image = self.process.run(self.data)
 
             if self.process.postprocess:
                 self.image = self.process.postprocess.run(self.image[None, ..., None])
@@ -240,11 +244,9 @@ class DataLoaderUI:
             self.image = self.data
 
         if self.to_dtype == "image_sc":
-            self.image = self.process.run(
-                self.image,
-                dtype="image",
-                to_dtype="image_sc",
-            )
+            if self.process_image.pipeline is None:
+                self.process_image.set_pipeline(dtype="image", to_dtype="image_sc")
+            self.image = self.process_image.run(self.image)
 
         # match orientation if necessary
         if self.config.plot.fliplr:
