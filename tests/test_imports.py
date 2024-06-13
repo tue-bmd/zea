@@ -5,8 +5,11 @@ import glob
 import traceback
 from pathlib import Path
 
+import pytest
 
-def check_imports_errors(directory):
+
+@pytest.mark.parametrize("directory", [Path(__file__).parent.parent])
+def test_check_imports_errors(directory):
     """Check all Python files in a directory for import errors."""
     python_files = glob.glob(f"{directory}/**/*.py", recursive=True)
 
@@ -31,8 +34,3 @@ def check_imports_errors(directory):
             success = False
 
     assert success, "Import errors found in one or more Python files."
-
-
-if __name__ == "__main__":
-    directory_to_check = Path(__file__).parent.parent
-    check_imports_errors(directory_to_check)
