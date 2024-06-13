@@ -29,9 +29,9 @@ After installation, you can use the package as follows in your own project:
 # import usbmd package
 import usbmd
 # or if you want to use the Tensorflow tools
-from usbmd import tensorflow_ultrasound as usmbd_tf
+import usbmd.backend.tensorflow as usbmd_tf
 # or if you want to use the Pytorch tools
-from usbmd import pytorch_ultrasound as usbmd_torch
+import usbmd.backend.pytorch as usbmd_torch
 ```
 
 More complete examples can be found in the [examples](examples) folder.
