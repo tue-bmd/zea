@@ -1,11 +1,13 @@
 """Basic testing for ui / generate
 """
+
 import shutil
 import sys
 from pathlib import Path
-import pytest
+
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 
 from usbmd import ui
 from usbmd.generate import GenerateDataSet
@@ -43,6 +45,7 @@ def test_get_data():
     assert isinstance(data, np.ndarray), "Data is not a numpy array"
     assert len(data.shape) == 4, "Data must be 4d (n_tx, n_el, n_ax, N_ch)"
 
+
 @pytest.mark.parametrize(
     "ml_library, dtype, to_dtype, filetype",
     [
@@ -50,7 +53,7 @@ def test_get_data():
         ("torch", "beamformed_data", "image", "hdf5"),
         ("tensorflow", "raw_data", "image", "png"),
         ("tensorflow", "beamformed_data", "image", "hdf5"),
-     ]
+    ],
 )
 def test_generate(ml_library, dtype, to_dtype, filetype):
     """Test generate class"""
