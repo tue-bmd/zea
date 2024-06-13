@@ -3,6 +3,7 @@
 - **Author(s)**     : Tristan Stevens, Vincent van de Schaft
 - **Date**          : 28/02/2023
 """
+
 from usbmd.utils.registration import RegisterDecorator
 
 # The registry for the datasets linking each dataset to
@@ -26,3 +27,4 @@ metrics_registry = RegisterDecorator(
 )
 
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
+ops_registry = RegisterDecorator(items_to_register=["name"])
