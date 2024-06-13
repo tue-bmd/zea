@@ -59,6 +59,7 @@ import numpy as np
 import scipy
 from scipy import ndimage, signal
 
+from usbmd import Config
 from usbmd.backend.pytorch import on_device_torch
 from usbmd.backend.tensorflow import on_device_tf
 from usbmd.display import scan_convert
@@ -67,7 +68,6 @@ from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
 from usbmd.utils.checks import _ML_LIBRARIES, get_check
-from usbmd.utils.config import Config
 from usbmd.utils.utils import translate
 
 

@@ -22,13 +22,13 @@ import scipy.io as sio
 import tqdm
 from deepdiff import DeepDiff
 
+from usbmd import Config
+from usbmd.data.read_h5 import ReadH5, recursively_load_dict_contents_from_group
 from usbmd.probes import get_probe
 from usbmd.registry import dataset_registry
 from usbmd.scan import PlaneWaveScan, Scan, cast_scan_parameters
 from usbmd.utils import log
 from usbmd.utils.checks import get_check, validate_dataset
-from usbmd.utils.config import Config
-from usbmd.data.read_h5 import ReadH5, recursively_load_dict_contents_from_group
 from usbmd.utils.utils import (
     calculate_file_hash,
     date_string_to_readable,

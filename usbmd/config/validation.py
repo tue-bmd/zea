@@ -19,10 +19,10 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
+from usbmd import Config
 from usbmd.registry import metrics_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
-from usbmd.utils.config import Config
 
 _ML_LIBRARIES = [None, "torch", "tensorflow", "numpy"]
 

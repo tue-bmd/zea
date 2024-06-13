@@ -9,9 +9,9 @@ from pathlib import Path
 
 import schema
 
-from usbmd.utils.config import Config
-from usbmd.utils.config_comments import DESCRIPTIONS, add_comments_to_yaml
-from usbmd.utils.config_validation import check_config, config_schema
+from usbmd import Config
+from usbmd.config.comments import DESCRIPTIONS, add_comments_to_yaml
+from usbmd.config.validation import check_config, config_schema
 from usbmd.utils.log import green, red
 from usbmd.utils.utils import get_date_string, strtobool
 
