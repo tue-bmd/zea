@@ -1,5 +1,8 @@
 """Ops module for processing ultrasound data.
 
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 12/04/2024
+
 Each step in the processing pipeline is defined as an operation. The operations
 are then combined into a pipeline which can be used to process the data.
 
@@ -7,6 +10,7 @@ The pipeline as a whole has some additional functionality such as setting parame
 to all operations at once, initializing all operations at once, and running the
 pipeline on a specific device and using a specific package.
 
+## Stand-alone manual usage
 Operations can also be run individually / standalone.
 Examples:
 ```python
@@ -15,6 +19,7 @@ envelope_detect = EnvelopeDetect(axis=-1)
 envelope_data = envelope_detect(data)
 ```
 
+## Using a pipeline
 We can leave the arguments to the operation empty and set them later using the
 `set_params` method. This is useful when using the operations in a pipeline.
 ```python
@@ -43,13 +48,69 @@ image = pipeline.process(data)
 If you do not have a config, scan, or probe, you can set the parameters to the
 operations individually during initialization.
 
-TODO:
-- Test all operations with different packages (currently only np tested)
-- Find a way to make the ops.<method> calls work for every package
-- Compilation of the pipeline using jit
+## The process class
+Finally, there is an even higher level abstraction called the `Process` class.
+This class defines a pipeline with a set of operations for you. You can use
+this class to process data directly without having to define the operations explicitly.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 12/04/2024
+```python
+process = Process(config, scan, probe)
+process.set_pipeline(
+    operations_chain=[
+        {name: "beamform"},
+        {name: "demodulate": params={"fs": 50e6, "fc": 5e6}},
+        {name: "envelope_detect"},
+        {name: "downsample"},
+        {name: "normalize"},
+        {name: "log_compress"},
+        {name: "scan_convert"},
+    ],
+)
+
+raw_data = np.random.randn(11, 2000, 128, 1)
+image = pipeline.process(data)
+```
+
+## Go crazy with parallel pipelines
+You can also use blocks that output multiple data arrays as a list,
+process them in parallel, and then stack them back together later in the pipeline.
+
+```python
+process = Process(config, scan, probe)
+process.set_pipeline(
+    operations_chain = [
+        {
+            "name": "multi_bandpass_filter",
+            "params": {
+                "params": {
+                    "freqs": [-0.2e6, 0.0e6, 0.2e6],
+                    "bandwidths": [1.2e6, 1.4e6, 1.0e6],
+                    "num_taps": 81,
+                },
+                "modtype": "iq",
+            },
+        },  # this bandpass filters the data three times and returns a list
+        {"name": "demodulate"},
+        {"name": "envelope_detect"},
+        {"name": "downsample"},
+        {"name": "normalize"},
+        {"name": "log_compress"},
+        {
+            "name": "stack",
+            "params": {"axis": 0},
+        },  # stack the data back together
+        {
+            "name": "mean",
+            "params": {"axis": 0},
+        },  # take the mean of the stack
+    ]
+)
+```
+
+TODO:
+- Test operations for jax (currently only np / torch / tensorflow tested)
+- Compilation of the pipeline using jit (currently some ops break the jit compatibility)
+
 """
 
 import importlib
@@ -62,7 +123,11 @@ from scipy import ndimage, signal
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.pytorch_ultrasound import on_device_torch
-from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
+from usbmd.registry import (
+    ops_registry,
+    tf_beamformer_registry,
+    torch_beamformer_registry,
+)
 from usbmd.scan import Scan
 from usbmd.tensorflow_ultrasound import on_device_tf
 from usbmd.utils import log
@@ -71,12 +136,16 @@ from usbmd.utils.config import Config
 from usbmd.utils.utils import translate
 
 
+def get_ops(ops_name):
+    """Get the operation from the registry."""
+    return ops_registry[ops_name]
+
+
 class Operation(ABC):
     """Basic operation class as building block for processing pipeline and standalone operations."""
 
     def __init__(
         self,
-        name=None,
         input_data_type=None,
         output_data_type=None,
         with_batch_dim=True,
@@ -85,7 +154,6 @@ class Operation(ABC):
         """Initialize the operation.
 
         Args:
-            name (str): The name of the operation.
             input_data_type (type): The expected data type of the input data.
             output_data_type (type): The expected data type of the output data.
             with_batch_dim (bool): Whether the input data has a batch dimension.
@@ -93,7 +161,6 @@ class Operation(ABC):
                 Can be a module or a string to import the module. Defaults to "numpy".
 
         """
-        self.name = name
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
         self.with_batch_dim = with_batch_dim
@@ -286,6 +353,54 @@ class Pipeline:
 
         self._jitted_process = None
 
+    def __str__(self):
+        """String representation of the pipeline.
+
+        will print on two parallel pipeline lines if it detects a splitting operations (such as multi_bandpass_filter)
+        will merge the pipeline lines if it detects a stacking operation (such as stack)
+        """
+        split_operations = ["MultiBandPassFilter"]
+        merge_operations = ["Stack"]
+
+        operations = [operation.__class__.__name__ for operation in self.operations]
+        string = " -> ".join(operations)
+
+        if any(operation in split_operations for operation in operations):
+            # a second line is needed with same length as the first line
+            split_line = " " * len(string)
+            # find the splitting operation and index and print \-> instead of -> after
+            split_detected = False
+            for operation in operations:
+                if operation in split_operations:
+                    index = string.index(operation)
+                    index = index + len(operation)
+                    split_line = (
+                        split_line[:index] + "\\->" + split_line[index + len("\\->") :]
+                    )
+                    split_detected = True
+                    continue
+
+                if operation in merge_operations:
+                    index = string.index(operation)
+                    index = index - 4
+                    split_line = split_line[:index] + "/" + split_line[index + 1 :]
+                    split_detected = False
+                    continue
+
+                if split_detected:
+                    # print all operations in the second line
+                    index = string.index(operation)
+                    split_line = (
+                        split_line[:index]
+                        + operation
+                        + " -> "
+                        + split_line[index + len(operation) + len(" -> ") :]
+                    )
+
+            return f"\n{string}\n{split_line}\n"
+
+        return string
+
     @property
     def ops(self):
         """Get the operations package used in the pipeline."""
@@ -296,6 +411,11 @@ class Pipeline:
             "please use the same operations package for all operations."
         )
         return self.operations[0].ops
+
+    @property
+    def with_batch_dim(self):
+        """Get the with_batch_dim property of the pipeline."""
+        return self.operations[0].with_batch_dim
 
     def on_device(self, func, data, device=None, return_numpy=False):
         """On device function for running pipeline on specific device."""
@@ -340,7 +460,10 @@ class Pipeline:
 
     def _process(self, data):
         for operation in self.operations:
-            data = operation(data)
+            if isinstance(data, list) and operation.__class__.__name__ != "Stack":
+                data = [operation(_data) for _data in data]
+            else:
+                data = operation(data)
         return data
 
     def initialize(self):
@@ -407,12 +530,12 @@ class Pipeline:
             return device
 
 
+@ops_registry("beamform")
 class Beamform(Operation):
     """Beamforming operation for ultrasound data."""
 
     def __init__(self, beamformer=None, **kwargs):
         super().__init__(
-            name="Beamform",
             input_data_type="raw_data",
             output_data_type="beamformed_data",
             **kwargs,
@@ -442,7 +565,10 @@ class Beamform(Operation):
             get_beamformer = None
             _BEAMFORMER_TYPES = []
 
-        assert beamformer_type in _BEAMFORMER_TYPES
+        assert beamformer_type in _BEAMFORMER_TYPES, (
+            f"Beamformer type {beamformer_type} is not supported, "
+            f"should be in {_BEAMFORMER_TYPES}"
+        )
 
         self.beamformer = get_beamformer(self.probe, self.scan, self.config)
 
@@ -468,12 +594,30 @@ class Beamform(Operation):
         return data
 
 
+@ops_registry("stack")
+class Stack(Operation):
+    """Stack multiple data arrays along a new axis.
+    Useful to merge data from parallel pipelines.
+    """
+
+    def __init__(self, axis=0, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
+            **kwargs,
+        )
+        self.axis = axis
+
+    def process(self, data):
+        return self.ops.stack(data, axis=self.axis)
+
+
+@ops_registry("mean")
 class Mean(Operation):
     """Take the mean of the input data along a specific axis."""
 
-    def __init__(self, axis, **kwargs):
+    def __init__(self, axis=0, **kwargs):
         super().__init__(
-            name="Mean",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -484,6 +628,7 @@ class Mean(Operation):
         return self.ops.mean(data, axis=self.axis)
 
 
+@ops_registry("normalize")
 class Normalize(Operation):
     """Normalize data to a given range."""
 
@@ -497,7 +642,6 @@ class Normalize(Operation):
                 of the input data will be computed. Defaults to None.
         """
         super().__init__(
-            name="Normalize",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -523,12 +667,12 @@ class Normalize(Operation):
         return translate(data, self.input_range, self.output_range)
 
 
+@ops_registry("log_compress")
 class LogCompress(Operation):
     """Logarithmic compression of data."""
 
     def __init__(self, dynamic_range=None, **kwargs):
         super().__init__(
-            name="LogCompress",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -553,12 +697,12 @@ class LogCompress(Operation):
         return compressed_data
 
 
+@ops_registry("downsample")
 class Downsample(Operation):
     """Downsample data along a specific axis."""
 
     def __init__(self, factor: int = None, phase: int = None, axis: int = -1, **kwargs):
         super().__init__(
-            name="Downsample",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -580,6 +724,7 @@ class Downsample(Operation):
         return take(data, sample_idx, axis=self.axis, ops=self.ops)
 
 
+@ops_registry("companding")
 class Companding(Operation):
     """Companding according to the A- or μ-law algorithm.
     Tensorflow versions of companding.
@@ -610,7 +755,6 @@ class Companding(Operation):
 
     def __init__(self, expand=False, comp_type=None, mu=255, A=87.6, **kwargs):
         super().__init__(
-            name="Companding",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -694,12 +838,12 @@ class Companding(Operation):
         return data_out
 
 
+@ops_registry("envelope_detect")
 class EnvelopeDetect(Operation):
     """Envelope detection of RF signals."""
 
     def __init__(self, axis=-3, **kwargs):
         super().__init__(
-            name="EnvelopeDetection",
             **kwargs,
         )
         self.axis = axis
@@ -720,12 +864,12 @@ class EnvelopeDetect(Operation):
         return data
 
 
+@ops_registry("demodulate")
 class Demodulate(Operation):
     """Demodulate RF signals to IQ data (complex baseband)."""
 
     def __init__(self, fs=None, fc=None, bandwidth=None, filter_coeff=None, **kwargs):
         super().__init__(
-            name="Demodulate",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -768,12 +912,12 @@ class Demodulate(Operation):
             self.fc = config.scan.center_frequency
 
 
+@ops_registry("upmix")
 class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
     def __init__(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
         super().__init__(
-            name="UpMix",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -803,6 +947,7 @@ class UpMix(Operation):
             self.fc = config.scan.center_frequency
 
 
+@ops_registry("bandpass_filter")
 class BandPassFilter(Operation):
     """Band pass filter data."""
 
@@ -810,7 +955,6 @@ class BandPassFilter(Operation):
         self, axis=None, num_taps=None, fs=None, fc=None, f1=None, f2=None, **kwargs
     ):
         super().__init__(
-            name="BandPassFilter",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -842,6 +986,138 @@ class BandPassFilter(Operation):
         return ndimage.convolve1d(data, self.filter, mode="wrap", axis=self.axis)
 
 
+@ops_registry("multi_bandpass_filter")
+class MultiBandPassFilter(Operation):
+    """Applies multiply band pass filters on beamformed data.
+
+    Takes average in image domain of differend band passed filtered data if `to_image` set to true.
+    Data is filtered in the RF / IQ domain. This function also can convert to image domain, since
+    the compounding of filtered beamformed data takes place there (incoherent compounding).
+
+    Args:
+        beamformed_data (ndarray): input data, RF / IQ with shape [..., n_ax, n_el, n_ch].
+            filtering is always applied over the n_ax axis.
+        params (dict): dict with parameters for filter.
+            Should include `num_taps`, `fs`, `fc` and two lists: `freqs` and `bandwidths`
+            which define the filter characteristics. Lengths of those lists should
+            be the same and is equal to the number of filters applied. Optionally the
+            `units` can be specified, which is for instance `Hz` or `MHz`. Defaults to `Hz`.
+
+    Returns:
+        beamformed_data (list): list of filtered data, each element is filtered data
+            with shape [..., n_ax, n_el, n_ch] for each filter applied.
+
+    Example:
+        >>> params = {
+        >>>     'num_taps': 128,
+        >>>     'fs': 50e6,
+        >>>     'fc': 5e6,
+        >>>     'freqs': [-2.5, 0, 2.5],
+        >>>     'bandwidths': [1, 1, 1],
+        >>>     'units': 'MHz'
+        >>> }
+        >>> mbpf = usbmd.ops.MultiBandPassFilter(
+        >>>     params=params, modtype='iq', fs=50e6, fc=5e6, axis=-3)
+        >>> filtered_data = mbpf(beamformed_data)
+    """
+
+    def __init__(self, params=None, modtype=None, fs=None, fc=None, axis=-3, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
+            **kwargs,
+        )
+        self.params = params
+        self.modtype = modtype
+        self.axis = axis
+        self.fs = fs
+        self.fc = fc
+
+        assert self.axis != -1, (
+            "Axis of multibandpass filter cannot be the last axis "
+            "as it is used for channels (RF / IQ)."
+        )
+        if self._ready:
+            self.initialize()
+
+    def initialize(self):
+        if "units" in self.params:
+            units = ["Hz", "kHz", "MHz", "GHz"]
+            factors = [1, 1e3, 1e6, 1e9]
+            unit_factor = factors[units.index(self.params["units"])]
+        else:
+            unit_factor = 1
+
+        offsets = self.params["freqs"] * unit_factor
+        bandwidths = self.params["bandwidths"] * unit_factor
+        num_taps = self.params["num_taps"]
+        # make sure fs is correct for IQ (downsampled)
+        fs = self.fs * unit_factor
+        fc = self.fc * unit_factor  # fc is only used when RF
+
+        if self.modtype == "iq":
+            fc = 0  # fc is automatically set to zero if IQ
+            self.filter_params = [
+                {"num_taps": num_taps, "fs": fs, "f": fc - offset, "bw": bw}
+                for offset, bw in zip(offsets, bandwidths)
+            ]
+        elif self.modtype == "rf":
+            self.filter_params = [
+                {
+                    "num_taps": num_taps,
+                    "fs": fs,
+                    "f1": fc - offset - bw / 2,
+                    "f2": fc - offset + bw / 2,
+                }
+                for offset, bw in zip(offsets, bandwidths)
+            ]
+        self.filters = []
+        for param in self.filter_params:
+            if self.modtype == "iq":
+                filter_weights = get_low_pass_iq_filter(**param)
+            elif self.modtype == "rf":
+                filter_weights = get_band_pass_filter(**param)
+            self.filters.append(filter_weights)
+
+    @property
+    def _ready(self):
+        return (
+            self.axis is not None
+            and self.modtype is not None
+            and self.params is not None
+            and self.fs is not None
+            and self.fc is not None
+        )
+
+    def _assign_scan_params(self, scan):
+        self.fs = scan.fs
+        self.fc = scan.fc
+
+    def _assign_config_params(self, config):
+        if config.scan.sampling_frequency is not None:
+            self.fs = config.scan.sampling_frequency
+        if config.scan.center_frequency is not None:
+            self.fc = config.scan.center_frequency
+
+    def process(self, data):
+        axis = data.ndim + self.axis if self.axis < 0 else self.axis
+
+        if self.modtype == "iq":
+            assert data.shape[-1] == 2, "IQ data should have 2 channels."
+            data = channels_to_complex(data, ops=self.ops)
+
+        data_list = []
+        for _filter in self.filters:
+            _data = ndimage.convolve1d(data, _filter, mode="wrap", axis=axis)
+            _data = self.prepare_tensor(_data)
+            if self.modtype == "iq":
+                _data = complex_to_channels(_data, axis=-1, ops=self.ops)
+            data_list.append(_data)
+
+        return data_list
+
+
+@ops_registry("scan_convert")
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
@@ -872,7 +1148,6 @@ class ScanConvert(Operation):
 
         """
         super().__init__(
-            name="ScanConvert",
             input_data_type=None,
             output_data_type=None,
             **kwargs,
@@ -1307,7 +1582,8 @@ def channels_to_complex(data, ops=np):
     Returns:
         ndarray: complex array with real and imaginary components.
     """
-    assert data.shape[-1] == 2
+    assert data.shape[-1] == 2, "Data must have two channels."
+    assert data.dtype in [ops.float32, ops.float64], "Data must be float type."
     return ops.complex(data[..., 0], data[..., 1])
 
 
