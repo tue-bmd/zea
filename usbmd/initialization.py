@@ -3,6 +3,7 @@
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 28/02/2023
 """
+
 from usbmd.probes import get_probe
 from usbmd.registry import dataset_registry, probe_registry
 from usbmd.scan import Scan
@@ -42,7 +43,7 @@ def initialize_scan_from_probe(probe):
     if isinstance(probe, str):
         probe = get_probe(probe)
 
-    default_parameters = probe.get_default_scan_parameters()
+    default_parameters = probe.get_parameters()
 
     scan = Scan(**default_parameters)
     return scan
