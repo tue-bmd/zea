@@ -1,7 +1,5 @@
 """Tests for the probes module."""
 
-from os import name
-
 import numpy as np
 import pytest
 
