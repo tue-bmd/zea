@@ -16,7 +16,7 @@ scan:
 
 # The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)
 device: 'cpu'
-# The machine learning library to use ('torch', 'tensorflow', 'disable')
+# The machine learning library to use ('torch', 'tensorflow')
 ml_library: 'torch'
 
 plot:

@@ -48,7 +48,7 @@ def init_device(
 
         device = get_device(device, verbose=verbose)
 
-    elif ml_library == "disable" or ml_library is None:
+    elif ml_library == "numpy" or ml_library is None:
         device = "cpu"
     else:
         raise ValueError(f"Unknown ml_library ({ml_library}) in config.")
