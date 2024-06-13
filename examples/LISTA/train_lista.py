@@ -13,7 +13,7 @@ from usbmd.backend.tensorflow.dataloader import ImageLoader
 from usbmd.backend.tensorflow.models import lista
 
 # make sure you have Pip installed usbmd (see README)
-# import usbmd.tensorflow_ultrasound as usbmd_tf
+# import usbmd.backend.tensorflow as usbmd_tf
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup
 
