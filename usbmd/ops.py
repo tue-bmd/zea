@@ -59,12 +59,12 @@ import numpy as np
 import scipy
 from scipy import ndimage, signal
 
+from usbmd.backend.pytorch import on_device_torch
+from usbmd.backend.tensorflow import on_device_tf
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
-from usbmd.pytorch_ultrasound import on_device_torch
 from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
 from usbmd.scan import Scan
-from usbmd.tensorflow_ultrasound import on_device_tf
 from usbmd.utils import log
 from usbmd.utils.checks import _ML_LIBRARIES, get_check
 from usbmd.utils.config import Config
@@ -427,11 +427,11 @@ class Beamform(Operation):
         beamformer_type = self.config.model.beamformer.type
         # pylint: disable=import-outside-toplevel
         if self.ops.__name__ == "torch":
-            from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
+            from usbmd.backend.pytorch.layers.beamformers import get_beamformer
 
             _BEAMFORMER_TYPES = torch_beamformer_registry.registered_names()
         elif self.ops.__name__ == "tensorflow":
-            from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
+            from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
 
             _BEAMFORMER_TYPES = tf_beamformer_registry.registered_names()
         else:

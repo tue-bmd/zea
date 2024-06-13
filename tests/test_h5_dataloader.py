@@ -6,10 +6,7 @@ import h5py
 import numpy as np
 import pytest
 
-from usbmd.tensorflow_ultrasound.dataloader import (
-    H5Generator,
-    h5_dataset_from_directory,
-)
+from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
 
 CAMUS_DATASET_PATH = (
     "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/"
@@ -91,7 +88,6 @@ def test_h5_dataset_from_directory(
             return
     else:
         raise ValueError("Invalid directory for testing")
-
 
     dataset = h5_dataset_from_directory(
         directory, key, n_frames=n_frames, new_frames_dim=new_frames_dim

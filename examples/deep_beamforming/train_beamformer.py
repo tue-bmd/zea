@@ -21,12 +21,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
+from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
+from usbmd.backend.tensorflow.losses import SMSLE
 from usbmd.data import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
-from usbmd.tensorflow_ultrasound.losses import SMSLE
 from usbmd.utils.utils import update_dictionary
 
 
