@@ -362,8 +362,9 @@ class Pipeline:
     def __str__(self):
         """String representation of the pipeline.
 
-        will print on two parallel pipeline lines if it detects a splitting operations (such as multi_bandpass_filter)
-        will merge the pipeline lines if it detects a stacking operation (such as stack)
+        Will print on two parallel pipeline lines if it detects a splitting operations
+        (such as multi_bandpass_filter)
+        Will merge the pipeline lines if it detects a stacking operation (such as stack)
         """
         split_operations = ["MultiBandPassFilter"]
         merge_operations = ["Stack"]
