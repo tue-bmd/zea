@@ -39,12 +39,12 @@ def init_device(
     # Init GPU / CPU according to config
     if ml_library == "torch":
         # pylint: disable=import-outside-toplevel
-        from usbmd.pytorch_ultrasound.utils.gpu_config import get_device
+        from usbmd.backend.pytorch.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
     elif ml_library == "tensorflow":
         # pylint: disable=import-outside-toplevel
-        from usbmd.tensorflow_ultrasound.utils.gpu_config import get_device
+        from usbmd.backend.tensorflow.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
 

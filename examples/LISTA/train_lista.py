@@ -2,18 +2,20 @@
 - **Author(s)**: Tristan Stevens
 - **Date**: 09/12/2022
 """
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
+from usbmd.backend.tensorflow.dataloader import ImageLoader
+from usbmd.backend.tensorflow.models import lista
+
 # make sure you have Pip installed usbmd (see README)
 # import usbmd.tensorflow_ultrasound as usbmd_tf
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup
-from usbmd.tensorflow_ultrasound.dataloader import ImageLoader
-from usbmd.tensorflow_ultrasound.models import lista
 
 RUN_EAGERLY = False  # for debugging set to true
 

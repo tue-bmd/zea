@@ -1,11 +1,10 @@
 """GPU usage testing
 """
+
 import pytest
 
-from usbmd.pytorch_ultrasound.utils.gpu_config import get_device as get_device_pytorch
-from usbmd.tensorflow_ultrasound.utils.gpu_config import (
-    get_device as get_device_tf
-)
+from usbmd.backend.pytorch.utils.gpu_config import get_device as get_device_pytorch
+from usbmd.backend.tensorflow.utils.gpu_config import get_device as get_device_tf
 
 
 @pytest.mark.parametrize(
