@@ -23,7 +23,7 @@ from skimage import measure
 from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
 
-from usbmd.utils import log
+from usbmd.utils import log, translate
 from usbmd.utils.io_lib import (
     _SUPPORTED_VID_TYPES,
     filename_from_window_dialog,
@@ -33,7 +33,6 @@ from usbmd.utils.io_lib import (
     move_matplotlib_figure,
 )
 from usbmd.utils.metrics import get_metric
-from usbmd.utils.utils import translate
 
 
 def crop_array(array, value=None):

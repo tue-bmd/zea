@@ -27,7 +27,7 @@ from usbmd.data import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.utils.utils import update_dictionary
+from usbmd.utils import update_dictionary
 
 
 def train_beamformer(config):

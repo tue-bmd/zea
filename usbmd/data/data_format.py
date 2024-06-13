@@ -3,18 +3,17 @@ Functions to write and validate datasets in the USBMD format.
 """
 
 import logging
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 import h5py
 import numpy as np
 
+from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
 from usbmd.probes import Probe, get_probe
 from usbmd.scan import Scan, cast_scan_parameters
+from usbmd.utils import first_not_none_item, log, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
-from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
-from usbmd.utils.utils import first_not_none_item, update_dictionary
-from usbmd.utils import log
 
 
 @dataclass

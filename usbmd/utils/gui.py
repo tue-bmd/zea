@@ -30,9 +30,8 @@ from usbmd import Config, load_config_from_yaml
 from usbmd.config.validation import check_config, config_schema
 from usbmd.datapaths import set_data_paths
 from usbmd.setup_usbmd import setup_config
-from usbmd.utils import log
+from usbmd.utils import get_date_string, log
 from usbmd.utils.io_lib import filename_from_window_dialog
-from usbmd.utils.utils import get_date_string
 
 
 class App(tk.Tk):
