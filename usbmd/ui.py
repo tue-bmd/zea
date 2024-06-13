@@ -28,9 +28,9 @@ from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.usbmd_gui import USBMDApp
 from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES
+from usbmd.utils.gui import USBMDApp
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
