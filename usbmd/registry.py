@@ -183,18 +183,3 @@ metrics_registry = RegisterDecorator(
 
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
 ops_registry = RegisterDecorator(items_to_register=["name"])
-
-
-def get_beamformer_types():
-    """Returns a set of all registered beamformer types."""
-    # Needs to import backend to fill registry
-    import usbmd.backend  # pylint: disable=import-outside-toplevel, unused-import
-
-    beamformer_types = set(
-        tf_beamformer_registry.registered_names()
-        + torch_beamformer_registry.registered_names()
-    )
-    assert (
-        len(beamformer_types) > 0
-    ), "No beamformers registered. This could happen when no ML library is installed."
-    return beamformer_types
