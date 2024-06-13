@@ -22,8 +22,8 @@ def init_device(
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
 
             for more details see:
-                pytorch_ultrasound.utils.gpu_config.get_device and
-                tensorflow_ultrasound.utils.gpu_config.get_device.
+                backend.pytorch.utils.gpu_config.get_device and
+                backend.tensorflow.utils.gpu_config.get_device.
         hide_devices (int/list): device(s) to hide from the system.
             Examples: 0, or [0,1,2,3]. Can be useful when some GPUs have too
             little tensor cores to be useful for training, or when some GPUs
