@@ -24,7 +24,7 @@ from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
 from usbmd.utils.config import Config
 
-_ML_LIBRARIES = [None, "torch", "tensorflow"]
+_ML_LIBRARIES = [None, "torch", "tensorflow", "numpy"]
 
 # need to import ML libraries first for registry
 _ML_LIB_SET = False
@@ -95,17 +95,7 @@ model_schema = Schema(
 # preprocess
 preprocess_schema = Schema(
     {
-        Optional("elevation_compounding", default=None): Or(int, "max", "mean", None),
-        Optional("multi_bpf", default=None): Or(
-            None,
-            {
-                "num_taps": positive_integer,
-                "freqs": list_of_floats,
-                "bandwidths": list_of_floats,
-                Optional("units", default="Hz"): Or("Hz", "kHz", "MHz", "GHz"),
-            },
-        ),
-        Optional("demodulation", default="manual"): Or(*_ALLOWED_DEMODULATION),
+        Optional("operation_chain", default=None): Or(None, list),
     }
 )
 
@@ -236,7 +226,7 @@ config_schema = Schema(
         Optional("hide_devices", default=None): Or(
             None, list_of_positive_integers, positive_integer_and_zero
         ),
-        Optional("ml_library", default="disable"): Or(None, *_ML_LIBRARIES, "disable"),
+        Optional("ml_library", default="numpy"): Or(None, *_ML_LIBRARIES),
         Optional("git", default=None): Or(None, str),
     }
 )
@@ -248,14 +238,15 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
     def _try_validate_config(config):
         if not _ML_LIB_SET:
             log.warning(
-                "No ML library found, note that some functionality may not be available. "
+                "No ML library (i.e. `torch` or `tensorflow` was found or set, "
+                "note that some functionality may not be available. "
             )
-            if config.get("ml_library") != "disable":
+            if config.get("ml_library") != "numpy":
                 log.warning(
-                    "Setting `ml_library` to `disable`. "
-                    "Make sure to not use any ml_library specific parameters."
+                    "Setting `ml_library` to `numpy`. "
+                    "Make sure to not use any ml_library specific functionality or parameters."
                 )
-                config["ml_library"] = "disable"
+                config["ml_library"] = "numpy"
         try:
             config = config_schema.validate(config)
             return config
