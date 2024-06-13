@@ -590,10 +590,6 @@ class Beamform(Operation):
 
         self.beamformer = get_beamformer(self.probe, self.scan, self.config)
 
-    @property
-    def _ready(self):
-        return self.beamformer is not None
-
     def _assign_config_params(self, config: Config):
         self.config = config
 
@@ -606,6 +602,8 @@ class Beamform(Operation):
     def process(self, data):
         if self.with_batch_dim is False:
             data = self.ops.expand_dims(data, axis=0)
+        if self.ops.__name__ == "torch":
+            self.beamformer.to(data.device)
         data = self.beamformer(data, probe=self.probe, scan=self.scan)
         if self.with_batch_dim is False:
             data = self.ops.squeeze(data, axis=0)
@@ -739,6 +737,8 @@ class Downsample(Operation):
         if self.phase is None:
             self.phase = 0
         sample_idx = self.ops.arange(self.phase, length, self.factor)
+        if self.ops.__name__ == "torch":
+            sample_idx = sample_idx.to(data.device)
         return take(data, sample_idx, axis=self.axis, ops=self.ops)
 
 
@@ -913,7 +913,8 @@ class Demodulate(Operation):
             data = self.ops.squeeze(data, axis=-1)
 
         # currently demodulate converts to numpy so we have to do some trickery
-
+        if self.ops.__name__ == "torch":
+            data = data.cpu().numpy()
         data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
         data = self.prepare_tensor(data, device=device)
         return complex_to_channels(data, axis=-1, ops=self.ops)
