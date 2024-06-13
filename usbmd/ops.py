@@ -387,6 +387,7 @@ class Pipeline:
             # find the splitting operation and index and print \-> instead of -> after
             split_detected = False
             merge_detected = False
+            split_operation = None
             for operation in operations:
                 if operation in split_operations:
                     index = string.index(operation)
@@ -860,6 +861,8 @@ class Companding(Operation):
                 data_out = a_law_expand(data)
             else:
                 data_out = a_law_compress(data)
+        else:
+            raise ValueError(f"Invalid companding type {self.comp_type}.")
 
         return data_out
 
@@ -1132,6 +1135,11 @@ class MultiBandPassFilter(Operation):
                 filter_weights = get_low_pass_iq_filter(**param)
             elif self.modtype == "rf":
                 filter_weights = get_band_pass_filter(**param)
+            else:
+                raise ValueError(
+                    f"Modulation type {self.modtype} is not supported for multibandpass filter."
+                    "Supported types are 'iq' and 'rf'."
+                )
             self.filters.append(filter_weights)
 
     @property

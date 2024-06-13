@@ -5,6 +5,7 @@ Requires SimpleITK to be installed: pip install SimpleITK.
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import os
 import sys
@@ -16,6 +17,7 @@ from tqdm import tqdm
 
 from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
 from usbmd.display import transform_sc_image_to_polar
+from usbmd.utils import log
 from usbmd.utils.utils import translate
 
 
@@ -101,13 +103,12 @@ def get_args():
 
 
 if __name__ == "__main__":
-    try:
-        import SimpleITK as sitk
-    except ImportError:
-        print(
-            "SimpleITK not installed. Please install SimpleITK: pip install SimpleITK"
+    if importlib.util.find_spec("SimpleITK") is None:
+        log.error(
+            "SimpleITK not installed. Please install SimpleITK: `pip install SimpleITK`"
         )
         sys.exit()
+    import SimpleITK as sitk
 
     args = get_args()
 

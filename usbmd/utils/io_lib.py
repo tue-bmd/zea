@@ -615,6 +615,8 @@ class ImageViewerMatplotlib(ImageViewer):
                         divider = make_axes_locatable(self.ax)
                         if "color" in self.cax_kwargs:
                             color = self.cax_kwargs.pop("color")
+                        else:
+                            color = "black"
                         cax = divider.append_axes(**self.cax_kwargs)
                         cax.yaxis.label.set_color(color)
                         cax.tick_params(axis="y", colors=color)
