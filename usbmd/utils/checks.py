@@ -20,7 +20,7 @@ _DATA_TYPES = [
     "image_sc",
 ]
 
-_ML_LIBRARIES = [None, "torch", "tensorflow", "keras", "jax", "numpy"]
+_BACKENDS = [None, "torch", "tensorflow", "keras", "jax", "numpy"]
 
 _MOD_TYPES = [None, "rf", "iq"]
 
