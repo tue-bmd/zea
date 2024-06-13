@@ -34,7 +34,7 @@ dataset_parameters = {
     "bandwidth_percent": 200.0,
 }
 
-from usbmd.data_format.usbmd_data_format import (
+from usbmd.data.data_format import (
     generate_example_dataset,
     generate_usbmd_dataset,
     DatasetElement,
