@@ -13,44 +13,38 @@ Also if that parameter is optional, add a default value.
 - **Date**          : 31/01/2023
 """
 
-import importlib
 from pathlib import Path
 from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-from usbmd.registry import metrics_registry
-from usbmd.utils import log
-from usbmd.utils.checks import _DATA_TYPES, _ML_LIBRARIES, _MOD_TYPES
-from usbmd.utils.config import Config
-
-_ML_LIBRARIES = [None, "torch", "tensorflow", "numpy"]
-
-# need to import ML libraries first for registry
-_ML_LIB_SET = False
-for lib in _ML_LIBRARIES:
-    if importlib.util.find_spec(str(lib)):
-        if lib == "torch":
-            # pylint: disable=unused-import
-            import usbmd.pytorch_ultrasound
-
-            _ML_LIB_SET = True
-        if lib == "tensorflow":
-            # pylint: disable=unused-import
-            import usbmd.tensorflow_ultrasound
-
-            _ML_LIB_SET = True
-
-# pylint: disable=unused-import
-import usbmd.utils.metrics
-
-# Register beamforing types in registry
-from usbmd.registry import tf_beamformer_registry, torch_beamformer_registry
-
-_BEAMFORMER_TYPES = set(
-    tf_beamformer_registry.registered_names()
-    + torch_beamformer_registry.registered_names()
+import usbmd.utils.metrics  # pylint: disable=unused-import
+from usbmd.config import Config
+from usbmd.registry import (
+    metrics_registry,
+    tf_beamformer_registry,
+    torch_beamformer_registry,
 )
+from usbmd.utils import log
+from usbmd.utils.checks import _DATA_TYPES, _ML_LIB_AVAILABLE, _MOD_TYPES
+
+
+def get_beamformer_types():
+    """Returns a set of all registered beamformer types."""
+    # Needs to import backend to fill registry
+    import usbmd.backend  # pylint: disable=import-outside-toplevel, unused-import
+
+    beamformer_types = set(
+        tf_beamformer_registry.registered_names()
+        + torch_beamformer_registry.registered_names()
+    )
+    assert (
+        len(beamformer_types) > 0
+    ), "No beamformers registered. This could happen when no ML library is installed."
+    return beamformer_types
+
+
+_BACKENDS = [None, "torch", "tensorflow", "numpy"]
 
 
 # predefined checks, later used in schema to check validity of parameter
@@ -80,7 +74,7 @@ model_schema = Schema(
         Optional("batch_size", default=1): positive_integer,
         Optional("patch_shape", default=None): Or(None, list_of_size_two),
         Optional("beamformer", default={}): {
-            Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
+            Optional("type", default=None): Or(None, *get_beamformer_types()),
             Optional("folds", default=1): positive_integer,
             Optional("end_with_prox", default=False): bool,
             Optional("proxtype", default="softthres"): Or(*_ALLOWED_KEYS_PROXTYPE),
@@ -226,7 +220,7 @@ config_schema = Schema(
         Optional("hide_devices", default=None): Or(
             None, list_of_positive_integers, positive_integer_and_zero
         ),
-        Optional("ml_library", default="numpy"): Or(None, *_ML_LIBRARIES),
+        Optional("ml_library", default="numpy"): Or(None, *_BACKENDS),
         Optional("git", default=None): Or(None, str),
     }
 )
@@ -236,7 +230,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
     """Check a config given dictionary"""
 
     def _try_validate_config(config):
-        if not _ML_LIB_SET:
+        if not _ML_LIB_AVAILABLE:
             log.warning(
                 "No ML library (i.e. `torch` or `tensorflow` was found or set, "
                 "note that some functionality may not be available. "

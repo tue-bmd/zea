@@ -9,12 +9,11 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
 from usbmd.probes import get_probe
 from usbmd.scan import Scan, cast_scan_parameters
-from usbmd.utils import log
+from usbmd.utils import first_not_none_item, log, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
-from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
-from usbmd.utils.utils import first_not_none_item, update_dictionary
 
 
 @dataclass

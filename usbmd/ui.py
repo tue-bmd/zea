@@ -21,16 +21,16 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.datasets import get_dataset
+from usbmd import Config
+from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils import log
+from usbmd.utils import log, save_to_gif, save_to_mp4, strtobool, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES
-from usbmd.utils.config import Config
+from usbmd.utils.gui import USBMDApp
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
@@ -39,7 +39,6 @@ from usbmd.utils.io_lib import (
     running_in_notebook,
     start_async_app,
 )
-from usbmd.utils.utils import save_to_gif, save_to_mp4, strtobool, update_dictionary
 
 
 class DataLoaderUI:

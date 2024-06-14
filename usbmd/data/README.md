@@ -29,7 +29,7 @@ The USBMD data format has the following structure:
 This information is combined in a hdf5 file consisting of one sequence. A dataset then consists of multiple hdf5 files.
 
 ## Viewing a dataset
-To view what is inside an existing dataset you can use the `usbmd.utils.utils.print_hdf5_attrs` function, which prints all the keys, shapes, and attributes of a dataset. Alternatively you can use the tool [HDFView](https://www.hdfgroup.org/downloads/hdfview/) from the HDF group.
+To view what is inside an existing dataset you can use the `usbmd.utils.print_hdf5_attrs` function, which prints all the keys, shapes, and attributes of a dataset. Alternatively you can use the tool [HDFView](https://www.hdfgroup.org/downloads/hdfview/) from the HDF group.
 
 ## Saving data
 When store data or converting a dataset to USBMD format it is recommended to always use the `usbmd.data_format.usbmd_data_format.generate_usbmd_dataset` function. This ensures all data is stored in exactly the same way and makes it easy to propagate changes to the USBMD format to all datasets.

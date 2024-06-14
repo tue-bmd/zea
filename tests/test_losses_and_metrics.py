@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 import usbmd
+from usbmd.backend.tensorflow.losses import SMSLE
 from usbmd.registry import metrics_registry
-from usbmd.tensorflow_ultrasound.losses import SMSLE
 from usbmd.utils.metrics import get_metric
 
 
