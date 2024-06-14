@@ -185,7 +185,7 @@ class Operation(ABC):
         """Set the package for the operation."""
         if isinstance(ops, str):
             ops = importlib.import_module(ops)
-            importlib.import_module("usbmd.backend_aliases")
+            importlib.import_module("usbmd.backend.aliases")
         assert ops.__name__ in _BACKENDS, f"Unsupported operations package {ops}"
         self._ops = ops
 
