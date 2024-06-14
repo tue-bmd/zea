@@ -13,6 +13,7 @@ TODO:
 - **Date**          : November 18th, 2021
 """
 
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -22,7 +23,7 @@ import scipy.io as sio
 import tqdm
 from deepdiff import DeepDiff
 
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.data.read_h5 import ReadH5, recursively_load_dict_contents_from_group
 from usbmd.probes import get_probe
 from usbmd.registry import dataset_registry
@@ -32,7 +33,6 @@ from usbmd.utils import (
     date_string_to_readable,
     get_date_string,
     log,
-    update_dictionary,
 )
 from usbmd.utils.checks import get_check, validate_dataset
 
@@ -205,21 +205,7 @@ class DataSet:
         """Returns the Scan class corresponding to the dataset."""
         return dataset_registry.get_parameter(cls_or_name=cls, parameter="scan_class")
 
-    def get_default_scan_parameters(self):
-        """Returns a dictionary of default parameters to initialize a scan
-        object that works with the dataset.
-
-        Returns:
-            dict: The default parameters (the keys are identical to the
-                __init__ parameters of the Scan class).
-        """
-        default_scan_parameters = get_probe(
-            self.get_probe_name()
-        ).get_default_scan_parameters()
-        file_scan_parameters = self.get_scan_parameters_from_file()
-        return update_dictionary(default_scan_parameters, file_scan_parameters)
-
-    def get_scan_parameters_from_file(self, file=None):
+    def get_parameters_from_file(self, file_idx=None):
         """Returns a dictionary of parameters to initialize a scan
         object that comes with the dataset (stored inside datafile).
 
@@ -232,11 +218,15 @@ class DataSet:
         Returns:
             dict: The scan parameters.
         """
-        if file is None:
-            file = self.get_file(0)
+        if file_idx is None:
+            file_idx = 0
+        self.file = self.get_file(file_idx)
         scan_parameters = {}
-        if "scan" in file:
-            scan_parameters = recursively_load_dict_contents_from_group(file, "scan")
+        if "scan" in self.file:
+            scan_parameters = recursively_load_dict_contents_from_group(
+                self.file, "scan"
+            )
+        scan_parameters = cast_scan_parameters(scan_parameters)
         return scan_parameters
 
     def close(self):
@@ -336,29 +326,50 @@ class USBMDDataSet(DataSet):
             f"Found attributes: {list(self.file.attrs)}"
         )
         probe_name = self.file.attrs["probe"]
-
         return probe_name
 
-    def get_default_scan_parameters(self, file_idx=0):
-        # Get the first file from the dataset
-        # We assume all files in a dataset have the same scan parameters
-        # so the first one will do.
-        self.file = super().__getitem__(file_idx)
+    def get_probe_parameters_from_file(self, file_idx=None):
+        """Returns a dictionary of probe parameters to initialize a probe
+        object that comes with the dataset (stored inside datafile).
 
-        probe_name = self.get_probe_name()
+        Args:
+            file_idx (int): Index of the file in the dataset.
+                Defaults to None, in which case the first file is used.
 
-        default_scan_parameters = get_probe(probe_name).get_default_scan_parameters()
+        Returns:
+            dict: The probe parameters.
+        """
+        file_scan_parameters = self.get_parameters_from_file(file_idx)
 
-        file_scan_parameters = self.get_scan_parameters_from_file(self.file)
-        file_scan_parameters = cast_scan_parameters(file_scan_parameters)
+        sig = inspect.signature(get_probe("generic").__init__)
+        probe_parameters = {
+            key: file_scan_parameters[key]
+            for key in sig.parameters
+            if key in file_scan_parameters
+        }
+        return probe_parameters
 
-        # lookup all arguments from Scan class and populate default_scan_parameters if
-        # they can be found in file_scan_parameters
-        for arg in Scan.__init__.__code__.co_varnames:
-            if arg in file_scan_parameters:
-                default_scan_parameters[arg] = file_scan_parameters[arg]
+    def get_scan_parameters_from_file(self, file_idx=None):
+        """Returns a dictionary of default parameters to initialize a scan
+        object that works with the dataset.
 
-        return default_scan_parameters
+        Args:
+            file_idx (int): Index of the file in the dataset.
+                Defaults to None, in which case the first file is used.
+
+        Returns:
+            dict: The default parameters (the keys are identical to the
+                __init__ parameters of the Scan class).
+        """
+        file_scan_parameters = self.get_parameters_from_file(file_idx)
+
+        sig = inspect.signature(Scan.__init__)
+        scan_parameters = {
+            key: file_scan_parameters[key]
+            for key in sig.parameters
+            if key in file_scan_parameters
+        }
+        return scan_parameters
 
     def validate_dataset(self):
         """Validate dataset contents.
@@ -407,7 +418,7 @@ class USBMDDataSet(DataSet):
                 validated_succesfully = False
 
             try:
-                scan_parameters = self.get_default_scan_parameters(i)
+                scan_parameters = self.get_scan_parameters_from_file(i)
                 if i == 0:
                     self.scan_parameters = scan_parameters
                 else:
@@ -503,6 +514,8 @@ class USBMDDataSet(DataSet):
                         scan_parameters[key] = np.array(value).tolist()
                     elif isinstance(value, str):
                         scan_parameters[key] = str(value)
+                    elif value is None:
+                        scan_parameters[key] = None
                     elif int(value) == value:
                         scan_parameters[key] = int(value)
                     else:
@@ -616,9 +629,8 @@ class DummyDataset(DataSet):
         return file
 
     def get_default_scan_parameters(self):
-        probe_parameters = get_probe(
-            self.get_probe_name()
-        ).get_default_scan_parameters()
+        """Returns placeholder default scan parameters."""
+        probe_parameters = get_probe(self.get_probe_name()).get_parameters()
         probe_parameters["n_ax"] = self.n_ax
         probe_parameters["n_tx"] = self.n_tx
         probe_parameters["Nz"] = self.Nz
@@ -629,5 +641,12 @@ class DummyDataset(DataSet):
         }
         return scan_parameters
 
+    # pylint: disable=unused-argument
+    def get_probe_parameters_from_file(self, file=None):
+        """Returns placeholder probe parameters."""
+        return get_probe(self.get_probe_name()).get_parameters()
+
+    # pylint: disable=unused-argument
     def get_scan_parameters_from_file(self, file=None):
+        """Returns placeholder scan parameters."""
         return self.get_default_scan_parameters()

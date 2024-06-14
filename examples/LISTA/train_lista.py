@@ -78,10 +78,9 @@ def train_lista(config):
             axs[i, 0].imshow(np.squeeze(Y), cmap="gray")
             axs[i, 1].imshow(out, cmap="gray")
 
-    for ax in axs.ravel():
-        ax.axis("off")
-
-    fig.tight_layout()
+        for ax in axs.ravel():
+            ax.axis("off")
+        fig.tight_layout()
 
     return model
 
