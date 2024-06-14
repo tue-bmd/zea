@@ -885,7 +885,10 @@ class EnvelopeDetect(Operation):
             M = 2 ** int(np.ceil(np.log2(n_ax)))
             # data = scipy.signal.hilbert(data, N=M, axis=self.axis)
             data = hilbert(data, N=M, axis=self.axis, ops=self.ops)
-            data = take(data, self.ops.arange(n_ax), axis=self.axis, ops=self.ops)
+            indices = self.ops.arange(n_ax)
+            if self.ops.__name__ == "torch":
+                indices = indices.to(data.device)
+            data = take(data, indices, axis=self.axis, ops=self.ops)
             data = self.ops.squeeze(data, axis=-1)
 
         data = self.ops.abs(data)
@@ -1563,7 +1566,11 @@ def hilbert(x, N: int = None, axis=-1, ops=np):
             raise ValueError("N must be greater or equal to n_ax.")
         # only pad along the axis, use manual padding
         pad = N - n_ax
-        zeros = ops.zeros(input_shape[:axis] + (pad,) + input_shape[axis + 1 :])
+        zeros = ops.zeros(
+            input_shape[:axis] + (pad,) + input_shape[axis + 1 :],
+        )
+        if ops.__name__ == "torch":
+            zeros = zeros.to(x.device)
         x = ops.concatenate((x, zeros), axis=axis)
         n_ax = N
 
@@ -1579,6 +1586,8 @@ def hilbert(x, N: int = None, axis=-1, ops=np):
 
     h = ops.convert_to_tensor(h)
     h = ops.expand_dims(ops.cast(ops.complex(h, h), ops.complex64), axis=0)
+    if ops.__name__ == "torch":
+        h = h.to(x.device)
 
     # switch n_ax and n_el elements (based on ndim)
     idx = list(range(n_dim))
