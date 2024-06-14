@@ -29,9 +29,9 @@ After installation, you can use the package as follows in your own project:
 # import usbmd package
 import usbmd
 # or if you want to use the Tensorflow tools
-from usbmd import tensorflow_ultrasound as usmbd_tf
+import usbmd.backend.tensorflow as usbmd_tf
 # or if you want to use the Pytorch tools
-from usbmd import pytorch_ultrasound as usbmd_torch
+import usbmd.backend.pytorch as usbmd_torch
 ```
 
 More complete examples can be found in the [examples](examples) folder.
@@ -48,7 +48,7 @@ from usbmd.ui import DataLoaderUI
 config_path = "configs/config_picmus_rf.yaml"
 
 # setup function handles local data paths, default config settings and GPU usage
-# make sure to create your own users.yaml using usbmd/common.py
+# make sure to create your own users.yaml using usbmd/datapaths.py
 config = setup(config_path, "users.yaml")
 
 # initialize the DataloaderUI class with your config
@@ -67,7 +67,7 @@ The DataloaderUI class is a convenient way to load and inspect your data. Howeve
 ```python
 import matplotlib.pyplot as plt
 
-from usbmd.data_format.usbmd_data_format import load_usbmd_file
+from usbmd.data import load_usbmd_file
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup_config
 

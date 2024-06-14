@@ -4,6 +4,7 @@ dictionary.
 - **Author(s)**     : Tristan Stevens
 - **Date**          : October 3th, 2022
 """
+
 import argparse
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import numpy as np
 import scipy.io as sio
 
 from usbmd.utils.io_lib import filename_from_window_dialog
-from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
+from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
 
 
 def load_mat(filename):

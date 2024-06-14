@@ -12,7 +12,7 @@ from scipy import interpolate
 from scipy.ndimage import map_coordinates
 from skimage.transform import resize
 
-from usbmd.utils.utils import find_first_nonzero_index, translate
+from usbmd.utils import find_first_nonzero_index, translate
 
 
 def to_8bit(image, dynamic_range: tuple = None, pillow: bool = True):

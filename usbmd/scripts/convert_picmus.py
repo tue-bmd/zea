@@ -15,7 +15,7 @@ import logging
 import os
 from pathlib import Path
 
-from usbmd.data_format.convert_picmus import convert_picmus
+from usbmd.data.convert import convert_picmus
 
 if __name__ == "__main__":
     # Parse the arguments

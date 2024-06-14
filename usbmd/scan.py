@@ -8,9 +8,8 @@ beamforming grid.
 import matplotlib.pyplot as plt
 import numpy as np
 
-from usbmd.utils import log
+from usbmd.utils import deprecated, log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
-from usbmd.utils.utils import deprecated
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
