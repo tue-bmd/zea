@@ -2,6 +2,7 @@
 - **Author(s)**: Tristan Stevens
 - **Date**: 09/12/2022
 """
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -76,10 +77,9 @@ def train_lista(config):
             axs[i, 0].imshow(np.squeeze(Y), cmap="gray")
             axs[i, 1].imshow(out, cmap="gray")
 
-    for ax in axs.ravel():
-        ax.axis("off")
-
-    fig.tight_layout()
+        for ax in axs.ravel():
+            ax.axis("off")
+        fig.tight_layout()
 
     return model
 

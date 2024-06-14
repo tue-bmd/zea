@@ -42,7 +42,7 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
     config.ml_library = "torch"
 
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
         n_tx=1,

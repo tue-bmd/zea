@@ -40,7 +40,7 @@ def train_beamformer(config):
 
     # Initialize scan based on dataset
     scan_class = dataset.get_scan_class()
-    default_scan_params = dataset.get_default_scan_parameters()
+    default_scan_params = dataset.get_scan_parameters_from_file()
     config_scan_params = config.scan
     config.model.beamformer.patches = 4
 
