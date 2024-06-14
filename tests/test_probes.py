@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from usbmd.datasets import DummyDataset
+from usbmd.data.datasets import DummyDataset
 from usbmd.probes import Probe, get_probe
 from usbmd.registry import probe_registry
 

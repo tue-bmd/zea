@@ -25,7 +25,7 @@ class PICMUS(Dataset):
 
 In another file:
 ```other_file.py
-from usbmd.datasets import dataset_registry
+from usbmd.data import dataset_registry
 
 dataset_class = dataset_registry['picmus']
 dataset = dataset_class()
