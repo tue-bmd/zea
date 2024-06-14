@@ -862,7 +862,7 @@ def apod_mask(grid, probe_geometry, f_number):
     # Get the lateral location of each pixel
     x_pixel = grid[:, 0]
     # Get the lateral location of each element
-    x_element = probe_geometry[:, 0]
+    x_element = probe_geometry[:, 0].type(torch.float32)
 
     # Compute the aperture size for every pixel
     # The f-number is by definition f=z/aperture

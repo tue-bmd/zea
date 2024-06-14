@@ -2,7 +2,7 @@
 Functions to write and validate datasets in the USBMD format.
 """
 
-import logging
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 
 from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
-from usbmd.probes import Probe, get_probe
+from usbmd.probes import get_probe
 from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import first_not_none_item, log, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
@@ -538,34 +538,33 @@ def load_usbmd_file(
     with h5py.File(path, "r") as hdf5_file:
         # Define the probe
         probe_name = hdf5_file.attrs["probe"]
-        probe_geometry = hdf5_file["scan"]["probe_geometry"][:]
-
-        # Try to load a known probe type. If this fails, use a generic probe
-        # instead, but warn the user.
-        try:
-            probe = get_probe(probe_name)
-        except NotImplementedError:
-            logging.warning(
-                "The probe %s is not implemented. Using a generic probe instead.",
-                probe_name,
-            )
-
-            probe = Probe(probe_geometry=probe_geometry)
-
-        # Verify that the probe geometry matches the probe geometry in the
-        # dataset
-        if not np.allclose(probe_geometry, probe.probe_geometry):
-            probe.probe_geometry = probe_geometry
-            logging.warning(
-                "The probe geometry in the data file does not "
-                "match the probe geometry of the probe. The probe "
-                "geometry has been updated to match the data file."
-            )
-
         file_scan_parameters = recursively_load_dict_contents_from_group(
             hdf5_file, "scan"
         )
         file_scan_parameters = cast_scan_parameters(file_scan_parameters)
+        sig = inspect.signature(get_probe("generic").__init__)
+        file_probe_params = {
+            key: file_scan_parameters[key]
+            for key in sig.parameters
+            if key in file_scan_parameters
+        }
+
+        if probe_name == "generic":
+            probe = get_probe(probe_name, **file_probe_params)
+        else:
+            probe = get_probe(probe_name)
+
+            probe_geometry = file_probe_params.get("probe_geometry", None)
+
+            # Verify that the probe geometry matches the probe geometry in the
+            # dataset
+            if not np.allclose(probe_geometry, probe.probe_geometry):
+                probe.probe_geometry = probe_geometry
+                log.warning(
+                    "The probe geometry in the data file does not "
+                    "match the probe geometry of the probe. The probe "
+                    "geometry has been updated to match the data file."
+                )
 
         n_frames = file_scan_parameters.pop(
             "n_frames"

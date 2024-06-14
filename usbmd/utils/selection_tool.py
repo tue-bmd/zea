@@ -522,6 +522,8 @@ def equalize_polygons(polygons, mode="max"):
         num_vertices = max(polygon.shape[0] for polygon in polygons)
     elif mode == "min":
         num_vertices = min(polygon.shape[0] for polygon in polygons)
+    else:
+        raise ValueError(f"Mode must be either 'max' or 'min', not {mode}.")
 
     # give warning if difference in min / max vertices is large
     if num_vertices < 0.8 * max(polygon.shape[0] for polygon in polygons):

@@ -271,7 +271,7 @@ def test_channels_to_complex(size, axis):
 def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
     """Test rf2iq and iq2rf in sequence"""
     probe = get_probe("verasonics_l11_4v")
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
     fs = probe_parameters["sampling_frequency"]
     fc = probe_parameters["center_frequency"]
     scan = PlaneWaveScan(

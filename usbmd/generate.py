@@ -73,20 +73,35 @@ class GenerateDataSet:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset
+        # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters()
-        config_scan_params = self.config.scan
+        file_scan_params = self.dataset.get_scan_parameters_from_file()
+        file_probe_params = self.dataset.get_probe_parameters_from_file()
 
-        # dict merging of manual config and dataset default scan parameters
-        scan_params = update_dictionary(default_scan_params, config_scan_params)
-        self.scan = scan_class(**scan_params)
+        if len(file_scan_params) == 0:
+            log.info(
+                f"Could not find proper scan parameters in {self.dataset} at "
+                f"{log.yellow(str(self.dataset.datafolder))}."
+            )
+            log.info("Proceeding without scan class.")
+
+            self.scan = None
+        else:
+            config_scan_params = self.config.scan
+            # dict merging of manual config and dataset default scan parameters
+            scan_params = update_dictionary(file_scan_params, config_scan_params)
+            self.scan = scan_class(**scan_params)
 
         # initialize probe
-        self.probe = get_probe(self.dataset.get_probe_name())
+        probe_name = self.dataset.get_probe_name()
+
+        if probe_name == "generic":
+            self.probe = get_probe(probe_name, **file_probe_params)
+        else:
+            self.probe = get_probe(probe_name)
 
         # intialize process class
-        self.process = Process(config, self.scan, self.probe)
+        self.process = Process(self.config, self.scan, self.probe)
         self.process.set_pipeline(dtype=self.config.data.dtype, to_dtype=self.to_dtype)
 
         if self.dataset.datafolder is None:
