@@ -115,7 +115,7 @@ Which means:
 - `--user`: Run as a specific user
 
 > [!IMPORTANT]
-> Note that it is important to mount the `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container, so that the changes you make in the repository are reflected in the container. Additionally, you should use your user id and group id with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
+> Note that it is important to mount your `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container, so that the changes you make are reflected in the usbmd installation inside the container. Additionally, you should use your user id and group id with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
 
 Alternative flags:
 - `-w` = `--workdir`: Working directory inside the container
