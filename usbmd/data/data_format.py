@@ -48,11 +48,12 @@ def generate_example_dataset(path, add_optional_fields=False):
 
     n_ax = 2048
     n_el = 128
-    n_tx = 8
+    n_tx = 11
     n_ch = 1
     n_frames = 2
 
     raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
+    image = np.ones((n_frames, 512, 512)) * -40
 
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
     tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
@@ -73,6 +74,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     generate_usbmd_dataset(
         path,
         raw_data=raw_data,
+        image=image,
         probe_geometry=probe_geometry,
         sampling_frequency=40e6,
         center_frequency=7e6,
