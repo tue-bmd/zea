@@ -56,14 +56,14 @@ this class to process data directly without having to define the operations expl
 ```python
 process = Process(config, scan, probe)
 process.set_pipeline(
-    operations_chain=[
-        {name: "beamform"},
-        {name: "demodulate": params={"fs": 50e6, "fc": 5e6}},
-        {name: "envelope_detect"},
-        {name: "downsample"},
-        {name: "normalize"},
-        {name: "log_compress"},
-        {name: "scan_convert"},
+    operation_chain=[
+        {"name": "beamform"},
+        {"name": "demodulate": params={"fs": 50e6, "fc": 5e6}},
+        {"name": "envelope_detect"},
+        {"name": "downsample"},
+        {"name": "normalize"},
+        {"name": "log_compress"},
+        {"name": "scan_convert"},
     ],
 )
 

@@ -3,6 +3,7 @@ This file searches all notebooks in the folder examples/notebooks and then runs
 a test for each notebook that executes it using papermill. The test fails if
 if any of the cells in the notebook raise an exception.
 """
+
 import shutil
 from pathlib import Path
 
@@ -13,9 +14,7 @@ import pytest
 notebook_paths = set(Path("examples").rglob("*.ipynb"))
 
 # Specify notebook names to be removed
-notebooks_to_remove = set(
-    [Path("examples", "notebooks", "loading_usbmd_data_file.ipynb")]
-)
+notebooks_to_remove = set([Path("examples", "notebooks")])
 
 # Filter out the undesired notebook names
 notebook_paths = notebook_paths - notebooks_to_remove
