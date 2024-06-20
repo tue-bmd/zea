@@ -10,8 +10,8 @@ The USBMD data format has the following structure:
     rf-data or iq-data.
     - `envelope_data`: The envelope of the aligned data.
     - `beamformed_data`: The data after beamforming.
-    - `image`: The processed image.
-    - `image_sc`: The scan converted image.
+    - `image`: The processed image in dB (default: [-60, 0]).
+    - `image_sc`: The scan converted image in dB (default: [-60, 0]).
 - The `scan` group must contain the following keys:
     - `probe_geometry`: The geometry of the probe.
     - `t0_delays`: The time delays of the transducer elements. These delays determine the steering and focusing of the beam as well as the type of transmit (plane-wave, focused, etc.).
