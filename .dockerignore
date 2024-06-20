@@ -1,3 +1,4 @@
+################ GITIGNORE COPY ################
 #### usbmd repo specific ####
 /figures
 /custom_configs
@@ -164,3 +165,17 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+################ DOCKER SPECIFIC ################
+/Dockerfile
+/.devcontainer/
+/.github/
+/configs/
+/docs/
+/examples/
+/.git/
+/.gitattributes
+/.gitignore
+
+# ignore verasonics because matlab is not installed in the container
+/verasonics/

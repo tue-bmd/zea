@@ -102,7 +102,7 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
             f"Unknown hostname {hostname} for user {username}",
             UnknownHostnameWarning,
         )
-        return {"username": username, "hostname": hostname, "system": system}
+        return _fallback_to_default_data_root(config, system), "./output"
 
     # Check if set os system matches with the current system
     if "system" in config:
@@ -198,6 +198,10 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
                         system: linux
                         data_root: /home/path_to_my_data_root/
                         output: C:/other_paths/
+                    # if both my_hostname and linux_hostname are not matching, fallback to hostname:
+                    hostname:
+                        system: linux
+                        data_root: /home/path_to_my_data_root/
 
                 other_username:
                     other_hostname:
