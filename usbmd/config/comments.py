@@ -72,7 +72,7 @@ DESCRIPTIONS = {
         ),
         "dtype": (
             "The form of data to load (raw_data, rf_data, iq_data, beamformed_data, "
-            "envelope_data)"
+            "envelope_data, image, image_sc)"
         ),
         "dynamic_range": "The dynamic range for showing data in db [min, max]",
         "user": "The user to use when loading data (null, dict)",
@@ -170,6 +170,7 @@ DESCRIPTIONS = {
         "fliplr": "Set to true to flip the image left to right",
         "image_extension": "The file extension to use when saving the image (png, jpg)",
         "video_extension": "The file extension to use when saving the video (mp4, gif)",
+        "headless": "Set to true to run the UI in headless mode",
     },
 }
 
