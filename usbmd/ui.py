@@ -149,7 +149,8 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                log.warning("Could not connect to display, running headless.")
+                self.plot_lib = "matplotlib" # force matplotlib in headless mode
+                log.warning("Could not connect to display, running headless (using matplotlib).")
         else:
             matplotlib.use("agg")
             log.info("Running in headless mode as set by config.")
