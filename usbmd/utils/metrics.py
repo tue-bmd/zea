@@ -130,3 +130,30 @@ def image_sharpness(image):
         float: The sharpness of the image
     """
     return np.mean(np.abs(np.gradient(image)))
+
+def sector_reweight_image(image, sector_angle):
+    """
+    Reweights image according to the amount of area each
+    row of pixels will occupy if that image is scan converted
+    with angle sector_angle.
+    This 'image' could be e.g. a pixelwise loss or metric.
+
+    We can compute this by viewing the scan converted image as the sector
+    of a circle with a known central angle, and radius given by depth.
+    See: https://en.wikipedia.org/wiki/Circular_sector
+
+    Params:
+        image (tensor of shape (img_height, img_width, channels)): image to be re-weighted
+        sector_angle (float | int): angle in degrees
+    Returns:
+        reweighted_image (tensor of shape (img_height, img_width)): image according with pixels reweighted
+            to area occupied by each pixel post-scan-conversion.
+    """
+    assert len(image.shape) == 3, "image should have shape (height, width, channels)"
+    height = image.shape[0]
+    depths = (
+        np.arange(height) + 0.5
+    )  # add 0.5 to measure the center of the pixel as its depth
+    # Reweighting factor is set as the arc length of the sector: https://en.wikipedia.org/wiki/Circular_sector#Arc_length
+    reweighting_factors = (sector_angle / 360) * 2 * np.pi * depths
+    return reweighting_factors[:, None] * image
