@@ -117,6 +117,9 @@ Which means:
 > [!IMPORTANT]
 > Note that it is important to mount your `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container, so that the changes you make are reflected in the usbmd installation inside the container. Additionally, you should use your user id and group id with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
 
+> [!TIP]
+> The docker container sets a random hostname by default. You can set a hostname with the `--hostname` flag. This is useful for the `users.yaml` file. Alternatively, you can use the `hostname` wildcard in the `users.yaml` file.
+
 Alternative flags:
 - `-w` = `--workdir`: Working directory inside the container
 - `--rm`: Automatically remove the container when it *exits*

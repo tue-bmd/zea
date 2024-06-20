@@ -198,6 +198,10 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
                         system: linux
                         data_root: /home/path_to_my_data_root/
                         output: C:/other_paths/
+                    # if both my_hostname and linux_hostname are not matching, fallback to hostname:
+                    hostname:
+                        system: linux
+                        data_root: /home/path_to_my_data_root/
 
                 other_username:
                     other_hostname:
