@@ -233,7 +233,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
     def _try_validate_config(config):
         if not _ML_LIB_AVAILABLE:
             log.warning(
-                "No ML library (i.e. `torch` or `tensorflow` was found or set, "
+                "No ML library (i.e. `torch` or `tensorflow`) was found or set, "
                 "note that some functionality may not be available. "
             )
             if config.get("ml_library") != "numpy":
