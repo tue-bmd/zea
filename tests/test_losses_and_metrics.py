@@ -77,7 +77,7 @@ def test_metrics_registry():
 
 
 def test_sector_reweight_image():
-    """Test if all metrics are in the registry"""
+    """Test sector reweight util function"""
     # arrange
     cube_of_ones = np.ones((3, 3, 3))
 
