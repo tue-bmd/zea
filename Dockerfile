@@ -53,5 +53,8 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
         pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision && \
         pip install --upgrade keras==3.1.1 && \
         pip install --upgrade keras-cv && \
-        pip install wandb albumentations torchmetrics ax-platform; \
+        pip install wandb albumentations torchmetrics ax-platform && \
+        # Fix for: https://github.com/albumentations-team/albumentations/issues/1785
+        pip uninstall opencv-python-headless opencv-python -y && \
+        pip install opencv-python; \
     fi
