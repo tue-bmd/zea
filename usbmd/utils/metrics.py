@@ -132,7 +132,7 @@ def image_sharpness(image):
     return np.mean(np.abs(np.gradient(image)))
 
 
-def sector_reweight_image(image, sector_angle):
+def _sector_reweight_image(image, sector_angle):
     """
     Reweights image according to the amount of area each
     row of pixels will occupy if that image is scan converted
