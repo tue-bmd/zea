@@ -38,9 +38,10 @@ def get_beamformer_types():
         tf_beamformer_registry.registered_names()
         + torch_beamformer_registry.registered_names()
     )
-    assert (
-        len(beamformer_types) > 0
-    ), "No beamformers registered. This could happen when no ML library is installed."
+    if len(beamformer_types) == 0:
+        log.warning(
+            "No beamformers registered. This could happen when no ML library is installed."
+        )
     return beamformer_types
 
 
@@ -232,7 +233,7 @@ def check_config(config: Union[dict, Config], verbose: bool = False):
     def _try_validate_config(config):
         if not _ML_LIB_AVAILABLE:
             log.warning(
-                "No ML library (i.e. `torch` or `tensorflow` was found or set, "
+                "No ML library (i.e. `torch` or `tensorflow`) was found or set, "
                 "note that some functionality may not be available. "
             )
             if config.get("ml_library") != "numpy":

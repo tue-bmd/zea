@@ -149,8 +149,12 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                log.warning("Could not connect to display, running headless.")
+                self.plot_lib = "matplotlib"  # force matplotlib in headless mode
+                log.warning(
+                    "Could not connect to display, running headless (using matplotlib)."
+                )
         else:
+            # self.plot_lib = "matplotlib"  # force matplotlib in headless mode
             matplotlib.use("agg")
             log.info("Running in headless mode as set by config.")
 
@@ -448,7 +452,7 @@ class DataLoaderUI:
                             return images
                     # For matplotlib, check if window has been closed
                     elif self.plot_lib == "matplotlib":
-                        if cv2.waitKey(25) and self.image_viewer.has_been_closed():
+                        if time.sleep(0.025) and self.image_viewer.has_been_closed():
                             return images
                     # For headless mode, check if all frames have been plotted
                     if self.headless:
