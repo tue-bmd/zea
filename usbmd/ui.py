@@ -154,7 +154,7 @@ class DataLoaderUI:
                     "Could not connect to display, running headless (using matplotlib)."
                 )
         else:
-            self.plot_lib = "matplotlib"  # force matplotlib in headless mode
+            # self.plot_lib = "matplotlib"  # force matplotlib in headless mode
             matplotlib.use("agg")
             log.info("Running in headless mode as set by config.")
 
