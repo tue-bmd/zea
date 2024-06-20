@@ -1,10 +1,20 @@
 # Install usbmd
 
-- [Editable install](#editable-install)
-- [Install from github](#install-from-github)
+- [Install usbmd](#install-usbmd)
+  - [Editable install](#editable-install)
+  - [Install from github](#install-from-github)
     - [Using a Personal Access Token](#using-a-personal-access-token)
     - [Using an SSH key](#using-an-ssh-key)
-- [Docker](#docker)
+    - [Resources](#resources)
+  - [Docker](#docker)
+    - [Build](#build)
+      - [Base](#base)
+      - [Keras 3](#keras-3)
+    - [Run](#run)
+    - [Attach / start / stop](#attach--start--stop)
+    - [Development in the container using vscode](#development-in-the-container-using-vscode)
+      - [Using git](#using-git)
+      - [Installing more packages](#installing-more-packages)
 
 ## Editable install
 
@@ -88,7 +98,7 @@ This will build the image `usbmd/keras3:latest`.
 Here is an example of how to run the docker container with the image you just built. Note that there exist [many flags](https://docs.docker.com/reference/cli/docker/container/run/) you may use.
 
 ```shell
-docker run --name {CONTAINER-NAME} --gpus 'all' -v ~/{NAS-MOUNT}:/mnt/z/ -v ~/ultrasound-toolbox:/usbmd -d -it -m 100g --cpus 7 --user "$(id -u):$(id -g)" {IMAGE-NAME}:{IMAGE-TAG}
+docker run --name {CONTAINER-NAME} --gpus 'all' -v ~/{NAS-MOUNT}:/mnt/z/ -v ~/ultrasound-toolbox:/ultrasound-toolbox -d -it -m 100g --cpus 7 --user "$(id -u):$(id -g)" {IMAGE-NAME}:{IMAGE-TAG}
 ```
 
 Which means:
@@ -105,7 +115,10 @@ Which means:
 - `--user`: Run as a specific user
 
 > [!IMPORTANT]
-> Note that it is important to mount the `ultrasound-toolbox` repository to `/usbmd` inside the container, so that the changes you make in the repository are reflected in the container. Additionally, you should use your user id and group id with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
+> Note that it is important to mount your `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container, so that the changes you make are reflected in the usbmd installation inside the container. Additionally, you should use your user id and group id with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
+
+> [!TIP]
+> The docker container sets a random hostname by default. You can set a hostname with the `--hostname` flag. This is useful for the `users.yaml` file. Alternatively, you can use the `hostname` wildcard in the `users.yaml` file.
 
 Alternative flags:
 - `-w` = `--workdir`: Working directory inside the container
