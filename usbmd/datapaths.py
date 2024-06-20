@@ -102,7 +102,7 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
             f"Unknown hostname {hostname} for user {username}",
             UnknownHostnameWarning,
         )
-        return {"username": username, "hostname": hostname, "system": system}
+        return _fallback_to_default_data_root(config, system), "./output"
 
     # Check if set os system matches with the current system
     if "system" in config:

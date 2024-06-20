@@ -38,9 +38,10 @@ def get_beamformer_types():
         tf_beamformer_registry.registered_names()
         + torch_beamformer_registry.registered_names()
     )
-    assert (
-        len(beamformer_types) > 0
-    ), "No beamformers registered. This could happen when no ML library is installed."
+    if len(beamformer_types) == 0:
+        log.warning(
+            "No beamformers registered. This could happen when no ML library is installed."
+        )
     return beamformer_types
 
 
