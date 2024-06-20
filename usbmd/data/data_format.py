@@ -52,9 +52,12 @@ def generate_example_dataset(path, add_optional_fields=False):
     n_ch = 1
     n_frames = 2
 
+    # creating some fake raw and image data
     raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
+    # image data is in dB
     image = np.ones((n_frames, 512, 512)) * -40
 
+    # creating some fake scan parameters
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
     tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
     probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
