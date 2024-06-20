@@ -146,7 +146,7 @@ def sector_reweight_image(image, sector_angle):
         image (tensor of shape (img_height, img_width, channels)): image to be re-weighted
         sector_angle (float | int): angle in degrees
     Returns:
-        reweighted_image (tensor of shape (img_height, img_width)): image according with pixels reweighted
+        reweighted_image (tensor of shape (img_height, img_width, channels)): image according with pixels reweighted
             to area occupied by each pixel post-scan-conversion.
     """
     assert len(image.shape) == 3, "image should have shape (height, width, channels)"
