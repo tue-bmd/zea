@@ -10,8 +10,8 @@ The USBMD data format has the following structure:
     rf-data or iq-data.
     - `envelope_data`: The envelope of the aligned data.
     - `beamformed_data`: The data after beamforming.
-    - `image`: The processed image.
-    - `image_sc`: The scan converted image.
+    - `image`: The processed image in dB (default: [-60, 0]).
+    - `image_sc`: The scan converted image in dB (default: [-60, 0]).
 - The `scan` group must contain the following keys:
     - `probe_geometry`: The geometry of the probe.
     - `t0_delays`: The time delays of the transducer elements. These delays determine the steering and focusing of the beam as well as the type of transmit (plane-wave, focused, etc.).
@@ -32,4 +32,4 @@ This information is combined in a hdf5 file consisting of one sequence. A datase
 To view what is inside an existing dataset you can use the `usbmd.utils.print_hdf5_attrs` function, which prints all the keys, shapes, and attributes of a dataset. Alternatively you can use the tool [HDFView](https://www.hdfgroup.org/downloads/hdfview/) from the HDF group.
 
 ## Saving data
-When store data or converting a dataset to USBMD format it is recommended to always use the `usbmd.data_format.usbmd_data_format.generate_usbmd_dataset` function. This ensures all data is stored in exactly the same way and makes it easy to propagate changes to the USBMD format to all datasets.
+When store data or converting a dataset to USBMD format it is recommended to always use the `usbmd.data.data_format.generate_usbmd_dataset()` function. This ensures all data is stored in exactly the same way and makes it easy to propagate changes to the USBMD format to all datasets.
