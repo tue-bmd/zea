@@ -126,8 +126,7 @@ import scipy
 from scipy import ndimage, signal
 
 from usbmd import Config
-from usbmd.backend.pytorch import on_device_torch
-from usbmd.backend.tensorflow import on_device_tf
+
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import (
@@ -446,8 +445,10 @@ class Pipeline:
         if self.ops.__name__ == "numpy":
             return func(data)
         elif self.ops.__name__ == "tensorflow":
+            on_device_tf = importlib.import_module("usbmd.backend.tensorflow").on_device_tf
             return on_device_tf(func, data, device=device, return_numpy=return_numpy)
         elif self.ops.__name__ == "torch":
+            on_device_torch = importlib.import_module("usbmd.backend.pytorch").on_device_torch
             return on_device_torch(func, data, device=device, return_numpy=return_numpy)
         else:
             raise ValueError("Unsupported operations package.")
