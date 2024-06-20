@@ -75,17 +75,19 @@ def test_metrics_registry():
             continue
         assert metric in metrics_registry, f"{metric} is not in the metrics registry"
 
+
 def test_sector_reweight_image():
     # arrange
     cube_of_ones = np.ones((3, 3, 3))
-    
+
     # act
     reweighted_cube = sector_reweight_image(cube_of_ones, 180)
-    
+
     # assert
     # depths are set at the 'center' of each pixel index
     expected_depths = np.array([0.5, 1.5, 2.5])
-    expected_reweighting_per_depth = np.pi # (180 / 360) * 2 * pi = pi
-    expected_result = cube_of_ones * expected_depths[:, None] * expected_reweighting_per_depth
+    expected_reweighting_per_depth = np.pi  # (180 / 360) * 2 * pi = pi
+    expected_result = (
+        cube_of_ones * expected_depths[:, None] * expected_reweighting_per_depth
+    )
     assert np.all(expected_result == reweighted_cube)
-    
