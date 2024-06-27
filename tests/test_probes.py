@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from usbmd.data.datasets import DummyDataset
 from usbmd.probes import Probe, get_probe
 from usbmd.registry import probe_registry
 
@@ -26,10 +27,10 @@ def test_get_probe_error():
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
 def test_get_default_scan_paramters(probe_name):
     """Tests the get_probe function by calling it on all registered probes and
-    calling their get_default_scan_parameters method."""
+    calling their get_parameters() method."""
     probe = get_probe(probe_name)
 
-    probe.get_default_scan_parameters()
+    probe.get_parameters()
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
@@ -39,8 +40,12 @@ def test_probe_attributes(probe_name):
     1. the element positions are of the correct shape
     2. the probe type is either 'linear' or 'phased'
     """
-
-    probe = get_probe(probe_name)
+    if probe_name == "generic":
+        dataset = DummyDataset()
+        probe_params = dataset.get_probe_parameters_from_file()
+        probe = get_probe(probe_name, **probe_params)
+    else:
+        probe = get_probe(probe_name)
 
     assert isinstance(
         probe.probe_geometry, np.ndarray

@@ -1,7 +1,8 @@
 """Test the registration decorator"""
+
 import pytest
 
-from usbmd.utils.registration import RegisterDecorator
+from usbmd.registry import RegisterDecorator
 
 
 def test_names():

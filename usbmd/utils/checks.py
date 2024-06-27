@@ -4,6 +4,7 @@
 - **Date**          : October 30 2023
 """
 
+import importlib
 import logging
 from pathlib import Path
 
@@ -21,7 +22,15 @@ _DATA_TYPES = [
     "image_sc",
 ]
 
-_ML_LIBRARIES = [None, "torch", "tensorflow"]
+_BACKENDS = [None, "torch", "tensorflow", "keras", "jax", "numpy"]
+
+_ML_LIB_AVAILABLE = False
+for lib in _BACKENDS:
+    if importlib.util.find_spec(str(lib)):
+        if lib == "torch":
+            _ML_LIB_AVAILABLE = True
+        if lib == "tensorflow":
+            _ML_LIB_AVAILABLE = True
 
 _MOD_TYPES = [None, "rf", "iq"]
 
@@ -62,7 +71,7 @@ def get_check(data_type):
 
 
 @checks_registry("raw_data")
-def _check_raw_data(data=None, shape=None, with_frame_dim=False):
+def _check_raw_data(data=None, shape=None, with_batch_dim=False):
     """Check raw data shape.
 
     If data is provided, shape is derived from data.
@@ -73,7 +82,7 @@ def _check_raw_data(data=None, shape=None, with_frame_dim=False):
             either data or shape must be provided.
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
-        with_frame_dim (bool, optional): whether data has frame dimension at the start.
+        with_batch_dim (bool, optional): whether data has frame dimension at the start.
             Setting this to True requires the data to have 5 dimensions. Defaults to
             False.
 
@@ -87,7 +96,7 @@ def _check_raw_data(data=None, shape=None, with_frame_dim=False):
     if data is not None:
         shape = data.shape
 
-    if not with_frame_dim:
+    if not with_batch_dim:
         assert len(shape) == 4, (
             "raw data must be 4D, with expected shape [n_tx, n_ax, n_el, n_ch], "
             f"got {shape}"
@@ -104,7 +113,7 @@ def _check_raw_data(data=None, shape=None, with_frame_dim=False):
 
 
 @checks_registry("aligned_data")
-def _check_aligned_data(data=None, shape=None, with_frame_dim=False):
+def _check_aligned_data(data=None, shape=None, with_batch_dim=False):
     """Check aligned data shape.
 
     If data is provided, shape is derived from data.
@@ -115,7 +124,7 @@ def _check_aligned_data(data=None, shape=None, with_frame_dim=False):
             either data or shape must be provided.
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
-        with_frame_dim (bool, optional): whether data has frame dimension at the start.
+        with_batch_dim (bool, optional): whether data has frame dimension at the start.
             Setting this to True requires the data to have 5 dimensions. Defaults to
             False.
 
@@ -129,7 +138,7 @@ def _check_aligned_data(data=None, shape=None, with_frame_dim=False):
     if data is not None:
         shape = data.shape
 
-    if not with_frame_dim:
+    if not with_batch_dim:
         assert len(shape) == 4, (
             "aligned data must be 4D, with expected shape [n_tx, n_ax, n_el, n_ch], "
             f"got {shape}"
@@ -146,7 +155,7 @@ def _check_aligned_data(data=None, shape=None, with_frame_dim=False):
 
 
 @checks_registry("beamformed_data")
-def _check_beamformed_data(data=None, shape=None, with_frame_dim=False):
+def _check_beamformed_data(data=None, shape=None, with_batch_dim=False):
     """Check beamformed data shape.
 
     If data is provided, shape is derived from data.
@@ -157,7 +166,7 @@ def _check_beamformed_data(data=None, shape=None, with_frame_dim=False):
             either data or shape must be provided.
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
-        with_frame_dim (bool, optional): whether data has frame dimension at the start.
+        with_batch_dim (bool, optional): whether data has frame dimension at the start.
             Setting this to True requires the data to have 4 dimensions. Defaults to
             False.
 
@@ -171,7 +180,7 @@ def _check_beamformed_data(data=None, shape=None, with_frame_dim=False):
     if data is not None:
         shape = data.shape
 
-    if not with_frame_dim:
+    if not with_batch_dim:
         assert len(shape) == 3, (
             "beamformed data must be 3D, with expected shape [Ny, Nx, n_ch], "
             f"got {shape}"
@@ -188,7 +197,7 @@ def _check_beamformed_data(data=None, shape=None, with_frame_dim=False):
 
 
 @checks_registry("envelope_data")
-def _check_envelope_data(data=None, shape=None, with_frame_dim=False):
+def _check_envelope_data(data=None, shape=None, with_batch_dim=False):
     """Check envelope data shape.
 
     If data is provided, shape is derived from data.
@@ -199,7 +208,7 @@ def _check_envelope_data(data=None, shape=None, with_frame_dim=False):
             either data or shape must be provided.
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
-        with_frame_dim (bool, optional): whether data has frame dimension at the start.
+        with_batch_dim (bool, optional): whether data has frame dimension at the start.
             Setting this to True requires the data to have 4 dimensions. Defaults to
             False.
 
@@ -212,7 +221,7 @@ def _check_envelope_data(data=None, shape=None, with_frame_dim=False):
     if data is not None:
         shape = data.shape
 
-    if not with_frame_dim:
+    if not with_batch_dim:
         assert len(shape) == 2, (
             "envelope data must be 2D, with expected shape [Ny, Nx], " f"got {shape}"
         )
@@ -224,7 +233,7 @@ def _check_envelope_data(data=None, shape=None, with_frame_dim=False):
 
 
 @checks_registry("image")
-def _check_image(data=None, shape=None, with_frame_dim=False):
+def _check_image(data=None, shape=None, with_batch_dim=False):
     """Check image data shape.
 
     If data is provided, shape is derived from data.
@@ -235,7 +244,7 @@ def _check_image(data=None, shape=None, with_frame_dim=False):
             either data or shape must be provided.
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
-        with_frame_dim (bool, optional): whether data has frame dimension at the start.
+        with_batch_dim (bool, optional): whether data has frame dimension at the start.
             Setting this to True requires the data to have 4 dimensions. Defaults to
             False.
 
@@ -248,7 +257,7 @@ def _check_image(data=None, shape=None, with_frame_dim=False):
     if data is not None:
         shape = data.shape
 
-    if not with_frame_dim:
+    if not with_batch_dim:
         assert len(shape) == 2, (
             "image data must be 2D, with expected shape [Ny, Nx], " f"got {shape}"
         )
@@ -259,7 +268,7 @@ def _check_image(data=None, shape=None, with_frame_dim=False):
 
 
 @checks_registry("image_sc")
-def _check_image_sc(data=None, shape=None, with_frame_dim=False):
+def _check_image_sc(data=None, shape=None, with_batch_dim=False):
     """Check image data shape.
 
     If data is provided, shape is derived from data.
@@ -270,7 +279,7 @@ def _check_image_sc(data=None, shape=None, with_frame_dim=False):
             either data or shape must be provided.
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
-        with_frame_dim (bool, optional): whether data has frame dimension at the start.
+        with_batch_dim (bool, optional): whether data has frame dimension at the start.
             Setting this to True requires the data to have 4 dimensions. Defaults to
             False.
 
@@ -283,7 +292,7 @@ def _check_image_sc(data=None, shape=None, with_frame_dim=False):
     if data is not None:
         shape = data.shape
 
-    if not with_frame_dim:
+    if not with_batch_dim:
         assert len(shape) == 2, (
             "image data must be 2D, with expected shape [Ny, Nx], " f"got {shape}"
         )
@@ -368,7 +377,7 @@ def _validate_structure(dataset):
         # Validate data shape
         data_shape = dataset["data"][key].shape
         if key == "raw_data":
-            get_check(key)(shape=data_shape, with_frame_dim=True)
+            get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
                 data_shape[0] == dataset["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of raw_data."
@@ -382,27 +391,27 @@ def _validate_structure(dataset):
                 data_shape[3] == dataset["scan"]["n_el"][()]
             ), "n_el does not match the fourth dimension of raw_data."
         elif key == "aligned_data":
-            get_check(key)(shape=data_shape, with_frame_dim=True)
+            get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
                 data_shape[0] == dataset["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of aligned_data."
         elif key == "beamformed_data":
-            get_check(key)(shape=data_shape, with_frame_dim=True)
+            get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
                 data_shape[0] == dataset["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of beamformed_data."
         elif key == "envelope_data":
-            get_check(key)(shape=data_shape, with_frame_dim=True)
+            get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
                 data_shape[0] == dataset["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of envelope_data."
         elif key == "image":
-            get_check(key)(shape=data_shape, with_frame_dim=True)
+            get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
                 data_shape[0] == dataset["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of image."
         elif key == "image_sc":
-            get_check(key)(shape=data_shape, with_frame_dim=True)
+            get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
                 data_shape[0] == dataset["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of image_sc."
@@ -521,7 +530,8 @@ def _assert_uint8_images(images: np.ndarray):
         AssertionError: If the dtype of images is not uint8.
         AssertionError: If the shape of images is not (n_frames, height, width, channels)
             or (n_frames, height, width) for grayscale images.
-        AssertionError: If images have anything other than 1 (grayscale) or 3 (rgb) channels.
+        AssertionError: If images have anything other than 1 (grayscale),
+            3 (rgb) or 4 (rgba) channels.
     """
     assert (
         images.dtype == np.uint8
@@ -533,7 +543,8 @@ def _assert_uint8_images(images: np.ndarray):
     )
 
     if images.ndim == 4:
-        assert images.shape[-1] in (
-            1,
-            3,
-        ), "grayscale images must have 1 channel, RGB images must have 3 channels"
+        assert images.shape[-1] in (1, 3, 4), (
+            "Grayscale images must have 1 channel, "
+            "RGB images must have 3 channels, and RGBA images must have 4 channels. "
+            f"Got shape: {images.shape}, channels: {images.shape[-1]}"
+        )

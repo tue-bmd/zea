@@ -1,9 +1,19 @@
-# usbmd repo specific
-figures/
-custom_configs/
-data/
-log/
-.ideas/
+#### usbmd repo specific ####
+/figures
+/custom_configs
+/data
+/log
+
+backend/tensorflow/figures/
+usbmd/figures/
+examples/deep_beamforming/example_config_ABLE.yaml
+trained_models/
+benchmarks/
+
+# Temporary files
+temp/
+users.yaml
+file_paths.txt
 
 # any png / gifs in root directory
 /*.png
@@ -11,14 +21,17 @@ log/
 /*.jpg
 /*.jpeg
 
+#### General Python ####
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 
-# VSCode
-.vscode/
+# IDEs and editors
+/.vscode
 .DS_Store
+/.ideas
 
 # C extensions
 *.so
@@ -151,13 +164,3 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-tensorflow_ultrasound/figures/
-usbmd/figures/
-examples/deep_beamforming/example_config_ABLE.yaml
-trained_models/
-benchmarks/
-
-# Temporary files
-temp/
-users.yaml
-file_paths.txt

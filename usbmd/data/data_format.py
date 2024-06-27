@@ -2,20 +2,18 @@
 Functions to write and validate datasets in the USBMD format.
 """
 
-import logging
+import inspect
 from dataclasses import dataclass
-from inspect import signature
 from pathlib import Path
 
 import h5py
 import numpy as np
 
-from usbmd.probes import Probe, get_probe
+from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
+from usbmd.probes import get_probe
 from usbmd.scan import Scan, cast_scan_parameters
-from usbmd.utils import log
+from usbmd.utils import first_not_none_item, log, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
-from usbmd.utils.read_h5 import recursively_load_dict_contents_from_group
-from usbmd.utils.utils import first_not_none_item, update_dictionary
 
 
 @dataclass
@@ -50,12 +48,16 @@ def generate_example_dataset(path, add_optional_fields=False):
 
     n_ax = 2048
     n_el = 128
-    n_tx = 8
+    n_tx = 11
     n_ch = 1
     n_frames = 2
 
+    # creating some fake raw and image data
     raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
+    # image data is in dB
+    image = np.ones((n_frames, 512, 512)) * -40
 
+    # creating some fake scan parameters
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
     tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
     probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
@@ -75,6 +77,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     generate_usbmd_dataset(
         path,
         raw_data=raw_data,
+        image=image,
         probe_geometry=probe_geometry,
         sampling_frequency=40e6,
         center_frequency=7e6,
@@ -526,7 +529,7 @@ def generate_usbmd_dataset(
     # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
     assert (
         len(data_and_parameters)
-        == len(signature(generate_usbmd_dataset).parameters) - 2
+        == len(inspect.signature(generate_usbmd_dataset).parameters) - 2
     ), (
         "All arguments should be put in data_and_parameters except "
         "`path` and `event_structure` arguments."
@@ -661,34 +664,33 @@ def load_usbmd_file(
     with h5py.File(path, "r") as hdf5_file:
         # Define the probe
         probe_name = hdf5_file.attrs["probe"]
-        probe_geometry = hdf5_file["scan"]["probe_geometry"][:]
-
-        # Try to load a known probe type. If this fails, use a generic probe
-        # instead, but warn the user.
-        try:
-            probe = get_probe(probe_name)
-        except NotImplementedError:
-            logging.warning(
-                "The probe %s is not implemented. Using a generic probe instead.",
-                probe_name,
-            )
-
-            probe = Probe(probe_geometry=probe_geometry)
-
-        # Verify that the probe geometry matches the probe geometry in the
-        # dataset
-        if not np.allclose(probe_geometry, probe.probe_geometry):
-            probe.probe_geometry = probe_geometry
-            logging.warning(
-                "The probe geometry in the data file does not "
-                "match the probe geometry of the probe. The probe "
-                "geometry has been updated to match the data file."
-            )
-
         file_scan_parameters = recursively_load_dict_contents_from_group(
             hdf5_file, "scan"
         )
         file_scan_parameters = cast_scan_parameters(file_scan_parameters)
+        sig = inspect.signature(get_probe("generic").__init__)
+        file_probe_params = {
+            key: file_scan_parameters[key]
+            for key in sig.parameters
+            if key in file_scan_parameters
+        }
+
+        if probe_name == "generic":
+            probe = get_probe(probe_name, **file_probe_params)
+        else:
+            probe = get_probe(probe_name)
+
+            probe_geometry = file_probe_params.get("probe_geometry", None)
+
+            # Verify that the probe geometry matches the probe geometry in the
+            # dataset
+            if not np.allclose(probe_geometry, probe.probe_geometry):
+                probe.probe_geometry = probe_geometry
+                log.warning(
+                    "The probe geometry in the data file does not "
+                    "match the probe geometry of the probe. The probe "
+                    "geometry has been updated to match the data file."
+                )
 
         n_frames = file_scan_parameters.pop(
             "n_frames"

@@ -132,7 +132,7 @@ def select_gpus(
         gpu_ids: list of selected GPU ids. If no GPU is selected, returns an
             empty list. If a CPU is selected, returns None.
     """
-
+    gpu_ids = []
     # Check if GPU mode is forced or if GPU should be selected based on memory
     if device == "cpu" or (device is None and not available_gpu_ids):
         print("Setting device to CPU")

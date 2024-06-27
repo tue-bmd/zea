@@ -1,6 +1,7 @@
 """
 Test the pytorch implementation of the beamformers.
 """
+
 # pylint: disable=no-member
 import sys
 from pathlib import Path
@@ -11,11 +12,11 @@ import numpy as np
 import pytest
 import torch
 
+from usbmd.backend.pytorch import on_device_torch
+from usbmd.backend.pytorch.layers.beamformers import get_beamformer
+from usbmd.config import load_config_from_yaml
 from usbmd.probes import Verasonics_l11_4v
-from usbmd.pytorch_ultrasound.layers.beamformers import get_beamformer
-from usbmd.pytorch_ultrasound.processing import on_device_torch
 from usbmd.scan import PlaneWaveScan
-from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.simulator import UltrasoundSimulator
 
 # Add project folder to path to find config files
@@ -41,7 +42,7 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
     config.ml_library = "torch"
 
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
         n_tx=1,
