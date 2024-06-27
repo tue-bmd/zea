@@ -62,20 +62,20 @@ plt.imshow(image, cmap="gray")
 plt.show()
 ```
 
-The DataloaderUI class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
-
+The `DataloaderUI` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
+We do this by manually loading a single usbmd file with `load_usbmd_file` and processing it with the `Process` class.
 ```python
 import matplotlib.pyplot as plt
 
+from usbmd import setup
 from usbmd.data import load_usbmd_file
 from usbmd.processing import Process
-from usbmd.setup_usbmd import setup_config
 
 # choose your config file
 # all necessary settings should be in the config file
 config_path = "configs/config_picmus_rf.yaml"
 # setup_config only loads, validates and sets defauls in the config file
-config = setup_config(config_path)
+config = setup(config_path, "users.yaml")
 
 # we now manually point to our data
 data_path = "Z:/Ultrasound-BMd/data/USBMD_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
@@ -91,22 +91,49 @@ data, scan, probe = load_usbmd_file(
 # initialize the Process class
 process = Process(config=config, scan=scan, probe=probe)
 
+# initialize the processing pipeline so it know what kind
+# of data it is processing and what it should output
+process.set_pipeline(dtype="raw_data", to_dtype="image")
+
 # index the first frame
 data_frame = data[0]
 
 # processing the data from raw_data to image
-image = process.run(data_frame, dtype="raw_data", to_dtype="image")
+image = process.run(data_frame)
 
 plt.figure()
 plt.imshow(image, cmap="gray")
 
 # we can also process a single plane wave angle by
 # setting the `selected_transmits` parameter in the scan object
-scan.selected_transmits = 1
-process = Process(config=config, scan=scan, probe=probe)
+process.scan.selected_transmits = 1
 
-image = process.run(data_frame, dtype="raw_data", to_dtype="image")
+image = process.run(data_frame)
 
 plt.figure()
 plt.imshow(image, cmap="gray")
+
+# lastly instead of setting the pipeline with `dtype` and `to_dtype`
+# we can also opt for passing a custom operation chain as follows
+
+# initialize the processing pipeline
+process.set_pipeline(
+    operation_chain=[
+        {"name": "beamform"},
+        {"name": "demodulate"},
+        {"name": "envelope_detect"},
+        {"name": "downsample"},
+        {"name": "normalize"},
+        # we now only set log_compress parameters to show how it can be done
+        # if you don't pass any parameters it will use default or
+        # params from config / scan / probe
+        {"name": "log_compress", "params": {"dynamic_range": (-40, 0)}},
+    ],
+)
+
+image = process.run(data_frame)
+
+plt.figure()
+plt.imshow(image, cmap="gray")
+
 ```
