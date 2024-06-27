@@ -222,9 +222,11 @@ class DataSet:
         Returns:
             dict: The scan parameters.
         """
-        if file_idx is None:
-            file_idx = 0
-        self.file = self.get_file(file_idx)
+        if self.file is None and file_idx is None:
+            self.file = self.get_file(0)
+        elif file_idx is not None:
+            self.file = self.get_file(file_idx)
+
         scan_parameters = {}
         if "scan" in self.file:
             scan_parameters = recursively_load_dict_contents_from_group(

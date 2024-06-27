@@ -213,9 +213,7 @@ class GenerateDataSet:
             image (ndarray): input data
             path (str): file path
         """
-        file_scan_parameters = self.dataset.get_scan_parameters_from_file(
-            self.dataset.file
-        )
+        file_scan_parameters = self.dataset.get_scan_parameters_from_file()
 
         gen_kwargs = {
             str(self.to_dtype): data,
