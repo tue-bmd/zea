@@ -6,7 +6,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from usbmd.utils.read_h5 import (
+from usbmd.data.read_h5 import (
     ReadH5,
     print_hdf5_attrs,
     recursively_load_dict_contents_from_group,

@@ -15,15 +15,14 @@ from pathlib import Path
 import numpy as np
 import tqdm
 
-from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
-from usbmd.datasets import get_dataset
+from usbmd import Config
+from usbmd.data import get_dataset
+from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.display import to_8bit
 from usbmd.probes import get_probe
 from usbmd.processing import Process
-from usbmd.utils import log
+from usbmd.utils import get_function_args, log, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES
-from usbmd.utils.config import Config
-from usbmd.utils.utils import get_function_args, update_dictionary
 
 
 class GenerateDataSet:
@@ -74,20 +73,36 @@ class GenerateDataSet:
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
 
-        # Initialize scan based on dataset
+        # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters()
-        config_scan_params = self.config.scan
+        file_scan_params = self.dataset.get_scan_parameters_from_file()
+        file_probe_params = self.dataset.get_probe_parameters_from_file()
 
-        # dict merging of manual config and dataset default scan parameters
-        scan_params = update_dictionary(default_scan_params, config_scan_params)
-        self.scan = scan_class(**scan_params)
+        if len(file_scan_params) == 0:
+            log.info(
+                f"Could not find proper scan parameters in {self.dataset} at "
+                f"{log.yellow(str(self.dataset.datafolder))}."
+            )
+            log.info("Proceeding without scan class.")
+
+            self.scan = None
+        else:
+            config_scan_params = self.config.scan
+            # dict merging of manual config and dataset default scan parameters
+            scan_params = update_dictionary(file_scan_params, config_scan_params)
+            self.scan = scan_class(**scan_params)
 
         # initialize probe
-        self.probe = get_probe(self.dataset.get_probe_name())
+        probe_name = self.dataset.get_probe_name()
+
+        if probe_name == "generic":
+            self.probe = get_probe(probe_name, **file_probe_params)
+        else:
+            self.probe = get_probe(probe_name)
 
         # intialize process class
-        self.process = Process(config, self.scan, self.probe)
+        self.process = Process(self.config, self.scan, self.probe)
+        self.process.set_pipeline(dtype=self.config.data.dtype, to_dtype=self.to_dtype)
 
         if self.dataset.datafolder is None:
             self.dataset.datafolder = Path(".")
@@ -150,15 +165,13 @@ class GenerateDataSet:
 
                         path = self.get_path_from_name(name, ".png")
 
-                        image = self.process.run(
-                            image, self.config.data.dtype, self.to_dtype
-                        )
+                        image = self.process.run(image)
                         self.save_image(np.squeeze(image), path)
 
                 elif self.filetype == "hdf5":
                     data_list = []
                     for d in data:
-                        d = self.process.run(d, self.config.data.dtype, self.to_dtype)
+                        d = self.process.run(d)
                         data_list.append(d)
                     data = np.stack(data_list, axis=0)
                     path = self.get_path_from_name(base_name, ".hdf5")

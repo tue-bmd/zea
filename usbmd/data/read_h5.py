@@ -4,11 +4,12 @@
 - **Date**          : -
 """
 
+import sys
 from pathlib import Path
 
-import sys
 import h5py
 import numpy as np
+
 from usbmd.utils import log
 
 

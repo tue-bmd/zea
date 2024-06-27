@@ -9,12 +9,12 @@ import os
 import re
 from pathlib import Path
 
-from usbmd.utils.config_validation import (
+from usbmd.config.validation import (
     _ALLOWED_DEMODULATION,
     _ALLOWED_KEYS_PROXTYPE,
     _ALLOWED_PLOT_LIBS,
+    _BACKENDS,
     _DATA_TYPES,
-    _ML_LIBRARIES,
     _MOD_TYPES,
 )
 
@@ -72,7 +72,7 @@ DESCRIPTIONS = {
         ),
         "dtype": (
             "The form of data to load (raw_data, rf_data, iq_data, beamformed_data, "
-            "envelope_data)"
+            "envelope_data, image, image_sc)"
         ),
         "dynamic_range": "The dynamic range for showing data in db [min, max]",
         "user": "The user to use when loading data (null, dict)",
@@ -155,7 +155,7 @@ DESCRIPTIONS = {
         },
     },
     "device": "The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)",
-    "ml_library": f"The library to use ({allows_type_to_str(_ML_LIBRARIES)}, disable)",
+    "ml_library": f"The library to use ({allows_type_to_str(_BACKENDS)})",
     "plot": {
         "description": (
             "Settings pertaining to plotting when running the UI (`usbmd/ui.py`)"
@@ -170,6 +170,7 @@ DESCRIPTIONS = {
         "fliplr": "Set to true to flip the image left to right",
         "image_extension": "The file extension to use when saving the image (png, jpg)",
         "video_extension": "The file extension to use when saving the video (mp4, gif)",
+        "headless": "Set to true to run the UI in headless mode",
     },
 }
 

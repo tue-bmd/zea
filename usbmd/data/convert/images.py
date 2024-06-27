@@ -10,7 +10,7 @@ from itertools import groupby
 
 import numpy as np
 
-from usbmd.data_format.usbmd_data_format import generate_usbmd_dataset
+from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.utils.io_lib import load_image, _SUPPORTED_IMG_TYPES
 
 

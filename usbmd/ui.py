@@ -21,16 +21,16 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.datasets import get_dataset
+from usbmd import Config
+from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils import log
+from usbmd.utils import log, save_to_gif, save_to_mp4, strtobool, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES
-from usbmd.utils.config import Config
+from usbmd.utils.gui import USBMDApp
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
@@ -39,7 +39,6 @@ from usbmd.utils.io_lib import (
     running_in_notebook,
     start_async_app,
 )
-from usbmd.utils.utils import save_to_gif, save_to_mp4, strtobool, update_dictionary
 
 
 class DataLoaderUI:
@@ -58,11 +57,10 @@ class DataLoaderUI:
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters(
-            file_idx=0, event=0
-        )
+        file_scan_params = self.dataset.get_scan_parameters_from_file()
+        file_probe_params = self.dataset.get_probe_parameters_from_file()
 
-        if len(default_scan_params) == 0:
+        if len(file_scan_params) == 0:
             log.info(
                 f"Could not find proper scan parameters in {self.dataset} at "
                 f"{log.yellow(str(self.dataset.datafolder))}."
@@ -74,16 +72,23 @@ class DataLoaderUI:
             self.config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
             self.scan_params = update_dictionary(
-                default_scan_params, self.config_scan_params
+                file_scan_params, self.config_scan_params
             )
-
             self.scan = scan_class(**self.scan_params)
 
         # initialize probe
-        self.probe = get_probe(self.dataset.get_probe_name())
+        probe_name = self.dataset.get_probe_name()
+
+        if probe_name == "generic":
+            self.probe = get_probe(probe_name, **file_probe_params)
+        else:
+            self.probe = get_probe(probe_name)
 
         # intialize process class
         self.process = Process(self.config, self.scan, self.probe)
+        # initialize a second process class for postprocessing (faster this way)
+        self.process_image = Process(self.config, self.scan, self.probe)
+        self.process_image.device = "cpu"
 
         # initialize attributes for UI class
         self.data = None
@@ -146,8 +151,12 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                log.warning("Could not connect to display, running headless.")
+                self.plot_lib = "matplotlib"  # force matplotlib in headless mode
+                log.warning(
+                    "Could not connect to display, running headless (using matplotlib)."
+                )
         else:
+            # self.plot_lib = "matplotlib"  # force matplotlib in headless mode
             matplotlib.use("agg")
             log.info("Running in headless mode as set by config.")
 
@@ -178,6 +187,7 @@ class DataLoaderUI:
                 )
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
+            log.info("Please select file from window dialog...")
             self.file_path = filename_from_window_dialog(
                 f"Choose .{filtetype} file",
                 filetypes=((filtetype, "*." + filtetype),),
@@ -240,11 +250,15 @@ class DataLoaderUI:
             else:
                 to_dtype = self.to_dtype
 
-            self.image = self.process.run(
-                self.data,
-                dtype=self.dtype,
-                to_dtype=to_dtype,
-            )
+            if self.process.pipeline is None:
+                if self.config.preprocess.operation_chain is None:
+                    self.process.set_pipeline(dtype=self.dtype, to_dtype=to_dtype)
+                else:
+                    self.process.set_pipeline(
+                        operation_chain=self.config.preprocess.operation_chain
+                    )
+
+            self.image = self.process.run(self.data)
 
             if self.process.postprocess:
                 self.image = self.process.postprocess.run(self.image[None, ..., None])
@@ -255,11 +269,9 @@ class DataLoaderUI:
             self.image = self.data
 
         if self.to_dtype == "image_sc":
-            self.image = self.process.run(
-                self.image,
-                dtype="image",
-                to_dtype="image_sc",
-            )
+            if self.process_image.pipeline is None:
+                self.process_image.set_pipeline(dtype="image", to_dtype="image_sc")
+            self.image = self.process_image.run(self.image)
 
         # match orientation if necessary
         if self.config.plot.fliplr:
@@ -456,7 +468,7 @@ class DataLoaderUI:
                             return images
                     # For matplotlib, check if window has been closed
                     elif self.plot_lib == "matplotlib":
-                        if cv2.waitKey(25) and self.image_viewer.has_been_closed():
+                        if time.sleep(0.025) and self.image_viewer.has_been_closed():
                             return images
                     # For headless mode, check if all frames have been plotted
                     if self.headless:
@@ -599,6 +611,8 @@ def main():
 
     if args.task == "run":
         ui = DataLoaderUI(config)
+
+        log.info(f"Using {config.ml_library} backend")
 
         if args.gui:
             log.warning(

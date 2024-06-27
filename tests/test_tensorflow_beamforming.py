@@ -11,11 +11,11 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
+from usbmd.backend.tensorflow.utils.utils import tf_snapshot
+from usbmd.config import load_config_from_yaml
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
-from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
-from usbmd.tensorflow_ultrasound.utils.utils import tf_snapshot
-from usbmd.utils.config import load_config_from_yaml
 from usbmd.utils.simulator import UltrasoundSimulator
 
 # Add project folder to path to find config files
@@ -51,7 +51,7 @@ def test_das_beamforming(
         config.model.beamformer.patches = patches  # pylint: disable=no-member
 
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
 
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
@@ -148,7 +148,7 @@ def test_dynamic_beamforming():
     config.ml_library = "tensorflow"
 
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
 
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
@@ -191,7 +191,7 @@ def test_dynamic_beamforming():
 def test_snapshot():
     """Test that the snapshot function works."""
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_default_scan_parameters()
+    probe_parameters = probe.get_parameters()
 
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,

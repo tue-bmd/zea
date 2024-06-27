@@ -38,9 +38,9 @@ After installation, you can use the package as follows in your own project:
 # import usbmd package
 import usbmd
 # or if you want to use the Tensorflow tools
-from usbmd import tensorflow_ultrasound as usmbd_tf
+import usbmd.backend.tensorflow as usbmd_tf
 # or if you want to use the Pytorch tools
-from usbmd import pytorch_ultrasound as usbmd_torch
+import usbmd.backend.pytorch as usbmd_torch
 ```
 
 #### User interface
@@ -80,7 +80,7 @@ config = setup("configs/config_picmus_rf.yaml")
 
 ### Data paths
 
-In order to use this repository and point to the correct data paths, you'll need to create a user profile. We have a script to guide you through the setup and create your userprofile; start by running `python usbmd/common.py` (see [`common.py`](common.html)). When you run this script, you will be prompted to provide a path to your data directory -- the default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS. Your user profile will then be created at `users.yaml`. Once it's created, you can edit your profile to add multiple devices or data paths -- see the example below.
+In order to use this repository and point to the correct data paths, you'll need to create a user profile. We have a script to guide you through the setup and create your userprofile; start by running `python usbmd/datapaths.py` (see [`datapaths.py`](datapaths.html)). When you run this script, you will be prompted to provide a path to your data directory -- the default location is `Z:\Ultrasound-BMd\data` which is the path to the data on the NAS. Your user profile will then be created at `users.yaml`. Once it's created, you can edit your profile to add multiple devices or data paths -- see the example below.
 
 ```yaml
 MY_USER_NAME:

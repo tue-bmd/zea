@@ -21,13 +21,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-from usbmd.datasets import get_dataset
+from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
+from usbmd.backend.tensorflow.losses import SMSLE
+from usbmd.data import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.tensorflow_ultrasound.layers.beamformers import get_beamformer
-from usbmd.tensorflow_ultrasound.losses import SMSLE
-from usbmd.utils.utils import update_dictionary
+from usbmd.utils import update_dictionary
 
 
 def train_beamformer(config):
@@ -40,7 +40,7 @@ def train_beamformer(config):
 
     # Initialize scan based on dataset
     scan_class = dataset.get_scan_class()
-    default_scan_params = dataset.get_default_scan_parameters()
+    default_scan_params = dataset.get_scan_parameters_from_file()
     config_scan_params = config.scan
     config.model.beamformer.patches = 4
 
@@ -107,9 +107,11 @@ def train_beamformer(config):
 
     # Create a Process class to convert the data to an image
     process = Process(config, scan, probe)
-    img_target = process.run(targets[0], "beamformed_data", "image")
-    img_prediction = process.run(prediction[0], "beamformed_data", "image")
-    img_das = process.run(das[0], "beamformed_data", "image")
+    process.set_pipeline(dtype="beamformed_data", to_dtype="image")
+    img_target = process.run(targets[0])
+
+    img_prediction = process.run(prediction[0])
+    img_das = process.run(das[0])
 
     # plot the resulting image
     plt.figure()
