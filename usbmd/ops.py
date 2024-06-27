@@ -58,7 +58,7 @@ process = Process(config, scan, probe)
 process.set_pipeline(
     operation_chain=[
         {"name": "beamform"},
-        {"name": "demodulate": params={"fs": 50e6, "fc": 5e6}},
+        {"name": "demodulate", "params": {"fs": 50e6, "fc": 5e6}},
         {"name": "envelope_detect"},
         {"name": "downsample"},
         {"name": "normalize"},
@@ -126,7 +126,6 @@ import scipy
 from scipy import ndimage, signal
 
 from usbmd import Config
-
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import (
@@ -445,10 +444,14 @@ class Pipeline:
         if self.ops.__name__ == "numpy":
             return func(data)
         elif self.ops.__name__ == "tensorflow":
-            on_device_tf = importlib.import_module("usbmd.backend.tensorflow").on_device_tf
+            on_device_tf = importlib.import_module(
+                "usbmd.backend.tensorflow"
+            ).on_device_tf
             return on_device_tf(func, data, device=device, return_numpy=return_numpy)
         elif self.ops.__name__ == "torch":
-            on_device_torch = importlib.import_module("usbmd.backend.pytorch").on_device_torch
+            on_device_torch = importlib.import_module(
+                "usbmd.backend.pytorch"
+            ).on_device_torch
             return on_device_torch(func, data, device=device, return_numpy=return_numpy)
         else:
             raise ValueError("Unsupported operations package.")
@@ -553,6 +556,14 @@ class Pipeline:
                         "cuda"
                     ), f"device should be 'cpu' or 'cuda:*', got {device}"
             return device
+
+
+@ops_registry("identity")
+class Identity(Operation):
+    """Identity operation."""
+
+    def process(self, data):
+        return data
 
 
 @ops_registry("beamform")
