@@ -186,14 +186,26 @@ def _write_datasets(
     data_group = dataset.create_group(data_group_name)
     data_group.attrs["description"] = "This group contains the data."
 
-    n_frames = first_not_none_item(
-        [raw_data, aligned_data, envelope_data, beamformed_data, image_sc, image]
-    ).shape[0]
-    n_tx = _first_not_none_shape([raw_data, aligned_data], axis=1)
-    n_ax = _first_not_none_shape([raw_data], axis=-3)
-    n_el = _first_not_none_shape([raw_data], axis=-2)
-    n_ch = _first_not_none_shape([raw_data], axis=-1)
-
+    if n_frames is None:
+        n_frames = first_not_none_item(
+            [raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc]
+        ).shape[0]
+    if n_tx is None:
+        n_tx = _first_not_none_shape([raw_data, aligned_data], axis=1)
+    if n_ax is None:
+        n_ax = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
+    if n_ax is None:
+        n_ax = _first_not_none_shape([envelope_data, image, image_sc], axis=-2)
+    if n_el is None:
+        n_el = _first_not_none_shape([raw_data], axis=-3)
+    if n_ch is None:
+        n_ch = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
+    if n_tx is None:
+        n_tx = _first_not_none_shape([t0_delays, focus_distances, polar_angles], axis=0)
+    if n_el is None:
+        n_el = _first_not_none_shape([t0_delays], axis=1)
+    if n_el is None:
+        n_el = _first_not_none_shape([probe_geometry], axis=0)
     if n_tx is None:
         n_tx = 1
 
