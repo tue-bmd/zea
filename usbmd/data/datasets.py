@@ -18,6 +18,7 @@ import json
 import sys
 from pathlib import Path
 
+import h5py
 import numpy as np
 import tqdm
 from deepdiff import DeepDiff
@@ -222,10 +223,13 @@ class DataSet:
         Returns:
             dict: The scan parameters.
         """
-        if self.file is None and file_idx is None:
-            self.file = self.get_file(0)
-        elif file_idx is not None:
-            self.file = self.get_file(file_idx)
+        if isinstance(file_idx, h5py.File):
+            self.file = file_idx
+        else:
+            if self.file is None and file_idx is None:
+                self.file = self.get_file(0)
+            elif file_idx is not None:
+                self.file = self.get_file(file_idx)
 
         scan_parameters = {}
         if "scan" in self.file:
