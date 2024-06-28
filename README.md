@@ -137,3 +137,65 @@ plt.figure()
 plt.imshow(image, cmap="gray")
 
 ```
+
+You can also make use of the `USBMDDataSet` class to load and process multiple files at once.
+We will have to manually initialize the `Scan` and `Probe` classes and pass them to the `Process` class. This was done automatically in the `DataloaderUI` in the first example.
+
+```python
+import matplotlib.pyplot as plt
+
+import usbmd
+from usbmd import setup
+from usbmd.data import USBMDDataSet
+from usbmd.probes import Probe
+from usbmd.processing import Process
+from usbmd.scan import Scan
+from usbmd.utils import update_dictionary
+
+# let's check if your usbmd version is up to date
+assert usbmd.__version__ >= "2.0", "Please update usbmd to version 2.0 or higher"
+
+# choose your config file with all your settings
+config_path = "configs/config_picmus_rf.yaml"
+users_paths = "users.yaml"
+config = setup(config_path, users_paths)
+
+# intialize the dataset
+dataset = USBMDDataSet(config.data)
+
+# get scan and probe parameters from the dataset and config
+file_scan_params = dataset.get_scan_parameters_from_file()
+file_probe_params = dataset.get_probe_parameters_from_file()
+config_scan_params = config.scan
+
+# merging of manual config and dataset scan parameters
+scan_params = update_dictionary(file_scan_params, config_scan_params)
+scan = Scan(**scan_params)
+probe = Probe(**file_probe_params)
+process = Process(config=config, scan=scan, probe=probe)
+
+# initialize the processing pipeline
+process.set_pipeline(
+    operation_chain=[
+        {"name": "beamform"},
+        {"name": "demodulate"},
+        {"name": "envelope_detect"},
+        {"name": "downsample"},
+        {"name": "normalize"},
+        {"name": "log_compress"},
+    ],
+)
+
+# pick a frame from the dataset
+file_idx = 0
+frame_idx = 10
+data = dataset[(file_idx, frame_idx)]
+
+# process the data
+image = process.run(data)
+
+# plot the image
+plt.figure()
+plt.imshow(image, cmap="gray")
+plt.show()
+```
