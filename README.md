@@ -49,7 +49,8 @@ config_path = "configs/config_picmus_rf.yaml"
 
 # setup function handles local data paths, default config settings and GPU usage
 # make sure to create your own users.yaml using usbmd/datapaths.py
-config = setup(config_path, "users.yaml")
+users_paths = "users.yaml"
+config = setup(config_path, users_paths, create_user=True)
 
 # initialize the DataloaderUI class with your config
 ui = DataLoaderUI(config)
@@ -74,8 +75,11 @@ from usbmd.processing import Process
 # choose your config file
 # all necessary settings should be in the config file
 config_path = "configs/config_picmus_rf.yaml"
-# setup_config only loads, validates and sets defauls in the config file
-config = setup(config_path, "users.yaml")
+
+# setup function handles local data paths, default config settings and GPU usage
+# make sure to create your own users.yaml using usbmd/datapaths.py
+users_paths = "users.yaml"
+config = setup(config_path, users_paths, create_user=True)
 
 # we now manually point to our data
 data_path = "Z:/Ultrasound-BMd/data/USBMD_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
@@ -157,8 +161,11 @@ assert usbmd.__version__ >= "2.0", "Please update usbmd to version 2.0 or higher
 
 # choose your config file with all your settings
 config_path = "configs/config_picmus_rf.yaml"
+
+# setup function handles local data paths, default config settings and GPU usage
+# make sure to create your own users.yaml using usbmd/datapaths.py
 users_paths = "users.yaml"
-config = setup(config_path, users_paths)
+config = setup(config_path, users_paths, create_user=True)
 
 # intialize the dataset
 dataset = USBMDDataSet(config.data)
