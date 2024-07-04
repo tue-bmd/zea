@@ -31,7 +31,7 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
         - Collection of metadata.
     """
     # Load image and save info
-    # pylint: disable=used-before-assignment
+    # pylint: disable=possibly-used-before-assignment
     image = sitk.ReadImage(str(filepath))
 
     all_metadata = {}
