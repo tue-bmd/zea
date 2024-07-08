@@ -314,6 +314,14 @@ class TOF_layer(torch.nn.Module):
         return self._t0_delays.to(self.device)
 
     @property
+    def tx_apodizations(self):
+        """The transmit apodizations of shape `(n_tx, n_el)`."""
+        self.register_buffer(
+            "_tx_apodizations", torch.from_numpy(self.scan.tx_apodizations)
+        )
+        return self._tx_apodizations.to(self.device)
+
+    @property
     def sound_speed(self):
         """The speed of sound in m/s."""
         self.register_buffer(
@@ -396,6 +404,7 @@ class TOF_layer(torch.nn.Module):
                 x[b],
                 self.grid,
                 self.t0_delays,
+                self.tx_apodizations,
                 self.sound_speed,
                 self.probe_geometry,
                 self.initial_times,
@@ -430,6 +439,7 @@ class TOF_layer(torch.nn.Module):
         data,
         grid,
         t0_delays,
+        tx_apodizations,
         sound_speed,
         probe_geometry,
         initial_times,
@@ -444,6 +454,8 @@ class TOF_layer(torch.nn.Module):
             grid (torch.Tensor): Pixel locations x, y, z of shape `(n_z, n_x, 3)`
             t0_delays (torch.Tensor): Times at which the elements fire shifted such
                 that the first element fires at t=0 of shape `(n_tx, n_el)`
+            tx_apodizations (torch.Tensor): Transmit apodizations of shape
+                `(n_tx, n_el)`
             c (float): Speed-of-sound.
             probe_geometry (torch.Tensor): Element positions x, y, z of shape
             (num_samples, 3)
@@ -497,6 +509,7 @@ class TOF_layer(torch.nn.Module):
         txdel, rxdel = self.calculate_delays(
             flatgrid,
             t0_delays,
+            tx_apodizations,
             probe_geometry,
             initial_times,
             sampling_frequency,
@@ -549,6 +562,7 @@ class TOF_layer(torch.nn.Module):
         self,
         grid,
         t0_delays,
+        tx_apodizations,
         probe_geometry,
         initial_times,
         sampling_frequency,
@@ -575,6 +589,8 @@ class TOF_layer(torch.nn.Module):
             t0_delays (torch.Tensor): The transmit delays in seconds of shape
                 `(n_tx, n_el)`, shifted such that the smallest delay is 0. Defaults to
                 None.
+            tx_apodizations (torch.Tensor): The transmit apodizations of shape
+                `(n_tx, n_el)`.
             probe_geometry (torch.Tensor): The positions of the transducer elements of shape
                 `(n_el, 3)`.
             initial_times (torch.Tensor): The probe transmit time offsets of shape
@@ -607,7 +623,11 @@ class TOF_layer(torch.nn.Module):
                 distance_to_pixels = distance_Tx_planewave(grid, polar_angles[tx])
             else:
                 distance_to_pixels = distance_Tx_generic(
-                    grid, t0_delays[tx], probe_geometry, sound_speed
+                    grid,
+                    t0_delays[tx],
+                    tx_apodizations[tx],
+                    probe_geometry,
+                    sound_speed,
                 )
 
             tx_distances.append(distance_to_pixels[..., None])
@@ -778,7 +798,9 @@ def distance_Tx_planewave(grid, angle):
     return dist
 
 
-def distance_Tx_generic(grid, t0_delays, probe_geometry, sound_speed=1540):
+def distance_Tx_generic(
+    grid, t0_delays, tx_apodization, probe_geometry, sound_speed=1540
+):
     """
     Computes distance to user-defined pixels for generic transmits based on
     the t0_delays.
@@ -788,6 +810,8 @@ def distance_Tx_generic(grid, t0_delays, probe_geometry, sound_speed=1540):
             `(n_pix, 3)`
         t0_delays (torch.Tensor): The transmit delays in seconds of shape `(n_el,)`,
             shifted such that the smallest delay is 0. Defaults to None.
+        tx_apodization (torch.Tensor): The transmit apodizations of shape
+            `(n_el,)`.
         probe_geometry (torch.Tensor): The positions of the transducer elements of shape
             `(n_el, 3)`.
         sound_speed (float): The speed of sound in m/s. Defaults to 1540.
@@ -817,9 +841,15 @@ def distance_Tx_generic(grid, t0_delays, probe_geometry, sound_speed=1540):
     dy = y - ele_y
     dz = z - ele_z
 
+    # Define an infinite offset for elements that do not fire to not consider them in
+    # the transmit distance calculation.
+    offset = torch.where(tx_apodization == 0, torch.inf, 0.0)
+
     # Compute the distance between the elements and the pixels of shape
     # (n_pix, n_el)
-    dist = t0_delays[None] * sound_speed + torch.sqrt(dx**2 + dy**2 + dz**2)
+    dist = (
+        t0_delays[None] * sound_speed + torch.sqrt(dx**2 + dy**2 + dz**2) + offset[None]
+    )
 
     # Compute the effective distance of the pixels to the wavefront by
     # computing the smallest distance over all the elements. This is the wave
