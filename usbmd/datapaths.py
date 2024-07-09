@@ -341,9 +341,7 @@ def _build_user_profile_string(data_paths, local: bool = None):
         raise ValueError("local should set to a boolean or None.")
 
 
-def _to_write_user_profile_to_file(user_profile_string, user_config_path=None):
-    if user_config_path is None:
-        user_config_path = DEFAULT_USERS_CONFIG_PATH
+def _to_write_user_profile_to_file(user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH):
     with open(user_config_path, "a", encoding="utf-8") as file:
         file.write("\n\n" + user_profile_string + "\n")
     print(
