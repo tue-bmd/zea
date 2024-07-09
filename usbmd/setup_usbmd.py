@@ -17,7 +17,7 @@ import yaml
 
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
-from usbmd.datapaths import set_data_paths
+from usbmd.datapaths import create_new_user, set_data_paths
 from usbmd.utils import log
 from usbmd.utils.device import init_device
 from usbmd.utils.git_info import get_git_summary
@@ -30,6 +30,7 @@ def setup(
     verbose: bool = True,
     disable_config_check: bool = False,
     loader=yaml.FullLoader,
+    create_user: bool = False,
 ):
     """General setup function for usbmd. Loads config, sets data paths and
     initializes gpu if available. Will return config object.
@@ -44,6 +45,8 @@ def setup(
             Defaults to False. Can be set to True if you are using some other config that
             does not have to adhere to usbmd config standards.
         loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
+        create_user (bool, optional): whether to create a new user. Defaults to False.
+            If True, it will prompt the user to enter their datapaths.
     Returns:
         config (dict): config object / dict.
     """
@@ -55,6 +58,10 @@ def setup(
         disable_config_check=disable_config_check,
         loader=loader,
     )
+
+    # Prompt user to enter datapath information
+    if create_user:
+        create_new_user(user_config, local=config.data.local)
 
     # Set data paths
     config.data.user = set_data_paths(user_config, local=config.data.local)
