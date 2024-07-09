@@ -184,15 +184,42 @@ class DataSet:
         return file
 
     def get_frame_no(self, frame_no=None):
-        """set frame number"""
+        """Sets the frame number(s)
+
+        Bit of logic to handle different types of frame numbers.
+
+        Frame number can be an integer, a list of integers or 'all'.
+        - If 'all' is given, a list of all frame numbers is returned.
+        - If None is given, the first frame is returned, only if there is only
+            one frame in the dataset.
+
+        Args:
+            frame_no (int, list, str): Frame number(s) to retrieve.
+        Returns:
+            int, list: Frame number(s) to retrieve.
+        """
         if self.num_frames == 1:
+            # just pick the only frame in the file
             frame_no = 0
+            return frame_no
+
+        assert (
+            frame_no is not None
+        ), "Frame number should be set if num_frames in dataset > 1."
+
+        error_msg = "Frame number should be an integer, list of integers or 'all'."
+        type_msg = f"Frame number should be between 0 and {self.num_frames - 1}."
+
+        if isinstance(frame_no, str):
+            assert frame_no == "all", error_msg
+            frame_no = list(range(self.num_frames))
+        elif isinstance(frame_no, int):
+            assert 0 <= frame_no < self.num_frames, type_msg
         else:
-            if frame_no is None:
-                if self.config.get("frame_no") is None:
-                    frame_no = int(input(f"Frame number (0 / {self.num_frames - 1}): "))
-                else:
-                    frame_no = self.config.frame_no
+            # assert iterable (list, tuple, array, etc.)
+            assert hasattr(frame_no, "__iter__"), error_msg
+            frame_no = [int(frame) for frame in frame_no]
+            assert all(0 <= frame < self.num_frames for frame in frame_no), type_msg
         return frame_no
 
     @classmethod
@@ -282,8 +309,8 @@ class USBMDDataSet(DataSet):
 
         data = self.file[f"data/{self.dtype}"]
 
-        if self.frame_no == "all":
-            data = data[:]
+        if isinstance(self.frame_no, list):
+            data = data[self.frame_no]
             get_check(self.dtype)(data, with_batch_dim=True)
         else:
             data = data[self.frame_no]
