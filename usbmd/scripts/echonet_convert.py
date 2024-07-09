@@ -1,11 +1,10 @@
+import os
 from concurrent.futures import ProcessPoolExecutor
 
-import os
-import numpy as np
 import h5py
-from tqdm import tqdm
+import numpy as np
 from scipy.interpolate import griddata
-
+from tqdm import tqdm
 from usbmd.data import generate_usbmd_dataset
 
 
@@ -120,7 +119,7 @@ def segment(tensor, number_erasing=0, min_clip=0):
 
 
 def accept_shape(tensor):
-    """Acceptance algorithm that determines whether to reject an image 
+    """Acceptance algorithm that determines whether to reject an image
     based on left and right corner data.
 
     Args:
@@ -130,7 +129,7 @@ def accept_shape(tensor):
         decision (bool): Whether or not the tensor should be rejected.
 
     """
-    
+
     decision = True
 
     # Test one, check if left bottom corner is populated with values
@@ -151,7 +150,7 @@ def accept_shape(tensor):
 
     # List all the values
     counter = []
-    for i in range(len(cols)):
+    for i, _ in enumerate(cols):
         counter += [tensor[rows_bot[i] : rows_top[i], cols[i]]]
 
     flattened_counter = [float(item) for sublist in counter for item in sublist]
@@ -177,7 +176,7 @@ def rotate_coordinates(data_points, degrees):
        rotated_points (ndarray): the rotated data_points.
 
     """
-    
+
     angle_radians = np.radians(degrees)
     cos_angle = np.cos(angle_radians)
     sin_angle = np.sin(angle_radians)
@@ -187,20 +186,21 @@ def rotate_coordinates(data_points, degrees):
 
     return rotated_points.T
 
+
 def cartesian_to_polar_matrix(
     cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
 ):
-    """Function that converts a timeseries of a cartesian cone to a polar representation 
+    """Function that converts a timeseries of a cartesian cone to a polar representation
     that is more compatible with CNN's/action selection.
     Args:
-        cartesian_matrix (3d array): (N, 112, 112) matrix containing time sequence 
+        cartesian_matrix (3d array): (N, 112, 112) matrix containing time sequence
         of image_sc data.
-        tip (tuple, optional): coordinates (in indices) of the tip of the cone. 
+        tip (tuple, optional): coordinates (in indices) of the tip of the cone.
         Defaults to (61, 7).
         r_max (int, optional): expected radius of the cone. Defaults to 107.
-        angle (float, optional): expected angle of the cone, will be used as 
+        angle (float, optional): expected angle of the cone, will be used as
         (-angle, angle). Defaults to 0.79.
-        interpolation (str, optional): _description_. Defaults to 'nearest'. 
+        interpolation (str, optional): _description_. Defaults to 'nearest'.
         can be [nearest, linear, cubic]
 
     Returns:
@@ -221,12 +221,12 @@ def cartesian_to_polar_matrix(
 
     # Define new points to sample from in the region of the data.
     # R_max and Theta are found manually. R_max differs from the number of rows in EchoNet!
-    R = np.linspace(0, r_max, rows)
-    Theta = np.linspace(-angle, angle, cols)
-    R, Theta = np.meshgrid(R, Theta)
+    r = np.linspace(0, r_max, rows)
+    theta = np.linspace(-angle, angle, cols)
+    r, theta = np.meshgrid(r, theta)
 
-    x_polar = R * np.cos(Theta)
-    y_polar = R * np.sin(Theta)
+    x_polar = r * np.cos(theta)
+    y_polar = r * np.sin(theta)
     new_points = np.column_stack((x_polar.ravel(), y_polar.ravel()))
 
     # Interpolate and reshape to 2D matrix
@@ -240,6 +240,10 @@ def cartesian_to_polar_matrix(
 if __name__ == "__main__":
 
     class H5Processor:
+        """
+        Stores a few variables and pathes to allow for hyperthreading.
+        """
+
         def __init__(self, path_in, path_out, path_out_h5, num_val=500, num_test=500):
             self.path_in = path_in
             self.path_out = path_out
@@ -252,6 +256,9 @@ if __name__ == "__main__":
                 os.makedirs(os.path.join(path_out_h5, folder), exist_ok=True)
 
         def process_h5_file(self, h5file):
+            """
+            Processes a single file using the class variables and the filename given.
+            """
             with h5py.File(os.path.join(self.path_in, h5file), "r") as file:
                 tensor = file["data/image_sc"][:]
                 tensor = normalize(tensor)
@@ -317,23 +324,23 @@ if __name__ == "__main__":
                     )
             return
 
-    path_in = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonet"
-    path_out = "/mnt/z/Ultrasound-BMd/data/....."  ##########
-    path_out_h5 = "/mnt/z/Ultrasound-BMd/data/....."
+    PATH_IN = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonet"
+    PATH_OUT = "/mnt/z/Ultrasound-BMd/data/....."  ##########
+    PATH_OUT_H5 = "/mnt/z/Ultrasound-BMd/data/....."
 
     # List the files that have an entry in path_out_h5 already
     files_done = []
-    for _, _, filenames in os.walk(path_out_h5):
+    for _, _, filenames in os.walk(PATH_OUT_H5):
         for filename in filenames:
             files_done.append(filename)
     # List all files of echonet and exclude those already processed
-    h5_files = os.listdir(path_in)
+    h5_files = os.listdir(PATH_IN)
     h5_files = [
         file for file in h5_files if file.endswith(".hdf5") and file not in files_done
     ]
     print(f"Files left to process: {len(h5_files)}")
 
-    processor = H5Processor(path_in, path_out, path_out_h5)
+    processor = H5Processor(PATH_IN, PATH_OUT, PATH_OUT_H5)
     with ProcessPoolExecutor() as executor:
         results = list(
             tqdm(executor.map(processor.process_h5_file, h5_files), total=len(h5_files))
