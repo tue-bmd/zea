@@ -1,15 +1,22 @@
+from concurrent.futures import ProcessPoolExecutor
+
 import os
 import numpy as np
 import h5py
 from tqdm import tqdm
 from scipy.interpolate import griddata
-from scipy.ndimage import map_coordinates
-from concurrent.futures import ProcessPoolExecutor
 
 from usbmd.data import generate_usbmd_dataset
 
 
 def normalize(file):
+    """Normalizes the values from [-60, 0] to [0, 1]
+    Args:
+        file (ndarray): Input images [N, 112, 112]
+    Returns:
+        file (ndarray): Output images [N, 112, 112]
+
+    """
     # convert from [-60,0] to [0,1]
     file = (file + 60) / 60
     return file
@@ -113,7 +120,8 @@ def segment(tensor, number_erasing=0, min_clip=0):
 
 
 def accept_shape(tensor):
-    """Acceptance algorithm that determines whether to reject an image based on left and right corner data.
+    """Acceptance algorithm that determines whether to reject an image 
+    based on left and right corner data.
 
     Args:
         tensor (ndarray): Input image (sc) with 2 dimensions. (112, 112)
@@ -122,7 +130,6 @@ def accept_shape(tensor):
         decision (bool): Whether or not the tensor should be rejected.
 
     """
-    
     
     decision = True
 
@@ -180,18 +187,21 @@ def rotate_coordinates(data_points, degrees):
 
     return rotated_points.T
 
-
 def cartesian_to_polar_matrix(
     cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
 ):
-    """Function that converts a timeseries of a cartesian cone to a polar representation that is more compatible with CNN's/action selection.
-
+    """Function that converts a timeseries of a cartesian cone to a polar representation 
+    that is more compatible with CNN's/action selection.
     Args:
-        cartesian_matrix (3d array): (N, 112, 112) matrix containing time sequence of image_sc data.
-        tip (tuple, optional): coordinates (in indices) of the tip of the cone. Defaults to (61, 7).
+        cartesian_matrix (3d array): (N, 112, 112) matrix containing time sequence 
+        of image_sc data.
+        tip (tuple, optional): coordinates (in indices) of the tip of the cone. 
+        Defaults to (61, 7).
         r_max (int, optional): expected radius of the cone. Defaults to 107.
-        angle (float, optional): expected angle of the cone, will be used as (-angle, angle). Defaults to 0.79.
-        interpolation (str, optional): _description_. Defaults to 'nearest'. can be [nearest, linear, cubic]
+        angle (float, optional): expected angle of the cone, will be used as 
+        (-angle, angle). Defaults to 0.79.
+        interpolation (str, optional): _description_. Defaults to 'nearest'. 
+        can be [nearest, linear, cubic]
 
     Returns:
         polar_matrix (3d array): polar conversion of the input.
