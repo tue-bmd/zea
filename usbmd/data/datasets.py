@@ -616,6 +616,7 @@ class DummyDataset(DataSet):
         self.n_ax = 2048
         self.n_tx = 75
         self.Nz = 128
+        self.num_frames = 4
 
     def __len__(self):
         """
