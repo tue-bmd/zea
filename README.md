@@ -206,3 +206,21 @@ plt.figure()
 plt.imshow(image, cmap="gray")
 plt.show()
 ```
+
+For batch processing you can request multiple frames from the `USBMDDataSet` class. For the `Process` we need to set a pipeline `with_batch_dim` processing set to True.
+
+```python
+file_idx = 0
+
+# the following are now all valid `frame_idx` examples
+frame_idx = 1 # just asking for a single frame
+frame_idx = (0, 1, 2, 3) # asking for multiple frames
+frame_idx = 'all' # return all frames of the file specified with `file_idx` in the dataset
+data = dataset[(file_idx, frame_idx)]
+
+# now it is wise to do inform the process class that we are processing a batch with `with_batch_dim=True`
+# unless you picked a single frame with `frame_idx` then you can set it to False
+process.set_pipeline(operation_chain=operation_chain, with_batch_dim=True)
+
+images = process.run(data)
+```
