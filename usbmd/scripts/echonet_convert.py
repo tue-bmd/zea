@@ -1,3 +1,13 @@
+"""
+Script to convert the EchoNet database to .npy and USBMD formats.
+Parameters to set:
+PATH_IN = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonet" (input)
+PATH_OUT = "/mnt/z/Ultrasound-BMd/data/....."  (Numpy output)
+PATH_OUT_H5 = "/mnt/z/Ultrasound-BMd/data/....." (Usbmd output)
+
+All proper subfolders are created in the script at these locations.
+"""
+
 import os
 from concurrent.futures import ProcessPoolExecutor
 
@@ -150,8 +160,8 @@ def accept_shape(tensor):
 
     # List all the values
     counter = []
-    for i, _ in enumerate(cols):
-        counter += [tensor[rows_bot[i] : rows_top[i], cols[i]]]
+    for i, col in enumerate(cols):
+        counter += [tensor[rows_bot[i] : rows_top[i], col]]
 
     flattened_counter = [float(item) for sublist in counter for item in sublist]
     # Sort and exclude the first 50 (likely artifacts)
@@ -322,7 +332,6 @@ if __name__ == "__main__":
                         probe_name="generic",
                         description="EchoNet dataset converted to USBMD format",
                     )
-            return
 
     PATH_IN = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonet"
     PATH_OUT = "/mnt/z/Ultrasound-BMd/data/....."  ##########
