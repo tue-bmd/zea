@@ -664,6 +664,22 @@ class Mean(Operation):
         return self.ops.mean(data, axis=self.axis)
 
 
+@ops_registry("sum")
+class Sum(Operation):
+    """Sum the input data along a specific axis."""
+
+    def __init__(self, axis=0, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
+            **kwargs,
+        )
+        self.axis = axis
+
+    def process(self, data):
+        return self.ops.sum(data, axis=self.axis)
+
+
 @ops_registry("normalize")
 class Normalize(Operation):
     """Normalize data to a given range."""
