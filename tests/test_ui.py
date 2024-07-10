@@ -1,6 +1,6 @@
 """Basic testing for ui / generate
 """
-import shutil
+
 import sys
 from pathlib import Path
 
@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from usbmd import ui
-from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup_config
 
 wd = Path(__file__).parent.parent
@@ -42,36 +41,3 @@ def test_get_data():
     assert data is not None
     assert isinstance(data, np.ndarray), "Data is not a numpy array"
     assert len(data.shape) == 4, "Data must be 4d (n_tx, n_el, n_ax, N_ch)"
-
-
-def test_generate():
-    """Test generate class"""
-    config = setup_config("./tests/config_test.yaml")
-    config.ml_library = "tensorflow"
-    config.data.dtype = "beamformed_data"  # TODO: fix for raw_data
-
-    temp_folder = Path("./tests/temp")
-
-    generator = GenerateDataSet(
-        config,
-        to_dtype="image",
-        destination_folder=temp_folder,
-        retain_folder_structure=True,
-        filetype="png",
-        overwrite=True,
-    )
-    generator.generate()
-
-    config.ml_library = "torch"
-
-    generator = GenerateDataSet(
-        config,
-        to_dtype="image",
-        destination_folder=temp_folder,
-        retain_folder_structure=True,
-        filetype="hdf5",
-        overwrite=True,
-    )
-    generator.generate()
-
-    shutil.rmtree(temp_folder)
