@@ -21,16 +21,16 @@ from PIL import Image
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
-from usbmd.datasets import get_dataset
+from usbmd import Config
+from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.usbmd_gui import USBMDApp
-from usbmd.utils import log
+from usbmd.utils import log, save_to_gif, save_to_mp4, strtobool, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES
-from usbmd.utils.config import Config
+from usbmd.utils.gui import USBMDApp
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
@@ -39,7 +39,6 @@ from usbmd.utils.io_lib import (
     running_in_notebook,
     start_async_app,
 )
-from usbmd.utils.utils import save_to_gif, save_to_mp4, strtobool, update_dictionary
 
 
 class DataLoaderUI:
@@ -58,27 +57,40 @@ class DataLoaderUI:
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
-        default_scan_params = self.dataset.get_default_scan_parameters()
+        file_scan_params = self.dataset.get_scan_parameters_from_file()
+        file_probe_params = self.dataset.get_probe_parameters_from_file()
 
-        if len(default_scan_params) == 0:
+        self.scan = None
+        if len(file_scan_params) == 0:
             log.info(
                 f"Could not find proper scan parameters in {self.dataset} at "
                 f"{log.yellow(str(self.dataset.datafolder))}."
             )
             log.info("Proceeding without scan class.")
-
-            self.scan = None
         else:
             config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
-            scan_params = update_dictionary(default_scan_params, config_scan_params)
-            self.scan = scan_class(**scan_params)
+            scan_params = update_dictionary(file_scan_params, config_scan_params)
+            try:
+                self.scan = scan_class(**scan_params)
+            except Exception:
+                log.error(
+                    f"Could not initialize scan class with parameters: {scan_params}"
+                )
 
         # initialize probe
-        self.probe = get_probe(self.dataset.get_probe_name())
+        probe_name = self.dataset.get_probe_name()
+
+        if probe_name == "generic":
+            self.probe = get_probe(probe_name, **file_probe_params)
+        else:
+            self.probe = get_probe(probe_name)
 
         # intialize process class
         self.process = Process(self.config, self.scan, self.probe)
+        # initialize a second process class for postprocessing (faster this way)
+        self.process_image = Process(self.config, self.scan, self.probe)
+        self.process_image.device = "cpu"
 
         # initialize attributes for UI class
         self.data = None
@@ -105,7 +117,6 @@ class DataLoaderUI:
         else:
             window_name = "usbmd"
 
-        # if not self.headless:
         if self.plot_lib == "opencv":
             self.image_viewer = ImageViewerOpenCV(
                 self.data_to_display,
@@ -142,8 +153,12 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                log.warning("Could not connect to display, running headless.")
+                self.plot_lib = "matplotlib"  # force matplotlib in headless mode
+                log.warning(
+                    "Could not connect to display, running headless (using matplotlib)."
+                )
         else:
+            # self.plot_lib = "matplotlib"  # force matplotlib in headless mode
             matplotlib.use("agg")
             log.info("Running in headless mode as set by config.")
 
@@ -174,6 +189,7 @@ class DataLoaderUI:
                 )
             filtetype = self.dataset.filetype
             initialdir = self.dataset.data_root
+            log.info("Please select file from window dialog...")
             self.file_path = filename_from_window_dialog(
                 f"Choose .{filtetype} file",
                 filetypes=((filtetype, "*." + filtetype),),
@@ -192,10 +208,20 @@ class DataLoaderUI:
                 f"Chosen datafile {self.file_path} does not exist in dataset!"
             )
 
-        if self.config.data.get("frame_no") == "all":
-            log.info("Will run all frames as `all` was chosen in config...")
+        # grab frame number from config or user input if not set in config
+        frame_no = self.config.data.get("frame_no")
 
-        data = self.dataset[file_idx]
+        if frame_no == "all":
+            log.info("Will run all frames as `all` was chosen in config...")
+        elif frame_no is None:
+            frame_no = _try(
+                lambda: int(
+                    input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
+                )
+            )
+
+        # get data from dataset
+        data = self.dataset[(file_idx, frame_no)]
 
         return data
 
@@ -222,11 +248,15 @@ class DataLoaderUI:
             else:
                 to_dtype = self.to_dtype
 
-            self.image = self.process.run(
-                self.data,
-                dtype=self.dtype,
-                to_dtype=to_dtype,
-            )
+            if self.process.pipeline is None:
+                if self.config.preprocess.operation_chain is None:
+                    self.process.set_pipeline(dtype=self.dtype, to_dtype=to_dtype)
+                else:
+                    self.process.set_pipeline(
+                        operation_chain=self.config.preprocess.operation_chain
+                    )
+
+            self.image = self.process.run(self.data)
 
             if self.process.postprocess:
                 self.image = self.process.postprocess.run(self.image[None, ..., None])
@@ -237,11 +267,9 @@ class DataLoaderUI:
             self.image = self.data
 
         if self.to_dtype == "image_sc":
-            self.image = self.process.run(
-                self.image,
-                dtype="image",
-                to_dtype="image_sc",
-            )
+            if self.process_image.pipeline is None:
+                self.process_image.set_pipeline(dtype="image", to_dtype="image_sc")
+            self.image = self.process_image.run(self.image)
 
         # match orientation if necessary
         if self.config.plot.fliplr:
@@ -286,12 +314,6 @@ class DataLoaderUI:
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
-        if self.headless:
-            image = self.data_to_display(data)
-            if save:
-                self.save_image(image)
-            return image
-
         assert self.image_viewer is not None, "Image viewer not initialized."
 
         self.image_viewer.threading = False
@@ -444,7 +466,7 @@ class DataLoaderUI:
                             return images
                     # For matplotlib, check if window has been closed
                     elif self.plot_lib == "matplotlib":
-                        if cv2.waitKey(25) and self.image_viewer.has_been_closed():
+                        if time.sleep(0.025) and self.image_viewer.has_been_closed():
                             return images
                     # For headless mode, check if all frames have been plotted
                     if self.headless:
@@ -500,7 +522,9 @@ class DataLoaderUI:
         elif isinstance(fig, Image.Image):
             fig.save(path)
         else:
-            raise ValueError("Figure is not PIL image or matplotlib figure object.")
+            raise ValueError(
+                f"Figure is not PIL image or matplotlib figure object, got {type(fig)}"
+            )
 
         if self.verbose:
             log.info(f"Image saved to {log.yellow(path)}")
@@ -539,6 +563,25 @@ class DataLoaderUI:
             log.info(f"Video saved to {log.yellow(path)}")
 
 
+def _try(fn, args=None, required_set=None):
+    """Keep trying to run a function until it succeeds.
+    Args:
+        fn (function): function to run
+        args (dict, optional): arguments to pass to function
+        required_set (set, optional): set of required outputs
+            if output is not in required_set, function will be rerun
+    """
+    while True:
+        try:
+            out = fn(**args) if args is not None else fn()
+            if required_set is not None:
+                assert out is not None
+                assert out in required_set, f"Output {out} not in {required_set}"
+            return out
+        except Exception as e:
+            print(e)
+
+
 def get_args():
     """Command line argument parser"""
     parser = argparse.ArgumentParser(description="Process ultrasound data.")
@@ -567,6 +610,8 @@ def main():
     if args.task == "run":
         ui = DataLoaderUI(config)
 
+        log.info(f"Using {config.ml_library} backend")
+
         if args.gui:
             log.warning(
                 "GUI is very much in beta, please report any bugs to "
@@ -593,11 +638,23 @@ def main():
             ui.run(plot=True)
 
     elif args.task == "generate":
-        destination_folder = input(">> Give destination folder path: ")
-        to_dtype = input(f">> Specify data type \n{_DATA_TYPES}: ")
-        retain_folder_structure = input(">> Retain folder structure? (Y/N): ")
-        retain_folder_structure = strtobool(retain_folder_structure)
-        filetype = input(">> Filetype (hdf5, png): ")
+        destination_folder = _try(
+            lambda: input(
+                ">> Give destination folder path"
+                + " (if relative path, will be relative to the original dataset): "
+            )
+        )
+        to_dtype = _try(
+            lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
+            required_set=_DATA_TYPES,
+        )
+        retain_folder_structure = _try(
+            lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
+        )
+        filetype = _try(
+            lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
+        )
+
         generator = GenerateDataSet(
             config,
             to_dtype=to_dtype,
