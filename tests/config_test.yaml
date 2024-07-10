@@ -3,11 +3,12 @@ model:
   beamformer:
     type: das
 data:
-  file_path: 'dummy_file_1.hdf5'
-  dataset_name: 'dummy'
-  dtype: 'raw_data'
+  file_path: dummy_file_1.hdf5
+  dataset_name: dummy
+  dtype: raw_data
   dynamic_range: [-60, 0]
-  dataset_folder: 'dummy_folder'
+  dataset_folder: dummy_folder
+  frame_no: 0
 
 scan:
   xlims: [-0.019, 0.019]
@@ -15,9 +16,9 @@ scan:
   selected_transmits: 1
 
 # The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)
-device: 'cpu'
+device: cpu
 # The machine learning library to use ('torch', 'tensorflow')
-ml_library: 'torch'
+ml_library: torch
 
 plot:
   save: false
