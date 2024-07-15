@@ -53,9 +53,6 @@ ENV POETRY_NO_INTERACTION=1 \
 WORKDIR /ultrasound-toolbox
 COPY . /ultrasound-toolbox/
 
-# Create a symbolic link to the ultrasound-toolbox directory
-RUN mkdir /usbmd && ln -s /ultrasound-toolbox /usbmd
-
 ARG KERAS3=False
 # Install additional packages if KERAS3=True
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
