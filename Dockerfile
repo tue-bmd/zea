@@ -56,7 +56,7 @@ COPY . /ultrasound-toolbox/
 ARG KERAS3=False
 # Install additional packages if KERAS3=True
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
-        poetry install; \
-    else \
         poetry install --with torch,tensorflow,jax; \
+    else \
+        poetry install; \
     fi
