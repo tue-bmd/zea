@@ -7,6 +7,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Prevent python from writing pyc files
 ENV PYTHONDONTWRITEBYTECODE=1
 
+# Install sudo
+RUN apt-get update && apt-get install -y sudo
+
 # Add non-root users
 ARG BASE_UID=1000
 ARG NUM_USERS=51
@@ -22,10 +25,9 @@ RUN for i in $(seq 0 $NUM_USERS); do \
     done
 
 # Install python, pip, git, opencv dependencies, ffmpeg, imagemagick, and ssh keyscan github
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip git python3-tk pipx \
+RUN apt-get install -y python3 python3-pip git python3-tk pipx \
                        libsm6 libxext6 libxrender-dev libqt5gui5 \
-                       ffmpeg imagemagick sudo && \
+                       ffmpeg imagemagick && \
     python3 -m pip install pip -U && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
