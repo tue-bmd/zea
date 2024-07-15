@@ -1,7 +1,7 @@
 """Module for defining aliases for ops module."""
 
 # pylint: skip-file
-import importlib
+import importlib.util
 
 """Convert Tensorflow ops to numpy ops syntax used in main ops module."""
 if importlib.util.find_spec("tensorflow"):

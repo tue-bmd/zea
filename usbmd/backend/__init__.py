@@ -1,6 +1,6 @@
 """Loads the environment variable USBMD_BACKEND can import the corresponding backend."""
 
-import importlib
+import importlib.util
 
 from usbmd.utils.checks import _BACKENDS
 
