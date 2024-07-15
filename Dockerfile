@@ -7,20 +7,6 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Prevent python from writing pyc files
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Set pip cache directory
-ENV PIP_CACHE_DIR=/tmp/pip_cache
-
-# Install python, pip, git, opencv dependencies, ffmpeg, imagemagick, and ssh keyscan github
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip git python3-tk \
-                       libsm6 libxext6 libxrender-dev libqt5gui5 \
-                       ffmpeg imagemagick sudo && \
-    python3 -m pip install pip -U && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts && \
-    ln -s /usr/bin/python3 /usr/bin/python
-
 # Add non-root users
 ARG BASE_UID=1000
 ARG NUM_USERS=51
@@ -35,6 +21,24 @@ RUN for i in $(seq 0 $NUM_USERS); do \
         chmod 0440 /etc/sudoers.d/$USERNAME; \
     done
 
+# Install python, pip, git, opencv dependencies, ffmpeg, imagemagick, and ssh keyscan github
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip git python3-tk pipx \
+                       libsm6 libxext6 libxrender-dev libqt5gui5 \
+                       ffmpeg imagemagick sudo && \
+    python3 -m pip install pip -U && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts && \
+    ln -s /usr/bin/python3 /usr/bin/python
+
+# Install poetry and set environment variables
+RUN pipx install poetry==1.8.3
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=0 \
+    POETRY_VIRTUALENVS_CREATE=0 \
+    POETRY_CACHE_DIR=/opt/.cache
+
 # Set working directory
 WORKDIR /ultrasound-toolbox
 COPY . /ultrasound-toolbox/
@@ -42,19 +46,10 @@ COPY . /ultrasound-toolbox/
 # Create a symbolic link to the ultrasound-toolbox directory
 RUN mkdir /usbmd && ln -s /ultrasound-toolbox /usbmd
 
-# Install usbmd
-RUN --mount=type=cache,target=$PIP_CACHE_DIR pip install -e .[test,linter] --config-settings editable_mode=compat
-
 ARG KERAS3=False
 # Install additional packages if KERAS3=True
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
-        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 && \
-        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision && \
-        pip install --upgrade keras==3.1.1 && \
-        pip install --upgrade keras-cv && \
-        pip install wandb albumentations torchmetrics ax-platform && \
-        # Fix for: https://github.com/albumentations-team/albumentations/issues/1785
-        pip uninstall opencv-python-headless opencv-python -y && \
-        pip install opencv-python; \
+RUN --mount=type=cache,target=$POETRY_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
+        poetry install; \
+    else \
+        poetry install --with torch,tensorflow,jax; \
     fi
