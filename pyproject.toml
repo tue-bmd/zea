@@ -1,8 +1,79 @@
 [tool.black]
 line-length = 88
 target-version = ['py39']
-include = '\.pyi?$|\.ipynb$'  # Include both Python files and Jupyter notebooks
+include = '\.pyi?$|\.ipynb$' # Include both Python files and Jupyter notebooks
 
 [tool.isort]
 profile = "black"
 line_length = 88
+
+[tool.poetry]
+name = "usbmd"
+version = "2.0.0"
+description = "A collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts for ultrasound researchers."
+authors = ["Tristan Stevens <t.s.w.stevens@tue.nl>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+matplotlib = "^3.8"
+numpy = "^1"
+scipy = "^1.13"
+pillow = "^10"
+scikit-image = "^0.23"
+scikit-learn = "^1.4"
+h5py = "^3.11"
+pandas = "^2.2"
+opencv-python = "^4"
+schema = "^0.7"
+tqdm = "^4"
+pyyaml = "^6"
+decorator = "^5"
+flask = "^3"
+futures3 = "^1"
+tk = "^0.1"
+pydicom = "^2.4"
+PyQt5 = "^5.15"
+bm3d = "^4"
+deepdiff = "^7"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1"
+pylint = "^3.1"
+
+[tool.poetry.group.torch]
+optional = true
+
+# Torch is temporarily on CPU because of CUDA mismatch
+[tool.poetry.group.torch.dependencies]
+torch = { version = "^2.3+cpu", source = "torch-cpu" }
+torchvision = { version = "^0.18+cpu", source = "torch-cpu" }
+
+[tool.poetry.group.tensorflow]
+optional = true
+
+[tool.poetry.group.tensorflow.dependencies]
+"tensorflow" = { version = "^2.16", extras = ["and-cuda"] }
+"tensorflow-probability" = "^0.24"
+"tf-keras" = "^2.16"
+"keras-cv" = "^0.9"
+
+[tool.poetry.group.jax]
+optional = true
+
+[tool.poetry.group.jax.dependencies]
+"jax" = { version = "^0.4", extras = ["cuda12"] }
+
+[[tool.poetry.source]]
+name = "torch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
+
+[[tool.poetry.source]]
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
