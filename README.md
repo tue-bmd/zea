@@ -63,6 +63,7 @@ plt.imshow(image, cmap="gray")
 plt.show()
 ```
 
+### Loading a single file
 The `DataloaderUI` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
 We do this by manually loading a single usbmd file with `load_usbmd_file` and processing it with the `Process` class.
 ```python
@@ -142,6 +143,8 @@ plt.imshow(image, cmap="gray")
 
 ```
 
+### Handling multiple files (i.e. datasets)
+
 You can also make use of the `USBMDDataSet` class to load and process multiple files at once.
 We will have to manually initialize the `Scan` and `Probe` classes and pass them to the `Process` class. This was done automatically in the `DataloaderUI` in the first example.
 
@@ -205,4 +208,23 @@ image = process.run(data)
 plt.figure()
 plt.imshow(image, cmap="gray")
 plt.show()
+```
+
+### Batch processing
+For batch processing you can request multiple frames from the `USBMDDataSet` class. For the `Process` we need to set a pipeline `with_batch_dim` processing set to True.
+
+```python
+file_idx = 0
+
+# the following are now all valid `frame_idx` examples
+frame_idx = 1 # just asking for a single frame
+frame_idx = (0, 1, 2, 3) # asking for multiple frames
+frame_idx = 'all' # return all frames of the file specified with `file_idx` in the dataset
+data = dataset[(file_idx, frame_idx)]
+
+# now it is wise to do inform the process class that we are processing a batch with `with_batch_dim=True`
+# unless you picked a single frame with `frame_idx` then you can set it to False
+process.set_pipeline(operation_chain=operation_chain, with_batch_dim=True)
+
+images = process.run(data)
 ```

@@ -60,21 +60,25 @@ class DataLoaderUI:
         file_scan_params = self.dataset.get_scan_parameters_from_file()
         file_probe_params = self.dataset.get_probe_parameters_from_file()
 
+        self.scan = None
         if len(file_scan_params) == 0:
             log.info(
                 f"Could not find proper scan parameters in {self.dataset} at "
                 f"{log.yellow(str(self.dataset.datafolder))}."
             )
             log.info("Proceeding without scan class.")
-
-            self.scan = None
         else:
             self.config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
             self.scan_params = update_dictionary(
                 file_scan_params, self.config_scan_params
             )
-            self.scan = scan_class(**self.scan_params)
+            try:
+                self.scan = scan_class(**self.scan_params)
+            except Exception:
+                log.error(
+                    f"Could not initialize scan class with parameters: {self.scan_params}"
+                )
 
         # initialize probe
         probe_name = self.dataset.get_probe_name()
@@ -206,10 +210,20 @@ class DataLoaderUI:
                 f"Chosen datafile {self.file_path} does not exist in dataset!"
             )
 
-        if self.config.data.get("frame_no") == "all":
-            log.info("Will run all frames as `all` was chosen in config...")
+        # grab frame number from config or user input if not set in config
+        frame_no = self.config.data.get("frame_no")
 
-        data = self.dataset[file_idx]
+        if frame_no == "all":
+            log.info("Will run all frames as `all` was chosen in config...")
+        elif frame_no is None:
+            frame_no = _try(
+                lambda: int(
+                    input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
+                )
+            )
+
+        # get data from dataset
+        data = self.dataset[(file_idx, frame_no)]
 
         ## Update scan class (probably a cleaner way to do this)
         # check if event data by checking self.dataset.file keys start with event
