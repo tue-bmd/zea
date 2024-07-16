@@ -487,12 +487,14 @@ def _assert_scan_keys_present(dataset):
             shape_dataset = dataset["scan"][key].size
 
         else:
+            correct_shape = None
             logging.warning(f"No validation has been defined for {key}.")
 
-        assert shape_dataset == correct_shape, (
-            f"`{key}` does not have the correct shape. "
-            f"Expected shape: {correct_shape}, got shape: {shape_dataset}"
-        )
+        if correct_shape is not None:
+            assert shape_dataset == correct_shape, (
+                f"`{key}` does not have the correct shape. "
+                f"Expected shape: {correct_shape}, got shape: {shape_dataset}"
+            )
 
 
 def _assert_unit_and_description_present(hdf5_file, _prefix=""):
