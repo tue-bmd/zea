@@ -150,6 +150,11 @@ def _write_datasets(
     azimuth_angles=None,
     bandwidth_percent=None,
     time_to_next_transmit=None,
+    tgc_gain_curve=None,
+    element_width=None,
+    tx_waveform_indices=None,
+    waveforms_one_way=None,
+    waveforms_two_way=None,
     additional_elements=None,
     **kwargs,
 ):
@@ -422,6 +427,66 @@ def _write_datasets(
         unit="s",
     )
 
+    _add_dataset(
+        group_name=scan_group_name,
+        name="tgc_gain_curve",
+        data=tgc_gain_curve,
+        description=(
+            "The time-gain-compensation that was applied to every sample in the "
+            "raw_data of shape (n_ax,). Divide by this curve to undo the TGC."
+        ),
+        unit="unitless",
+    )
+
+    _add_dataset(
+        group_name=scan_group_name,
+        name="element_width",
+        data=element_width,
+        description="The width of the elements in the probe in meters.",
+        unit="m",
+    )
+
+    if tx_waveform_indices is not None and (
+        waveforms_one_way is not None or waveforms_two_way is not None
+    ):
+        _add_dataset(
+            group_name="scan",
+            name="tx_waveform_indices",
+            data=tx_waveform_indices,
+            description=(
+                "Transmit indices for waveforms, indexing waveforms_one_way "
+                "and waveforms_two_way. This indicates which transmit waveform was "
+                "used for each transmit event."
+            ),
+            unit="-",
+        )
+        n_waveforms = len(waveforms_one_way)
+        for n, waveform_1way, waveform_2way in zip(
+            range(n_waveforms), waveforms_one_way, waveforms_two_way
+        ):
+            _add_dataset(
+                group_name="scan/waveforms_one_way",
+                name=f"waveform_{str(n).zfill(3)}",
+                data=waveform_1way,
+                description=(
+                    "One-way waveform as simulated by the Verasonics system, "
+                    "sampled at 250MHz. This is the waveform after being filtered "
+                    "by the tranducer bandwidth once."
+                ),
+                unit="V",
+            )
+            _add_dataset(
+                group_name="scan/waveforms_two_way",
+                name=f"waveform_{str(n).zfill(3)}",
+                data=waveform_2way,
+                description=(
+                    "Two-way waveform as simulated by the Verasonics system, "
+                    "sampled at 250MHz. This is the waveform after being filtered "
+                    "by the tranducer bandwidth twice."
+                ),
+                unit="V",
+            )
+
     # Add additional elements
     if additional_elements is not None:
         for element in additional_elements:
@@ -456,11 +521,15 @@ def generate_usbmd_dataset(
     tx_apodizations=None,
     bandwidth_percent=None,
     time_to_next_transmit=None,
+    tgc_gain_curve=None,
+    element_width=None,
+    tx_waveform_indices=None,
+    waveforms_one_way=None,
+    waveforms_two_way=None,
     additional_elements=None,
     event_structure=False,
 ):
-    """
-    Generates a dataset in the USBMD format.
+    """Generates a dataset in the USBMD format.
 
     Args:
         path (str): The path to write the dataset to.
@@ -495,6 +564,19 @@ def generate_usbmd_dataset(
             percentage of the center frequency.
         time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s
             of shape (n_frames, n_tx).
+        tgc_gain_curve (np.ndarray): The TGC gain that was applied to every sample in the
+            raw_data of shape (n_ax).
+        element_width (float): The width of the elements in the probe in meters of
+            shape (n_tx,).
+        tx_waveform_indices (np.ndarray): Transmit indices for waveforms, indexing
+            waveforms_one_way and waveforms_two_way. This indicates which transmit
+            waveform was used for each transmit event.
+        waveforms_one_way (list): List of one-way waveforms as simulated by the Verasonics
+            system, sampled at 250MHz. This is the waveform after being filtered by the
+            tranducer bandwidth once. Every element in the list is a 1D numpy array.
+        waveforms_two_way (list): List of two-way waveforms as simulated by the Verasonics
+            system, sampled at 250MHz. This is the waveform after being filtered by the
+            tranducer bandwidth twice. Every element in the list is a 1D numpy array.
         additional_elements (List[DatasetElement]): A list of additional dataset
             elements to be added to the dataset. Each element should be a DatasetElement
             object. The additional elements are added under the scan group.
