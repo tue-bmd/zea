@@ -585,6 +585,10 @@ class Beamform(Operation):
         if self.beamformer is not None:
             return
 
+        assert (
+            self.config.model.beamformer is not None
+        ), "Beamformer is not set in the config, please set the beamformer type."
+
         beamformer_type = self.config.model.beamformer.type
         # pylint: disable=import-outside-toplevel
         if self.ops.__name__ == "torch":
