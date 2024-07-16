@@ -616,6 +616,11 @@ def generate_usbmd_dataset(
         "tx_apodizations": tx_apodizations,
         "bandwidth_percent": bandwidth_percent,
         "time_to_next_transmit": time_to_next_transmit,
+        "tgc_gain_curve": tgc_gain_curve,
+        "element_width": element_width,
+        "tx_waveform_indices": tx_waveform_indices,
+        "waveforms_one_way": waveforms_one_way,
+        "waveforms_two_way": waveforms_two_way,
         "additional_elements": additional_elements,
     }
 
