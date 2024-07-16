@@ -102,7 +102,14 @@ class GenerateDataSet:
 
         # intialize process class
         self.process = Process(self.config, self.scan, self.probe)
-        self.process.set_pipeline(dtype=self.config.data.dtype, to_dtype=self.to_dtype)
+        if self.config.preprocess.operation_chain is None:
+            self.process.set_pipeline(
+                dtype=self.config.data.dtype, to_dtype=self.to_dtype
+            )
+        else:
+            self.process.set_pipeline(
+                operation_chain=self.config.preprocess.operation_chain
+            )
 
         if self.dataset.datafolder is None:
             self.dataset.datafolder = Path(".")
@@ -141,7 +148,8 @@ class GenerateDataSet:
             desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
         ):
             try:
-                data = self.dataset[idx]
+                frame_no = "all"
+                data = self.dataset[(idx, frame_no)]
 
                 single_frame = False
                 if self.config.data.dtype in ["raw_data", "aligned_data"]:
