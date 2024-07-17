@@ -80,6 +80,12 @@ def test_generate(ml_library, dtype, to_dtype, filetype):
     config.ml_library = ml_library
     config.data.dtype = dtype
 
+    # setting sum_transmits to False and operation_chain to None
+    # that way we can use the default operation chain that
+    # automatically checks the dtype and to_dtype
+    config.model.beamformer.sum_transmits = False
+    config.preprocess.operation_chain = None
+
     temp_folder = Path("./tests/temp")
     shutil.rmtree(temp_folder, ignore_errors=True)
 

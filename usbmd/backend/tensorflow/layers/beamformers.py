@@ -219,7 +219,7 @@ class DAS_layer(BeamSumming):
         x = tf.reduce_sum(self.rx_apo * inputs, axis=-2)
         # sum transmits, i.e. Compounding
         x = self.tx_apo * x
-        if not self.sum_transmits:
+        if self.sum_transmits:
             x = tf.reduce_sum(x, axis=1)
         return {"beamformed": x}
 
