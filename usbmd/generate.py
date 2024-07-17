@@ -70,6 +70,7 @@ class GenerateDataSet:
                 "Cannot save to png if to_dtype is not image. "
                 "Please set filetype to hdf5."
             )
+        self.overwrite = overwrite
 
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
@@ -128,11 +129,13 @@ class GenerateDataSet:
                 )
 
         if self.destination_folder.exists():
-            if not overwrite:
-                raise ValueError(
-                    f"Cannot create dataset in {self.destination_folder}, folder"
-                    " already exists!"
+            if self.overwrite:
+                log.warning(
+                    "Possibly overwriting files existing folder "
+                    f"{self.destination_folder}. "
+                    "Press enter to continue..."
                 )
+                input()
 
     def generate(self):
         """Generate the dataset.
@@ -175,19 +178,26 @@ class GenerateDataSet:
                             name = base_name.parent / str(i)
 
                         path = self.get_path_from_name(name, ".png")
+                        if self.skip_path(path):
+                            pbar.update(1)
+                            continue
 
                         image = self.process.run(image)
                         self.save_image(np.squeeze(image), path)
                         pbar.update(1)
 
                 elif self.filetype == "hdf5":
+                    path = self.get_path_from_name(base_name, ".hdf5")
+                    if self.skip_path(path):
+                        pbar.update(data.shape[0])
+                        continue
+
                     data_list = []
                     for d in data:
                         d = self.process.run(d)
                         data_list.append(d)
                         pbar.update(1)
                     data = np.stack(data_list, axis=0)
-                    path = self.get_path_from_name(base_name, ".hdf5")
                     self.save_data(data, path)
             except Exception as e:
                 log.error(f"Error processing {base_name}: {e}")
@@ -195,6 +205,20 @@ class GenerateDataSet:
 
         log.success(f"Created dataset in {self.destination_folder}")
         return True
+
+    def skip_path(self, path):
+        """Check if path exists and if we should skip it.
+        Skips when file exists and overwrite is False.
+        Overwrites when file exists and overwrite is True.
+        Nothing happens when file does not exist, we will proceed.
+        """
+        if path.is_file() and not self.overwrite:
+            log.warning(f"Skipping {path}, already exists.")
+            return True
+        elif path.is_file() and self.overwrite:
+            log.warning(f"Overwriting {path}.")
+            path.unlink()
+        return False
 
     def get_path_from_name(self, name, suffix):
         """Simple helper function that return proper path"""
