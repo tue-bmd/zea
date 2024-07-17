@@ -53,10 +53,20 @@ ENV POETRY_NO_INTERACTION=1 \
 WORKDIR /ultrasound-toolbox
 COPY . /ultrasound-toolbox/
 
-ARG KERAS3=False
-# Install additional packages if KERAS3=True
-RUN --mount=type=cache,target=$POETRY_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
-        poetry install --with torch,tensorflow,jax; \
+ARG DEV=False
+# Install additional packages if DEV=True
+RUN --mount=type=cache,target=$POETRY_CACHE_DIR if [ "$DEV" = "True" ]; then \
+        # Create a virtual environment for jax
+        python -m venv /opt/dev-tf-jax && \
+        cd /ultrasound-toolbox/envs/dev-tf-jax && \
+        poetry env use /opt/dev-tf-jax && \
+        poetry install && \
+        # Create a virtual environment for torch
+        python -m venv /opt/dev-torch && \
+        cd /ultrasound-toolbox/envs/dev-torch && \
+        poetry env use /opt/dev-torch && \
+        poetry install; \
     else \
+        # Just install usbmd without ml libraries
         poetry install; \
     fi

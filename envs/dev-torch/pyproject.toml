@@ -1,0 +1,18 @@
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+usbmd = { path = "../../", develop = true }
+torch = { version = "^2.3", source = "torch-cu121" }
+torchvision = { version = "^0.18", source = "torch-cu121" }
+tensorflow = "^2.16"
+tensorflow-probability = "^0.24"
+tf-keras = "^2.16"
+keras-cv = "^0.9"
+jax = "^0.4"
+
+[[tool.poetry.source]]
+name = "torch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
