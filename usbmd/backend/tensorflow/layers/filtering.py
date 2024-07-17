@@ -5,13 +5,14 @@
 """
 import numpy as np
 import tensorflow as tf
+import tf_keras as keras
 
 # It is TF convention to define layers in the build method
 # pylint: disable=attribute-defined-outside-init
 # pylint: disable=arguments-differ
 
 
-class Filter1DLayer(tf.keras.layers.Layer):
+class Filter1DLayer(keras.layers.Layer):
     """Base class for 1D filtering layers"""
 
     def __init__(self, filter_weights, axis=-1, trainable=False, **kwargs):
@@ -29,12 +30,12 @@ class Filter1DLayer(tf.keras.layers.Layer):
     def build(self, input_shape):
         """Build the filter layer"""
 
-        self.filter_layer = tf.keras.layers.Conv1D(
+        self.filter_layer = .layers.Conv1D(
             filters=1,
             kernel_size=len(self.filter_weights),
             padding="same",
             use_bias=False,
-            kernel_initializer=tf.keras.initializers.Constant(self.filter_weights),
+            kernel_initializer=keras.initializers.Constant(self.filter_weights),
             trainable=self.trainable,
             name="filter_layer",
         )

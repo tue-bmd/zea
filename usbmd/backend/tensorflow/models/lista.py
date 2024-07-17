@@ -6,11 +6,11 @@ Date          : 03/02/2022
 """
 
 # pylint: disable=abstract-method
-import tensorflow as tf
-from keras import Input
-from keras import backend as K
-from keras.layers import Add, Conv2D, UpSampling2D
+import tf_keras as keras
 from tensorflow.python.keras.layers import Layer
+from tf_keras import Input
+from tf_keras import backend as K
+from tf_keras.layers import Add, Conv2D, UpSampling2D
 
 from usbmd.backend.tensorflow.layers.utils import get_activation
 from usbmd.registry import post_processing_registry
@@ -90,7 +90,7 @@ def UnfoldingModel(
     )(x_thresh)
     out = get_activation(activation)(out)
 
-    return tf.keras.Model(inputs=inp, outputs=out)
+    return keras.Model(inputs=inp, outputs=out)
 
 
 class Prox(Layer):
