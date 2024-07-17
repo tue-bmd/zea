@@ -200,7 +200,7 @@ def _write_datasets(
             [raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc]
         ).shape[0]
     if n_tx is None:
-        n_tx = _first_not_none_shape([raw_data, aligned_data], axis=-4)
+        n_tx = _first_not_none_shape([raw_data, aligned_data], axis=1)
     if n_ax is None:
         n_ax = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
     if n_ax is None:
@@ -222,7 +222,7 @@ def _write_datasets(
         group_name=data_group_name,
         name="raw_data",
         data=_convert_datatype(raw_data),
-        description="The raw_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
+        description="The raw_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).",
         unit="unitless",
     )
 
@@ -230,7 +230,7 @@ def _write_datasets(
         group_name=data_group_name,
         name="aligned_data",
         data=_convert_datatype(aligned_data),
-        description="The aligned_data of shape (n_frames, n_tx, n_el, n_ax, n_ch).",
+        description="The aligned_data of shape (n_frames, n_tx, n_ax, n_el, n_ch).",
         unit="unitless",
     )
 

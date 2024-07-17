@@ -175,6 +175,13 @@ class Operation(ABC):
         self.probe = None
 
     @property
+    def name(self):
+        """Return the name of the registered operation."""
+        names = ops_registry.registry.keys()
+        classes = ops_registry.registry.values()
+        return list(names)[list(classes).index(self.__class__)]
+
+    @property
     def ops(self):
         """Get the operations package used in the operation."""
         assert self._ops is not None, "ops package is not set"
@@ -501,6 +508,8 @@ class Pipeline:
         for operation in self.operations:
             operation.initialize()
 
+        self._beamformer_warning()
+
     def compile(self, jit=True):
         """Compile the pipeline using jit."""
         if not jit:
@@ -559,6 +568,29 @@ class Pipeline:
                     ), f"device should be 'cpu' or 'cuda:*', got {device}"
             return device
 
+    def _beamformer_warning(self):
+        """Check if Sum() operation is detected after Beamform() operation."""
+        # if so and Beamform sum_transmits property is True, raise a warning
+        if any(operation.name == "beamform" for operation in self.operations):
+            beamform_index = [
+                i
+                for i, operation in enumerate(self.operations)
+                if operation.name == "beamform"
+            ][0]
+            if self.operations[beamform_index + 1].name != "sum":
+                return
+            if self.operations[beamform_index]._ready is False:
+                return
+            if not self.operations[beamform_index].beamformer.sum_transmits:
+                return
+
+            log.warning(
+                "Sum() operation detected after Beamform() operation with "
+                "sum_transmits=True. This will sum the data along the batch "
+                "dimension, which might not be the expected behavior."
+                "Consider removing the Sum() operation or setting sum_transmits=False."
+            )
+
 
 @ops_registry("identity")
 class Identity(Operation):
@@ -594,7 +626,7 @@ class Beamform(Operation):
             return
 
         assert (
-            self.config.model.beamformer is not None
+            self.config.model.beamformer
         ), "Beamformer is not set in the config, please set the beamformer type."
 
         beamformer_type = self.config.model.beamformer.type
