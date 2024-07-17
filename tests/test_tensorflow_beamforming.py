@@ -157,7 +157,7 @@ def test_dynamic_beamforming():
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        n_ax=2048,
+        n_ax=2046,
         sampling_frequency=probe_parameters["sampling_frequency"],
         center_frequency=probe_parameters["center_frequency"],
         angles=np.array(
