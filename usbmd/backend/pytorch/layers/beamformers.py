@@ -99,13 +99,22 @@ class Beamformer(torch.nn.Module):
         #: The time-of-flight correction layer.
         self.tof_layer = TOF_layer(probe, scan, config.model.batch_size)
         #: The delay-and-sum layer, which performs the beamsumming.
-        self.das_layer = DAS_layer()
+        self.das_layer = DAS_layer(
+            sum_transmits=self.config.model.beamformer.sum_transmits
+        )
 
         # Store modules in module dictionary to properly register them
         #: A `torch.nn.ModuleDict` containing all the modules of the beamformer.
         self.all_modules = torch.nn.ModuleDict(
             {"tof_layer": self.tof_layer, "das_layer": self.das_layer}
         )
+
+    @property
+    def sum_transmits(self):
+        """Whether beamformer sums the transmits or not.
+        If not returns aligned_data, else returns beamformed_data.
+        """
+        return self.das_layer.sum_transmits
 
     def forward(self, data, scan=None, probe=None):
         """Applies delay and sum beamforming to the input data by first applying
@@ -170,10 +179,11 @@ class DAS_layer(torch.nn.Module):
     and transmits to compute the final beamformed image.
     """
 
-    def __init__(self, rx_apo=None, tx_apo=None):
+    def __init__(self, rx_apo=None, tx_apo=None, sum_transmits=True):
         super().__init__()
         self.rx_apo = rx_apo if rx_apo else 1
         self.tx_apo = tx_apo if tx_apo else 1
+        self.sum_transmits = sum_transmits
 
     def forward(self, x):
         """Performs DAS beamforming on tof-corrected input.
@@ -190,7 +200,9 @@ class DAS_layer(torch.nn.Module):
         x = torch.sum(self.rx_apo * x, dim=-2)
 
         # Sum over transmits, i.e. Compounding
-        x = torch.sum(self.tx_apo * x, dim=1)
+        x = self.tx_apo * x
+        if self.sum_transmits:
+            x = torch.sum(x, dim=1)
 
         return x
 
