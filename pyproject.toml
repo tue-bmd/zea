@@ -53,7 +53,7 @@ decorator = "^5"
 tk = "^0.1"
 pydicom = "^2.4"
 PyQt5 = "^5.15"
-bm3d = "^4"
+bm3d = "==4.0.1" # 4.0.2: `GLIBCXX_3.4.32' not found
 deepdiff = "^7"
 
 [tool.poetry.group.torch]
@@ -68,10 +68,12 @@ optional = true
 
 [tool.poetry.group.tensorflow.dependencies]
 tensorflow = { version = "^2.16", extras = ["and-cuda"] }
+tf-keras = "^2.16"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.1"
 pylint = "^3.1"
+papermill = "^2.4"
 
 [[tool.poetry.source]]
 name = "torch-cpu"
