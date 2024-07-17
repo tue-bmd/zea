@@ -268,10 +268,15 @@ class DataLoaderUI:
 
             if self.process.pipeline is None:
                 if self.config.preprocess.operation_chain is None:
-                    self.process.set_pipeline(dtype=self.dtype, to_dtype=to_dtype)
+                    self.process.set_pipeline(
+                        dtype=self.dtype,
+                        to_dtype=to_dtype,
+                        verbose=self.verbose,
+                    )
                 else:
                     self.process.set_pipeline(
-                        operation_chain=self.config.preprocess.operation_chain
+                        operation_chain=self.config.preprocess.operation_chain,
+                        verbose=self.verbose,
                     )
 
             self.image = self.process.run(self.data)
@@ -669,9 +674,12 @@ def main():
         retain_folder_structure = _try(
             lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
         )
-        filetype = _try(
-            lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
-        )
+        if to_dtype in ["image", "image_sc"]:
+            filetype = _try(
+                lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
+            )
+        else:
+            filetype = "hdf5"
 
         generator = GenerateDataSet(
             config,
