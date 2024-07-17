@@ -11,6 +11,7 @@ Example:
 """
 
 from pathlib import Path
+from typing import Union
 
 import numpy as np
 import tqdm
@@ -32,7 +33,7 @@ class GenerateDataSet:
         self,
         config,
         to_dtype: str = "image",
-        destination_folder: str = None,
+        destination_folder: Union[None, str] = None,
         retain_folder_structure: bool = True,
         filetype: str = "hdf5",
         overwrite: bool = False,
@@ -143,10 +144,12 @@ class GenerateDataSet:
             bool: if succesfull returns `True`.
 
         """
-        for idx in tqdm.tqdm(
-            range(len(self.dataset)),
+        total_num_frames = self.dataset.total_num_frames
+        pbar = tqdm.tqdm(
+            total=total_num_frames,
             desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
-        ):
+        )
+        for idx in range(len(self.dataset)):
             try:
                 frame_no = "all"
                 data = self.dataset[(idx, frame_no)]
@@ -175,12 +178,14 @@ class GenerateDataSet:
 
                         image = self.process.run(image)
                         self.save_image(np.squeeze(image), path)
+                        pbar.update(1)
 
                 elif self.filetype == "hdf5":
                     data_list = []
                     for d in data:
                         d = self.process.run(d)
                         data_list.append(d)
+                        pbar.update(1)
                     data = np.stack(data_list, axis=0)
                     path = self.get_path_from_name(base_name, ".hdf5")
                     self.save_data(data, path)
