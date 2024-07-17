@@ -152,7 +152,7 @@ Install anaconda from [here](https://docs.conda.io/en/latest/miniconda.html).
 To reproduce the environment on your own machine run the following commands:
 
 ```shell
-conda create -n usbmd python=3.9
+conda create -n usbmd python=3.10
 conda activate usbmd
 python -m pip install --upgrade pip
 
