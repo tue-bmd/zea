@@ -37,6 +37,7 @@ class GenerateDataSet:
         retain_folder_structure: bool = True,
         filetype: str = "hdf5",
         overwrite: bool = False,
+        verbose: bool = True,
     ):
         """
         Args:
@@ -52,6 +53,7 @@ class GenerateDataSet:
                 files in one folder. Defaults to True.
             filetype (str, optional): Filetype to save to. Defaults to "hdf5".
             overwrite (bool, optional): Whether to overwrite existing files.
+            verbose (bool, optional): Whether to print verbose output. Defaults to True.
 
         """
         self.config = Config(config)
@@ -71,6 +73,7 @@ class GenerateDataSet:
                 "Please set filetype to hdf5."
             )
         self.overwrite = overwrite
+        self.verbose = verbose
 
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
@@ -106,11 +109,14 @@ class GenerateDataSet:
         self.process = Process(self.config, self.scan, self.probe)
         if self.config.preprocess.operation_chain is None:
             self.process.set_pipeline(
-                dtype=self.config.data.dtype, to_dtype=self.to_dtype
+                dtype=self.config.data.dtype,
+                to_dtype=self.to_dtype,
+                verbose=self.verbose,
             )
         else:
             self.process.set_pipeline(
-                operation_chain=self.config.preprocess.operation_chain
+                operation_chain=self.config.preprocess.operation_chain,
+                verbose=self.verbose,
             )
 
         if self.dataset.datafolder is None:
@@ -157,25 +163,11 @@ class GenerateDataSet:
                 frame_no = "all"
                 data = self.dataset[(idx, frame_no)]
 
-                single_frame = False
-                if self.config.data.dtype in ["raw_data", "aligned_data"]:
-                    if len(data.shape) == 4:
-                        single_frame = True
-                else:
-                    if len(data.shape) == 3:
-                        single_frame = True
-
-                if single_frame:
-                    data = np.expand_dims(data, axis=0)
-
                 base_name = self.dataset.file_paths[idx]
 
                 if self.filetype == "png":
                     for i, image in enumerate(data):
-                        if single_frame:
-                            name = base_name
-                        else:
-                            name = base_name.parent / str(i)
+                        name = base_name.parent / base_name.stem / str(i)
 
                         path = self.get_path_from_name(name, ".png")
                         if self.skip_path(path):

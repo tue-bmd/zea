@@ -438,7 +438,10 @@ def _assert_scan_keys_present(dataset):
 
     # Ensure that all keys have the correct shape
     for key in dataset["scan"].keys():
-        shape_dataset = dataset["scan"][key].shape
+        if isinstance(dataset["scan"][key], h5py.Group):
+            shape_dataset = None
+        else:
+            shape_dataset = dataset["scan"][key].shape
 
         if key == "probe_geometry":
             correct_shape = (dataset["scan"]["n_el"][()], 3)
