@@ -11,12 +11,13 @@
 # do not add them, and we get an arguments-differ warning. Disabling the latter seemed to be the
 # better option.
 
-import keras.backend as K
 import numpy as np
 import tensorflow as tf
-from keras.layers import Conv2D, Input, Lambda
-from keras.models import Model
-from keras.regularizers import l2
+import tf_keras as keras
+import tf_keras.backend as K
+from tf_keras.layers import Conv2D, Input, Lambda
+from tf_keras.models import Model
+from tf_keras.regularizers import l2
 
 from usbmd.backend.tensorflow.layers.beamformers import BeamSumming
 from usbmd.backend.tensorflow.losses import SMSLE
@@ -40,7 +41,7 @@ def antirect(x):
     return tf.nn.crelu(x)
 
 
-class Prox(tf.keras.layers.Layer):
+class Prox(keras.layers.Layer):
     """Proximal operator layer"""
 
     def __init__(self, proxtype=0, **kwargs):
@@ -126,7 +127,7 @@ def fmodel(input_shape, channels, kernel_size, activation):
     return Model(inputs=inputs, outputs=outputs)
 
 
-class simpleUnet(tf.keras.layers.Layer):
+class simpleUnet(keras.layers.Layer):
     """Simple U-net model"""
 
     def __init__(self, n_layers=4):
@@ -160,7 +161,7 @@ class simpleUnet(tf.keras.layers.Layer):
         return x
 
 
-class WaveletProx(tf.keras.layers.Layer):
+class WaveletProx(keras.layers.Layer):
     """Wavelet proximal operator layer"""
 
     def __init__(self, fold_nr, **kwargs):
@@ -190,7 +191,7 @@ class WaveletProx(tf.keras.layers.Layer):
         return x_out
 
 
-class FourierProx(tf.keras.layers.Layer):
+class FourierProx(keras.layers.Layer):
     """Fourier domain proximal operator layer"""
 
     def __init__(self):
@@ -394,9 +395,9 @@ if __name__ == "__main__":
     y = np.repeat(y, N, axis=0)
     x = np.repeat(x, N, axis=0)
 
-    inputs = tf.keras.layers.Input(input_shape)
+    inputs = keras.layers.Input(input_shape)
     outputs = NeuralMAP(4, (1, 1), intermediate_outputs=False)(inputs)
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    model = keras.Model(inputs=inputs, outputs=outputs)
 
     x_pred = model(np.expand_dims(y[0], 0))
 

@@ -59,6 +59,7 @@ from typing import Tuple
 
 import numpy as np
 import tensorflow as tf
+import tf_keras as keras
 
 from usbmd.backend.tensorflow.utils.utils import tf_snapshot
 from usbmd.registry import tf_beamformer_registry
@@ -72,7 +73,7 @@ def get_beamformer(probe, scan, config):
     return model
 
 
-class Beamformer(tf.keras.Model):
+class Beamformer(keras.Model):
     """Beamformer model"""
 
     def __init__(self, probe, scan, config, stateful=True):
@@ -158,7 +159,7 @@ class Beamformer(tf.keras.Model):
         return {"beamformed": beamformed_data}
 
 
-class BeamSumming(tf.keras.layers.Layer):
+class BeamSumming(keras.layers.Layer):
     """Base class for beamsumming layers"""
 
     def __init__(self, probe=None, scan=None, config=None, **kwargs):
@@ -205,7 +206,7 @@ class DAS_layer(BeamSumming):
         return {"beamformed": compounded}
 
 
-class TOFLayer(tf.keras.layers.Layer):
+class TOFLayer(keras.layers.Layer):
     """Time-flight-correction layer"""
 
     def __init__(

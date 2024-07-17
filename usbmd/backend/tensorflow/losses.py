@@ -3,11 +3,12 @@
 - **Author(s)**     : Ben Luijten
 - **Date**          : -
 """
-import keras.backend as K
-import tensorflow as tf
+
+import tf_keras as keras
+import tf_keras.backend as K
 
 
-class SMSLE(tf.keras.losses.Loss):
+class SMSLE(keras.losses.Loss):
     """Loss function for calculating the Signed-Mean-Squared-Logarithmic-Error. This loss function
     calculates the the mean squared error on log-scaled data, and then takes the sign of the
     difference between the predicted and ground truth values into account.
