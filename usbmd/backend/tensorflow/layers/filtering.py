@@ -3,9 +3,11 @@
 - **Author(s)**     : Ben Luijten
 - **Date**          : Thu Jun 1st 2023
 """
+
 import numpy as np
 import tensorflow as tf
 import tf_keras as keras
+from tf_keras import layers
 
 # It is TF convention to define layers in the build method
 # pylint: disable=attribute-defined-outside-init
@@ -30,7 +32,7 @@ class Filter1DLayer(keras.layers.Layer):
     def build(self, input_shape):
         """Build the filter layer"""
 
-        self.filter_layer = .layers.Conv1D(
+        self.filter_layer = layers.Conv1D(
             filters=1,
             kernel_size=len(self.filter_weights),
             padding="same",
