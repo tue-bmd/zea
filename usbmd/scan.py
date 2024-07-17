@@ -513,6 +513,37 @@ class Scan:
             self._Nz, self._Nx, _ = self._grid.shape
         return self._grid
 
+    def get_scan_parameters(self):
+        """Returns a dictionary with all the parameters of the scan.
+        Note that these are the parameters under the currently set selected_transmits.
+        """
+        return {
+            "n_tx": self.n_tx,
+            "n_ax": self.n_ax,
+            "n_el": self.n_el,
+            "center_frequency": self.fc,
+            "sampling_frequency": self.fs,
+            "demodulation_frequency": self.fdemod,
+            "xlims": self.xlims,
+            "ylims": self.ylims,
+            "zlims": self.zlims,
+            "bandwidth_percent": self.bandwidth_percent,
+            "sound_speed": self.sound_speed,
+            "n_ch": self.n_ch,
+            "Nx": self.Nx,
+            "Nz": self.Nz,
+            "pixels_per_wvln": self.pixels_per_wavelength,
+            "polar_angles": self.polar_angles,
+            "azimuth_angles": self.azimuth_angles,
+            "t0_delays": self.t0_delays,
+            "tx_apodizations": self.tx_apodizations,
+            "focus_distances": self.focus_distances,
+            "initial_times": self.initial_times,
+            "selected_transmits": self.selected_transmits,
+            "probe_geometry": self.probe_geometry,
+            "time_to_next_transmit": self.time_to_next_transmit,
+        }
+
 
 class FocussedScan(Scan):
     """
