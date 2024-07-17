@@ -19,7 +19,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tensorflow as tf
 import tf_keras as keras
 
 from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
