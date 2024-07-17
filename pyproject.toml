@@ -75,6 +75,7 @@ tf-keras = "^2.16"
 pytest = "^8.1"
 pylint = "^3.1"
 papermill = "^2.4"
+ipykernel = "^6.29.5"
 
 [[tool.poetry.source]]
 name = "torch-cpu"
