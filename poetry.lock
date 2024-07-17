@@ -197,19 +197,19 @@ scipy = "*"
 
 [[package]]
 name = "bm4d"
-version = "4.2.4"
+version = "4.2.3"
 description = "BM4D for correlated noise"
 optional = false
 python-versions = ">=3.5"
 files = [
-    {file = "bm4d-4.2.4-py3-none-any.whl", hash = "sha256:72cff3e7b8a71eab2f36918a3b52c98f8e5c07d2884e9cbece44156ed4861401"},
-    {file = "bm4d-4.2.4.tar.gz", hash = "sha256:8a45ab1f8aea6ad8693d24ae3e2c91bb8fa3b4c7d5c47890fd9ffe9e3b8fbb05"},
+    {file = "bm4d-4.2.3-py3-none-any.whl", hash = "sha256:752c3a5952624d760e5251ba38dd4e7e46b6e450deb7fc3bd05544128ac6c27a"},
+    {file = "bm4d-4.2.3.tar.gz", hash = "sha256:e4cd0865f304f584118b9e8af880f0f2212ae9c5aa5192cf5d96c40007659de6"},
 ]
 
 [package.dependencies]
 numpy = "*"
 PyWavelets = "*"
-scipy = ">=1.13.0"
+scipy = "*"
 
 [[package]]
 name = "certifi"
@@ -3658,4 +3658,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "032241fc0ba9797d73ddec0d80116538de28bdf4ae76b00fbb54a9fbbb7dd442"
+content-hash = "e6e06a54f09b0a6723e3c8ab3327ac3d5eedfed44d26ea82ef061da39951666f"
