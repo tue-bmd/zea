@@ -1,0 +1,18 @@
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+usbmd = { path = "../../", develop = true }
+torch = { version = "^2.3", source = "torch-cpu" }
+torchvision = { version = "^0.18", source = "torch-cpu" }
+tensorflow = { version = "^2.16", extras = ["and-cuda"] }
+tensorflow-probability = "^0.24"
+tf-keras = "^2.16"
+keras-cv = "^0.9"
+jax = { version = "^0.4", extras = ["cuda12"] }
+
+[[tool.poetry.source]]
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"

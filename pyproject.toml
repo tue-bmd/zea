@@ -56,37 +56,22 @@ PyQt5 = "^5.15"
 bm3d = "^4"
 deepdiff = "^7"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.1"
-pylint = "^3.1"
-
 [tool.poetry.group.torch]
 optional = true
 
-# Torch is temporarily on CPU because of CUDA mismatch
 [tool.poetry.group.torch.dependencies]
-torch = { version = "^2.3+cpu", source = "torch-cpu" }
-torchvision = { version = "^0.18+cpu", source = "torch-cpu" }
+# CPU only, install the dev-torch
+torch = { version = "^2.3", source = "torch-cpu" }
 
 [tool.poetry.group.tensorflow]
 optional = true
 
 [tool.poetry.group.tensorflow.dependencies]
-"tensorflow" = { version = "^2.16", extras = ["and-cuda"] }
-"tensorflow-probability" = "^0.24"
-"tf-keras" = "^2.16"
-"keras-cv" = "^0.9"
+tensorflow = { version = "^2.16", extras = ["and-cuda"] }
 
-[tool.poetry.group.jax]
-optional = true
-
-[tool.poetry.group.jax.dependencies]
-"jax" = { version = "^0.4", extras = ["cuda12"] }
-
-[[tool.poetry.source]]
-name = "torch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
-priority = "explicit"
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1"
+pylint = "^3.1"
 
 [[tool.poetry.source]]
 name = "torch-cpu"
