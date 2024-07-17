@@ -20,7 +20,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install poetry
-        run: pip install poetry
+        run: |
+          pipx install poetry==1.8.3
+          echo "/root/.local/bin" >> $GITHUB_PATH
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -28,9 +30,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: poetry
 
+      - name: Install poetry again
+        run: pipx install poetry==1.8.3
+
       - name: Install dependencies
         run: poetry install --with torch,tensorflow
 
       - name: Analysing the code with pylint
-        run: |
-          poetry run pylint $(git ls-files '*.py') -j 0
+        run: poetry run pylint $(git ls-files '*.py') -j 0
