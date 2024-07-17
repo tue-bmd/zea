@@ -51,6 +51,9 @@ def generate_example_dataset(path, add_optional_fields=False):
     n_tx = 11
     n_ch = 1
     n_frames = 2
+    sound_speed = 1540
+    center_frequency = 7e6
+    sampling_frequency = 40e6
 
     # creating some fake raw and image data
     raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
@@ -62,6 +65,7 @@ def generate_example_dataset(path, add_optional_fields=False):
     tx_apodizations = np.zeros((n_tx, n_el), dtype=np.float32)
     probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
     probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
+    initial_times = np.zeros((n_tx,), dtype=np.float32)
 
     if add_optional_fields:
         focus_distances = np.ones((n_tx,), dtype=np.float32) * np.inf
@@ -79,11 +83,11 @@ def generate_example_dataset(path, add_optional_fields=False):
         raw_data=raw_data,
         image=image,
         probe_geometry=probe_geometry,
-        sampling_frequency=40e6,
-        center_frequency=7e6,
-        initial_times=np.zeros((n_tx,)),
+        sampling_frequency=sampling_frequency,
+        center_frequency=center_frequency,
+        initial_times=initial_times,
         t0_delays=t0_delays,
-        sound_speed=1540,
+        sound_speed=sound_speed,
         tx_apodizations=tx_apodizations,
         probe_name="generic",
         focus_distances=focus_distances,
@@ -196,15 +200,15 @@ def _write_datasets(
             [raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc]
         ).shape[0]
     if n_tx is None:
-        n_tx = _first_not_none_shape([raw_data, aligned_data], axis=1)
+        n_tx = _first_not_none_shape([raw_data, aligned_data], axis=-4)
     if n_ax is None:
         n_ax = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
     if n_ax is None:
         n_ax = _first_not_none_shape([envelope_data, image, image_sc], axis=-2)
     if n_el is None:
-        n_el = _first_not_none_shape([raw_data], axis=-3)
+        n_el = _first_not_none_shape([raw_data], axis=-2)
     if n_ch is None:
-        n_ch = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
+        n_ch = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-1)
     if n_tx is None:
         n_tx = _first_not_none_shape([t0_delays, focus_distances, polar_angles], axis=0)
     if n_el is None:
