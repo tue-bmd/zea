@@ -11,8 +11,30 @@ line_length = 88
 name = "usbmd"
 version = "2.0.0"
 description = "A collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts for ultrasound researchers."
-authors = ["Tristan Stevens <t.s.w.stevens@tue.nl>"]
+authors = [
+    "Tristan Stevens <t.s.w.stevens@tue.nl>",
+    "Ben Luijten <w.m.b.luijten@tue.nl>",
+    "Nishith Chennakeshava <n.chennakeshava@tue.nl>",
+    "Vincent van de Schaft <v.v.d.schaft@tue.nl>",
+    "Oisín Nolan <o.i.nolan@tue.nl>",
+    "Wessel van Nierop <w.l.v.nierop@tue.nl>",
+    "Beatrice Federici <b.federici@tue.nl>",
+]
 readme = "README.md"
+homepage = "https://github.com/tue-bmd/ultrasound-toolbox/"
+repository = "https://github.com/tue-bmd/ultrasound-toolbox/"
+keywords = ["ultrasound", "machine learning", "beamforming"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Natural Language :: English",
+    "Topic :: Scientific/Engineering :: Ultrasound",
+    "Topic :: Scientific/Engineering :: Deep Learning",
+]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -29,8 +51,6 @@ schema = "^0.7"
 tqdm = "^4"
 pyyaml = "^6"
 decorator = "^5"
-flask = "^3"
-futures3 = "^1"
 tk = "^0.1"
 pydicom = "^2.4"
 PyQt5 = "^5.15"
