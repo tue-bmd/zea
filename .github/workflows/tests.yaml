@@ -19,17 +19,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install poetry
+        run: pip install poetry
+
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: poetry
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install poetry
-          poetry install --with torch,tensorflow
+        run: poetry install --with torch,tensorflow
 
       - name: Perform tests
         run: |
