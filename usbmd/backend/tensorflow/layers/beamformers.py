@@ -89,7 +89,7 @@ class Beamformer(tf.keras.Model):
         self.tof_layer = TOFLayer(probe, scan, config)
         self.beamsumming_layer = tf_beamformer_registry[
             config.model.beamformer.get("type", "das")  # default to DAS
-        ](probe, scan, config)
+        ](probe, scan, config, config.model.beamformer.sum_transmits)
 
         if self.patches > 1:
             self.beamform = self._beamform_patch_wise
@@ -104,6 +104,13 @@ class Beamformer(tf.keras.Model):
         if self.jit:
             log.info("JIT compiling TF Beamformer")
             self.beamform = tf.function(self.beamform, jit_compile=True)
+
+    @property
+    def sum_transmits(self):
+        """Whether beamformer sums the transmits or not.
+        If not returns aligned_data, else returns beamformed_data.
+        """
+        return self.beamsumming_layer.sum_transmits
 
     def call(self, inputs, probe=None, scan=None, **kwargs):
         """Performs beamforming on input data, based on the provided probe and scan.
@@ -181,10 +188,20 @@ class BeamSumming(tf.keras.layers.Layer):
 class DAS_layer(BeamSumming):
     """Layer that implements DAS beamforming"""
 
-    def __init__(self, probe, scan, config, rx_apo=None, tx_apo=None, **kwargs):
+    def __init__(
+        self,
+        probe,
+        scan,
+        config,
+        rx_apo=None,
+        tx_apo=None,
+        sum_transmits=False,
+        **kwargs,
+    ):
         super().__init__(probe, scan, config, **kwargs)
         self.rx_apo = rx_apo if rx_apo else 1
         self.tx_apo = tx_apo if tx_apo else 1
+        self.sum_transmits = sum_transmits
 
     # pylint: disable=arguments-differ
     def call(self, inputs, **kwargs):
@@ -199,10 +216,12 @@ class DAS_layer(BeamSumming):
             (batch_size, N_x, N_z, 1 if RF/2 if IQ)
         """
         # sum channels, i.e. DAS
-        summed = tf.reduce_sum(self.rx_apo * inputs, axis=-2)
+        x = tf.reduce_sum(self.rx_apo * inputs, axis=-2)
         # sum transmits, i.e. Compounding
-        compounded = tf.reduce_sum(self.tx_apo * summed, axis=1)
-        return {"beamformed": compounded}
+        x = self.tx_apo * x
+        if not self.sum_transmits:
+            x = tf.reduce_sum(x, axis=1)
+        return {"beamformed": x}
 
 
 class TOFLayer(tf.keras.layers.Layer):

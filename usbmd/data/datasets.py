@@ -179,8 +179,17 @@ class DataSet:
     def num_frames(self):
         """Return number of frames in current file."""
         if self.file is None:
-            self.file = self.get_file(0)
-        return len(self.file)
+            self.get_file(0)
+        return len(self.h5_reader)
+
+    @property
+    def total_num_frames(self):
+        """Return total number of frames in dataset."""
+        total_num_frames = 0
+        for i in range(len(self)):
+            self.get_file(i)
+            total_num_frames += len(self.h5_reader)
+        return total_num_frames
 
     def get_frame_no(self, frame_no=None):
         """Sets the frame number(s)

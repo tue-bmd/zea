@@ -83,6 +83,7 @@ model_schema = Schema(
             Optional("aux_inputs", default=None): Or(None, list),
             Optional("patches", default=1): positive_integer,
             Optional("jit", default=False): bool,
+            Optional("sum_transmits", default=False): bool,
         },
     }
 )

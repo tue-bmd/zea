@@ -25,6 +25,7 @@ We can leave the arguments to the operation empty and set them later using the
 ```python
 operations = [
     Beamform(),
+    Sum(),
     Demodulate(),
     EnvelopeDetect(),
     Downsample(),
@@ -58,6 +59,7 @@ process = Process(config, scan, probe)
 process.set_pipeline(
     operation_chain=[
         {"name": "beamform"},
+        {"name": "sum"},
         {"name": "demodulate", "params": {"fs": 50e6, "fc": 5e6}},
         {"name": "envelope_detect"},
         {"name": "downsample"},
@@ -571,13 +573,19 @@ class Beamform(Operation):
     """Beamforming operation for ultrasound data."""
 
     def __init__(self, beamformer=None, **kwargs):
+        self.beamformer = beamformer
+        output_data_type = None
+        if self.beamformer is not None:
+            if self.beamformer.sum_transmits:
+                output_data_type = "beamformed_data"
+            else:
+                output_data_type = "aligned_data"
+
         super().__init__(
             input_data_type="raw_data",
-            output_data_type="beamformed_data",
+            output_data_type=output_data_type,
             **kwargs,
         )
-
-        self.beamformer = beamformer
 
     def initialize(self):
         super().initialize()
@@ -613,6 +621,10 @@ class Beamform(Operation):
         )
 
         self.beamformer = get_beamformer(self.probe, self.scan, self.config)
+        if self.beamformer.sum_transmits:
+            self.output_data_type = "beamformed_data"
+        else:
+            self.output_data_type = "aligned_data"
 
     def _assign_config_params(self, config: Config):
         self.config = config
