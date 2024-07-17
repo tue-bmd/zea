@@ -674,7 +674,16 @@ class DummyDataset(DataSet):
         self.n_ax = 2048
         self.n_tx = 75
         self.Nz = 128
-        self.num_frames = 4
+
+    @property
+    def num_frames(self):
+        """Return number of frames in current file."""
+        return 4
+
+    @property
+    def total_num_frames(self):
+        """Return total number of frames in dataset."""
+        return 20
 
     def __len__(self):
         """
@@ -696,13 +705,28 @@ class DummyDataset(DataSet):
             file (h5py or mat): File container.
 
         """
+        if isinstance(index, int):
+            frame_no = None
+        elif len(index) == 2:
+            index, frame_no = index
+        else:
+            raise ValueError(
+                "Index should either be an integer (indicating file index), "
+                "or tuple containing file index and frame number!"
+            )
+        self.file = super().__getitem__(index)
+        self.frame_no = self.get_frame_no(frame_no)
+
         self.file = self.get_file(index)
         if self.dtype == "raw_data":
-            rf_data = np.random.randn(self.n_tx, self.n_ax, self.Nz, self.n_ch)
-            return rf_data
+            data = np.random.randn(
+                self.num_frames, self.n_tx, self.n_ax, self.Nz, self.n_ch
+            )
+            return data[self.frame_no]
 
         elif self.dtype == "beamformed_data":
-            return np.random.randn(self.Nz, 256, 1)
+            data = np.random.randn(self.num_frames, self.Nz, 256, 1)
+            return data[self.frame_no]
 
         else:
             raise ValueError(f"Data type {self.dtype} not available for this dataset")
