@@ -2,6 +2,8 @@ model:
   batch_size: 1
   beamformer:
     type: das
+    sum_transmits: true
+
 data:
   file_path: dummy_file_1.hdf5
   dataset_name: dummy
