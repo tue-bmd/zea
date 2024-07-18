@@ -1,5 +1,7 @@
 [tool.poetry]
 package-mode = false
+name = "usbmd-devpack-torch"
+version = "0.1.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"
