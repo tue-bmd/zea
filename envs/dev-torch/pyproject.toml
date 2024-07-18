@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-usbmd = { path = "../../", develop = true , extras=["dev"]}
+usbmd = { path = "../../", develop = true , extras=["dev"] }
 torch = { version = "^2.3", source = "torch-cu121" }
 torchvision = { version = "^0.18", source = "torch-cu121" }
 tensorflow = "^2.16"
