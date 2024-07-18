@@ -89,7 +89,12 @@ class Beamformer(tf.keras.Model):
         self.tof_layer = TOFLayer(probe, scan, config)
         self.beamsumming_layer = tf_beamformer_registry[
             config.model.beamformer.get("type", "das")  # default to DAS
-        ](probe, scan, config, config.model.beamformer.sum_transmits)
+        ](
+            probe,
+            scan,
+            config,
+            sum_transmits=config.model.beamformer.sum_transmits,
+        )
 
         if self.patches > 1:
             self.beamform = self._beamform_patch_wise
