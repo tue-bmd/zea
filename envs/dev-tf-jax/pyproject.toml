@@ -1,3 +1,5 @@
+# Make sure to `poetry lock` usbmd and the devpacks at the same time
+
 [tool.poetry]
 package-mode = false
 name = "usbmd-devpack-tf-jax"
@@ -5,7 +7,7 @@ version = "0.1.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-usbmd = { path = "../../", develop = true }
+usbmd = { path = "../../", develop = true , extras=["dev"]}
 torch = { version = "^2.3", source = "torch-cpu" }
 torchvision = { version = "^0.18", source = "torch-cpu" }
 tensorflow = { version = "^2.16", extras = ["and-cuda"] }
