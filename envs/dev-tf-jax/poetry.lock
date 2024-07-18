@@ -717,46 +717,6 @@ etree-tf = ["etils[etree]", "tensorflow"]
 lazy-imports = ["etils[ecolab]"]
 
 [[package]]
-name = "etils"
-version = "1.9.2"
-description = "Collection of common python utils"
-optional = false
-python-versions = ">=3.11"
-files = [
-    {file = "etils-1.9.2-py3-none-any.whl", hash = "sha256:ecd79de1fbfea9b0d6924756cfa922b05ed3360c45cf2170767da4bee0001d20"},
-    {file = "etils-1.9.2.tar.gz", hash = "sha256:15dcd35ac0c0cc2404b46ac0846af3cc4e876fd3d80f36f57951e27e8b9d6379"},
-]
-
-[package.dependencies]
-absl-py = {version = "*", optional = true, markers = "extra == \"etqdm\""}
-fsspec = {version = "*", optional = true, markers = "extra == \"epath\""}
-importlib_resources = {version = "*", optional = true, markers = "extra == \"epath\""}
-numpy = {version = "*", optional = true, markers = "extra == \"enp\""}
-tqdm = {version = "*", optional = true, markers = "extra == \"etqdm\""}
-typing_extensions = {version = "*", optional = true, markers = "extra == \"epy\""}
-zipp = {version = "*", optional = true, markers = "extra == \"epath\""}
-
-[package.extras]
-all = ["etils[array-types]", "etils[eapp]", "etils[ecolab]", "etils[edc]", "etils[enp]", "etils[epath-gcs]", "etils[epath-s3]", "etils[epath]", "etils[epy]", "etils[etqdm]", "etils[etree-dm]", "etils[etree-jax]", "etils[etree-tf]", "etils[etree]"]
-array-types = ["etils[enp]"]
-dev = ["chex", "dataclass_array", "optree", "pydantic", "pyink", "pylint (>=2.6.0)", "pytest", "pytest-subtests", "pytest-xdist", "torch"]
-docs = ["etils[all,dev]", "sphinx-apitree[ext]"]
-eapp = ["absl-py", "etils[epy]", "simple_parsing"]
-ecolab = ["etils[enp]", "etils[epy]", "etils[etree]", "jupyter", "mediapy", "numpy", "packaging", "protobuf"]
-edc = ["etils[epy]"]
-enp = ["etils[epy]", "numpy"]
-epath = ["etils[epy]", "fsspec", "importlib_resources", "typing_extensions", "zipp"]
-epath-gcs = ["etils[epath]", "gcsfs"]
-epath-s3 = ["etils[epath]", "s3fs"]
-epy = ["typing_extensions"]
-etqdm = ["absl-py", "etils[epy]", "tqdm"]
-etree = ["etils[array-types]", "etils[enp]", "etils[epy]", "etils[etqdm]"]
-etree-dm = ["dm-tree", "etils[etree]"]
-etree-jax = ["etils[etree]", "jax[cpu]"]
-etree-tf = ["etils[etree]", "tensorflow"]
-lazy-imports = ["etils[ecolab]"]
-
-[[package]]
 name = "eval-type-backport"
 version = "0.2.0"
 description = "Like `typing._eval_type`, but lets older Python versions use newer typing features."
@@ -1395,9 +1355,9 @@ jax-cuda12-plugin = {version = "0.4.28", optional = true, markers = "extra == \"
 jaxlib = {version = "0.4.28", optional = true, markers = "extra == \"cuda12\""}
 ml-dtypes = ">=0.2.0"
 numpy = [
-    {version = ">=1.22", markers = "python_version < \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.2", markers = "python_version >= \"3.11\" and python_version < \"3.12\""},
+    {version = ">=1.22", markers = "python_version < \"3.11\""},
 ]
 nvidia-cublas-cu12 = {version = ">=12.1.3.1", optional = true, markers = "extra == \"cuda12\""}
 nvidia-cuda-cupti-cu12 = {version = ">=12.1.105", optional = true, markers = "extra == \"cuda12\""}
@@ -1411,8 +1371,8 @@ nvidia-nccl-cu12 = {version = ">=2.18.1", optional = true, markers = "extra == \
 nvidia-nvjitlink-cu12 = {version = ">=12.1.105", optional = true, markers = "extra == \"cuda12\""}
 opt-einsum = "*"
 scipy = [
-    {version = ">=1.9", markers = "python_version < \"3.12\""},
     {version = ">=1.11.1", markers = "python_version >= \"3.12\""},
+    {version = ">=1.9", markers = "python_version < \"3.12\""},
 ]
 
 [package.extras]
@@ -1491,8 +1451,8 @@ files = [
 ml-dtypes = ">=0.2.0"
 numpy = ">=1.22"
 scipy = [
-    {version = ">=1.9", markers = "python_version < \"3.12\""},
     {version = ">=1.11.1", markers = "python_version >= \"3.12\""},
+    {version = ">=1.9", markers = "python_version < \"3.12\""},
 ]
 
 [package.extras]
@@ -2115,9 +2075,9 @@ files = [
 
 [package.dependencies]
 numpy = [
-    {version = ">=1.21.2", markers = "python_version >= \"3.10\" and python_version < \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.3", markers = "python_version >= \"3.11\" and python_version < \"3.12\""},
+    {version = ">=1.21.2", markers = "python_version >= \"3.10\" and python_version < \"3.11\""},
 ]
 
 [package.extras]
@@ -2418,10 +2378,10 @@ files = [
 
 [package.dependencies]
 numpy = [
-    {version = ">=1.21.4", markers = "python_version >= \"3.10\" and platform_system == \"Darwin\" and python_version < \"3.11\""},
-    {version = ">=1.21.2", markers = "platform_system != \"Darwin\" and python_version >= \"3.10\" and python_version < \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.5", markers = "python_version >= \"3.11\" and python_version < \"3.12\""},
+    {version = ">=1.21.4", markers = "python_version >= \"3.10\" and platform_system == \"Darwin\" and python_version < \"3.11\""},
+    {version = ">=1.21.2", markers = "platform_system != \"Darwin\" and python_version >= \"3.10\" and python_version < \"3.11\""},
 ]
 
 [[package]]
@@ -2442,10 +2402,10 @@ files = [
 
 [package.dependencies]
 numpy = [
-    {version = ">=1.21.4", markers = "python_version >= \"3.10\" and platform_system == \"Darwin\" and python_version < \"3.11\""},
-    {version = ">=1.21.2", markers = "platform_system != \"Darwin\" and python_version >= \"3.10\" and python_version < \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.5", markers = "python_version >= \"3.11\" and python_version < \"3.12\""},
+    {version = ">=1.21.4", markers = "python_version >= \"3.10\" and platform_system == \"Darwin\" and python_version < \"3.11\""},
+    {version = ">=1.21.2", markers = "platform_system != \"Darwin\" and python_version >= \"3.10\" and python_version < \"3.11\""},
 ]
 
 [[package]]
@@ -2620,9 +2580,9 @@ files = [
 
 [package.dependencies]
 numpy = [
-    {version = ">=1.22.4", markers = "python_version < \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.2", markers = "python_version == \"3.11\""},
+    {version = ">=1.22.4", markers = "python_version < \"3.11\""},
 ]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
@@ -3000,6 +2960,19 @@ files = [
     {file = "pyarrow-17.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:392bc9feabc647338e6c89267635e111d71edad5fcffba204425a7c8d13610d7"},
     {file = "pyarrow-17.0.0-cp38-cp38-macosx_10_15_x86_64.whl", hash = "sha256:af5ff82a04b2171415f1410cff7ebb79861afc5dae50be73ce06d6e870615204"},
     {file = "pyarrow-17.0.0-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:edca18eaca89cd6382dfbcff3dd2d87633433043650c07375d095cd3517561d8"},
+    {file = "pyarrow-17.0.0-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7c7916bff914ac5d4a8fe25b7a25e432ff921e72f6f2b7547d1e325c1ad9d155"},
+    {file = "pyarrow-17.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f553ca691b9e94b202ff741bdd40f6ccb70cdd5fbf65c187af132f1317de6145"},
+    {file = "pyarrow-17.0.0-cp38-cp38-manylinux_2_28_aarch64.whl", hash = "sha256:0cdb0e627c86c373205a2f94a510ac4376fdc523f8bb36beab2e7f204416163c"},
+    {file = "pyarrow-17.0.0-cp38-cp38-manylinux_2_28_x86_64.whl", hash = "sha256:d7d192305d9d8bc9082d10f361fc70a73590a4c65cf31c3e6926cd72b76bc35c"},
+    {file = "pyarrow-17.0.0-cp38-cp38-win_amd64.whl", hash = "sha256:02dae06ce212d8b3244dd3e7d12d9c4d3046945a5933d28026598e9dbbda1fca"},
+    {file = "pyarrow-17.0.0-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:13d7a460b412f31e4c0efa1148e1d29bdf18ad1411eb6757d38f8fbdcc8645fb"},
+    {file = "pyarrow-17.0.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:9b564a51fbccfab5a04a80453e5ac6c9954a9c5ef2890d1bcf63741909c3f8df"},
+    {file = "pyarrow-17.0.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:32503827abbc5aadedfa235f5ece8c4f8f8b0a3cf01066bc8d29de7539532687"},
+    {file = "pyarrow-17.0.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a155acc7f154b9ffcc85497509bcd0d43efb80d6f733b0dc3bb14e281f131c8b"},
+    {file = "pyarrow-17.0.0-cp39-cp39-manylinux_2_28_aarch64.whl", hash = "sha256:dec8d129254d0188a49f8a1fc99e0560dc1b85f60af729f47de4046015f9b0a5"},
+    {file = "pyarrow-17.0.0-cp39-cp39-manylinux_2_28_x86_64.whl", hash = "sha256:a48ddf5c3c6a6c505904545c25a4ae13646ae1f8ba703c4df4a1bfe4f4006bda"},
+    {file = "pyarrow-17.0.0-cp39-cp39-win_amd64.whl", hash = "sha256:42bf93249a083aca230ba7e2786c5f673507fa97bbd9725a1e2754715151a204"},
+    {file = "pyarrow-17.0.0.tar.gz", hash = "sha256:4beca9521ed2c0921c1023e68d097d0299b62c362639ea315572a58f3f50fd28"},
 ]
 
 [package.dependencies]
@@ -3034,8 +3007,8 @@ files = [
 annotated-types = ">=0.4.0"
 pydantic-core = "2.20.1"
 typing-extensions = [
-    {version = ">=4.6.1", markers = "python_version < \"3.13\""},
     {version = ">=4.12.2", markers = "python_version >= \"3.13\""},
+    {version = ">=4.6.1", markers = "python_version < \"3.13\""},
 ]
 
 [package.extras]
@@ -4199,8 +4172,8 @@ keras = ">=3.2.0"
 libclang = ">=13.0.0"
 ml-dtypes = ">=0.3.1,<0.5.0"
 numpy = [
-    {version = ">=1.23.5,<2.0.0", markers = "python_version <= \"3.11\""},
     {version = ">=1.26.0,<2.0.0", markers = "python_version >= \"3.12\""},
+    {version = ">=1.23.5,<2.0.0", markers = "python_version <= \"3.11\""},
 ]
 nvidia-cublas-cu12 = {version = "12.3.4.1", optional = true, markers = "extra == \"and-cuda\""}
 nvidia-cuda-cupti-cu12 = {version = "12.3.101", optional = true, markers = "extra == \"and-cuda\""}
@@ -4231,6 +4204,76 @@ and-cuda = ["nvidia-cublas-cu12 (==12.3.4.1)", "nvidia-cuda-cupti-cu12 (==12.3.1
 
 [[package]]
 name = "tensorflow-datasets"
+version = "4.9.5"
+description = "tensorflow/datasets is a library of datasets ready to use with TensorFlow."
+optional = false
+python-versions = ">=3.10"
+files = [
+    {file = "tensorflow_datasets-4.9.5-py3-none-any.whl", hash = "sha256:3d704dd6a06ec37bb972e648e940cce081626fd570524179423b668c7d6e2c33"},
+    {file = "tensorflow_datasets-4.9.5.tar.gz", hash = "sha256:b0d9d29eebf502676b186cd50094a1855d51e7cc86adffa7ad0354b3dbb1ce66"},
+]
+
+[package.dependencies]
+absl-py = "*"
+array-record = {version = ">=0.5.0", markers = "platform_system == \"Linux\""}
+click = "*"
+dm-tree = "*"
+etils = {version = ">=1.6.0", extras = ["enp", "epath", "epy", "etree"]}
+immutabledict = "*"
+numpy = "*"
+promise = "*"
+protobuf = ">=3.20"
+psutil = "*"
+pyarrow = "*"
+requests = ">=2.19.0"
+simple-parsing = "*"
+tensorflow-metadata = "*"
+termcolor = "*"
+toml = "*"
+tqdm = "*"
+wrapt = "*"
+
+[package.extras]
+aflw2k3d = ["scipy"]
+beir = ["apache-beam"]
+ble-wind-field = ["gcsfs", "zarr"]
+c4 = ["apache-beam", "gcld3", "langdetect", "nltk", "tldextract"]
+c4-wsrs = ["apache-beam"]
+cats-vs-dogs = ["matplotlib"]
+colorectal-histology = ["Pillow"]
+common-voice = ["pydub"]
+dev = ["apache-beam", "conllu", "dill", "jax[cpu]", "jupyter", "pandas", "pydub", "pylint (>=2.6.0)", "pytest", "pytest-shard", "pytest-xdist", "pyyaml", "tensorflow-io[tensorflow]", "yapf"]
+duke-ultrasound = ["scipy"]
+eurosat = ["imagecodecs", "scikit-image", "tifffile"]
+groove = ["pretty-midi", "pydub"]
+gtzan = ["pydub"]
+huggingface = ["Pillow", "bs4", "conllu", "datasets", "dill", "envlogger", "gcld3", "gcsfs", "h5py", "imagecodecs", "jax[cpu]", "jupyter", "langdetect", "lxml", "matplotlib", "mwparserfromhell", "mwxml", "networkx", "nltk", "opencv-python", "pandas", "pretty-midi", "pycocotools", "pydub", "pytest", "pytest-shard", "pytest-xdist", "pyyaml", "scikit-image", "scipy", "tensorflow-io[tensorflow]", "tifffile", "tldextract", "zarr"]
+imagenet2012-corrupted = ["opencv-python", "scikit-image", "scipy"]
+librispeech = ["pydub"]
+locomotion = ["envlogger"]
+lsun = ["tensorflow-io[tensorflow]"]
+matplotlib = ["matplotlib"]
+nsynth = ["crepe (>=0.0.11)", "librosa", "scikit-learn (==0.20.3)"]
+ogbg-molpcba = ["networkx", "pandas"]
+pet-finder = ["pandas"]
+qm9 = ["pandas"]
+robonet = ["h5py"]
+robosuite-panda-pick-place-can = ["envlogger"]
+smartwatch-gestures = ["pandas"]
+svhn = ["scipy"]
+tensorflow = ["tensorflow (>=2.1)"]
+tensorflow-data-validation = ["tensorflow-data-validation"]
+tests-all = ["Pillow", "apache-beam", "bs4", "conllu", "dill", "envlogger", "gcld3", "gcsfs", "h5py", "imagecodecs", "jax[cpu]", "jupyter", "langdetect", "lxml", "matplotlib", "mwparserfromhell", "mwxml", "networkx", "nltk", "opencv-python", "pandas", "pretty-midi", "pycocotools", "pydub", "pytest", "pytest-shard", "pytest-xdist", "pyyaml", "scikit-image", "scipy", "tensorflow-io[tensorflow]", "tifffile", "tldextract", "zarr"]
+tf-nightly = ["tf-nightly"]
+the300w-lp = ["scipy"]
+wider-face = ["Pillow"]
+wiki-dialog = ["apache-beam"]
+wikipedia = ["apache-beam", "mwparserfromhell", "mwxml"]
+wsc273 = ["bs4", "lxml"]
+youtube-vis = ["pycocotools"]
+
+[[package]]
+name = "tensorflow-datasets"
 version = "4.9.6"
 description = "tensorflow/datasets is a library of datasets ready to use with TensorFlow."
 optional = false
@@ -4245,10 +4288,7 @@ absl-py = "*"
 array-record = {version = ">=0.5.0", markers = "platform_system == \"Linux\""}
 click = "*"
 dm-tree = "*"
-etils = [
-    {version = ">=1.6.0", extras = ["enp", "epath", "epy", "etree"], markers = "python_version < \"3.11\""},
-    {version = ">=1.9.1", extras = ["enp", "epath", "epy", "etree"], markers = "python_version >= \"3.11\""},
-]
+etils = {version = ">=1.6.0", extras = ["enp", "epath", "epy", "etree"], markers = "python_version < \"3.11\""}
 immutabledict = "*"
 numpy = "*"
 promise = "*"
@@ -4348,8 +4388,8 @@ files = [
 absl-py = ">=0.9,<3.0.0"
 googleapis-common-protos = {version = ">=1.56.4,<2", markers = "python_version >= \"3.11\""}
 protobuf = [
-    {version = ">=3.20.3,<4.21", markers = "python_version < \"3.11\""},
     {version = ">=4.25.2,<5", markers = "python_version >= \"3.11\""},
+    {version = ">=3.20.3,<4.21", markers = "python_version < \"3.11\""},
 ]
 
 [[package]]
@@ -4717,6 +4757,9 @@ scipy = "^1.13"
 tk = "^0.1"
 tqdm = "^4"
 
+[package.extras]
+dev = []
+
 [package.source]
 type = "directory"
 url = "../.."
@@ -4909,4 +4952,4 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "206055376045722ea521fe14be309f573604b25a68005dc2384b46e26e9dedeb"
+content-hash = "f126aaff731dddbbc3966d7157ed18131c27ec98222b16ea8a7fefa943d2eb2c"

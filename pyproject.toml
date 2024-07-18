@@ -77,6 +77,9 @@ pylint = "^3.1"
 papermill = "^2.4"
 ipykernel = "^6.29.5"
 
+[tool.poetry.extras]
+dev = ["pytest", "pylint", "papermill", "ipykernel"]
+
 [[tool.poetry.source]]
 name = "torch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
