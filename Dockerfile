@@ -46,8 +46,9 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 # Set poetry environment variables
 ENV POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_CACHE_DIR=/opt/.cache
+    POETRY_VIRTUALENVS_CREATE=1 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache \
+    POETRY_VIRTUALENVS_PATH=/opt/
 
 # Set working directory
 WORKDIR /ultrasound-toolbox
@@ -57,16 +58,15 @@ ARG DEV=False
 # Install additional packages if DEV=True
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR if [ "$DEV" = "True" ]; then \
         # Create a virtual environment for jax
-        python -m venv /opt/dev-tf-jax && \
         cd /ultrasound-toolbox/envs/dev-tf-jax && \
-        poetry env use /opt/dev-tf-jax && \
         poetry install && \
         # Create a virtual environment for torch
-        python -m venv /opt/dev-torch && \
         cd /ultrasound-toolbox/envs/dev-torch && \
-        poetry env use /opt/dev-torch && \
         poetry install; \
     else \
         # Just install usbmd without ml libraries
         poetry install; \
     fi
+
+# Make VSCode discover the VENVs
+ENV WORKON_HOME=$POETRY_VIRTUALENVS_PATH
