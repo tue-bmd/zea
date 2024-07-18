@@ -370,7 +370,7 @@ class USBMDDataSet(DataSet):
         """
         file_scan_parameters = self.get_parameters_from_file(file_idx)
 
-        sig = inspect.signature(get_probe("generic").__init__)
+        sig = inspect.signature(get_probe(self.get_probe_name()).__init__)
         probe_parameters = {
             key: file_scan_parameters[key]
             for key in sig.parameters
