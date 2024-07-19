@@ -1,42 +1,55 @@
 import numpy as np
+import scipy as sc
+import torch
+import time
 
-def pfield(x,z,param,options):
-    # medium params
-    alpha_dB = param['attenuation']
-    c = param['c']
 
-    # waveform params
-    fc = param['fc'] #% central frequency (Hz)
-    BW = param['bandwidth'] #% pulse-echo 6dB fractional bandwidth (%)
-    NoW = param['TXnow'] # number of waveforms in the pulse
-
-    # array params
-    NumberOfElements = param['Nelements'] #% number of elements
-    pitch = param['pitch']
-    ElementWidth = pitch - param['kerf']
-
-    # delays and apodization of transmit event
-    delaysTX = param['delaysTX']
-    idx = np.isnan(delaysTX)
-    delaysTX[idx] = 0
-    TXapodization = param['TXapodization']
-    TXapodization[np.any(idx)] = 0
-
-    APOD = param['TXapodization'].squeeze()
+def pfield(probe,scan,options):
 
     # options for acceleration
     FrequencyStep = options['FrequencyStep'] #% frequency step (scaling factor); default = 1. Higher is faster but less accurate.
     dBThresh = options['dBThresh'] # % dB threshold for the frequency response; default = -60 dB. Higher is faster but less accurate.
+    downsample = options['downsample'] # % downsample the grid for faster computation; default = 1. Higher is faster but less accurate.
+
+    # medium params
+    alpha_dB = 0    
+    c = scan.sound_speed
+
+    # probe params
+    fc = scan.fc #% central frequency (Hz)
+    BW = scan.bandwidth_percent #% pulse-echo 6dB fractional bandwidth of the probe (%)
+
+    # pulse params
+    NoW = 1 # number of waveforms in the pulse - we don't have this in the scan object
+
+    # array params
+    probe_geometry = probe.probe_geometry
+    
+    NumberOfElements = scan.n_el #% number of elements
+    pitch = probe_geometry[1,0]-probe_geometry[0,0] #% element pitch
+
+    kerf = 0.1*pitch # for now this is hardcoded - we don't have it in the probe object!
+    ElementWidth = pitch - kerf
+
+    n_transmits = len(scan.tx_apodizations)
+
+    # %------------------------------------%
+    # % POINT LOCATIONS, DISTANCES & GRIDS %
+    # %------------------------------------%
     
     # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
     LambdaMin = c/(fc*(1+BW/200))
     M = np.int32(np.ceil(ElementWidth/LambdaMin))
 
-    # %------------------------------------%
-    # % POINT LOCATIONS, DISTANCES & GRIDS %
-    # %------------------------------------%
+    x_orig = scan.grid[:,:,0]
+    z_orig = scan.grid[:,:,2]
+    
+    siz_orig = np.shape(x_orig)
 
+    x = x_orig[::downsample,::downsample]
+    z = z_orig[::downsample,::downsample]
     siz0 = np.shape(x)
+
 
     #%-- Coordinates of the points where pressure is needed
     x = x.flatten() 
@@ -75,7 +88,7 @@ def pfield(x,z,param,options):
     d2 = dxi**2+(z_expanded-zi_expanded-ze_expanded)**2
     r = np.sqrt(d2)
 
-    # %-- Angle between the normal to the transducer and the line joining the point and the transducer
+    #-- Angle between the normal to the transducer and the line joining the point and the transducer
     epss = np.finfo(np.float32).eps
     Th = np.arcsin((dxi+epss)/(np.sqrt(d2)+epss))-THe
     sinT = np.sin(Th)
@@ -87,177 +100,187 @@ def pfield(x,z,param,options):
 
     pulseSpectrum = lambda w: 1j*(mysinc(T*(w-wc)/2)-mysinc(T*(w+wc)/2))
 
-
-    #%-- FREQUENCY RESPONSE of the ensemble PZT + probe
-    #% We want a generalized normal window (6dB-bandwidth = PARAM.bandwidth)
-    #% (https://en.wikipedia.org/wiki/Window_function#Generalized_normal_window)
-
+    #-- FREQUENCY RESPONSE of the ensemble PZT + probe
     wB =BW*wc/100 # angular frequency bandwidth
-    p = np.log(126)/np.log(2*wc/wB) # p adjusts the shape
+    p = np.log(126)/np.log(epss+2*wc/wB) # p adjusts the shape
     probeSpectrum = lambda w: np.exp(-(np.abs(w-wc)/(wB/2/np.log(2)**(1/p)))**p)
 
-    #% The frequency response is a pulse-echo (transmit + receive) response. A
-    #% square root is thus required when calculating the pressure field:
-
-    #% Note: The spectrum of the pulse (pulseSpectrum) will be then multiplied
-    #% by the frequency-domain tapering window of the transducer (probeSpectrum)
-
-    # % The frequency step df is chosen to avoid interferences due to
-    # % inadequate discretization.
-    # % -- df = frequency step (must be sufficiently small):
-    # % One has exp[-i(k r + w delay)] = exp[-2i pi(f r/c + f delay)] in the Eq.
-    # % One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
-    # % Therefore: df < 1/(r/c + delay).
-
-    df = 1/(np.max(r.flatten()/c) + np.max(delaysTX.flatten()))
-    df = FrequencyStep*df
-    #% note: df is here an upper bound; it will be recalculated below
-
-    #%-- FREQUENCY SAMPLES
-    Nf = 2*np.ceil(fc/df).astype(np.int32)+1 #% number of frequency samples
-    f = np.linspace(0,2*fc,Nf) #% frequency samples
-    df = f[1] #% update the frequency step
-
-    #%- we keep the significant components only by using options.dBThresh
-    S = np.abs(pulseSpectrum(2*np.pi*f)*probeSpectrum(2*np.pi*f))
-    GdB = 20*np.log10(epss+S/(np.max(S))) #% gain in dB
-    IDX = GdB>dBThresh
-
-    f = f[IDX]
-    nSampling = len(f)
-
-    #print(f'Number of frequency samples above dB threshold: {nSampling} out of {Nf}')
-
-    pulseSPECT = pulseSpectrum(2*np.pi*f) #% pulse spectrum
-    probeSPECT = probeSpectrum(2*np.pi*f) #% probe response
-
-    #%-- Initialization
-    RP = 0 #% RP = Radiation Pattern
-
-    #%-- Obliquity factor (baffle property)
-    ObliFac = 1
-
-    #%-- EXPONENTIAL arrays of size [numel(x) NumberOfElements M]
-    kw = 2*np.pi*f[0]/c #% wavenumber
-    kwa = alpha_dB/8.69*f[0]/1e6*1e2 #% attenuation-based wavenumber
-    EXP = np.exp(-kwa*r + 1j*np.mod(kw*r,2*np.pi)); #% faster than exp(-kwa*r+1j*kw*r)
-    #%-- Exponential array for the increment wavenumber dk
-    dkw = 2*np.pi*df/c
-    dkwa = alpha_dB/8.69*df/1e6*1e2
-    EXPdf = np.exp((-dkwa + 1j*dkw)*r)
-
-    EXP = EXP*ObliFac/np.sqrt(r)
-
-    kc = 2*np.pi*fc/c #% center wavenumber
-    DIR = mysinc(kc*SegLength/2*sinT) # directivity of each segment
-    EXP = EXP*DIR
-
-    # %-----------------------------%
-    # % SUMMATION OVER THE SPECTRUM %
-    # %-----------------------------%
-
-    for k in range(0,nSampling,1):
-    #for k in range(70,150,1):
-
-        kw = 2*np.pi*f[k]/c #wavenumber
-        
-        # %-- Exponential array of size [numel(x) NumberOfElements M]
-        # % For all k, we need: EXP = exp((-kwa+1i*kw)*r)
-        # %                         with kw = 2*pi*f(k)/c;
-        # %                     and with kwa = alpha_dB/8.7*f(k)/1e6*1e2;
-        # % Since f(k) = f(1)+(k-1)df, we use the following recursive product:
-        if k>0:
-            EXP = EXP*EXPdf
-
-            
-        # %-- Radiation patterns of the single elements
-        # % They are the combination of the far-field patterns of the M small
-        # % segments that make upR the single elements
-        # %--
-
-        if M>1:
-            RPmono = np.mean(EXP,1) #% summation over the M small segments
-            RPmono = EXP[:,0,:]
-        else:
-            RPmono = EXP.squeeze()
-
-
-        #%-- Transmit delays + Transmit apodization
-        #% use of SUM: summation over the number of delay series (e.g. MLT)
-        DELAPOD = np.sum(np.exp(1j*kw*c*delaysTX),1)*APOD
-        
-        # %-- Summing the radiation patterns generating by all the elements
-        # % This is a matrix-vector product.
-        # %      RPmono is of size [number_of_points number_of_elements]
-        # %      DELAPOD is of size [number_of_elements 1]
-        RPk = RPmono.dot(DELAPOD)
-        #%- include spectrum responses:
-        RPk = pulseSPECT[k]*probeSPECT[k]*RPk
-
-        isOUT = z<0
-        RPk[isOUT] = 0
-
-        RP = RP + abs(RPk)**2 #% acoustic intensity
-
-        
-    # % RMS acoustic pressure
-    P = np.reshape(np.sqrt(RP),siz0)
-    return P
-
-#%%
-
-def example():
-    #% Grid
-    Nx = 50
-    Nz = 50
-    x = np.linspace(-4e-2,4e-2,Nx)
-    z = np.linspace(0,10e-2,Nz)
-    [x,z] = np.meshgrid(x,z)
-
-
-    options = {'FrequencyStep': 2, 'dBThresh': -10, 'FullFrequencyDirectivity': False}
-
-
-    L = 10 # number of elements per transmit event = 2*L+1
     P_list = []
-    for i in range(0,128,1):
+    for j in range(0,n_transmits):
+        # print some progress
+        if j%1==0:
+            print(f'Precomputing pressure fields, transmit {j}/{n_transmits}')
 
-        delaysTX = np.zeros((128,1)) # size number of elements x number of delay series (e.g. MLT)
-        apodTX = np.zeros(128)
-        apodTX[np.maximum(i-L,0):np.minimum(i+L,128-1)] = 1
+        # delays and apodization of transmit event
+        delaysTX = scan.t0_delays[j]
+        idx = np.isnan(delaysTX)
+        delaysTX[idx] = 0
+
+        TXapodization = scan.tx_apodizations[j]
+        TXapodization[np.any(idx)] = 0
+        TXapodization = TXapodization.squeeze()
+
+        # The frequency response is a pulse-echo (transmit + receive) response. A
+        # square root is thus required when calculating the pressure field:
+        # Note: The spectrum of the pulse (pulseSpectrum) will be then multiplied
+        # by the frequency-domain tapering window of the transducer (probeSpectrum)
+        # The frequency step df is chosen to avoid interferences due to
+        # inadequate discretization.
+        # -- df = frequency step (must be sufficiently small):
+        # One has exp[-i(k r + w delay)] = exp[-2i pi(f r/c + f delay)] in the Eq.
+        # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
+        # Therefore: df < 1/(r/c + delay).
+
+        df = 1/(np.max(r.flatten()/c) + np.max(delaysTX.flatten()))
+        df = FrequencyStep*df # df is here an upper bound; it will be recalculated below
+
+        #-- FREQUENCY SAMPLES
+        Nf = 2*np.ceil(fc/df).astype(np.int32)+1 #% number of frequency samples
+        f = np.linspace(0,2*fc,Nf) #% frequency samples
+        df = f[1] #% update the frequency step
+
+        #-- we keep the significant components only by using options.dBThresh
+        S = np.abs(pulseSpectrum(2*np.pi*f)*probeSpectrum(2*np.pi*f))
+        GdB = 20*np.log10(epss+S/(np.max(S))) #% gain in dB
+        IDX = GdB>dBThresh
+
+        f = f[IDX]
+        nSampling = len(f)
+
+        pulseSPECT = pulseSpectrum(2*np.pi*f) #% pulse spectrum
+        probeSPECT = probeSpectrum(2*np.pi*f) #% probe response
+
+        #%-- EXPONENTIAL arrays of size [numel(x) NumberOfElements M]
+        kw = 2*np.pi*f[0]/c #% wavenumber
+        kwa = alpha_dB/8.69*f[0]/1e6*1e2 #% attenuation-based wavenumber
+        EXP = np.exp(-kwa*r + 1j*np.mod(kw*r,2*np.pi)); #% faster than exp(-kwa*r+1j*kw*r)
         
-        # apodTX = np.ones(128)
-        # scale = 1-2*i/128
-        # delaysTX = np.linspace(-1e-6*scale,1e-6*scale,128).reshape(128,1)
+        #%-- Exponential array for the increment wavenumber dk
+        dkw = 2*np.pi*df/c
+        dkwa = alpha_dB/8.69*df/1e6*1e2
+        EXPdf = np.exp((-dkwa + 1j*dkw)*r)
 
-        param = {'Nelements': 128, 'pitch': 0.3e-3, 'fc': 2.7e6, 
-                'kerf': 0.1e-3, 'radius': np.infty, 'bandwidth': 75, 
-                'c': 1540, 'attenuation': 0, 
-                'TXapodization': apodTX, 'delaysTX': delaysTX, 'TXnow': 1}
+        EXP = EXP/np.sqrt(r)
 
+        kc = 2*np.pi*fc/c #% center wavenumber
+        DIR = mysinc(kc*SegLength/2*sinT) # directivity of each segment
+        EXP = EXP*DIR
 
-        #% RMS pressure field calculation
-        start = time.time()
-        P = pfield(x,z,param,options)
-        end = time.time()
+        # Render pressure field for all relevant frequencies and sum them up
+        RP = 0
+        RP = pfield_freqloop_torch(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling)
 
-        #print(f'Progress: {100*i/128}%, Elapsed time: {end-start}')
+        RP = RP.cpu().numpy()  # Convert back to numpy... not ideal but needs to work with sc.ndimage.zoom
+
+        # % RMS acoustic pressure
+        P = np.reshape(np.sqrt(RP),siz0)
+
+        # resize P to exactly the original grid size
+        P = sc.ndimage.zoom(P, (siz_orig[0]/siz0[0],siz_orig[1]/siz0[1]), order=1)
 
 
         P_list.append(P)
-
-
         
-    alpha = 1 # shape factor to tighten te beams
-
     # keep only the highest intensities
+    P_arr  = np.array(P_list)
     P_arr[P_arr < np.percentile(P_arr, 10, axis=(1,2))[:,np.newaxis,np.newaxis]] = 0  
 
+    alpha = 2 # shape factor to tighten te beams
     P_arr=np.array(P_arr)**alpha
-    P_norm = P_arr/(1+np.sum(P_arr, axis=0))
+    P_norm = P_arr/np.max(P_arr)
+    P_norm = P_norm/(0.01+np.sum(P_norm, axis=0))
 
+    P_norm = torch.tensor(P_norm, dtype=torch.float32) # convert to torch tensor
 
     return P_norm
 
 
+#%%
 
+
+def pfield_freqloop_torch(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling):
+    # the hot loop...
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    f_tensor = torch.tensor(f, dtype=torch.float32, device=device)
+    c_tensor = torch.tensor(c, dtype=torch.float32, device=device)
+    delaysTX_tensor = torch.tensor(delaysTX, dtype=torch.float32, device=device)
+    TXapodization_tensor = torch.tensor(TXapodization, dtype=torch.complex64, device=device)
+    pulseSPECT_tensor = torch.tensor(pulseSPECT, dtype=torch.complex64, device=device)
+    probeSPECT_tensor = torch.tensor(probeSPECT, dtype=torch.complex64, device=device)
+    z_tensor = torch.tensor(z, dtype=torch.float32, device=device)
+    EXPdf_tensor = torch.tensor(EXPdf, dtype=torch.complex64, device=device)
+    EXP_tensor = torch.tensor(EXP, dtype=torch.complex64, device=device)
+
+    RP = 0
+    kw = 2 * np.pi * f_tensor / c_tensor
+
+    for k in range(nSampling):
+        if k > 0:
+            EXP_tensor *= EXPdf_tensor
+
+        if M > 1:
+            RPmono = torch.mean(EXP_tensor, dim=1)
+        else:
+            RPmono = EXP_tensor.squeeze()
+
+        DELAPOD = torch.exp(1j * kw[k] * c_tensor * delaysTX_tensor) * TXapodization_tensor
+        RPk = torch.matmul(RPmono, DELAPOD)
+
+        RPk *= pulseSPECT_tensor[k] * probeSPECT_tensor[k]
+
+        isOUT = z_tensor < 0
+        RPk[isOUT] = 0
+
+        RP += torch.abs(RPk) ** 2
+
+    #RP = RP.cpu().numpy()  # Convert back to numpy if needed
+
+    return RP
+
+# #%%
+# def pfield_freqloop(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling):
+#     RP =
+#     for k in range(0,nSampling,1):
+        
+#         kw = 2*np.pi*f[k]/c #wavenumber
+        
+#         # %-- Exponential array of size [numel(x) NumberOfElements M]
+#         # % For all k, we need: EXP = exp((-kwa+1i*kw)*r)
+#         # %                         with kw = 2*pi*f(k)/c;
+#         # %                     and with kwa = alpha_dB/8.7*f(k)/1e6*1e2;
+#         # % Since f(k) = f(1)+(k-1)df, we use the following recursive product:
+#         if k>0:
+#             EXP = EXP*EXPdf
+
+            
+#         # %-- Radiation patterns of the single elements
+#         # % They are the combination of the far-field patterns of the M small
+#         # % segments that make upR the single elements
+#         # %--
+
+#         if M>1:
+#             RPmono = np.mean(EXP,1) #% summation over the M small segments
+#         else:
+#             RPmono = EXP.squeeze()
+
+
+#         #%-- Transmit delays + Transmit apodization
+#         #% use of SUM: summation over the number of delay series (e.g. MLT)
+#         DELAPOD = np.exp(1j*kw*c*delaysTX)*TXapodization
+        
+#         # %-- Summing the radiation patterns generating by all the elements
+#         # % This is a matrix-vector product.
+#         # %      RPmono is of size [number_of_points number_of_elements]
+#         # %      DELAPOD is of size [number_of_elements 1]
+#         RPk = RPmono.dot(DELAPOD)
+#         #%- include spectrum responses:
+#         RPk = pulseSPECT[k]*probeSPECT[k]*RPk
+
+#         isOUT = z<0
+#         RPk[isOUT] = 0
+
+#         RP = RP + abs(RPk)**2 #% acoustic intensity
+    
+#     return RP
