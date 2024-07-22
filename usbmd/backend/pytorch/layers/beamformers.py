@@ -98,9 +98,30 @@ class Beamformer(torch.nn.Module):
         #: The `usbmd.config.Config` object to beamform with.
         self.config = config
 
-        #: The pressure field for each of the transmit events is precomputed
-        options = {'FrequencyStep': 4, 'dBThresh': -1, 'downsample':10} # hardcoded for now..
-        self.pfields = pfield(probe, scan, options)
+
+        #: Whether to apply automatic pressure weighting
+        if 'auto_pressure_weighting' in config.model.beamformer.keys():
+            self.auto_pressure_weighting = config.model.beamformer['auto_pressure_weighting']
+        else:
+            self.auto_pressure_weighting = False
+        
+        #: Whether to show the demo/debug mode with a widget 
+        #  (helpfull to analyse if the fields are computed properly)
+        if 'auto_pressure_weighting_demo' in config.model.beamformer.keys():
+            self.demo = config.model.beamformer['auto_pressure_weighting_demo']
+        else:
+            self.demo = False
+
+        if self.auto_pressure_weighting:
+
+            options = {'FrequencyStep': 4, # frequency step; 1 computes is all frequencies
+                       'dBThresh': -1, # threshold for the pressure field computation (lower is more accurate)
+                       'downsample':10, # grid downsampling factor (both directions) for the pressure field computation
+                       'downmix': 4, # frequency downmixing factor for the pressure field computation (higher is smoother and requirers fewer gridpoints)
+                	   'alpha': 2, # exponent to 'sharpen or smooth' the weighting (higher is sharper transitions) 
+                       'low_perc_th': 10} # lower percentile threshold for the weighting (higher is more aggressive)
+            #: The pressure field for each of the transmit events is precomputed
+            self.pfields = pfield(probe, scan, options)
 
         #: The time-of-flight correction layer.
         self.tof_layer = TOF_layer(probe, scan, config.model.batch_size)
@@ -165,42 +186,47 @@ class Beamformer(torch.nn.Module):
         # Perform time-of-flight correction
         data_tof_corrected = self.tof_layer(data)
 
-        # Perform element-wise multiplication with the pressure weight mask
-        # Also add the required dimensions for broadcasting
-        data_weighted = data_tof_corrected * self.pfields.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+        if self.auto_pressure_weighting:
+            # Perform element-wise multiplication with the pressure weight mask
+            # Also add the required dimensions for broadcasting
+            device = data_tof_corrected.get_device()
+            data_tof_corrected = data_tof_corrected * self.pfields.to(device).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+            # Perform element-wise summing
+            data_beamformed = self.das_layer(data_tof_corrected)
 
-        # Perform element-wise summing
-        data_beamformed = self.das_layer(data_weighted)
-        #data_beamformed = self.das_layer(data_tof_corrected)
+        else: # Automatic pressure weighting off
+            data_beamformed = self.das_layer(data_tof_corrected)
 
 
-        # Some plotting for debugging purposes
-        import matplotlib.pyplot as plt
-        from ipywidgets import interact, IntSlider
-        import ipywidgets as widgets
-        from ipywidgets.embed import embed_minimal_html
 
-        def plot_image(index,scale=1):
+        if self.auto_pressure_weighting & self.demo:
+            # Some plotting for debugging purposes
+            import matplotlib.pyplot as plt
+            from ipywidgets import interact, IntSlider
+            import ipywidgets as widgets
+            from ipywidgets.embed import embed_minimal_html
 
-            das_weighted = self.das_layer(data_weighted[:,index:index+1]).cpu().numpy()
-            das = data_beamformed.cpu().numpy()
-            plt.subplot(131)
-            plt.imshow(self.pfields[index].cpu().numpy(), cmap='hot')
-            plt.title(f'Tx {index}')
-            plt.subplot(132)
-            plt.imshow(np.log10(1e-5+np.abs(scale*das_weighted[0]/np.max(das_weighted[0].flatten()))), cmap='gray',vmin=-1,vmax=1)
-            plt.title('Weighted Tx')
-            plt.subplot(133)
-            plt.imshow(np.log10(1e-5+np.abs(scale*das[0]/np.max(das[0].flatten()))), cmap='gray',vmin=-1,vmax=1)
-            plt.title('Beamsummed')
-            plt.show()
-        # Create an interactive slider
-        num_images = len(self.pfields)
-        slider = IntSlider(min=0, max=num_images-1, step=1, value=0, description='Transmit index')
-        slider_scale = IntSlider(min=1, max=1000, step=1, value=10, description='Scale')
+            def plot_image(index,scale=1):
 
-        # Use the interact function to create the interactive plot
-        interact(plot_image, index=slider, scale=slider_scale)
+                das_weighted = self.das_layer(data_tof_corrected[:,index:index+1]).cpu().numpy()
+                das = data_beamformed.cpu().numpy()
+                plt.subplot(131)
+                plt.imshow(self.pfields[index].cpu().numpy(), cmap='hot')
+                plt.title(f'Tx {index}')
+                plt.subplot(132)
+                plt.imshow(np.log10(1e-5+np.abs(scale*das_weighted[0]/np.max(das_weighted[0].flatten()))), cmap='gray',vmin=-1,vmax=1)
+                plt.title('Weighted Tx')
+                plt.subplot(133)
+                plt.imshow(np.log10(1e-5+np.abs(scale*das[0]/np.max(das[0].flatten()))), cmap='gray',vmin=-1,vmax=1)
+                plt.title('Beamsummed')
+                plt.show()
+            # Create an interactive slider
+            num_images = len(self.pfields)
+            slider = IntSlider(min=0, max=num_images-1, step=1, value=0, description='Transmit index')
+            slider_scale = IntSlider(min=1, max=30, step=1, value=10, description='Scale')
+
+            # Use the interact function to create the interactive plot
+            interact(plot_image, index=slider, scale=slider_scale)
 
         return data_beamformed
 
