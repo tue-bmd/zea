@@ -4,19 +4,40 @@ import torch
 import time
 
 
-def pfield(probe,scan,options):
+def pfield(probe, scan, options):
+    """
+    Compute the pressure field for ultrasound imaging.
 
-    # options for acceleration
+    Args:
+        probe (Probe): The ultrasound probe object.
+        scan (Scan): The ultrasound scan object.
+        options (dict): A dictionary containing various options for the computation.
+
+    Returns:
+        torch.Tensor: The normalized pressure field as a torch tensor.
+
+    Raises:
+        None
+
+    """
+
+    # options 
     FrequencyStep = options['FrequencyStep'] #% frequency step (scaling factor); default = 1. Higher is faster but less accurate.
-    dBThresh = options['dBThresh'] # % dB threshold for the frequency response; default = -60 dB. Higher is faster but less accurate.
-    downsample = options['downsample'] # % downsample the grid for faster computation; default = 1. Higher is faster but less accurate.
+    dBThresh = options['dBThresh'] # dB threshold for the frequency response; default = -60 dB. Higher is faster but less accurate.
+    downsample = options['downsample'] # downsample the grid for faster computation; default = 1. Higher is faster but less accurate.
+    downmix = options['downmix'] # downmixing the frequency to facilitate a smaller grid; default = 1. Higher requires lower number of grid points but is less accurate.
+    
+    alpha = options['alpha'] # default = 1; exponent to 'sharpen or smooth' the weighting (higher is sharper transitions) 
+    perc = options['low_perc_th'] # default = 10; minium percentile threshold to keep in the weighting (higher is more aggressive)
 
     # medium params
-    alpha_dB = 0    
+    alpha_dB = 0 # currently we ignore attenuation in the compounding
     c = scan.sound_speed
 
     # probe params
     fc = scan.fc #% central frequency (Hz)
+    fc = fc/downmix #% downmixing the frequency to facilitate a smaller grid
+
     BW = scan.bandwidth_percent #% pulse-echo 6dB fractional bandwidth of the probe (%)
 
     # pulse params
@@ -108,7 +129,7 @@ def pfield(probe,scan,options):
     P_list = []
     for j in range(0,n_transmits):
         # print some progress
-        if j%1==0:
+        if j%10==0:
             print(f'Precomputing pressure fields, transmit {j}/{n_transmits}')
 
         # delays and apodization of transmit event
@@ -161,6 +182,7 @@ def pfield(probe,scan,options):
         EXPdf = np.exp((-dkwa + 1j*dkw)*r)
 
         EXP = EXP/np.sqrt(r)
+        EXP = EXP*np.min(np.sqrt(r)) # normalize the field
 
         kc = 2*np.pi*fc/c #% center wavenumber
         DIR = mysinc(kc*SegLength/2*sinT) # directivity of each segment
@@ -179,24 +201,30 @@ def pfield(probe,scan,options):
         P = sc.ndimage.zoom(P, (siz_orig[0]/siz0[0],siz_orig[1]/siz0[1]), order=1)
 
 
+        #P_list.append(P/np.max(P[5:]))
         P_list.append(P)
         
-    # keep only the highest intensities
-    P_arr  = np.array(P_list)
-    P_arr[P_arr < np.percentile(P_arr, 10, axis=(1,2))[:,np.newaxis,np.newaxis]] = 0  
-
-    alpha = 2 # shape factor to tighten te beams
-    P_arr=np.array(P_arr)**alpha
-    P_norm = P_arr/np.max(P_arr)
-    P_norm = P_norm/(0.01+np.sum(P_norm, axis=0))
-
+    P_norm = normalize(P_list, alpha = alpha, perc = perc)
     P_norm = torch.tensor(P_norm, dtype=torch.float32) # convert to torch tensor
 
     return P_norm
 
+#%%
+def normalize(P_list, alpha =1, perc = 10):
+    # alpha: shape factor to tighten te beams (default = 1)
+    # perc: percentile to keep (default = 10)
+
+    # keep only the highest intensities
+    P_arr  = np.array(P_list)
+    P_arr[P_arr < np.percentile(P_arr, perc, axis=(1,2))[:,np.newaxis,np.newaxis]] = 0  
+
+    P_arr=np.array(P_arr)**alpha
+    #P_arr = P_arr/np.max(P_arr)
+    P_norm = P_arr/(1e-10+np.sum(P_arr, axis=0))
+
+    return P_norm
 
 #%%
-
 
 def pfield_freqloop_torch(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling):
     # the hot loop...
@@ -234,8 +262,6 @@ def pfield_freqloop_torch(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPE
         RPk[isOUT] = 0
 
         RP += torch.abs(RPk) ** 2
-
-    #RP = RP.cpu().numpy()  # Convert back to numpy if needed
 
     return RP
 
