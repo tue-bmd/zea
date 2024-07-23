@@ -12,6 +12,13 @@ Beamformer functionality implemented in pytorch.
     dimension selects over elements without stating explicitly how large these
     dimensions are.
 
+- By default the beamformer compounds all transmit data coherently without weighting.
+  To perform automatic weighting based on an estimate of the pressure field, 
+  add: 
+    config.model.beamformer['auto_pressure_weighting']= True
+    config.model.beamformer['auto_pressure_weighting_demo']= True
+  to the config file
+
 ### Abbreviations
 | abbreviation  | description                                      |
 | ------------- | ------------------------------------------------ |
@@ -34,6 +41,7 @@ These variable names are used throughout the code and documentation.
 | `flatgrid`      | The grid of points to beamform to, flattened          | `(n_pix, 3)`   |
 | `probe_geometry`| The positions of the elements                         | `(n_el, 3)`    |
 | `t0_delays`     | The delay to firing with respect to the first element | `(n_tx, n_el)` |
+
 """
 
 # pylint: disable=no-member
