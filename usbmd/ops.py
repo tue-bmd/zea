@@ -1683,10 +1683,6 @@ class Doppler(Operation):
 
     def process(self, data):
 
-        device = None
-        if self.ops.__name__ == "torch":
-            device = data.device
-
         assert data.ndim == 3, "Doppler requires multiple frames to compute"
 
         # currently demodulate converts to numpy so we have to do some trickery
@@ -1724,9 +1720,9 @@ class Doppler(Operation):
             isinstance(self.lag, int) and self.lag >= 0
         ), "Lag must be a positive integer"
 
-        if self.fc == None:
+        if self.fc is None:
             raise ValueError("A center frequency (fc) must be specified")
-        if self.PRF == None:
+        if self.PRF is None:
             raise ValueError("A pulse repetition frequency or period must be specified")
 
         # Auto-correlation method
