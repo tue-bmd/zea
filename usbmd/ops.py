@@ -958,7 +958,7 @@ class Demodulate(Operation):
             data = data.cpu().numpy()
         data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
         data = self.prepare_tensor(data, device=device)
-        if self.separate_channels == True:
+        if self.separate_channels is True:
             return complex_to_channels(data, axis=-1, ops=self.ops)
         else:
             return data
