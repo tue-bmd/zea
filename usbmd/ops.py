@@ -137,7 +137,6 @@ from usbmd.scan import Scan
 from usbmd.utils import log, translate
 from usbmd.utils.checks import _BACKENDS, get_check
 
-
 def get_ops(ops_name):
     """Get the operation from the registry."""
     return ops_registry[ops_name]
@@ -927,7 +926,7 @@ class EnvelopeDetect(Operation):
 class Demodulate(Operation):
     """Demodulate RF signals to IQ data (complex baseband)."""
 
-    def __init__(self, fs=None, fc=None, bandwidth=None, filter_coeff=None, **kwargs):
+    def __init__(self, fs=None, fc=None, bandwidth=None, filter_coeff=None, separate_channels = False, **kwargs):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
@@ -937,6 +936,7 @@ class Demodulate(Operation):
         self.fc = fc
         self.bandwidth = bandwidth
         self.filter_coeff = filter_coeff
+        self.separate_channels = separate_channels
         self.warning_produced = False
 
     def process(self, data):
@@ -958,7 +958,10 @@ class Demodulate(Operation):
             data = data.cpu().numpy()
         data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
         data = self.prepare_tensor(data, device=device)
-        return complex_to_channels(data, axis=-1, ops=self.ops)
+        if self.separate_channels == True:
+            return complex_to_channels(data, axis=-1, ops=self.ops)
+        else:
+            return data
 
     def _assign_scan_params(self, scan):
         self.fs = scan.fs
@@ -1634,3 +1637,92 @@ def hilbert(x, N: int = None, axis=-1, ops=np):
     idx.insert(axis, idx.pop(-1))
     x = ops.permute(x, idx)
     return x
+
+
+@ops_registry("doppler")
+class Doppler(Operation):
+    """Compute Doppler Map from IQ data (complex baseband)."""
+
+    def __init__(self, PRF=None, fs = None, fc=None, c=None, M = None, lag = 1, image_increment=4, win_size = np.array(
+            [[32, 32], [24, 24], [16, 16]]
+        ), nargout = 1, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
+            **kwargs,
+        )
+        self.PRF = PRF
+        self.fs = fs
+        self.fc = fc
+        self.c = c
+        self.M = M
+        self.lag = lag
+        self.image_increment = image_increment
+        self.win_size = win_size
+        self.nargout = nargout
+        self.warning_produced = False
+
+    def process(self, data):
+
+        device = None
+        if self.ops.__name__ == "torch":
+            device = data.device
+
+        assert data.ndim == 3, 'Doppler requires multiple frames to compute'
+        
+        # currently demodulate converts to numpy so we have to do some trickery
+        if self.ops.__name__ == "torch":
+            data = data.cpu().numpy()
+        data = np.transpose(data, (1,2,0)) #frames as last dimension
+        VD = self.iq2doppler(data)
+        return VD
+
+    def _assign_scan_params(self, scan):
+        self.fs = scan.fs
+        self.fc = scan.fc
+        self.c = scan.sound_speed
+        self.PRF = 1/sum(scan.time_to_next_transmit[0])
+
+    def _assign_config_params(self, config):
+        if config.scan.sampling_frequency is not None:
+            self.fs = config.scan.sampling_frequency
+        if config.scan.center_frequency is not None:
+            self.fc = config.scan.center_frequency
+
+    def iq2doppler(self, data):
+        
+        assert data.ndim == 3, "Data must be a 3-D array"
+
+        if self.M is None: self.M = np.array([1, 1])
+        elif np.isscalar(self.M): self.M = np.array([self.M, self.M])
+        assert self.M.all() > 0 and np.all(np.equal(self.M, np.round(self.M))), "M must contain integers > 0"
+        
+        assert isinstance(self.lag, int) and self.lag >= 0, "Lag must be a positive integer"
+        
+        if self.fc == None:
+            raise ValueError("A center frequency (fc) must be specified")
+        if self.PRF == None:
+            raise ValueError("A pulse repetition frequency or period must be specified")
+
+        # Auto-correlation method
+        IQ1 = data[:, :, :data.shape[-1]-self.lag]
+        IQ2 = data[:, :, self.lag:]
+        AC = np.sum(IQ1 * np.conj(IQ2), axis=2)  # Ensemble auto-correlation
+
+        if self.M[0] != 1 and self.M[1] != 1:  # Spatial weighted average
+            h = np.hamming(self.M[0])[:, np.newaxis] * np.hamming(self.M[1])[np.newaxis, :]
+            AC = ndimage.convolve(AC, h, mode='constant', cval=0.0)
+
+        # Doppler velocity
+        VN = self.c * self.PRF / (4 * self.fc * self.lag)  # Nyquist velocity
+        VD = -VN * np.imag(np.log(AC)) / np.pi  # or -VN * np.angle(AC) / np.pi
+
+        # Doppler variance
+        if self.nargout == 2:
+            P = np.sum(np.abs(data)**2, axis=2)  # Power
+            if self.M[0] != 1 and self.M[1] != 1:  # Spatial weighted average
+                P = ndimage.convolve(P, h, mode='constant', cval=0.0)
+            varD = 2 * (self.c * self.PRF / (4 * self.fc * self.lag * np.pi))**2 * (1 - np.abs(AC) / P)
+            return VD, varD
+        else:
+            return VD
