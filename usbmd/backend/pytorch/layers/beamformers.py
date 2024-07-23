@@ -44,7 +44,7 @@ from usbmd.registry import torch_beamformer_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _check_raw_data
 
-from usbmd.utils.pfield import pfield
+from usbmd.utils.pfield import pfield, pfield_widget
 
 
 def get_beamformer(probe, scan, config, aux_inputs=("grid"), aux_outputs=()):
@@ -100,6 +100,7 @@ class Beamformer(torch.nn.Module):
 
 
         #: Whether to apply automatic pressure weighting
+        #: Currently it is not active by default
         if 'auto_pressure_weighting' in config.model.beamformer.keys():
             self.auto_pressure_weighting = config.model.beamformer['auto_pressure_weighting']
         else:
@@ -195,39 +196,11 @@ class Beamformer(torch.nn.Module):
             # Perform element-wise summing
             data_beamformed = self.das_layer(data_tof_corrected)
 
+            if self.demo:
+                pfield_widget(self.pfields)
+
         else: # Automatic pressure weighting off
             data_beamformed = self.das_layer(data_tof_corrected)
-
-
-
-        if self.auto_pressure_weighting & self.demo:
-            # Some plotting for debugging purposes
-            import matplotlib.pyplot as plt
-            from ipywidgets import interact, IntSlider
-            import ipywidgets as widgets
-            from ipywidgets.embed import embed_minimal_html
-
-            def plot_image(index,scale=1):
-
-                das_weighted = self.das_layer(data_tof_corrected[:,index:index+1]).cpu().numpy()
-                das = data_beamformed.cpu().numpy()
-                plt.subplot(131)
-                plt.imshow(self.pfields[index].cpu().numpy(), cmap='hot')
-                plt.title(f'Tx {index}')
-                plt.subplot(132)
-                plt.imshow(np.log10(1e-5+np.abs(scale*das_weighted[0]/np.max(das_weighted[0].flatten()))), cmap='gray',vmin=-1,vmax=1)
-                plt.title('Weighted Tx')
-                plt.subplot(133)
-                plt.imshow(np.log10(1e-5+np.abs(scale*das[0]/np.max(das[0].flatten()))), cmap='gray',vmin=-1,vmax=1)
-                plt.title('Beamsummed')
-                plt.show()
-            # Create an interactive slider
-            num_images = len(self.pfields)
-            slider = IntSlider(min=0, max=num_images-1, step=1, value=0, description='Transmit index')
-            slider_scale = IntSlider(min=1, max=30, step=1, value=10, description='Scale')
-
-            # Use the interact function to create the interactive plot
-            interact(plot_image, index=slider, scale=slider_scale)
 
         return data_beamformed
 

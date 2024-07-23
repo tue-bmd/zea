@@ -259,6 +259,25 @@ def pfield_freqloop_torch(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPE
 
     return RP
 
+
+# Some plotting for debugging purposes
+import matplotlib.pyplot as plt
+from ipywidgets import interact, IntSlider
+import ipywidgets as widgets
+from ipywidgets.embed import embed_minimal_html
+
+def pfield_widget(pfields):
+    def plot_image(index):
+        plt.imshow(pfields[index].cpu().numpy(), cmap='hot')
+        plt.title(f'Tx {index}')
+
+    # Create an interactive slider
+    num_images = len(pfields)
+    slider = IntSlider(min=0, max=num_images-1, step=1, value=0, description='Transmit index')
+    # Use the interact function to create the interactive plot
+    interact(plot_image, index=slider)
+
+
 # # Numpy implementation
 # def pfield_freqloop(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling):
 #     RP =
