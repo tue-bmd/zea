@@ -7,7 +7,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tensorflow as tf
+import tf_keras as keras
 
 from usbmd.backend.tensorflow.dataloader import ImageLoader
 from usbmd.backend.tensorflow.models import lista
@@ -59,7 +59,7 @@ def train_lista(config):
 
     model = lista.UnfoldingModel(image_shape, activation="relu")
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
         loss="mse",
         run_eagerly=RUN_EAGERLY,
     )
