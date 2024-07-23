@@ -28,6 +28,12 @@ Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyprojec
 python -m pip install -e .
 ```
 
+Optionally you can add the dev dependencies by running:
+
+```bash
+python -m pip install -e .[dev]
+```
+
 ## Install from github
 
 You can also directly install the package from github. This is useful if you want to install a specific release or branch and keep it fixed in your environment.
