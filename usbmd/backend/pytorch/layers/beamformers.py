@@ -118,8 +118,9 @@ class Beamformer(torch.nn.Module):
                        'dBThresh': -1, # threshold for the pressure field computation (lower is more accurate)
                        'downsample':10, # grid downsampling factor (both directions) for the pressure field computation
                        'downmix': 4, # frequency downmixing factor for the pressure field computation (higher is smoother and requirers fewer gridpoints)
-                	   'alpha': 2, # exponent to 'sharpen or smooth' the weighting (higher is sharper transitions) 
+                	   'alpha': 1, # exponent to 'sharpen or smooth' the weighting (higher is sharper transitions) 
                        'low_perc_th': 10} # lower percentile threshold for the weighting (higher is more aggressive)
+            
             #: The pressure field for each of the transmit events is precomputed
             self.pfields = pfield(probe, scan, options)
 

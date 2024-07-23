@@ -200,16 +200,13 @@ def pfield(probe, scan, options):
         # resize P to exactly the original grid size
         P = sc.ndimage.zoom(P, (siz_orig[0]/siz0[0],siz_orig[1]/siz0[1]), order=1)
 
-
-        #P_list.append(P/np.max(P[5:]))
         P_list.append(P)
-        
+    
     P_norm = normalize(P_list, alpha = alpha, perc = perc)
     P_norm = torch.tensor(P_norm, dtype=torch.float32) # convert to torch tensor
 
     return P_norm
 
-#%%
 def normalize(P_list, alpha =1, perc = 10):
     # alpha: shape factor to tighten te beams (default = 1)
     # perc: percentile to keep (default = 10)
@@ -219,15 +216,12 @@ def normalize(P_list, alpha =1, perc = 10):
     P_arr[P_arr < np.percentile(P_arr, perc, axis=(1,2))[:,np.newaxis,np.newaxis]] = 0  
 
     P_arr=np.array(P_arr)**alpha
-    #P_arr = P_arr/np.max(P_arr)
     P_norm = P_arr/(1e-10+np.sum(P_arr, axis=0))
 
     return P_norm
 
-#%%
 
 def pfield_freqloop_torch(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling):
-    # the hot loop...
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -265,7 +259,7 @@ def pfield_freqloop_torch(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPE
 
     return RP
 
-# #%%
+# # Numpy implementation
 # def pfield_freqloop(f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling):
 #     RP =
 #     for k in range(0,nSampling,1):
