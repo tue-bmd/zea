@@ -11,8 +11,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PIP_CACHE_DIR=/tmp/pip_cache
 
 # Set poetry version and venv path
-ENV POETRY_VERSION=1.8.3
-ENV POETRY_VENV=/opt/poetry-venv
+ENV POETRY_VERSION=1.8.3 \
+    POETRY_VENV=/opt/poetry-venv \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=0 \
+    POETRY_VIRTUALENVS_CREATE=0 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
 
 # Install sudo
 RUN apt-get update && apt-get install -y sudo
@@ -51,7 +55,7 @@ WORKDIR /ultrasound-toolbox
 COPY . /ultrasound-toolbox/
 
 # Install usbmd
-RUN --mount=type=cache,target=$PIP_CACHE_DIR pip install -e .[dev] --config-settings editable_mode=compat
+RUN poetry install
 
 ARG KERAS3=False
 # Install additional packages if KERAS3=True
