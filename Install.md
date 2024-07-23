@@ -1,5 +1,8 @@
 # Install usbmd
 
+This document describes how to install the usbmd package and how to use it in a docker container.
+Make sure you always use a virtual environment such as `miniconda` or `venv` to avoid conflicts with other packages!
+
 - [Install usbmd](#install-usbmd)
   - [Editable install](#editable-install)
   - [Install from github](#install-from-github)
