@@ -19,7 +19,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tensorflow as tf
+import tf_keras as keras
 
 from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
 from usbmd.backend.tensorflow.losses import SMSLE
@@ -77,7 +77,7 @@ def train_beamformer(config):
     config.model.beamformer.type = "das"
     das_beamformer = get_beamformer(probe, scan, config)
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+    optimizer = keras.optimizers.Adam(learning_rate=1e-3)
 
     beamformer.compile(
         optimizer=optimizer,

@@ -1,5 +1,8 @@
 # Install usbmd
 
+This document describes how to install the usbmd package and how to use it in a docker container.
+Make sure you always use a virtual environment such as `miniconda` or `venv` to avoid conflicts with other packages!
+
 - [Install usbmd](#install-usbmd)
   - [Editable install](#editable-install)
   - [Install from github](#install-from-github)
@@ -19,10 +22,16 @@
 ## Editable install
 
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`ultrasound-toolbox`) where the [`setup.py`](setup.py) file is located and run the following command from terminal:
+Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from terminal:
 
 ```bash
 python -m pip install -e .
+```
+
+Optionally you can add the dev dependencies by running:
+
+```bash
+python -m pip install -e .[dev]
 ```
 
 ## Install from github

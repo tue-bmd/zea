@@ -5,7 +5,7 @@ Requires SimpleITK to be installed: pip install SimpleITK.
 from __future__ import annotations
 
 import argparse
-import importlib
+import importlib.util
 import logging
 import os
 import sys
