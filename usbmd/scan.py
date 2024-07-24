@@ -10,6 +10,7 @@ import numpy as np
 
 from usbmd.utils import deprecated, log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
+from usbmd.utils.pfield import pfield, pfield_savefigs
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -226,6 +227,9 @@ class Scan:
 
         #: The beamforming grid of shape (Nx, Nz, 3)
         self._grid = self.grid
+
+        #: The pressure field grid of shape (Nx, Nz, 1)
+        self._pfield = pfield(self)
 
         if initial_times is None:
             log.warning("No initial times provided. Assuming all zeros.")
@@ -511,8 +515,16 @@ class Scan:
         if self._grid is None:
             self._grid = get_grid(self)
             self._Nz, self._Nx, _ = self._grid.shape
+            self._pfield = None # also update the pressure fields
+
         return self._grid
 
+    @property
+    def pfield(self):
+        """The pfield grid of shape (Nx, Nz, 1)."""
+        if self._pfield is None:
+            self._pfield = pfield(self)
+        return self._pfield
 
 class FocussedScan(Scan):
     """
