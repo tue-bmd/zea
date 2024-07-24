@@ -121,9 +121,9 @@ class Beamformer(torch.nn.Module):
         else:
             self.savefigs = False
 
-        if self.auto_pressure_weighting:
-            #: The pressure field for each of the transmit events is precomputed
-            self.pfields = pfield(scan)
+        # if self.auto_pressure_weighting:
+        #     #: The pressure field for each of the transmit events is precomputed
+        #     self.pfields = pfield(scan)
 
         #: The time-of-flight correction layer.
         self.tof_layer = TOF_layer(probe, scan, config.model.batch_size)
@@ -192,7 +192,7 @@ class Beamformer(torch.nn.Module):
             # Perform element-wise multiplication with the pressure weight mask
             # Also add the required dimensions for broadcasting
             device = data_tof_corrected.get_device()
-            data_tof_corrected = data_tof_corrected * self.pfields.to(device).unsqueeze(
+            data_tof_corrected = data_tof_corrected * self.scan.pfields.to(device).unsqueeze(
                 0
             ).unsqueeze(-1).unsqueeze(-1)
             # Perform element-wise summing
