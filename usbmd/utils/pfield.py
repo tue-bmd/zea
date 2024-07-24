@@ -11,7 +11,7 @@ import numpy as np
 import scipy as sc
 import torch
 
-from usbmd import log
+from usbmd.utils import log
 
 
 def pfield(probe, scan, options):
