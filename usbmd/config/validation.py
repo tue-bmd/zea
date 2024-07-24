@@ -20,32 +20,14 @@ from schema import And, Optional, Or, Regex, Schema
 
 import usbmd.utils.metrics  # pylint: disable=unused-import
 from usbmd.config import Config
-from usbmd.registry import (
-    metrics_registry,
-    tf_beamformer_registry,
-    torch_beamformer_registry,
-)
+from usbmd.registry import metrics_registry
+
 from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIB_AVAILABLE, _MOD_TYPES
 
 
-def get_beamformer_types():
-    """Returns a set of all registered beamformer types."""
-    # Needs to import backend to fill registry
-    import usbmd.backend  # pylint: disable=import-outside-toplevel, unused-import
-
-    beamformer_types = set(
-        tf_beamformer_registry.registered_names()
-        + torch_beamformer_registry.registered_names()
-    )
-    if len(beamformer_types) == 0:
-        log.warning(
-            "No beamformers registered. This could happen when no ML library is installed."
-        )
-    return beamformer_types
-
-
 _BACKENDS = [None, "torch", "tensorflow", "numpy"]
+_BEAMFORMER_TYPES = ["das"] # TODO: hardcoded for now
 
 
 # predefined checks, later used in schema to check validity of parameter
@@ -75,7 +57,7 @@ model_schema = Schema(
         Optional("batch_size", default=1): positive_integer,
         Optional("patch_shape", default=None): Or(None, list_of_size_two),
         Optional("beamformer", default={}): {
-            Optional("type", default=None): Or(None, *get_beamformer_types()),
+            Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
             Optional("folds", default=1): positive_integer,
             Optional("end_with_prox", default=False): bool,
             Optional("proxtype", default="softthres"): Or(*_ALLOWED_KEYS_PROXTYPE),

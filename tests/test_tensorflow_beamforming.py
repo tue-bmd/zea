@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import tensorflow as tf
+import tf_keras as keras
 
 from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
 from usbmd.backend.tensorflow.utils.utils import tf_snapshot
@@ -122,7 +123,7 @@ def test_das_beamforming(
     print(f"MSE: {MSE}")
 
     # Free all GPU memory
-    tf.keras.backend.clear_session()
+    keras.backend.clear_session()
 
     if compare_gt:
         assert MSE < 0.01

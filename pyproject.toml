@@ -1,8 +1,89 @@
 [tool.black]
 line-length = 88
 target-version = ['py39']
-include = '\.pyi?$|\.ipynb$'  # Include both Python files and Jupyter notebooks
+include = '\.pyi?$|\.ipynb$' # Include both Python files and Jupyter notebooks
 
 [tool.isort]
 profile = "black"
 line_length = 88
+
+[tool.poetry]
+name = "usbmd"
+version = "2.0.0"
+description = "A collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts for ultrasound researchers."
+authors = [
+    "Tristan Stevens <t.s.w.stevens@tue.nl>",
+    "Ben Luijten <w.m.b.luijten@tue.nl>",
+    "Nishith Chennakeshava <n.chennakeshava@tue.nl>",
+    "Vincent van de Schaft <v.v.d.schaft@tue.nl>",
+    "Oisín Nolan <o.i.nolan@tue.nl>",
+    "Wessel van Nierop <w.l.v.nierop@tue.nl>",
+    "Beatrice Federici <b.federici@tue.nl>",
+]
+readme = "README.md"
+homepage = "https://github.com/tue-bmd/ultrasound-toolbox/"
+repository = "https://github.com/tue-bmd/ultrasound-toolbox/"
+keywords = ["ultrasound", "machine learning", "beamforming"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Natural Language :: English",
+    "Topic :: Scientific/Engineering :: Ultrasound",
+    "Topic :: Scientific/Engineering :: Deep Learning",
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+matplotlib = "^3.8"
+numpy = "^1"
+scipy = "^1.13"
+pillow = "^10"
+scikit-image = "^0.23"
+scikit-learn = "^1.4"
+h5py = "^3.11"
+pandas = "^2.2"
+opencv-python = "^4"
+schema = "^0.7"
+tqdm = "^4"
+pyyaml = "^6"
+decorator = "^5"
+pydicom = "^2.4"
+PyQt5 = "^5.15"
+bm3d = "==4.0.1" # 4.0.2: `GLIBCXX_3.4.32' not found
+bm4d = "==4.2.3" # we don't depend on bm4d, but bm3d breaks if the latest bm4d is installed
+deepdiff = "^7"
+
+[tool.poetry.group.torch]
+optional = true
+
+[tool.poetry.group.torch.dependencies]
+# CPU only, install the dev-torch
+torch = { version = "^2.2", source = "torch-cpu" }
+
+[tool.poetry.group.tensorflow]
+optional = true
+
+[tool.poetry.group.tensorflow.dependencies]
+tensorflow = { version = "^2.15", extras = ["and-cuda"] }
+tf-keras = "^2.15"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1"
+pylint = "^3.1"
+papermill = "^2.4"
+ipykernel = "^6.29.5"
+
+[tool.poetry.extras]
+dev = ["pytest", "pylint", "papermill", "ipykernel"]
+
+[[tool.poetry.source]]
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
