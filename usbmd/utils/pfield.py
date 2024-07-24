@@ -5,10 +5,13 @@
 """
 
 import os
+
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy as sc
 import torch
-import matplotlib.pyplot as plt
+
+from usbmd import log
 
 
 def pfield(scan):
@@ -164,7 +167,7 @@ def pfield(scan):
     for j in range(0, n_transmits):
         # print some progress
         if j % 10 == 0:
-            print(f"Precomputing pressure fields, transmit {j}/{n_transmits}")
+            log.info(f"Precomputing pressure fields, transmit {j}/{n_transmits}")
 
         # delays and apodization of transmit event
         delaysTX = scan.t0_delays[j]
@@ -347,6 +350,7 @@ def pfield_freqloop_torch(
 
     return RP
 
+
 def pfield_savefigs(pfields):
     """
     Save pfield images as PNG files.
@@ -359,12 +363,14 @@ def pfield_savefigs(pfields):
     """
 
     # Create the directory if it doesn't exist
-    if not os.path.exists('pfield_images'):
-        os.makedirs('pfield_images')
+    if not os.path.exists("pfield_images"):
+        os.makedirs("pfield_images")
 
     # Save each pfield as a PNG file
     for i, pfield in enumerate(pfields):
-        plt.imshow(pfield.cpu().numpy(), cmap='hot',vmin=0,vmax=np.max(pfields.cpu().numpy()))
-        plt.title(f'Tx {i}')
-        plt.savefig(f'pfield_images/pfield_{i}.png')
+        plt.imshow(
+            pfield.cpu().numpy(), cmap="hot", vmin=0, vmax=np.max(pfields.cpu().numpy())
+        )
+        plt.title(f"Tx {i}")
+        plt.savefig(f"pfield_images/pfield_{i}.png")
         plt.close()
