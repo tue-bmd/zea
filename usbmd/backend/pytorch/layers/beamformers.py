@@ -1,6 +1,6 @@
 """Pytorch version of the tensorflow beamformer.
 
-- **Author(s)**     : Vincent van de Schaft
+- **Author(s)**     : Vincent van de Schaft, Ruud van Sloun
 - **Date**          : Thu Feb 16 2023
 Beamformer functionality implemented in pytorch.
 
@@ -52,7 +52,7 @@ from usbmd.registry import torch_beamformer_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _check_raw_data
 
-from usbmd.utils.pfield import pfield, pfield_widget
+from usbmd.utils.pfield import pfield, pfield_savefigs
 
 
 def get_beamformer(probe, scan, config, aux_inputs=("grid"), aux_outputs=()):
@@ -106,30 +106,33 @@ class Beamformer(torch.nn.Module):
         #: The `usbmd.config.Config` object to beamform with.
         self.config = config
 
-
         #: Whether to apply automatic pressure weighting
         #: Currently it is not active by default
-        if 'auto_pressure_weighting' in config.model.beamformer.keys():
-            self.auto_pressure_weighting = config.model.beamformer['auto_pressure_weighting']
+        if "auto_pressure_weighting" in config.model.beamformer.keys():
+            self.auto_pressure_weighting = config.model.beamformer[
+                "auto_pressure_weighting"
+            ]
         else:
             self.auto_pressure_weighting = False
-        
-        #: Whether to show the demo/debug mode with a widget 
+
+        #: Whether to save all computed pressure fields to pngs
         #  (helpfull to analyse if the fields are computed properly)
-        if 'auto_pressure_weighting_demo' in config.model.beamformer.keys():
-            self.demo = config.model.beamformer['auto_pressure_weighting_demo']
+        if "auto_pressure_weighting_savefigs" in config.model.beamformer.keys():
+            self.savefigs = config.model.beamformer["auto_pressure_weighting_savefigs"]
         else:
-            self.demo = False
+            self.savefigs = False
 
         if self.auto_pressure_weighting:
 
-            options = {'FrequencyStep': 4, # frequency step; 1 computes is all frequencies
-                       'dBThresh': -1, # threshold for the pressure field computation (lower is more accurate)
-                       'downsample':10, # grid downsampling factor (both directions) for the pressure field computation
-                       'downmix': 4, # frequency downmixing factor for the pressure field computation (higher is smoother and requirers fewer gridpoints)
-                	   'alpha': 1, # exponent to 'sharpen or smooth' the weighting (higher is sharper transitions) 
-                       'low_perc_th': 10} # lower percentile threshold for the weighting (higher is more aggressive)
-            
+            options = {
+                "FrequencyStep": 4,
+                "dBThresh": -1,
+                "downsample": 10,
+                "downmix": 4,
+                "alpha": 1,
+                "low_perc_th": 10,
+            }
+
             #: The pressure field for each of the transmit events is precomputed
             self.pfields = pfield(probe, scan, options)
 
@@ -200,14 +203,15 @@ class Beamformer(torch.nn.Module):
             # Perform element-wise multiplication with the pressure weight mask
             # Also add the required dimensions for broadcasting
             device = data_tof_corrected.get_device()
-            data_tof_corrected = data_tof_corrected * self.pfields.to(device).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+            data_tof_corrected = data_tof_corrected * self.pfields.to(device).unsqueeze(
+                0).unsqueeze(-1).unsqueeze(-1)
             # Perform element-wise summing
             data_beamformed = self.das_layer(data_tof_corrected)
 
-            if self.demo:
-                pfield_widget(self.pfields)
+            if self.savefigs:
+                pfield_savefigs(self.pfields)
 
-        else: # Automatic pressure weighting off
+        else:  # Automatic pressure weighting off
             data_beamformed = self.das_layer(data_tof_corrected)
 
         return data_beamformed
