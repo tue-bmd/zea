@@ -10,7 +10,7 @@ import numpy as np
 
 from usbmd.utils import deprecated, log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
-from usbmd.utils.pfield import pfield, pfield_savefigs
+from usbmd.utils.pfield import pfield
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -228,9 +228,6 @@ class Scan:
         #: The beamforming grid of shape (Nx, Nz, 3)
         self._grid = self.grid
 
-        #: The pressure field grid of shape (Nx, Nz, 1)
-        self._pfield = pfield(self)
-
         if initial_times is None:
             log.warning("No initial times provided. Assuming all zeros.")
             initial_times = np.zeros(self._n_tx)
@@ -276,6 +273,9 @@ class Scan:
         self._initial_times = initial_times
 
         self.selected_transmits = selected_transmits
+
+        #: The pressure field grid of shape (Nx, Nz, 1)
+        self._pfield = pfield(self)
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -362,6 +362,7 @@ class Scan:
     def selected_transmits(self, value):
         self._selected_transmits = self._select_transmits(value)
         check_for_aliasing(self)
+        self._pfield = None  # also trigger update of the pressure fields
 
     @property
     def n_tx(self):
@@ -515,7 +516,7 @@ class Scan:
         if self._grid is None:
             self._grid = get_grid(self)
             self._Nz, self._Nx, _ = self._grid.shape
-            self._pfield = None # also update the pressure fields
+            self._pfield = None # also trigger update of the pressure fields
 
         return self._grid
 
