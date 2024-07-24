@@ -51,7 +51,7 @@ import torch
 from usbmd.registry import torch_beamformer_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _check_raw_data
-from usbmd.utils.pfield import pfield, pfield_savefigs
+from usbmd.utils.pfield import pfield_savefigs
 
 
 def get_beamformer(probe, scan, config, aux_inputs=("grid"), aux_outputs=()):
@@ -192,14 +192,14 @@ class Beamformer(torch.nn.Module):
             # Perform element-wise multiplication with the pressure weight mask
             # Also add the required dimensions for broadcasting
             device = data_tof_corrected.get_device()
-            data_tof_corrected = data_tof_corrected * self.scan.pfields.to(device).unsqueeze(
+            data_tof_corrected = data_tof_corrected * self.scan.pfield.to(device).unsqueeze(
                 0
             ).unsqueeze(-1).unsqueeze(-1)
             # Perform element-wise summing
             data_beamformed = self.das_layer(data_tof_corrected)
 
             if self.savefigs:
-                pfield_savefigs(self.pfields)
+                pfield_savefigs(self.scan.pfield)
 
         else:  # Automatic pressure weighting off
             data_beamformed = self.das_layer(data_tof_corrected)
