@@ -122,18 +122,8 @@ class Beamformer(torch.nn.Module):
             self.savefigs = False
 
         if self.auto_pressure_weighting:
-
-            options = {
-                "FrequencyStep": 4,
-                "dBThresh": -1,
-                "downsample": 10,
-                "downmix": 4,
-                "alpha": 1,
-                "low_perc_th": 10,
-            }
-
             #: The pressure field for each of the transmit events is precomputed
-            self.pfields = pfield(probe, scan, options)
+            self.pfields = pfield(scan)
 
         #: The time-of-flight correction layer.
         self.tof_layer = TOF_layer(probe, scan, config.model.batch_size)
