@@ -344,7 +344,7 @@ def pfield_freqloop_torch(
     return RP
 
 
-def pfield_savefigs(pfields):
+def pfield_savefigs(pfields, folder=None):
     """
     Save pfield images as PNG files.
 
@@ -354,10 +354,10 @@ def pfield_savefigs(pfields):
     Returns:
         None
     """
+    if folder is None:
+        folder = "./temp/pfield_images/"
 
-    # Create the directory if it doesn't exist
-    if not os.path.exists("pfield_images"):
-        os.makedirs("pfield_images")
+    os.makedirs(folder, exist_ok=True)
 
     # Save each pfield as a PNG file
     for i, pfield in enumerate(pfields):
@@ -365,5 +365,7 @@ def pfield_savefigs(pfields):
             pfield.cpu().numpy(), cmap="hot", vmin=0, vmax=np.max(pfields.cpu().numpy())
         )
         plt.title(f"Tx {i}")
-        plt.savefig(f"pfield_images/pfield_{i}.png")
+        filepath = folder + f"pfield_{i}.png"
+        plt.savefig(filepath, bbox_inches="tight")
         plt.close()
+        log.success(f"Saved pfield image to {log.yellow(filepath)}")
