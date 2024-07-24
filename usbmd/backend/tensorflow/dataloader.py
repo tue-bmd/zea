@@ -13,7 +13,8 @@ import h5py
 import keras
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import RandomCrop, Resizing
+import tf_keras
+from keras import layers
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import search_file_tree
@@ -314,10 +315,10 @@ def h5_dataset_from_directory(
         assert len(image_size) == 2, "image_size must be of length 2 (height, width)"
 
         if resize_type == "resize":
-            resize_layer = Resizing(*image_size)
+            resize_layer = layers.Resizing(*image_size)
             dataset = dataset.map(resize_layer, num_parallel_calls=tf.data.AUTOTUNE)
         else:
-            crop_layer = RandomCrop(*image_size)
+            crop_layer = layers.RandomCrop(*image_size)
             dataset = dataset.map(crop_layer, num_parallel_calls=tf.data.AUTOTUNE)
 
     # normalize
@@ -337,7 +338,7 @@ def h5_dataset_from_directory(
     return dataset
 
 
-class ImageLoader(tf.keras.utils.Sequence):
+class ImageLoader(tf_keras.utils.Sequence):
     """Class for loading ultrasound dataset for training.
 
     Make sure file names in x_directory and y_directory match

@@ -1,9 +1,11 @@
 """
 Tensorflow utilities
 """
+
 import numpy as np
 import tensorflow as tf
-from keras.layers import Lambda, LeakyReLU, ReLU
+import tf_keras as keras
+from tf_keras.layers import Lambda, LeakyReLU, ReLU
 
 PI = tf.experimental.numpy.pi
 
@@ -33,9 +35,9 @@ def get_activation(activation: str = None):
     elif activation.lower() == "leakyrelu":
         return LeakyReLU()
     elif activation.lower() == "swish":
-        return Lambda(lambda x: tf.keras.activations.swish(x))
+        return Lambda(lambda x: keras.activations.swish(x))
     elif activation.lower() == "sigmoid":
-        return Lambda(lambda x: tf.keras.activations.sigmoid(x))
+        return Lambda(lambda x: keras.activations.sigmoid(x))
     elif activation is None:
         return Lambda(lambda x: x)
     else:
@@ -63,10 +65,10 @@ def tf_cropping_and_padding(input_shape, target_shape):
     cropping = tuple(tuple(0 if x < 0 else x for x in row) for row in cropping)
 
     # Create a Cropping2D layer with the calculated crop amounts
-    cropping_layer = tf.keras.layers.Cropping2D(cropping=cropping)
+    cropping_layer = keras.layers.Cropping2D(cropping=cropping)
 
     # Create a ZeroPadding2D layer with the calculated padding amounts
-    padding_layer = tf.keras.layers.ZeroPadding2D(padding=padding)
+    padding_layer = keras.layers.ZeroPadding2D(padding=padding)
 
     return cropping_layer, padding_layer
 

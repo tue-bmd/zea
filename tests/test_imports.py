@@ -1,5 +1,5 @@
 """ Check that all Python files in the project can be compiled, and that no import errors occur, for
-example due to missing dependencies in the requirements.txt file. """
+example due to missing dependencies in the pyproject.toml file. """
 
 import glob
 import traceback

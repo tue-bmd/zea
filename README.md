@@ -13,7 +13,7 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 ### Editable install
 
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`ultrasound-toolbox`) where the [`setup.py`](setup.py) file is located and run the following command from terminal:
+Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from terminal:
 
 ```bash
 python -m pip install -e .
@@ -158,6 +158,9 @@ from usbmd.probes import Probe
 from usbmd.processing import Process
 from usbmd.scan import Scan
 from usbmd.utils import update_dictionary
+from usbmd.utils.device import init_device
+
+device = init_device("torch", "auto:1")
 
 # let's check if your usbmd version is up to date
 assert usbmd.__version__ >= "2.0", "Please update usbmd to version 2.0 or higher"
@@ -194,6 +197,7 @@ process.set_pipeline(
         {"name": "normalize"},
         {"name": "log_compress"},
     ],
+    device=device,
 )
 
 # pick a frame from the dataset
