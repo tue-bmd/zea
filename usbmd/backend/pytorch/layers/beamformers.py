@@ -13,8 +13,8 @@ Beamformer functionality implemented in pytorch.
     dimensions are.
 
 - By default the beamformer compounds all transmit data coherently without weighting.
-  To perform automatic weighting based on an estimate of the pressure field, 
-  add: 
+  To perform automatic weighting based on an estimate of the pressure field,
+  add:
     config.model.beamformer['auto_pressure_weighting']= True
     config.model.beamformer['auto_pressure_weighting_demo']= True
   to the config file
@@ -51,7 +51,6 @@ import torch
 from usbmd.registry import torch_beamformer_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _check_raw_data
-
 from usbmd.utils.pfield import pfield, pfield_savefigs
 
 
@@ -194,7 +193,8 @@ class Beamformer(torch.nn.Module):
             # Also add the required dimensions for broadcasting
             device = data_tof_corrected.get_device()
             data_tof_corrected = data_tof_corrected * self.pfields.to(device).unsqueeze(
-                0).unsqueeze(-1).unsqueeze(-1)
+                0
+            ).unsqueeze(-1).unsqueeze(-1)
             # Perform element-wise summing
             data_beamformed = self.das_layer(data_tof_corrected)
 
