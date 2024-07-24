@@ -14,14 +14,12 @@ import torch
 from usbmd.utils import log
 
 
-def pfield(probe, scan, options):
+def pfield(scan):
     """
     Compute the pressure field for ultrasound imaging.
 
     Args:
-        probe (Probe): The ultrasound probe object.
         scan (Scan): The ultrasound scan object.
-        options (dict): A dictionary containing various options for the computation.
 
     Returns:
         torch.Tensor: The normalized pressure field (across tx events) as a torch tensor.
@@ -30,6 +28,15 @@ def pfield(probe, scan, options):
         None
 
     """
+
+    options = {
+        "FrequencyStep": 4,
+        "dBThresh": -1,
+        "downsample": 10,
+        "downmix": 4,
+        "alpha": 1,
+        "low_perc_th": 10,
+    }
 
     # options
     FrequencyStep = options["FrequencyStep"]
@@ -70,7 +77,7 @@ def pfield(probe, scan, options):
     NoW = 1  # number of waveforms in the pulse - we don't have this in the scan object
 
     # array params
-    probe_geometry = probe.probe_geometry
+    probe_geometry = scan.probe_geometry
 
     NumberOfElements = scan.n_el  # % number of elements
     pitch = probe_geometry[1, 0] - probe_geometry[0, 0]  # % element pitch
