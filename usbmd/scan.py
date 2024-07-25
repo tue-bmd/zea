@@ -159,7 +159,7 @@ class Scan:
             pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
                 pressure field of shape (Nx, Nz, 1) with to perform automatic weighting.
                 Defaults to None. In that case default arguments are used. If pfield can be used
-                by the beamformer with option config.model.beamformer.auto_pressure_weighting = True.
+                by the beamformer with option config.model.beamformer.auto_pressure_weighting.
                 If set to True, the pfield is used, if False, beamformer will compound all
                 transmit data coherently without pfield weighting.
 
