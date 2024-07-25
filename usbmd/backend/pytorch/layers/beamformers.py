@@ -192,7 +192,7 @@ class Beamformer(torch.nn.Module):
             # Perform element-wise multiplication with the pressure weight mask
             # Also add the required dimensions for broadcasting
             device = data_tof_corrected.get_device()
-            data_tof_corrected = data_tof_corrected * self.scan.pfield.to(device).unsqueeze(
+            data_tof_corrected = data_tof_corrected * torch.tensor(self.scan.pfield,dtype=torch.float32).to(device).unsqueeze(
                 0
             ).unsqueeze(-1).unsqueeze(-1)
             # Perform element-wise summing
