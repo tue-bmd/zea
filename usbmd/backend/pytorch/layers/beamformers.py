@@ -114,17 +114,6 @@ class Beamformer(torch.nn.Module):
         else:
             self.auto_pressure_weighting = False
 
-        #: Whether to save all computed pressure fields to pngs
-        #  (helpfull to analyse if the fields are computed properly)
-        if "auto_pressure_weighting_savefigs" in config.model.beamformer.keys():
-            self.savefigs = config.model.beamformer["auto_pressure_weighting_savefigs"]
-        else:
-            self.savefigs = False
-
-        # if self.auto_pressure_weighting:
-        #     #: The pressure field for each of the transmit events is precomputed
-        #     self.pfields = pfield(scan)
-
         #: The time-of-flight correction layer.
         self.tof_layer = TOF_layer(probe, scan, config.model.batch_size)
         #: The delay-and-sum layer, which performs the beamsumming.
@@ -192,14 +181,13 @@ class Beamformer(torch.nn.Module):
             # Perform element-wise multiplication with the pressure weight mask
             # Also add the required dimensions for broadcasting
             device = data_tof_corrected.get_device()
+            
             data_tof_corrected = data_tof_corrected * torch.tensor(
                 self.scan.pfield, dtype=torch.float32
             ).to(device).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+
             # Perform element-wise summing
             data_beamformed = self.das_layer(data_tof_corrected)
-
-            if self.savefigs:
-                pfield_savefigs(self.scan.pfield)
 
         else:  # Automatic pressure weighting off
             data_beamformed = self.das_layer(data_tof_corrected)
