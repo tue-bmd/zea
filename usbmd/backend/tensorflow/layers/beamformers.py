@@ -105,6 +105,11 @@ class Beamformer(tf.keras.Model):
             log.info("JIT compiling TF Beamformer")
             self.beamform = tf.function(self.beamform, jit_compile=True)
 
+        if config.model.beamformer.get("auto_pressure_weighting"):
+            log.warning(
+                "Auto pressure weighting is not yet implemented in the TF Beamformer"
+            )
+
     def call(self, inputs, probe=None, scan=None, **kwargs):
         """Performs beamforming on input data, based on the provided probe and scan.
         Probe and Scan objects can only be given if this function was not graph compiled, i.e.
