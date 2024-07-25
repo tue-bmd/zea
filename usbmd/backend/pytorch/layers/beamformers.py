@@ -1,6 +1,6 @@
 """Pytorch version of the tensorflow beamformer.
 
-- **Author(s)**     : Vincent van de Schaft
+- **Author(s)**     : Vincent van de Schaft, Ruud van Sloun
 - **Date**          : Thu Feb 16 2023
 Beamformer functionality implemented in pytorch.
 
@@ -11,6 +11,13 @@ Beamformer functionality implemented in pytorch.
     that the first dimension selects over the transmits and the second
     dimension selects over elements without stating explicitly how large these
     dimensions are.
+
+- By default the beamformer compounds all transmit data coherently without weighting.
+  To perform automatic weighting based on an estimate of the pressure field,
+  add:
+    config.model.beamformer['auto_pressure_weighting']= True
+    config.model.beamformer['auto_pressure_weighting_demo']= True
+  to the config file
 
 ### Abbreviations
 | abbreviation  | description                                      |
@@ -34,6 +41,7 @@ These variable names are used throughout the code and documentation.
 | `flatgrid`      | The grid of points to beamform to, flattened          | `(n_pix, 3)`   |
 | `probe_geometry`| The positions of the elements                         | `(n_el, 3)`    |
 | `t0_delays`     | The delay to firing with respect to the first element | `(n_tx, n_el)` |
+
 """
 
 # pylint: disable=no-member
@@ -43,7 +51,6 @@ import torch
 from usbmd.registry import torch_beamformer_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _check_raw_data
-
 
 def get_beamformer(probe, scan, config, aux_inputs=("grid"), aux_outputs=()):
     """Creates a beamformer from a probe, a scan, and a config file.
@@ -95,6 +102,15 @@ class Beamformer(torch.nn.Module):
         self.probe = probe
         #: The `usbmd.config.Config` object to beamform with.
         self.config = config
+
+        #: Whether to apply automatic pressure weighting
+        #: Currently it is not active by default
+        if "auto_pressure_weighting" in config.model.beamformer.keys():
+            self.auto_pressure_weighting = config.model.beamformer[
+                "auto_pressure_weighting"
+            ]
+        else:
+            self.auto_pressure_weighting = False
 
         #: The time-of-flight correction layer.
         self.tof_layer = TOF_layer(probe, scan, config.model.batch_size)
@@ -168,7 +184,20 @@ class Beamformer(torch.nn.Module):
         # Perform time-of-flight correction
         data_tof_corrected = self.tof_layer(data)
 
-        data_beamformed = self.das_layer(data_tof_corrected)
+        if self.auto_pressure_weighting:
+            # Perform element-wise multiplication with the pressure weight mask
+            # Also add the required dimensions for broadcasting
+            device = data_tof_corrected.get_device()
+
+            data_tof_corrected = data_tof_corrected * torch.tensor(
+                self.scan.pfield, dtype=torch.float32
+            ).to(device).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+
+            # Perform element-wise summing
+            data_beamformed = self.das_layer(data_tof_corrected)
+
+        else:  # Automatic pressure weighting off
+            data_beamformed = self.das_layer(data_tof_corrected)
 
         return data_beamformed
 
