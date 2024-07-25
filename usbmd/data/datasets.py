@@ -697,6 +697,11 @@ class DummyDataset(DataSet):
         """Return total number of frames in dataset."""
         return 20
 
+    @property
+    def event_structure(self):
+        """Whether the files in the dataset have an event structure."""
+        return False
+
     def __len__(self):
         """
         Return number of files in dataset. The number is arbitrary for the dummy
