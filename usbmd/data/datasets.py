@@ -316,27 +316,6 @@ class USBMDDataSet(DataSet):
             data = data[self.frame_no]
             get_check(self.dtype)(data)
 
-        data = self._correct_deprecated_dim_order(data)
-        return data
-
-    def _correct_deprecated_dim_order(self, data):
-        """Correct data dimension order if it is in the old usbmd format."""
-        if self.dtype not in ["raw_data", "aligned_data"]:
-            return data
-
-        *_, n_ax, n_el, _ = data.shape
-
-        if n_ax < n_el:
-            log.warning(
-                "\nThe data has the wrong dimension order: (n_tx, n_el, n_ax, n_ch).\n"
-                "Transposing data to correct dimension order: (n_tx, n_ax, n_el, n_ch).\n"
-                "This will be removed in a future version of USBMD. "
-                "Please update your dataset to the new format."
-            )
-            if len(data.shape) == 4:
-                data = np.transpose(data, (0, 2, 1, 3))
-            else:
-                data = np.transpose(data, (0, 1, 3, 2, 4))
         return data
 
     # pylint: disable=arguments-differ
