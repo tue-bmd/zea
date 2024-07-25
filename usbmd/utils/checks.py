@@ -5,13 +5,13 @@
 """
 
 import importlib.util
-import logging
 from pathlib import Path
 
 import h5py
 import numpy as np
 
 from usbmd.registry import checks_registry
+from usbmd.utils import log
 
 _DATA_TYPES = [
     "raw_data",
@@ -491,7 +491,7 @@ def _assert_scan_keys_present(dataset):
 
         else:
             correct_shape = None
-            logging.warning(f"No validation has been defined for {key}.")
+            log.warning(f"No validation has been defined for {log.orange(key)}.")
 
         if correct_shape is not None:
             assert shape_dataset == correct_shape, (
