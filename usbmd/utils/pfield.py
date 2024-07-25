@@ -11,46 +11,38 @@ import torch
 from usbmd.utils import log
 
 
-def compute_pfield(scan, options):
+def compute_pfield(
+    scan,
+    FrequencyStep=4,
+    dBThresh=-1,
+    downsample=10,
+    downmix=4,
+    alpha=1,
+    perc=10,
+):
     """
     Compute the pressure field for ultrasound imaging.
 
     Args:
         scan (Scan): The ultrasound scan object.
+        FrequencyStep (int, optional): Frequency step. Default is 4.
+            Higher is faster but less accurate.
+        dBThresh (int, optional): dB threshold. Default is -1.
+            Higher is faster but less accurate.
+        downsample (int, optional): Downsample the grid for faster computation.
+            Default is 10. Higher is faster but less accurate.
+        downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
+            Default is 4. Higher requires lower number of grid points but is less accurate.
+        alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Default is 1.
+        perc (int, optional): minium percentile threshold to keep in the weighting
+            Higher is more aggressive) Default is 10.
 
     Returns:
-        torch.Tensor: The normalized pressure field (across tx events) as a torch tensor.
-
-    Raises:
-        None
-
+        np.ndarray: The normalized pressure field (across tx events).
     """
-
-    # options
-    FrequencyStep = options["FrequencyStep"]
-    # Frequency step (scaling factor); default = 1.
-    # Higher is faster but less accurate.
-
-    dBThresh = options["dBThresh"]
-    # dB threshold for the frequency response; default = -60 dB.
-    # Higher is faster but less accurate.
-
-    downsample = options["downsample"]
-    # Downsample the grid for faster computation; default = 1.
-    # Higher is faster but less accurate.
-
-    downmix = options["downmix"]
-    # Downmixing the frequency to facilitate a smaller grid; default = 1.
-    # Higher requires lower number of grid points but is less accurate.
-    alpha = options["alpha"]
-    # Default = 1; exponent to 'sharpen or smooth' the weighting.
-    # Higher is sharper transitions.
-
-    perc = options["low_perc_th"]
-    # Default = 10; minium percentile threshold to keep in the weighting (higher is more aggressive)
-
     # medium params
     alpha_dB = 0  # currently we ignore attenuation in the compounding
+
     c = scan.sound_speed
 
     # probe params
