@@ -49,7 +49,7 @@ planewave_scan_args = {
     "pixels_per_wvln": 4,
     "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
     "azimuth_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
-    "tx_apodizations": np.ones((10, 10)),
+    "tx_apodizations": np.ones((10, 128)),
     "downsample": 1,
     "initial_times": np.zeros((10,)),
 }

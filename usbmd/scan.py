@@ -1,14 +1,17 @@
 """Class structures containing parameters defining an ultrasound scan and the
 beamforming grid.
 
-- **Author(s)**     : Vincent van de Schaft
+- **Author(s)**     : Vincent van de Schaft, Tristan Stevens
 - **Date**          : Wed Feb 15 2024
 """
+
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from usbmd.utils import deprecated, log
+from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 
 SCAN_PARAM_TYPES = {
@@ -77,15 +80,16 @@ class Scan:
         Nz: int = None,
         pixels_per_wvln: int = 3,
         downsample: int = 1,
-        polar_angles: np.ndarray = None,
-        azimuth_angles: np.ndarray = None,
-        t0_delays: np.ndarray = None,
-        tx_apodizations: np.ndarray = None,
-        focus_distances: np.ndarray = None,
-        initial_times: np.ndarray = None,
-        selected_transmits: list = None,
-        probe_geometry: np.ndarray = None,
-        time_to_next_transmit: np.ndarray = None,
+        polar_angles: Union[np.ndarray, None] = None,
+        azimuth_angles: Union[np.ndarray, None] = None,
+        t0_delays: Union[np.ndarray, None] = None,
+        tx_apodizations: Union[np.ndarray, None] = None,
+        focus_distances: Union[np.ndarray, None] = None,
+        initial_times: Union[np.ndarray, None] = None,
+        selected_transmits: Union[int, list] = None,
+        probe_geometry: Union[np.ndarray, None] = None,
+        time_to_next_transmit: Union[np.ndarray, None] = None,
+        pfield: Union[np.ndarray, None] = None,
         f_number: float = 1.0,
     ):
         """Initializes a Scan object representing the number and type of
@@ -152,6 +156,9 @@ class Scan:
                 in meters. Necessary for automatic xlim calculation if not set. Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
+            pfield (np.ndarray, float, optional): The estimated pressure field of shape (Nx, Nz, 1).
+                to perform automatic weighting. Defaults to None. In that case the beamformer
+                compounds all transmit data coherently without weighting.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -250,18 +257,46 @@ class Scan:
                 "128 element probe."
             )
             tx_apodizations = np.ones((self._n_tx, self._n_el))
+        else:
+            assert tx_apodizations.shape == (self._n_tx, self._n_el), (
+                f"tx_apodizations must have shape (n_tx, n_el) = "
+                f"{self._n_tx, self._n_el}. "
+                f"Got shape {tx_apodizations.shape}."
+            )
 
         if polar_angles is None:
             log.warning("No polar_angles provided. Assuming all zeros.")
             polar_angles = np.zeros(self._n_tx)
+        else:
+            assert len(polar_angles) == self._n_tx, (
+                f"polar_angles must have length n_tx = {self._n_tx}. "
+                f"Got length {len(polar_angles)}."
+            )
 
         if azimuth_angles is None:
             log.warning("No azimuth_angles provided. Assuming all zeros.")
             azimuth_angles = np.zeros(self._n_tx)
+        else:
+            assert len(azimuth_angles) == self._n_tx, (
+                f"azimuth_angles must have length n_tx = {self._n_tx}. "
+                f"Got length {len(azimuth_angles)}."
+            )
 
         if focus_distances is None:
             log.warning("No focus_distances provided. Assuming all zeros.")
             focus_distances = np.zeros(self._n_tx)
+        else:
+            assert len(focus_distances) == self._n_tx, (
+                f"focus_distances must have length n_tx = {self._n_tx}. "
+                f"Got length {len(focus_distances)}."
+            )
+
+        # will self compute pfield if None
+        if pfield is not None:
+            assert pfield.shape == (self.Nx, self.Nz, 1), (
+                f"pfield must have shape (Nx, Nz, 1) = {self.Nx, self.Nz, 1}. "
+                f"Got shape {pfield.shape}."
+            )
 
         self._t0_delays = t0_delays
         self._tx_apodizations = tx_apodizations
@@ -270,6 +305,7 @@ class Scan:
         self._azimuth_angles = azimuth_angles
         self._focus_distances = focus_distances
         self._initial_times = initial_times
+        self._pfield = pfield
 
         self.selected_transmits = selected_transmits
 
@@ -358,6 +394,7 @@ class Scan:
     def selected_transmits(self, value):
         self._selected_transmits = self._select_transmits(value)
         check_for_aliasing(self)
+        self._pfield = None  # also trigger update of the pressure fields
 
     @property
     def n_tx(self):
@@ -511,7 +548,24 @@ class Scan:
         if self._grid is None:
             self._grid = get_grid(self)
             self._Nz, self._Nx, _ = self._grid.shape
+            self._pfield = None  # also trigger update of the pressure fields
+
         return self._grid
+
+    @property
+    def pfield(self):
+        """The pfield grid of shape (Nx, Nz, 1)."""
+        if self._pfield is None:
+            if self.probe_geometry is not None:
+                self._pfield = compute_pfield(self)
+            else:
+                log.warning(
+                    "scan.probe_geometry not set. Cannot compute pfield."
+                    "Defaulting to uniform weights."
+                )
+                self._pfield = 1
+
+        return self._pfield
 
 
 class FocussedScan(Scan):
