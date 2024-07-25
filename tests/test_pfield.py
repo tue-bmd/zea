@@ -11,12 +11,9 @@ import numpy as np
 import pytest
 import torch
 
-from usbmd.backend.pytorch import on_device_torch
-from usbmd.backend.pytorch.layers.beamformers import get_beamformer
 from usbmd.config import load_config_from_yaml
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
-from usbmd.utils.simulator import UltrasoundSimulator
 
 # Add project folder to path to find config files
 wd = Path(__file__).parent.parent
@@ -57,6 +54,8 @@ def test_pfield(scantype, debug=False):
         ),
     )
 
+    assert scantype is "pw", "Only pw testing supported"
+
     scan._focus_distances = np.array([np.inf])
 
     # Set scan grid parameters
@@ -77,7 +76,7 @@ def test_pfield(scantype, debug=False):
         plt.imshow(scan._pfield[0])
         plt.title("Pressure field for Tx1")
         plt.show()
-        
+
     # Free all GPU memory
     torch.cuda.empty_cache()
 
