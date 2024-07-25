@@ -216,11 +216,14 @@ class DataLoaderUI:
         if frame_no == "all":
             log.info("Will run all frames as `all` was chosen in config...")
         elif frame_no is None:
-            frame_no = _try(
-                lambda: int(
-                    input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
+            if self.dataset.num_frames == 1:
+                frame_no = 0
+            else:
+                frame_no = _try(
+                    lambda: int(
+                        input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
+                    )
                 )
-            )
 
         # get data from dataset
         data = self.dataset[(file_idx, frame_no)]
