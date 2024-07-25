@@ -54,7 +54,7 @@ def test_pfield(scantype, debug=False):
         ),
     )
 
-    assert scantype is "pw", "Only pw testing supported"
+    assert scantype == "pw", "Only pw testing supported"
 
     scan._focus_distances = np.array([np.inf])
 
