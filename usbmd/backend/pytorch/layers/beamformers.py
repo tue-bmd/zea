@@ -51,8 +51,6 @@ import torch
 from usbmd.registry import torch_beamformer_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _check_raw_data
-from usbmd.utils.pfield import pfield_savefigs
-
 
 def get_beamformer(probe, scan, config, aux_inputs=("grid"), aux_outputs=()):
     """Creates a beamformer from a probe, a scan, and a config file.
