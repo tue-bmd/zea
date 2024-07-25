@@ -36,6 +36,10 @@ DESCRIPTIONS = {
         "beamformer": {
             "description": "Settings used to configure the beamformer.",
             "type": "The beamforming method to use (das,)",
+            "auto_pressure_weighting": (
+                "True: enables automatic field-based weighting of Tx events in compounding."
+                "False: disables automatic field-based weighting of Tx events in compounding."
+            ),
             "proxtype": (
                 "The type of proximal operator to use "
                 f"({allows_type_to_str(_ALLOWED_KEYS_PROXTYPE)})"

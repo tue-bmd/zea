@@ -89,7 +89,7 @@ class Scan:
         selected_transmits: Union[int, list] = None,
         probe_geometry: Union[np.ndarray, None] = None,
         time_to_next_transmit: Union[np.ndarray, None] = None,
-        pfield: Union[np.ndarray, None] = None,
+        pfield_kwargs: Union[dict, None] = None,
         f_number: float = 1.0,
     ):
         """Initializes a Scan object representing the number and type of
@@ -156,9 +156,12 @@ class Scan:
                 in meters. Necessary for automatic xlim calculation if not set. Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
-            pfield (np.ndarray, float, optional): The estimated pressure field of shape (Nx, Nz, 1).
-                to perform automatic weighting. Defaults to None. In that case the beamformer
-                compounds all transmit data coherently without weighting.
+            pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
+                pressure field of shape (Nx, Nz, 1) with to perform automatic weighting.
+                Defaults to None. In that case default arguments are used. If pfield can be used
+                by the beamformer with option config.model.beamformer.auto_pressure_weighting.
+                If set to True, the pfield is used, if False, beamformer will compound all
+                transmit data coherently without pfield weighting.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -194,6 +197,8 @@ class Scan:
         self.time_to_next_transmit = time_to_next_transmit
         #: The f-number, e.g. dynamic aperture, used for receive beamforming
         self.f_number = f_number
+        #: The arguments to calculate the estimated pressure field with
+        self.pfield_kwargs = pfield_kwargs
 
         # Beamforming grid related attributes
         # ---------------------------------------------------------------------
@@ -291,13 +296,6 @@ class Scan:
                 f"Got length {len(focus_distances)}."
             )
 
-        # will self compute pfield if None
-        if pfield is not None:
-            assert pfield.shape == (self.Nx, self.Nz, 1), (
-                f"pfield must have shape (Nx, Nz, 1) = {self.Nx, self.Nz, 1}. "
-                f"Got shape {pfield.shape}."
-            )
-
         self._t0_delays = t0_delays
         self._tx_apodizations = tx_apodizations
         self._polar_angles = polar_angles
@@ -305,7 +303,7 @@ class Scan:
         self._azimuth_angles = azimuth_angles
         self._focus_distances = focus_distances
         self._initial_times = initial_times
-        self._pfield = pfield
+        self._pfield = None
 
         self.selected_transmits = selected_transmits
 
@@ -555,17 +553,34 @@ class Scan:
     @property
     def pfield(self):
         """The pfield grid of shape (Nx, Nz, 1)."""
-        if self._pfield is None:
-            if self.probe_geometry is not None:
-                self._pfield = compute_pfield(self)
+        if self._pfield is not None:
+            return self._pfield
+
+        if self.probe_geometry is None:
+            log.warning(
+                "scan.probe_geometry not set. Cannot compute pfield."
+                "Defaulting to uniform weights."
+            )
+            self._pfield = 1
+        else:
+            if self.pfield_kwargs is None:
+                pfield_kwargs = {}
             else:
-                log.warning(
-                    "scan.probe_geometry not set. Cannot compute pfield."
-                    "Defaulting to uniform weights."
-                )
-                self._pfield = 1
+                pfield_kwargs = self.pfield_kwargs
+
+            self._pfield = compute_pfield(self, **pfield_kwargs)
 
         return self._pfield
+
+    @pfield.setter
+    def pfield(self, value):
+        """Manually set the pfield."""
+        self.pfield_kwargs = None
+        self._pfield = value
+        assert self._pfield.shape == (self.Nx, self.Nz, 1), (
+            f"pfield must have shape (Nx, Nz, 1) = {self.Nx, self.Nz, 1}. "
+            f"Got shape {self._pfield.shape}."
+        )
 
 
 class FocussedScan(Scan):
