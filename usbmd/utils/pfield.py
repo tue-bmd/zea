@@ -11,7 +11,7 @@ import torch
 from usbmd.utils import log
 
 
-def compute_pfield(scan):
+def compute_pfield(scan, options):
     """
     Compute the pressure field for ultrasound imaging.
 
@@ -25,15 +25,6 @@ def compute_pfield(scan):
         None
 
     """
-
-    options = {
-        "FrequencyStep": 4,
-        "dBThresh": -1,
-        "downsample": 10,
-        "downmix": 4,
-        "alpha": 1,
-        "low_perc_th": 10,
-    }
 
     # options
     FrequencyStep = options["FrequencyStep"]

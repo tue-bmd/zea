@@ -552,12 +552,22 @@ class Scan:
 
         return self._grid
 
-    @property
-    def pfield(self):
+    def _pfield_logic(self, **kwargs):
         """The pfield grid of shape (Nx, Nz, 1)."""
         if self._pfield is None:
             if self.probe_geometry is not None:
-                self._pfield = compute_pfield(self)
+                options = {
+                    "FrequencyStep": 4,
+                    "dBThresh": -1,
+                    "downsample": 10,
+                    "downmix": 4,
+                    "alpha": 1,
+                    "low_perc_th": 10,
+                }
+                # Update options with any matching keys in kwargs
+                options.update(kwargs)
+                self._pfield = compute_pfield(self, options)
+
             else:
                 log.warning(
                     "scan.probe_geometry not set. Cannot compute pfield."
@@ -566,6 +576,16 @@ class Scan:
                 self._pfield = 1
 
         return self._pfield
+
+    @property
+    def pfield(self):
+        """ Call the method without arguments to use it as a property"""
+        return self._pfield_logic()
+
+    def set_pfield(self, **kwargs):
+        """ Call the method with arguments to customize behavior """
+        self._pfield = None
+        return self._pfield_logic(**kwargs)
 
 
 class FocussedScan(Scan):
