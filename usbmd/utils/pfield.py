@@ -14,7 +14,7 @@ import torch
 from usbmd.utils import log
 
 
-def pfield(scan):
+def compute_pfield(scan):
     """
     Compute the pressure field for ultrasound imaging.
 
@@ -257,7 +257,6 @@ def pfield(scan):
         P_list.append(P)
 
     P_norm = normalize(P_list, alpha=alpha, perc=perc)
-    P_norm = torch.tensor(P_norm, dtype=torch.float32)  # convert to torch tensor
 
     return P_norm
 
@@ -375,7 +374,7 @@ def pfield_savefigs(pfields, folder=None):
     # Save each pfield as a PNG file
     for i, pfield in enumerate(pfields):
         plt.imshow(
-            pfield.cpu().numpy(), cmap="hot", vmin=0, vmax=np.max(pfields.cpu().numpy())
+            pfield, cmap="hot", vmin=0, vmax=np.max(pfields)
         )
         plt.title(f"Tx {i}")
         filepath = folder + f"pfield_{i}.png"

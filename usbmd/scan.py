@@ -10,7 +10,7 @@ import numpy as np
 
 from usbmd.utils import deprecated, log
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
-from usbmd.utils.pfield import pfield
+from usbmd.utils.pfield import compute_pfield
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -275,7 +275,7 @@ class Scan:
         self.selected_transmits = selected_transmits
 
         #: The pressure field grid of shape (Nx, Nz, 1)
-        self._pfield = pfield(self)
+        self._pfield = self.pfield
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -524,7 +524,13 @@ class Scan:
     def pfield(self):
         """The pfield grid of shape (Nx, Nz, 1)."""
         if self._pfield is None:
-            self._pfield = pfield(self)
+            if self.probe_geometry is not None:
+                self._pfield = compute_pfield(self)
+            else:
+                log.info("Probe geometry not set. Cannot compute pfield. \
+                         Defaulting to uniform weights.")
+                self._pfield = 1
+
         return self._pfield
 
 class FocussedScan(Scan):
