@@ -51,8 +51,6 @@ import torch
 from usbmd.registry import torch_beamformer_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _check_raw_data
-from usbmd.utils.pfield import pfield_savefigs
-
 
 def get_beamformer(probe, scan, config, aux_inputs=("grid"), aux_outputs=()):
     """Creates a beamformer from a probe, a scan, and a config file.
@@ -113,17 +111,6 @@ class Beamformer(torch.nn.Module):
             ]
         else:
             self.auto_pressure_weighting = False
-
-        #: Whether to save all computed pressure fields to pngs
-        #  (helpfull to analyse if the fields are computed properly)
-        if "auto_pressure_weighting_savefigs" in config.model.beamformer.keys():
-            self.savefigs = config.model.beamformer["auto_pressure_weighting_savefigs"]
-        else:
-            self.savefigs = False
-
-        # if self.auto_pressure_weighting:
-        #     #: The pressure field for each of the transmit events is precomputed
-        #     self.pfields = pfield(scan)
 
         #: The time-of-flight correction layer.
         self.tof_layer = TOF_layer(probe, scan, config.model.batch_size)
@@ -192,14 +179,13 @@ class Beamformer(torch.nn.Module):
             # Perform element-wise multiplication with the pressure weight mask
             # Also add the required dimensions for broadcasting
             device = data_tof_corrected.get_device()
+
             data_tof_corrected = data_tof_corrected * torch.tensor(
                 self.scan.pfield, dtype=torch.float32
             ).to(device).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+
             # Perform element-wise summing
             data_beamformed = self.das_layer(data_tof_corrected)
-
-            if self.savefigs:
-                pfield_savefigs(self.scan.pfield)
 
         else:  # Automatic pressure weighting off
             data_beamformed = self.das_layer(data_tof_corrected)
