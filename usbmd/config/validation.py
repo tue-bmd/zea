@@ -65,6 +65,8 @@ model_schema = Schema(
             Optional("aux_inputs", default=None): Or(None, list),
             Optional("patches", default=1): positive_integer,
             Optional("jit", default=False): bool,
+            Optional("auto_pressure_weighting", default=False): bool,
+            Optional("auto_pressure_weighting_savefigs", default=False): bool,
         },
     }
 )
