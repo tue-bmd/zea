@@ -454,7 +454,7 @@ def _write_datasets(
         waveforms_one_way is not None or waveforms_two_way is not None
     ):
         _add_dataset(
-            group_name="scan",
+            group_name=scan_group_name,
             name="tx_waveform_indices",
             data=tx_waveform_indices,
             description=(
@@ -469,7 +469,7 @@ def _write_datasets(
             range(n_waveforms), waveforms_one_way, waveforms_two_way
         ):
             _add_dataset(
-                group_name="scan/waveforms_one_way",
+                group_name=scan_group_name + "/waveforms_one_way",
                 name=f"waveform_{str(n).zfill(3)}",
                 data=waveform_1way,
                 description=(
@@ -480,7 +480,7 @@ def _write_datasets(
                 unit="V",
             )
             _add_dataset(
-                group_name="scan/waveforms_two_way",
+                group_name=scan_group_name + "/waveforms_two_way",
                 name=f"waveform_{str(n).zfill(3)}",
                 data=waveform_2way,
                 description=(
@@ -665,6 +665,7 @@ def generate_usbmd_dataset(
 
     assert isinstance(probe_name, str), "The probe name must be a string."
     assert isinstance(description, str), "The description must be a string."
+    assert isinstance(event_structure, bool), "The event_structure must be a boolean."
 
     validate_input_data(
         raw_data=raw_data,
@@ -687,6 +688,7 @@ def generate_usbmd_dataset(
     with h5py.File(path, "w") as dataset:
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
+        dataset.attrs["event_structure"] = event_structure
         # remove probe and description from data_and_parameters
         data_and_parameters.pop("probe_name")
         data_and_parameters.pop("description")

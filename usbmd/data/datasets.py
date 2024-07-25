@@ -272,7 +272,7 @@ class DataSet:
             scan_parameters = recursively_load_dict_contents_from_group(
                 self.file, "scan"
             )
-        elif f"event_{event}/scan" in self.file:
+        elif "event" in list(self.file.keys())[0]:
             if event is None:
                 raise ValueError(
                     log.error(
@@ -280,6 +280,12 @@ class DataSet:
                         "from a file with an event structure."
                     )
                 )
+
+            assert f"event_{event}/scan" in self.file, (
+                f"Could not find scan parameters for event {event} in file. "
+                f"Found number of events: {len(self.file.keys())}."
+            )
+
             scan_parameters = recursively_load_dict_contents_from_group(
                 self.file, f"event_{event}/scan"
             )
@@ -366,6 +372,13 @@ class USBMDDataSet(DataSet):
                 int(self.file[event]["scan"]["n_frames"][()])
                 for event in self.file.keys()
             )
+
+    @property
+    def event_structure(self):
+        """Whether the files in the dataset have an event structure."""
+        if self.file is None:
+            self.file = super().__getitem__(0)
+        return self.file.attrs.get("event_structure", False)
 
     def _correct_deprecated_dim_order(self, data):
         """Correct data dimension order if it is in the old usbmd format."""
@@ -485,8 +498,7 @@ class USBMDDataSet(DataSet):
             desc="Checking dataset files on validity (USBMD format)",
         ):
             try:
-                info = validate_dataset(file_path)
-                self.event_structure = info["event_structure"]
+                validate_dataset(file_path)
             except Exception as e:
                 validation_error_log.append(
                     f"File {file_path} is not a valid USBMD dataset.\n{e}\n"

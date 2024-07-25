@@ -57,8 +57,8 @@ class DataLoaderUI:
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
-        file_scan_params = self.dataset.get_scan_parameters_from_file()
-        file_probe_params = self.dataset.get_probe_parameters_from_file()
+        file_scan_params = self.dataset.get_scan_parameters_from_file(event=0)
+        file_probe_params = self.dataset.get_probe_parameters_from_file(event=0)
 
         self.scan = None
         if len(file_scan_params) == 0:
@@ -227,7 +227,8 @@ class DataLoaderUI:
 
         ## Update scan class (probably a cleaner way to do this)
         # check if event data by checking self.dataset.file keys start with event
-        if "event" in self.dataset.file:
+        if self.dataset.event_structure:
+            # this is still under development
             scan_params = self.dataset.get_scan_parameters_from_file(
                 file_idx=self.dataset.file, event=self.dataset.frame_no
             )
@@ -239,8 +240,8 @@ class DataLoaderUI:
 
             # TODO: use adaptive beamformer processing instead of reinit
             self.process = Process(self.config, self.scan, self.probe)
+            # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
 
-        # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
         return data
 
     def data_to_display(self, data=None):
