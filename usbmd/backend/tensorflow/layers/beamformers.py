@@ -111,12 +111,10 @@ class Beamformer(keras.Model):
             log.info("JIT compiling TF Beamformer")
             self.beamform = tf.function(self.beamform, jit_compile=True)
 
-    @property
-    def sum_transmits(self):
-        """Whether beamformer sums the transmits or not.
-        If not returns aligned_data, else returns beamformed_data.
-        """
-        return self.beamsumming_layer.sum_transmits
+        if config.model.beamformer.get("auto_pressure_weighting"):
+            log.warning(
+                "Auto pressure weighting is not yet implemented in the TF Beamformer"
+            )
 
     def call(self, inputs, probe=None, scan=None, **kwargs):
         """Performs beamforming on input data, based on the provided probe and scan.
@@ -169,6 +167,13 @@ class Beamformer(keras.Model):
             beamformed_data = beamformed_data[:, :-padding_length, :, :]
 
         return {"beamformed": beamformed_data}
+
+    @property
+    def sum_transmits(self):
+        """Whether beamformer sums the transmits or not.
+        If not returns aligned_data, else returns beamformed_data.
+        """
+        return self.beamsumming_layer.sum_transmits
 
 
 class BeamSumming(keras.layers.Layer):
