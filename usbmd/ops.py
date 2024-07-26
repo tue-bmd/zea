@@ -933,7 +933,6 @@ class Demodulate(Operation):
         fc=None,
         bandwidth=None,
         filter_coeff=None,
-        separate_channels=False,
         **kwargs,
     ):
         super().__init__(
@@ -1705,7 +1704,15 @@ class Doppler(Operation):
             self.fc = config.scan.center_frequency
 
     def iq2doppler(self, data):
+        """Compute Doppler from packet of I/Q Data.
 
+        Args:
+            x (ndarray): I/Q complex data of shape n_el, n_ax, n_frames.
+            n_frames corresponds to the ensemble length used to compute the Doppler signal.
+        Returns:
+            VD (ndarray): Doppler velocity map of shape n_el, n_ax.
+
+        """
         assert data.ndim == 3, "Data must be a 3-D array"
 
         if self.M is None:
@@ -1741,16 +1748,4 @@ class Doppler(Operation):
         VN = self.c * self.PRF / (4 * self.fc * self.lag)  # Nyquist velocity
         VD = -VN * np.imag(np.log(AC)) / np.pi  # or -VN * np.angle(AC) / np.pi
 
-        # Doppler variance
-        if self.nargout == 2:
-            P = np.sum(np.abs(data) ** 2, axis=2)  # Power
-            if self.M[0] != 1 and self.M[1] != 1:  # Spatial weighted average
-                P = ndimage.convolve(P, h, mode="constant", cval=0.0)
-            varD = (
-                2
-                * (self.c * self.PRF / (4 * self.fc * self.lag * np.pi)) ** 2
-                * (1 - np.abs(AC) / P)
-            )
-            return VD, varD
-        else:
-            return VD
+        return VD
