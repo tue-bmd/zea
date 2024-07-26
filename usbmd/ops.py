@@ -945,7 +945,6 @@ class Demodulate(Operation):
         self.fc = fc
         self.bandwidth = bandwidth
         self.filter_coeff = filter_coeff
-        self.separate_channels = separate_channels
         self.warning_produced = False
 
     def process(self, data):
@@ -967,10 +966,7 @@ class Demodulate(Operation):
             data = data.cpu().numpy()
         data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
         data = self.prepare_tensor(data, device=device)
-        if self.separate_channels is True:
-            return complex_to_channels(data, axis=-1, ops=self.ops)
-        else:
-            return data
+        return complex_to_channels(data, axis=-1, ops=self.ops)
 
     def _assign_scan_params(self, scan):
         self.fs = scan.fs
@@ -1683,11 +1679,15 @@ class Doppler(Operation):
 
     def process(self, data):
 
-        assert data.ndim == 3, "Doppler requires multiple frames to compute"
+        assert data.ndim == 4, "Doppler requires multiple frames to compute"
 
         # currently demodulate converts to numpy so we have to do some trickery
         if self.ops.__name__ == "torch":
             data = data.cpu().numpy()
+        # convert to complex data
+        if data.shape[-1] == 2:
+            data = channels_to_complex(data, ops=self.ops)
+
         data = np.transpose(data, (1, 2, 0))  # frames as last dimension
         VD = self.iq2doppler(data)
         return VD
