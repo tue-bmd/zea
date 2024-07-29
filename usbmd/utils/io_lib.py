@@ -232,8 +232,7 @@ def search_file_tree(
         log.info(f"...for reading file paths in {log.yellow(directory)}")
         with open(directory / dataset_info_filename, "r", encoding="utf-8") as file:
             dataset_info = yaml.load(file, Loader=yaml.FullLoader)
-            file_paths = dataset_info["file_paths"]
-        return file_paths
+        return dataset_info
 
     if redo:
         log.info(
@@ -254,9 +253,9 @@ def search_file_tree(
         assert isinstance(
             hdf5_key_for_length, str
         ), "hdf5_key_for_length must be a string"
-        assert filetypes == [".hdf5"], (
-            "hdf5_key_for_length only works with when filetypes is set to `.hdf5`"
-            f", got {filetypes}"
+        assert set(filetypes) == {".hdf5", ".h5"}, (
+            "hdf5_key_for_length only works with when filetypes is set to "
+            f"`.hdf5` or `.h5`, got {filetypes}"
         )
 
     # Traverse file tree to index all files from filetypes
@@ -297,11 +296,12 @@ def search_file_tree(
     log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
     log.info(f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}")
 
+    dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
+    if len(file_lengths) > 0:
+        dataset_info["file_lengths"] = file_lengths
+        dataset_info["total_num_frames"] = sum(file_lengths)
+
     if write:
-        dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
-        if len(file_lengths) > 0:
-            dataset_info["file_lengths"] = file_lengths
-            dataset_info["total_num_frames"] = sum(file_lengths)
         with open(directory / dataset_info_filename, "w", encoding="utf-8") as file:
             yaml.dump(dataset_info, file)
 

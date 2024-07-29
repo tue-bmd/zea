@@ -188,7 +188,9 @@ def h5_dataset_from_directory(
         dataset_info = search_file_tree(
             _dir, filetypes=[".hdf5", ".h5"], hdf5_key_for_length=key
         )
-        filenames.extend(str(Path(_dir) / dataset_info["file_paths"]))
+        file_paths = dataset_info["file_paths"]
+        file_paths = [str(Path(_dir) / file_path) for file_path in file_paths]
+        filenames.extend(file_paths)
         file_lengths.extend(dataset_info["file_lengths"])
 
     assert len(filenames) > 0, f"No files in directories:\n{directory}"
