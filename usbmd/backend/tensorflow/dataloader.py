@@ -4,7 +4,6 @@
 - **Date**          : Thu Nov 18 2021
 """
 
-import itertools
 import re
 from pathlib import Path
 
@@ -84,23 +83,6 @@ class H5Generator:
             return self._length(file, key)
 
 
-def _infer_n_samples(filenames, key, n_frames, frames_dim, new_frames_dim):
-    # generator here to get length of dataset
-    generator = H5Generator(n_frames, frames_dim, new_frames_dim)
-    # sum up number of samples in each file
-    n_samples = [generator.length(filename, key) for filename in filenames]
-
-    # Check for files that don't have any samples (i.e. less than n_frames samples)
-    if 0 in n_samples:
-        _skip_files = np.where(np.array(n_samples) == 0)[0]
-        _skip_filenames = [Path(filenames[i]).name for i in _skip_files]
-        log.warning(
-            f"Skipping files with 0 samples (or that do not contain `n_frames`={n_frames}): "
-            f"{_skip_filenames}"
-        )
-    return sum(n_samples)
-
-
 def h5_dataset_from_directory(
     directory,
     key: str,
@@ -112,7 +94,6 @@ def h5_dataset_from_directory(
     cycle_length: int = None,
     block_length: int = None,
     limit_n_samples: int = None,
-    n_samples_per_file: int = None,
     resize_type: str = "crop",
     image_range: tuple = (0, 255),
     normalization_range: tuple = (0, 1),
@@ -121,7 +102,6 @@ def h5_dataset_from_directory(
     n_frames: int = 1,
     new_frames_dim: bool = False,
     frames_dim: int = -1,
-    save_file_paths: bool = False,
     shard_index: int = None,
     num_shards: int = 1,
 ):
@@ -129,6 +109,10 @@ def h5_dataset_from_directory(
 
     Mimicks the native TF function `tf.keras.utils.image_dataset_from_directory`
     but for .hdf5 files.
+
+    Saves a dataset_info.yaml file in the directory with information about the dataset.
+    This file is used to load the dataset later on, which speeds up the initial loading
+    of the dataset for very large datasets.
 
     Does the following in order to load a dataset:
     - Find all .hdf5 files in the directory
@@ -181,8 +165,6 @@ def h5_dataset_from_directory(
         new_frames_dim (bool, optional): if True, new dimension to stack
             frames along will be created. Defaults to False. In that case
             frames will be stacked along existing dimension (frames_dim).
-        save_file_paths (bool, optional): save file paths to file. Defaults to False.
-            Can be useful to check which files are being loaded.
         shard_index (int, optional): index which part of the dataset should be selected.
             Can only be used if num_shards is specified. Defaults to None.
             See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
@@ -200,11 +182,14 @@ def h5_dataset_from_directory(
         else:
             directory = [directory]
 
-    if filenames is None:
-        filenames = [list(Path(dir).rglob("*.hdf5")) for dir in directory]
-        filenames += [list(Path(dir).rglob("*.h5")) for dir in directory]
-        filenames = list(itertools.chain(*filenames))
-        filenames = [str(s) for s in filenames]
+    filenames = []
+    file_lengths = []
+    for _dir in directory:
+        dataset_info = search_file_tree(
+            _dir, filetypes=[".hdf5", ".h5"], hdf5_key_for_length=key
+        )
+        filenames.extend(str(Path(_dir) / dataset_info["file_paths"]))
+        file_lengths.extend(dataset_info["file_lengths"])
 
     assert len(filenames) > 0, f"No files in directories:\n{directory}"
     if image_size is not None:
@@ -226,29 +211,34 @@ def h5_dataset_from_directory(
         tf.float32 if image.dtype not in ["complex64", "complex128"] else tf.complex64
     )
 
-    # infer total number of samples in dataset unless n_samples_per_file is known
-    if n_samples_per_file is not None:
-        n_samples = len(filenames) * n_samples_per_file
-    else:
-        n_samples = _infer_n_samples(
-            filenames, key, n_frames, frames_dim, new_frames_dim
-        )
+    # infer total number of samples in dataset from number of samples in each file
+    # not necessarily the same if n_frames > 1
+    def _compute_length_dataset(filenames, file_lengths, n_frames):
+        assert len(filenames) == len(
+            file_lengths
+        ), "filenames and file_lengths must have same length"
+        n_samples = [length // n_frames for length in file_lengths]
+
+        # Check for files that don't have any samples (i.e. less than n_frames samples)
+        if 0 in n_samples:
+            _skip_files = np.where(np.array(n_samples) == 0)[0]
+            _skip_filenames = [Path(filenames[i]).name for i in _skip_files]
+            log.warning(
+                f"Skipping files with 0 samples (or that do not contain `n_frames`={n_frames}): "
+                f"{_skip_filenames}"
+            )
+        return sum(n_samples)
+
+    n_samples = _compute_length_dataset(
+        filenames,
+        file_lengths,
+        n_frames,
+    )
 
     if not shuffle:
         cycle_length = 1
 
     generator = H5Generator(n_frames, frames_dim, new_frames_dim)
-
-    # save paths to file
-    if save_file_paths:
-        file_path = Path("file_paths.txt")
-
-        if file_path.exists():
-            file_path.unlink()
-        with open(file_path, "w", encoding="utf-8") as f:
-            for filename in filenames:
-                for i in range(generator.length(filename, key)):
-                    f.write(f"{Path(filename).stem}_{i}\n")
 
     # n_frames are stacked along the last axis (channel)
     image_shape = list(image_shape)
