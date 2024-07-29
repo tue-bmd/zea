@@ -1662,8 +1662,7 @@ class Doppler(Operation):
         fc: center frequency (in Hz, REQUIRED)
         c: longitudinal velocity (in m/s, REQUIRED)
         PRF (in Hz, REQUIRED): pulse repetition frequency
-        M (unitless, either a two-component vector or a scalar, REQUIRED): the output Doppler velocity is
-        estimated from the M(1)-by-M(2) or M-by-M neighborhood around the corresponding pixel.
+        M (unitless, default = 1): the output Doppler velocity is estimated from M-by-M or M(1)-by-M(2) neighborhood around the corresponding pixel.
         lag (unitless, default = 1): LAG used in the autocorrelator.
         """
         super().__init__(
@@ -1689,15 +1688,15 @@ class Doppler(Operation):
         assert data.ndim == 4, "Doppler requires multiple frames to compute"
 
         # currently demodulate converts to numpy so we have to do some trickery
-        if self.ops.__name__ == "torch":
-            data = data.cpu().numpy()
+        # if self.ops.__name__ == "torch":
+        # data = data.cpu().numpy()
         # convert to complex data
         if data.shape[-1] == 2:
             data = channels_to_complex(data, ops=self.ops)
 
-        data = np.transpose(data, (1, 2, 0))  # frames as last dimension
+        data = self.ops.permute(data, (1, 2, 0))  # frames as last dimension
         doppler_velocities = self.iq2doppler(data)
-        doppler_velocities = self.prepare_tensor(doppler_velocities)
+        # doppler_velocities = self.prepare_tensor(doppler_velocities)
         return doppler_velocities
 
     def _assign_scan_params(self, scan):
@@ -1744,7 +1743,7 @@ class Doppler(Operation):
         # Auto-correlation method
         IQ1 = data[:, :, : data.shape[-1] - self.lag]
         IQ2 = data[:, :, self.lag :]
-        AC = np.sum(IQ1 * np.conj(IQ2), axis=2)  # Ensemble auto-correlation
+        AC = self.ops.sum(IQ1 * self.ops.conj(IQ2), axis=2)  # Ensemble auto-correlation
 
         if self.M[0] != 1 and self.M[1] != 1:  # Spatial weighted average
             h = (
@@ -1755,6 +1754,8 @@ class Doppler(Operation):
 
         # Doppler velocity
         nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
-        doppler_velocities = -nyquist_velocities * np.imag(np.log(AC)) / np.pi
+        doppler_velocities = (
+            -nyquist_velocities * self.ops.imag(self.ops.log(AC)) / np.pi
+        )
 
         return doppler_velocities
