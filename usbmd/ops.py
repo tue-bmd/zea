@@ -1645,7 +1645,7 @@ def hilbert(x, N: int = None, axis=-1, ops=np):
 
 @ops_registry("doppler")
 class Doppler(Operation):
-    """Compute Doppler Map from IQ data (complex baseband)."""
+    """Compute the Doppler velocities from the I/ time series using a slow-time autocorrelator."""
 
     def __init__(
         self,
@@ -1655,11 +1655,17 @@ class Doppler(Operation):
         c=None,
         M=None,
         lag=1,
-        image_increment=4,
-        win_size=np.array([[32, 32], [24, 24], [16, 16]]),
         nargout=1,
         **kwargs,
     ):
+        """
+        fc: center frequency (in Hz, REQUIRED)
+        c: longitudinal velocity (in m/s, REQUIRED)
+        PRF (in Hz, REQUIRED): pulse repetition frequency
+        M (unitless, either a two-component vector or a scalar, REQUIRED): the output Doppler velocity is
+        estimated from the M(1)-by-M(2) or M-by-M neighborhood around the corresponding pixel.
+        lag (unitless, default = 1): LAG used in the autocorrelator.
+        """
         super().__init__(
             input_data_type=None,
             output_data_type=None,
@@ -1671,10 +1677,12 @@ class Doppler(Operation):
         self.c = c
         self.M = M
         self.lag = lag
-        self.image_increment = image_increment
-        self.win_size = win_size
         self.nargout = nargout
         self.warning_produced = False
+
+        assert (
+            self.with_batch_dim is True
+        ), "Doppler requires multiple frames to compute"
 
     def process(self, data):
 
@@ -1688,8 +1696,9 @@ class Doppler(Operation):
             data = channels_to_complex(data, ops=self.ops)
 
         data = np.transpose(data, (1, 2, 0))  # frames as last dimension
-        VD = self.iq2doppler(data)
-        return VD
+        doppler_velocities = self.iq2doppler(data)
+        doppler_velocities = self.prepare_tensor(doppler_velocities)
+        return doppler_velocities
 
     def _assign_scan_params(self, scan):
         self.fs = scan.fs
@@ -1710,7 +1719,7 @@ class Doppler(Operation):
             x (ndarray): I/Q complex data of shape n_el, n_ax, n_frames.
             n_frames corresponds to the ensemble length used to compute the Doppler signal.
         Returns:
-            VD (ndarray): Doppler velocity map of shape n_el, n_ax.
+            doppler_velocities (ndarray): Doppler velocity map of shape n_el, n_ax.
 
         """
         assert data.ndim == 3, "Data must be a 3-D array"
@@ -1745,7 +1754,7 @@ class Doppler(Operation):
             AC = ndimage.convolve(AC, h, mode="constant", cval=0.0)
 
         # Doppler velocity
-        VN = self.c * self.PRF / (4 * self.fc * self.lag)  # Nyquist velocity
-        VD = -VN * np.imag(np.log(AC)) / np.pi  # or -VN * np.angle(AC) / np.pi
+        nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
+        doppler_velocities = -nyquist_velocities * np.imag(np.log(AC)) / np.pi
 
-        return VD
+        return doppler_velocities
