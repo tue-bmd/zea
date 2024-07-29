@@ -22,6 +22,7 @@ if importlib.util.find_spec("tensorflow"):
     tf.imag = tf.math.imag
     tf.real = tf.math.real
     tf.iscomplex = tf.experimental.numpy.iscomplex
+    tf.conj = tf.math.conj
 
 
 """Convert Torch ops to numpy ops syntax used in main ops module."""
