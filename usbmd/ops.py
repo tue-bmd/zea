@@ -1692,16 +1692,13 @@ class Doppler(Operation):
 
         assert data.ndim == 4, "Doppler requires multiple frames to compute"
 
-        # currently demodulate converts to numpy so we have to do some trickery
-        # if self.ops.__name__ == "torch":
-        # data = data.cpu().numpy()
-        # convert to complex data
         if data.shape[-1] == 2:
             data = channels_to_complex(data, ops=self.ops)
 
-        data = self.ops.permute(data, (1, 2, 0))  # frames as last dimension
+        # frames as last dimension for iq2doppler func
+        data = self.ops.permute(data, (1, 2, 0))
+
         doppler_velocities = self.iq2doppler(data)
-        # doppler_velocities = self.prepare_tensor(doppler_velocities)
         return doppler_velocities
 
     def _assign_scan_params(self, scan):
@@ -1755,6 +1752,8 @@ class Doppler(Operation):
                 np.hamming(self.M[0])[:, np.newaxis]
                 * np.hamming(self.M[1])[np.newaxis, :]
             )
+            h = self.prepare_tensor(h)
+            # TODO: implement convolution with self.ops
             AC = ndimage.convolve(AC, h, mode="constant", cval=0.0)
 
         # Doppler velocity
