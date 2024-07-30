@@ -1750,14 +1750,7 @@ class Doppler(Operation):
         IQ2 = data[:, :, self.lag :]
         AC = self.ops.sum(IQ1 * self.ops.conj(IQ2), axis=2)  # Ensemble auto-correlation
 
-        if self.M[0] != 1 and self.M[1] != 1:  # Spatial weighted average
-            h = (
-                np.hamming(self.M[0])[:, np.newaxis]
-                * np.hamming(self.M[1])[np.newaxis, :]
-            )
-            h = self.prepare_tensor(h)
-            # TODO: implement convolution with self.ops
-            AC = ndimage.convolve(AC, h, mode="constant", cval=0.0)
+        # TODO: add spatial weighted average
 
         # Doppler velocity
         nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
