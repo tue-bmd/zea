@@ -1664,9 +1664,11 @@ class Doppler(Operation):
         PRF (in Hz, REQUIRED): pulse repetition frequency
         M (unitless, default = 1): the output Doppler velocity is estimated from M-by-M or M(1)-by-M(2) neighborhood around the corresponding pixel.
         lag (unitless, default = 1): LAG used in the autocorrelator.
+
+        Now limited to use with beamformed data, but it can be modified to receive inpute_data_type = "raw_data"
         """
         super().__init__(
-            input_data_type=None,
+            input_data_type="beamformed_data",
             output_data_type=None,
             **kwargs,
         )
