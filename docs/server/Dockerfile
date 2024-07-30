@@ -11,7 +11,7 @@ WORKDIR /app
 COPY host_docs.py /app/host_docs.py
 
 # Install Flask
-RUN pip install flask
+RUN pip install flask Authlib requests
 
 # Expose port 6000
 EXPOSE 6001
