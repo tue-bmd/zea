@@ -1662,7 +1662,7 @@ class Doppler(Operation):
         fc: center frequency (in Hz, REQUIRED)
         c: longitudinal velocity (in m/s, REQUIRED)
         PRF (in Hz, REQUIRED): pulse repetition frequency
-        M (unitless, default = 1): size of the hamming filter for  spatial weighted average.
+        M (unitless, default = 1): size of the hamming filter for spatial weighted average.
         i.e., the output Doppler velocity is estimated from M-by-M or M(1)-by-M(2) neighborhood around the corresponding pixel.
         lag (unitless, default = 1): LAG used in the autocorrelator.
 
