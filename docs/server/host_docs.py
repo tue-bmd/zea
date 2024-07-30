@@ -17,11 +17,17 @@ app = Flask(__name__)
 # Define the path to the docs directory
 DOCS_DIR = "/app/repo/docs/usbmd"
 
+# This is a personal access token (PAT) for the GitHub repository, owned by the BMD group, with
+# read-only acces to the repository. Not the most secure way to do this, but since it is
+# a read-only token, it is not a big security risk.
+TOKEN = """
+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
+"""
+
 
 def update_repo():
-
-    token = "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"
-    repo_url = f"https://{token}@github.com/tue-bmd/ultrasound-toolbox.git"
+    """Update the repository with the latest changes from the remote repository."""
+    repo_url = f"https://{TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git"
     repo_dir = "/app/repo"
 
     if not os.path.exists(repo_dir):
@@ -33,6 +39,7 @@ def update_repo():
 
 @app.route("/update")
 def update_docs():
+    """Manually force an update of the repository."""
     try:
         update_repo()
         return jsonify({"message": "Repository updated"}), 200
@@ -42,6 +49,7 @@ def update_docs():
 
 @app.route("/<path:path>")
 def serve_docs(path):
+    """Serve the documentation."""
     try:
         update_repo()
         return send_from_directory(DOCS_DIR, path)
@@ -51,6 +59,7 @@ def serve_docs(path):
 
 @app.route("/")
 def index():
+    """Serve the index page."""
     try:
         update_repo()
         return send_from_directory(DOCS_DIR, "index.html")
