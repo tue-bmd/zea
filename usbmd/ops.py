@@ -1649,26 +1649,29 @@ class Doppler(Operation):
 
     def __init__(
         self,
-        PRF=None,
-        fs=None,
-        fc=None,
-        c=None,
-        M=None,
-        lag=1,
-        nargout=1,
+        PRF: float = None,
+        fs: float = None,
+        fc: float = None,
+        c: float = None,
+        M: int = None,
+        lag: int = 1,
+        nargout: int = 1,
         **kwargs,
-    ):
+    ) -> None:
         """
-        fc: center frequency (in Hz, REQUIRED)
-        c: longitudinal velocity (in m/s, REQUIRED)
-        PRF (in Hz, REQUIRED): pulse repetition frequency
-        M (unitless, default = 1): size of the hamming filter for spatial weighted average.
-        i.e., the output Doppler velocity is estimated from M-by-M or M(1)-by-M(2)
-        neighborhood around the corresponding pixel.
-        lag (unitless, default = 1): LAG used in the autocorrelator.
+        Args:
+            fc (float): Center frequency in Hz.
+            c (float): Longitudinal velocity in m/s.
+            PRF (float): Pulse repetition frequency in Hz.
+            M (int, optional): Size of the hamming filter for spatial weighted average.
+                Default is 1.
+            The output Doppler velocity is estimated from M-by-M or M(1)-by-M(2)
+                neighborhood around the corresponding pixel.
+            lag (int, optional): LAG used in the autocorrelator. Default is 1.
 
-        Now limited to use with beamformed data, but it can be modified to receive
-        inpute_data_type = "raw_data"
+        Note:
+            This function is currently limited to use with beamformed data, but it
+            can be modified to receive input_data_type = "raw_data".
         """
         super().__init__(
             input_data_type="beamformed_data",
