@@ -1,8 +1,14 @@
 # Use a base image with Python and Git
-FROM python:3.9-alpine
+FROM python:3.11-alpine
 
 # Install required packages
-RUN apk add --no-cache git
+RUN apk add --no-cache \
+    git \
+    curl \
+    docker \
+    openrc \
+    && rc-update add docker boot \
+    && service docker start
 
 # Set working directory
 WORKDIR /app
@@ -17,4 +23,4 @@ RUN pip install flask Authlib requests gunicorn
 EXPOSE 6001
 
 # Default entry point to python script
-ENTRYPOINT ["gunicorn", "-w", "2", "-b", "0.0.0.0:6001", "host_docs:app"]
+ENTRYPOINT ["gunicorn", "-w", "1", "-b", "0.0.0.0:6001", "host_docs:app"]

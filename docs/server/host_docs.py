@@ -4,11 +4,14 @@
     This script is automatically run when the Docker container (also in this folder) is started.
 
     >> docker build -t docs_server . (if you haven't built the image yet)
-    >> docker run -d -p 6001:6001 --name docs_server --restart unless-stopped docs_server
+    >> docker run -d -v /var/run/docker.sock:/var/run/docker.sock -v
+    /home/bluijten/usbmd-docs/repo:/app/repo -p 6001:6001 --name docs_server
+    --restart unless-stopped docs_server
 """
 
 import os
 import subprocess
+import threading
 from functools import wraps
 
 from authlib.integrations.flask_client import OAuth
@@ -22,10 +25,15 @@ app.secret_key = os.environ.get(
 oauth = OAuth(app)
 
 # Configure GitHub OAuth client
-
 # TODO: These should be environment variables, not hardcoded in the script. (REGENERATE)
+# NAS
 app.config["GITHUB_CLIENT_ID"] = "Ov23lixwYEES6JAk6Moj"
 app.config["GITHUB_CLIENT_SECRET"] = "1846fcb16eb048d0d2e1145c1a57dcc4978f0f3b"
+
+# 131.155.127.132
+# app.config["GITHUB_CLIENT_ID"] = "Ov23likB4WMiaNoSCrDX"
+# app.config["GITHUB_CLIENT_SECRET"] = "6bb95d200fce50a5b43ae4564f552fa1aa73d047"
+
 
 github = oauth.register(
     name="github",
@@ -47,16 +55,131 @@ TOKEN = """github_pat_\
     11ANWVESA0sJShCnhONCjG_kKdrvvHjF35AX9KkSSVmYCYvGDKaD0L0K1sV7qs6WJjH44Z2EIP1UhzhzTB"""
 
 
-def update_repo():
-    """Update the repository with the latest changes from the remote repository."""
-    repo_url = f"https://{TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git"
-    repo_dir = "/app/repo"
+## Helper functions
+class DocUpdater:
+    """Class to handle the update process for the documentation."""
 
-    if not os.path.exists(repo_dir):
-        subprocess.run(["git", "clone", repo_url, repo_dir], check=True)
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._update_thread = None
 
-    subprocess.run(["git", "-C", repo_dir, "checkout", "main"], check=True)
-    subprocess.run(["git", "-C", repo_dir, "pull", "origin", "main"], check=True)
+    def start_update(self):
+        """Start the update process in a background thread, ensuring that only one update runs at a time."""
+        if not self._lock.acquire(blocking=False):
+            print("An update is already in progress. Please wait until it completes.")
+            return "Update in progress"
+
+        if self._update_thread and self._update_thread.is_alive():
+            print("An update is already running in the background.")
+            self._lock.release()
+            return "Update in progress"
+
+        self._update_thread = threading.Thread(target=self._update_process)
+        self._update_thread.start()
+        return "Update started"
+
+    def update_repo(self):
+        """Update the repository with the latest changes from the remote repository."""
+        TOKEN = """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"""
+
+        repo_url = f"https://{TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git"
+        repo_dir = "/app/repo"
+
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", "/app/repo"]
+        )
+
+        if not os.path.exists(repo_dir):
+            subprocess.run(["git", "clone", repo_url, repo_dir], check=True)
+
+        subprocess.run(["git", "-C", repo_dir, "checkout", "main"], check=True)
+        subprocess.run(["git", "-C", repo_dir, "pull", "origin", "main"], check=True)
+
+    def build_docker_image(self):
+        """Build the Docker image from the Dockerfile in the repository."""
+        repo_dir = "/app/repo"
+        image_name = "usbmd"
+
+        try:
+            subprocess.run(
+                [
+                    "docker",
+                    "build",
+                    "-t",
+                    image_name,
+                    repo_dir,
+                    "--build-arg",
+                    "KERAS3=True",
+                ],
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"An error occurred while building the Docker image: {str(e)}")
+            raise
+
+    def run_pdoc_inside_docker(self):
+        """Run pdoc to generate the documentation inside the Docker container."""
+        container_name = "usbmd_doc_generator"
+        repo_dir = "/app/repo"
+        volume_name = "ultrasound-toolbox-repo"
+
+        # Ensure the Docker volume is created (if not already done)
+        subprocess.run(["docker", "volume", "create", volume_name], check=True)
+
+        # Remove old HTML files
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{volume_name}:{repo_dir}",
+                "busybox",
+                "sh",
+                "-c",
+                f"find {repo_dir}/docs/usbmd/ -name '*.html' -type f -delete",
+            ],
+            check=True,
+        )
+
+        # Run pdoc inside the Docker container
+        try:
+            subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-v",
+                    f"{volume_name}:{repo_dir}",
+                    "-w",
+                    repo_dir,
+                    "usbmd:latest",
+                    "sh",
+                    "-c",
+                    "pip install pdoc3 && pdoc usbmd --html --output-dir /app/repo/docs --force --skip-errors --template-dir /app/repo/docs/pdoc_template",
+                ],
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"An error occurred while generating documentation: {str(e)}")
+            raise
+
+    def _update_process(self):
+        """Internal method to handle the update process."""
+        try:
+            print("Starting the update process...")
+            self.update_repo()
+            self.build_docker_image()
+            self.run_pdoc_inside_docker()
+            print("Update process completed successfully.")
+        except Exception as e:
+            print(f"An error occurred during the update process: {str(e)}")
+        finally:
+            self._lock.release()
+
+
+## Routes
+doc_updater = DocUpdater()
 
 
 def login_required(f):
@@ -69,6 +192,17 @@ def login_required(f):
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+@app.route("/update")
+@login_required
+def update_docs():
+    """Manually force an update of the repository."""
+    try:
+        message = doc_updater.start_update()
+        return jsonify({"message": message}), 200
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/login")
@@ -88,23 +222,11 @@ def authorize():
     return redirect(url_for("index"))
 
 
-@app.route("/update")
-@login_required
-def update_docs():
-    """Manually force an update of the repository."""
-    try:
-        update_repo()
-        return jsonify({"message": "Repository updated"}), 200
-    except subprocess.CalledProcessError as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/<path:path>")
 @login_required
 def serve_docs(path):
     """Serve the documentation."""
     try:
-        update_repo()
         return send_from_directory(DOCS_DIR, path)
     except subprocess.CalledProcessError as e:
         return jsonify({"error": str(e)}), 500
@@ -115,7 +237,6 @@ def serve_docs(path):
 def index():
     """Serve the index page."""
     try:
-        update_repo()
         return send_from_directory(DOCS_DIR, "index.html")
     except subprocess.CalledProcessError as e:
         return jsonify({"error": str(e)}), 500
