@@ -60,7 +60,9 @@ def cast_scan_parameters(scan_parameters: dict) -> dict:
         if key in SCAN_PARAM_TYPES:
             scan_parameters[key] = SCAN_PARAM_TYPES[key](value)
         else:
-            log.warning(f"Unknown scan parameter: {key}.")
+            log.error(
+                f"Unknown scan parameter: {key}, cannot cast to correct type "
+                f"but will proceed anyways. Please add {key} to the `SCAN_PARAM_TYPES`.")
 
     return scan_parameters
 
