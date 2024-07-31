@@ -17,4 +17,4 @@ RUN pip install flask Authlib requests
 EXPOSE 6001
 
 # Default entry point to python script
-ENTRYPOINT ["python", "/app/host_docs.py"]
+ENTRYPOINT ["gunicorn", "-w", "2", "-b", "0.0.0.0:6001", "host_docs:app"]
