@@ -35,6 +35,12 @@ SCAN_PARAM_TYPES = {
     "time_to_next_transmit": np.array,
     "probe_geometry": np.array,
     "origin": np.array,
+    "element_width": float,
+    "lens_correction": float,
+    "tgc_gain_curve": np.array,
+    "tx_waveform_indices": np.array,
+    "waveforms_two_way": dict,
+    "waveforms_one_way": dict,
 }
 
 
@@ -54,7 +60,7 @@ def cast_scan_parameters(scan_parameters: dict) -> dict:
         if key in SCAN_PARAM_TYPES:
             scan_parameters[key] = SCAN_PARAM_TYPES[key](value)
         else:
-            raise ValueError(f"Unknown scan parameter: {key}.")
+            log.warning(f"Unknown scan parameter: {key}.")
 
     return scan_parameters
 
