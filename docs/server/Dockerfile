@@ -11,7 +11,7 @@ WORKDIR /app
 COPY host_docs.py /app/host_docs.py
 
 # Install Flask
-RUN pip install flask Authlib requests
+RUN pip install flask Authlib requests gunicorn
 
 # Expose port 6000
 EXPOSE 6001
