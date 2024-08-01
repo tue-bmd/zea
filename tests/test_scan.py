@@ -56,6 +56,7 @@ planewave_scan_args = {
 
 
 def test_scan_compare():
+    """Test comparison of Scan objects."""
     scan = Scan(**scan_args)
     scan2 = Scan(**scan_args)
     scan3 = Scan(**scan_args)
@@ -63,6 +64,7 @@ def test_scan_compare():
 
     assert scan == scan2
     assert scan != scan3
+
 
 def test_initialization():
     """Test initialization of Scan class."""
@@ -112,7 +114,3 @@ def test_planewave_scan():
     assert np.all(scan.tx_apodizations == planewave_scan_args["tx_apodizations"])
     assert scan.pixels_per_wavelength == planewave_scan_args["pixels_per_wvln"]
     assert np.all(scan.initial_times == planewave_scan_args["initial_times"])
-
-
-if __name__ == "__main__":
-    test_time_scan_compare()
