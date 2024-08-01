@@ -3,10 +3,15 @@
 
     This script is automatically run when the Docker container (also in this folder) is started.
 
-    >> docker build -t docs_server . (if you haven't built the image yet)
-    >> docker run -d -v /var/run/docker.sock:/var/run/docker.sock -v
-    /home/bluijten/usbmd-docs/repo:/app/repo -p 6001:6001 --name docs_server
-    --restart unless-stopped docs_server
+    1). Set the environment variables in the default.env file.
+
+    2). Build the Docker image:
+        >> docker build -t docs_server . (if you haven't built the image yet)
+
+    3). Run the Docker container:
+        >> docker run -d -v /var/run/docker.sock:/var/run/docker.sock -v
+        /home/bluijten/usbmd-docs/repo:/app/repo -p 6001:6001 --name docs_server
+        --restart unless-stopped docs_server
 """
 
 import os
@@ -18,22 +23,11 @@ from authlib.integrations.flask_client import OAuth
 from flask import Flask, jsonify, redirect, send_from_directory, session, url_for
 
 app = Flask(__name__)
-app.secret_key = os.environ.get(
-    "FLASK_SECRET_KEY", "default_secret_key"
-)  # Use a real secret key in production
-# app.secret_key = 'your_secret_key'  # Replace with a real secret key
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "default_secret_key")
+app.config["GITHUB_CLIENT_ID"] = os.environ.get("GITHUB_CLIENT_ID")
+app.config["GITHUB_CLIENT_SECRET"] = os.environ.get("GITHUB_CLIENT_SECRET")
+
 oauth = OAuth(app)
-
-# Configure GitHub OAuth client
-# TODO: These should be environment variables, not hardcoded in the script. (REGENERATE)
-# NAS
-app.config["GITHUB_CLIENT_ID"] = "Ov23lixwYEES6JAk6Moj"
-app.config["GITHUB_CLIENT_SECRET"] = "1846fcb16eb048d0d2e1145c1a57dcc4978f0f3b"
-
-# 131.155.127.132
-# app.config["GITHUB_CLIENT_ID"] = "Ov23likB4WMiaNoSCrDX"
-# app.config["GITHUB_CLIENT_SECRET"] = "6bb95d200fce50a5b43ae4564f552fa1aa73d047"
-
 
 github = oauth.register(
     name="github",
@@ -47,12 +41,6 @@ github = oauth.register(
 )
 
 DOCS_DIR = "/app/repo/docs/usbmd"
-# This is a personal access token (PAT) for the GitHub repository, owned by the BMD group, with
-# read-only acces to the repository. Not the most secure way to do this, but since it is
-# a read-only token, it is not a big security risk.
-# TODO: These should be environment variables, not hardcoded in the script. (REGENERATE)
-TOKEN = """github_pat_\
-    11ANWVESA0sJShCnhONCjG_kKdrvvHjF35AX9KkSSVmYCYvGDKaD0L0K1sV7qs6WJjH44Z2EIP1UhzhzTB"""
 
 
 ## Helper functions
@@ -80,9 +68,9 @@ class DocUpdater:
 
     def update_repo(self):
         """Update the repository with the latest changes from the remote repository."""
-        TOKEN = """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"""
+        GITHUB_PAT = os.environ.get("GITHUB_PAT")
 
-        repo_url = f"https://{TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git"
+        repo_url = f"https://{GITHUB_PAT}@github.com/tue-bmd/ultrasound-toolbox.git"
         repo_dir = "/app/repo"
 
         subprocess.run(
