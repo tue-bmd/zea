@@ -25,6 +25,7 @@ We can leave the arguments to the operation empty and set them later using the
 ```python
 operations = [
     Beamform(),
+    Sum(),
     Demodulate(),
     EnvelopeDetect(),
     Downsample(),
@@ -58,6 +59,7 @@ process = Process(config, scan, probe)
 process.set_pipeline(
     operation_chain=[
         {"name": "beamform"},
+        {"name": "sum"},
         {"name": "demodulate", "params": {"fs": 50e6, "fc": 5e6}},
         {"name": "envelope_detect"},
         {"name": "downsample"},
@@ -171,6 +173,13 @@ class Operation(ABC):
         self.config = None
         self.scan = None
         self.probe = None
+
+    @property
+    def name(self):
+        """Return the name of the registered operation."""
+        names = ops_registry.registry.keys()
+        classes = ops_registry.registry.values()
+        return list(names)[list(classes).index(self.__class__)]
 
     @property
     def ops(self):
@@ -499,6 +508,8 @@ class Pipeline:
         for operation in self.operations:
             operation.initialize()
 
+        self._beamformer_warning()
+
     def compile(self, jit=True):
         """Compile the pipeline using jit."""
         if not jit:
@@ -557,6 +568,29 @@ class Pipeline:
                     ), f"device should be 'cpu' or 'cuda:*', got {device}"
             return device
 
+    def _beamformer_warning(self):
+        """Check if Sum() operation is detected after Beamform() operation."""
+        # if so and Beamform sum_transmits property is True, raise a warning
+        if any(operation.name == "beamform" for operation in self.operations):
+            beamform_index = [
+                i
+                for i, operation in enumerate(self.operations)
+                if operation.name == "beamform"
+            ][0]
+            if self.operations[beamform_index + 1].name != "sum":
+                return
+            if self.operations[beamform_index]._ready is False:
+                return
+            if not self.operations[beamform_index].beamformer.sum_transmits:
+                return
+
+            log.warning(
+                "Sum() operation detected after Beamform() operation with "
+                "sum_transmits=True. This will sum the data along the batch "
+                "dimension, which might not be the expected behavior."
+                "Consider removing the Sum() operation or setting sum_transmits=False."
+            )
+
 
 @ops_registry("identity")
 class Identity(Operation):
@@ -571,19 +605,29 @@ class Beamform(Operation):
     """Beamforming operation for ultrasound data."""
 
     def __init__(self, beamformer=None, **kwargs):
+        self.beamformer = beamformer
+        output_data_type = None
+        if self.beamformer is not None:
+            if self.beamformer.sum_transmits:
+                output_data_type = "beamformed_data"
+            else:
+                output_data_type = "aligned_data"
+
         super().__init__(
             input_data_type="raw_data",
-            output_data_type="beamformed_data",
+            output_data_type=output_data_type,
             **kwargs,
         )
-
-        self.beamformer = beamformer
 
     def initialize(self):
         super().initialize()
 
         if self.beamformer is not None:
             return
+
+        assert (
+            self.config.model.beamformer
+        ), "Beamformer is not set in the config, please set the beamformer type."
 
         beamformer_type = self.config.model.beamformer.type
         # pylint: disable=import-outside-toplevel
@@ -609,6 +653,10 @@ class Beamform(Operation):
         )
 
         self.beamformer = get_beamformer(self.probe, self.scan, self.config)
+        if self.beamformer.sum_transmits:
+            self.output_data_type = "beamformed_data"
+        else:
+            self.output_data_type = "aligned_data"
 
     def _assign_config_params(self, config: Config):
         self.config = config

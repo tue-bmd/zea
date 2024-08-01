@@ -15,6 +15,7 @@ import torch
 from usbmd.backend.pytorch import on_device_torch
 from usbmd.backend.pytorch.layers.beamformers import get_beamformer
 from usbmd.config import load_config_from_yaml
+from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
@@ -39,6 +40,7 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
 
     # probe = get_probe(config)
     config = load_config_from_yaml(r"./tests/config_test.yaml")
+    config = check_config(config)
     config.ml_library = "torch"
 
     probe = Verasonics_l11_4v()

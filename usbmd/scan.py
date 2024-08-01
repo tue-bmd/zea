@@ -35,6 +35,12 @@ SCAN_PARAM_TYPES = {
     "time_to_next_transmit": np.array,
     "probe_geometry": np.array,
     "origin": np.array,
+    "element_width": float,
+    "lens_correction": float,
+    "tgc_gain_curve": np.array,
+    "tx_waveform_indices": np.array,
+    "waveforms_two_way": dict,
+    "waveforms_one_way": dict,
 }
 
 
@@ -54,7 +60,10 @@ def cast_scan_parameters(scan_parameters: dict) -> dict:
         if key in SCAN_PARAM_TYPES:
             scan_parameters[key] = SCAN_PARAM_TYPES[key](value)
         else:
-            raise ValueError(f"Unknown scan parameter: {key}.")
+            log.error(
+                f"Unknown scan parameter: {key}, cannot cast to correct type "
+                f"but will proceed anyways. Please add {key} to the `SCAN_PARAM_TYPES`."
+            )
 
     return scan_parameters
 
@@ -78,7 +87,7 @@ class Scan:
         n_ch: int = None,
         Nx: int = None,
         Nz: int = None,
-        pixels_per_wvln: int = 3,
+        pixels_per_wvln: int = 4,
         downsample: int = 1,
         polar_angles: Union[np.ndarray, None] = None,
         azimuth_angles: Union[np.ndarray, None] = None,
@@ -250,7 +259,7 @@ class Scan:
             t0_delays = np.zeros((self._n_tx, self._n_el))
         else:
             assert t0_delays.shape == (self._n_tx, self._n_el), (
-                f"t0_delays must have shape (n_tx, n_el). "
+                f"t0_delays must have shape (n_tx, n_el): {self._n_tx, self._n_el}. "
                 f"Got shape {t0_delays.shape}. Please set t0_delays either to None in which "
                 f"case all zeros are assumed, or set the n_tx and n_el params to match the "
                 "t0_delays shape."
@@ -582,6 +591,38 @@ class Scan:
             f"Got shape {self._pfield.shape}."
         )
 
+    def get_scan_parameters(self):
+        """Returns a dictionary with all the parameters of the scan.
+        Note that these are the parameters under the currently set selected_transmits.
+        """
+        return {
+            "n_tx": self.n_tx,
+            "n_ax": self.n_ax,
+            "n_el": self.n_el,
+            "center_frequency": self.fc,
+            "sampling_frequency": self.fs,
+            "demodulation_frequency": self.fdemod,
+            "xlims": self.xlims,
+            "ylims": self.ylims,
+            "zlims": self.zlims,
+            "bandwidth_percent": self.bandwidth_percent,
+            "sound_speed": self.sound_speed,
+            "n_ch": self.n_ch,
+            "Nx": self.Nx,
+            "Nz": self.Nz,
+            "pixels_per_wvln": self.pixels_per_wavelength,
+            "polar_angles": self.polar_angles,
+            "azimuth_angles": self.azimuth_angles,
+            "t0_delays": self.t0_delays,
+            "tx_apodizations": self.tx_apodizations,
+            "focus_distances": self.focus_distances,
+            "initial_times": self.initial_times,
+            "selected_transmits": self.selected_transmits,
+            "probe_geometry": self.probe_geometry,
+            "time_to_next_transmit": self.time_to_next_transmit,
+            "pfield": self.pfield,
+        }
+
 
 class FocussedScan(Scan):
     """
@@ -613,7 +654,7 @@ class PlaneWaveScan(Scan):
         n_ax=3328,
         Nx=None,
         Nz=None,
-        pixels_per_wvln=3,
+        pixels_per_wvln=4,
         polar_angles=None,
         azimuth_angles=None,
         tx_apodizations=None,
