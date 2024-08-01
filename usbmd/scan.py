@@ -13,6 +13,7 @@ import numpy as np
 from usbmd.utils import deprecated, log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
+from usbmd.core import Object
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -59,7 +60,7 @@ def cast_scan_parameters(scan_parameters: dict) -> dict:
     return scan_parameters
 
 
-class Scan:
+class Scan(Object):
     """Scan base class."""
 
     def __init__(
