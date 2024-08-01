@@ -5,13 +5,13 @@
 """
 
 import importlib.util
-import logging
 from pathlib import Path
 
 import h5py
 import numpy as np
 
 from usbmd.registry import checks_registry
+from usbmd.utils import log
 
 _DATA_TYPES = [
     "raw_data",
@@ -319,15 +319,42 @@ def validate_dataset(path: str = None, dataset: h5py.File = None):
     if path is not None:
         path = Path(path)
         with h5py.File(path, "r") as _dataset:
-            _validate_hdf5_dataset(_dataset)
+            event_structure, num_events = _validate_hdf5_dataset(_dataset)
     else:
-        _validate_hdf5_dataset(dataset)
+        event_structure, num_events = _validate_hdf5_dataset(dataset)
+
+    return {
+        "status": "success",
+        "event_structure": event_structure,
+        "num_events": num_events,
+    }
+
+
+def check_key(dataset, key):
+    """Check if the key is present in the dataset."""
+    assert key in dataset.keys(), f"The dataset does not contain the key `{key}`."
 
 
 def _validate_hdf5_dataset(dataset):
-    def check_key(dataset, key):
-        assert key in dataset.keys(), f"The dataset does not contain the key {key}."
+    all_keys = list(dataset.keys())
 
+    event_structure = False
+    if "data" not in all_keys:
+        event_structure = True
+
+    if event_structure:
+        num_events = len(all_keys)
+        for event_no in range(num_events):
+            check_key(dataset, f"event_{event_no}")
+            _validate_structure(dataset[f"event_{event_no}"])
+    else:
+        num_events = 0
+        _validate_structure(dataset)
+
+    return event_structure, num_events
+
+
+def _validate_structure(dataset):
     # Validate the root group
     check_key(dataset, "data")
 
@@ -411,62 +438,42 @@ def _assert_scan_keys_present(dataset):
 
     # Ensure that all keys have the correct shape
     for key in dataset["scan"].keys():
+        if isinstance(dataset["scan"][key], h5py.Group):
+            shape_dataset = None
+        else:
+            shape_dataset = dataset["scan"][key].shape
+
         if key == "probe_geometry":
             correct_shape = (dataset["scan"]["n_el"][()], 3)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`probe_geometry` does not have the correct shape."
 
         elif key == "t0_delays":
             correct_shape = (
                 dataset["scan"]["n_tx"][()],
                 dataset["scan"]["n_el"][()],
             )
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`t0_delays` does not have the correct shape."
-
         elif key == "tx_apodizations":
             correct_shape = (
                 dataset["scan"]["n_tx"][()],
                 dataset["scan"]["n_el"][()],
             )
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`tx_apodizations` does not have the correct shape."
 
         elif key == "focus_distances":
             correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`focus_distances` does not have the correct shape."
 
         elif key == "polar_angles":
             correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`polar_angles` does not have the correct shape."
 
         elif key == "azimuth_angles":
             correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`azimuth_angles` does not have the correct shape."
 
         elif key == "initial_times":
             correct_shape = (dataset["scan"]["n_tx"][()],)
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`initial_times` does not have the correct shape."
 
         elif key == "time_to_next_transmit":
             correct_shape = (
                 dataset["scan"]["n_frames"][()],
                 dataset["scan"]["n_tx"][()],
             )
-            assert (
-                dataset["scan"][key].shape == correct_shape
-            ), "`time_to_next_transmit` does not have the correct shape."
 
         elif key in (
             "sampling_frequency",
@@ -479,12 +486,18 @@ def _assert_scan_keys_present(dataset):
             "sound_speed",
             "bandwidth_percent",
         ):
-            assert (
-                dataset["scan"][key].size == 1
-            ), f"{key} does not have the correct shape."
+            correct_shape = 1
+            shape_dataset = dataset["scan"][key].size
 
         else:
-            logging.warning("No validation has been defined for %s.", key)
+            correct_shape = None
+            log.warning(f"No validation has been defined for {log.orange(key)}.")
+
+        if correct_shape is not None:
+            assert shape_dataset == correct_shape, (
+                f"`{key}` does not have the correct shape. "
+                f"Expected shape: {correct_shape}, got shape: {shape_dataset}"
+            )
 
 
 def _assert_unit_and_description_present(hdf5_file, _prefix=""):

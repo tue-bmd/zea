@@ -2,6 +2,8 @@ model:
   batch_size: 1
   beamformer:
     type: das
+    sum_transmits: true
+
 data:
   file_path: dummy_file_1.hdf5
   dataset_name: dummy
@@ -14,6 +16,16 @@ scan:
   xlims: [-0.019, 0.019]
   zlims: [0, 0.063]
   selected_transmits: 1
+
+preprocess:
+  operation_chain:
+    - name: beamform
+    # Sum() is not needed here as sum_transmits in beamformer is set to true
+    - name: demodulate
+    - name: envelope_detect
+    - name: downsample
+    - name: normalize
+    - name: log_compress
 
 # The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)
 device: cpu

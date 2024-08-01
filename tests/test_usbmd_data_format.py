@@ -144,7 +144,7 @@ def test_wrong_shape(key):
         key (str): The key to change in the dataset_parameters dictionary.
     """
     wrong_parameters = dataset_parameters.copy()
-    wrong_parameters[key] = np.zeros((n_tx + 7, n_el + 1), dtype=np.float32)
+    wrong_parameters[key] = np.zeros((n_frames, n_tx + 7, n_el + 1), dtype=np.float32)
     try:
         with pytest.raises(AssertionError):
             generate_usbmd_dataset(**wrong_parameters)
