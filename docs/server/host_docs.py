@@ -59,28 +59,26 @@ class DocUpdater:
     def start_update(self):
         """Start the update process in a background thread,
         ensuring that only one update runs at a time."""
-        if not self._lock.acquire(blocking=False):
-            print("An update is already in progress. Please wait until it completes.")
-            return "Update in progress"
+        with self._lock:
+            if self._update_thread and self._update_thread.is_alive():
+                print(
+                    "An update is already in progress. Please wait until it completes."
+                )
+                return "Update in progress"
 
-        if self._update_thread and self._update_thread.is_alive():
-            print("An update is already running in the background.")
-            self._lock.release()
-            return "Update in progress"
-
-        self._update_thread = threading.Thread(target=self._update_process)
-        self._update_thread.start()
-        return "Update started"
+            self._update_thread = threading.Thread(target=self._update_process)
+            self._update_thread.start()
+            return "Update started"
 
     def update_repo(self):
         """Update the repository with the latest changes from the remote repository."""
         GITHUB_PAT = os.environ.get("GITHUB_PAT")
-
         repo_url = f"https://{GITHUB_PAT}@github.com/tue-bmd/ultrasound-toolbox.git"
         repo_dir = "/app/repo"
 
         subprocess.run(
-            ["git", "config", "--global", "--add", "safe.directory", "/app/repo"]
+            ["git", "config", "--global", "--add", "safe.directory", repo_dir],
+            check=True,
         )
 
         if not os.path.exists(repo_dir):
@@ -94,26 +92,21 @@ class DocUpdater:
         repo_dir = "/app/repo"
         image_name = "usbmd"
 
-        try:
-            subprocess.run(
-                [
-                    "docker",
-                    "build",
-                    "-t",
-                    image_name,
-                    repo_dir,
-                    "--build-arg",
-                    "KERAS3=True",
-                ],
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            print(f"An error occurred while building the Docker image: {str(e)}")
-            raise
+        subprocess.run(
+            [
+                "docker",
+                "build",
+                "-t",
+                image_name,
+                repo_dir,
+                "--build-arg",
+                "KERAS3=True",
+            ],
+            check=True,
+        )
 
     def run_pdoc_inside_docker(self):
         """Run pdoc to generate the documentation inside the Docker container."""
-        container_name = "usbmd_doc_generator"
         repo_dir = "/app/repo"
         volume_name = "ultrasound-toolbox-repo"
 
@@ -137,29 +130,25 @@ class DocUpdater:
         )
 
         # Run pdoc inside the Docker container
-        try:
-            subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "-v",
-                    f"{volume_name}:{repo_dir}",
-                    "-w",
-                    repo_dir,
-                    "usbmd:latest",
-                    "sh",
-                    "-c",
-                    (
-                        "pip install pdoc3 && pdoc usbmd --html --output-dir /app/repo/docs "
-                        "--force --skip-errors --template-dir /app/repo/docs/pdoc_template"
-                    ),
-                ],
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            print(f"An error occurred while generating documentation: {str(e)}")
-            raise
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{volume_name}:{repo_dir}",
+                "-w",
+                repo_dir,
+                "usbmd:latest",
+                "sh",
+                "-c",
+                (
+                    "pip install pdoc3 && pdoc usbmd --html --output-dir /app/repo/docs "
+                    "--force --skip-errors --template-dir /app/repo/docs/pdoc_template"
+                ),
+            ],
+            check=True,
+        )
 
     def _update_process(self):
         """Internal method to handle the update process."""
@@ -169,10 +158,16 @@ class DocUpdater:
             self.build_docker_image()
             self.run_pdoc_inside_docker()
             print("Update process completed successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"An error occurred during the subprocess execution: {e}")
         except Exception as e:
-            print(f"An error occurred during the update process: {str(e)}")
+            print(f"An unexpected error occurred during the update process: {e}")
         finally:
             self._lock.release()
+
+    def busy(self):
+        """Check if an update is in progress."""
+        return self._lock.locked()
 
 
 ## Routes
