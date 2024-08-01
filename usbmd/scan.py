@@ -62,7 +62,8 @@ def cast_scan_parameters(scan_parameters: dict) -> dict:
         else:
             log.error(
                 f"Unknown scan parameter: {key}, cannot cast to correct type "
-                f"but will proceed anyways. Please add {key} to the `SCAN_PARAM_TYPES`.")
+                f"but will proceed anyways. Please add {key} to the `SCAN_PARAM_TYPES`."
+            )
 
     return scan_parameters
 

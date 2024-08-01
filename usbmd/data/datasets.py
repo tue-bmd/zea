@@ -357,7 +357,6 @@ class USBMDDataSet(DataSet):
         else:
             get_check(self.dtype)(data)
 
-        data = self._correct_deprecated_dim_order(data)
         return data
 
     @property
