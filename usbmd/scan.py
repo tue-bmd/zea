@@ -10,10 +10,10 @@ from typing import Union
 import matplotlib.pyplot as plt
 import numpy as np
 
+from usbmd.core import Object
 from usbmd.utils import deprecated, log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
-from usbmd.core import Object
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -167,6 +167,7 @@ class Scan(Object):
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
         """
+        super().__init__()
 
         # Attributes concerning channel data : The number of transmissions in a frame
         self._n_tx = int(n_tx)
