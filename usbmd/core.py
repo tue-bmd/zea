@@ -1,5 +1,8 @@
+""" Base classes for the toolbox """
+
 import pickle
 import timeit
+
 import numpy as np
 
 
@@ -31,10 +34,12 @@ class Object:
             return False
         return self.serialized == other.serialized
 
+
 if __name__ == "__main__":
 
     class TestObj(Object):
         """Test object with random data"""
+
         def __init__(self):
             super().__init__()
             self.data = np.random.rand(2**16)
@@ -62,7 +67,6 @@ if __name__ == "__main__":
     )
     time_equal = timeit.timeit(lambda: obj1 == obj2, number=N)
     time_not_equal = timeit.timeit(lambda: obj1 == obj3, number=N)
-
 
     # compare while changing the object in between
     def _time_with_change(obj1, obj2):
