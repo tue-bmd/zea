@@ -380,26 +380,6 @@ class USBMDDataSet(DataSet):
             self.file = super().__getitem__(0)
         return self.file.attrs.get("event_structure", False)
 
-    def _correct_deprecated_dim_order(self, data):
-        """Correct data dimension order if it is in the old usbmd format."""
-        if self.dtype != "raw_data":
-            return data
-
-        *_, n_ax, n_el, _ = data.shape
-
-        if n_ax < n_el:
-            log.warning(
-                "\nThe data has the wrong dimension order: (n_tx, n_el, n_ax, n_ch).\n"
-                "Transposing data to correct dimension order: (n_tx, n_ax, n_el, n_ch).\n"
-                "This will be removed in a future version of USBMD. "
-                "Please update your dataset to the new format."
-            )
-            if len(data.shape) == 4:
-                data = np.transpose(data, (0, 2, 1, 3))
-            else:
-                data = np.transpose(data, (0, 1, 3, 2, 4))
-        return data
-
     # pylint: disable=arguments-differ
     def get_probe_name(self):
         """Reads the probe name from the data file and returns it."""
