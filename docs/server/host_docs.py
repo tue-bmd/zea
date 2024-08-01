@@ -5,13 +5,18 @@
 
     1). Set the environment variables in the default.env file.
 
-    2). Build the Docker image:
+    2). Create a Docker volume to store the repository:
+        >> docker volume create ultrasound-toolbox-repo
+
+    3). Build the Docker image:
         >> docker build -t docs_server . (if you haven't built the image yet)
 
-    3). Run the Docker container:
-        >> docker run -d -v /var/run/docker.sock:/var/run/docker.sock -v
-        /home/bluijten/usbmd-docs/repo:/app/repo -p 6001:6001 --name docs_server
+    4). Run the Docker container:
+        >> docker run -d --env-file default.env -v /var/run/docker.sock:/var/run/docker.sock -v
+        ultrasound-toolbox-repo:/app/repo -p 6001:6001 --name docs_server
         --restart unless-stopped docs_server
+
+
 """
 
 import os
@@ -52,7 +57,8 @@ class DocUpdater:
         self._update_thread = None
 
     def start_update(self):
-        """Start the update process in a background thread, ensuring that only one update runs at a time."""
+        """Start the update process in a background thread,
+        ensuring that only one update runs at a time."""
         if not self._lock.acquire(blocking=False):
             print("An update is already in progress. Please wait until it completes.")
             return "Update in progress"
@@ -144,7 +150,10 @@ class DocUpdater:
                     "usbmd:latest",
                     "sh",
                     "-c",
-                    "pip install pdoc3 && pdoc usbmd --html --output-dir /app/repo/docs --force --skip-errors --template-dir /app/repo/docs/pdoc_template",
+                    (
+                        "pip install pdoc3 && pdoc usbmd --html --output-dir /app/repo/docs "
+                        "--force --skip-errors --template-dir /app/repo/docs/pdoc_template"
+                    ),
                 ],
                 check=True,
             )
