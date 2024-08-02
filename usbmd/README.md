@@ -142,7 +142,8 @@ The following terminology is used in the code when referring to different data t
 
 ## How to use with Verasonics
 
-Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the provided [`save_to_usbmd_format.m`](../../usbmd/verasonics/save_to_usbmd_format.m) script. Which will save the raw rf data, along with all acquisition parameters needed for reconstruction, to disk in `.hdf5` format. You can create your own dataset and inherite a sepate [Dataset](datasets.html), or simply copy the `.hdf5` datafile to the `Z:\Ultrasound-BMd\data\USBMD_Verasonics\raw_data` directory. This way, the default Verasonics dataset in the toolbox is used to load the data. Run the [`ui.py`](ui.html) script and select your newly generated datafile to visualize the data.
+Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the save RF button which saves the matlab workspace to disk along with all acquisition parameters needed for reconstruction. You can use [`matlab.py`](data/convert/matlab.html) to convert those workspace files to usbmd format. One way to quickly read those generated `.hdf5` files is though the [`ui.py`](ui.html) script. Adapt one of the configs in template configs folder and point to your dataset. Then when running the [`ui.py`](ui.html) you can select that config and start visualizing your newly generated datafile.
+
 
 ## How to contribute
 
