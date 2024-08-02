@@ -10,6 +10,7 @@ from typing import Union
 import matplotlib.pyplot as plt
 import numpy as np
 
+from usbmd.core import Object
 from usbmd.utils import deprecated, log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -68,7 +69,7 @@ def cast_scan_parameters(scan_parameters: dict) -> dict:
     return scan_parameters
 
 
-class Scan:
+class Scan(Object):
     """Scan base class."""
 
     def __init__(
@@ -175,6 +176,7 @@ class Scan:
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
         """
+        super().__init__()
 
         # Attributes concerning channel data : The number of transmissions in a frame
         self._n_tx = int(n_tx)
