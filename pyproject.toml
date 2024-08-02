@@ -9,7 +9,7 @@ line_length = 88
 
 [tool.poetry]
 name = "usbmd"
-version = "2.0.0"
+version = "2.1.0"
 description = "A collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts for ultrasound researchers."
 authors = [
     "Tristan Stevens <t.s.w.stevens@tue.nl>",
@@ -19,6 +19,9 @@ authors = [
     "Oisín Nolan <o.i.nolan@tue.nl>",
     "Wessel van Nierop <w.l.v.nierop@tue.nl>",
     "Beatrice Federici <b.federici@tue.nl>",
+    "Ruud van Sloun <r.j.g.v.sloun@tue.nl>",
+    "Simon Penninga <s.w.penninga@tue.nl>",
+    "Louis van Harten <l.d.v.harten@tue.nl>",
 ]
 readme = "README.md"
 homepage = "https://github.com/tue-bmd/ultrasound-toolbox/"
