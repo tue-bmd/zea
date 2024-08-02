@@ -15,6 +15,7 @@ import tf_keras as keras
 from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
 from usbmd.backend.tensorflow.utils.utils import tf_snapshot
 from usbmd.config import load_config_from_yaml
+from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
@@ -44,6 +45,7 @@ def test_das_beamforming(
     """
 
     config = load_config_from_yaml(r"./tests/config_test.yaml")
+    config = check_config(config)
     config.ml_library = "tensorflow"
     if jit:
         config.model.beamformer.jit = True  # pylint: disable=no-member
@@ -156,7 +158,7 @@ def test_dynamic_beamforming():
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        n_ax=2048,
+        n_ax=2046,
         sampling_frequency=probe_parameters["sampling_frequency"],
         center_frequency=probe_parameters["center_frequency"],
         angles=np.array(
