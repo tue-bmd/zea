@@ -13,7 +13,6 @@ import platform
 import cv2
 import numpy as np
 from PIL import Image
-
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_uint8_images
 
@@ -111,7 +110,7 @@ def grayscale_to_rgb(image):
     return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
 
-def _preprocess_for_saving(images):
+def preprocess_for_saving(images):
     """Preprocesses images for saving to GIF or MP4.
 
     Args:
@@ -128,6 +127,7 @@ def _preprocess_for_saving(images):
     # convert grayscale images to RGB
     if images.ndim == 3:
         images = [grayscale_to_rgb(image) for image in images]
+        images = np.array(images)
 
     return images
 
@@ -142,7 +142,7 @@ def save_to_gif(images, filename, fps=20):
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
-    images = _preprocess_for_saving(images)
+    images = preprocess_for_saving(images)
 
     if fps > 50:
         log.warning(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
@@ -175,7 +175,7 @@ def save_to_mp4(images, filename, fps=20):
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
-    images = _preprocess_for_saving(images)
+    images = preprocess_for_saving(images)
 
     filename = str(filename)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
