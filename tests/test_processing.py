@@ -304,6 +304,9 @@ def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
     demodulate = Demodulate(fs=fs, fc=fc, bandwidth=None, filter_coeff=None, ops=ops)
     upmix = UpMix(fs=fs, fc=fc, upsampling_rate=factor, ops=ops)
 
+    # cut n_ax data so it is divisible by factor
+    data = data[:, : (data.shape[1] // factor) * factor]
+
     _data = demodulate(data)
     _data = downsample(_data)
     _data = upmix(_data)

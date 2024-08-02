@@ -44,8 +44,13 @@ def initialize_scan_from_probe(probe):
         probe = get_probe(probe)
 
     default_parameters = probe.get_parameters()
-
-    scan = Scan(**default_parameters)
+    try:
+        scan = Scan(**default_parameters)
+    except Exception as e:
+        raise ValueError(
+            f"Could not initialize scan from probe: {probe.__class__.__name__}. "
+            f"Found default parameters: {default_parameters.keys()}. "
+        ) from e
     return scan
 
 

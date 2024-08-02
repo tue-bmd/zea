@@ -8,6 +8,8 @@ Use to quickly read and write files or interact with file system.
 
 import abc
 import asyncio
+import functools
+import multiprocessing
 import os
 import sys
 from collections import deque
@@ -19,12 +21,14 @@ from tkinter.filedialog import askopenfilename
 from typing import Callable, Optional
 
 import cv2
+import h5py
 import imageio
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pydicom
 import tqdm
+import yaml
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -162,56 +166,146 @@ def load_image(filename, grayscale=True):
     return image
 
 
-def search_file_tree(directory, filetypes=None, write=True):
+def _get_length_hdf5_file(filepath, key):
+    """Retrieve the length of a dataset in an hdf5 file."""
+    with h5py.File(filepath, "r") as f:
+        return len(f[key])
+
+
+def search_file_tree(
+    directory,
+    filetypes=None,
+    write=True,
+    dataset_info_filename="dataset_info.yaml",
+    hdf5_key_for_length=None,
+    redo=False,
+):
     """Lists all files in directory and sub-directories.
 
-    If file_paths.txt is detected in the directory, that file is read and used.
+    If dataset_info.yaml is detected in the directory, that file is read and used
+    to deduce the file paths. If not, the file paths are searched for in the
+    directory and written to a dataset_info.yaml file.
 
     Args:
-        directory (str): path to directory.
-        filetypes (Tuple of strings, optional): filetypes.
-            Defaults to image types (.png etc.).
-        write (bool, optional): Whether to write to file. Useful has searching
-            the tree takes quite a while. Defaults to True.
+        directory (str): path to base directory to start file search
+        filetypes (str, list, optional): filetypes to look for in directory
+            Defaults to image types (.png etc.). make sure to include the dot.
+        write (bool, optional): Whether to write to dataset_info.yaml file.
+            Defaults to True. If False, the file paths are not written to file
+            and simply returned.
+        dataset_info_filename (str, optional): name of dataset info file.
+            Defaults to "dataset_info.yaml", but can be changed to any name.
+        hdf5_key_for_length (str, optional): key to use for getting length of hdf5 files.
+            Defaults to None. If set, the number of frames in each hdf5 file is
+            calculated and stored in the dataset_info.yaml file. This is extra
+            functionality of `search_file_tree` and only works with hdf5 files.
+        redo (bool, optional): Whether to redo the search and overwrite the dataset_info.yaml file.
 
     Returns:
-        file_paths (List): List with str to all file paths.
+        dict: dictionary containing file paths and total number of files.
+            has the following structure:
+                {
+                    "file_paths": list of file paths,
+                    "total_num_files": total number of files
+                    "file_lengths": list of number of frames in each hdf5 file
+                    "total_num_frames": total number of frames in all hdf5 files
+                }
 
     """
     directory = Path(directory)
-    if (directory / "file_paths.txt").is_file():
-        print(
-            "Using pregenerated txt file in the following directory for reading file paths: "
+    if not directory.is_dir():
+        raise ValueError(
+            log.error(
+                f"Directory {directory} does not exist. Please provide a valid directory."
+            )
         )
-        print(directory)
-        with open(directory / "file_paths.txt", encoding="utf-8") as file:
-            file_paths = [line.strip() for line in file]
-        return file_paths
+    assert Path(dataset_info_filename).suffix == ".yaml", (
+        "Currently only YAML files are supported for dataset info file when "
+        f"using `search_file_tree`, got {dataset_info_filename}"
+    )
+
+    if (directory / dataset_info_filename).is_file() and not redo:
+        log.info(
+            "Using pregenerated dataset info file: "
+            f"{log.yellow(directory / dataset_info_filename)} ..."
+        )
+        log.info(f"...for reading file paths in {log.yellow(directory)}")
+        with open(directory / dataset_info_filename, "r", encoding="utf-8") as file:
+            dataset_info = yaml.load(file, Loader=yaml.FullLoader)
+        return dataset_info
+
+    if redo:
+        log.info(
+            f"Overwriting dataset info file: {log.yellow(directory / dataset_info_filename)}"
+        )
 
     # set default file type
     if filetypes is None:
         filetypes = _SUPPORTED_IMG_TYPES
 
     file_paths = []
+    file_lengths = []
+
+    if isinstance(filetypes, str):
+        filetypes = [filetypes]
+
+    if hdf5_key_for_length is not None:
+        assert isinstance(
+            hdf5_key_for_length, str
+        ), "hdf5_key_for_length must be a string"
+        assert set(filetypes) == {".hdf5", ".h5"}, (
+            "hdf5_key_for_length only works with when filetypes is set to "
+            f"`.hdf5` or `.h5`, got {filetypes}"
+        )
 
     # Traverse file tree to index all files from filetypes
-    for dirpath, _, filenames in tqdm.tqdm(
-        os.walk(directory), desc="Searching file tree"
-    ):
+    log.info(f"Searching {log.yellow(directory)} for {filetypes} files...")
+    for dirpath, _, filenames in os.walk(directory):
         for file in filenames:
             # Append to file_paths if it is a filetype file
             if Path(file).suffix in filetypes:
-                file_paths.append(str(Path(dirpath) / Path(file)))
+                file_path = Path(dirpath) / file
+                file_path = file_path.relative_to(directory)
+                file_paths.append(str(file))
+
+    if hdf5_key_for_length is not None:
+        # using multiprocessing to speed up reading hdf5 files
+        # and getting the number of frames in each file
+        log.info("Getting number of frames in each hdf5 file...")
+
+        _get_length_hdf5_file_partial = functools.partial(
+            _get_length_hdf5_file, key=hdf5_key_for_length
+        )
+        # make sure to call search_file_tree from within a function
+        # or use if __name__ == "__main__":
+        # to avoid freezing the main process
+        with multiprocessing.Pool() as pool:
+            absolute_file_paths = [directory / file for file in file_paths]
+            file_lengths = list(
+                tqdm.tqdm(
+                    pool.imap(
+                        _get_length_hdf5_file_partial,
+                        absolute_file_paths,
+                    ),
+                    total=len(file_paths),
+                    desc="Getting number of frames in each hdf5 file",
+                )
+            )
 
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
-    print(f"\nFound {len(file_paths)} image files in .\\{Path(directory)}\n")
+    log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
+    log.info(f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}")
+
+    dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
+    if len(file_lengths) > 0:
+        dataset_info["file_lengths"] = file_lengths
+        dataset_info["total_num_frames"] = sum(file_lengths)
 
     if write:
-        with open(directory / "file_paths.txt", "w", encoding="utf-8") as file:
-            _file_paths = [file + "\n" for file in file_paths]
-            file.writelines(_file_paths)
+        with open(directory / dataset_info_filename, "w", encoding="utf-8") as file:
+            yaml.dump(dataset_info, file)
 
-    return file_paths
+    return dataset_info
 
 
 def move_matplotlib_figure(figure, position, size=None):

@@ -57,8 +57,8 @@ class DataLoaderUI:
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
-        file_scan_params = self.dataset.get_scan_parameters_from_file()
-        file_probe_params = self.dataset.get_probe_parameters_from_file()
+        file_scan_params = self.dataset.get_scan_parameters_from_file(event=0)
+        file_probe_params = self.dataset.get_probe_parameters_from_file(event=0)
 
         self.scan = None
         if len(file_scan_params) == 0:
@@ -68,14 +68,16 @@ class DataLoaderUI:
             )
             log.info("Proceeding without scan class.")
         else:
-            config_scan_params = self.config.scan
+            self.config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
-            scan_params = update_dictionary(file_scan_params, config_scan_params)
+            self.scan_params = update_dictionary(
+                file_scan_params, self.config_scan_params
+            )
             try:
-                self.scan = scan_class(**scan_params)
+                self.scan = scan_class(**self.scan_params)
             except Exception:
                 log.error(
-                    f"Could not initialize scan class with parameters: {scan_params}"
+                    f"Could not initialize scan class with parameters: {self.scan_params}"
                 )
 
         # initialize probe
@@ -214,14 +216,34 @@ class DataLoaderUI:
         if frame_no == "all":
             log.info("Will run all frames as `all` was chosen in config...")
         elif frame_no is None:
-            frame_no = _try(
-                lambda: int(
-                    input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
+            if self.dataset.num_frames == 1:
+                frame_no = 0
+            else:
+                frame_no = _try(
+                    lambda: int(
+                        input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
+                    )
                 )
-            )
 
         # get data from dataset
         data = self.dataset[(file_idx, frame_no)]
+
+        ## Update scan class (probably a cleaner way to do this)
+        # check if event data by checking self.dataset.file keys start with event
+        if self.dataset.event_structure:
+            # this is still under development
+            scan_params = self.dataset.get_scan_parameters_from_file(
+                file_idx=self.dataset.file, event=self.dataset.frame_no
+            )
+            scan_class = self.dataset.get_scan_class()
+
+            scan_params = update_dictionary(scan_params, self.config_scan_params)
+            self.scan_params = update_dictionary(self.scan_params, scan_params)
+            self.scan = scan_class(**self.scan_params)
+
+            # TODO: use adaptive beamformer processing instead of reinit
+            self.process = Process(self.config, self.scan, self.probe)
+            # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
 
         return data
 
@@ -250,10 +272,15 @@ class DataLoaderUI:
 
             if self.process.pipeline is None:
                 if self.config.preprocess.operation_chain is None:
-                    self.process.set_pipeline(dtype=self.dtype, to_dtype=to_dtype)
+                    self.process.set_pipeline(
+                        dtype=self.dtype,
+                        to_dtype=to_dtype,
+                        verbose=self.verbose,
+                    )
                 else:
                     self.process.set_pipeline(
-                        operation_chain=self.config.preprocess.operation_chain
+                        operation_chain=self.config.preprocess.operation_chain,
+                        verbose=self.verbose,
                     )
 
             self.image = self.process.run(self.data)
@@ -414,7 +441,7 @@ class DataLoaderUI:
         # Load correct number of frames (needs to get_data first)
         self.config.data.frame_no = 0
         self.get_data()
-        n_frames = len(self.dataset.h5_reader)
+        n_frames = self.dataset.num_frames
 
         self.verbose = False
         # pylint: disable=too-many-nested-blocks
@@ -651,9 +678,12 @@ def main():
         retain_folder_structure = _try(
             lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
         )
-        filetype = _try(
-            lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
-        )
+        if to_dtype in ["image", "image_sc"]:
+            filetype = _try(
+                lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
+            )
+        else:
+            filetype = "hdf5"
 
         generator = GenerateDataSet(
             config,
