@@ -11,6 +11,7 @@ Example:
 """
 
 from pathlib import Path
+from typing import Union
 
 import numpy as np
 import tqdm
@@ -32,10 +33,11 @@ class GenerateDataSet:
         self,
         config,
         to_dtype: str = "image",
-        destination_folder: str = None,
+        destination_folder: Union[None, str] = None,
         retain_folder_structure: bool = True,
         filetype: str = "hdf5",
         overwrite: bool = False,
+        verbose: bool = True,
     ):
         """
         Args:
@@ -51,6 +53,7 @@ class GenerateDataSet:
                 files in one folder. Defaults to True.
             filetype (str, optional): Filetype to save to. Defaults to "hdf5".
             overwrite (bool, optional): Whether to overwrite existing files.
+            verbose (bool, optional): Whether to print verbose output. Defaults to True.
 
         """
         self.config = Config(config)
@@ -69,6 +72,8 @@ class GenerateDataSet:
                 "Cannot save to png if to_dtype is not image. "
                 "Please set filetype to hdf5."
             )
+        self.overwrite = overwrite
+        self.verbose = verbose
 
         # intialize dataset
         self.dataset = get_dataset(self.config.data)
@@ -102,7 +107,17 @@ class GenerateDataSet:
 
         # intialize process class
         self.process = Process(self.config, self.scan, self.probe)
-        self.process.set_pipeline(dtype=self.config.data.dtype, to_dtype=self.to_dtype)
+        if self.config.preprocess.operation_chain is None:
+            self.process.set_pipeline(
+                dtype=self.config.data.dtype,
+                to_dtype=self.to_dtype,
+                verbose=self.verbose,
+            )
+        else:
+            self.process.set_pipeline(
+                operation_chain=self.config.preprocess.operation_chain,
+                verbose=self.verbose,
+            )
 
         if self.dataset.datafolder is None:
             self.dataset.datafolder = Path(".")
@@ -120,11 +135,13 @@ class GenerateDataSet:
                 )
 
         if self.destination_folder.exists():
-            if not overwrite:
-                raise ValueError(
-                    f"Cannot create dataset in {self.destination_folder}, folder"
-                    " already exists!"
+            if self.overwrite:
+                log.warning(
+                    "Possibly overwriting files existing folder "
+                    f"{self.destination_folder}. "
+                    "Press enter to continue..."
                 )
+                input()
 
     def generate(self):
         """Generate the dataset.
@@ -136,45 +153,43 @@ class GenerateDataSet:
             bool: if succesfull returns `True`.
 
         """
-        for idx in tqdm.tqdm(
-            range(len(self.dataset)),
+        total_num_frames = self.dataset.total_num_frames
+        pbar = tqdm.tqdm(
+            total=total_num_frames,
             desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
-        ):
+        )
+        for idx in range(len(self.dataset)):
             try:
-                data = self.dataset[idx]
-
-                single_frame = False
-                if self.config.data.dtype in ["raw_data", "aligned_data"]:
-                    if len(data.shape) == 4:
-                        single_frame = True
-                else:
-                    if len(data.shape) == 3:
-                        single_frame = True
-
-                if single_frame:
-                    data = np.expand_dims(data, axis=0)
+                frame_no = "all"
+                data = self.dataset[(idx, frame_no)]
 
                 base_name = self.dataset.file_paths[idx]
 
                 if self.filetype == "png":
                     for i, image in enumerate(data):
-                        if single_frame:
-                            name = base_name
-                        else:
-                            name = base_name.parent / str(i)
+                        name = base_name.parent / base_name.stem / str(i)
 
                         path = self.get_path_from_name(name, ".png")
+                        if self.skip_path(path):
+                            pbar.update(1)
+                            continue
 
                         image = self.process.run(image)
                         self.save_image(np.squeeze(image), path)
+                        pbar.update(1)
 
                 elif self.filetype == "hdf5":
+                    path = self.get_path_from_name(base_name, ".hdf5")
+                    if self.skip_path(path):
+                        pbar.update(data.shape[0])
+                        continue
+
                     data_list = []
                     for d in data:
                         d = self.process.run(d)
                         data_list.append(d)
+                        pbar.update(1)
                     data = np.stack(data_list, axis=0)
-                    path = self.get_path_from_name(base_name, ".hdf5")
                     self.save_data(data, path)
             except Exception as e:
                 log.error(f"Error processing {base_name}: {e}")
@@ -182,6 +197,20 @@ class GenerateDataSet:
 
         log.success(f"Created dataset in {self.destination_folder}")
         return True
+
+    def skip_path(self, path):
+        """Check if path exists and if we should skip it.
+        Skips when file exists and overwrite is False.
+        Overwrites when file exists and overwrite is True.
+        Nothing happens when file does not exist, we will proceed.
+        """
+        if path.is_file() and not self.overwrite:
+            log.warning(f"Skipping {path}, already exists.")
+            return True
+        elif path.is_file() and self.overwrite:
+            log.warning(f"Overwriting {path}.")
+            path.unlink()
+        return False
 
     def get_path_from_name(self, name, suffix):
         """Simple helper function that return proper path"""
@@ -213,7 +242,7 @@ class GenerateDataSet:
             image (ndarray): input data
             path (str): file path
         """
-        file_scan_parameters = self.dataset.get_scan_parameters_from_file()
+        file_scan_parameters = self.scan.get_scan_parameters()
 
         gen_kwargs = {
             str(self.to_dtype): data,

@@ -18,8 +18,8 @@ import json
 import sys
 from pathlib import Path
 
+import h5py
 import numpy as np
-import scipy.io as sio
 import tqdm
 from deepdiff import DeepDiff
 
@@ -93,8 +93,6 @@ class DataSet:
         # h5 reader object for reading hdf5 files.
         # This class is defined in `usbmd.utils.read_h5`.
         self.h5_reader = None
-        #: Total number of frames in current file
-        self.num_frames = None
         #: The scan parameters of the current file
         self.scan_parameters = None
 
@@ -172,16 +170,26 @@ class DataSet:
         if self.reader == "hdf5":
             self.h5_reader = ReadH5(self.file_name)
             file = self.h5_reader.open()
-            self.num_frames = len(self.h5_reader)
-
-        elif self.reader == "mat":
-            file = sio.loadmat(self.file_name)
-            self.num_frames = len(file)
-
         else:
             raise ValueError("Unsupported filteype.")
 
         return file
+
+    @property
+    def num_frames(self):
+        """Return number of frames in current file."""
+        if self.file is None:
+            self.get_file(0)
+        return len(self.h5_reader)
+
+    @property
+    def total_num_frames(self):
+        """Return total number of frames in dataset."""
+        total_num_frames = 0
+        for i in range(len(self)):
+            self.get_file(i)
+            total_num_frames += len(self.h5_reader)
+        return total_num_frames
 
     def get_frame_no(self, frame_no=None):
         """Sets the frame number(s)
@@ -232,7 +240,7 @@ class DataSet:
         """Returns the Scan class corresponding to the dataset."""
         return dataset_registry.get_parameter(cls_or_name=cls, parameter="scan_class")
 
-    def get_parameters_from_file(self, file_idx=None):
+    def get_parameters_from_file(self, file_idx=None, event=None):
         """Returns a dictionary of parameters to initialize a scan
         object that comes with the dataset (stored inside datafile).
 
@@ -241,20 +249,49 @@ class DataSet:
 
         Args:
             file (h5py or mat): File container.
+            event (int, optional): Event number. When specified an event structure
+                is expected as follows:
+                    - event_0/scan
+                    - event_1/scan
+                    - ...
+                Defaults to None. In that case no event structure is expected.
 
         Returns:
             dict: The scan parameters.
         """
-        if self.file is None and file_idx is None:
-            self.file = self.get_file(0)
-        elif file_idx is not None:
-            self.file = self.get_file(file_idx)
+        if isinstance(file_idx, h5py.File):
+            self.file = file_idx
+        else:
+            if self.file is None and file_idx is None:
+                self.file = self.get_file(0)
+            elif file_idx is not None:
+                self.file = self.get_file(file_idx)
 
         scan_parameters = {}
         if "scan" in self.file:
             scan_parameters = recursively_load_dict_contents_from_group(
                 self.file, "scan"
             )
+        elif "event" in list(self.file.keys())[0]:
+            if event is None:
+                raise ValueError(
+                    log.error(
+                        "Please specify an event number to read scan parameters "
+                        "from a file with an event structure."
+                    )
+                )
+
+            assert f"event_{event}/scan" in self.file, (
+                f"Could not find scan parameters for event {event} in file. "
+                f"Found number of events: {len(self.file.keys())}."
+            )
+
+            scan_parameters = recursively_load_dict_contents_from_group(
+                self.file, f"event_{event}/scan"
+            )
+        else:
+            log.warning("Could not find scan parameters in file.")
+
         scan_parameters = cast_scan_parameters(scan_parameters)
         return scan_parameters
 
@@ -285,7 +322,6 @@ class USBMDDataSet(DataSet):
             self.data_root = Path(config.user["data_root"]) / config["dataset_folder"]
         else:
             self.data_root = config["dataset_folder"]
-
         super().__init__(
             config, datafolder=self.data_root, filetype="hdf5", reader="hdf5"
         )
@@ -307,16 +343,41 @@ class USBMDDataSet(DataSet):
 
         self.frame_no = self.get_frame_no(frame_no)
 
-        data = self.file[f"data/{self.dtype}"]
+        if "data" in self.file:
+            data = self.file[f"data/{self.dtype}"][self.frame_no]
+        else:
+            assert not isinstance(self.frame_no, list), (
+                "Reading multiple frames from event structure is not supported. "
+                "Please specify a single frame number."
+            )
+            data = self.file[f"event_{self.frame_no}/data/{self.dtype}"][0]
 
         if isinstance(self.frame_no, list):
-            data = data[self.frame_no]
             get_check(self.dtype)(data, with_batch_dim=True)
         else:
-            data = data[self.frame_no]
             get_check(self.dtype)(data)
 
         return data
+
+    @property
+    def num_frames(self):
+        """Return number of frames in current file."""
+        if self.file is None:
+            self.file = self.get_file(0)
+        if "scan" in self.file:
+            return int(self.file["scan"]["n_frames"][()])
+        else:
+            return sum(
+                int(self.file[event]["scan"]["n_frames"][()])
+                for event in self.file.keys()
+            )
+
+    @property
+    def event_structure(self):
+        """Whether the files in the dataset have an event structure."""
+        if self.file is None:
+            self.file = super().__getitem__(0)
+        return self.file.attrs.get("event_structure", False)
 
     # pylint: disable=arguments-differ
     def get_probe_name(self):
@@ -336,7 +397,7 @@ class USBMDDataSet(DataSet):
         probe_name = self.file.attrs["probe"]
         return probe_name
 
-    def get_probe_parameters_from_file(self, file_idx=None):
+    def get_probe_parameters_from_file(self, file_idx=None, event=None):
         """Returns a dictionary of probe parameters to initialize a probe
         object that comes with the dataset (stored inside datafile).
 
@@ -347,7 +408,7 @@ class USBMDDataSet(DataSet):
         Returns:
             dict: The probe parameters.
         """
-        file_scan_parameters = self.get_parameters_from_file(file_idx)
+        file_scan_parameters = self.get_parameters_from_file(file_idx, event)
 
         sig = inspect.signature(get_probe("generic").__init__)
         probe_parameters = {
@@ -357,7 +418,7 @@ class USBMDDataSet(DataSet):
         }
         return probe_parameters
 
-    def get_scan_parameters_from_file(self, file_idx=None):
+    def get_scan_parameters_from_file(self, file_idx=None, event=None):
         """Returns a dictionary of default parameters to initialize a scan
         object that works with the dataset.
 
@@ -369,7 +430,7 @@ class USBMDDataSet(DataSet):
             dict: The default parameters (the keys are identical to the
                 __init__ parameters of the Scan class).
         """
-        file_scan_parameters = self.get_parameters_from_file(file_idx)
+        file_scan_parameters = self.get_parameters_from_file(file_idx, event)
 
         sig = inspect.signature(Scan.__init__)
         scan_parameters = {
@@ -422,19 +483,20 @@ class USBMDDataSet(DataSet):
                     f"File {file_path} is not a valid USBMD dataset.\n{e}\n"
                 )
                 # convert into warning
-                log.warning(f"⚠️ Error in file {file_path}.\n{e}")
+                log.warning(f"Error in file {file_path}.\n{e}")
                 validated_succesfully = False
 
             try:
-                scan_parameters = self.get_scan_parameters_from_file(i)
-                if i == 0:
-                    self.scan_parameters = scan_parameters
-                else:
-                    diff = DeepDiff(self.scan_parameters, scan_parameters)
-                    assert not diff, (
-                        "Scan parameters are not the same in all files in dataset."
-                        f"\n{diff}"
-                    )
+                if not self.event_structure:
+                    scan_parameters = self.get_scan_parameters_from_file(i)
+                    if i == 0:
+                        self.scan_parameters = scan_parameters
+                    else:
+                        diff = DeepDiff(self.scan_parameters, scan_parameters)
+                        assert not diff, (
+                            "Scan parameters are not the same in all files in dataset."
+                            f"\n{diff}"
+                        )
                 num_frames_per_file.append(self.num_frames)
             except Exception as e:
                 # convert into warning
@@ -498,7 +560,11 @@ class USBMDDataSet(DataSet):
     def _write_validation_file(self, num_frames_per_file):
         """Write validation file."""
         validation_file_path = Path(self.data_root, _VALIDATED_FLAG_FILE)
-        data_types = list(self.file["data"].keys())
+        if "data" in self.file:
+            data_types = list(self.file["data"].keys())
+        else:
+            data_types = list(self.file["event_0"]["data"].keys())
+
         number_of_files = len(self.file_paths)
         number_of_frames = sum(num_frames_per_file)
         with open(validation_file_path, "w", encoding="utf-8") as f:
@@ -512,9 +578,13 @@ class USBMDDataSet(DataSet):
             for file_path, num_frames in zip(self.file_paths, num_frames_per_file):
                 f.write(f"{file_path.name}: {num_frames}\n")
             f.write(f"{'-' * 80}\n")
-            f.write("Scan parameters:\n")
-            scan_parameters = dict(self.scan_parameters)
-            if scan_parameters:
+            if self.event_structure:
+                f.write(
+                    "Event structure with mixed scan parameters found in dataset.\n"
+                )
+            elif self.scan_parameters:
+                f.write("Scan parameters:\n")
+                scan_parameters = dict(self.scan_parameters)
                 for key, value in scan_parameters.items():
                     if isinstance(value, np.ndarray):
                         scan_parameters[key] = value.tolist()
@@ -595,7 +665,21 @@ class DummyDataset(DataSet):
         self.n_ax = 2048
         self.n_tx = 75
         self.Nz = 128
-        self.num_frames = 4
+
+    @property
+    def num_frames(self):
+        """Return number of frames in current file."""
+        return 4
+
+    @property
+    def total_num_frames(self):
+        """Return total number of frames in dataset."""
+        return 20
+
+    @property
+    def event_structure(self):
+        """Whether the files in the dataset have an event structure."""
+        return False
 
     def __len__(self):
         """
@@ -617,13 +701,28 @@ class DummyDataset(DataSet):
             file (h5py or mat): File container.
 
         """
+        if isinstance(index, int):
+            frame_no = None
+        elif len(index) == 2:
+            index, frame_no = index
+        else:
+            raise ValueError(
+                "Index should either be an integer (indicating file index), "
+                "or tuple containing file index and frame number!"
+            )
+        self.file = super().__getitem__(index)
+        self.frame_no = self.get_frame_no(frame_no)
+
         self.file = self.get_file(index)
         if self.dtype == "raw_data":
-            rf_data = np.random.randn(self.n_tx, self.n_ax, self.Nz, self.n_ch)
-            return rf_data
+            data = np.random.randn(
+                self.num_frames, self.n_tx, self.n_ax, self.Nz, self.n_ch
+            )
+            return data[self.frame_no]
 
         elif self.dtype == "beamformed_data":
-            return np.random.randn(self.Nz, 256, 1)
+            data = np.random.randn(self.num_frames, self.Nz, 256, 1)
+            return data[self.frame_no]
 
         else:
             raise ValueError(f"Data type {self.dtype} not available for this dataset")
@@ -651,11 +750,11 @@ class DummyDataset(DataSet):
         return scan_parameters
 
     # pylint: disable=unused-argument
-    def get_probe_parameters_from_file(self, file=None):
+    def get_probe_parameters_from_file(self, file=None, event=None):
         """Returns placeholder probe parameters."""
         return get_probe(self.get_probe_name()).get_parameters()
 
     # pylint: disable=unused-argument
-    def get_scan_parameters_from_file(self, file=None):
+    def get_scan_parameters_from_file(self, file=None, event=None):
         """Returns placeholder scan parameters."""
         return self.get_default_scan_parameters()

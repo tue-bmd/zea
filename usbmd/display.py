@@ -6,6 +6,8 @@ All functionality related to displaying ultrasound images.
 - **Date**          : 02/11/2023
 """
 
+from typing import Union
+
 import numpy as np
 from PIL import Image
 from scipy import interpolate
@@ -15,7 +17,7 @@ from skimage.transform import resize
 from usbmd.utils import find_first_nonzero_index, translate
 
 
-def to_8bit(image, dynamic_range: tuple = None, pillow: bool = True):
+def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True):
     """Convert image to 8 bit image [0, 255]. Clip between dynamic range.
 
     Args:

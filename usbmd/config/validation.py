@@ -21,13 +21,11 @@ from schema import And, Optional, Or, Regex, Schema
 import usbmd.utils.metrics  # pylint: disable=unused-import
 from usbmd.config import Config
 from usbmd.registry import metrics_registry
-
 from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIB_AVAILABLE, _MOD_TYPES
 
-
 _BACKENDS = [None, "torch", "tensorflow", "numpy"]
-_BEAMFORMER_TYPES = ["das"] # TODO: hardcoded for now
+_BEAMFORMER_TYPES = ["das"]  # TODO: hardcoded for now
 
 
 # predefined checks, later used in schema to check validity of parameter
@@ -65,6 +63,7 @@ model_schema = Schema(
             Optional("aux_inputs", default=None): Or(None, list),
             Optional("patches", default=1): positive_integer,
             Optional("jit", default=False): bool,
+            Optional("sum_transmits", default=False): bool,
             Optional("auto_pressure_weighting", default=False): bool,
         },
     }
