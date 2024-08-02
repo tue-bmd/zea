@@ -1,9 +1,6 @@
 """ Base classes for the toolbox """
 
 import pickle
-import timeit
-
-import numpy as np
 
 
 class Object:
