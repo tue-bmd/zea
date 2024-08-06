@@ -23,6 +23,9 @@ if importlib.util.find_spec("tensorflow"):
     tf.real = tf.math.real
     tf.iscomplex = tf.experimental.numpy.iscomplex
     tf.conj = tf.math.conj
+    tf.isinf = tf.keras.ops.isinf
+    tf.take_along_axis = tf.experimental.numpy.take_along_axis
+    tf.hstack = tf.experimental.numpy.hstack
 
 
 """Convert Torch ops to numpy ops syntax used in main ops module."""
@@ -36,6 +39,7 @@ if importlib.util.find_spec("torch"):
     torch.cast = lambda x, dtype: x.type(dtype)
     torch.concatenate = torch.cat
     torch.iscomplex = torch.is_complex
+    torch.take_along_axis = torch.take_along_dim
 
 """Extent numpy ops a bit for main ops module."""
 if importlib.util.find_spec("numpy"):
