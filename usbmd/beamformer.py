@@ -289,6 +289,8 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1, ops=np):
 
     # Apply clipping of delays clipping to ensure correct behavior on cpu
     if clip_min != -1 and clip_max != -1:
+        clip_min = ops.cast(clip_min, d0.dtype)
+        clip_max = ops.cast(clip_max, d0.dtype)
         d0 = ops.clip(d0, clip_min, clip_max)
         d1 = ops.clip(d1, clip_min, clip_max)
 
