@@ -474,6 +474,12 @@ def _assert_scan_keys_present(dataset):
                 dataset["scan"]["n_frames"][()],
                 dataset["scan"]["n_tx"][()],
             )
+        elif key == "tgc_gain_curve":
+            correct_shape = (dataset["scan"]["n_ax"][()],)
+        elif key == "tx_waveform_indices":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+        elif key == "waveforms_one_way" or key == "waveforms_two_way":
+            correct_shape = None
 
         elif key in (
             "sampling_frequency",
@@ -485,6 +491,8 @@ def _assert_scan_keys_present(dataset):
             "n_ch",
             "sound_speed",
             "bandwidth_percent",
+            "element_width",
+            "lens_correction",
         ):
             correct_shape = 1
             shape_dataset = dataset["scan"][key].size
