@@ -127,6 +127,7 @@ import numpy as np
 import scipy
 from scipy import ndimage, signal
 
+import usbmd.beamformer as bmf
 from usbmd import Config
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
@@ -598,6 +599,186 @@ class Identity(Operation):
 
     def process(self, data):
         return data
+
+
+@ops_registry("delay_and_sum")
+class DelayAndSum(Operation):
+    """Sums time-delayed signals along channels and transmits."""
+
+    def __init__(self, rx_apo=None, tx_apo=None, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type="beamformed_data",
+            **kwargs,
+        )
+        self.rx_apo = rx_apo
+        self.tx_apo = tx_apo
+
+    def initialize(self):
+        if self.rx_apo is None:
+            self.rx_apo = self.ops.ones((1, 1, 1, 1, 1))
+
+        if self.tx_apo is None:
+            self.tx_apo = self.ops.ones((1, 1, 1, 1, 1))
+
+    def process(self, data):
+        """Performs DAS beamforming on tof-corrected input.
+
+        if self.ops.__name__ == "torch":
+            self.tx_apo = self.tx_apo.to(self.device)
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape
+                `(n_frames, n_tx, n_ax, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_frames, n_z, n_x)`
+        """
+        if self.with_batch_dim is False:
+            data = self.ops.expand_dims(data, axis=0)
+
+        if self.ops.__name__ == "torch":
+            self.rx_apo = self.prepare_tensor(self.rx_apo, device=data.device)
+            self.tx_apo = self.prepare_tensor(self.tx_apo, device=data.device)
+
+        # Sum over the channels, i.e. DAS
+        data = self.ops.sum(self.rx_apo * data, -2)
+
+        # Sum over transmits, i.e. Compounding
+        data = self.tx_apo * data
+        data = self.ops.sum(data, 1)
+
+        if self.with_batch_dim is False:
+            data = self.ops.squeeze(data, axis=0)
+
+        return data
+
+
+@ops_registry("tof_correction")
+class TOFCorrection(Operation):
+    """Time-of-flight correction operation for ultrasound data."""
+
+    def __init__(
+        self,
+        grid=None,
+        sound_speed=None,
+        polar_angles=None,
+        focus_distances=None,
+        sampling_frequency=None,
+        f_number=None,
+        n_el=None,
+        n_tx=None,
+        n_ax=None,
+        fdemod=None,
+        t0_delays=None,
+        tx_apodizations=None,
+        initial_times=None,
+        probe_geometry=None,
+    ):
+        super().__init__(
+            input_data_type="raw_data",
+            output_data_type=None,
+        )
+        self.grid = grid
+        self.sound_speed = sound_speed
+        self.polar_angles = polar_angles
+        self.focus_distances = focus_distances
+        self.sampling_frequency = sampling_frequency
+        self.f_number = f_number
+        self.n_el = n_el
+        self.n_tx = n_tx
+        self.n_ax = n_ax
+        self.fdemod = fdemod
+        self.t0_delays = t0_delays
+        self.tx_apodizations = tx_apodizations
+        self.initial_times = initial_times
+        self.probe_geometry = probe_geometry
+
+    def initialize(self):
+        self.grid = self.prepare_tensor(self.grid, dtype=self.ops.float32)
+        self.focus_distances = self.prepare_tensor(
+            self.focus_distances, dtype=self.ops.float32
+        )
+        self.t0_delays = self.prepare_tensor(self.t0_delays, dtype=self.ops.float32)
+        self.tx_apodizations = self.prepare_tensor(
+            self.tx_apodizations, dtype=self.ops.float32
+        )
+        self.initial_times = self.prepare_tensor(
+            self.initial_times, dtype=self.ops.float32
+        )
+        self.probe_geometry = self.prepare_tensor(
+            self.probe_geometry, dtype=self.ops.float32
+        )
+
+        super().initialize()
+
+    def process(self, data):
+        tof_data = []
+        if self.with_batch_dim is False:
+            data = self.ops.expand_dims(data, axis=0)
+        batch_size = data.shape[0]
+        for batch_idx in range(batch_size):
+            tof_corrected_batch = bmf.tof_correction(
+                data[batch_idx],
+                grid=self.grid,
+                t0_delays=self.t0_delays,
+                tx_apodizations=self.tx_apodizations,
+                sound_speed=self.sound_speed,
+                probe_geometry=self.probe_geometry,
+                initial_times=self.initial_times,
+                sampling_frequency=self.sampling_frequency,
+                fdemod=self.fdemod,
+                fnum=self.f_number,
+                angles=self.polar_angles,
+                vfocus=self.focus_distances,
+                apply_phase_rotation=bool(self.fdemod),
+                ops=self.ops,
+            )
+
+            # Add batch dimension
+            # The shape is now (batch, z, x, num_transmits, num_elements)
+            tof_corrected_batch = tof_corrected_batch[None]
+
+            tof_data.append(tof_corrected_batch)
+
+        # Stack batches of TOF corrected data in a single tensor
+        output = self.ops.concatenate(tof_data, 0)
+
+        if self.with_batch_dim is False:
+            output = self.ops.squeeze(output, 0)
+
+        return output
+
+    def _assign_scan_params(self, scan: Scan):
+        self.grid = scan.grid
+        self.focus_distances = scan.focus_distances
+        self.t0_delays = scan.t0_delays
+        self.tx_apodizations = scan.tx_apodizations
+        self.initial_times = scan.initial_times
+        self.probe_geometry = scan.probe_geometry
+
+        self.sound_speed = scan.sound_speed
+        self.polar_angles = scan.polar_angles
+        self.sampling_frequency = scan.fs
+        self.f_number = scan.f_number
+        self.fdemod = scan.fdemod
+
+    @property
+    def _ready(self):
+        return all(
+            [
+                self.grid is not None,
+                self.focus_distances is not None,
+                self.t0_delays is not None,
+                self.tx_apodizations is not None,
+                self.initial_times is not None,
+                self.probe_geometry is not None,
+                self.sound_speed is not None,
+                self.polar_angles is not None,
+                self.sampling_frequency is not None,
+                self.f_number is not None,
+                self.fdemod is not None,
+            ]
+        )
 
 
 @ops_registry("beamform")
