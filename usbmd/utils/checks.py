@@ -494,8 +494,8 @@ def _assert_scan_keys_present(dataset):
             "element_width",
             "lens_correction",
         ):
-            correct_shape = 1
-            shape_dataset = dataset["scan"][key].size
+            correct_shape = ()
+            shape_dataset = dataset["scan"][key].shape
 
         else:
             correct_shape = None
