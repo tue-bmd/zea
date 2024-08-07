@@ -177,7 +177,7 @@ def test_additional_dataset_element():
         DatasetElement(
             group_name="scan",
             dataset_name="lens_correction",
-            data=np.array([0.1]),
+            data=np.array(0.1),
             description="The additional path length due to the lens in wavelengths.",
             unit="wavelengths",
         )
