@@ -478,7 +478,7 @@ def _assert_scan_keys_present(dataset):
             correct_shape = (dataset["scan"]["n_ax"][()],)
         elif key == "tx_waveform_indices":
             correct_shape = (dataset["scan"]["n_tx"][()],)
-        elif key == "waveforms_one_way" or key == "waveforms_two_way":
+        elif key in ("waveforms_one_way", "waveforms_two_way"):
             correct_shape = None
 
         elif key in (
