@@ -87,13 +87,20 @@ class Config(dict):
         """Serialize config object to dictionary"""
         dictionary = {}
         for key, value in self.items():
-            if isinstance(value, Config):
-                dictionary[key] = value.serialize()
-            elif isinstance(value, Path):
-                dictionary[key] = str(value)
-            else:
-                dictionary[key] = value
+            if key == "__frozen__":
+                continue
+            dictionary[key] = self._serialize(value)
         return dictionary
+
+    def _serialize(self, obj):
+        """Serialize object"""
+        if isinstance(obj, Config):
+            return obj.serialize()
+        if isinstance(obj, Path):
+            return str(obj)
+        if isinstance(obj, (list, tuple)):
+            return [self._serialize(item) for item in obj]
+        return obj
 
     def deep_copy(self):
         """Deep copy"""
