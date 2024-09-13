@@ -15,6 +15,7 @@ original_import = builtins.__import__
 
 # Define a custom import function
 def import_fail_on_ml_libs(name, *args, **kwargs):
+    """Custom import function that raises an error if torch, tensorflow, or jax is imported."""
     if name.lower() in ["jax", "tensorflow", "torch"]:
         raise ImportError(f"{name} is not allowed to be imported in this program.")
     return original_import(name, *args, **kwargs)
