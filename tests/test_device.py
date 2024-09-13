@@ -1,6 +1,8 @@
 """ Tests for the device module. """
 
-from tests.test_imports import _assert_ml_libs_not_imported, _clear_ml_libs
+import builtins
+
+from tests.test_imports import import_fail_on_ml_libs, original_import
 from usbmd.utils.device import init_device
 
 
@@ -11,6 +13,10 @@ def test_init_device_without_ml_libs():
     CUDA_VISIBLE_DEVICES is set.
     """
 
-    _clear_ml_libs()
-    init_device(None, "auto:1")
-    _assert_ml_libs_not_imported()
+    # Override the built-in import function
+    builtins.__import__ = import_fail_on_ml_libs
+
+    init_device("tensorflow", "auto:1")
+
+    # Restore the original import function
+    builtins.__import__ = original_import
