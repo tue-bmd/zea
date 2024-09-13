@@ -17,7 +17,10 @@ def init_device(
     by setting the CUDA_VISIBLE_DEVICES.
 
     Args:
-        ml_library (str): String indicating which ml library to use.
+        ml_library (str): String indicating which ml library to use. Can be
+            'torch', 'tensorflow', 'jax', 'numpy' or `None`. When `None` or 'jax', the
+            it will select GPU without specific features for the ml library and
+            thus will not import any ml library.
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
 
@@ -47,8 +50,13 @@ def init_device(
         from usbmd.backend.tensorflow.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
+    elif ml_library is None or ml_library == "jax":
+        # pylint: disable=import-outside-toplevel
+        from usbmd.utils.gpu_utils import get_device
 
-    elif ml_library == "numpy" or ml_library is None:
+        selected_gpu_ids = get_device(device, verbose=verbose)
+        device = f"cuda:{selected_gpu_ids[0]}"
+    elif ml_library == "numpy":
         device = "cpu"
     else:
         raise ValueError(f"Unknown ml_library ({ml_library}) in config.")
