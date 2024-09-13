@@ -44,7 +44,7 @@ jobs:
         run: poetry install --no-interaction --no-root --with torch,tensorflow -E opencv-python-headless
 
       - name: Install project
-        run: poetry install --no-interaction
+        run: poetry install --no-interaction -E opencv-python-headless
 
       - name: Analysing the code with pylint
         run: poetry run pylint $(git ls-files '*.py') -j 0
