@@ -16,7 +16,7 @@ def test_init_device_without_ml_libs():
     # Override the built-in import function
     builtins.__import__ = import_fail_on_ml_libs
 
-    init_device("tensorflow", "auto:1")
+    init_device(None, "auto:1")
 
     # Restore the original import function
     builtins.__import__ = original_import
