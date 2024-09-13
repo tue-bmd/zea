@@ -7,9 +7,5 @@ def test_init_device_without_ml_libs():
     This is important because for example Jax should not be imported before CUDA_VISIBLE_DEVICES is set.
     """
     _clear_ml_libs()
-    init_device("tensorflow", "auto:1")
+    init_device(None, "auto:1")
     _assert_ml_libs_not_imported()
-
-
-if __name__ == "__main__":
-    test_init_device_without_ml_libs()
