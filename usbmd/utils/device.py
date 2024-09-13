@@ -25,7 +25,7 @@ def init_device(
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
 
             for more details see:
-                backend.pytorch.utils.gpu_config.get_device and
+                backend.torch.utils.gpu_config.get_device and
                 backend.tensorflow.utils.gpu_config.get_device.
         hide_devices (int/list): device(s) to hide from the system.
             Examples: 0, or [0,1,2,3]. Can be useful when some GPUs have too
@@ -42,7 +42,7 @@ def init_device(
     # Init GPU / CPU according to config
     if ml_library == "torch":
         # pylint: disable=import-outside-toplevel
-        from usbmd.backend.pytorch.utils.gpu_config import get_device
+        from usbmd.backend.torch.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
     elif ml_library == "tensorflow":
