@@ -273,3 +273,19 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
         print("-" * 50)
 
     return selected_gpu_ids
+
+
+def selected_gpu_ids_to_device(selected_gpu_ids, key="cuda"):
+    """Convert selected GPU ids to device string."""
+    if selected_gpu_ids is not None:
+        if len(selected_gpu_ids) > 1:
+            log.warning(
+                (
+                    "Specified multiple GPU's but this function will just return "
+                    f"one GPU: {selected_gpu_ids[0]}"
+                )
+            )
+
+        return f"{key}:{selected_gpu_ids[0]}"
+    else:
+        return "cpu"

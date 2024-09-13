@@ -2,7 +2,7 @@
 
 from typing import Union
 
-from usbmd.utils.gpu_utils import hide_gpus
+from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
 
 
 def init_device(
@@ -55,7 +55,7 @@ def init_device(
         from usbmd.utils.gpu_utils import get_device
 
         selected_gpu_ids = get_device(device, verbose=verbose)
-        device = f"cuda:{selected_gpu_ids[0]}"
+        device = selected_gpu_ids_to_device(selected_gpu_ids)
     elif ml_library == "numpy":
         device = "cpu"
     else:

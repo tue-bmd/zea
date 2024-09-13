@@ -8,6 +8,7 @@ import torch
 
 from usbmd.utils import log
 from usbmd.utils.gpu_utils import get_device as _get_device
+from usbmd.utils.gpu_utils import selected_gpu_ids_to_device
 
 
 def get_device(device="auto:1", verbose=True, hide_others=True):
@@ -44,15 +45,7 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
 
     selected_gpu_ids = _get_device(device, verbose=verbose, hide_others=hide_others)
 
-    if len(selected_gpu_ids) > 1:
-        log.warning(
-            (
-                "Specified multiple GPU's but this function will just return "
-                f"one GPU: {selected_gpu_ids[0]}"
-            )
-        )
-
-    return f"cuda:{selected_gpu_ids[0]}"
+    return selected_gpu_ids_to_device(selected_gpu_ids)
 
 
 if __name__ == "__main__":
