@@ -13,6 +13,7 @@ import tensorflow as tf
 
 from usbmd.utils import log
 from usbmd.utils.gpu_utils import get_device as _get_device
+from usbmd.utils.gpu_utils import selected_gpu_ids_to_device
 
 # Get a list of all tf devices
 GPUS = tf.config.experimental.list_physical_devices("GPU")
@@ -84,15 +85,7 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
 
     set_memory_growth(gpu_ids=selected_gpu_ids)
 
-    if len(selected_gpu_ids) > 1:
-        log.warning(
-            (
-                "Specified multiple GPU's but this function will just return "
-                f"one GPU: {selected_gpu_ids[0]}"
-            )
-        )
-
-    return f"gpu:{selected_gpu_ids[0]}"
+    return selected_gpu_ids_to_device(selected_gpu_ids, key="gpu")
 
 
 if __name__ == "__main__":
