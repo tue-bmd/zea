@@ -19,7 +19,8 @@ def _assert_ml_libs_not_imported():
         raise AssertionError(
             "Torch, TensorFlow, and/or JAX was imported! Please ensure that no ML library "
             "is imported in the device module. "
-            f"Imported modules: torch={torch_imported}, tensorflow={tf_imported}, jax={jax_imported}"
+            f"Imported modules: torch={torch_imported}, tensorflow={tf_imported}, "
+            f"jax={jax_imported}"
         )
 
 
