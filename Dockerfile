@@ -54,8 +54,8 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 WORKDIR /ultrasound-toolbox
 COPY . /ultrasound-toolbox/
 
-# Install usbmd
-RUN poetry install
+# Install usbmd (with headless opencv)
+RUN poetry install -E opencv-python-headless
 
 ARG KERAS3=False
 # Install additional packages if KERAS3=True
