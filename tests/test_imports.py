@@ -1,34 +1,23 @@
 """ Check that all Python files in the project can be compiled, and that no import errors occur, for
 example due to missing dependencies in the pyproject.toml file. """
 
+import builtins
 import glob
 import importlib
-import sys
 import traceback
 from pathlib import Path
 
 import pytest
 
-
-def _assert_ml_libs_not_imported():
-    """Check if 'torch', 'tensorflow', and 'jax' were imported"""
-    torch_imported = "torch" in sys.modules
-    tf_imported = "tensorflow" in sys.modules
-    jax_imported = "jax" in sys.modules
-    if torch_imported or tf_imported or jax_imported:
-        raise AssertionError(
-            "Torch, TensorFlow, and/or JAX was imported! Please ensure that no ML library "
-            "is imported in the device module. "
-            f"Imported modules: torch={torch_imported}, tensorflow={tf_imported}, "
-            f"jax={jax_imported}"
-        )
+# Save the original import function
+original_import = builtins.__import__
 
 
-def _clear_ml_libs():
-    """Clear ML libraries from sys.modules"""
-    sys.modules.pop("torch", None)
-    sys.modules.pop("tensorflow", None)
-    sys.modules.pop("jax", None)
+# Define a custom import function
+def import_fail_on_ml_libs(name, *args, **kwargs):
+    if name.lower() in ["jax", "tensorflow", "torch"]:
+        raise ImportError(f"{name} is not allowed to be imported in this program.")
+    return original_import(name, *args, **kwargs)
 
 
 @pytest.mark.parametrize("directory", [Path(__file__).parent.parent])
@@ -61,6 +50,11 @@ def test_check_imports_errors(directory):
 
 def test_package_does_not_import_heavy_ml_libraries():
     """Test that the package does not import heavy ML libraries like torch, tensorflow, or jax."""
-    _clear_ml_libs()
+
+    # Override the built-in import function
+    builtins.__import__ = import_fail_on_ml_libs
+
     importlib.import_module("usbmd")
-    _assert_ml_libs_not_imported()
+
+    # Restore the original import function
+    builtins.__import__ = original_import
