@@ -142,4 +142,4 @@ def load_config_from_yaml(path, loader=yaml.FullLoader):
     if dictionary:
         return Config(dictionary)
     else:
-        return {}
+        return Config(dictionary={})
