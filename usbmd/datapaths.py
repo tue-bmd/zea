@@ -17,6 +17,7 @@ from typing import Union
 
 import yaml
 
+from usbmd.config import Config
 from usbmd.utils import log, strtobool
 
 DEFAULT_WINDOWS_DATA_ROOT = "Z:/Ultrasound-BMd/data"
@@ -313,7 +314,7 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
 
     _verify_paths(data_path)
 
-    return data_path
+    return Config(data_path)
 
 
 ## Helper functions for handling user input
@@ -341,7 +342,9 @@ def _build_user_profile_string(data_paths, local: bool = None):
         raise ValueError("local should set to a boolean or None.")
 
 
-def _to_write_user_profile_to_file(user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH):
+def _to_write_user_profile_to_file(
+    user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH
+):
     with open(user_config_path, "a", encoding="utf-8") as file:
         file.write("\n\n" + user_profile_string + "\n")
     print(
