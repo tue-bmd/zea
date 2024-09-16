@@ -295,8 +295,8 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1, ops=np):
         d1 = ops.clip(d1, clip_min, clip_max)
 
     if data.shape[-1] == 2:
-        d0 = d0.repeat((1, 1, 2))
-        d1 = d1.repeat((1, 1, 2))
+        d0 = ops.repeat(d0, 2, axis=-1)
+        d1 = ops.repeat(d1, 2, axis=-1)
 
     # Gather pixel values
     # Here we extract for each transducer element the sample containing the
@@ -380,7 +380,7 @@ def distance_Tx_planewave(grid, angle, ops=np):
     x = grid[..., 0]
     z = grid[..., 2]
     # For each element, compute distance to pixels
-    angle = angle.float()
+    angle = ops.cast(angle, ops.float32)
     dist = x * ops.sin(angle) + z * ops.cos(angle)
 
     return dist
