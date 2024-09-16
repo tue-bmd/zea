@@ -58,11 +58,12 @@ class UnknownLocalRemoteWarning(UserWarning):
 
 def _create_empty_yaml(path):
     # Create empty file if it does not exist
-    open(path, "a", encoding="utf-8").close()
+    with open(path, "a", encoding="utf-8"):
+        pass
 
 
 def _fallback_to_default_data_root(system):
-    if system not in DEFAULT_DATA_ROOT.keys():
+    if system not in DEFAULT_DATA_ROOT:
         system = None
     return DEFAULT_DATA_ROOT[system]
 
@@ -100,7 +101,7 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
             f"Unknown hostname {hostname} for user {username} and no default data_root found.",
             UnknownHostnameWarning,
         )
-        return _fallback_to_default_data_root(config, system), "./output"
+        return _fallback_to_default_data_root(system), "./output"
 
     # Check if set os system matches with the current system
     if "system" in config:
@@ -150,7 +151,7 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
                     f"Unknown remote path for {key} in user config. Falling back to default.",
                     UnknownLocalRemoteWarning,
                 )
-                paths[key] = _fallback_to_default_data_root(config, system)
+                paths[key] = _fallback_to_default_data_root(system)
         else:
             raise ValueError(
                 f"Please set local to True or False or have the {key} "
@@ -212,7 +213,7 @@ def _load_users_yaml(user_config, local, username, hostname):
             Please check your users.yaml file for corruptions. In case you want to create a
             new users.yaml file, please delete the current one."""
         )
-    return config, config_path
+    return config
 
 
 def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> dict:
@@ -264,10 +265,6 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     hostname = socket.gethostname()
     repo_root = Path(__file__)
 
-    assert isinstance(
-        user_config, (str, dict, type(None))
-    ), "user_config should be a string or dictionary."
-
     # If user_config is None, use the default users.yaml file
     if isinstance(user_config, type(None)):
         user_config = DEFAULT_USERS_CONFIG_PATH
@@ -275,10 +272,11 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     # If user_config is a dictionary, use it as the config
     if isinstance(user_config, dict):
         config = copy.deepcopy(user_config)
-
     # If user_config is a string, load the yaml file
-    if isinstance(user_config, str):
-        config, config_path = _load_users_yaml(user_config, local, username, hostname)
+    elif isinstance(user_config, str):
+        config = _load_users_yaml(user_config, local, username, hostname)
+    else:
+        raise ValueError("user_config should be a string or dictionary.")
 
     if username in config:
         # Check if username is in the config
@@ -295,7 +293,7 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
             (
                 f"Unknown user {username} in user file and no default `data_root`.\n"
                 f"Falling back to default path for {system}: {DEFAULT_DATA_ROOT[system]}. "
-                f"Please update the `{config_path}` file with your data-path settings."
+                f"Please update the `{user_config}` with your data-path settings."
             ),
             UnknownUsernameWarning,
         )
