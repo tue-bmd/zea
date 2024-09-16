@@ -59,8 +59,8 @@ def get_gpu_memory(verbose=True):
     """
     if not check_nvidia_smi():
         log.warning(
-            "nvidia-smi is not available. Cannot retrieve GPU memory. Falling back to"
-            " CPU.."
+            "nvidia-smi is not available. Please install nvidia-utils. "
+            "Cannot retrieve GPU memory. Falling back to CPU.."
         )
         return None
 
