@@ -6,8 +6,8 @@ from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
 
 
 def init_device(
-    ml_library: str,
-    device: Union[str, int, list],
+    ml_library: Union[str, None] = None,
+    device: Union[str, int, list] = "auto:1",
     hide_devices: Union[int, list] = None,
     verbose: bool = True,
 ):
@@ -18,15 +18,17 @@ def init_device(
 
     Args:
         ml_library (str): String indicating which ml library to use. Can be
-            'torch', 'tensorflow', 'jax', 'numpy' or `None`. When `None` or 'jax', the
-            it will select GPU without specific features for the ml library and
-            thus will not import any ml library.
+            'torch', 'tensorflow', 'jax', 'numpy' or `None`.
+                - When `None` or 'jax', the function will select GPU(s) without specific features
+                for the ml library and thus will not import any ml library.
+                - Selecting Tensorflow will set memory growth, check if CUDA is available
+                and format the device string for Tensorflow.
+                - Selecting Torch will also check if CUDA is available.
+                - For numpy this function will return 'cpu'.
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
 
-            for more details see:
-                backend.torch.utils.gpu_config.get_device and
-                backend.tensorflow.utils.gpu_config.get_device.
+            For more details see: `usbmd.utils.gpu_utils.get_device`
         hide_devices (int/list): device(s) to hide from the system.
             Examples: 0, or [0,1,2,3]. Can be useful when some GPUs have too
             little tensor cores to be useful for training, or when some GPUs
