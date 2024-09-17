@@ -2,12 +2,12 @@
 
 from typing import Union
 
-from usbmd.utils.gpu_utils import hide_gpus
+from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
 
 
 def init_device(
-    ml_library: str,
-    device: Union[str, int, list],
+    ml_library: Union[str, None] = None,
+    device: Union[str, int, list] = "auto:1",
     hide_devices: Union[int, list] = None,
     verbose: bool = True,
 ):
@@ -17,13 +17,18 @@ def init_device(
     by setting the CUDA_VISIBLE_DEVICES.
 
     Args:
-        ml_library (str): String indicating which ml library to use.
+        ml_library (str): String indicating which ml library to use. Can be
+            'torch', 'tensorflow', 'jax', 'numpy' or `None`.
+                - When `None` or 'jax', the function will select GPU(s) without specific features
+                for the ml library and thus will not import any ml library.
+                - Selecting Tensorflow will set memory growth, check if CUDA is available
+                and format the device string for Tensorflow.
+                - Selecting Torch will also check if CUDA is available.
+                - For numpy this function will return 'cpu'.
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
 
-            for more details see:
-                backend.pytorch.utils.gpu_config.get_device and
-                backend.tensorflow.utils.gpu_config.get_device.
+            For more details see: `usbmd.utils.gpu_utils.get_device`
         hide_devices (int/list): device(s) to hide from the system.
             Examples: 0, or [0,1,2,3]. Can be useful when some GPUs have too
             little tensor cores to be useful for training, or when some GPUs
@@ -39,7 +44,7 @@ def init_device(
     # Init GPU / CPU according to config
     if ml_library == "torch":
         # pylint: disable=import-outside-toplevel
-        from usbmd.backend.pytorch.utils.gpu_config import get_device
+        from usbmd.backend.torch.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
     elif ml_library == "tensorflow":
@@ -47,8 +52,13 @@ def init_device(
         from usbmd.backend.tensorflow.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
+    elif ml_library is None or ml_library == "jax":
+        # pylint: disable=import-outside-toplevel
+        from usbmd.utils.gpu_utils import get_device
 
-    elif ml_library == "numpy" or ml_library is None:
+        selected_gpu_ids = get_device(device, verbose=verbose)
+        device = selected_gpu_ids_to_device(selected_gpu_ids)
+    elif ml_library == "numpy":
         device = "cpu"
     else:
         raise ValueError(f"Unknown ml_library ({ml_library}) in config.")

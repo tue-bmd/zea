@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 # pylint: disable=unused-import
-from usbmd.backend.pytorch.layers import beamformers
+from usbmd.backend.torch.layers import beamformers
 
 
 def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
