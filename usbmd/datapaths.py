@@ -155,7 +155,8 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
         else:
             raise ValueError(
                 f"Please set local to True or False or have the {key} "
-                + "specified as a string (without local / remote key)."
+                "specified as a string (without local / remote sub keys). "
+                f"Current value, 'data_root': {path}."
             )
 
     # Set output path if not set
@@ -360,7 +361,7 @@ def _pretty_print_data_paths(data_paths):
 
 def _prompt_user_for_data_root():
     data_root_input = input(
-        "\nℹ️ Please enter the path to your data directory, "
+        "\nℹ️  Please enter the path to your data directory, "
         "or press Enter to use the default Linux path "
         f"`{DEFAULT_LINUX_DATA_ROOT}`: "
     )
@@ -480,7 +481,7 @@ def create_new_user(user_config_path: str = None, local: bool = None):
         )
 
         if user_warning_was_thrown or no_yaml_file_error_was_thrown:
-            print("ℹ️ Follow the instructions below to create your user profile.")
+            print("ℹ️  Follow the instructions below to create your user profile.")
             data_root = _acquire_and_validate_data_root()
             data_paths["data_root"] = data_root
             user_profile_string = _build_user_profile_string(data_paths, local=local)
@@ -488,7 +489,7 @@ def create_new_user(user_config_path: str = None, local: bool = None):
                 "\n"
                 + user_profile_string
                 + "\n"
-                + "\nℹ️ Would you like to automatically create your user"
+                + "\nℹ️  Would you like to automatically create your user"
                 + "profile with the details above? [y]: "
             )
             if user_response == "" or strtobool(user_response):
