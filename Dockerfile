@@ -67,3 +67,18 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
         pip install --upgrade keras-cv && \
         pip install tf-keras==2.15.0 wandb; \
     fi
+
+# Source working/installation directory and add motd (message of the day)
+ENV INSTALL /usr/local/src
+RUN echo '[ ! -z "$TERM" -a -r /etc/motd ] && cat /etc/issue && cat /etc/motd' \
+    >> /etc/bash.bashrc \
+    ; echo "\
+===================================================================\n\
+    UU   UU   SSSSS   BBBBB    MMM MMM   DDDD \n\
+    UU   UU  SS       BB   BB  MMMMMMM   DD  D\n\
+    UU   UU   SSSS    BBBBB    MM M MM   DD   D\n\
+    UU   UU      SS   BB   BB  MM   MM   DD  D\n\
+     UUUUU   SSSSS    BBBBB    MM   MM   DDDD     (c) \e[31mTU/e 2021\e[0m\n\
+===================================================================\n\
+\n"\
+    > /etc/motd
