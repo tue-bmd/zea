@@ -162,7 +162,8 @@ DESCRIPTIONS = {
     "ml_library": f"The library to use ({allows_type_to_str(_BACKENDS)})",
     "plot": {
         "description": (
-            "Settings pertaining to plotting when running the UI (`usbmd --config <path-to-config.yaml>`)"
+            "Settings pertaining to plotting when running the UI "
+            "(`usbmd --config <path-to-config.yaml>`)"
         ),
         "save": (
             "Set to true to save the plots to disk, false to only display them in the UI"
