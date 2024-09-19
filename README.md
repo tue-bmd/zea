@@ -15,8 +15,8 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from terminal:
 
-```bash
-python -m pip install -e .
+```shell
+pip install -e .[opencv-python-headless]
 ```
 
 Other install options can be found in the [Install.md](Install.md) file.
