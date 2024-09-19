@@ -52,7 +52,7 @@ def tof_correction(
         f"{data.shape}"
     )
 
-    n_tx, n_ax, n_el, n_ch = ops.shape(data)
+    n_tx, n_ax, n_el, _ = ops.shape(data)
 
     # assert data.shape[0] == n_tx, (
     #     "The first dimension of the input data should be the number of "

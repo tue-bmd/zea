@@ -18,5 +18,16 @@ tf.imag = tf.math.imag
 tf.real = tf.math.real
 tf.iscomplex = tf.experimental.numpy.iscomplex
 tf.conj = tf.math.conj
-tf.isinf = tf.keras.ops.isinf
 tf.hstack = tf.experimental.numpy.hstack
+
+
+def isinf(x):
+    """Taken from keras.ops"""
+    x = tf.convert_to_tensor(x)
+    dtype_as_dtype = tf.as_dtype(x.dtype)
+    if dtype_as_dtype.is_integer or not dtype_as_dtype.is_numeric:
+        return tf.zeros(x.shape, tf.bool)
+    return tf.math.is_inf(x)
+
+
+tf.isinf = isinf
