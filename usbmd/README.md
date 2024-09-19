@@ -44,10 +44,10 @@ import usbmd.backend.torch as usbmd_torch
 
 #### User interface
 
-In order to get started with usbmd stand-alone, you can run [`ui.py`](ui.html), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](../../configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
+In order to get started with usbmd stand-alone, you can simply run [`usbmd`](__main__.html), which is the main entry point of the toolbox runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](../../configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
 
 ```shell
-python ui.py --config configs/config_picmus.yaml
+usbmd --config configs/config_picmus.yaml
 ```
 
 If you make your own config, make sure it can be validated using the [config validation](utils/config_validation.html) schema. This ensures it has the correct structure and all required parameters are present.
@@ -141,7 +141,7 @@ The following terminology is used in the code when referring to different data t
 
 ## How to use with Verasonics
 
-Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the save RF button which saves the matlab workspace to disk along with all acquisition parameters needed for reconstruction. You can use [`matlab.py`](data/convert/matlab.html) to convert those workspace files to usbmd format. One way to quickly read those generated `.hdf5` files is though the [`ui.py`](ui.html) script. Adapt one of the configs in template configs folder and point to your dataset. Then when running the [`ui.py`](ui.html) you can select that config and start visualizing your newly generated datafile.
+Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the save RF button which saves the matlab workspace to disk along with all acquisition parameters needed for reconstruction. You can use [`matlab.py`](data/convert/matlab.html) to convert those workspace files to usbmd format. One way to quickly read those generated `.hdf5` files is though running [`usbmd`](__main__.html) in your terminal. Adapt one of the configs in template configs folder and point to your dataset. Then when running [`usbmd`](__main__.html) you can select that config and start visualizing your newly generated datafile.
 
 
 ## How to contribute

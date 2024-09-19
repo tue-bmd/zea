@@ -4,7 +4,7 @@ Supports both saving to png and hdf5. saving to png is only supported for image 
 
 Example:
     Run from command line to generate PICMUS dataset:
-    >>> python usbmd/ui.py -c configs/config_picmus_rf.yaml -t generate
+    >>> usbmd -c configs/config_picmus_rf.yaml -t generate
 
 - **Author(s)**     : Tristan Stevens
 - **Date**          : November 18th, 2021
