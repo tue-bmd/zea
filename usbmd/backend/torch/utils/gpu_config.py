@@ -7,7 +7,8 @@
 import torch
 
 from usbmd.utils import log
-from usbmd.utils.gpu_utils import get_gpu_memory, select_gpus
+from usbmd.utils.gpu_utils import get_device as _get_device
+from usbmd.utils.gpu_utils import selected_gpu_ids_to_device
 
 
 def get_device(device="auto:1", verbose=True, hide_others=True):
@@ -38,43 +39,13 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
     Returns:
         device (str): Available device that torch can use for its computations.
     """
-    if device.lower() == "cpu":
-        return "cpu"
     if not torch.cuda.is_available():
         log.warning("Cuda not available, fallback to CPU.")
         return "cpu"
 
-    if verbose:
-        header = "GPU settings"
-        print("-" * 2 + header.center(50 - 4, "-") + "-" * 2)
+    selected_gpu_ids = _get_device(device, verbose=verbose, hide_others=hide_others)
 
-    memory = get_gpu_memory(verbose=verbose)
-    if memory is None:  # nvidia-smi not working, fallback to CPU
-        return "cpu"
-
-    gpu_ids = list(range(torch.cuda.device_count()))
-
-    selected_gpu_ids = select_gpus(
-        available_gpu_ids=gpu_ids,
-        memory_free=memory,
-        device=device,
-        verbose=verbose,
-        hide_others=hide_others,
-    )
-    if selected_gpu_ids is None:
-        return "cpu"
-    if len(selected_gpu_ids) > 1:
-        log.warning(
-            (
-                "Config specified multiple GPU's while our Pytorch"
-                "implementation does not currently support this."
-                f"Fallback to single GPU: {selected_gpu_ids[0]}"
-            )
-        )
-    if verbose:
-        print("-" * 50)
-
-    return f"cuda:{selected_gpu_ids[0]}"
+    return selected_gpu_ids_to_device(selected_gpu_ids)
 
 
 if __name__ == "__main__":
