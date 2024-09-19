@@ -17,6 +17,7 @@ from typing import Union
 
 import yaml
 
+from usbmd.config import Config
 from usbmd.utils import log, strtobool
 
 DEFAULT_DATA_ROOT = {
@@ -315,7 +316,7 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
 
     _verify_paths(data_path)
 
-    return data_path
+    return Config(data_path)
 
 
 ## Helper functions for handling user input

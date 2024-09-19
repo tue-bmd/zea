@@ -12,6 +12,7 @@ import functools
 import multiprocessing
 import os
 import sys
+import warnings
 from collections import deque
 from io import BytesIO
 from multiprocessing.pool import ThreadPool
@@ -41,6 +42,7 @@ from usbmd.utils import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
+_SUPPORTED_USBMD_TYPES = [".hdf5", ".h5"]
 
 
 def running_in_notebook():
@@ -138,13 +140,15 @@ def load_video(filename):
     return np.array(frames)
 
 
-def load_image(filename, grayscale=True):
+def load_image(filename, grayscale=True, color_order="RGB"):
     """Load an image file and return a numpy array.
 
     Supported file types: jpg, png.
 
     Args:
         filename (str): The path to the image file.
+        grayscale (bool, optional): Whether to convert the image to grayscale. Defaults to True.
+        color_order (str, optional): The desired color channel ordering. Defaults to 'RGB'.
 
     Returns:
         numpy.ndarray: A numpy array of the image.
@@ -163,6 +167,14 @@ def load_image(filename, grayscale=True):
 
     if grayscale and len(image.shape) == 3:
         image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+    if color_order == "BGR":
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    elif color_order == "RGB":
+        pass
+    else:
+        raise ValueError(f"Unsupported color order: {color_order}")
+
     return image
 
 
@@ -241,7 +253,7 @@ def search_file_tree(
 
     # set default file type
     if filetypes is None:
-        filetypes = _SUPPORTED_IMG_TYPES
+        filetypes = _SUPPORTED_IMG_TYPES + _SUPPORTED_VID_TYPES + _SUPPORTED_USBMD_TYPES
 
     file_paths = []
     file_lengths = []
@@ -428,7 +440,9 @@ def matplotlib_figure_to_numpy(fig):
             buf.close()
             return image
 
-        canvas.draw()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            canvas.draw()
 
         if matplotlib.get_backend() == "Qt5Agg":
             image = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)

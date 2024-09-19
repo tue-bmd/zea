@@ -9,10 +9,12 @@ import functools
 import hashlib
 import inspect
 import platform
+from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
+
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_uint8_images
 
@@ -142,6 +144,9 @@ def save_to_gif(images, filename, fps=20):
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
+    assert isinstance(
+        filename, (str, Path)
+    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     if fps > 50:
@@ -175,6 +180,9 @@ def save_to_mp4(images, filename, fps=20):
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
+    assert isinstance(
+        filename, (str, Path)
+    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     filename = str(filename)
