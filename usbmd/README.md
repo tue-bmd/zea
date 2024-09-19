@@ -22,11 +22,10 @@ This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](../pyproject.toml) file is located and run the following command from terminal:
 
 ```shell
-python -m pip install -e .
+pip install -e .[opencv-python-headless]
 ```
 
- For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide).
- Alternatively, you can [run this code via Docker](#running-the-code-with-docker) using included [Dockerfile](../../Dockerfile).
+Other install options can be found in the [Install.md](Install.md) file.
 
 ### Getting started
 
@@ -151,13 +150,14 @@ Please see [`CONTRIBUTING.md`](../CONTRIBUTING.md) on guidelines to contribute t
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 
 ```shell
-pip install pylint
+pip install -e .[dev] # in case dev dependencies were not installed
 pylint usbmd
 ```
 
 Also make sure all the pytest tests are running succesfully (100%) by running the following command in the root directory:
 
 ```shell
+pip install -e .[dev] # in case dev dependencies were not installed
 pytest ./tests
 ```
 

@@ -25,14 +25,11 @@ This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from terminal:
 
 ```bash
-python -m pip install -e .
+pip install -e .[opencv-python-headless,dev]
 ```
 
-Optionally you can add the dev dependencies by running:
-
-```bash
-python -m pip install -e .[dev]
-```
+This installes the dev dependencies and opencv without the GUI backend. This means it [does not conflict with matplotlib](https://github.com/tue-bmd/ultrasound-toolbox/issues/410).
+In case you need the opencv GUI backend, you can install it with `pip install -e .[opencv-python]`.
 
 ## Install from github
 

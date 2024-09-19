@@ -41,10 +41,10 @@ jobs:
 
       - name: Install dependencies
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root --with torch,tensorflow
+        run: poetry install --no-interaction --no-root --with torch,tensorflow -E opencv-python-headless
 
       - name: Install project
-        run: poetry install --no-interaction
+        run: poetry install --no-interaction -E opencv-python-headless
 
       - name: Perform tests
         run: poetry run pytest -s ./tests
