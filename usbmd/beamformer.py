@@ -1,6 +1,7 @@
 """Beamformer functions with general ops."""
 
 import numpy as np
+from keras import ops
 
 
 def tof_correction(
@@ -17,7 +18,6 @@ def tof_correction(
     angles,
     vfocus,
     apply_phase_rotation=False,
-    ops=np,
 ):
     """
     Args:
@@ -92,10 +92,9 @@ def tof_correction(
         n_el,
         vfocus,
         angles,
-        ops=ops,
     )
 
-    mask = apod_mask(flatgrid, probe_geometry, fnum, ops=ops)
+    mask = apod_mask(flatgrid, probe_geometry, fnum)
 
     # Apply delays
     bf_tx = []
@@ -111,12 +110,8 @@ def tof_correction(
 
         # Compute the time-of-flight corrected samples for each element
         # from each pixel of shape (n_pix, n_el, n_ch)
-        if ops.__name__ == "torch":
-            delays = delays.to(data.device)
-            mask = mask.to(data.device)
-            flatgrid = flatgrid.to(data.device)
 
-        tof_tx = apply_delays(data_tx, delays, clip_min=0, clip_max=n_ax - 1, ops=ops)
+        tof_tx = apply_delays(data_tx, delays, clip_min=0, clip_max=n_ax - 1)
 
         # Apply the mask
         tof_tx = tof_tx * mask
@@ -126,7 +121,7 @@ def tof_correction(
             tshift = delays[:, :] / sampling_frequency
             tdemod = flatgrid[:, None, 2] * 2 / sound_speed
             theta = 2 * np.pi * fdemod * (tshift - tdemod)
-            tof_tx = _complex_rotate(tof_tx, theta, ops=ops)
+            tof_tx = _complex_rotate(tof_tx, theta)
 
         # Reshape to reintroduce the x- and z-dimensions
         tof_tx = ops.reshape(
@@ -153,7 +148,6 @@ def calculate_delays(
     n_el,
     focus_distances,
     polar_angles,
-    ops=np,
 ):
     """
     Calculates the delays in samples to every pixel in the grid.
@@ -220,7 +214,7 @@ def calculate_delays(
 
     # Compute receive distances
     for el in range(n_el):
-        distances = distance_Rx(grid, probe_geometry[el], ops=ops)
+        distances = distance_Rx(grid, probe_geometry[el])
         # Add transducer element dimension
         distances = distances[..., None]
         rx_distances.append(distances)
@@ -249,7 +243,7 @@ def calculate_delays(
     return tx_delays, rx_delays
 
 
-def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1, ops=np):
+def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     """
     Applies time delays for a single transmit using linear interpolation.
 
@@ -283,7 +277,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1, ops=np):
     d0 = ops.floor(delays)
 
     # Cast to integer to be able to use as indices
-    d0 = ops.cast(d0, ops.int64)
+    d0 = ops.cast(d0, "int64")
     # Add 1 to find the integers above the exact delay values
     d1 = d0 + 1
 
@@ -305,14 +299,14 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1, ops=np):
     data1 = ops.take_along_axis(data, d1, 0)
 
     # Compute interpolated pixel value
-    d0 = ops.cast(d0, ops.float32)  # Cast to float
-    d1 = ops.cast(d1, ops.float32)  # Cast to float
+    d0 = ops.cast(d0, "float32")  # Cast to float
+    d1 = ops.cast(d1, "float32")  # Cast to float
     reflection_samples = (d1 - delays) * data0 + (delays - d0) * data1
 
     return reflection_samples
 
 
-def _complex_rotate(iq, theta, ops=np):
+def _complex_rotate(iq, theta):
     """
     Performs a simple phase rotation of I and Q component by complex angle
     theta.
@@ -343,7 +337,7 @@ def _complex_rotate(iq, theta, ops=np):
     return ops.concatenate([ir, qr], -1)
 
 
-def distance_Rx(grid, probe_geometry, ops=np):
+def distance_Rx(grid, probe_geometry):
     """
     Computes distance to user-defined pixels from elements
     Expects all inputs to be numpy arrays specified in SI units.
@@ -363,7 +357,7 @@ def distance_Rx(grid, probe_geometry, ops=np):
     return dist
 
 
-def distance_Tx_planewave(grid, angle, ops=np):
+def distance_Tx_planewave(grid, angle):
     """
     Computes distance to user-defined pixels for plane wave transmits.
 
@@ -380,7 +374,7 @@ def distance_Tx_planewave(grid, angle, ops=np):
     x = grid[..., 0]
     z = grid[..., 2]
     # For each element, compute distance to pixels
-    angle = ops.cast(angle, ops.float32)
+    angle = ops.cast(angle, "float32")
     dist = x * ops.sin(angle) + z * ops.cos(angle)
 
     return dist
@@ -453,7 +447,7 @@ def distance_Tx_generic(
     return dist
 
 
-def apod_mask(grid, probe_geometry, f_number, ops=np):
+def apod_mask(grid, probe_geometry, f_number):
     """
     Computes a binary mask to disregard pixels outside of the vision cone of a
     transducer element. Transducer elements can only accurately measure
@@ -485,7 +479,7 @@ def apod_mask(grid, probe_geometry, f_number, ops=np):
     # Get the lateral location of each pixel
     x_pixel = grid[:, 0]
     # Get the lateral location of each element
-    x_element = ops.cast(probe_geometry[:, 0], dtype=ops.float32)
+    x_element = ops.cast(probe_geometry[:, 0], dtype="float32")
 
     # Compute the aperture size for every pixel
     # The f-number is by definition f=z/aperture
@@ -496,10 +490,6 @@ def apod_mask(grid, probe_geometry, f_number, ops=np):
     ones_aperture = ops.ones((1, n_el), dtype=aperture.dtype)
     ones_x_pixel = ops.ones((1, n_el), dtype=x_pixel.dtype)
     ones_x_element = ops.ones((n_pix, 1), dtype=x_element.dtype)
-    if ops.__name__ == "torch":
-        ones_aperture.to(aperture.device)
-        ones_x_pixel.to(x_pixel.device)
-        ones_x_element.to(x_element.device)
 
     aperture = aperture[..., None] @ ones_aperture
 
@@ -516,7 +506,7 @@ def apod_mask(grid, probe_geometry, f_number, ops=np):
     # the aperture i.e. where the pixel lies within the vision cone of the
     # element
     mask = distance <= aperture / 2
-    mask = ops.cast(mask, ops.float32)
+    mask = ops.cast(mask, "float32")
 
     # Add dummy dimension for RF/IQ channel channel
     mask = mask[..., None]
