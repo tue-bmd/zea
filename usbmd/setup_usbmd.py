@@ -106,7 +106,8 @@ def setup_config(
         except Exception as e:
             raise ValueError(
                 "Please specify the path to a config file through --config flag "
-                "if GUI is not working (usually on headless servers)."
+                "i.e. `usbmd --config <path-to-config.yaml>` if GUI is not working "
+                "(usually on headless servers)."
             ) from e
 
     config = load_config_from_yaml(Path(config_path), loader=loader)
