@@ -193,7 +193,7 @@ class Operation(ABC):
         """Set the package for the operation."""
         if isinstance(ops, str):
             ops = importlib.import_module(ops)
-            importlib.import_module("usbmd.backend.aliases")
+            importlib.import_module(f"usbmd.backend.{ops.__name__}.aliases")
         assert ops.__name__ in _BACKENDS, f"Unsupported operations package {ops}"
         self._ops = ops
 
@@ -460,7 +460,7 @@ class Pipeline:
             return on_device_tf(func, data, device=device, return_numpy=return_numpy)
         elif self.ops.__name__ == "torch":
             on_device_torch = importlib.import_module(
-                "usbmd.backend.pytorch"
+                "usbmd.backend.torch"
             ).on_device_torch
             return on_device_torch(func, data, device=device, return_numpy=return_numpy)
         else:
@@ -813,7 +813,7 @@ class Beamform(Operation):
         beamformer_type = self.config.model.beamformer.type
         # pylint: disable=import-outside-toplevel
         if self.ops.__name__ == "torch":
-            from usbmd.backend.pytorch.layers.beamformers import get_beamformer
+            from usbmd.backend.torch.layers.beamformers import get_beamformer
 
             _BEAMFORMER_TYPES = torch_beamformer_registry.registered_names()
         elif self.ops.__name__ == "tensorflow":

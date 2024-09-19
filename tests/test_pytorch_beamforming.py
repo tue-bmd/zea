@@ -12,8 +12,8 @@ import numpy as np
 import pytest
 import torch
 
-from usbmd.backend.pytorch import on_device_torch
-from usbmd.backend.pytorch.layers.beamformers import get_beamformer
+from usbmd.backend.torch import on_device_torch
+from usbmd.backend.torch.layers.beamformers import get_beamformer
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v

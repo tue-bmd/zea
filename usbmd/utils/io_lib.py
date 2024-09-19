@@ -589,24 +589,8 @@ class ImageViewerOpenCV(ImageViewer):
                     self._create_window()
                     cv2.resizeWindow(self.window_name, frame.shape[1], frame.shape[0])
 
-            self._retain_aspect_ratio_resize(frame)
-
             cv2.imshow(self.window_name, frame)
             self.frame_no += 1
-
-    def _retain_aspect_ratio_resize(self, frame):
-        """Resize frame to retain aspect ratio."""
-        try:
-            # get frame size of cv2 and change it to preserve aspect ratio (keep height same)
-            aspect_ratio = frame.shape[1] / frame.shape[0]
-            # get height of the window
-            height = cv2.getWindowImageRect(self.window_name)[3]
-            # calculate width based on aspect ratio
-            width = int(height * aspect_ratio)
-            # resize the window
-            cv2.resizeWindow(self.window_name, width, height)
-        except Exception as error:
-            log.warning(f"Could not resize window: {error}")
 
     def close(self):
         """Closes the window."""

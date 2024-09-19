@@ -230,58 +230,66 @@ def remove_color_escape_codes(text):
 def success(message):
     """Prints a message to the console in green."""
     logger.info(green(message))
-    file_logger.info(remove_color_escape_codes(message))
+    if file_logger:
+        file_logger.info(remove_color_escape_codes(message))
     return message
 
 
 def warning(message, *args, **kwargs):
     """Prints a message with log level warning."""
     logger.warning(message, *args, **kwargs)
-    file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
+    if file_logger:
+        file_logger.warning(remove_color_escape_codes(message), *args, **kwargs)
     return message
 
 
 def deprecated(message, *args, **kwargs):
     """Prints a message with custom log level DEPRECATED."""
     logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
-    file_logger.log(
-        DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs
-    )
+    if file_logger:
+        file_logger.log(
+            DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs
+        )
     return message
 
 
 def error(message, *args, **kwargs):
     """Prints a message with log level error."""
     logger.error(message, *args, **kwargs)
-    file_logger.error(remove_color_escape_codes(message), *args, **kwargs)
+    if file_logger:
+        file_logger.error(remove_color_escape_codes(message), *args, **kwargs)
     return message
 
 
 def debug(message, *args, **kwargs):
     """Prints a message with log level debug."""
     logger.debug(message, *args, **kwargs)
-    file_logger.debug(remove_color_escape_codes(message), *args, **kwargs)
+    if file_logger:
+        file_logger.debug(remove_color_escape_codes(message), *args, **kwargs)
     return message
 
 
 def info(message, *args, **kwargs):
     """Prints a message with log level info."""
     logger.info(message, *args, **kwargs)
-    file_logger.info(remove_color_escape_codes(message), *args, **kwargs)
+    if file_logger:
+        file_logger.info(remove_color_escape_codes(message), *args, **kwargs)
     return message
 
 
 def critical(message, *args, **kwargs):
     """Prints a message with log level critical."""
     logger.critical(message, *args, **kwargs)
-    file_logger.critical(message, *args, **kwargs)
+    if file_logger:
+        file_logger.critical(message, *args, **kwargs)
     return message
 
 
 def set_level(level):
     """Sets the log level of the logger."""
     logger.setLevel(level)
-    file_logger.setLevel(level)
+    if file_logger:
+        file_logger.setLevel(level)
 
 
 def set_file_logger_directory(directory):
@@ -298,15 +306,26 @@ def set_file_logger_directory(directory):
     file_logger = configure_file_logger(level="DEBUG")
 
 
+def enable_file_logging():
+    """Enables file logging"""
+    # Add pylint exception
+    # pylint: disable=global-statement
+    global file_logger
+    if not file_logger:
+        file_logger = configure_file_logger(level="DEBUG")
+        file_logger.propagate = False
+
+
 logger = configure_console_logger(
     level="DEBUG",
     name="usbmd",
     color=True,
     name_color="darkgreen",
 )
-file_logger = configure_file_logger(level="DEBUG")
+
+# File logger is disabled by default
+file_logger = None
 
 # Do not propagate the log messages to the root logger
 # Prevents double logging when using the logger in multiple modules
 logger.propagate = False
-file_logger.propagate = False
