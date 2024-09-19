@@ -124,6 +124,7 @@ class DataLoaderUI:
                 self.data_to_display,
                 window_name=window_name,
                 num_threads=1,
+                headless=self.headless,
             )
         elif self.plot_lib == "matplotlib":
             self.image_viewer = ImageViewerMatplotlib(
@@ -155,9 +156,8 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                self.plot_lib = "matplotlib"  # force matplotlib in headless mode
                 log.warning(
-                    "Could not connect to display, running headless (using matplotlib)."
+                    "Could not connect to display, running headless."
                 )
         else:
             # self.plot_lib = "matplotlib"  # force matplotlib in headless mode
@@ -485,16 +485,20 @@ class DataLoaderUI:
                             images.append(image)
 
                     # For opencv, show frame for 25 ms and check if "q" is pressed
-                    if self.plot_lib == "opencv":
-                        if cv2.waitKey(25) & 0xFF == ord("q"):
-                            self.image_viewer.close()
-                            return images
-                        if self.image_viewer.has_been_closed():
-                            return images
-                    # For matplotlib, check if window has been closed
-                    elif self.plot_lib == "matplotlib":
-                        if time.sleep(0.025) and self.image_viewer.has_been_closed():
-                            return images
+                    if not self.headless:
+                        if self.plot_lib == "opencv":
+                            if cv2.waitKey(25) & 0xFF == ord("q"):
+                                self.image_viewer.close()
+                                return images
+                            if self.image_viewer.has_been_closed():
+                                return images
+                        # For matplotlib, check if window has been closed
+                        elif self.plot_lib == "matplotlib":
+                            if (
+                                time.sleep(0.025)
+                                and self.image_viewer.has_been_closed()
+                            ):
+                                return images
                     # For headless mode, check if all frames have been plotted
                     if self.headless:
                         if len(images) == n_frames:

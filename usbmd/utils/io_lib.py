@@ -573,12 +573,14 @@ class ImageViewerOpenCV(ImageViewer):
         num_threads: Optional[int] = None,
         resizable_window: Optional[bool] = True,
         threading: Optional[bool] = True,
+        headless: Optional[bool] = False,
     ) -> None:
         """Initializes the ImageViewerOpenCV object."""
         super().__init__(
             get_frame, window_name, num_threads, resizable_window, threading
         )
         self.window = None
+        self.headless = headless
 
     def _create_window(self):
         if self.resizable_window:
@@ -598,6 +600,10 @@ class ImageViewerOpenCV(ImageViewer):
         while self.frame_is_ready:
             frame = self._get_frame()
             frame = np.array(frame, dtype=np.uint8)
+            if self.headless:
+                self.frame_no += 1
+                continue
+
             if self.frame_no == 0:
                 if self.window is None:
                     self._create_window()
