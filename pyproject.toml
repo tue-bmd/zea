@@ -48,7 +48,8 @@ scikit-image = "^0.23"
 scikit-learn = "^1.4"
 h5py = "^3.11"
 pandas = "^2.2"
-opencv-python = "^4"
+opencv-python = { version = "^4", optional = true }
+opencv-python-headless = { version = "^4", optional = true }
 schema = "^0.7"
 tqdm = "^4"
 pyyaml = "^6"
@@ -81,6 +82,8 @@ ipykernel = "^6.29.5"
 
 [tool.poetry.extras]
 dev = ["pytest", "pylint", "papermill", "ipykernel"]
+opencv-python = ["opencv-python"]
+opencv-python-headless = ["opencv-python-headless"]
 
 [[tool.poetry.source]]
 name = "torch-cpu"
@@ -90,3 +93,7 @@ priority = "explicit"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+# To update the poetry.lock file run `sudo /opt/poetry-venv/bin/python3 -m poetry lock` inside the usbmd container (where poetry is installed)
+# Otherwise a simple `poetry lock` will suffice.
+# Rebuild docker image afterwards to match the lock file!
