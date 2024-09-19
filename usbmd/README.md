@@ -40,7 +40,7 @@ import usbmd
 # or if you want to use the Tensorflow tools
 import usbmd.backend.tensorflow as usbmd_tf
 # or if you want to use the Pytorch tools
-import usbmd.backend.pytorch as usbmd_torch
+import usbmd.backend.torch as usbmd_torch
 ```
 
 #### User interface
