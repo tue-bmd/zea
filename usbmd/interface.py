@@ -29,6 +29,7 @@ from usbmd.utils.io_lib import (
     matplotlib_figure_to_numpy,
     running_in_notebook,
 )
+from usbmd.utils.utils import keep_trying
 
 
 class Interface:
@@ -207,7 +208,7 @@ class Interface:
             if self.dataset.num_frames == 1:
                 frame_no = 0
             else:
-                frame_no = _try(
+                frame_no = keep_trying(
                     lambda: int(
                         input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
                     )
