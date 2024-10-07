@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.probes import get_probe
