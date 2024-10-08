@@ -59,6 +59,7 @@ PyQt5 = "^5.15"
 bm3d = "==4.0.1" # 4.0.2: `GLIBCXX_3.4.32' not found
 bm4d = "==4.2.3" # we don't depend on bm4d, but bm3d breaks if the latest bm4d is installed
 deepdiff = "^7"
+keras = "^3.6"
 
 [tool.poetry.group.torch]
 optional = true
