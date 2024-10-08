@@ -6,11 +6,10 @@ Date          : 03/02/2022
 """
 
 # pylint: disable=abstract-method
-import tf_keras as keras
+import keras
+from keras import Input, ops
+from keras.layers import Add, Conv2D, UpSampling2D
 from tensorflow.python.keras.layers import Layer
-from tf_keras import Input
-from tf_keras import backend as K
-from tf_keras.layers import Add, Conv2D, UpSampling2D
 
 from usbmd.backend.tensorflow.layers.utils import get_activation
 from usbmd.registry import post_processing_registry
@@ -109,7 +108,7 @@ class Prox(Layer):
 
     def call(self, inputs, *args, **kwargs):
         # pylint: disable=missing-function-docstring,arguments-differ
-        return K.sign(inputs) * K.relu(K.abs(inputs) - K.softplus(self.alpha))
+        return ops.sign(inputs) * ops.relu(ops.abs(inputs) - ops.softplus(self.alpha))
 
     def compute_output_shape(self, input_shape):
         # pylint: disable=missing-function-docstring

@@ -11,13 +11,13 @@
 # do not add them, and we get an arguments-differ warning. Disabling the latter seemed to be the
 # better option.
 
+import keras
 import numpy as np
 import tensorflow as tf
-import tf_keras as keras
-import tf_keras.backend as K
-from tf_keras.layers import Conv2D, Input, Lambda
-from tf_keras.models import Model
-from tf_keras.regularizers import l2
+from keras import ops
+from keras.layers import Conv2D, Input, Lambda
+from keras.models import Model
+from keras.regularizers import l2
 
 from usbmd.backend.tensorflow.layers.beamformers import BeamSumming
 from usbmd.backend.tensorflow.losses import SMSLE
@@ -26,7 +26,7 @@ from usbmd.registry import tf_beamformer_registry
 
 def NormalizeLayer():
     """Function that normalizes the input tensor based on its max value"""
-    return Lambda(lambda x: x / K.max(K.abs(x) + K.epsilon(), axis=(1, 2, 3)))
+    return Lambda(lambda x: x / ops.max(ops.abs(x) + ops.epsilon(), axis=(1, 2, 3)))
 
 
 def regularizer_unity(activity):
@@ -66,18 +66,18 @@ class Prox(keras.layers.Layer):
         x = inputs
 
         if self.proxtype in (0, "softthres"):
-            return K.sign(x) * K.relu(K.abs(x) - K.softplus(self.alpha))
+            return ops.sign(x) * ops.relu(ops.abs(x) - ops.softplus(self.alpha))
         elif self.proxtype == 1:
             tau = 1
-            return x / (1 + K.exp(-tau * (K.abs(x) - self.alpha)))
+            return x / (1 + ops.exp(-tau * (ops.abs(x) - self.alpha)))
         elif self.proxtype == 2:
-            return K.relu(x - K.softplus(self.alpha))
+            return ops.relu(x - ops.softplus(self.alpha))
         elif self.proxtype == 3:
-            return K.tanh(x + self.alpha) + K.tanh(x - self.alpha)
+            return ops.tanh(x + self.alpha) + ops.tanh(x - self.alpha)
         elif self.proxtype == 4:
             x = tf.cast(x, "complex64")
-            return K.exp(tf.complex(0.0, tf.math.angle(x))) * tf.cast(
-                K.relu(K.abs(x) - K.softplus(self.alpha)), "complex64"
+            return ops.exp(tf.complex(0.0, tf.math.angle(x))) * tf.cast(
+                ops.relu(ops.abs(x) - ops.softplus(self.alpha)), "complex64"
             )
 
     def get_config(self):

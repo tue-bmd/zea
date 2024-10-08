@@ -65,7 +65,7 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
         pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics && \
         pip install --upgrade 'keras>=3.6' && \
         pip install --upgrade keras-cv && \
-        pip install tf-keras==2.15.0 wandb; \
+        pip install wandb; \
     fi
 
 # Source working/installation directory and add motd (message of the day)

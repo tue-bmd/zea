@@ -6,11 +6,11 @@ import sys
 from pathlib import Path
 
 import cv2
+import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import tensorflow as tf
-import tf_keras as keras
 
 from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
 from usbmd.backend.tensorflow.utils.utils import tf_snapshot
