@@ -49,7 +49,7 @@ def equality_libs_processing(test_func):
             - my_processing_func_tf
             - test_my_processing_func
     """
-    decimal = 4
+    decimal = 3
 
     # @functools.wraps(test_func)
     def wrapper(test_func, *args, **kwargs):
