@@ -207,7 +207,6 @@ def calculate_delays(
                 tx_apodizations[tx],
                 probe_geometry,
                 sound_speed,
-                ops=ops,
             )
 
         tx_distances.append(distance_to_pixels[..., None])
@@ -386,7 +385,6 @@ def distance_Tx_generic(
     tx_apodization,
     probe_geometry,
     sound_speed=1540,
-    ops=np,
 ):
     """
     Computes distance to user-defined pixels for generic transmits based on
@@ -442,7 +440,7 @@ def distance_Tx_generic(
     # computing the smallest distance over all the elements. This is the wave
     # front that reaches the pixel first and thus is the overal wavefront
     # distance.
-    dist = ops.min(dist, 1)[0]
+    dist = ops.min(dist, 1)
 
     return dist
 
