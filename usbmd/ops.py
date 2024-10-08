@@ -129,7 +129,7 @@ from keras import ops
 from scipy import ndimage, signal
 
 import usbmd.beamformer as bmf
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
