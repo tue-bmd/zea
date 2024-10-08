@@ -298,6 +298,19 @@ class Operation(ABC):
         """
         return ops.convert_to_tensor(x, dtype=dtype)
 
+    def to_numpy(self, x):
+        """Convert tensor to numpy array.
+
+        Args:
+            x: The input tensor to be converted.
+
+        Returns:
+            The converted numpy array.
+
+        """
+        return ops.convert_to_numpy(x)
+
+
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
@@ -1169,6 +1182,7 @@ class BandPassFilter(Operation):
         if data.shape[-1] == 2:
             data = channels_to_complex(data)
 
+        data = ops.convert_to_numpy(data)
         data = ndimage.convolve1d(data, self.filter, mode="wrap", axis=axis)
         data = ops.convert_to_tensor(data)
 
@@ -1307,6 +1321,7 @@ class MultiBandPassFilter(Operation):
 
         data_list = []
         for _filter in self.filters:
+            data = ops.convert_to_numpy(data)
             _data = ndimage.convolve1d(data, _filter, mode="wrap", axis=axis)
             _data = ops.convert_to_tensor(_data)
             if self.modtype == "iq":
@@ -1645,7 +1660,7 @@ def channels_to_complex(data):
         ndarray: complex array with real and imaginary components.
     """
     assert data.shape[-1] == 2, "Data must have two channels."
-    assert str(data.dtype).rsplit('.', maxsplit=1)[-1] in [
+    assert str(data.dtype).rsplit(".", maxsplit=1)[-1] in [
         "float32",
         "float64",
     ], f"Data must be float type, got {data.dtype}"
@@ -1701,33 +1716,48 @@ def hilbert(x, N: int = None, axis=-1):
         )
 
         x = ops.concatenate((x, zeros), axis=axis)
-        n_ax = N
+    else:
+        N = n_ax
 
-    h = np.zeros(n_ax)
-
-    # Create mask to remove the negative frequencies and double the frequencies above 0.
-    if n_ax % 2 == 0:
-        h[0] = h[n_ax // 2] = 1
-        h[1 : n_ax // 2] = 2
+    # Create filter to zero out negative frequencies
+    h = np.zeros(N)
+    if N % 2 == 0:
+        h[0] = h[N // 2] = 1
+        h[1 : N // 2] = 2
     else:
         h[0] = 1
-        h[1 : (n_ax + 1) // 2] = 2
+        h[1 : (N + 1) // 2] = 2
 
-    h = ops.convert_to_tensor(h)
-    h = ops.expand_dims(ops.cast(complex(h, h), "complex64"), axis=0)
-
-    # switch n_ax and n_el elements (based on ndim)
     idx = list(range(n_dim))
     # make sure axis gets to the end for fft (operates on last axis)
     idx.remove(axis)
     idx.append(axis)
-
     x = ops.transpose(x, idx)
 
-    x = ops.cast(complex(x, x), "complex64")
+    if x.ndim > 1:
+        ind = [np.newaxis] * x.ndim
+        ind[-1] = slice(None)
+        h = h[tuple(ind)]
 
-    Xf = ops.fft.fft(x)
-    x = ops.fft.ifft(Xf * h)
+    h = ops.convert_to_tensor(h)
+    h = ops.cast(h, "complex64")
+    h = h + 1j * ops.zeros_like(h)
+
+    Xf_r, Xf_i = ops.fft((x, ops.zeros_like(x)))
+
+    Xf_r = ops.cast(Xf_r, "complex64")
+    Xf_i = ops.cast(Xf_i, "complex64")
+
+    Xf = Xf_r + 1j * Xf_i
+    Xf = Xf * h
+
+    # x = np.fft.ifft(Xf)
+    # do manual ifft using fft
+    Xf_r = ops.real(Xf)
+    Xf_i = ops.imag(Xf)
+    Xf_r_inv, Xf_i_inv = ops.fft((Xf_r, -Xf_i))
+    x = Xf_r_inv / N
+    x = x + 1j * (-Xf_i_inv / N)
 
     # switch back to original shape
     idx = list(range(n_dim))
