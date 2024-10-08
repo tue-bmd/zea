@@ -277,14 +277,14 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     d0 = ops.floor(delays)
 
     # Cast to integer to be able to use as indices
-    d0 = ops.cast(d0, "int64")
+    d0 = ops.cast(d0, "int32")
     # Add 1 to find the integers above the exact delay values
     d1 = d0 + 1
 
     # Apply clipping of delays clipping to ensure correct behavior on cpu
     if clip_min != -1 and clip_max != -1:
-        clip_min = np.int64(clip_min)
-        clip_max = np.int64(clip_max)
+        clip_min = ops.cast(clip_min, d0.dtype)
+        clip_max = ops.cast(clip_max, d0.dtype)
         d0 = ops.clip(d0, clip_min, clip_max)
         d1 = ops.clip(d1, clip_min, clip_max)
 

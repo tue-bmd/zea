@@ -115,20 +115,15 @@ MBPF -> Demodulate -> EnvelopeDetect -> Downsample -> Normalize -> LogCompress -
 ```
 
 TODO:
-- Test operations for jax (currently only np / torch / tensorflow tested)
 - Compilation of the pipeline using jit (currently some ops break the jit compatibility)
 
 """
 
-import os
-
-os.environ["KERAS_BACKEND"] = "jax"
+import importlib
 from abc import ABC, abstractmethod
 
-import keras
 import numpy as np
 import scipy
-import tensorflow as tf
 from keras import ops
 from scipy import ndimage, signal
 
@@ -139,7 +134,14 @@ from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.utils import log, translate
-from usbmd.utils.checks import _BACKENDS, get_check
+from usbmd.utils.checks import get_check
+
+# make sure to reload all modules that import keras
+# to be able to set backend properly
+importlib.reload(bmf)
+
+# clear registry upon import
+ops_registry.clear()
 
 
 def get_ops(ops_name):
@@ -340,7 +342,7 @@ class Operation(ABC):
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
-    def __init__(self, operations, ops="numpy", with_batch_dim=True, device=None):
+    def __init__(self, operations, with_batch_dim=True, device=None):
         """Initialize a pipeline
 
         Args:
@@ -497,7 +499,10 @@ class Pipeline:
         #     return self.on_device(
         #         processing_func, data, device=self.device, return_numpy=return_numpy
         #     )
-        return processing_func(data)
+        data_out = processing_func(data)
+        if return_numpy:
+            return ops.convert_to_numpy(data_out)
+        return data_out
 
     def _process(self, data):
         for operation in self.operations:
@@ -1467,7 +1472,7 @@ def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
         iq_data (ndarray): complex valued base-band signal.
 
     """
-    rf_data = np.array(rf_data)
+    rf_data = ops.convert_to_numpy(rf_data)
     assert np.isreal(
         rf_data
     ).all(), f"RF must contain real RF signals, got {rf_data.dtype}"
@@ -1681,27 +1686,12 @@ def channels_to_complex(data):
         ndarray: complex array with real and imaginary components.
     """
     assert data.shape[-1] == 2, "Data must have two channels."
-    assert data.dtype in ["float32", "float64"], "Data must be float type."
-    return create_complex(data[..., 0], data[..., 1])
-
-
-def create_complex(real_data, imag_data):
-    if keras.backend.backend() == "tensorflow":
-        import tensorflow as tf
-
-        return tf.complex(real_data, imag_data)
-    elif keras.backend.backend() == "jax":
-        import jax
-
-        return jax.lax.complex(real_data, imag_data)
-    elif keras.backend.backend() == "numpy":
-        return real_data[..., 0] + 1j * imag_data[..., 1]
-    elif keras.backend.backend() == "torch":
-        import torch
-
-        return torch.complex(real_data, imag_data)
-    else:
-        raise ValueError("Backend not supported.")
+    assert str(data.dtype).rsplit('.', maxsplit=1)[-1] in [
+        "float32",
+        "float64",
+    ], f"Data must be float type, got {data.dtype}"
+    data = ops.cast(data, "complex64")
+    return data[..., 0] + 1j * data[..., 1]
 
 
 def take(data, indices, axis=-1):
