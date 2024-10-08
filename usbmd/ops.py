@@ -122,6 +122,7 @@ TODO:
 import importlib
 from abc import ABC, abstractmethod
 
+import keras
 import numpy as np
 import scipy
 from keras import ops
@@ -329,7 +330,7 @@ class Pipeline:
 
         self.operations = operations
 
-        # self.device = self._check_device(device, ops)
+        self.device = self._check_device(device)
 
         for operation in self.operations:
             # operation.ops = ops
@@ -410,38 +411,31 @@ class Pipeline:
 
         return string
 
-    # @property
-    # def ops(self):
-    #     """Get the operations package used in the pipeline."""
-    #     assert all(
-    #         operation.ops == self.operations[0].ops for operation in self.operations
-    #     ), (
-    #         "Operations in pipeline are not compatible, "
-    #         "please use the same operations package for all operations."
-    #     )
-    #     return self.operations[0].ops
-
     @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
         return self.operations[0].with_batch_dim
 
-    # def on_device(self, func, data, device=None, return_numpy=False):
-    #     """On device function for running pipeline on specific device."""
-    #     if ops.__name__ == "numpy":
-    #         return func(data)
-    #     elif ops.__name__ == "tensorflow":
-    #         on_device_tf = importlib.import_module(
-    #             "usbmd.backend.tensorflow"
-    #         ).on_device_tf
-    #         return on_device_tf(func, data, device=device, return_numpy=return_numpy)
-    #     elif ops.__name__ == "torch":
-    #         on_device_torch = importlib.import_module(
-    #             "usbmd.backend.torch"
-    #         ).on_device_torch
-    #         return on_device_torch(func, data, device=device, return_numpy=return_numpy)
-    #     else:
-    #         raise ValueError("Unsupported operations package.")
+    def on_device(self, func, data, device=None, return_numpy=False):
+        """On device function for running pipeline on specific device."""
+        backend = keras.backend.backend()
+        if backend == "numpy":
+            return func(data)
+        elif backend == "tensorflow":
+            on_device_tf = importlib.import_module(
+                "usbmd.backend.tensorflow"
+            ).on_device_tf
+            return on_device_tf(func, data, device=device, return_numpy=return_numpy)
+        elif backend == "torch":
+            on_device_torch = importlib.import_module(
+                "usbmd.backend.torch"
+            ).on_device_torch
+            return on_device_torch(func, data, device=device, return_numpy=return_numpy)
+        elif backend == "jax":
+            log.warning("JAX not yet supported for on_device.")
+            return func(data)
+        else:
+            raise ValueError(f"Unsupported operations package {backend}.")
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
         """Set the parameters for the pipeline. See Operation.set_params for more info."""
@@ -467,10 +461,10 @@ class Pipeline:
         else:
             processing_func = self._jitted_process
 
-        # if self.device:
-        #     return self.on_device(
-        #         processing_func, data, device=self.device, return_numpy=return_numpy
-        #     )
+        if self.device:
+            return self.on_device(
+                processing_func, data, device=self.device, return_numpy=return_numpy
+            )
         data_out = processing_func(data)
         if return_numpy:
             return ops.convert_to_numpy(data_out)
@@ -516,38 +510,37 @@ class Pipeline:
             return x
         return self.operations[0].prepare_tensor(x, dtype=dtype, device=device)
 
-    # def _check_device(self, device, ops):
-    #     if device is None:
-    #         return None
+    def _check_device(self, device):
+        if device is None:
+            return None
 
-    #     if device == "cpu":
-    #         return "cpu"
+        if device == "cpu":
+            return "cpu"
 
-    #     if not isinstance(ops, str):
-    #         ops = ops.__name__
+        backend = keras.backend.backend()
 
-    #     if ops == "numpy":
-    #         if device not in [None, "cpu"]:
-    #             log.warning(
-    #                 f"Device {device} is not supported for numpy operations, using cpu."
-    #             )
-    #         return "cpu"
+        if backend == "numpy":
+            if device not in [None, "cpu"]:
+                log.warning(
+                    f"Device {device} is not supported for numpy operations, using cpu."
+                )
+            return "cpu"
 
-    #     else:
-    #         # assert device to be cpu, cuda, cuda:{int} or int or None
-    #         assert isinstance(
-    #             device, (str, int)
-    #         ), f"device should be a string or int, got {device}"
-    #         if isinstance(device, str):
-    #             if ops in ["tensorflow", "jax"]:
-    #                 assert device.startswith(
-    #                     "gpu"
-    #                 ), f"device should be 'cpu' or 'gpu:*', got {device}"
-    #             elif ops == "torch":
-    #                 assert device.startswith(
-    #                     "cuda"
-    #                 ), f"device should be 'cpu' or 'cuda:*', got {device}"
-    #         return device
+        else:
+            # assert device to be cpu, cuda, cuda:{int} or int or None
+            assert isinstance(
+                device, (str, int)
+            ), f"device should be a string or int, got {device}"
+            if isinstance(device, str):
+                if backend in ["tensorflow", "jax"]:
+                    assert device.startswith(
+                        "gpu"
+                    ), f"device should be 'cpu' or 'gpu:*', got {device}"
+                elif backend == "torch":
+                    assert device.startswith(
+                        "cuda"
+                    ), f"device should be 'cpu' or 'cuda:*', got {device}"
+            return device
 
     def _beamformer_warning(self):
         """Check if Sum() operation is detected after Beamform() operation."""
@@ -604,8 +597,6 @@ class DelayAndSum(Operation):
     def process(self, data):
         """Performs DAS beamforming on tof-corrected input.
 
-        if ops.__name__ == "torch":
-            self.tx_apo = self.tx_apo.to(self.device)
         Args:
             data (ops.Tensor): The TOF corrected input of shape
                 `(n_frames, n_tx, n_ax, n_el, n_ch)`
@@ -615,10 +606,6 @@ class DelayAndSum(Operation):
         """
         if self.with_batch_dim is False:
             data = ops.expand_dims(data, axis=0)
-
-        if ops.__name__ == "torch":
-            self.rx_apo = ops.convert_to_tensor(self.rx_apo)
-            self.tx_apo = ops.convert_to_tensor(self.tx_apo)
 
         # Sum over the channels, i.e. DAS
         data = ops.sum(self.rx_apo * data, -2)
