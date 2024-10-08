@@ -1,10 +1,14 @@
-import usbmd
-
-usbmd.init_device()
+"""Tests for the ops beamformer.
+"""
 
 import importlib
 
 import numpy as np
+
+import usbmd
+
+usbmd.init_device()
+
 
 from usbmd.beamformer import tof_correction
 from usbmd.config import load_config_from_yaml
@@ -19,7 +23,7 @@ OPS = {
     "numpy": None,
 }
 
-for name in OPS.keys():
+for name in OPS:
     OPS[name] = importlib.import_module(name)
     importlib.import_module(f"usbmd.backend.{name}.aliases")
 
@@ -69,12 +73,12 @@ def _get(reconstruction_mode):
 
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends"""
-    config, probe, scan, data, inputs = _get(reconstruction_mode)
+    _, probe, scan, _, inputs = _get(reconstruction_mode)
 
     outputs = {}
     batch_item = 0  # Only one batch item
     for name, ops in OPS.items():
-        kwargs = dict(
+        kwargs = dict(  # pylint: disable=use-dict-literal
             data=inputs[batch_item],
             grid=scan.grid,
             t0_delays=scan.t0_delays,
@@ -97,7 +101,6 @@ def test_tof_correction(reconstruction_mode="generic"):
         outputs[name] = tof_correction(
             **kwargs,
             apply_phase_rotation=bool(scan.fdemod),
-            ops=ops,
         )
 
     for name, output in outputs.items():

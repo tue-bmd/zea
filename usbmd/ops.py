@@ -157,7 +157,6 @@ class Operation(ABC):
         input_data_type=None,
         output_data_type=None,
         with_batch_dim=True,
-        ops="numpy",
     ):
         """Initialize the operation.
 
@@ -165,14 +164,10 @@ class Operation(ABC):
             input_data_type (type): The expected data type of the input data.
             output_data_type (type): The expected data type of the output data.
             with_batch_dim (bool): Whether the input data has a batch dimension.
-            ops (module, str): The operations package used in the operation.
-                Can be a module or a string to import the module. Defaults to "numpy".
-
         """
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
         self.with_batch_dim = with_batch_dim
-        self.ops = ops
 
         self.config = None
         self.scan = None
@@ -184,21 +179,6 @@ class Operation(ABC):
         names = ops_registry.registry.keys()
         classes = ops_registry.registry.values()
         return list(names)[list(classes).index(self.__class__)]
-
-    # @property
-    # def ops(self):
-    #     """Get the operations package used in the operation."""
-    #     assert self._ops is not None, "ops package is not set"
-    #     return self._ops
-
-    # @ops.setter
-    # def ops(self, ops):
-    #     """Set the package for the operation."""
-    #     if isinstance(ops, str):
-    #         ops = importlib.import_module(ops)
-    #         importlib.import_module(f"usbmd.backend.{ops.__name__}.aliases")
-    #     assert ops.__name__ in _BACKENDS, f"Unsupported operations package {ops}"
-    #     self._ops = ops
 
     @abstractmethod
     def process(self, data):
@@ -317,27 +297,6 @@ class Operation(ABC):
 
         """
         return ops.convert_to_tensor(x, dtype=dtype)
-
-        # if ops.__name__ == "numpy":
-        #     x = np.array(x)
-        #     if dtype is not None:
-        #         x = x.astype(dtype)
-        #     return x
-        # elif ops.__name__ == "tensorflow":
-        #     x = ops.convert_to_tensor(x)
-        #     if dtype is not None:
-        #         x = ops.cast(x, dtype)
-        #     return x
-        # elif ops.__name__ == "torch":
-        #     x = ops.tensor(x)
-        #     if dtype is not None:
-        #         x = x.type(dtype)
-        #     if device is not None:
-        #         x = x.to(device)
-        #     return x
-        # else:
-        #     raise ValueError("Unsupported operations package.")
-
 
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
