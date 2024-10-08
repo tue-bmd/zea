@@ -347,6 +347,8 @@ class ImageLoader(keras.utils.Sequence):
         shuffle=True,
     ):
         """Initialization"""
+        super().__init__()
+
         self.x_dataset_directory = Path(x_directory)
         self.y_dataset_directory = Path(y_directory)
 

@@ -104,6 +104,7 @@ disable=import-error, 		# E, but not reliable in pylint
 		too-many-ancestors,
 		logging-fstring-interpolation,
 		too-many-positional-arguments,
+		abstract-method,
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option

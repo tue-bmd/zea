@@ -26,7 +26,9 @@ from usbmd.registry import tf_beamformer_registry
 
 def NormalizeLayer():
     """Function that normalizes the input tensor based on its max value"""
-    return Lambda(lambda x: x / ops.max(ops.abs(x) + ops.epsilon(), axis=(1, 2, 3)))
+    return Lambda(
+        lambda x: x / ops.max(ops.abs(x) + keras.config.epsilon(), axis=(1, 2, 3))
+    )
 
 
 def regularizer_unity(activity):
