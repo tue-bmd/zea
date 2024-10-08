@@ -73,7 +73,6 @@ optional = true
 
 [tool.poetry.group.tensorflow.dependencies]
 tensorflow = { version = "^2.15", extras = ["and-cuda"] }
-tf-keras = "^2.15"
 
 [tool.poetry.group.jax]
 optional = true

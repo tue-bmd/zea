@@ -5,9 +5,9 @@
 
 from pathlib import Path
 
+import keras
 import matplotlib.pyplot as plt
 import numpy as np
-import tf_keras as keras
 
 from usbmd.backend.tensorflow.dataloader import ImageLoader
 from usbmd.backend.tensorflow.models import lista

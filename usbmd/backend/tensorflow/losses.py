@@ -4,8 +4,8 @@
 - **Date**          : -
 """
 
-import tf_keras as keras
-import tf_keras.backend as K
+import keras
+from keras import ops
 
 
 class SMSLE(keras.losses.Loss):
@@ -28,41 +28,41 @@ class SMSLE(keras.losses.Loss):
             loss (tensor): SMSLE loss value.
         """
 
-        y_pred_max = K.maximum(K.max(K.abs(y_pred)), K.epsilon())
-        y_true_max = K.maximum(K.max(K.abs(y_true)), K.epsilon())
+        y_pred_max = ops.maximum(ops.max(ops.abs(y_pred)), keras.config.epsilon())
+        y_true_max = ops.maximum(ops.max(ops.abs(y_true)), keras.config.epsilon())
 
-        first_log_pos = K.clip(
+        first_log_pos = ops.clip(
             20
-            * K.log(K.clip(y_pred / y_pred_max, K.epsilon(), 1) + 0.0)
-            / K.log(K.constant(10)),
+            * ops.log(ops.clip(y_pred / y_pred_max, keras.config.epsilon(), 1) + 0.0)
+            / ops.log(10),
             -self.dynamic_range,
             0,
         )
-        secon_log_pos = K.clip(
+        secon_log_pos = ops.clip(
             20
-            * K.log(K.clip(y_true / y_true_max, K.epsilon(), 1) + 0.0)
-            / K.log(K.constant(10)),
-            -self.dynamic_range,
-            0,
-        )
-
-        first_log_neg = K.clip(
-            20
-            * K.log(K.clip(-y_pred / y_pred_max, K.epsilon(), 1) + 0.0)
-            / K.log(K.constant(10)),
-            -self.dynamic_range,
-            0,
-        )
-        secon_log_neg = K.clip(
-            20
-            * K.log(K.clip(-y_true / y_true_max, K.epsilon(), 1) + 0.0)
-            / K.log(K.constant(10)),
+            * ops.log(ops.clip(y_true / y_true_max, keras.config.epsilon(), 1) + 0.0)
+            / ops.log(10),
             -self.dynamic_range,
             0,
         )
 
-        loss = 0.5 * K.mean(K.square(first_log_pos - secon_log_pos)) + 0.5 * K.mean(
-            K.square(first_log_neg - secon_log_neg)
+        first_log_neg = ops.clip(
+            20
+            * ops.log(ops.clip(-y_pred / y_pred_max, keras.config.epsilon(), 1) + 0.0)
+            / ops.log(10),
+            -self.dynamic_range,
+            0,
         )
+        secon_log_neg = ops.clip(
+            20
+            * ops.log(ops.clip(-y_true / y_true_max, keras.config.epsilon(), 1) + 0.0)
+            / ops.log(10),
+            -self.dynamic_range,
+            0,
+        )
+
+        loss = 0.5 * ops.mean(
+            ops.square(first_log_pos - secon_log_pos)
+        ) + 0.5 * ops.mean(ops.square(first_log_neg - secon_log_neg))
 
         return loss

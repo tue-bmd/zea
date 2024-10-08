@@ -57,9 +57,9 @@ functions, but not the direct __call__ function, i.e. model(data).
 import warnings
 from typing import Tuple
 
+import keras
 import numpy as np
 import tensorflow as tf
-import tf_keras as keras
 
 from usbmd.backend.tensorflow.utils.utils import tf_snapshot
 from usbmd.registry import tf_beamformer_registry

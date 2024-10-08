@@ -4,10 +4,10 @@
 - **Date**          : Thu Jun 1st 2023
 """
 
+import keras
 import numpy as np
 import tensorflow as tf
-import tf_keras as keras
-from tf_keras import layers
+from keras import layers
 
 # It is TF convention to define layers in the build method
 # pylint: disable=attribute-defined-outside-init
