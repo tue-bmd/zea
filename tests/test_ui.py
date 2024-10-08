@@ -6,8 +6,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 
 from usbmd import ui
+from usbmd.processing import set_backend
 from usbmd.setup_usbmd import setup_config
 
 wd = Path(__file__).parent.parent
@@ -17,17 +19,21 @@ sys.path.append(str(wd))
 plt.rcParams["backend"] = "agg"
 
 
-def test_ui_initialization():
+@pytest.mark.parametrize(
+    "ml_library",
+    [
+        "numpy",
+        "jax",
+        "torch",
+        "tensorflow",
+    ],
+)
+def test_ui_initialization(ml_library):
     """Test ui initialization function"""
     config = setup_config("./tests/config_test.yaml")
-    config.ml_library = "torch"
+    config.ml_library = ml_library
+    set_backend(config.ml_library)
 
-    dataloader_ui = ui.DataLoaderUI(config)
-    dataloader_ui.run()
-    dataloader_ui.run(plot=True)
-
-    config = setup_config("./tests/config_test.yaml")
-    config.ml_library = "tensorflow"
     dataloader_ui = ui.DataLoaderUI(config)
     dataloader_ui.run()
     dataloader_ui.run(plot=True)
@@ -36,6 +42,8 @@ def test_ui_initialization():
 def test_get_data():
     """Test ui get_data function"""
     config = setup_config("./tests/config_test.yaml")
+    set_backend(config.ml_library)
+
     dataloader_ui = ui.DataLoaderUI(config)
     data = dataloader_ui.get_data()
     assert data is not None
