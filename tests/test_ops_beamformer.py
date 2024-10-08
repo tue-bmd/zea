@@ -1,14 +1,12 @@
 """Tests for the ops beamformer.
 """
 
-import importlib
-
 import numpy as np
 
 import usbmd
+from tests.test_processing import equality_libs_processing
 
 usbmd.init_device()
-
 
 from usbmd.beamformer import tof_correction
 from usbmd.config import load_config_from_yaml
@@ -16,16 +14,6 @@ from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
-
-OPS = {
-    "torch": None,
-    "tensorflow": None,
-    "numpy": None,
-}
-
-for name in OPS:
-    OPS[name] = importlib.import_module(name)
-    importlib.import_module(f"usbmd.backend.{name}.aliases")
 
 
 def _get(reconstruction_mode):
@@ -71,44 +59,39 @@ def _get(reconstruction_mode):
     return config, probe, scan, data, inputs
 
 
+@equality_libs_processing
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends"""
+    from keras import ops  # pylint: disable=import-outside-toplevel
+
     _, probe, scan, _, inputs = _get(reconstruction_mode)
 
-    outputs = {}
     batch_item = 0  # Only one batch item
-    for name, ops in OPS.items():
-        kwargs = dict(  # pylint: disable=use-dict-literal
-            data=inputs[batch_item],
-            grid=scan.grid,
-            t0_delays=scan.t0_delays,
-            tx_apodizations=scan.tx_apodizations,
-            sound_speed=scan.sound_speed,
-            probe_geometry=probe.probe_geometry,
-            initial_times=scan.initial_times,
-            sampling_frequency=scan.fs,
-            fdemod=scan.fdemod,
-            fnum=scan.f_number,
-            angles=scan.polar_angles,
-            vfocus=scan.focus_distances,
-        )
-        for key, item in kwargs.items():
-            # If item is a floating point numpy array, convert to float32
-            if hasattr(item, "dtype") and np.issubdtype(item.dtype, np.floating):
-                item = item.astype(np.float32)
-            # Convert to tensor
-            kwargs[key] = ops.convert_to_tensor(item)
-        outputs[name] = tof_correction(
-            **kwargs,
-            apply_phase_rotation=bool(scan.fdemod),
-        )
-
-    for name, output in outputs.items():
-        if name == "numpy":
-            continue
-        print(f"Comparing TOF Correction {name} to Numpy...")
-        np.testing.assert_almost_equal(output, outputs["numpy"], decimal=2)
-        print(f"TOF Correction {name} passed!")
+    kwargs = dict(  # pylint: disable=use-dict-literal
+        data=inputs[batch_item],
+        grid=scan.grid,
+        t0_delays=scan.t0_delays,
+        tx_apodizations=scan.tx_apodizations,
+        sound_speed=scan.sound_speed,
+        probe_geometry=probe.probe_geometry,
+        initial_times=scan.initial_times,
+        sampling_frequency=scan.fs,
+        fdemod=scan.fdemod,
+        fnum=scan.f_number,
+        angles=scan.polar_angles,
+        vfocus=scan.focus_distances,
+    )
+    for key, item in kwargs.items():
+        # If item is a floating point numpy array, convert to float32
+        if hasattr(item, "dtype") and np.issubdtype(item.dtype, np.floating):
+            item = item.astype(np.float32)
+        # Convert to tensor
+        kwargs[key] = ops.convert_to_tensor(item)
+    outputs = tof_correction(
+        **kwargs,
+        apply_phase_rotation=bool(scan.fdemod),
+    )
+    return outputs
 
 
 if __name__ == "__main__":

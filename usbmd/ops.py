@@ -1647,10 +1647,6 @@ def channels_to_complex(data):
         ndarray: complex array with real and imaginary components.
     """
     assert data.shape[-1] == 2, "Data must have two channels."
-    assert str(data.dtype).rsplit(".", maxsplit=1)[-1] in [
-        "float32",
-        "float64",
-    ], f"Data must be float type, got {data.dtype}"
     data = ops.cast(data, "complex64")
     return data[..., 0] + 1j * data[..., 1]
 
