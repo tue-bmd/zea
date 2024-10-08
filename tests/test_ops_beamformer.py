@@ -91,6 +91,7 @@ def test_tof_correction(reconstruction_mode="generic"):
         **kwargs,
         apply_phase_rotation=bool(scan.fdemod),
     )
+    outputs = ops.convert_to_numpy(outputs)
     return outputs
 
 
