@@ -298,8 +298,10 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     data1 = ops.take_along_axis(data, d1, 0)
 
     # Compute interpolated pixel value
-    d0 = ops.cast(d0, "float32")  # Cast to float
-    d1 = ops.cast(d1, "float32")  # Cast to float
+    d0 = ops.cast(d0, delays.dtype)  # Cast to float
+    d1 = ops.cast(d1, delays.dtype)  # Cast to float
+    data0 = ops.cast(data0, delays.dtype)  # Cast to float
+    data1 = ops.cast(data1, delays.dtype)  # Cast to float
     reflection_samples = (d1 - delays) * data0 + (delays - d0) * data1
 
     return reflection_samples
