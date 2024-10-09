@@ -58,8 +58,8 @@ this class to process data directly without having to define the operations expl
 process = Process(config, scan, probe)
 process.set_pipeline(
     operation_chain=[
-        {"name": "beamform"},
-        {"name": "sum"},
+        {"name": "tof_correction"},
+        {"name": "delay_and_sum"},
         {"name": "demodulate", "params": {"fs": 50e6, "fc": 5e6}},
         {"name": "envelope_detect"},
         {"name": "downsample"},
@@ -134,12 +134,13 @@ from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import log, translate
+from usbmd.utils import log, pfield, translate
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras
 # to be able to set backend properly
 importlib.reload(bmf)
+importlib.reload(pfield)
 
 # clear registry upon import
 ops_registry.clear()
@@ -743,6 +744,40 @@ class TOFCorrection(Operation):
                 self.fdemod is not None,
             ]
         )
+
+
+@ops_registry("pfield_weighting")
+class PfieldWeighting(Operation):
+    """Weighting aligned data with the pressure field."""
+
+    def __init__(self, pfield=None, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
+            **kwargs,
+        )
+
+        self.pfield = pfield
+
+    def _assign_scan_params(self, scan: Scan):
+        self.pfield = scan.pfield
+
+    @property
+    def _ready(self):
+        return self.pfield is not None
+
+    def process(self, data):
+        # Perform element-wise multiplication with the pressure weight mask
+        # Also add the required dimensions for broadcasting
+        if self.with_batch_dim:
+            pfield = ops.expand_dims(self.pfield, axis=0)
+        else:
+            pfield = self.pfield
+
+        pfield = pfield[..., None, None]
+
+        data_weighted = data * pfield
+        return data_weighted
 
 
 @ops_registry("stack")
@@ -1862,4 +1897,5 @@ class Doppler(Operation):
         nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
         doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
 
+        return doppler_velocities
         return doppler_velocities
