@@ -127,7 +127,7 @@ import numpy as np
 import scipy
 from scipy import ndimage, signal
 
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import (
