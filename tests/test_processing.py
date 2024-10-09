@@ -27,7 +27,7 @@ def set_random_seed(seed=None):
     return seed
 
 
-def equality_libs_processing(test_func):
+def equality_libs_processing(decimal=4):
     """Test the processing functions of different libraries
 
     Check if np / tf / torch processing funcs produce equal output.
@@ -35,7 +35,7 @@ def equality_libs_processing(test_func):
     Example:
         ```python
             @pytest.mark.parametrize('some_keys', [some_values])
-            @equality_libs_processing # <-- add as inner most decorator
+            @equality_libs_processing(decimal=4) # <-- add as inner most decorator
             def test_my_processing_func(some_arguments):
                 # Do some processing
                 output = my_processing_func(some_arguments)
@@ -49,9 +49,7 @@ def equality_libs_processing(test_func):
             - my_processing_func_tf
             - test_my_processing_func
     """
-    decimal = 3
 
-    # @functools.wraps(test_func)
     def wrapper(test_func, *args, **kwargs):
         # Set random seed
         seed = np.random.randint(0, 1000)
@@ -108,7 +106,7 @@ def equality_libs_processing(test_func):
         )
         print(f"Function {func_name} passed with jax output.")
 
-    return decorator.decorator(wrapper, test_func)
+    return decorator.decorator(wrapper)
 
 
 @pytest.mark.parametrize(
@@ -120,7 +118,7 @@ def equality_libs_processing(test_func):
         ("mu", (512, 512), (50, 300)),
     ],
 )
-@equality_libs_processing
+@equality_libs_processing(decimal=4)
 def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
 
@@ -156,7 +154,7 @@ def test_companding(comp_type, size, parameter_value_range):
         ((1, 128, 32), None, None),
     ],
 )
-@equality_libs_processing
+@equality_libs_processing(decimal=4)
 def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
     if dynamic_range is None:
@@ -193,7 +191,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
         ((1, 128, 32), (50, 51), (-2.2, 3.0)),
     ],
 )
-@equality_libs_processing
+@equality_libs_processing(decimal=4)
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
     normalize = ops.Normalize(output_range, input_range)
@@ -309,7 +307,7 @@ def test_up_and_down_conversion(factor, batch_size):
     ), "Data is not equal after up and down conversion."
 
 
-@equality_libs_processing
+@equality_libs_processing(decimal=4)
 def test_hilbert_transform():
     """Test hilbert transform"""
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
@@ -338,7 +336,7 @@ def test_hilbert_transform():
     return data_iq
 
 
-@equality_libs_processing
+@equality_libs_processing(decimal=4)
 def test_processing_class():
     """Test the processing class"""
     operation_chain = [
