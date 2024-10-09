@@ -1898,4 +1898,3 @@ class Doppler(Operation):
         doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
 
         return doppler_velocities
-        return doppler_velocities
