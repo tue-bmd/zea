@@ -49,15 +49,13 @@ def compute_pfield(
     fc = scan.fc  # % central frequency (Hz)
     fc = fc / downmix  # % downmixing the frequency to facilitate a smaller grid
 
-    BW = (
-        scan.bandwidth_percent
-    )  # % pulse-echo 6dB fractional bandwidth of the probe (%)
+    BW = scan.bandwidth_percent  # pulse-echo 6dB fractional bandwidth of the probe (%)
 
     # pulse params
     NoW = 1  # number of waveforms in the pulse - we don't have this in the scan object
 
     # array params
-    probe_geometry = scan.probe_geometry
+    probe_geometry = ops.convert_to_tensor(scan.probe_geometry, dtype="float32")
 
     NumberOfElements = scan.n_el  # % number of elements
     pitch = probe_geometry[1, 0] - probe_geometry[0, 0]  # % element pitch
@@ -75,10 +73,10 @@ def compute_pfield(
 
     # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
     LambdaMin = c / (fc * (1 + BW / 200))
-    M = ops.cast(ops.ceil(ElementWidth / LambdaMin), "int32")
+    M = ops.ceil(ElementWidth / LambdaMin)
 
-    x_orig = scan.grid[:, :, 0]
-    z_orig = scan.grid[:, :, 2]
+    x_orig = ops.convert_to_tensor(scan.grid[:, :, 0], dtype="float32")
+    z_orig = ops.convert_to_tensor(scan.grid[:, :, 2], dtype="float32")
 
     siz_orig = ops.shape(x_orig)
 
@@ -103,9 +101,13 @@ def compute_pfield(
     # % (if M=1, then xi = zi = 0 for a rectilinear array).
 
     SegLength = ElementWidth / M
-    tmp = -ElementWidth / 2 + SegLength / 2 + ops.arange(0, M) * SegLength
+    tmp = (
+        -ElementWidth / 2
+        + SegLength / 2
+        + ops.arange(0, M, dtype=SegLength.dtype) * SegLength
+    )
     xi = tmp
-    zi = ops.zeros((M,))
+    zi = ops.zeros((int(M),))
 
     # %-- Distances between the points and the transducer elements
     # Expand dimensions to allow broadcasting
@@ -134,7 +136,9 @@ def compute_pfield(
     T = NoW / fc  # % temporal pulse width
     wc = 2 * np.pi * fc
 
-    pulseSpectrum = lambda w: 1j * (mysinc(T * (w - wc) / 2) - mysinc(T * (w + wc) / 2))
+    def pulseSpectrum(w):
+        imag = mysinc(T * (w - wc) / 2) - mysinc(T * (w + wc) / 2)
+        return 1j * ops.cast(imag, "complex64")
 
     # -- FREQUENCY RESPONSE of the ensemble PZT + probe
     wB = BW * wc / 100  # angular frequency bandwidth
@@ -151,11 +155,12 @@ def compute_pfield(
 
         # delays and apodization of transmit event
         delaysTX = ops.convert_to_tensor(scan.t0_delays[j])
-        idx = ops.isnan(delaysTX)
-        delaysTX[idx] = 0
+        idx_nan = ops.isnan(delaysTX)
+        delaysTX = ops.where(idx_nan, 0, delaysTX)
 
         TXapodization = ops.convert_to_tensor(scan.tx_apodizations[j])
-        TXapodization[ops.any(idx)] = 0
+        idx_nan = ops.isnan(TXapodization)
+        TXapodization = ops.where(idx_nan, 0, TXapodization)
         TXapodization = ops.squeeze(TXapodization)
 
         # The frequency response is a pulse-echo (transmit + receive) response. A
@@ -169,7 +174,10 @@ def compute_pfield(
         # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
         # Therefore: df < 1/(r/c + delay).
 
-        df = 1 / (ops.max(r.flatten() / c) + ops.max(delaysTX.flatten()))
+        r_flat = ops.reshape(r, (-1,))
+        delaysTX_flat = ops.reshape(delaysTX, (-1,))
+
+        df = 1 / (ops.max(r_flat / c) + ops.max(delaysTX_flat))
         df = (
             FrequencyStep * df
         )  # df is here an upper bound; it will be recalculated below
@@ -182,7 +190,10 @@ def compute_pfield(
         df = f[1]  # % update the frequency step
 
         # -- we keep the significant components only by using options.dBThresh
-        S = ops.abs(pulseSpectrum(2 * np.pi * f) * probeSpectrum(2 * np.pi * f))
+        S = ops.abs(
+            pulseSpectrum(2 * np.pi * f)
+            * ops.cast(probeSpectrum(2 * np.pi * f), "complex64")
+        )
         GdB = 20 * ops.log10(epss + S / (ops.max(S)))  # % gain in dB
         IDX = GdB > dBThresh
 
@@ -195,20 +206,27 @@ def compute_pfield(
         # %-- EXPONENTIAL arrays of size [numel(x) NumberOfElements M]
         kw = 2 * np.pi * f[0] / c  # % wavenumber
         kwa = alpha_dB / 8.69 * f[0] / 1e6 * 1e2  # % attenuation-based wavenumber
-        EXP = ops.exp(-kwa * r + 1j * ops.mod(kw * r, 2 * np.pi))
+
+        r_complex = ops.cast(r, dtype="complex64")
+        kwa = ops.cast(kwa, dtype="complex64")
+        mod_out = ops.cast(ops.mod(kw * r, 2 * np.pi), dtype="complex64")
+        EXP = ops.exp(-kwa * r_complex + 1j * mod_out)
         # % faster than exp(-kwa*r+1j*kw*r)
 
         # %-- Exponential array for the increment wavenumber dk
         dkw = 2 * np.pi * df / c
         dkwa = alpha_dB / 8.69 * df / 1e6 * 1e2
-        EXPdf = ops.exp((-dkwa + 1j * dkw) * r)
+        dkw = ops.cast(dkw, dtype="complex64")
+        dkwa = ops.cast(dkwa, dtype="complex64")
 
-        EXP = EXP / ops.sqrt(r)
-        EXP = EXP * ops.min(ops.sqrt(r))  # normalize the field
+        EXPdf = ops.exp((-dkwa + 1j * dkw) * r_complex)
+
+        EXP = EXP / ops.sqrt(r_complex)
+        EXP = EXP * ops.cast(ops.min(ops.sqrt(r)), "complex64")  # normalize the field
 
         kc = 2 * np.pi * fc / c  # % center wavenumber
         DIR = mysinc(kc * SegLength / 2 * sinT)  # directivity of each segment
-        EXP = EXP * DIR
+        EXP = EXP * ops.cast(DIR, "complex64")
 
         # Render pressure field for all relevant frequencies and sum them up
         RP = 0
@@ -226,10 +244,6 @@ def compute_pfield(
             nSampling,
         )
 
-        RP = (
-            RP.cpu().numpy()
-        )  # Convert back to numpy... not ideal but needs to work with sc.ndimage.zoom
-
         # % RMS acoustic pressure
         P = ops.reshape(ops.sqrt(RP), siz0)
 
@@ -242,6 +256,9 @@ def compute_pfield(
         P_list.append(P)
 
     P_arr = ops.convert_to_tensor(P_list)
+    P_arr = ops.where(
+        ops.isnan(P_arr), 0, P_arr
+    )  # TODO: this is necessary for Jax / TF somehow. not sure why (not for torch)
 
     P_norm = normalize(P_arr, alpha=alpha, perc=perc)
 
@@ -258,7 +275,7 @@ def normalize(P_arr, alpha=1, perc=10):
         perc (int, optional): Percentile to keep. Default is 10.
 
     Returns:
-        numpy.ndarray: Normalized intensity array.
+        ops.array: Normalized intensity array.
 
     """
     # keep only the highest intensities
@@ -313,13 +330,17 @@ def pfield_freqloop_torch(
         else:
             RPmono = ops.squeeze(EXP)
 
-        DELAPOD = ops.exp(1j * kw[k] * c * delaysTX) * TXapodization
+        TXapodization = ops.cast(TXapodization, "complex64")
+
+        DELAPOD = (
+            ops.exp(1j * ops.cast(kw[k] * c * delaysTX, "complex64")) * TXapodization
+        )
         RPk = ops.matmul(RPmono, DELAPOD)
 
-        RPk *= pulseSPECT[k] * probeSPECT[k]
+        RPk *= pulseSPECT[k] * ops.cast(probeSPECT[k], "complex64")
 
         isOUT = z < 0
-        RPk[isOUT] = 0
+        RPk = ops.where(isOUT, 0, RPk)
 
         RP += ops.abs(RPk) ** 2
 
