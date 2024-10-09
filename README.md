@@ -124,7 +124,8 @@ plt.imshow(image, cmap="gray")
 # initialize the processing pipeline
 process.set_pipeline(
     operation_chain=[
-        {"name": "beamform"},
+        {"name": "tof_correction"},
+        {"name": "delay_and_sum"},
         {"name": "demodulate"},
         {"name": "envelope_detect"},
         {"name": "downsample"},
@@ -190,7 +191,8 @@ process = Process(config=config, scan=scan, probe=probe)
 # initialize the processing pipeline
 process.set_pipeline(
     operation_chain=[
-        {"name": "beamform"},
+        {"name": "tof_correction"},
+        {"name": "delay_and_sum"},
         {"name": "demodulate"},
         {"name": "envelope_detect"},
         {"name": "downsample"},

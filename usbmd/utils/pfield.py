@@ -1,12 +1,12 @@
 """Automatic pressure field computation used for compounding multiple Tx events
 
-- **Author(s)**     : Ruud van Sloun
-- **Date**          : 2024-07-24
+- **Author(s)**     : Ruud van Sloun (initial code), Tristan Stevens (transferred to keras)
+- **Date**          : 2024-07-24, 20240-10-09
 """
 
+import keras
 import numpy as np
-import scipy as sc
-import torch
+from keras import ops
 
 from usbmd.utils import log
 
@@ -38,7 +38,7 @@ def compute_pfield(
             Higher is more aggressive) Default is 10.
 
     Returns:
-        np.ndarray: The normalized pressure field (across tx events).
+        ops.array: The normalized pressure field (across tx events).
     """
     # medium params
     alpha_dB = 0  # currently we ignore attenuation in the compounding
@@ -75,25 +75,25 @@ def compute_pfield(
 
     # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
     LambdaMin = c / (fc * (1 + BW / 200))
-    M = np.int32(np.ceil(ElementWidth / LambdaMin))
+    M = ops.cast(ops.ceil(ElementWidth / LambdaMin), "int32")
 
     x_orig = scan.grid[:, :, 0]
     z_orig = scan.grid[:, :, 2]
 
-    siz_orig = np.shape(x_orig)
+    siz_orig = ops.shape(x_orig)
 
     x = x_orig[::downsample, ::downsample]
     z = z_orig[::downsample, ::downsample]
-    siz0 = np.shape(x)
+    siz0 = ops.shape(x)
 
     # %-- Coordinates of the points where pressure is needed
-    x = x.flatten()
-    z = z.flatten()
+    x = ops.reshape(x, (-1,))
+    z = ops.reshape(z, (-1,))
 
     # %-- Centers of the tranducer elements (x- and z-coordinates)
-    xe = (np.arange(0, NumberOfElements) - (NumberOfElements - 1) / 2) * pitch
-    ze = np.zeros(NumberOfElements)
-    THe = np.zeros(NumberOfElements)
+    xe = (ops.arange(0.0, NumberOfElements) - (NumberOfElements - 1) / 2) * pitch
+    ze = ops.zeros(NumberOfElements)
+    THe = ops.zeros(NumberOfElements)
 
     # %-- Centroids of the sub-elements
     # %-- note: Each elements is split into M sub-elements.
@@ -103,33 +103,33 @@ def compute_pfield(
     # % (if M=1, then xi = zi = 0 for a rectilinear array).
 
     SegLength = ElementWidth / M
-    tmp = -ElementWidth / 2 + SegLength / 2 + np.arange(0, M) * SegLength
+    tmp = -ElementWidth / 2 + SegLength / 2 + ops.arange(0, M) * SegLength
     xi = tmp
-    zi = np.zeros(M)
+    zi = ops.zeros((M,))
 
     # %-- Distances between the points and the transducer elements
     # Expand dimensions to allow broadcasting
-    x_expanded = x[:, np.newaxis, np.newaxis]  # Shape: (4000, 1, 1)
-    xi_expanded = xi[np.newaxis, :, np.newaxis]  # Shape: (1, 7, 1)
-    xe_expanded = xe[np.newaxis, np.newaxis, :]  # Shape: (1, 1, 128)
+    x_expanded = x[:, None, None]  # Shape: (4000, 1, 1)
+    xi_expanded = xi[None, :, None]  # Shape: (1, 7, 1)
+    xe_expanded = xe[None, None, :]  # Shape: (1, 1, 128)
 
     # Perform the operation
     dxi = x_expanded - xi_expanded - xe_expanded
 
-    z_expanded = z[:, np.newaxis, np.newaxis]  # Shape: (4000, 1, 1)
-    zi_expanded = zi[np.newaxis, :, np.newaxis]  # Shape: (1, 7, 1)
-    ze_expanded = ze[np.newaxis, np.newaxis, :]  # Shape: (1, 1, 128)
+    z_expanded = z[:, None, None]  # Shape: (4000, 1, 1)
+    zi_expanded = zi[None, :, None]  # Shape: (1, 7, 1)
+    ze_expanded = ze[None, None, :]  # Shape: (1, 1, 128)
 
     d2 = dxi**2 + (z_expanded - zi_expanded - ze_expanded) ** 2
-    r = np.sqrt(d2)
+    r = ops.sqrt(d2)
 
     # Angle between the normal to the transducer and the line joining
     # the point and the transducer
-    epss = np.finfo(np.float32).eps
-    Th = np.arcsin((dxi + epss) / (np.sqrt(d2) + epss)) - THe
-    sinT = np.sin(Th)
+    epss = keras.config.epsilon()
+    Th = ops.arcsin((dxi + epss) / (ops.sqrt(d2) + epss)) - THe
+    sinT = ops.sin(Th)
 
-    mysinc = lambda x: np.sin(np.abs(x) + epss) / (np.abs(x) + epss)
+    mysinc = lambda x: ops.sin(ops.abs(x) + epss) / (ops.abs(x) + epss)
 
     T = NoW / fc  # % temporal pulse width
     wc = 2 * np.pi * fc
@@ -138,9 +138,9 @@ def compute_pfield(
 
     # -- FREQUENCY RESPONSE of the ensemble PZT + probe
     wB = BW * wc / 100  # angular frequency bandwidth
-    p = np.log(126) / np.log(epss + 2 * wc / wB)  # p adjusts the shape
-    probeSpectrum = lambda w: np.exp(
-        -((np.abs(w - wc) / (wB / 2 / np.log(2) ** (1 / p))) ** p)
+    p = ops.log(126) / ops.log(epss + 2 * wc / wB)  # p adjusts the shape
+    probeSpectrum = lambda w: ops.exp(
+        -((ops.abs(w - wc) / (wB / 2 / ops.log(2) ** (1 / p))) ** p)
     )
 
     P_list = []
@@ -150,13 +150,13 @@ def compute_pfield(
             log.info(f"Precomputing pressure fields, transmit {j}/{n_transmits}")
 
         # delays and apodization of transmit event
-        delaysTX = scan.t0_delays[j]
-        idx = np.isnan(delaysTX)
+        delaysTX = ops.convert_to_tensor(scan.t0_delays[j])
+        idx = ops.isnan(delaysTX)
         delaysTX[idx] = 0
 
-        TXapodization = scan.tx_apodizations[j]
-        TXapodization[np.any(idx)] = 0
-        TXapodization = TXapodization.squeeze()
+        TXapodization = ops.convert_to_tensor(scan.tx_apodizations[j])
+        TXapodization[ops.any(idx)] = 0
+        TXapodization = ops.squeeze(TXapodization)
 
         # The frequency response is a pulse-echo (transmit + receive) response. A
         # square root is thus required when calculating the pressure field:
@@ -169,19 +169,21 @@ def compute_pfield(
         # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
         # Therefore: df < 1/(r/c + delay).
 
-        df = 1 / (np.max(r.flatten() / c) + np.max(delaysTX.flatten()))
+        df = 1 / (ops.max(r.flatten() / c) + ops.max(delaysTX.flatten()))
         df = (
             FrequencyStep * df
         )  # df is here an upper bound; it will be recalculated below
 
         # -- FREQUENCY SAMPLES
-        Nf = 2 * np.ceil(fc / df).astype(np.int32) + 1  # % number of frequency samples
-        f = np.linspace(0, 2 * fc, Nf)  # % frequency samples
+        Nf = (
+            2 * ops.cast(ops.ceil(fc / df), "int32") + 1
+        )  # % number of frequency samples
+        f = ops.linspace(0, 2 * fc, Nf)  # % frequency samples
         df = f[1]  # % update the frequency step
 
         # -- we keep the significant components only by using options.dBThresh
-        S = np.abs(pulseSpectrum(2 * np.pi * f) * probeSpectrum(2 * np.pi * f))
-        GdB = 20 * np.log10(epss + S / (np.max(S)))  # % gain in dB
+        S = ops.abs(pulseSpectrum(2 * np.pi * f) * probeSpectrum(2 * np.pi * f))
+        GdB = 20 * ops.log10(epss + S / (ops.max(S)))  # % gain in dB
         IDX = GdB > dBThresh
 
         f = f[IDX]
@@ -193,16 +195,16 @@ def compute_pfield(
         # %-- EXPONENTIAL arrays of size [numel(x) NumberOfElements M]
         kw = 2 * np.pi * f[0] / c  # % wavenumber
         kwa = alpha_dB / 8.69 * f[0] / 1e6 * 1e2  # % attenuation-based wavenumber
-        EXP = np.exp(-kwa * r + 1j * np.mod(kw * r, 2 * np.pi))
+        EXP = ops.exp(-kwa * r + 1j * ops.mod(kw * r, 2 * np.pi))
         # % faster than exp(-kwa*r+1j*kw*r)
 
         # %-- Exponential array for the increment wavenumber dk
         dkw = 2 * np.pi * df / c
         dkwa = alpha_dB / 8.69 * df / 1e6 * 1e2
-        EXPdf = np.exp((-dkwa + 1j * dkw) * r)
+        EXPdf = ops.exp((-dkwa + 1j * dkw) * r)
 
-        EXP = EXP / np.sqrt(r)
-        EXP = EXP * np.min(np.sqrt(r))  # normalize the field
+        EXP = EXP / ops.sqrt(r)
+        EXP = EXP * ops.min(ops.sqrt(r))  # normalize the field
 
         kc = 2 * np.pi * fc / c  # % center wavenumber
         DIR = mysinc(kc * SegLength / 2 * sinT)  # directivity of each segment
@@ -229,24 +231,29 @@ def compute_pfield(
         )  # Convert back to numpy... not ideal but needs to work with sc.ndimage.zoom
 
         # % RMS acoustic pressure
-        P = np.reshape(np.sqrt(RP), siz0)
+        P = ops.reshape(ops.sqrt(RP), siz0)
 
         # resize P to exactly the original grid size
-        P = sc.ndimage.zoom(P, (siz_orig[0] / siz0[0], siz_orig[1] / siz0[1]), order=1)
+        # P = sc.ndimage.zoom(P, (siz_orig[0] / siz0[0], siz_orig[1] / siz0[1]), order=1)
+        P = ops.squeeze(
+            ops.image.resize(P[..., None], siz_orig, interpolation="nearest"), axis=-1
+        )
 
         P_list.append(P)
 
-    P_norm = normalize(P_list, alpha=alpha, perc=perc)
+    P_arr = ops.convert_to_tensor(P_list)
+
+    P_norm = normalize(P_arr, alpha=alpha, perc=perc)
 
     return P_norm
 
 
-def normalize(P_list, alpha=1, perc=10):
+def normalize(P_arr, alpha=1, perc=10):
     """
     Normalize the input array of intensities.
 
     Args:
-        P_list (list): List of intensity arrays.
+        P_arr (array): Sequence of intensity arrays.
         alpha (float, optional): Shape factor to tighten the beams. Default is 1.
         perc (int, optional): Percentile to keep. Default is 10.
 
@@ -255,13 +262,17 @@ def normalize(P_list, alpha=1, perc=10):
 
     """
     # keep only the highest intensities
-    P_arr = np.array(P_list)
-    P_arr[
-        P_arr < np.percentile(P_arr, perc, axis=(1, 2))[:, np.newaxis, np.newaxis]
-    ] = 0
+    # P_arr[P_arr < ops.percentile(P_arr, perc, axis=(1, 2))[:, None, None]] = 0
 
-    P_arr = np.array(P_arr) ** alpha
-    P_norm = P_arr / (1e-10 + np.sum(P_arr, axis=0))
+    # let's do manual percentile calculation
+    # Flatten the last two dimensions, sort, and reshape back
+    P_flat = ops.reshape(P_arr, (P_arr.shape[0], -1))
+    P_sorted = ops.sort(P_flat, axis=1)
+    perc_value = P_sorted[:, int(P_arr.shape[1] * P_arr.shape[2] * perc / 100)]
+    P_arr = ops.where(P_arr < perc_value[:, None, None], 0, P_arr)
+
+    P_arr = ops.convert_to_tensor(P_arr) ** alpha
+    P_norm = P_arr / (keras.config.epsilon() + ops.sum(P_arr, axis=0))
 
     return P_norm
 
@@ -286,45 +297,30 @@ def pfield_freqloop_torch(
         nSampling (int): Number of samples.
 
     Returns:
-        RP (torch.Tensor): Pressure field.
+        RP (Tensor): Pressure field.
 
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    f_tensor = torch.tensor(f, dtype=torch.float32, device=device)
-    c_tensor = torch.tensor(c, dtype=torch.float32, device=device)
-    delaysTX_tensor = torch.tensor(delaysTX, dtype=torch.float32, device=device)
-    TXapodization_tensor = torch.tensor(
-        TXapodization, dtype=torch.complex64, device=device
-    )
-    pulseSPECT_tensor = torch.tensor(pulseSPECT, dtype=torch.complex64, device=device)
-    probeSPECT_tensor = torch.tensor(probeSPECT, dtype=torch.complex64, device=device)
-    z_tensor = torch.tensor(z, dtype=torch.float32, device=device)
-    EXPdf_tensor = torch.tensor(EXPdf, dtype=torch.complex64, device=device)
-    EXP_tensor = torch.tensor(EXP, dtype=torch.complex64, device=device)
 
     RP = 0
-    kw = 2 * np.pi * f_tensor / c_tensor
+    kw = 2 * np.pi * f / c
 
     for k in range(nSampling):
         if k > 0:
-            EXP_tensor *= EXPdf_tensor
+            EXP *= EXPdf
 
         if M > 1:
-            RPmono = torch.mean(EXP_tensor, dim=1)
+            RPmono = ops.mean(EXP, axis=1)
         else:
-            RPmono = EXP_tensor.squeeze()
+            RPmono = ops.squeeze(EXP)
 
-        DELAPOD = (
-            torch.exp(1j * kw[k] * c_tensor * delaysTX_tensor) * TXapodization_tensor
-        )
-        RPk = torch.matmul(RPmono, DELAPOD)
+        DELAPOD = ops.exp(1j * kw[k] * c * delaysTX) * TXapodization
+        RPk = ops.matmul(RPmono, DELAPOD)
 
-        RPk *= pulseSPECT_tensor[k] * probeSPECT_tensor[k]
+        RPk *= pulseSPECT[k] * probeSPECT[k]
 
-        isOUT = z_tensor < 0
+        isOUT = z < 0
         RPk[isOUT] = 0
 
-        RP += torch.abs(RPk) ** 2
+        RP += ops.abs(RPk) ** 2
 
     return RP
