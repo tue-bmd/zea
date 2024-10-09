@@ -103,7 +103,6 @@ class Interface:
             self.headless = self.config.plot.headless
 
         self.check_for_display()
-        self.set_backend_for_notebooks()
 
         if hasattr(self.dataset.file_name, "name"):
             window_name = str(self.dataset.file_name.name)
