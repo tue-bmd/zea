@@ -429,3 +429,22 @@ def get_function_args(func):
     """Get the names of the arguments of a function."""
     sig = inspect.signature(func)
     return tuple(sig.parameters)
+
+
+def keep_trying(fn, args=None, required_set=None):
+    """Keep trying to run a function until it succeeds.
+    Args:
+        fn (function): function to run
+        args (dict, optional): arguments to pass to function
+        required_set (set, optional): set of required outputs
+            if output is not in required_set, function will be rerun
+    """
+    while True:
+        try:
+            out = fn(**args) if args is not None else fn()
+            if required_set is not None:
+                assert out is not None
+                assert out in required_set, f"Output {out} not in {required_set}"
+            return out
+        except Exception as e:
+            print(e)

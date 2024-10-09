@@ -33,6 +33,7 @@ RUN for i in $(seq 0 $NUM_USERS); do \
         useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
         echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME && \
         chmod 0440 /etc/sudoers.d/$USERNAME; \
+        echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
     done
 
 # Install python, pip, git, opencv dependencies, ffmpeg, imagemagick, and ssh keyscan github
