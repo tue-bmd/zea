@@ -94,6 +94,8 @@ priority = "explicit"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
+[tool.poetry.scripts]
+usbmd = "usbmd.__main__:main"
 # To update the poetry.lock file run `sudo /opt/poetry-venv/bin/python3 -m poetry lock` inside the usbmd container (where poetry is installed)
 # Otherwise a simple `poetry lock` will suffice.
 # Rebuild docker image afterwards to match the lock file!
