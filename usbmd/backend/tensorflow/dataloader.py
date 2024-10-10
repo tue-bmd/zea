@@ -8,9 +8,9 @@ import re
 from pathlib import Path
 
 import h5py
+import keras
 import numpy as np
 import tensorflow as tf
-from keras import layers
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_length_hdf5_file, search_file_tree
