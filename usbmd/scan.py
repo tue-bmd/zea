@@ -104,7 +104,6 @@ class Scan(Object):
         lens_thickness: float = None,
         lens_sound_speed: float = None,
         f_number: float = 1.0,
-        **kwargs,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -176,6 +175,10 @@ class Scan(Object):
                 by the beamformer with option config.model.beamformer.auto_pressure_weighting.
                 If set to True, the pfield is used, if False, beamformer will compound all
                 transmit data coherently without pfield weighting.
+            apply_lens_correction (bool, optional): Whether to apply lens correction to the
+                delay computation. Defaults to False.
+            lens_thickness (float, optional): The thickness of the lens in meters. Defaults to None.
+            lens_sound_speed (float, optional): The speed of sound in the lens in m/s. Defaults to None.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
