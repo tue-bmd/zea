@@ -905,7 +905,9 @@ class Downsample(Operation):
 class Interpolate(Operation):
     """Interpolate data along a specific axis using the downsample factor."""
 
-    def __init__(self, factor: int = None, axis: int = -1, method: str="linear", **kwargs):
+    def __init__(
+        self, factor: int = None, axis: int = -1, method: str = "bilinear", **kwargs
+    ):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
@@ -919,20 +921,22 @@ class Interpolate(Operation):
         if self.factor is None or self.factor <= 1:
             return data  # No interpolation needed if factor is None or <= 1
 
-        current_length = self.ops.shape(data)[self.axis]
-        original_length = current_length * self.factor
+        data_out = self.resize_along_axis(data, self.factor, self.axis, self.method)
+        return data_out
 
-        original_idx = self.ops.arange(original_length)  # Original index range
-        current_idx = self.ops.linspace(
-            0, original_length - 1, current_length
-        )  # Downsampled index range
-
-        # Perform linear interpolation along the specified axis
-        interpolated = scipy.interpolate.interp1d(
-            current_idx, data, axis=self.axis, kind=self.method,
+    @staticmethod
+    def resize_along_axis(data, factor, axis, method):
+        shape = ops.shape(data)
+        data_flat = ops.reshape(data, [-1, shape[axis]])
+        # fill to four dimensions
+        data_flat = data_flat[..., None, None]
+        data_out = ops.image.resize(
+            data_flat, [shape[axis] * factor, 1], interpolation=method
         )
-        interpolated = interpolated(original_idx)
-        return interpolated
+        new_shape = list(shape)
+        new_shape[axis] = shape[axis] * factor
+        data_out = ops.reshape(data_out, new_shape)
+        return data_out
 
 
 @ops_registry("companding")
