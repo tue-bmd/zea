@@ -1,7 +1,7 @@
 """Test the tf implementation of the beamformers.
 """
 
-import pickle
+# import pickle
 import sys
 from pathlib import Path
 
