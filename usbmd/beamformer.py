@@ -196,20 +196,21 @@ def calculate_delays(
     tx_distances = []
     rx_distances = []
 
-    # Compute transmit distances
+    inf_distances = ops.isinf(focus_distances)
+
     for tx in range(n_tx):
-        if ops.isinf(focus_distances[tx]):
-            distance_to_pixels = distance_Tx_planewave(grid, polar_angles[tx])
-        else:
-            distance_to_pixels = distance_Tx_generic(
+        tx_distance = ops.where(
+            inf_distances[tx],
+            distance_Tx_planewave(grid, polar_angles[tx]),
+            distance_Tx_generic(
                 grid,
                 t0_delays[tx],
                 tx_apodizations[tx],
                 probe_geometry,
                 sound_speed,
-            )
-
-        tx_distances.append(distance_to_pixels[..., None])
+            ),
+        )
+        tx_distances.append(tx_distance[..., None])
 
     # Compute receive distances
     for el in range(n_el):

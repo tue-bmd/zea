@@ -134,7 +134,7 @@ from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import log, pfield, translate
+from usbmd.utils import log, pfield
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras
@@ -484,24 +484,28 @@ class Pipeline:
         for operation in self.operations:
             operation.initialize()
 
-    # def compile(self, jit=True):
-    #     """Compile the pipeline using jit."""
-    #     if not jit:
-    #         return
-    #     log.info(f"Compiling pipeline, with ops library: {ops.__name__}")
-    #     if ops.__name__ == "numpy":
-    #         return
-    #     elif ops.__name__ == "tensorflow":
-    #         self._jitted_process = ops.function(
-    #             self._process, jit_compile=jit
-    #         )  # tf.function
-    #         return
-    #     elif ops.__name__ == "torch":
-    #         log.warning("JIT compmilation is not yet supported for torch.")
-    #         return
-    #     elif ops.__name__ == "jax":
-    #         self._jitted_process = ops.jit(self._process)  # jax.jit
-    #         return
+    def compile(self, jit=True):
+        """Compile the pipeline using jit."""
+        backend = keras.backend.backend()
+        if not jit:
+            return
+        log.info(f"Compiling pipeline, with backend {backend}.")
+        if backend == "numpy":
+            return
+        elif backend == "tensorflow":
+            tf_function = importlib.import_module("tensorflow").function
+
+            self._jitted_process = tf_function(
+                self._process, jit_compile=jit
+            )  # tf.function
+            return
+        elif backend == "torch":
+            log.warning("JIT compmilation is not yet supported for torch.")
+            return
+        elif backend == "jax":
+            jax_jit = importlib.import_module("jax").jit
+            self._jitted_process = jax_jit(self._process)  # jax.jit
+            return
 
     def prepare_tensor(self, x, dtype=None, device=None):
         """Convert input array to appropriate tensor type for the operations package."""
@@ -1409,6 +1413,122 @@ class ScanConvert(Operation):
         self.z_axis = scan.z_axis
 
 
+@ops_registry("doppler")
+class Doppler(Operation):
+    """Compute the Doppler velocities from the I/ time series using a slow-time autocorrelator."""
+
+    def __init__(
+        self,
+        PRF: float = None,
+        fs: float = None,
+        fc: float = None,
+        c: float = None,
+        M: int = None,
+        lag: int = 1,
+        nargout: int = 1,
+        **kwargs,
+    ) -> None:
+        """
+        Args:
+            fc (float): Center frequency in Hz.
+            c (float): Longitudinal velocity in m/s.
+            PRF (float): Pulse repetition frequency in Hz.
+            M (int, optional): Size of the hamming filter for spatial weighted average.
+                Default is 1.
+            The output Doppler velocity is estimated from M-by-M or M(1)-by-M(2)
+                neighborhood around the corresponding pixel.
+            lag (int, optional): LAG used in the autocorrelator. Default is 1.
+
+        Note:
+            This function is currently limited to use with beamformed data, but it
+            can be modified to receive input_data_type = "raw_data".
+        """
+        super().__init__(
+            input_data_type="beamformed_data",
+            output_data_type=None,
+            **kwargs,
+        )
+        self.PRF = PRF
+        self.fs = fs
+        self.fc = fc
+        self.c = c
+        self.M = M
+        self.lag = lag
+        self.nargout = nargout
+        self.warning_produced = False
+
+        assert (
+            self.with_batch_dim is True
+        ), "Doppler requires multiple frames to compute"
+
+    def process(self, data):
+
+        assert data.ndim == 4, "Doppler requires multiple frames to compute"
+
+        if data.shape[-1] == 2:
+            data = channels_to_complex(data)
+
+        # frames as last dimension for iq2doppler func
+        data = ops.transpose(data, (1, 2, 0))
+
+        doppler_velocities = self.iq2doppler(data)
+        return doppler_velocities
+
+    def _assign_scan_params(self, scan):
+        self.fs = scan.fs
+        self.fc = scan.fc
+        self.c = scan.sound_speed
+        self.PRF = 1 / sum(scan.time_to_next_transmit[0])
+
+    def _assign_config_params(self, config):
+        if config.scan.sampling_frequency is not None:
+            self.fs = config.scan.sampling_frequency
+        if config.scan.center_frequency is not None:
+            self.fc = config.scan.center_frequency
+
+    def iq2doppler(self, data):
+        """Compute Doppler from packet of I/Q Data.
+
+        Args:
+            x (ndarray): I/Q complex data of shape n_el, n_ax, n_frames.
+            n_frames corresponds to the ensemble length used to compute the Doppler signal.
+        Returns:
+            doppler_velocities (ndarray): Doppler velocity map of shape n_el, n_ax.
+
+        """
+        assert data.ndim == 3, "Data must be a 3-D array"
+
+        if self.M is None:
+            self.M = np.array([1, 1])
+        elif np.isscalar(self.M):
+            self.M = np.array([self.M, self.M])
+        assert self.M.all() > 0 and np.all(
+            np.equal(self.M, np.round(self.M))
+        ), "M must contain integers > 0"
+
+        assert (
+            isinstance(self.lag, int) and self.lag >= 0
+        ), "Lag must be a positive integer"
+
+        if self.fc is None:
+            raise ValueError("A center frequency (fc) must be specified")
+        if self.PRF is None:
+            raise ValueError("A pulse repetition frequency or period must be specified")
+
+        # Auto-correlation method
+        IQ1 = data[:, :, : data.shape[-1] - self.lag]
+        IQ2 = data[:, :, self.lag :]
+        AC = ops.sum(IQ1 * ops.conj(IQ2), axis=2)  # Ensemble auto-correlation
+
+        # TODO: add spatial weighted average
+
+        # Doppler velocity
+        nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
+        doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
+
+        return doppler_velocities
+
+
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
     """Demodulates an RF signal to complex base-band (IQ).
 
@@ -1749,6 +1869,10 @@ def hilbert(x, N: int = None, axis=-1):
     Xf_r = ops.real(Xf)
     Xf_i = ops.imag(Xf)
     Xf_r_inv, Xf_i_inv = ops.fft((Xf_r, -Xf_i))
+
+    Xf_i_inv = ops.cast(Xf_i_inv, "complex64")
+    Xf_r_inv = ops.cast(Xf_r_inv, "complex64")
+
     x = Xf_r_inv / N
     x = x + 1j * (-Xf_i_inv / N)
 
@@ -1759,117 +1883,22 @@ def hilbert(x, N: int = None, axis=-1):
     return x
 
 
-@ops_registry("doppler")
-class Doppler(Operation):
-    """Compute the Doppler velocities from the I/ time series using a slow-time autocorrelator."""
+def translate(array, range_from, range_to):
+    """Map values in array from one range to other.
 
-    def __init__(
-        self,
-        PRF: float = None,
-        fs: float = None,
-        fc: float = None,
-        c: float = None,
-        M: int = None,
-        lag: int = 1,
-        nargout: int = 1,
-        **kwargs,
-    ) -> None:
-        """
-        Args:
-            fc (float): Center frequency in Hz.
-            c (float): Longitudinal velocity in m/s.
-            PRF (float): Pulse repetition frequency in Hz.
-            M (int, optional): Size of the hamming filter for spatial weighted average.
-                Default is 1.
-            The output Doppler velocity is estimated from M-by-M or M(1)-by-M(2)
-                neighborhood around the corresponding pixel.
-            lag (int, optional): LAG used in the autocorrelator. Default is 1.
+    Args:
+        array (ndarray): input array.
+        range_from (Tuple): lower and upper bound of original array.
+        range_to (Tuple): lower and upper bound to which array should be mapped.
 
-        Note:
-            This function is currently limited to use with beamformed data, but it
-            can be modified to receive input_data_type = "raw_data".
-        """
-        super().__init__(
-            input_data_type="beamformed_data",
-            output_data_type=None,
-            **kwargs,
-        )
-        self.PRF = PRF
-        self.fs = fs
-        self.fc = fc
-        self.c = c
-        self.M = M
-        self.lag = lag
-        self.nargout = nargout
-        self.warning_produced = False
+    Returns:
+        (ndarray): translated array
+    """
+    left_min, left_max = range_from
+    right_min, right_max = range_to
 
-        assert (
-            self.with_batch_dim is True
-        ), "Doppler requires multiple frames to compute"
+    # Convert the left range into a 0-1 range (float)
+    value_scaled = (array - left_min) / (left_max - left_min)
 
-    def process(self, data):
-
-        assert data.ndim == 4, "Doppler requires multiple frames to compute"
-
-        if data.shape[-1] == 2:
-            data = channels_to_complex(data)
-
-        # frames as last dimension for iq2doppler func
-        data = ops.transpose(data, (1, 2, 0))
-
-        doppler_velocities = self.iq2doppler(data)
-        return doppler_velocities
-
-    def _assign_scan_params(self, scan):
-        self.fs = scan.fs
-        self.fc = scan.fc
-        self.c = scan.sound_speed
-        self.PRF = 1 / sum(scan.time_to_next_transmit[0])
-
-    def _assign_config_params(self, config):
-        if config.scan.sampling_frequency is not None:
-            self.fs = config.scan.sampling_frequency
-        if config.scan.center_frequency is not None:
-            self.fc = config.scan.center_frequency
-
-    def iq2doppler(self, data):
-        """Compute Doppler from packet of I/Q Data.
-
-        Args:
-            x (ndarray): I/Q complex data of shape n_el, n_ax, n_frames.
-            n_frames corresponds to the ensemble length used to compute the Doppler signal.
-        Returns:
-            doppler_velocities (ndarray): Doppler velocity map of shape n_el, n_ax.
-
-        """
-        assert data.ndim == 3, "Data must be a 3-D array"
-
-        if self.M is None:
-            self.M = np.array([1, 1])
-        elif np.isscalar(self.M):
-            self.M = np.array([self.M, self.M])
-        assert self.M.all() > 0 and np.all(
-            np.equal(self.M, np.round(self.M))
-        ), "M must contain integers > 0"
-
-        assert (
-            isinstance(self.lag, int) and self.lag >= 0
-        ), "Lag must be a positive integer"
-
-        if self.fc is None:
-            raise ValueError("A center frequency (fc) must be specified")
-        if self.PRF is None:
-            raise ValueError("A pulse repetition frequency or period must be specified")
-
-        # Auto-correlation method
-        IQ1 = data[:, :, : data.shape[-1] - self.lag]
-        IQ2 = data[:, :, self.lag :]
-        AC = ops.sum(IQ1 * ops.conj(IQ2), axis=2)  # Ensemble auto-correlation
-
-        # TODO: add spatial weighted average
-
-        # Doppler velocity
-        nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
-        doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
-
-        return doppler_velocities
+    # Convert the 0-1 range into a value in the right range.
+    return right_min + (value_scaled * (right_max - right_min))
