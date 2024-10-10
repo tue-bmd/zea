@@ -48,7 +48,6 @@ def tof_correction(
         with shape: `(n_z, n_x, n_tx, n_el)`.
 
     """
-    print(f"apply_lens_correction: {apply_lens_correction}")
 
     assert len(data.shape) == 4, (
         "The input data should have 4 dimensions, "
@@ -158,7 +157,7 @@ def calculate_delays(
     n_el,
     focus_distances,
     polar_angles,
-    *args,
+    # pylint: disable=unused-argument
     **kwargs,
 ):
     """
