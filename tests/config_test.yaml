@@ -19,8 +19,8 @@ scan:
 
 preprocess:
   operation_chain:
-    - name: beamform
-    # Sum() is not needed here as sum_transmits in beamformer is set to true
+    - name: tof_correction
+    - name: delay_and_sum
     - name: demodulate
     - name: envelope_detect
     - name: downsample

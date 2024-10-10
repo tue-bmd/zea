@@ -12,7 +12,6 @@ import h5py
 import keras
 import numpy as np
 import tensorflow as tf
-import tf_keras
 from keras import layers
 
 from usbmd.utils import log, translate
@@ -330,7 +329,7 @@ def h5_dataset_from_directory(
     return dataset
 
 
-class ImageLoader(tf_keras.utils.Sequence):
+class ImageLoader(keras.utils.Sequence):
     """Class for loading ultrasound dataset for training.
 
     Make sure file names in x_directory and y_directory match
@@ -348,6 +347,8 @@ class ImageLoader(tf_keras.utils.Sequence):
         shuffle=True,
     ):
         """Initialization"""
+        super().__init__()
+
         self.x_dataset_directory = Path(x_directory)
         self.y_dataset_directory = Path(y_directory)
 
