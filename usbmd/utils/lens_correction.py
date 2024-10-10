@@ -16,7 +16,7 @@ def calculate_lens_corrected_delays(
     *args,
     lens_sound_speed=1000,
     lens_thickness=1e-3,
-    n_iter=1,
+    n_iter=2,
     **kwargs,
 ):
     """Compute the lens corrected delays IN SAMPLES for a given grid and transmit scheme.
