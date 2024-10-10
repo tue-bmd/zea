@@ -669,12 +669,12 @@ class DummyDataset(DataSet):
     @property
     def num_frames(self):
         """Return number of frames in current file."""
-        return 4
+        return 2
 
     @property
     def total_num_frames(self):
         """Return total number of frames in dataset."""
-        return 20
+        return 4
 
     @property
     def event_structure(self):
@@ -686,7 +686,7 @@ class DummyDataset(DataSet):
         Return number of files in dataset. The number is arbitrary for the dummy
         dataset because it can generate as much data as needed.
         """
-        return 5
+        return 2
 
     def __getitem__(self, index):
         """Read file at index place in file_paths.
