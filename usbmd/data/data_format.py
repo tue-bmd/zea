@@ -835,6 +835,14 @@ def load_usbmd_file(
         # merge file scan parameters with config scan parameters
         scan_params = update_dictionary(file_scan_parameters, config_scan_dict)
 
+        # Retrieve the argument names of the Scan class
+        sig = inspect.signature(Scan.__init__)
+
+        # Filter out the arguments that are not part of the Scan class
+        scan_params = {
+            key: scan_params[key] for key in sig.parameters if key in scan_params
+        }
+
         # Initialize the scan object
         scan = Scan(**scan_params)
 
