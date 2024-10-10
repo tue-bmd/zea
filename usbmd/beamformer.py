@@ -42,6 +42,15 @@ def tof_correction(
         angles (ops.Tensor): The angles of the plane waves in radians of shape
             `(n_tx,)`
         vfocus (ops.Tensor): The focus distance of shape `(n_tx,)`
+        apply_phase_rotation (bool, optional): Whether to apply phase rotation to
+            time-of-flights. Defaults to False.
+        apply_lens_correction (bool, optional): Whether to apply lens correction to
+            time-of-flights. This makes it slower, but more accurate in the near-field.
+            Defaults to False.
+        lens_thickness (float, optional): Thickness of the lens in meters. Used for
+            lens correction. Defaults to 1e-3.
+        lens_sound_speed (float, optional): Speed of sound in the lens in m/s. Used
+            for lens correction Defaults to 1000.
 
     Returns:
         output (ops.Tensor): time-of-flight corrected data
