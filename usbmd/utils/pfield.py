@@ -154,7 +154,7 @@ def compute_pfield(
             log.info(f"Precomputing pressure fields, transmit {j}/{n_transmits}")
 
         # delays and apodization of transmit event
-        delaysTX = ops.convert_to_tensor(scan.t0_delays[j])
+        delaysTX = ops.convert_to_tensor(scan.t0_delays[j], dtype="float32")
         idx_nan = ops.isnan(delaysTX)
         delaysTX = ops.where(idx_nan, 0, delaysTX)
 
