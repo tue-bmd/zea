@@ -2,10 +2,10 @@
 Tensorflow utilities
 """
 
+import keras
 import numpy as np
 import tensorflow as tf
-import tf_keras as keras
-from tf_keras.layers import Lambda, LeakyReLU, ReLU
+from keras.layers import Lambda, LeakyReLU, ReLU
 
 PI = tf.experimental.numpy.pi
 

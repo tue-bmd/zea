@@ -57,7 +57,7 @@ def init_device(
         from usbmd.utils.gpu_utils import get_device
 
         selected_gpu_ids = get_device(device, verbose=verbose)
-        device = selected_gpu_ids_to_device(selected_gpu_ids)
+        device = selected_gpu_ids_to_device(selected_gpu_ids, key="gpu")
     elif ml_library == "numpy":
         device = "cpu"
     else:

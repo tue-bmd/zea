@@ -58,8 +58,8 @@ this class to process data directly without having to define the operations expl
 process = Process(config, scan, probe)
 process.set_pipeline(
     operation_chain=[
-        {"name": "beamform"},
-        {"name": "sum"},
+        {"name": "tof_correction"},
+        {"name": "delay_and_sum"},
         {"name": "demodulate", "params": {"fs": 50e6, "fc": 5e6}},
         {"name": "envelope_detect"},
         {"name": "downsample"},
@@ -115,7 +115,6 @@ MBPF -> Demodulate -> EnvelopeDetect -> Downsample -> Normalize -> LogCompress -
 ```
 
 TODO:
-- Test operations for jax (currently only np / torch / tensorflow tested)
 - Compilation of the pipeline using jit (currently some ops break the jit compatibility)
 
 """
@@ -123,21 +122,28 @@ TODO:
 import importlib
 from abc import ABC, abstractmethod
 
+import keras
 import numpy as np
 import scipy
+from keras import ops
 from scipy import ndimage, signal
 
+import usbmd.beamformer as bmf
 from usbmd.config import Config
 from usbmd.display import scan_convert
 from usbmd.probes import Probe
-from usbmd.registry import (
-    ops_registry,
-    tf_beamformer_registry,
-    torch_beamformer_registry,
-)
+from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import log, translate
-from usbmd.utils.checks import _BACKENDS, get_check
+from usbmd.utils import log, pfield
+from usbmd.utils.checks import get_check
+
+# make sure to reload all modules that import keras
+# to be able to set backend properly
+importlib.reload(bmf)
+importlib.reload(pfield)
+
+# clear registry upon import
+ops_registry.clear()
 
 
 def get_ops(ops_name):
@@ -153,7 +159,6 @@ class Operation(ABC):
         input_data_type=None,
         output_data_type=None,
         with_batch_dim=True,
-        ops="numpy",
     ):
         """Initialize the operation.
 
@@ -161,14 +166,10 @@ class Operation(ABC):
             input_data_type (type): The expected data type of the input data.
             output_data_type (type): The expected data type of the output data.
             with_batch_dim (bool): Whether the input data has a batch dimension.
-            ops (module, str): The operations package used in the operation.
-                Can be a module or a string to import the module. Defaults to "numpy".
-
         """
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
         self.with_batch_dim = with_batch_dim
-        self.ops = ops
 
         self.config = None
         self.scan = None
@@ -180,21 +181,6 @@ class Operation(ABC):
         names = ops_registry.registry.keys()
         classes = ops_registry.registry.values()
         return list(names)[list(classes).index(self.__class__)]
-
-    @property
-    def ops(self):
-        """Get the operations package used in the operation."""
-        assert self._ops is not None, "ops package is not set"
-        return self._ops
-
-    @ops.setter
-    def ops(self, ops):
-        """Set the package for the operation."""
-        if isinstance(ops, str):
-            ops = importlib.import_module(ops)
-            importlib.import_module(f"usbmd.backend.{ops.__name__}.aliases")
-        assert ops.__name__ in _BACKENDS, f"Unsupported operations package {ops}"
-        self._ops = ops
 
     @abstractmethod
     def process(self, data):
@@ -297,7 +283,7 @@ class Operation(ABC):
         """
         return
 
-    def prepare_tensor(self, x, dtype=None, device=None):
+    def prepare_tensor(self, x, dtype=None):
         """Convert input array to appropriate tensor type for the operations package.
 
         Args:
@@ -312,31 +298,25 @@ class Operation(ABC):
             ValueError: If the operations package is not supported.
 
         """
-        if self.ops.__name__ == "numpy":
-            x = np.array(x)
-            if dtype is not None:
-                x = x.astype(dtype)
-            return x
-        elif self.ops.__name__ == "tensorflow":
-            x = self.ops.convert_to_tensor(x)
-            if dtype is not None:
-                x = self.ops.cast(x, dtype)
-            return x
-        elif self.ops.__name__ == "torch":
-            x = self.ops.tensor(x)
-            if dtype is not None:
-                x = x.type(dtype)
-            if device is not None:
-                x = x.to(device)
-            return x
-        else:
-            raise ValueError("Unsupported operations package.")
+        return ops.convert_to_tensor(x, dtype=dtype)
+
+    def to_numpy(self, x):
+        """Convert tensor to numpy array.
+
+        Args:
+            x: The input tensor to be converted.
+
+        Returns:
+            The converted numpy array.
+
+        """
+        return ops.convert_to_numpy(x)
 
 
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
-    def __init__(self, operations, ops="numpy", with_batch_dim=True, device=None):
+    def __init__(self, operations, with_batch_dim=True, device=None):
         """Initialize a pipeline
 
         Args:
@@ -351,10 +331,10 @@ class Pipeline:
 
         self.operations = operations
 
-        self.device = self._check_device(device, ops)
+        self.device = self._check_device(device)
 
         for operation in self.operations:
-            operation.ops = ops
+            # operation.ops = ops
             operation.with_batch_dim = with_batch_dim
 
         # check if the operations are compatible
@@ -433,37 +413,30 @@ class Pipeline:
         return string
 
     @property
-    def ops(self):
-        """Get the operations package used in the pipeline."""
-        assert all(
-            operation.ops == self.operations[0].ops for operation in self.operations
-        ), (
-            "Operations in pipeline are not compatible, "
-            "please use the same operations package for all operations."
-        )
-        return self.operations[0].ops
-
-    @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
         return self.operations[0].with_batch_dim
 
     def on_device(self, func, data, device=None, return_numpy=False):
         """On device function for running pipeline on specific device."""
-        if self.ops.__name__ == "numpy":
+        backend = keras.backend.backend()
+        if backend == "numpy":
             return func(data)
-        elif self.ops.__name__ == "tensorflow":
+        elif backend == "tensorflow":
             on_device_tf = importlib.import_module(
                 "usbmd.backend.tensorflow"
             ).on_device_tf
             return on_device_tf(func, data, device=device, return_numpy=return_numpy)
-        elif self.ops.__name__ == "torch":
+        elif backend == "torch":
             on_device_torch = importlib.import_module(
                 "usbmd.backend.torch"
             ).on_device_torch
             return on_device_torch(func, data, device=device, return_numpy=return_numpy)
+        elif backend == "jax":
+            log.warning("JAX not yet supported for on_device.")
+            return func(data)
         else:
-            raise ValueError("Unsupported operations package.")
+            raise ValueError(f"Unsupported operations package {backend}.")
 
     def set_params(self, config: Config, scan: Scan, probe: Probe):
         """Set the parameters for the pipeline. See Operation.set_params for more info."""
@@ -472,7 +445,7 @@ class Pipeline:
 
     def process(self, data, return_numpy=False):
         """Process input data through the pipeline."""
-        data = self.prepare_tensor(data)
+        data = ops.convert_to_tensor(data)
         if not all(operation._ready for operation in self.operations):
             operations_not_ready = [
                 operation.name for operation in self.operations if not operation._ready
@@ -493,7 +466,10 @@ class Pipeline:
             return self.on_device(
                 processing_func, data, device=self.device, return_numpy=return_numpy
             )
-        return processing_func(data)
+        data_out = processing_func(data)
+        if return_numpy:
+            return ops.convert_to_numpy(data_out)
+        return data_out
 
     def _process(self, data):
         for operation in self.operations:
@@ -508,25 +484,27 @@ class Pipeline:
         for operation in self.operations:
             operation.initialize()
 
-        self._beamformer_warning()
-
     def compile(self, jit=True):
         """Compile the pipeline using jit."""
+        backend = keras.backend.backend()
         if not jit:
             return
-        log.info(f"Compiling pipeline, with ops library: {self.ops.__name__}")
-        if self.ops.__name__ == "numpy":
+        log.info(f"Compiling pipeline, with backend {backend}.")
+        if backend == "numpy":
             return
-        elif self.ops.__name__ == "tensorflow":
-            self._jitted_process = self.ops.function(
+        elif backend == "tensorflow":
+            tf_function = importlib.import_module("tensorflow").function
+
+            self._jitted_process = tf_function(
                 self._process, jit_compile=jit
             )  # tf.function
             return
-        elif self.ops.__name__ == "torch":
+        elif backend == "torch":
             log.warning("JIT compmilation is not yet supported for torch.")
             return
-        elif self.ops.__name__ == "jax":
-            self._jitted_process = self.ops.jit(self._process)  # jax.jit
+        elif backend == "jax":
+            jax_jit = importlib.import_module("jax").jit
+            self._jitted_process = jax_jit(self._process)  # jax.jit
             return
 
     def prepare_tensor(self, x, dtype=None, device=None):
@@ -535,17 +513,16 @@ class Pipeline:
             return x
         return self.operations[0].prepare_tensor(x, dtype=dtype, device=device)
 
-    def _check_device(self, device, ops):
+    def _check_device(self, device):
         if device is None:
             return None
 
         if device == "cpu":
             return "cpu"
 
-        if not isinstance(ops, str):
-            ops = ops.__name__
+        backend = keras.backend.backend()
 
-        if ops == "numpy":
+        if backend == "numpy":
             if device not in [None, "cpu"]:
                 log.warning(
                     f"Device {device} is not supported for numpy operations, using cpu."
@@ -558,38 +535,15 @@ class Pipeline:
                 device, (str, int)
             ), f"device should be a string or int, got {device}"
             if isinstance(device, str):
-                if ops in ["tensorflow", "jax"]:
+                if backend in ["tensorflow", "jax"]:
                     assert device.startswith(
                         "gpu"
                     ), f"device should be 'cpu' or 'gpu:*', got {device}"
-                elif ops == "torch":
+                elif backend == "torch":
                     assert device.startswith(
                         "cuda"
                     ), f"device should be 'cpu' or 'cuda:*', got {device}"
             return device
-
-    def _beamformer_warning(self):
-        """Check if Sum() operation is detected after Beamform() operation."""
-        # if so and Beamform sum_transmits property is True, raise a warning
-        if any(operation.name == "beamform" for operation in self.operations):
-            beamform_index = [
-                i
-                for i, operation in enumerate(self.operations)
-                if operation.name == "beamform"
-            ][0]
-            if self.operations[beamform_index + 1].name != "sum":
-                return
-            if self.operations[beamform_index]._ready is False:
-                return
-            if not self.operations[beamform_index].beamformer.sum_transmits:
-                return
-
-            log.warning(
-                "Sum() operation detected after Beamform() operation with "
-                "sum_transmits=True. This will sum the data along the batch "
-                "dimension, which might not be the expected behavior."
-                "Consider removing the Sum() operation or setting sum_transmits=False."
-            )
 
 
 @ops_registry("identity")
@@ -600,82 +554,209 @@ class Identity(Operation):
         return data
 
 
-@ops_registry("beamform")
-class Beamform(Operation):
-    """Beamforming operation for ultrasound data."""
+@ops_registry("delay_and_sum")
+class DelayAndSum(Operation):
+    """Sums time-delayed signals along channels and transmits."""
 
-    def __init__(self, beamformer=None, **kwargs):
-        self.beamformer = beamformer
-        output_data_type = None
-        if self.beamformer is not None:
-            if self.beamformer.sum_transmits:
-                output_data_type = "beamformed_data"
-            else:
-                output_data_type = "aligned_data"
+    def __init__(self, rx_apo=None, tx_apo=None, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type="beamformed_data",
+            **kwargs,
+        )
+        self.rx_apo = rx_apo
+        self.tx_apo = tx_apo
 
+    def initialize(self):
+        if self.rx_apo is None:
+            self.rx_apo = ops.ones((1, 1, 1, 1, 1))
+
+        if self.tx_apo is None:
+            self.tx_apo = ops.ones((1, 1, 1, 1, 1))
+
+    def process(self, data):
+        """Performs DAS beamforming on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape
+                `(n_frames, n_tx, n_ax, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_frames, n_z, n_x)`
+        """
+        if self.with_batch_dim is False:
+            data = ops.expand_dims(data, axis=0)
+
+        # Sum over the channels, i.e. DAS
+        data = ops.sum(self.rx_apo * data, -2)
+
+        # Sum over transmits, i.e. Compounding
+        data = self.tx_apo * data
+        data = ops.sum(data, 1)
+
+        if self.with_batch_dim is False:
+            data = ops.squeeze(data, axis=0)
+
+        return data
+
+
+@ops_registry("tof_correction")
+class TOFCorrection(Operation):
+    """Time-of-flight correction operation for ultrasound data."""
+
+    def __init__(
+        self,
+        grid=None,
+        sound_speed=None,
+        polar_angles=None,
+        focus_distances=None,
+        sampling_frequency=None,
+        f_number=None,
+        n_el=None,
+        n_tx=None,
+        n_ax=None,
+        fdemod=None,
+        t0_delays=None,
+        tx_apodizations=None,
+        initial_times=None,
+        probe_geometry=None,
+    ):
         super().__init__(
             input_data_type="raw_data",
-            output_data_type=output_data_type,
+            output_data_type=None,
+        )
+        self.grid = grid
+        self.sound_speed = sound_speed
+        self.polar_angles = polar_angles
+        self.focus_distances = focus_distances
+        self.sampling_frequency = sampling_frequency
+        self.f_number = f_number
+        self.n_el = n_el
+        self.n_tx = n_tx
+        self.n_ax = n_ax
+        self.fdemod = fdemod
+        self.t0_delays = t0_delays
+        self.tx_apodizations = tx_apodizations
+        self.initial_times = initial_times
+        self.probe_geometry = probe_geometry
+
+    def initialize(self):
+        self.grid = ops.convert_to_tensor(self.grid, dtype="float32")
+        self.focus_distances = ops.convert_to_tensor(
+            self.focus_distances, dtype="float32"
+        )
+        self.t0_delays = ops.convert_to_tensor(self.t0_delays, dtype="float32")
+        self.tx_apodizations = ops.convert_to_tensor(
+            self.tx_apodizations, dtype="float32"
+        )
+        self.initial_times = ops.convert_to_tensor(self.initial_times, dtype="float32")
+        self.probe_geometry = ops.convert_to_tensor(
+            self.probe_geometry, dtype="float32"
+        )
+
+        super().initialize()
+
+    def process(self, data):
+        tof_data = []
+        if self.with_batch_dim is False:
+            data = ops.expand_dims(data, axis=0)
+        batch_size = data.shape[0]
+        for batch_idx in range(batch_size):
+            tof_corrected_batch = bmf.tof_correction(
+                data[batch_idx],
+                grid=self.grid,
+                t0_delays=self.t0_delays,
+                tx_apodizations=self.tx_apodizations,
+                sound_speed=self.sound_speed,
+                probe_geometry=self.probe_geometry,
+                initial_times=self.initial_times,
+                sampling_frequency=self.sampling_frequency,
+                fdemod=self.fdemod,
+                fnum=self.f_number,
+                angles=self.polar_angles,
+                vfocus=self.focus_distances,
+                apply_phase_rotation=bool(self.fdemod),
+            )
+
+            # Add batch dimension
+            # The shape is now (batch, z, x, num_transmits, num_elements)
+            tof_corrected_batch = tof_corrected_batch[None]
+
+            tof_data.append(tof_corrected_batch)
+
+        # Stack batches of TOF corrected data in a single tensor
+        output = ops.concatenate(tof_data, 0)
+
+        if self.with_batch_dim is False:
+            output = ops.squeeze(output, 0)
+
+        return output
+
+    def _assign_scan_params(self, scan: Scan):
+        self.grid = scan.grid
+        self.focus_distances = scan.focus_distances
+        self.t0_delays = scan.t0_delays
+        self.tx_apodizations = scan.tx_apodizations
+        self.initial_times = scan.initial_times
+        self.probe_geometry = scan.probe_geometry
+
+        self.sound_speed = scan.sound_speed
+        self.polar_angles = scan.polar_angles
+        self.sampling_frequency = scan.fs
+        self.f_number = scan.f_number
+        self.fdemod = scan.fdemod
+
+    @property
+    def _ready(self):
+        return all(
+            [
+                self.grid is not None,
+                self.focus_distances is not None,
+                self.t0_delays is not None,
+                self.tx_apodizations is not None,
+                self.initial_times is not None,
+                self.probe_geometry is not None,
+                self.sound_speed is not None,
+                self.polar_angles is not None,
+                self.sampling_frequency is not None,
+                self.f_number is not None,
+                self.fdemod is not None,
+            ]
+        )
+
+
+@ops_registry("pfield_weighting")
+class PfieldWeighting(Operation):
+    """Weighting aligned data with the pressure field."""
+
+    def __init__(self, pfield=None, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
             **kwargs,
         )
 
-    def initialize(self):
-        super().initialize()
-
-        if self.beamformer is not None:
-            return
-
-        assert (
-            self.config.model.beamformer
-        ), "Beamformer is not set in the config, please set the beamformer type."
-
-        beamformer_type = self.config.model.beamformer.type
-        # pylint: disable=import-outside-toplevel
-        if self.ops.__name__ == "torch":
-            from usbmd.backend.torch.layers.beamformers import get_beamformer
-
-            _BEAMFORMER_TYPES = torch_beamformer_registry.registered_names()
-        elif self.ops.__name__ == "tensorflow":
-            from usbmd.backend.tensorflow.layers.beamformers import get_beamformer
-
-            _BEAMFORMER_TYPES = tf_beamformer_registry.registered_names()
-        else:
-            log.warning(
-                f"Beamformer is not supported for the operations package: {self.ops.__name__} "
-                f"Please use on of the supported beamformer packages: {['torch', 'tensorflow']}"
-            )
-            get_beamformer = None
-            _BEAMFORMER_TYPES = []
-
-        assert beamformer_type in _BEAMFORMER_TYPES, (
-            f"Beamformer type {beamformer_type} is not supported, "
-            f"should be in {_BEAMFORMER_TYPES}"
-        )
-
-        self.beamformer = get_beamformer(self.probe, self.scan, self.config)
-        if self.beamformer.sum_transmits:
-            self.output_data_type = "beamformed_data"
-        else:
-            self.output_data_type = "aligned_data"
-
-    def _assign_config_params(self, config: Config):
-        self.config = config
+        self.pfield = pfield
 
     def _assign_scan_params(self, scan: Scan):
-        self.scan = scan
+        self.pfield = scan.pfield
 
-    def _assign_probe_params(self, probe: Probe):
-        self.probe = probe
+    @property
+    def _ready(self):
+        return self.pfield is not None
 
     def process(self, data):
-        if self.with_batch_dim is False:
-            data = self.ops.expand_dims(data, axis=0)
-        if self.ops.__name__ == "torch":
-            self.beamformer.to(data.device)
-        data = self.beamformer(data, probe=self.probe, scan=self.scan)
-        if self.with_batch_dim is False:
-            data = self.ops.squeeze(data, axis=0)
-        return data
+        # Perform element-wise multiplication with the pressure weight mask
+        # Also add the required dimensions for broadcasting
+        if self.with_batch_dim:
+            pfield = ops.expand_dims(self.pfield, axis=0)
+        else:
+            pfield = self.pfield
+
+        pfield = pfield[..., None, None]
+
+        data_weighted = data * pfield
+        return data_weighted
 
 
 @ops_registry("stack")
@@ -693,7 +774,7 @@ class Stack(Operation):
         self.axis = axis
 
     def process(self, data):
-        return self.ops.stack(data, axis=self.axis)
+        return ops.stack(data, axis=self.axis)
 
 
 @ops_registry("mean")
@@ -709,7 +790,7 @@ class Mean(Operation):
         self.axis = axis
 
     def process(self, data):
-        return self.ops.mean(data, axis=self.axis)
+        return ops.mean(data, axis=self.axis)
 
 
 @ops_registry("sum")
@@ -725,7 +806,7 @@ class Sum(Operation):
         self.axis = axis
 
     def process(self, data):
-        return self.ops.sum(data, axis=self.axis)
+        return ops.sum(data, axis=self.axis)
 
 
 @ops_registry("normalize")
@@ -758,12 +839,12 @@ class Normalize(Operation):
             self.output_range = (0, 1)
 
         if self.input_range is None:
-            minimum = self.ops.min(data)
-            maximum = self.ops.max(data)
+            minimum = ops.min(data)
+            maximum = ops.max(data)
             self.input_range = (minimum, maximum)
         else:
             a_min, a_max = self.input_range
-            data = self.ops.clip(data, a_min, a_max)
+            data = ops.clip(data, a_min, a_max)
         return translate(data, self.input_range, self.output_range)
 
 
@@ -785,15 +866,10 @@ class LogCompress(Operation):
     def process(self, data):
         if self.dynamic_range is None:
             self.dynamic_range = (-60, 0)
-
-        device = None
-        if self.ops.__name__ == "torch":
-            device = data.device
-
-        small_number = self.prepare_tensor(1e-16, dtype=data.dtype, device=device)
-        data = self.ops.where(data == 0, small_number, data)
-        compressed_data = 20 * self.ops.log10(data)
-        compressed_data = self.ops.clip(compressed_data, *self.dynamic_range)
+        small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
+        data = ops.where(data == 0, small_number, data)
+        compressed_data = 20 * ops.log10(data)
+        compressed_data = ops.clip(compressed_data, *self.dynamic_range)
         return compressed_data
 
 
@@ -817,13 +893,12 @@ class Downsample(Operation):
     def process(self, data):
         if self.factor is None:
             return data
-        length = self.ops.shape(data)[self.axis]
+        length = ops.shape(data)[self.axis]
         if self.phase is None:
             self.phase = 0
-        sample_idx = self.ops.arange(self.phase, length, self.factor)
-        if self.ops.__name__ == "torch":
-            sample_idx = sample_idx.to(data.device)
-        return take(data, sample_idx, axis=self.axis, ops=self.ops)
+        sample_idx = ops.arange(self.phase, length, self.factor)
+
+        return take(data, sample_idx, axis=self.axis)
 
 
 @ops_registry("companding")
@@ -874,11 +949,11 @@ class Companding(Operation):
         self.A = config.A
 
     def process(self, data):
-        self.one = self.prepare_tensor(1.0, dtype=data.dtype)
-        self.A = self.prepare_tensor(self.A, dtype=data.dtype)
-        self.mu = self.prepare_tensor(self.mu, dtype=data.dtype)
+        self.one = ops.convert_to_tensor(1.0, dtype=data.dtype)
+        self.A = ops.convert_to_tensor(self.A, dtype=data.dtype)
+        self.mu = ops.convert_to_tensor(self.mu, dtype=data.dtype)
 
-        data = self.ops.clip(data, -1, 1)
+        data = ops.clip(data, -1, 1)
 
         if self.comp_type is None:
             self.comp_type = "mu"
@@ -886,42 +961,40 @@ class Companding(Operation):
 
         def mu_law_compress(x):
             y = (
-                self.ops.sign(x)
-                * self.ops.log(self.one + self.mu * self.ops.abs(x))
-                / self.ops.log(self.one + self.mu)
+                ops.sign(x)
+                * ops.log(self.one + self.mu * ops.abs(x))
+                / ops.log(self.one + self.mu)
             )
             return y
 
         def mu_law_expand(y):
             x = (
-                self.ops.sign(y)
-                * ((self.one + self.mu) ** (self.ops.abs(y)) - self.one)
+                ops.sign(y)
+                * ((self.one + self.mu) ** (ops.abs(y)) - self.one)
                 / self.mu
             )
             return x
 
         def a_law_compress(x):
-            x_sign = self.ops.sign(x)
-            x_abs = self.ops.abs(x)
-            A_log = self.ops.log(self.A)
+            x_sign = ops.sign(x)
+            x_abs = ops.abs(x)
+            A_log = ops.log(self.A)
 
             val1 = x_sign * self.A * x_abs / (self.one + A_log)
-            val2 = (
-                x_sign * (self.one + self.ops.log(self.A * x_abs)) / (self.one + A_log)
-            )
+            val2 = x_sign * (self.one + ops.log(self.A * x_abs)) / (self.one + A_log)
 
-            y = self.ops.where((x_abs >= 0) & (x_abs < (self.one / self.A)), val1, val2)
+            y = ops.where((x_abs >= 0) & (x_abs < (self.one / self.A)), val1, val2)
             return y
 
         def a_law_expand(y):
-            y_sign = self.ops.sign(y)
-            y_abs = self.ops.abs(y)
-            A_log = self.ops.log(self.A)
+            y_sign = ops.sign(y)
+            y_abs = ops.abs(y)
+            A_log = ops.log(self.A)
 
             val1 = y_sign * y_abs * (self.one + A_log) / self.A
-            val2 = y_sign * self.ops.exp(y_abs * (self.one + A_log) - self.one) / self.A
+            val2 = y_sign * ops.exp(y_abs * (self.one + A_log) - self.one) / self.A
 
-            x = self.ops.where(
+            x = ops.where(
                 (y_abs >= 0) & (y_abs < (self.one / (self.one + A_log))), val1, val2
             )
             return x
@@ -954,20 +1027,22 @@ class EnvelopeDetect(Operation):
 
     def process(self, data):
         if data.shape[-1] == 2:
-            data = channels_to_complex(data, ops=self.ops)
+            data = channels_to_complex(data)
         else:
             n_ax = data.shape[self.axis]
             M = 2 ** int(np.ceil(np.log2(n_ax)))
             # data = scipy.signal.hilbert(data, N=M, axis=self.axis)
-            data = hilbert(data, N=M, axis=self.axis, ops=self.ops)
-            indices = self.ops.arange(n_ax)
-            if self.ops.__name__ == "torch":
-                indices = indices.to(data.device)
-            data = take(data, indices, axis=self.axis, ops=self.ops)
-            data = self.ops.squeeze(data, axis=-1)
+            data = hilbert(data, N=M, axis=self.axis)
+            indices = ops.arange(n_ax)
 
-        data = self.ops.abs(data)
-        data = self.ops.cast(data, self.ops.float32)
+            data = take(data, indices, axis=self.axis)
+            data = ops.squeeze(data, axis=-1)
+
+        # data = ops.abs(data)
+        real = ops.real(data)
+        imag = ops.imag(data)
+        data = ops.sqrt(real**2 + imag**2)
+        data = ops.cast(data, "float32")
         return data
 
 
@@ -996,24 +1071,17 @@ class Demodulate(Operation):
 
     def process(self, data):
 
-        device = None
-        if self.ops.__name__ == "torch":
-            device = data.device
-
         if data.shape[-1] == 2:
             if not self.warning_produced:
                 log.warning("Demodulation is not applicable to IQ data.")
                 self.warning_produced = True
             return data
         elif data.shape[-1] == 1:
-            data = self.ops.squeeze(data, axis=-1)
+            data = ops.squeeze(data, axis=-1)
 
-        # currently demodulate converts to numpy so we have to do some trickery
-        if self.ops.__name__ == "torch":
-            data = data.cpu().numpy()
         data = demodulate(data, self.fs, self.fc, self.bandwidth, self.filter_coeff)
-        data = self.prepare_tensor(data, device=device)
-        return complex_to_channels(data, axis=-1, ops=self.ops)
+        data = ops.convert_to_tensor(data)
+        return complex_to_channels(data, axis=-1)
 
     def _assign_scan_params(self, scan):
         self.fs = scan.fs
@@ -1046,9 +1114,9 @@ class UpMix(Operation):
             log.warning("Upmixing is not applicable to RF data.")
             return data
         elif data.shape[-1] == 2:
-            data = channels_to_complex(data, ops=self.ops)
+            data = channels_to_complex(data)
         data = upmix(data, self.fs, self.fc, self.upsampling_rate)
-        data = self.ops.expand_dims(data, axis=-1)
+        data = ops.expand_dims(data, axis=-1)
         return data
 
     def _assign_scan_params(self, scan):
@@ -1113,16 +1181,14 @@ class BandPassFilter(Operation):
         axis = data.ndim + self.axis if self.axis < 0 else self.axis
 
         if data.shape[-1] == 2:
-            data = channels_to_complex(data, ops=self.ops)
+            data = channels_to_complex(data)
 
-        if self.ops.__name__ == "torch":
-            data = data.cpu().numpy()
-
+        data = ops.convert_to_numpy(data)
         data = ndimage.convolve1d(data, self.filter, mode="wrap", axis=axis)
-        data = self.prepare_tensor(data)
+        data = ops.convert_to_tensor(data)
 
-        if data.dtype in [self.ops.complex64, self.ops.complex128]:
-            data = complex_to_channels(data, axis=-1, ops=self.ops)
+        if data.dtype in ["complex64", "complex128"]:
+            data = complex_to_channels(data, axis=-1)
 
         return data
 
@@ -1252,17 +1318,15 @@ class MultiBandPassFilter(Operation):
 
         if self.modtype == "iq":
             assert data.shape[-1] == 2, "IQ data should have 2 channels."
-            data = channels_to_complex(data, ops=self.ops)
-
-        if self.ops.__name__ == "torch":
-            data = data.cpu().numpy()
+            data = channels_to_complex(data)
 
         data_list = []
         for _filter in self.filters:
+            data = ops.convert_to_numpy(data)
             _data = ndimage.convolve1d(data, _filter, mode="wrap", axis=axis)
-            _data = self.prepare_tensor(_data)
+            _data = ops.convert_to_tensor(_data)
             if self.modtype == "iq":
-                _data = complex_to_channels(_data, axis=-1, ops=self.ops)
+                _data = complex_to_channels(_data, axis=-1)
             data_list.append(_data)
 
         return data_list
@@ -1327,10 +1391,6 @@ class ScanConvert(Operation):
         if self.probe_type != "phased":
             return data
 
-        # TODO: not ready for torch yet
-        if self.ops.__name__ == "torch":
-            data = data.cpu().numpy()
-
         return scan_convert(
             data,
             self.x_axis,
@@ -1351,6 +1411,122 @@ class ScanConvert(Operation):
 
     def _assign_scan_params(self, scan):
         self.z_axis = scan.z_axis
+
+
+@ops_registry("doppler")
+class Doppler(Operation):
+    """Compute the Doppler velocities from the I/ time series using a slow-time autocorrelator."""
+
+    def __init__(
+        self,
+        PRF: float = None,
+        fs: float = None,
+        fc: float = None,
+        c: float = None,
+        M: int = None,
+        lag: int = 1,
+        nargout: int = 1,
+        **kwargs,
+    ) -> None:
+        """
+        Args:
+            fc (float): Center frequency in Hz.
+            c (float): Longitudinal velocity in m/s.
+            PRF (float): Pulse repetition frequency in Hz.
+            M (int, optional): Size of the hamming filter for spatial weighted average.
+                Default is 1.
+            The output Doppler velocity is estimated from M-by-M or M(1)-by-M(2)
+                neighborhood around the corresponding pixel.
+            lag (int, optional): LAG used in the autocorrelator. Default is 1.
+
+        Note:
+            This function is currently limited to use with beamformed data, but it
+            can be modified to receive input_data_type = "raw_data".
+        """
+        super().__init__(
+            input_data_type="beamformed_data",
+            output_data_type=None,
+            **kwargs,
+        )
+        self.PRF = PRF
+        self.fs = fs
+        self.fc = fc
+        self.c = c
+        self.M = M
+        self.lag = lag
+        self.nargout = nargout
+        self.warning_produced = False
+
+        assert (
+            self.with_batch_dim is True
+        ), "Doppler requires multiple frames to compute"
+
+    def process(self, data):
+
+        assert data.ndim == 4, "Doppler requires multiple frames to compute"
+
+        if data.shape[-1] == 2:
+            data = channels_to_complex(data)
+
+        # frames as last dimension for iq2doppler func
+        data = ops.transpose(data, (1, 2, 0))
+
+        doppler_velocities = self.iq2doppler(data)
+        return doppler_velocities
+
+    def _assign_scan_params(self, scan):
+        self.fs = scan.fs
+        self.fc = scan.fc
+        self.c = scan.sound_speed
+        self.PRF = 1 / sum(scan.time_to_next_transmit[0])
+
+    def _assign_config_params(self, config):
+        if config.scan.sampling_frequency is not None:
+            self.fs = config.scan.sampling_frequency
+        if config.scan.center_frequency is not None:
+            self.fc = config.scan.center_frequency
+
+    def iq2doppler(self, data):
+        """Compute Doppler from packet of I/Q Data.
+
+        Args:
+            x (ndarray): I/Q complex data of shape n_el, n_ax, n_frames.
+            n_frames corresponds to the ensemble length used to compute the Doppler signal.
+        Returns:
+            doppler_velocities (ndarray): Doppler velocity map of shape n_el, n_ax.
+
+        """
+        assert data.ndim == 3, "Data must be a 3-D array"
+
+        if self.M is None:
+            self.M = np.array([1, 1])
+        elif np.isscalar(self.M):
+            self.M = np.array([self.M, self.M])
+        assert self.M.all() > 0 and np.all(
+            np.equal(self.M, np.round(self.M))
+        ), "M must contain integers > 0"
+
+        assert (
+            isinstance(self.lag, int) and self.lag >= 0
+        ), "Lag must be a positive integer"
+
+        if self.fc is None:
+            raise ValueError("A center frequency (fc) must be specified")
+        if self.PRF is None:
+            raise ValueError("A pulse repetition frequency or period must be specified")
+
+        # Auto-correlation method
+        IQ1 = data[:, :, : data.shape[-1] - self.lag]
+        IQ2 = data[:, :, self.lag :]
+        AC = ops.sum(IQ1 * ops.conj(IQ2), axis=2)  # Ensemble auto-correlation
+
+        # TODO: add spatial weighted average
+
+        # Doppler velocity
+        nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
+        doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
+
+        return doppler_velocities
 
 
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
@@ -1387,7 +1563,7 @@ def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
         iq_data (ndarray): complex valued base-band signal.
 
     """
-    rf_data = np.array(rf_data)
+    rf_data = ops.convert_to_numpy(rf_data)
     assert np.isreal(
         rf_data
     ).all(), f"RF must contain real RF signals, got {rf_data.dtype}"
@@ -1554,7 +1730,7 @@ def get_low_pass_iq_filter(num_taps, fs, f, bw):
         AssertionError: if cutoff frequency (bw / 2) is not within (0, fs / 2)
 
     Returns:
-        ndarray: complex LP filter
+        ndarray: fx LP filter
     """
     assert (bw / 2 > 0) & (bw / 2 < fs / 2), log.error(
         "Cutoff frequency must be within (0, fs / 2), "
@@ -1567,7 +1743,7 @@ def get_low_pass_iq_filter(num_taps, fs, f, bw):
     return lpf
 
 
-def complex_to_channels(complex_data, axis=-1, ops=np):
+def complex_to_channels(complex_data, axis=-1):
     """Unroll complex data to separate channels.
 
     Args:
@@ -1589,7 +1765,7 @@ def complex_to_channels(complex_data, axis=-1, ops=np):
     return iq_data
 
 
-def channels_to_complex(data, ops=np):
+def channels_to_complex(data):
     """Convert array with real and imaginary components at
     different channels to complex data array.
 
@@ -1601,11 +1777,11 @@ def channels_to_complex(data, ops=np):
         ndarray: complex array with real and imaginary components.
     """
     assert data.shape[-1] == 2, "Data must have two channels."
-    assert data.dtype in [ops.float32, ops.float64], "Data must be float type."
-    return ops.complex(data[..., 0], data[..., 1])
+    data = ops.cast(data, "complex64")
+    return data[..., 0] + 1j * data[..., 1]
 
 
-def take(data, indices, axis=-1, ops=np):
+def take(data, indices, axis=-1):
     """Take values from data along axis.
 
     Args:
@@ -1621,7 +1797,7 @@ def take(data, indices, axis=-1, ops=np):
     return ops.take_along_axis(data, indices, axis=axis)
 
 
-def hilbert(x, N: int = None, axis=-1, ops=np):
+def hilbert(x, N: int = None, axis=-1):
     """Manual implementation of Hilbert transform.
 
     Operated in the Fourier domain.
@@ -1651,159 +1827,78 @@ def hilbert(x, N: int = None, axis=-1, ops=np):
         zeros = ops.zeros(
             input_shape[:axis] + (pad,) + input_shape[axis + 1 :],
         )
-        if ops.__name__ == "torch":
-            zeros = zeros.to(x.device)
+
         x = ops.concatenate((x, zeros), axis=axis)
-        n_ax = N
+    else:
+        N = n_ax
 
-    h = np.zeros(n_ax)
-
-    # Create mask to remove the negative frequencies and double the frequencies above 0.
-    if n_ax % 2 == 0:
-        h[0] = h[n_ax // 2] = 1
-        h[1 : n_ax // 2] = 2
+    # Create filter to zero out negative frequencies
+    h = np.zeros(N)
+    if N % 2 == 0:
+        h[0] = h[N // 2] = 1
+        h[1 : N // 2] = 2
     else:
         h[0] = 1
-        h[1 : (n_ax + 1) // 2] = 2
+        h[1 : (N + 1) // 2] = 2
 
-    h = ops.convert_to_tensor(h)
-    h = ops.expand_dims(ops.cast(ops.complex(h, h), ops.complex64), axis=0)
-    if ops.__name__ == "torch":
-        h = h.to(x.device)
-
-    # switch n_ax and n_el elements (based on ndim)
     idx = list(range(n_dim))
     # make sure axis gets to the end for fft (operates on last axis)
     idx.remove(axis)
     idx.append(axis)
+    x = ops.transpose(x, idx)
 
-    x = ops.permute(x, idx)
+    if x.ndim > 1:
+        ind = [np.newaxis] * x.ndim
+        ind[-1] = slice(None)
+        h = h[tuple(ind)]
 
-    x = ops.cast(ops.complex(x, x), ops.complex64)
+    h = ops.convert_to_tensor(h)
+    h = ops.cast(h, "complex64")
+    h = h + 1j * ops.zeros_like(h)
 
-    Xf = ops.fft.fft(x)
-    x = ops.fft.ifft(Xf * h)
+    Xf_r, Xf_i = ops.fft((x, ops.zeros_like(x)))
+
+    Xf_r = ops.cast(Xf_r, "complex64")
+    Xf_i = ops.cast(Xf_i, "complex64")
+
+    Xf = Xf_r + 1j * Xf_i
+    Xf = Xf * h
+
+    # x = np.fft.ifft(Xf)
+    # do manual ifft using fft
+    Xf_r = ops.real(Xf)
+    Xf_i = ops.imag(Xf)
+    Xf_r_inv, Xf_i_inv = ops.fft((Xf_r, -Xf_i))
+
+    Xf_i_inv = ops.cast(Xf_i_inv, "complex64")
+    Xf_r_inv = ops.cast(Xf_r_inv, "complex64")
+
+    x = Xf_r_inv / N
+    x = x + 1j * (-Xf_i_inv / N)
 
     # switch back to original shape
     idx = list(range(n_dim))
     idx.insert(axis, idx.pop(-1))
-    x = ops.permute(x, idx)
+    x = ops.transpose(x, idx)
     return x
 
 
-@ops_registry("doppler")
-class Doppler(Operation):
-    """Compute the Doppler velocities from the I/ time series using a slow-time autocorrelator."""
+def translate(array, range_from, range_to):
+    """Map values in array from one range to other.
 
-    def __init__(
-        self,
-        PRF: float = None,
-        fs: float = None,
-        fc: float = None,
-        c: float = None,
-        M: int = None,
-        lag: int = 1,
-        nargout: int = 1,
-        **kwargs,
-    ) -> None:
-        """
-        Args:
-            fc (float): Center frequency in Hz.
-            c (float): Longitudinal velocity in m/s.
-            PRF (float): Pulse repetition frequency in Hz.
-            M (int, optional): Size of the hamming filter for spatial weighted average.
-                Default is 1.
-            The output Doppler velocity is estimated from M-by-M or M(1)-by-M(2)
-                neighborhood around the corresponding pixel.
-            lag (int, optional): LAG used in the autocorrelator. Default is 1.
+    Args:
+        array (ndarray): input array.
+        range_from (Tuple): lower and upper bound of original array.
+        range_to (Tuple): lower and upper bound to which array should be mapped.
 
-        Note:
-            This function is currently limited to use with beamformed data, but it
-            can be modified to receive input_data_type = "raw_data".
-        """
-        super().__init__(
-            input_data_type="beamformed_data",
-            output_data_type=None,
-            **kwargs,
-        )
-        self.PRF = PRF
-        self.fs = fs
-        self.fc = fc
-        self.c = c
-        self.M = M
-        self.lag = lag
-        self.nargout = nargout
-        self.warning_produced = False
+    Returns:
+        (ndarray): translated array
+    """
+    left_min, left_max = range_from
+    right_min, right_max = range_to
 
-        assert (
-            self.with_batch_dim is True
-        ), "Doppler requires multiple frames to compute"
+    # Convert the left range into a 0-1 range (float)
+    value_scaled = (array - left_min) / (left_max - left_min)
 
-    def process(self, data):
-
-        assert data.ndim == 4, "Doppler requires multiple frames to compute"
-
-        if data.shape[-1] == 2:
-            data = channels_to_complex(data, ops=self.ops)
-
-        # frames as last dimension for iq2doppler func
-        data = self.ops.permute(data, (1, 2, 0))
-
-        doppler_velocities = self.iq2doppler(data)
-        return doppler_velocities
-
-    def _assign_scan_params(self, scan):
-        self.fs = scan.fs
-        self.fc = scan.fc
-        self.c = scan.sound_speed
-        self.PRF = 1 / sum(scan.time_to_next_transmit[0])
-
-    def _assign_config_params(self, config):
-        if config.scan.sampling_frequency is not None:
-            self.fs = config.scan.sampling_frequency
-        if config.scan.center_frequency is not None:
-            self.fc = config.scan.center_frequency
-
-    def iq2doppler(self, data):
-        """Compute Doppler from packet of I/Q Data.
-
-        Args:
-            x (ndarray): I/Q complex data of shape n_el, n_ax, n_frames.
-            n_frames corresponds to the ensemble length used to compute the Doppler signal.
-        Returns:
-            doppler_velocities (ndarray): Doppler velocity map of shape n_el, n_ax.
-
-        """
-        assert data.ndim == 3, "Data must be a 3-D array"
-
-        if self.M is None:
-            self.M = np.array([1, 1])
-        elif np.isscalar(self.M):
-            self.M = np.array([self.M, self.M])
-        assert self.M.all() > 0 and np.all(
-            np.equal(self.M, np.round(self.M))
-        ), "M must contain integers > 0"
-
-        assert (
-            isinstance(self.lag, int) and self.lag >= 0
-        ), "Lag must be a positive integer"
-
-        if self.fc is None:
-            raise ValueError("A center frequency (fc) must be specified")
-        if self.PRF is None:
-            raise ValueError("A pulse repetition frequency or period must be specified")
-
-        # Auto-correlation method
-        IQ1 = data[:, :, : data.shape[-1] - self.lag]
-        IQ2 = data[:, :, self.lag :]
-        AC = self.ops.sum(IQ1 * self.ops.conj(IQ2), axis=2)  # Ensemble auto-correlation
-
-        # TODO: add spatial weighted average
-
-        # Doppler velocity
-        nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
-        doppler_velocities = (
-            -nyquist_velocities * self.ops.imag(self.ops.log(AC)) / np.pi
-        )
-
-        return doppler_velocities
+    # Convert the 0-1 range into a value in the right range.
+    return right_min + (value_scaled * (right_max - right_min))
