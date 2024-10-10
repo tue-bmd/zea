@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.config.validation import check_config
 from usbmd.data import generate_usbmd_dataset, get_dataset
 from usbmd.generate import GenerateDataSet
