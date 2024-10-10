@@ -17,13 +17,13 @@ def calculate_lens_corrected_delays(
     sound_speed,
     n_tx,
     n_el,
+    # pylint: disable=unused-argument
     focus_distances,
+    # pylint: disable=unused-argument
     polar_angles,
-    *args,
     lens_sound_speed=1000,
     lens_thickness=1e-3,
     n_iter=2,
-    **kwargs,
 ):
     """Compute the lens corrected delays IN SAMPLES for a given grid and transmit scheme.
 
@@ -49,8 +49,8 @@ def calculate_lens_corrected_delays(
     """
     for arr in [t0_delays, grid, tx_apodizations, probe_geometry]:
         assert arr.ndim == 2
-
-    n_tx = t0_delays.shape[0]
+    assert probe_geometry.shape[0] == n_el
+    assert t0_delays.shape[0] == n_tx
 
     tx_delays = []
     rx_delays = compute_lens_corrected_travel_times(
