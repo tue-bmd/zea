@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import h5py
+import keras
 import numpy as np
 import tensorflow as tf
 
