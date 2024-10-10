@@ -24,7 +24,7 @@ from usbmd.registry import metrics_registry
 from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, _ML_LIB_AVAILABLE, _MOD_TYPES
 
-_BACKENDS = [None, "torch", "tensorflow", "numpy"]
+_BACKENDS = [None, "torch", "tensorflow", "numpy", "jax"]
 _BEAMFORMER_TYPES = ["das"]  # TODO: hardcoded for now
 
 

@@ -15,8 +15,8 @@ In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from terminal:
 
-```bash
-python -m pip install -e .
+```shell
+pip install -e .[opencv-python-headless]
 ```
 
 Other install options can be found in the [Install.md](Install.md) file.
@@ -31,17 +31,16 @@ import usbmd
 # or if you want to use the Tensorflow tools
 import usbmd.backend.tensorflow as usbmd_tf
 # or if you want to use the Pytorch tools
-import usbmd.backend.pytorch as usbmd_torch
+import usbmd.backend.torch as usbmd_torch
 ```
 
 More complete examples can be found in the [examples](examples) folder.
 
-The easiest way to get started is to use the DataloaderUI class
+The easiest way to get started is to use the Interface class
 ```python
 import matplotlib.pyplot as plt
 
-from usbmd.setup_usbmd import setup
-from usbmd.ui import DataLoaderUI
+from usbmd import Interface, setup
 
 # choose your config file
 # all necessary settings should be in the config file
@@ -52,10 +51,10 @@ config_path = "configs/config_picmus_rf.yaml"
 users_paths = "users.yaml"
 config = setup(config_path, users_paths, create_user=True)
 
-# initialize the DataloaderUI class with your config
-ui = DataLoaderUI(config)
-image = ui.run()
-# ui.plot()
+# initialize the Interface class with your config
+interface = Interface(config)
+image = interface.run()
+# interface.plot()
 
 # plot the image
 plt.figure()
@@ -64,7 +63,7 @@ plt.show()
 ```
 
 ### Loading a single file
-The `DataloaderUI` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
+The `Interface` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
 We do this by manually loading a single usbmd file with `load_usbmd_file` and processing it with the `Process` class.
 ```python
 import matplotlib.pyplot as plt
@@ -124,7 +123,8 @@ plt.imshow(image, cmap="gray")
 # initialize the processing pipeline
 process.set_pipeline(
     operation_chain=[
-        {"name": "beamform"},
+        {"name": "tof_correction"},
+        {"name": "delay_and_sum"},
         {"name": "demodulate"},
         {"name": "envelope_detect"},
         {"name": "downsample"},
@@ -146,7 +146,7 @@ plt.imshow(image, cmap="gray")
 ### Handling multiple files (i.e. datasets)
 
 You can also make use of the `USBMDDataSet` class to load and process multiple files at once.
-We will have to manually initialize the `Scan` and `Probe` classes and pass them to the `Process` class. This was done automatically in the `DataloaderUI` in the first example.
+We will have to manually initialize the `Scan` and `Probe` classes and pass them to the `Process` class. This was done automatically in the `Interface` in the first example.
 
 ```python
 import matplotlib.pyplot as plt
@@ -190,7 +190,8 @@ process = Process(config=config, scan=scan, probe=probe)
 # initialize the processing pipeline
 process.set_pipeline(
     operation_chain=[
-        {"name": "beamform"},
+        {"name": "tof_correction"},
+        {"name": "delay_and_sum"},
         {"name": "demodulate"},
         {"name": "envelope_detect"},
         {"name": "downsample"},

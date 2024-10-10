@@ -3,7 +3,7 @@
 
 import pytest
 
-from usbmd.backend.pytorch.utils.gpu_config import get_device as get_device_pytorch
+from usbmd.backend.torch.utils.gpu_config import get_device as get_device_pytorch
 from usbmd.backend.tensorflow.utils.gpu_config import get_device as get_device_tf
 
 

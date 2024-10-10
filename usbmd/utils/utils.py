@@ -9,10 +9,12 @@ import functools
 import hashlib
 import inspect
 import platform
+from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
+
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_uint8_images
 
@@ -142,6 +144,9 @@ def save_to_gif(images, filename, fps=20):
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
+    assert isinstance(
+        filename, (str, Path)
+    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     if fps > 50:
@@ -175,6 +180,9 @@ def save_to_mp4(images, filename, fps=20):
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
     """
+    assert isinstance(
+        filename, (str, Path)
+    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     filename = str(filename)
@@ -421,3 +429,22 @@ def get_function_args(func):
     """Get the names of the arguments of a function."""
     sig = inspect.signature(func)
     return tuple(sig.parameters)
+
+
+def keep_trying(fn, args=None, required_set=None):
+    """Keep trying to run a function until it succeeds.
+    Args:
+        fn (function): function to run
+        args (dict, optional): arguments to pass to function
+        required_set (set, optional): set of required outputs
+            if output is not in required_set, function will be rerun
+    """
+    while True:
+        try:
+            out = fn(**args) if args is not None else fn()
+            if required_set is not None:
+                assert out is not None
+                assert out in required_set, f"Output {out} not in {required_set}"
+            return out
+        except Exception as e:
+            print(e)
