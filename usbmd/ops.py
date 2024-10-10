@@ -134,13 +134,14 @@ from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import log, pfield
+from usbmd.utils import log, pfield, lens_correction
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras
 # to be able to set backend properly
 importlib.reload(bmf)
 importlib.reload(pfield)
+importlib.reload(lens_correction)
 
 # clear registry upon import
 ops_registry.clear()
