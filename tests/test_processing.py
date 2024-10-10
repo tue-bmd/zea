@@ -1,28 +1,19 @@
 """Tests for the processing module."""
 
+import importlib
+import math
 import random
-from math import e
 
 import decorator
 import numpy as np
 import pytest
 import tensorflow as tf
 import torch
+from scipy.signal import hilbert
 
-from usbmd.ops import (
-    Companding,
-    Demodulate,
-    Downsample,
-    EnvelopeDetect,
-    LogCompress,
-    Normalize,
-    UpMix,
-    channels_to_complex,
-    complex_to_channels,
-    hilbert,
-)
+from usbmd import ops
 from usbmd.probes import get_probe
-from usbmd.processing import Process
+from usbmd.processing import Process, set_backend
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
@@ -36,7 +27,7 @@ def set_random_seed(seed=None):
     return seed
 
 
-def equality_libs_processing(test_func):
+def equality_libs_processing(decimal=4):
     """Test the processing functions of different libraries
 
     Check if np / tf / torch processing funcs produce equal output.
@@ -44,7 +35,7 @@ def equality_libs_processing(test_func):
     Example:
         ```python
             @pytest.mark.parametrize('some_keys', [some_values])
-            @equality_libs_processing # <-- add as inner most decorator
+            @equality_libs_processing(decimal=4) # <-- add as inner most decorator
             def test_my_processing_func(some_arguments):
                 # Do some processing
                 output = my_processing_func(some_arguments)
@@ -58,67 +49,64 @@ def equality_libs_processing(test_func):
             - my_processing_func_tf
             - test_my_processing_func
     """
-    decimal = 5
 
-    # @functools.wraps(test_func)
     def wrapper(test_func, *args, **kwargs):
         # Set random seed
         seed = np.random.randint(0, 1000)
-        set_random_seed(seed)
 
         # Extract function name from test function
         func_name = test_func.__name__.split("test_", 1)[-1]
 
-        assert args[-1] == "numpy", (
-            "Last argument should be 'numpy' for equality libs processing decorator."
-            f"got {args[-1]} instead."
-        )
-        args = list(args)
-
-        # Run the test function with the original processing module
-        args[-1] = "numpy"
+        # Run the test function
+        set_random_seed(seed)
+        set_backend("numpy")
+        importlib.reload(ops)
         original_output = test_func(*args, **kwargs)
 
-        tf_output = None
         set_random_seed(seed)
-        args[-1] = "tensorflow"
+        set_backend("tensorflow")
+        importlib.reload(ops)
+
         tf_output = np.array(test_func(*args, **kwargs))
 
         # Run the test function with processing_torch module
-        torch_output = None
         set_random_seed(seed)
-        args[-1] = "torch"
+        set_backend("torch")
+        importlib.reload(ops)
+
         torch_output = np.array(test_func(*args, **kwargs))
 
-        # Check if the outputs from the individual test functions are equal
-        if tf_output is not None:
-            np.testing.assert_almost_equal(
-                original_output,
-                tf_output,
-                decimal=decimal,
-                err_msg=f"Function {func_name} failed with tensorflow processing.",
-            )
-            print(f"Function {func_name} passed with tensorflow output.")
-        if torch_output is not None:
-            np.testing.assert_almost_equal(
-                original_output,
-                torch_output,
-                decimal=decimal,
-                err_msg=f"Function {func_name} failed with pytorch processing.",
-            )
-            print(f"Function {func_name} passed with pytorch output.")
-        if tf_output is not None and torch_output is not None:
-            np.testing.assert_almost_equal(
-                tf_output,
-                torch_output,
-                decimal=decimal,
-                err_msg=(
-                    f"Function {func_name} failed, tensorflow "
-                    "and pytorch output not the same."
-                ),
-            )
+        # Run the test function with
+        set_random_seed(seed)
+        set_backend("jax")
+        importlib.reload(ops)
 
-    return decorator.decorator(wrapper, test_func)
+        jax_output = np.array(test_func(*args, **kwargs))
+
+        # Check if the outputs from the individual test functions are equal
+        np.testing.assert_almost_equal(
+            original_output,
+            tf_output,
+            decimal=decimal,
+            err_msg=f"Function {func_name} failed with tensorflow processing.",
+        )
+        print(f"Function {func_name} passed with tensorflow output.")
+        np.testing.assert_almost_equal(
+            original_output,
+            torch_output,
+            decimal=decimal,
+            err_msg=f"Function {func_name} failed with pytorch processing.",
+        )
+        print(f"Function {func_name} passed with pytorch output.")
+        np.testing.assert_almost_equal(
+            original_output,
+            jax_output,
+            decimal=decimal,
+            err_msg=f"Function {func_name} failed with jax processing.",
+        )
+        print(f"Function {func_name} passed with jax output.")
+
+    return decorator.decorator(wrapper)
 
 
 @pytest.mark.parametrize(
@@ -130,15 +118,15 @@ def equality_libs_processing(test_func):
         ("mu", (512, 512), (50, 300)),
     ],
 )
-@equality_libs_processing
-def test_companding(comp_type, size, parameter_value_range, ops="numpy"):
+@equality_libs_processing(decimal=4)
+def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
         mu = parameter_value if comp_type == "mu" else 0
 
-        companding = Companding(comp_type=comp_type, A=A, mu=mu, expand=False, ops=ops)
+        companding = ops.Companding(comp_type=comp_type, A=A, mu=mu, expand=False)
 
         signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
         signal = signal.astype("float32")
@@ -146,13 +134,13 @@ def test_companding(comp_type, size, parameter_value_range, ops="numpy"):
         signal = companding.prepare_tensor(signal)
         signal_out = companding.process(signal)
         assert np.any(
-            np.not_equal(np.array(signal), np.array(signal_out))
+            np.not_equal(companding.to_numpy(signal), companding.to_numpy(signal_out))
         ), "Companding failed, arrays should not be equal"
         companding.expand = True
         signal_out = companding.process(signal_out)
 
-        signal = np.array(signal)
-        signal_out = np.array(signal_out)
+        signal = companding.to_numpy(signal)
+        signal_out = companding.to_numpy(signal_out)
         np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
 
@@ -166,8 +154,8 @@ def test_companding(comp_type, size, parameter_value_range, ops="numpy"):
         ((1, 128, 32), None, None),
     ],
 )
-@equality_libs_processing
-def test_converting_to_image(size, dynamic_range, input_range, ops="numpy"):
+@equality_libs_processing(decimal=4)
+def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
@@ -182,15 +170,15 @@ def test_converting_to_image(size, dynamic_range, input_range, ops="numpy"):
         np.random.random(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
     )
     output_range = (0, 1)
-    normalize = Normalize(output_range, input_range, ops=ops)
-    log_compress = LogCompress(dynamic_range, ops=ops)
+    normalize = ops.Normalize(output_range, input_range)
+    log_compress = ops.LogCompress(dynamic_range)
 
     data = normalize.prepare_tensor(data)
     _data = log_compress(normalize(data))
-    _data = np.array(_data)
+    _data = log_compress.to_numpy(_data)
     # data should be in dynamic range
     assert np.all(
-        np.logical_and(_data >= _dynamic_range[0], _data <= _dynamic_range[1])
+        np.logical_and(_data >= _dynamic_range[0], _data <= _dynamic_range[1]),
     ), f"Data is not in dynamic range after converting to image {_dynamic_range}"
     return _data
 
@@ -203,14 +191,14 @@ def test_converting_to_image(size, dynamic_range, input_range, ops="numpy"):
         ((1, 128, 32), (50, 51), (-2.2, 3.0)),
     ],
 )
-@equality_libs_processing
-def test_normalize(size, output_range, input_range, ops="numpy"):
+@equality_libs_processing(decimal=4)
+def test_normalize(size, output_range, input_range):
     """Test normalize function"""
-    normalize = Normalize(output_range, input_range, ops=ops)
+    normalize = ops.Normalize(output_range, input_range)
 
     _input_range = output_range
     _output_range = input_range
-    normalize_back = Normalize(_output_range, _input_range, ops=ops)
+    normalize_back = ops.Normalize(_output_range, _input_range)
 
     # create random data between input range
     data = np.random.random(size) * (input_range[1] - input_range[0]) + input_range[0]
@@ -219,11 +207,13 @@ def test_normalize(size, output_range, input_range, ops="numpy"):
     input_range, output_range = output_range, input_range
     _data = normalize_back(_data)
     # test if default args work too
-    normalize = Normalize(ops=ops)
+    normalize = ops.Normalize()
     _ = normalize(data)
 
-    np.testing.assert_almost_equal(np.array(data), np.array(_data))
-    return _data
+    np.testing.assert_almost_equal(
+        normalize.to_numpy(data), normalize.to_numpy(_data), decimal=4
+    )
+    return normalize.to_numpy(_data)
 
 
 @pytest.mark.parametrize(
@@ -237,8 +227,8 @@ def test_normalize(size, output_range, input_range, ops="numpy"):
 def test_complex_to_channels(size, axis):
     """Test complex to channels and back"""
     data = np.random.random(size) + 1j * np.random.random(size)
-    _data = complex_to_channels(data, axis=axis)
-    __data = channels_to_complex(_data)
+    _data = ops.complex_to_channels(data, axis=axis)
+    __data = ops.channels_to_complex(_data)
     np.testing.assert_almost_equal(data, __data)
     return _data
 
@@ -254,8 +244,8 @@ def test_complex_to_channels(size, axis):
 def test_channels_to_complex(size, axis):
     """Test channels to complex and back"""
     data = np.random.random(size)
-    _data = channels_to_complex(data)
-    __data = complex_to_channels(_data, axis=axis)
+    _data = ops.channels_to_complex(data)
+    __data = ops.complex_to_channels(_data, axis=axis)
     np.testing.assert_almost_equal(data, __data)
     return _data
 
@@ -268,7 +258,7 @@ def test_channels_to_complex(size, axis):
         (2, 3),
     ],
 )
-def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
+def test_up_and_down_conversion(factor, batch_size):
     """Test rf2iq and iq2rf in sequence"""
     probe = get_probe("verasonics_l11_4v")
     probe_parameters = probe.get_parameters()
@@ -300,9 +290,9 @@ def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
     if idx > 0:
         data = data[..., :-idx, :]
 
-    downsample = Downsample(factor=factor, axis=-3, ops=ops)
-    demodulate = Demodulate(fs=fs, fc=fc, bandwidth=None, filter_coeff=None, ops=ops)
-    upmix = UpMix(fs=fs, fc=fc, upsampling_rate=factor, ops=ops)
+    downsample = ops.Downsample(factor=factor, axis=-3)
+    demodulate = ops.Demodulate(fs=fs, fc=fc, bandwidth=None, filter_coeff=None)
+    upmix = ops.UpMix(fs=fs, fc=fc, upsampling_rate=factor)
 
     # cut n_ax data so it is divisible by factor
     data = data[:, : (data.shape[1] // factor) * factor]
@@ -317,35 +307,37 @@ def test_up_and_down_conversion(factor, batch_size, ops="numpy"):
     ), "Data is not equal after up and down conversion."
 
 
-@equality_libs_processing
-def test_hilbert_transform(ops="numpy"):
+@equality_libs_processing(decimal=4)
+def test_hilbert_transform():
     """Test hilbert transform"""
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
-    data = np.sin(np.linspace(0, 2 * e * np.pi, 500))
-    data = np.expand_dims(data, axis=-1)
-    data = np.expand_dims(data, axis=0)
+    data = np.sin(np.linspace(0, 2 * math.e * np.pi, 500))
+    data = data[np.newaxis, :, np.newaxis, np.newaxis]
     data = np.tile(data, (2, 1, 128, 1))
 
     data = data + np.random.random(data.shape) * 0.1
 
     # just getting this operation for the utils
-    envelope_detect = EnvelopeDetect(axis=-3, ops=ops)
-    ops = envelope_detect.ops
+    envelope_detect = ops.EnvelopeDetect(axis=-3)
 
-    data = envelope_detect.prepare_tensor(data)
-    data_iq = hilbert(data, axis=-3, ops=ops)
-    assert data_iq.dtype in [
-        ops.complex64,
-        ops.complex128,
+    data_prepared = envelope_detect.prepare_tensor(data)
+    data_iq = ops.hilbert(data_prepared, axis=-3)
+    assert str(data_iq.dtype).rsplit(".", maxsplit=1)[-1] in [
+        "complex64",
+        "complex128",
     ], f"Data type should be complex, got {data_iq.dtype} instead."
 
-    data_iq = np.array(data_iq)
+    data_iq = envelope_detect.to_numpy(data_iq)
+
+    reference_data_iq = hilbert(data, axis=-3)
+    np.testing.assert_almost_equal(reference_data_iq, data_iq, decimal=4)
+
     return data_iq
 
 
-@equality_libs_processing
-def test_processing_class(ops="numpy"):
+@equality_libs_processing(decimal=4)
+def test_processing_class():
     """Test the processing class"""
     operation_chain = [
         {
@@ -380,7 +372,6 @@ def test_processing_class(ops="numpy"):
     process.set_pipeline(
         operation_chain=operation_chain,
         device="cpu",
-        ml_library=ops,
     )
 
     beamformed_data = np.random.random((2, 500, 128, 2))
@@ -390,7 +381,6 @@ def test_processing_class(ops="numpy"):
         dtype="beamformed_data",
         to_dtype="image",
         device="cpu",
-        ml_library=ops,
     )
 
     beamformed_data = np.random.random((2, 500, 128, 2))

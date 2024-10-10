@@ -17,22 +17,22 @@ from typing import Union
 
 import yaml
 
+from usbmd.config import Config
 from usbmd.utils import log, strtobool
 
-DEFAULT_WINDOWS_DATA_ROOT = "Z:/Ultrasound-BMd/data"
-DEFAULT_LINUX_DATA_ROOT = "/home/data/ultrasound"
-DEFAULT_USERS_CONFIG_PATH = "./users.yaml"
-
-DEFAULT_USER = {
-    "windows_hostname": {
-        "system": "windows",
-        "data_root": DEFAULT_WINDOWS_DATA_ROOT,
-    },
-    "linux_hostname": {
-        "system": "linux",
-        "data_root": DEFAULT_LINUX_DATA_ROOT,
-    },
+DEFAULT_DATA_ROOT = {
+    "windows": "Z:/Ultrasound-BMd/data",
+    "linux": "/mnt/z/Ultrasound-BMd/data",
+    None: "/mnt/z/Ultrasound-BMd/data",  # for other system
 }
+
+DEFAULT_LINUX_DATA_ROOT = DEFAULT_DATA_ROOT["linux"]
+DEFAULT_USERS_CONFIG_PATH = "./users.yaml"
+DEFAULT_OUTPUT_PATH = "{data_root}/output"
+
+
+class NoYamlFileError(Warning):
+    """Raised when the users.yaml file is not found."""
 
 
 class UnknownUsernameWarning(UserWarning):
@@ -57,24 +57,20 @@ class UnknownLocalRemoteWarning(UserWarning):
     """
 
 
-def _fallback_to_default_data_root(config, system):
+def _create_empty_yaml(path):
+    # Create empty file if it does not exist
+    with open(path, "a", encoding="utf-8"):
+        pass
 
-    default_windows_data_root = DEFAULT_WINDOWS_DATA_ROOT
-    default_linux_data_root = DEFAULT_LINUX_DATA_ROOT
 
-    if "default_user" in config:
-        default_config = config["default_user"]
-        if "windows_hostname" in default_config:
-            default_windows_data_root = default_config["windows_hostname"]["data_root"]
-        elif "linux_hostname" in default_config:
-            default_linux_data_root = default_config["linux_hostname"]["data_root"]
+def _fallback_to_default_data_root(system):
+    if system not in DEFAULT_DATA_ROOT:
+        system = None
+    return DEFAULT_DATA_ROOT[system]
 
-    if system == "windows":
-        return default_windows_data_root
-    elif system == "linux":
-        return default_linux_data_root
-    else:
-        return "./"
+
+def _default_output_path(data_root):
+    return Path(DEFAULT_OUTPUT_PATH.format(data_root=data_root))
 
 
 def _verify_user_config_and_get_paths(username, config, system, hostname, local):
@@ -93,16 +89,20 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
     """
     # Get config for user and hostname
     config = config[username]
+
     if hostname in config:
+        # Check if hostname is in the config
         config = config[hostname]
-    elif "hostname" in config:
-        config = config["hostname"]
+    elif "data_root" in config:
+        # If hostname is not in the config, check if there is a default data_root
+        pass
     else:
+        # No hostname or data_root found in config so fallback to default
         warnings.warn(
-            f"Unknown hostname {hostname} for user {username}",
+            f"Unknown hostname {hostname} for user {username} and no default data_root found.",
             UnknownHostnameWarning,
         )
-        return _fallback_to_default_data_root(config, system), "./output"
+        return _fallback_to_default_data_root(system), "./output"
 
     # Check if set os system matches with the current system
     if "system" in config:
@@ -112,7 +112,7 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
         config.pop("system")
 
     # Assert that data_root is set
-    assert "data_root" in config, "Please add a data_root key to your user / hostname."
+    assert "data_root" in config, "Please add a data_root key."
 
     # Assert config only contains data_root and output
     unknown_keys = [x for x in config.keys() if x not in ["data_root", "output"]]
@@ -142,7 +142,7 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
                     f"Unknown local path for {key} in user config. Falling back to default.",
                     UnknownLocalRemoteWarning,
                 )
-                paths[key] = _fallback_to_default_data_root(config, system)
+                paths[key] = _fallback_to_default_data_root(system)
 
         elif local is False:
             if "remote" in path:
@@ -152,16 +152,17 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
                     f"Unknown remote path for {key} in user config. Falling back to default.",
                     UnknownLocalRemoteWarning,
                 )
-                paths[key] = _fallback_to_default_data_root(config, system)
+                paths[key] = _fallback_to_default_data_root(system)
         else:
             raise ValueError(
                 f"Please set local to True or False or have the {key} "
-                + "specified as a string (without local / remote key)."
+                "specified as a string (without local / remote sub keys). "
+                f"Current value, 'data_root': {path}."
             )
 
     # Set output path if not set
     if "output" not in paths:
-        paths["output"] = Path(paths["data_root"], "output")
+        paths["output"] = _default_output_path(paths["data_root"])
         log.warning("No output path set, using data_root/output as output path.")
 
     return paths["data_root"], paths["output"]
@@ -174,9 +175,47 @@ def _verify_paths(data_path):
             continue
         if not Path(path).is_dir():
             log.warning(
-                f"{key} path {path} does not exist, please update your "
+                f"{key} path `{path}` does not exist, please update your "
                 f"{log.yellow('users.yaml')} file."
             )
+
+
+def _load_users_yaml(user_config, local, username, hostname):
+    config_path = Path(user_config)
+
+    # If there is no users.yaml file yet, create one.
+    if not config_path.is_file():
+        warnings.warn(
+            f"No {user_config} file found, creating a new one. "
+            "Consider running `python -m usbmd.datapaths` to setup your paths. ",
+            NoYamlFileError,
+        )
+
+        _create_empty_yaml(config_path)
+
+        try:
+            create_new_user(local=local)
+        except:
+            log.warning(
+                f"Could not create user profile for {username} on {hostname}, using default."
+            )
+
+    # Load YAML file with user info
+    with open(config_path, "r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if config is None:
+        config = {}
+
+    if not isinstance(config, dict):
+        # Raise error if config is not a dictionary, for example if its empty.
+        # Lets not overwrite the users config file in this case.
+        raise ValueError(
+            f"""YAML file should contain a dictionary, but found {type(config)}".
+            Please check your users.yaml file for corruptions. In case you want to create a
+            new users.yaml file, please delete the current one."""
+        )
+    return config
 
 
 def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> dict:
@@ -186,48 +225,35 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
         user_config (str or dict): Path that points to yaml file with user info.
             Defaults to None. In that case `./users.yaml` is taken
             as default file. If not string, could also be a dictionary.
-            Should be structured see example below.
-
-            ```yaml
-                my_username:
-                    my_hostname:
-                        system: windows
-                        data_root: C:/path_to_my_data_root/
-                        output: C:/other_paths/
-                    linux_hostname:
-                        system: linux
-                        data_root: /home/path_to_my_data_root/
-                        output: C:/other_paths/
-                    # if both my_hostname and linux_hostname are not matching, fallback to hostname:
-                    hostname:
-                        system: linux
-                        data_root: /home/path_to_my_data_root/
-
-                other_username:
-                    other_hostname:
-                        system: windows
-                        data_root:
-                            local: C:/path_to_my_local_data_root/
-                            remote: Z:/path_to_my_remote_data_root/
-                        output:
-                            local: C:/path_to_my_local_output/
-                            remote: Z:/path_to_my_remote_output/
-            ```
-            the default_user can also be set in the users config but should
-            always be of the form:
-
-            ```yaml
-            default_user:
-                windows_hostname:
-                    system: windows
-                    data_root: C:/path_to_my_default_data_root/
-                linux_hostname:
-                    system: linux
-                    data_root: /home/path_to_my_default_data_root/
-            ```
-            When a username is not set, these paths are used as fallback.
+            Should be structured like example below.
 
         local (bool): Use local dataset or get from NAS.
+
+    ```yaml
+    data_root: ...
+    output: ...
+    ```
+
+    you can also specify different `data_root` for different users and machines:
+
+    ```yaml
+    my_username:
+        my_hostname:
+            system: windows
+            data_root: ...
+            output: ...
+        other_hostname:
+            system: linux
+            data_root:
+                local: ...
+                remote: ...
+        # if both my_hostname and other_hostname are not matching, fallback to:
+        system: linux
+        data_root: ...
+
+    other_username:
+        data_root: ...
+    ```
 
     Returns:
         data_path (dict): absolute paths to location of data. Stores the following
@@ -241,10 +267,6 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     hostname = socket.gethostname()
     repo_root = Path(__file__)
 
-    assert isinstance(
-        user_config, (str, dict, type(None))
-    ), "user_config should be a string or dictionary."
-
     # If user_config is None, use the default users.yaml file
     if isinstance(user_config, type(None)):
         user_config = DEFAULT_USERS_CONFIG_PATH
@@ -252,52 +274,33 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     # If user_config is a dictionary, use it as the config
     if isinstance(user_config, dict):
         config = copy.deepcopy(user_config)
-
     # If user_config is a string, load the yaml file
-    if isinstance(user_config, str):
-        config_path = Path(user_config)
+    elif isinstance(user_config, str):
+        config = _load_users_yaml(user_config, local, username, hostname)
+    else:
+        raise ValueError("user_config should be a string or dictionary.")
 
-        # If there is no users.yaml file yet, create one.
-        if not config_path.is_file():
-            default_config = DEFAULT_USER
-            with open(config_path, "w", encoding="utf-8") as file:
-                yaml.dump(default_config, file, default_flow_style=False)
-            try:
-                create_new_user(local=local)
-            except:
-                log.warning(
-                    f"Could not create user profile for {username} on {hostname}, using default."
-                )
-
-        # Load YAML file with user info
-        with open(config_path, "r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
-
-        if not isinstance(config, dict):
-            # Raise error if config is not a dictionary, for example if its empty.
-            # Lets not overwrite the users config file in this case.
-            raise ValueError(
-                f"""YAML file should contain a dictionary, but found {type(config)}".
-                Please check your users.yaml file for corruptions. In case you want to create a
-                new users.yaml file, please delete the current one."""
-            )
-
-    # Check if username is in the config
     if username in config:
+        # Check if username is in the config
         data_root, output = _verify_user_config_and_get_paths(
             username, config, system, hostname, local
         )
+    elif "data_root" in config:
+        # If username is not in the config, check if there is a default data_root
+        data_root = config["data_root"]
+        log.info(f"No user profile found, using default data_root: {data_root}.")
+        output = config.get("output", _default_output_path(data_root))
     else:
         warnings.warn(
             (
-                f"Unknown user {username} in user file.\nFalling back to default path. "
-                f"Please update the `{config_path}` file with "
-                "your data-path settings."
+                f"Unknown user {username} in user file and no default `data_root`.\n"
+                f"Falling back to default path for {system}: {DEFAULT_DATA_ROOT[system]}. "
+                f"Please update the `{user_config}` with your data-path settings."
             ),
             UnknownUsernameWarning,
         )
-        data_root = _fallback_to_default_data_root(config, system)
-        output = Path(data_root, "output")
+        data_root = _fallback_to_default_data_root(system)
+        output = _default_output_path(data_root)
 
     # Add repo_root to sys.path
     sys.path.insert(1, repo_root)
@@ -313,7 +316,7 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
 
     _verify_paths(data_path)
 
-    return data_path
+    return Config(data_path)
 
 
 ## Helper functions for handling user input
@@ -341,7 +344,9 @@ def _build_user_profile_string(data_paths, local: bool = None):
         raise ValueError("local should set to a boolean or None.")
 
 
-def _to_write_user_profile_to_file(user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH):
+def _to_write_user_profile_to_file(
+    user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH
+):
     with open(user_config_path, "a", encoding="utf-8") as file:
         file.write("\n\n" + user_profile_string + "\n")
     print(
@@ -357,11 +362,11 @@ def _pretty_print_data_paths(data_paths):
 
 def _prompt_user_for_data_root():
     data_root_input = input(
-        "\nℹ️ Please enter the path to your data directory, "
-        "or press Enter to use the default Windows path "
-        f"`{DEFAULT_WINDOWS_DATA_ROOT}`: "
+        "\nℹ️  Please enter the path to your data directory, "
+        "or press Enter to use the default Linux path "
+        f"`{DEFAULT_LINUX_DATA_ROOT}`: "
     )
-    return DEFAULT_WINDOWS_DATA_ROOT if data_root_input == "" else data_root_input
+    return DEFAULT_LINUX_DATA_ROOT if data_root_input == "" else data_root_input
 
 
 def _acquire_and_validate_data_root():
@@ -443,6 +448,9 @@ def create_new_user(user_config_path: str = None, local: bool = None):
             Default is None, which means that the data_root is shared for either
             local or remote (i.e. this parameter is ignored), see doc set_data_paths().
     """
+    # Create empty file if it does not exist
+    _create_empty_yaml(user_config_path)
+
     with warnings.catch_warnings(record=True) as list_of_warnings:
         data_paths = set_data_paths(user_config=user_config_path, local=local)
         if user_config_path is None:
@@ -469,9 +477,12 @@ def create_new_user(user_config_path: str = None, local: bool = None):
         local_remote_warning_was_thrown = _warning_type_was_thrown(
             UnknownLocalRemoteWarning, list_of_warnings
         )
+        no_yaml_file_error_was_thrown = _warning_type_was_thrown(
+            NoYamlFileError, list_of_warnings
+        )
 
-        if user_warning_was_thrown:
-            print("ℹ️ Follow the instructions below to create your user profile.")
+        if user_warning_was_thrown or no_yaml_file_error_was_thrown:
+            print("ℹ️  Follow the instructions below to create your user profile.")
             data_root = _acquire_and_validate_data_root()
             data_paths["data_root"] = data_root
             user_profile_string = _build_user_profile_string(data_paths, local=local)
@@ -479,7 +490,7 @@ def create_new_user(user_config_path: str = None, local: bool = None):
                 "\n"
                 + user_profile_string
                 + "\n"
-                + "\nℹ️ Would you like to automatically create your user"
+                + "\nℹ️  Would you like to automatically create your user"
                 + "profile with the details above? [y]: "
             )
             if user_response == "" or strtobool(user_response):

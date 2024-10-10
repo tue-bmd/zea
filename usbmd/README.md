@@ -22,11 +22,10 @@ This package can be installed like any open-source python package from PyPI.
 Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](../pyproject.toml) file is located and run the following command from terminal:
 
 ```shell
-python -m pip install -e .
+pip install -e .[opencv-python-headless]
 ```
 
- For more detailed info on the installation check out the [detailed installation guide](#detailed-installation-guide).
- Alternatively, you can [run this code via Docker](#running-the-code-with-docker) using included [Dockerfile](../../Dockerfile).
+Other install options can be found in the [Install.md](Install.md) file.
 
 ### Getting started
 
@@ -40,15 +39,15 @@ import usbmd
 # or if you want to use the Tensorflow tools
 import usbmd.backend.tensorflow as usbmd_tf
 # or if you want to use the Pytorch tools
-import usbmd.backend.pytorch as usbmd_torch
+import usbmd.backend.torch as usbmd_torch
 ```
 
 #### User interface
 
-In order to get started with usbmd stand-alone, you can run [`ui.py`](ui.html), which runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](../../configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
+In order to get started with usbmd stand-alone, you can simply run [`usbmd`](__main__.html), which is the main entry point of the toolbox runs the "user interface" tool for inspecting datasets. First, it will ask for a config file for which you can choose one of your own configs or one of the defaults in the [`configs`](../../configs) folder. Second, you can navigate to the appropriate datafile (make sure it is in the dataset you specified in the config). Depending on the settings, it will render and show the image. There are already some example configs:
 
 ```shell
-python ui.py --config configs/config_picmus.yaml
+usbmd --config configs/config_picmus.yaml
 ```
 
 If you make your own config, make sure it can be validated using the [config validation](utils/config_validation.html) schema. This ensures it has the correct structure and all required parameters are present.
@@ -142,7 +141,7 @@ The following terminology is used in the code when referring to different data t
 
 ## How to use with Verasonics
 
-Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the save RF button which saves the matlab workspace to disk along with all acquisition parameters needed for reconstruction. You can use [`matlab.py`](data/convert/matlab.html) to convert those workspace files to usbmd format. One way to quickly read those generated `.hdf5` files is though the [`ui.py`](ui.html) script. Adapt one of the configs in template configs folder and point to your dataset. Then when running the [`ui.py`](ui.html) you can select that config and start visualizing your newly generated datafile.
+Record plane wave data using the Verasonics system, for instance using your favorite flash angles example script. Then save the data using the save RF button which saves the matlab workspace to disk along with all acquisition parameters needed for reconstruction. You can use [`matlab.py`](data/convert/matlab.html) to convert those workspace files to usbmd format. One way to quickly read those generated `.hdf5` files is though running [`usbmd`](__main__.html) in your terminal. Adapt one of the configs in template configs folder and point to your dataset. Then when running [`usbmd`](__main__.html) you can select that config and start visualizing your newly generated datafile.
 
 
 ## How to contribute
@@ -151,13 +150,14 @@ Please see [`CONTRIBUTING.md`](../CONTRIBUTING.md) on guidelines to contribute t
 Make sure your code complies with the style formatting of this repo. To do that, check if pylint runs succesfully (10/10) by running the following in the root directory:
 
 ```shell
-pip install pylint
+pip install -e .[dev] # in case dev dependencies were not installed
 pylint usbmd
 ```
 
 Also make sure all the pytest tests are running succesfully (100%) by running the following command in the root directory:
 
 ```shell
+pip install -e .[dev] # in case dev dependencies were not installed
 pytest ./tests
 ```
 

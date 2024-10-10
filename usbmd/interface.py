@@ -1,13 +1,11 @@
-"""The UI module runs a complete ultrasound beamforming pipeline and displays
+"""The interface module runs a complete ultrasound beamforming pipeline and displays
 the results in a GUI.
 
 - **Author(s)**     : Tristan Stevens
 - **Date**          : November 18th, 2021
 """
 
-import argparse
 import asyncio
-import sys
 import time
 from pathlib import Path
 from typing import List
@@ -18,31 +16,24 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-wd = Path(__file__).parent.resolve()
-sys.path.append(str(wd))
-
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.data import get_dataset
 from usbmd.display import to_8bit
-from usbmd.generate import GenerateDataSet
 from usbmd.probes import get_probe
 from usbmd.processing import Process
-from usbmd.setup_usbmd import setup
-from usbmd.utils import log, save_to_gif, save_to_mp4, strtobool, update_dictionary
-from usbmd.utils.checks import _DATA_TYPES
-from usbmd.utils.gui import USBMDApp
+from usbmd.utils import log, save_to_gif, save_to_mp4, update_dictionary
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
     filename_from_window_dialog,
     matplotlib_figure_to_numpy,
     running_in_notebook,
-    start_async_app,
 )
+from usbmd.utils.utils import keep_trying
 
 
-class DataLoaderUI:
-    """UI for selecting / loading / processing single ultrasound images.
+class Interface:
+    """Interface for selecting / loading / processing single ultrasound images.
 
     Useful for inspecting datasets and single ultrasound images.
 
@@ -112,7 +103,6 @@ class DataLoaderUI:
             self.headless = self.config.plot.headless
 
         self.check_for_display()
-        self.set_backend_for_notebooks()
 
         if hasattr(self.dataset.file_name, "name"):
             window_name = str(self.dataset.file_name.name)
@@ -124,6 +114,7 @@ class DataLoaderUI:
                 self.data_to_display,
                 window_name=window_name,
                 num_threads=1,
+                headless=self.headless,
             )
         elif self.plot_lib == "matplotlib":
             self.image_viewer = ImageViewerMatplotlib(
@@ -155,10 +146,7 @@ class DataLoaderUI:
         if self.headless is False:
             if matplotlib.get_backend().lower() == "agg":
                 self.headless = True
-                self.plot_lib = "matplotlib"  # force matplotlib in headless mode
-                log.warning(
-                    "Could not connect to display, running headless (using matplotlib)."
-                )
+                log.warning("Could not connect to display, running headless.")
         else:
             # self.plot_lib = "matplotlib"  # force matplotlib in headless mode
             matplotlib.use("agg")
@@ -219,7 +207,7 @@ class DataLoaderUI:
             if self.dataset.num_frames == 1:
                 frame_no = 0
             else:
-                frame_no = _try(
+                frame_no = keep_trying(
                     lambda: int(
                         input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
                     )
@@ -485,16 +473,20 @@ class DataLoaderUI:
                             images.append(image)
 
                     # For opencv, show frame for 25 ms and check if "q" is pressed
-                    if self.plot_lib == "opencv":
-                        if cv2.waitKey(25) & 0xFF == ord("q"):
-                            self.image_viewer.close()
-                            return images
-                        if self.image_viewer.has_been_closed():
-                            return images
-                    # For matplotlib, check if window has been closed
-                    elif self.plot_lib == "matplotlib":
-                        if time.sleep(0.025) and self.image_viewer.has_been_closed():
-                            return images
+                    if not self.headless:
+                        if self.plot_lib == "opencv":
+                            if cv2.waitKey(25) & 0xFF == ord("q"):
+                                self.image_viewer.close()
+                                return images
+                            if self.image_viewer.has_been_closed():
+                                return images
+                        # For matplotlib, check if window has been closed
+                        elif self.plot_lib == "matplotlib":
+                            if (
+                                time.sleep(0.025)
+                                and self.image_viewer.has_been_closed()
+                            ):
+                                return images
                     # For headless mode, check if all frames have been plotted
                     if self.headless:
                         if len(images) == n_frames:
@@ -588,112 +580,3 @@ class DataLoaderUI:
 
         if self.verbose:
             log.info(f"Video saved to {log.yellow(path)}")
-
-
-def _try(fn, args=None, required_set=None):
-    """Keep trying to run a function until it succeeds.
-    Args:
-        fn (function): function to run
-        args (dict, optional): arguments to pass to function
-        required_set (set, optional): set of required outputs
-            if output is not in required_set, function will be rerun
-    """
-    while True:
-        try:
-            out = fn(**args) if args is not None else fn()
-            if required_set is not None:
-                assert out is not None
-                assert out in required_set, f"Output {out} not in {required_set}"
-            return out
-        except Exception as e:
-            print(e)
-
-
-def get_args():
-    """Command line argument parser"""
-    parser = argparse.ArgumentParser(description="Process ultrasound data.")
-    parser.add_argument(
-        "-c", "--config", type=str, default=None, help="path to config file."
-    )
-    parser.add_argument(
-        "-t",
-        "--task",
-        default="run",
-        choices=["run", "generate"],
-        type=str,
-        help="which task to run",
-    )
-    # pylint: disable=no-member
-    parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
-    args = parser.parse_args()
-    return args
-
-
-def main():
-    """main entrypoint for UI script USBMD"""
-    args = get_args()
-    config = setup(args.config)
-
-    if args.task == "run":
-        ui = DataLoaderUI(config)
-
-        log.info(f"Using {config.ml_library} backend")
-
-        if args.gui:
-            log.warning(
-                "GUI is very much in beta, please report any bugs to "
-                "https://github.com/tue-bmd/ultrasound-toolbox."
-            )
-            try:
-                asyncio.run(
-                    start_async_app(
-                        USBMDApp,
-                        title="USBMD GUI",
-                        ui=ui,
-                        resolution=(600, 300),
-                        verbose=True,
-                        config=config,
-                    )
-                )
-            except RuntimeError as e:
-                # probably a better way to handle this...
-                if str(e) == "Event loop stopped before Future completed.":
-                    log.info("GUI closed.")
-                else:
-                    raise e
-        else:
-            ui.run(plot=True)
-
-    elif args.task == "generate":
-        destination_folder = _try(
-            lambda: input(
-                ">> Give destination folder path"
-                + " (if relative path, will be relative to the original dataset): "
-            )
-        )
-        to_dtype = _try(
-            lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
-            required_set=_DATA_TYPES,
-        )
-        retain_folder_structure = _try(
-            lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
-        )
-        if to_dtype in ["image", "image_sc"]:
-            filetype = _try(
-                lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
-            )
-        else:
-            filetype = "hdf5"
-
-        generator = GenerateDataSet(
-            config,
-            to_dtype=to_dtype,
-            destination_folder=destination_folder,
-            retain_folder_structure=retain_folder_structure,
-            filetype=filetype,
-        )
-        generator.generate()
-
-
-if __name__ == "__main__":
-    main()

@@ -10,7 +10,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import tensorflow as tf
-import tf_keras as keras
+from keras import layers
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_length_hdf5_file, search_file_tree

@@ -12,7 +12,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import tensorflow as tf
 
 from usbmd.utils import log
-from usbmd.utils.gpu_utils import get_gpu_memory, select_gpus
+from usbmd.utils.gpu_utils import get_device as _get_device
+from usbmd.utils.gpu_utils import selected_gpu_ids_to_device
 
 # Get a list of all tf devices
 GPUS = tf.config.experimental.list_physical_devices("GPU")
@@ -76,36 +77,15 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
         gpu_ids: list of selected GPU ids. If no GPU is selected, returns an
             empty list. If a CPU is selected, returns None.
     """
-    if device.lower() == "cpu":
-        return None
     if not tf.test.is_built_with_cuda() or len(GPUS) == 0:
         log.warning("Cuda not available, fallback to CPU.")
         return None
 
-    if verbose:
-        header = "GPU settings"
-        print("-" * 2 + header.center(50 - 4, "-") + "-" * 2)
-
-    memory = get_gpu_memory(verbose=verbose)
-    if memory is None:  # nvidia-smi not working, fallback to CPU
-        return None
-
-    gpu_ids = list(range(len(memory)))
-
-    selected_gpu_ids = select_gpus(
-        available_gpu_ids=gpu_ids,
-        memory_free=memory,
-        device=device,
-        verbose=verbose,
-        hide_others=hide_others,
-    )
+    selected_gpu_ids = _get_device(device, verbose=verbose, hide_others=hide_others)
 
     set_memory_growth(gpu_ids=selected_gpu_ids)
 
-    if verbose:
-        print("-" * 50)
-
-    return f"gpu:{selected_gpu_ids[0]}"
+    return selected_gpu_ids_to_device(selected_gpu_ids, key="gpu")
 
 
 if __name__ == "__main__":
