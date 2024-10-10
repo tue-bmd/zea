@@ -177,8 +177,10 @@ class Scan(Object):
                 transmit data coherently without pfield weighting.
             apply_lens_correction (bool, optional): Whether to apply lens correction to the
                 delay computation. Defaults to False.
-            lens_thickness (float, optional): The thickness of the lens in meters. Defaults to None.
-            lens_sound_speed (float, optional): The speed of sound in the lens in m/s. Defaults to None.
+            lens_thickness (float, optional): The thickness of the lens in meters.
+                Defaults to None.
+            lens_sound_speed (float, optional): The speed of sound in the lens in m/s.
+                Defaults to None.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
