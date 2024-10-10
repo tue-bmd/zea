@@ -65,9 +65,10 @@ keras = "^3.6"
 optional = true
 
 [tool.poetry.group.torch.dependencies]
-torch = { version = "^2.2+cu121", source = "torch-cu121" }
-torchvision = "^0.17"
-torchmetrics = "^1.4"
+# CPU only, install the dev-torch
+torch = { version = "^2.2", source = "torch-cpu" }
+torchvision = { version = "^0.17", source = "torch-cpu" }
+torchmetrics = { version = "^1.4", source = "torch-cpu" }
 
 [tool.poetry.group.tensorflow]
 optional = true
@@ -93,8 +94,8 @@ opencv-python = ["opencv-python"]
 opencv-python-headless = ["opencv-python-headless"]
 
 [[tool.poetry.source]]
-name = "torch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
 priority = "explicit"
 
 [build-system]

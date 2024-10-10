@@ -4061,37 +4061,30 @@ url = "https://download.pytorch.org/whl/cpu"
 reference = "torch-cpu"
 
 [[package]]
+name = "torchmetrics"
+version = "1.4.2"
+description = "PyTorch native Metrics"
+optional = false
+python-versions = "*"
+files = []
+
+[[package]]
 name = "torchvision"
-version = "0.17.2"
+version = "0.17.2+cpu"
 description = "image and video datasets and models for torch deep learning"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "torchvision-0.17.2-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:1f2910fe3c21ad6875b2720d46fad835b2e4b336e9553d31ca364d24c90b1d4f"},
-    {file = "torchvision-0.17.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ecc1c503fa8a54fbab777e06a7c228032b8ab78efebf35b28bc8f22f544f51f1"},
-    {file = "torchvision-0.17.2-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:f400145fc108833e7c2fc28486a04989ca742146d7a2a2cc48878ebbb40cdbbd"},
-    {file = "torchvision-0.17.2-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:e9e4bed404af33dfc92eecc2b513d21ddc4c242a7fd8708b3b09d3a26aa6f444"},
-    {file = "torchvision-0.17.2-cp310-cp310-win_amd64.whl", hash = "sha256:ba2e62f233eab3d42b648c122a3a29c47cc108ca314dfd5cbb59cd3a143fd623"},
-    {file = "torchvision-0.17.2-cp311-cp311-macosx_10_13_x86_64.whl", hash = "sha256:9b83e55ee7d0a1704f52b9c0ac87388e7a6d1d98a6bde7b0b35f9ab54d7bda54"},
-    {file = "torchvision-0.17.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e031004a1bc432c980a7bd642f6c189a3efc316e423fc30b5569837166a4e28d"},
-    {file = "torchvision-0.17.2-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:3bbc24b7713e8f22766992562547d8b4b10001208d372fe599255af84bfd1a69"},
-    {file = "torchvision-0.17.2-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:833fd2e4216ced924c8aca0525733fe727f9a1af66dfad7c5be7257e97c39678"},
-    {file = "torchvision-0.17.2-cp311-cp311-win_amd64.whl", hash = "sha256:6835897df852fad1015e6a106c167c83848114cbcc7d86112384a973404e4431"},
-    {file = "torchvision-0.17.2-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:14fd1d4a033c325bdba2d03a69c3450cab6d3a625f85cc375781d9237ca5d04d"},
-    {file = "torchvision-0.17.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:9c3acbebbe379af112b62b535820174277b1f3eed30df264a4e458d58ee4e5b2"},
-    {file = "torchvision-0.17.2-cp312-cp312-manylinux1_x86_64.whl", hash = "sha256:77d680adf6ce367166a186d2c7fda3a73807ab9a03b2c31a03fa8812c8c5335b"},
-    {file = "torchvision-0.17.2-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:f1c9ab3152cfb27f83aca072cac93a3a4c4e4ab0261cf0f2d516b9868a4e96f3"},
-    {file = "torchvision-0.17.2-cp312-cp312-win_amd64.whl", hash = "sha256:3f784381419f3ed3f2ec2aa42fb4aeec5bf4135e298d1631e41c926e6f1a0dff"},
-    {file = "torchvision-0.17.2-cp38-cp38-macosx_10_13_x86_64.whl", hash = "sha256:b83aac8d78f48981146d582168d75b6c947cfb0a7693f76e219f1926f6e595a3"},
-    {file = "torchvision-0.17.2-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:1ece40557e122d79975860a005aa7e2a9e2e6c350a03e78a00ec1450083312fd"},
-    {file = "torchvision-0.17.2-cp38-cp38-manylinux1_x86_64.whl", hash = "sha256:32dbeba3987e20f2dc1bce8d1504139fff582898346dfe8ad98d649f97ca78fa"},
-    {file = "torchvision-0.17.2-cp38-cp38-manylinux2014_aarch64.whl", hash = "sha256:35ba5c1600c3203549d2316422a659bd20c0cfda1b6085eec94fb9f35f55ca43"},
-    {file = "torchvision-0.17.2-cp38-cp38-win_amd64.whl", hash = "sha256:2f69570f50b1d195e51bc03feffb7b7728207bc36efcfb1f0813712b2379d881"},
-    {file = "torchvision-0.17.2-cp39-cp39-macosx_10_13_x86_64.whl", hash = "sha256:4868bbfa55758c8107e69a0e7dd5e77b89056035cd38b767ad5b98cdb71c0f0d"},
-    {file = "torchvision-0.17.2-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:efd6d0dd0668e15d01a2cffadc74068433b32cbcf5692e0c4aa15fc5cb250ce7"},
-    {file = "torchvision-0.17.2-cp39-cp39-manylinux1_x86_64.whl", hash = "sha256:7dc85b397f6c6d9ef12716ce0d6e11ac2b803f5cccff6fe3966db248e7774478"},
-    {file = "torchvision-0.17.2-cp39-cp39-manylinux2014_aarch64.whl", hash = "sha256:d506854c5acd69b20a8b6641f01fe841685a21c5406b56813184f1c9fc94279e"},
-    {file = "torchvision-0.17.2-cp39-cp39-win_amd64.whl", hash = "sha256:067095e87a020a7a251ac1d38483aa591c5ccb81e815527c54db88a982fc9267"},
+    {file = "torchvision-0.17.2+cpu-cp310-cp310-linux_x86_64.whl", hash = "sha256:34ba0274b6150b59b9d91c421c116a217982d5e6c6101b5109f400b994c43e3d"},
+    {file = "torchvision-0.17.2+cpu-cp310-cp310-win_amd64.whl", hash = "sha256:acad6f9573b9d6b50a5a3942d0145cb0f9100608acb53a09bfc11ed5720dcfe3"},
+    {file = "torchvision-0.17.2+cpu-cp311-cp311-linux_x86_64.whl", hash = "sha256:5f39e3bee1eba1b66e48753f85faa8d3698ec401ce90b09c7b36efd885129617"},
+    {file = "torchvision-0.17.2+cpu-cp311-cp311-win_amd64.whl", hash = "sha256:54ae4b89038065e7393c65bc8ff141d1bf3c2f70f88badc834247666608ba9f4"},
+    {file = "torchvision-0.17.2+cpu-cp312-cp312-linux_x86_64.whl", hash = "sha256:7746e566d349c84dac35b5c4ec10ad10741b42d9590930a76a48d0107c1902fa"},
+    {file = "torchvision-0.17.2+cpu-cp312-cp312-win_amd64.whl", hash = "sha256:2024c4713380a54b295369aa3adf370d6a6f444fdc04620a096d947f1a0ffd42"},
+    {file = "torchvision-0.17.2+cpu-cp38-cp38-linux_x86_64.whl", hash = "sha256:efde5683e1106a6470ec56c1bc0612243c155d74a0e38b2022277b2ec7db04e6"},
+    {file = "torchvision-0.17.2+cpu-cp38-cp38-win_amd64.whl", hash = "sha256:ccd4d46b0b6b14a8fe1a01bb5088a84a536c48b2607cf15e0da102e3e5974ca7"},
+    {file = "torchvision-0.17.2+cpu-cp39-cp39-linux_x86_64.whl", hash = "sha256:61094e0856279e0ac220e725ca4d943168a31e522ff231021bfb46b394929948"},
+    {file = "torchvision-0.17.2+cpu-cp39-cp39-win_amd64.whl", hash = "sha256:277b7b854ad153ffbc37417d9e4ea378262b1e1e83a787e7103d20c53d5df5e2"},
 ]
 
 [package.dependencies]
@@ -4101,6 +4094,11 @@ torch = "2.2.2"
 
 [package.extras]
 scipy = ["scipy"]
+
+[package.source]
+type = "legacy"
+url = "https://download.pytorch.org/whl/cpu"
+reference = "torch-cpu"
 
 [[package]]
 name = "tornado"
@@ -4431,4 +4429,4 @@ opencv-python-headless = ["opencv-python-headless"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "efa8afcc9af7d6e5e9964c39f0bc9c2155fe408b69ad9871963d268cbf2c4360"
+content-hash = "8730022a425db445b9a7c201ae4d91435cf9c642318068a5641a21e5fadec762"
