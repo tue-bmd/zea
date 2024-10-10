@@ -1,3 +1,9 @@
+"""Ops module for computing lens corrected delays.
+
+- **Author(s)**     : Vincent van de Schaft
+- **Date**          : 10/10/2024
+"""
+
 from keras import ops
 
 
@@ -56,7 +62,13 @@ def calculate_lens_corrected_delays(
         n_iter=n_iter,
     )
     for tx in range(n_tx):
-        tx_min = ops.min(rx_delays + t0_delays[tx], axis=-1) + initial_times[tx]
+        # Add a large offset to elements that are not used in the transmit to
+        # diqualify them from being the closest element
+        apod_offset = ops.where(tx_apodizations[tx] == 0, 10.0, 0)
+        tx_min = (
+            ops.min(rx_delays + t0_delays[tx] + apod_offset, axis=-1)
+            + initial_times[tx]
+        )
         tx_delays.append(tx_min)
     tx_delays = ops.stack(tx_delays, axis=-1)
 
