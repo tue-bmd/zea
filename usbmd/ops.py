@@ -901,6 +901,40 @@ class Downsample(Operation):
         return take(data, sample_idx, axis=self.axis)
 
 
+@ops_registry("interpolate")
+class Interpolate(Operation):
+    """Interpolate data along a specific axis using the downsample factor."""
+
+    def __init__(self, factor: int = None, axis: int = -1, method: str="linear", **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
+            **kwargs,
+        )
+        self.factor = factor
+        self.axis = axis
+        self.method = method
+
+    def process(self, data):
+        if self.factor is None or self.factor <= 1:
+            return data  # No interpolation needed if factor is None or <= 1
+
+        current_length = self.ops.shape(data)[self.axis]
+        original_length = current_length * self.factor
+
+        original_idx = self.ops.arange(original_length)  # Original index range
+        current_idx = self.ops.linspace(
+            0, original_length - 1, current_length
+        )  # Downsampled index range
+
+        # Perform linear interpolation along the specified axis
+        interpolated = scipy.interpolate.interp1d(
+            current_idx, data, axis=self.axis, kind=self.method,
+        )
+        interpolated = interpolated(original_idx)
+        return interpolated
+
+
 @ops_registry("companding")
 class Companding(Operation):
     """Companding according to the A- or μ-law algorithm.
