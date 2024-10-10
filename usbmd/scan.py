@@ -100,7 +100,11 @@ class Scan(Object):
         probe_geometry: Union[np.ndarray, None] = None,
         time_to_next_transmit: Union[np.ndarray, None] = None,
         pfield_kwargs: Union[dict, None] = None,
+        apply_lens_correction: bool = False,
+        lens_thickness: float = None,
+        lens_sound_speed: float = None,
         f_number: float = 1.0,
+        **kwargs,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -210,6 +214,10 @@ class Scan(Object):
         self.f_number = f_number
         #: The arguments to calculate the estimated pressure field with
         self.pfield_kwargs = pfield_kwargs
+
+        self.apply_lens_correction = apply_lens_correction
+        self.lens_thickness = lens_thickness
+        self.lens_sound_speed = lens_sound_speed
 
         # Beamforming grid related attributes
         # ---------------------------------------------------------------------

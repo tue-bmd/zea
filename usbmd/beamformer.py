@@ -2,6 +2,7 @@
 
 import numpy as np
 from keras import ops
+from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
 def tof_correction(
@@ -18,6 +19,9 @@ def tof_correction(
     angles,
     vfocus,
     apply_phase_rotation=False,
+    apply_lens_correction=False,
+    lens_thickness=1e-3,
+    lens_sound_speed=1000,
 ):
     """
     Args:
@@ -44,6 +48,7 @@ def tof_correction(
         with shape: `(n_z, n_x, n_tx, n_el)`.
 
     """
+    print(f"apply_lens_correction: {apply_lens_correction}")
 
     assert len(data.shape) == 4, (
         "The input data should have 4 dimensions, "
@@ -80,7 +85,10 @@ def tof_correction(
     # reaching the transducer element.
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
-    txdel, rxdel = calculate_delays(
+    delay_fn = (
+        calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
+    )
+    txdel, rxdel = delay_fn(
         flatgrid,
         t0_delays,
         tx_apodizations,
@@ -92,6 +100,8 @@ def tof_correction(
         n_el,
         vfocus,
         angles,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
     )
 
     mask = apod_mask(flatgrid, probe_geometry, fnum)
@@ -148,6 +158,8 @@ def calculate_delays(
     n_el,
     focus_distances,
     polar_angles,
+    *args,
+    **kwargs,
 ):
     """
     Calculates the delays in samples to every pixel in the grid.

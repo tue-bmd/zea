@@ -620,6 +620,9 @@ class TOFCorrection(Operation):
         tx_apodizations=None,
         initial_times=None,
         probe_geometry=None,
+        apply_lens_correction=None,
+        lens_thickness=None,
+        lens_sound_speed=None,
     ):
         super().__init__(
             input_data_type="raw_data",
@@ -639,6 +642,9 @@ class TOFCorrection(Operation):
         self.tx_apodizations = tx_apodizations
         self.initial_times = initial_times
         self.probe_geometry = probe_geometry
+        self.apply_lens_correction = apply_lens_correction
+        self.lens_thickness = lens_thickness
+        self.lens_sound_speed = lens_sound_speed
 
     def initialize(self):
         self.grid = ops.convert_to_tensor(self.grid, dtype="float32")
@@ -676,6 +682,9 @@ class TOFCorrection(Operation):
                 angles=self.polar_angles,
                 vfocus=self.focus_distances,
                 apply_phase_rotation=bool(self.fdemod),
+                apply_lens_correction=bool(self.apply_lens_correction),
+                lens_thickness=self.lens_thickness,
+                lens_sound_speed=self.lens_sound_speed,
             )
 
             # Add batch dimension
@@ -705,6 +714,9 @@ class TOFCorrection(Operation):
         self.sampling_frequency = scan.fs
         self.f_number = scan.f_number
         self.fdemod = scan.fdemod
+        self.apply_lens_correction = scan.apply_lens_correction
+        self.lens_thickness = scan.lens_thickness
+        self.lens_sound_speed = scan.lens_sound_speed
 
     @property
     def _ready(self):
@@ -721,6 +733,9 @@ class TOFCorrection(Operation):
                 self.sampling_frequency is not None,
                 self.f_number is not None,
                 self.fdemod is not None,
+                self.apply_lens_correction is not None,
+                self.lens_thickness is not None,
+                self.lens_sound_speed is not None,
             ]
         )
 
