@@ -13,7 +13,7 @@ import os
 if "KERAS_BACKEND" not in os.environ:
     os.environ["KERAS_BACKEND"] = "numpy"
     print(
-        "`KERA_BACKEND` not set. usbmd will set it to `numpy` by default. "
+        "`KERAS_BACKEND` not set. usbmd will set it to `numpy` by default. "
         "It is recommended to set it manually using `os.environ['KERAS_BACKEND']` "
         "at top of your script before importing usbmd or any other library."
     )
