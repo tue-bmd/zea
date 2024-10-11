@@ -3,6 +3,8 @@
 import numpy as np
 from keras import ops
 
+from usbmd.utils.cache import cache_output
+
 
 def tof_correction(
     data,
@@ -136,6 +138,7 @@ def tof_correction(
     return output
 
 
+@cache_output()
 def calculate_delays(
     grid,
     t0_delays,
