@@ -281,27 +281,3 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
 
     # Resize image to output_size
     return resize(polar_image, output_size, preserve_range=True)
-
-
-def frustum_convert_rtp2xyz(r, t, p):
-    """Convert coordinates from (R,Theta,Phi) space to (X,Y,Z) space using
-    the frustum coordinate conversion.
-
-    Args:
-        r (ndarray): Radial coordinates of the points to convert.
-        t (ndarray): Theta coordinates of the points to convert.
-        p (ndarray): Phi coordinates of the points to convert.
-
-    Returns:
-        x (ndarray): X coordinates of the converted points.
-        y (ndarray): Y coordinates of the converted points.
-        z (ndarray): Z coordinates of the converted points.
-    """
-    if len(r) != len(t) or len(r) != len(p):
-        raise ValueError("Number of elements in r, t, and p should be the same")
-
-    z = r / np.sqrt(1 + np.tan(t) ** 2 + np.tan(p) ** 2)
-    x = z * np.tan(t)
-    y = z * np.tan(p)
-
-    return x, y, z
