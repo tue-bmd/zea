@@ -4061,14 +4061,6 @@ url = "https://download.pytorch.org/whl/cpu"
 reference = "torch-cpu"
 
 [[package]]
-name = "torchmetrics"
-version = "1.4.2"
-description = "PyTorch native Metrics"
-optional = false
-python-versions = "*"
-files = []
-
-[[package]]
 name = "torchvision"
 version = "0.17.2+cpu"
 description = "image and video datasets and models for torch deep learning"
@@ -4429,4 +4421,4 @@ opencv-python-headless = ["opencv-python-headless"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "8730022a425db445b9a7c201ae4d91435cf9c642318068a5641a21e5fadec762"
+content-hash = "baa36914351bf64d92689181848bfe0a735719a3361df9ecf7ac4f7b65217cac"
