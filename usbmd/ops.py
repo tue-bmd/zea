@@ -1940,3 +1940,66 @@ def translate(array, range_from, range_to):
 
     # Convert the 0-1 range into a value in the right range.
     return right_min + (value_scaled * (right_max - right_min))
+
+
+def frustum_convert_rtp2xyz(r, t, p):
+    """Convert coordinates from (R,Theta,Phi) space to (X,Y,Z) space using
+    the frustum coordinate conversion.
+
+    Args:
+        r (ndarray): Radial coordinates of the points to convert.
+        t (ndarray): Theta coordinates of the points to convert.
+        p (ndarray): Phi coordinates of the points to convert.
+
+    Returns:
+        x (ndarray): X coordinates of the converted points.
+        y (ndarray): Y coordinates of the converted points.
+        z (ndarray): Z coordinates of the converted points.
+    """
+    if ops.size(r) != ops.size(t) or ops.size(r) != ops.size(p):
+        raise ValueError("Number of elements in r, t, and p should be the same")
+
+    z = r / ops.sqrt(1 + ops.tan(t) ** 2 + ops.tan(p) ** 2)
+    x = z * ops.tan(t)
+    y = z * ops.tan(p)
+
+    return x, y, z
+
+
+def frustum_convert_xyz2rtp(x, y, z, theta_limits, phi_limits):
+    """Convert coordinates from (X,Y,Z) space to (R,Theta,Phi) space using
+    the frustum coordinate conversion.
+
+    Args:
+        x (ndarray): X coordinates of the points to convert.
+        y (ndarray): Y coordinates of the points to convert.
+        z (ndarray): Z coordinates of the points to convert.
+        tlimits, plimits:
+            Theta and phi limits, respectively, of the original volume. Any
+            point that resides outside of these limits is potentially
+            undefined, and therefore, the radial value for these points is
+            made to be -1.
+
+    Returns:
+        r (ndarray): Radial coordinates of the converted points.
+        t (ndarray): Theta coordinates of the converted points.
+        p (ndarray): Phi coordinates of the converted points.
+    """
+    if ops.size(x) != ops.size(y) or ops.size(x) != ops.size(z):
+        raise ValueError("Number of elements in x, y, and z should be the same")
+
+    r = ops.sqrt(x**2 + y**2 + z**2)
+    t = ops.arctan2(x, z)
+    p = ops.arctan2(y, z)
+
+    r = ops.where(
+        (r < 0)
+        | (t < theta_limits[0])
+        | (t > theta_limits[1])
+        | (p < phi_limits[0])
+        | (p > phi_limits[1]),
+        -1,
+        r,
+    )
+
+    return r, t, p
