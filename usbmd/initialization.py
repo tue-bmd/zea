@@ -7,6 +7,7 @@
 from usbmd.probes import get_probe
 from usbmd.registry import dataset_registry, probe_registry
 from usbmd.scan import Scan
+from usbmd.utils import safe_initialize_class
 
 
 def get_probe_from_config(config):
@@ -45,7 +46,7 @@ def initialize_scan_from_probe(probe):
 
     default_parameters = probe.get_parameters()
     try:
-        scan = Scan(**default_parameters)
+        scan = safe_initialize_class(Scan, **default_parameters)
     except Exception as e:
         raise ValueError(
             f"Could not initialize scan from probe: {probe.__class__.__name__}. "
