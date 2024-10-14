@@ -100,11 +100,11 @@ class GenerateDataSet:
             sig = inspect.signature(scan_class.__init__)
 
             # Filter out the arguments that are not part of the Scan class
-            scan_params = {
+            reduced_scan_params = {
                 key: scan_params[key] for key in sig.parameters if key in scan_params
             }
 
-            self.scan = scan_class(**scan_params)
+            self.scan = scan_class(**reduced_scan_params)
 
         # initialize probe
         probe_name = self.dataset.get_probe_name()
