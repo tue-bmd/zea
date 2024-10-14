@@ -21,7 +21,13 @@ from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.probes import get_probe
 from usbmd.processing import Process
-from usbmd.utils import log, save_to_gif, save_to_mp4, update_dictionary
+from usbmd.utils import (
+    log,
+    save_to_gif,
+    save_to_mp4,
+    update_dictionary,
+    safe_initialize_class,
+)
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
@@ -65,7 +71,7 @@ class Interface:
                 file_scan_params, self.config_scan_params
             )
             try:
-                self.scan = scan_class(**self.scan_params)
+                self.scan = safe_initialize_class(scan_class, **self.scan_params)
             except Exception:
                 log.error(
                     f"Could not initialize scan class with parameters: {self.scan_params}"
