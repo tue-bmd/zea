@@ -735,8 +735,8 @@ class TOFCorrection(Operation):
                 self.f_number is not None,
                 self.fdemod is not None,
                 self.apply_lens_correction is not None,
-                self.lens_thickness is not None,
-                self.lens_sound_speed is not None,
+                self.lens_thickness is not None or self.apply_lens_correction is False,
+                self.lens_sound_speed is not None or self.apply_lens_correction is False,
             ]
         )
 
