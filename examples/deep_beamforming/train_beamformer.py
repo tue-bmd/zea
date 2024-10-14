@@ -27,7 +27,7 @@ from usbmd.data import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.utils import update_dictionary
+from usbmd.utils import update_dictionary, safe_initialize_class
 
 
 def train_beamformer(config):
@@ -46,7 +46,7 @@ def train_beamformer(config):
 
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
-    scan = scan_class(**scan_params)
+    scan = safe_initialize_class(scan_class, **scan_params)
 
     # initialize probe
     probe = get_probe(dataset.get_probe_name())
@@ -67,7 +67,7 @@ def train_beamformer(config):
 
     # dict merging of manual config and dataset default scan parameters
     scan_params = update_dictionary(default_scan_params, config_scan_params)
-    scan = scan_class(**scan_params)
+    scan = safe_initialize_class(scan_class, **scan_params)
 
     inputs = dataset[0][scan.selected_transmits][None, ...]
 
