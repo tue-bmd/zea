@@ -12,6 +12,7 @@ Example:
 
 from pathlib import Path
 from typing import Union
+import inspect
 
 import numpy as np
 import tqdm
@@ -95,7 +96,15 @@ class GenerateDataSet:
             config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
             scan_params = update_dictionary(file_scan_params, config_scan_params)
-            self.scan = scan_class(**scan_params)
+            # Retrieve the argument names of the Scan class
+            sig = inspect.signature(scan_class.__init__)
+
+            # Filter out the arguments that are not part of the Scan class
+            reduced_scan_params = {
+                key: scan_params[key] for key in sig.parameters if key in scan_params
+            }
+
+            self.scan = scan_class(**reduced_scan_params)
 
         # initialize probe
         probe_name = self.dataset.get_probe_name()
