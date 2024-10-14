@@ -66,9 +66,10 @@ class Interface:
             )
             try:
                 self.scan = scan_class(**self.scan_params)
-            except Exception:
+            except Exception as e:
                 log.error(
-                    f"Could not initialize scan class with parameters: {self.scan_params}"
+                    "Could not initialize scan class with parameters: "
+                    f"{self.scan_params}\n{e}"
                 )
 
         # initialize probe
