@@ -157,7 +157,7 @@ from usbmd.data import USBMDDataSet
 from usbmd.probes import Probe
 from usbmd.processing import Process
 from usbmd.scan import Scan
-from usbmd.utils import update_dictionary
+from usbmd.utils import update_dictionary, safe_initialize_class
 from usbmd.utils.device import init_device
 
 device = init_device("torch", "auto:1")
@@ -183,7 +183,7 @@ config_scan_params = config.scan
 
 # merging of manual config and dataset scan parameters
 scan_params = update_dictionary(file_scan_params, config_scan_params)
-scan = Scan(**scan_params)
+scan = safe_initialize_class(Scan, **scan_params)
 probe = Probe(**file_probe_params)
 process = Process(config=config, scan=scan, probe=probe)
 
