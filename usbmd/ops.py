@@ -944,9 +944,10 @@ class Interpolate(Operation):
 
     @staticmethod
     def resize_along_axis(data, factor, axis, method):
+        """Resize data along a specific axis using the downsample factor."""
         shape = ops.shape(data)
         data_flat = ops.reshape(data, [-1, shape[axis]])
-        # fill to four dimensions
+        # fill to four dimensions for `ops.image.resize` function
         data_flat = data_flat[..., None, None]
         data_out = ops.image.resize(
             data_flat, [shape[axis] * factor, 1], interpolation=method
