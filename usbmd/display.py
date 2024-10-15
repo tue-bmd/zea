@@ -6,12 +6,12 @@ All functionality related to displaying ultrasound images.
 - **Date**          : 02/11/2023
 """
 
-from typing import Union
+from typing import Tuple, Union
 
 import numpy as np
+import scipy
+from keras import ops
 from PIL import Image
-from scipy import interpolate
-from scipy.ndimage import map_coordinates
 from skimage.transform import resize
 
 from usbmd.utils import find_first_nonzero_index, translate
@@ -32,152 +32,209 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     if dynamic_range is None:
         dynamic_range = (-60, 0)
 
-    image = np.clip(image, *dynamic_range)
+    image = ops.clip(image, *dynamic_range)
     image = translate(image, dynamic_range, (0, 255))
-    image = np.array(image, dtype=np.float32)
+    image = ops.convert_to_numpy(image)
     image = image.astype(np.uint8)
     if pillow:
         image = Image.fromarray(image)
     return image
 
 
-def scan_convert(image, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0):
-    """Scan conversion method for ultrasound data.
-
-    Args:
-        image (ndarray): Input image (in polar coordinates).
-        x_axis (ndarray): linspace of the angles
-        z_axis (ndarray): linspace of the depth
-        n_pixels (int): resolution width of the image
-        spline_order (int, optional): Order of spline interpolation.
-            Defaults to 1.
-        fill_value (float, optional): Value of the points that cannot be
-            mapped from sample_points to grid. Defaults to 0.
-
-    Returns:
-        image_sc (ndarray): Output image (converted to cartesian coordinates).
-
-    """
-    image_shape = image.shape
-    assert len(image_shape) >= 2, "function requires 2D data or more (batch dims)"
-
-    z_min = np.min(z_axis)
-    z_max = np.max(z_axis)
-    # aspect ratio of image
-    x_max = np.sqrt(2) * z_max
-
-    # dx = dz is the pixel size
-    dx = x_max / n_pixels
-
-    x_grid_points = np.arange(-x_max / 2, x_max / 2, dx)
-    z_grid_points = np.arange(z_min, z_max, dx)
-
-    x_sample_points = np.deg2rad(x_axis) + np.pi / 2
-    z_sample_points = z_axis
-
-    # to allow for batch processing
-    if len(image_shape) != 2:
-        images = np.reshape(image, (-1, *image_shape[-2:]))
-    else:
-        images = np.expand_dims(image, axis=0)
-
-    batch_dims = list(image_shape[:-2])
-
-    images_sc = []
-    for _image in images:
-        image_sc = project_to_cartesian_grid(
-            _image,
-            (x_sample_points, z_sample_points),
-            (x_grid_points, z_grid_points),
-            spline_order=spline_order,
-            fill_value=fill_value,
-        )
-        images_sc.append(image_sc)
-    image_sc = np.stack(images_sc).reshape(*batch_dims, *image_sc.shape)
-    return image_sc
-
-
-def project_to_cartesian_grid(
-    image, sample_points, grid, spline_order=1, fill_value=None
+def scan_convert_2d(
+    image,
+    rho_range: Tuple,
+    theta_range: Tuple,
+    resolution: Union[float, None] = None,
+    method: str = "linear",
 ):
-    """Project polar data onto a cartesian grid.
+    """
+    Perform scan conversion on a 2D ultrasound image from polar coordinates
+    (rho, theta) to Cartesian coordinates (x, z).
 
     Args:
-        image (ndarray): Input image (polar) with 2 dimensions.
-        sample_points (Tuple of 2 2D arrays): Meshgrid of x (2D) and z (2D)
-            points. Define the coordinates on which the input image are sampled.
-        grid (Tuple of 2 2D arrays): Meshgrid of x (2D) and z (2D)
-            points. Define the coordinates on which image should be mapped to.
-        spline_order (int, optional): spline order. Defaults to 1.
-        fill_value (float, optional): Value of the points that cannot be
-            mapped from sample_points to grid. Defaults to None.
+        image (ndarray): The input 2D ultrasound image in polar coordinates.
+            Has dimensions (n_rho, n_theta).
+        rho_range (tuple): A tuple specifying the range of rho values
+            (min_rho, max_rho). Defined in meters.
+        theta_range (tuple): A tuple specifying the range of theta values
+            (min_theta, max_theta). Defined in radians.
+        resolution (float, optional): The resolution for the Cartesian grid.
+            If None, it is calculated based on the input image.
+        method (str, optional): The interpolation method to use. Defaults to
+            'linear'. See `scipy.interpolate.interpn` for available methods.
 
     Returns:
-        image_sc (ndarray): Scan converted image (cartesian).
+        ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
+            Has dimensions (n_z, n_x). Coordinates outside the input image
+            ranges are filled with NaNs.
 
-    Raises:
-        AssertionError('function only allows for 2D data')
+    Note:
+        Polar grid is inferred from the input image shape and the supplied
+        rho and theta ranges. Cartesian grid is computed based on polar grid
+        with resolutions specified by resolution parameter.
+
+    TODO: Change `scipy.interpolate.interpn` to keras equivalent (requires
+        custom implementation currently on keras 3.6)
 
     """
-    assert len(image.shape) == 2, "function only allows for 2D data"
 
-    x_sample_points, z_sample_points = sample_points
-    x_grid_points, z_grid_points = grid
-    [grid_x, grid_z] = np.meshgrid(x_grid_points, z_grid_points)
-    [theta, radius] = cart2pol(grid_z, grid_x)
-
-    image_sc = interp2(
-        x_sample_points,
-        z_sample_points,
-        image,
-        theta,
-        radius,
-        spline_order=spline_order,
-        fill_value=fill_value,
+    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[0], dtype=image.dtype)
+    theta = ops.linspace(
+        theta_range[0], theta_range[1], image.shape[1], dtype=image.dtype
     )
+
+    rho_grid, theta_grid = ops.meshgrid(rho, theta, indexing="ij")
+
+    x_grid, z_grid = frustum_convert_rt2xz(rho_grid, theta_grid)
+
+    x_lim = [ops.min(x_grid), ops.max(x_grid)]
+    z_lim = [ops.min(z_grid), ops.max(z_grid)]
+
+    if resolution is None:
+        d_rho = rho[1] - rho[0]
+        d_theta = theta[1] - theta[0]
+        # arc length along constant phi at 1/4 depth
+        sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
+        # average of arc lengths and radial step
+        resolution = ops.mean([sRT, d_rho])
+
+    x_lim = [ops.min(x_grid), ops.max(x_grid)]
+    z_lim = [ops.min(z_grid), ops.max(z_grid)]
+
+    x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
+    z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
+
+    z_grid, x_grid = ops.meshgrid(z_vec, x_vec)
+
+    rho_grid_interp, theta_grid_interp = frustum_convert_xz2rt(
+        x_grid, z_grid, theta_limits=[theta[0], theta[-1]]
+    )
+
+    xi = ops.stack([rho_grid_interp, theta_grid_interp], axis=-1)
+
+    image = ops.convert_to_numpy(image)
+    rho = ops.convert_to_numpy(rho)
+    theta = ops.convert_to_numpy(theta)
+    xi = ops.convert_to_numpy(xi)
+    image_sc = scipy.interpolate.interpn(
+        (rho, theta), image, xi, method=method, bounds_error=False
+    )
+    image_sc = ops.convert_to_tensor(image_sc)
+    image_sc = ops.transpose(image_sc)
+
     return image_sc
 
 
-def interp2(x, y, z, xq, yq, spline_order=1, fill_value=None):
-    """Interpolate to target grid.
-
-    In MatLab: Vq = interp2(X, Y, V, Xq, Yq)
+def scan_convert_3d(
+    image,
+    rho_range: Tuple[float, float],
+    theta_range: Tuple[float, float],
+    phi_range: Tuple[float, float],
+    resolution: Union[float, None] = None,
+    method: str = "linear",
+):
+    """
+    Perform scan conversion on a 3D ultrasound image from polar coordinates
+    (rho, theta, phi) to Cartesian coordinates (z, x, y).
 
     Args:
-        x (2darray): x meshgrid of input image.
-        y (2darray): y meshgrid of input image.
-        z (2darray): input image.
-        xq (2darray): x meshgrid of output image.
-        yq (2darray): y meshgrid of output image.
-        spline_order (int, optional): spline order. Defaults to 1.
-        fill_value (float, optional): fill value for values outside
-            interpolation region. Defaults to None.
+        image (ndarray): The input 3D ultrasound image in polar coordinates.
+            Has dimensions (n_rho, n_theta, n_phi).
+        rho_range (tuple): A tuple specifying the range of rho values
+            (min_rho, max_rho). Defined in meters.
+        theta_range (tuple): A tuple specifying the range of theta values
+            (min_theta, max_theta). Defined in radians.
+        phi_range (tuple): A tuple specifying the range of phi values
+            (min_phi, max_phi). Defined in radians.
+        resolution (float, optional): The resolution for the Cartesian grid.
+            If None, it is calculated based on the input image.
+        method (str, optional): The interpolation method to use. Defaults to
+            'linear'. See `scipy.interpolate.interpn` for available methods.
 
     Returns:
-        zq (2darray): Interpolated output array defined on grid by xq and yq.
+        ndarray: The scan-converted 3D ultrasound image in Cartesian coordinates.
+            Has dimensions (n_z, n_x, n_y). Coordinates outside the input image
+            ranges are filled with NaNs.
 
+    Note:
+        Polar grid is inferred from the input image shape and the supplied
+        rho, theta and phi ranges. Cartesian grid is computed based on polar grid
+        with resolutions specified by resolution parameter.
+
+    TODO: Change `scipy.interpolate.interpn` to keras equivalent (requires
+        custom implementation currently on keras 3.6)
     """
-    rows, cols = z.shape
 
-    output_shape = xq.shape
+    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[0], dtype=image.dtype)
+    theta = ops.linspace(
+        theta_range[0], theta_range[1], image.shape[1], dtype=image.dtype
+    )
+    phi = ops.linspace(phi_range[0], phi_range[1], image.shape[2], dtype=image.dtype)
 
-    xq = xq.flatten()
-    yq = yq.flatten()
+    rho_grid, theta_grid, phi_grid = ops.meshgrid(rho, theta, phi, indexing="ij")
 
-    s = 1 + (xq - x[0]) / (x[-1] - x[0]) * (cols - 1)
-    t = 1 + (yq - y[0]) / (y[-1] - y[0]) * (rows - 1)
+    x_grid, y_grid, z_grid = frustum_convert_rtp2xyz(rho_grid, theta_grid, phi_grid)
 
-    if fill_value is None:
-        fill_value = -np.infty
-    zq = map_coordinates(z, [t, s], order=spline_order, cval=fill_value)
-    zq = zq.reshape(output_shape)
-    return zq
+    x_lim = [ops.min(x_grid), ops.max(x_grid)]
+    y_lim = [ops.min(y_grid), ops.max(y_grid)]
+    z_lim = [ops.min(z_grid), ops.max(z_grid)]
+
+    lims = ops.array([x_lim, y_lim, z_lim])
+
+    if resolution is None:
+        d_rho = rho[1] - rho[0]
+        d_theta = theta[1] - theta[0]
+        d_phi = phi[1] - phi[0]
+
+        # arc length along constant phi at 1/4 depth
+        sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
+        # arc length along constant theta at 1/4 depth
+        sRP = 0.25 * (rho[0] + rho[-1]) * d_phi
+        # average of arc lengths and radial step
+        resolution = ops.mean([sRT, sRP, d_rho])
+
+    dims = ops.round(ops.abs(ops.diff(lims, axis=1)) / resolution / 16) * 16
+    dims = ops.maximum(dims, 1)
+
+    dim_centers = 0.5 * ops.array(dims)
+    lim_centers = ops.mean(lims, axis=1)
+
+    # create vectors x, y, z centered at the center of the volume at the resolution of the volume
+    x_vec = (ops.arange(dims[0][0]) - dim_centers[0]) * resolution + lim_centers[0]
+    y_vec = (ops.arange(dims[1][0]) - dim_centers[1]) * resolution + lim_centers[1]
+    z_vec = (ops.arange(dims[2][0]) - dim_centers[2]) * resolution + lim_centers[2]
+
+    z_grid, x_grid, y_grid = ops.meshgrid(z_vec, x_vec[::-1], y_vec[::-1])
+
+    rho_grid_interp, theta_grid_interp, phi_grid_interp = frustum_convert_xyz2rtp(
+        x_grid,
+        y_grid,
+        z_grid,
+        theta_limits=[theta[0], theta[-1]],
+        phi_limits=[phi[0], phi[-1]],
+    )
+
+    xi = ops.stack([rho_grid_interp, theta_grid_interp, phi_grid_interp], axis=-1)
+
+    image = ops.convert_to_numpy(image)
+    rho = ops.convert_to_numpy(rho)
+    theta = ops.convert_to_numpy(theta)
+    phi = ops.convert_to_numpy(phi)
+    xi = ops.convert_to_numpy(xi)
+    volume = scipy.interpolate.interpn(
+        (rho, theta, phi), image, xi, method=method, bounds_error=False
+    )
+    volume = ops.convert_to_tensor(volume)
+    volume = ops.transpose(volume, (1, 0, 2))
+
+    return volume
 
 
 def cart2pol(x, y):
     """Convert x, y cartesian coordinates to polar coordinates theta, rho."""
-    theta = np.mod(np.arctan2(x, -y), np.pi * 2)
-    rho = np.sqrt(x**2 + y**2)
+    theta = ops.mod(ops.arctan2(x, -y), np.pi * 2)
+    rho = ops.sqrt(x**2 + y**2)
     return (theta, rho)
 
 
@@ -272,7 +329,7 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
             polar_image[y_i, :] = polar_image[y_i, width_middle]
         else:
             # Perform linear interpolation to stretch the line to the desired width.
-            array_interp = interpolate.interp1d(
+            array_interp = scipy.interpolate.interp1d(
                 np.arange(small_array.size), small_array
             )
             polar_image[y_i, :] = array_interp(
@@ -281,3 +338,126 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
 
     # Resize image to output_size
     return resize(polar_image, output_size, preserve_range=True)
+
+
+def frustum_convert_rtp2xyz(rho, theta, phi):
+    """Convert coordinates from (rho, theta, phi) space to (X,Y,Z) space using
+    the frustum coordinate conversion.
+
+    Angles are defined in radians.
+
+    Args:
+        rho (ndarray): Radial coordinates of the points to convert.
+        theta (ndarray): Theta coordinates of the points to convert.
+        phi (ndarray): Phi coordinates of the points to convert.
+
+    Returns:
+        x (ndarray): X coordinates of the converted points.
+        y (ndarray): Y coordinates of the converted points.
+        z (ndarray): Z coordinates of the converted points.
+    """
+    if ops.size(rho) != ops.size(theta) or ops.size(rho) != ops.size(phi):
+        raise ValueError("Number of elements in rho, theta, and phi should be the same")
+
+    z = rho / ops.sqrt(1 + ops.tan(theta) ** 2 + ops.tan(phi) ** 2)
+    x = z * ops.tan(theta)
+    y = z * ops.tan(phi)
+
+    return x, y, z
+
+
+def frustum_convert_rt2xz(rho, theta):
+    """Convert coordinates from (rho, theta) space to (X,Z) space using
+    the frustum coordinate conversion.
+
+    Angles are defined in radians.
+
+    Args:
+        rho (ndarray): Radial coordinates of the points to convert.
+        theta (ndarray): Theta coordinates of the points to convert.
+
+    Returns:
+        x (ndarray): X coordinates of the converted points.
+        z (ndarray): Z coordinates of the converted points.
+    """
+    if ops.size(rho) != ops.size(theta):
+        raise ValueError("Number of elements in rho and theta should be the same")
+
+    z = rho / ops.sqrt(1 + ops.tan(theta) ** 2)
+    x = z * ops.tan(theta)
+
+    return x, z
+
+
+def frustum_convert_xz2rt(x, z, theta_limits):
+    """Convert coordinates from (X,Z) space to (rho, theta) space using
+    the frustum coordinate conversion.
+
+    Angles are defined in radians.
+
+    Args:
+        x (ndarray): X coordinates of the points to convert.
+        z (ndarray): Z coordinates of the points to convert.
+        theta_limits (list): Theta limits of the original volume. Any
+            point that resides outside of these limits is potentially
+            undefined, and therefore, the radial value for these points is
+            made to be -1.
+
+    Returns:
+        rho (ndarray): Radial coordinates of the converted points.
+        theta (ndarray): Theta coordinates of the converted points.
+    """
+    if ops.size(x) != ops.size(z):
+        raise ValueError("Number of elements in x and z should be the same")
+
+    rho = ops.sqrt(x**2 + z**2)
+    theta = ops.arctan2(x, z)
+
+    rho = ops.where(
+        (rho < 0) | (theta < theta_limits[0]) | (theta > theta_limits[1]),
+        -1,
+        rho,
+    )
+
+    return rho, theta
+
+
+def frustum_convert_xyz2rtp(x, y, z, theta_limits, phi_limits):
+    """Convert coordinates from (X,Y,Z) space to (rho, theta, phi) space using
+    the frustum coordinate conversion.
+
+    Angles are defined in radians.
+
+    Args:
+        x (ndarray): X coordinates of the points to convert.
+        y (ndarray): Y coordinates of the points to convert.
+        z (ndarray): Z coordinates of the points to convert.
+        tlimits, plimits:
+            Theta and phi limits, respectively, of the original volume. Any
+            point that resides outside of these limits is potentially
+            undefined, and therefore, the radial value for these points is
+            made to be -1.
+
+    Returns:
+        rho (ndarray): Radial coordinates of the converted points.
+        theta (ndarray): Theta coordinates of the converted points.
+        phi (ndarray): Phi coordinates of the converted points.
+    """
+    if ops.size(x) != ops.size(y) or ops.size(x) != ops.size(z):
+        raise ValueError("Number of elements in x, y, and z should be the same")
+
+    rho = ops.sqrt(x**2 + y**2 + z**2)
+    theta = ops.arctan2(x, z)
+    phi = ops.arctan2(y, z)
+
+    rho = ops.where(
+        (rho < 0)
+        | (theta < theta_limits[0])
+        | (theta > theta_limits[1])
+        | (phi < phi_limits[0])
+        | (phi > phi_limits[1]),
+        -1,
+        rho,
+    )
+
+    return rho, theta, phi
