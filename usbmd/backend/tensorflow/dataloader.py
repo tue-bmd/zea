@@ -24,7 +24,7 @@ class H5Generator:
         n_frames: int = 1,
         frames_dim: int = -1,
         new_frames_dim: bool = False,
-        frame_interval: int = 1,
+        frame_index_stride: int = 1,
         return_filename: bool = False,
     ):
         """Initialize H5Generator.
@@ -38,7 +38,7 @@ class H5Generator:
             new_frames_dim (bool, optional): if True, new dimension to stack
                 frames along will be created. Defaults to False. In that case
                 frames will be stacked along existing dimension (frames_dim).
-            frame_interval (int, optional): interval between frames to load.
+            frame_index_stride (int, optional): interval between frames to load.
                 Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
             return_filename (bool, optional): return file name with image.
                 will return a string with the file name and frame number as follows:
@@ -49,7 +49,7 @@ class H5Generator:
         self.n_frames = n_frames
         self.frames_dim = frames_dim
         self.new_frames_dim = new_frames_dim
-        self.frame_interval = frame_interval
+        self.frame_index_stride = frame_index_stride
         self.return_filename = return_filename
 
     def __call__(self, file_name, key):
@@ -63,12 +63,12 @@ class H5Generator:
             np.ndarray: image of shape image_shape + (n_channels * n_frames,).
         """
         with h5py.File(file_name, "r") as file:
-            for i in range(self._length(file, key) // self.frame_interval):
+            for i in range(self._length(file, key) // self.frame_index_stride):
                 images = []
                 for j in range(
                     0,
-                    self.n_frames * self.frame_interval,
-                    self.frame_interval,
+                    self.n_frames * self.frame_index_stride,
+                    self.frame_index_stride,
                 ):
                     try:
                         image = file[key][i * self.n_frames + j]
@@ -125,7 +125,7 @@ def h5_dataset_from_directory(
     n_frames: int = 1,
     new_frames_dim: bool = False,
     frames_dim: int = -1,
-    frame_interval: int = 1,
+    frame_index_stride: int = 1,
     return_filename: bool = False,
     shard_index: int = None,
     num_shards: int = 1,
@@ -188,7 +188,7 @@ def h5_dataset_from_directory(
         new_frames_dim (bool, optional): if True, new dimension to stack
             frames along will be created. Defaults to False. In that case
             frames will be stacked along existing dimension (frames_dim).
-        frame_interval (int, optional): interval between frames to load.
+        frame_index_stride (int, optional): interval between frames to load.
             Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
         save_file_paths (bool, optional): save file paths to file. Defaults to False.
             Can be useful to check which files are being loaded.
@@ -252,8 +252,8 @@ def h5_dataset_from_directory(
             file_lengths
         ), "filenames and file_lengths must have same length"
 
-        # file lengths are effectively reduced if frame_interval > 1
-        file_lengths = [length // frame_interval for length in file_lengths]
+        # file lengths are effectively reduced if frame_index_stride > 1
+        file_lengths = [length // frame_index_stride for length in file_lengths]
 
         # number of samples in each file is reduced if n_frames > 1
         n_samples = [length // n_frames for length in file_lengths]
@@ -268,9 +268,9 @@ def h5_dataset_from_directory(
             log.warning(
                 f"Skipping {len(skip_files)} files with not enough frames which is about "
                 f"{len(skip_files) / len(filenames) * 100:.2f}% of the dataset. "
-                f"This can be fine if you expect set `n_frames` and `frame_interval` to be high. "
-                "Minimum frames in a file needs to be at least n_frames * frame_interval = "
-                f"{n_frames * frame_interval}. "
+                f"This can be fine if you expect set `n_frames` and `frame_index_stride` to be high. "
+                "Minimum frames in a file needs to be at least n_frames * frame_index_stride = "
+                f"{n_frames * frame_index_stride}. "
             )
         return sum(n_samples), filenames
 
@@ -283,7 +283,7 @@ def h5_dataset_from_directory(
     if not shuffle:
         cycle_length = 1
 
-    generator = H5Generator(n_frames, frames_dim, new_frames_dim, frame_interval)
+    generator = H5Generator(n_frames, frames_dim, new_frames_dim, frame_index_stride)
     image = next(generator(filenames[0], key))
 
     # n_frames are stacked along the last axis (channel)
