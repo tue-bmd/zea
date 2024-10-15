@@ -46,7 +46,7 @@ def scan_convert_2d(
     rho_range: Tuple,
     theta_range: Tuple,
     resolution: Union[float, None] = None,
-    method: str = "linear",
+    fill_value: float = 0.0,
 ):
     """
     Perform scan conversion on a 2D ultrasound image from polar coordinates
@@ -60,9 +60,9 @@ def scan_convert_2d(
         theta_range (tuple): A tuple specifying the range of theta values
             (min_theta, max_theta). Defined in radians.
         resolution (float, optional): The resolution for the Cartesian grid.
-            If None, it is calculated based on the input image.
-        method (str, optional): The interpolation method to use. Defaults to
-            'linear'. See `scipy.interpolate.interpn` for available methods.
+            If None, it is calculated based on the input image. In meters / pixel.
+        fill_value (float, optional): The value to fill in for coordinates
+            outside the input image ranges. Defaults to 0.0.
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -74,14 +74,11 @@ def scan_convert_2d(
         rho and theta ranges. Cartesian grid is computed based on polar grid
         with resolutions specified by resolution parameter.
 
-    TODO: Change `scipy.interpolate.interpn` to keras equivalent (requires
-        custom implementation currently on keras 3.6)
-
     """
 
-    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[0], dtype=image.dtype)
+    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-2], dtype=image.dtype)
     theta = ops.linspace(
-        theta_range[0], theta_range[1], image.shape[1], dtype=image.dtype
+        theta_range[0], theta_range[1], image.shape[-1], dtype=image.dtype
     )
 
     rho_grid, theta_grid = ops.meshgrid(rho, theta, indexing="ij")
@@ -111,19 +108,49 @@ def scan_convert_2d(
         x_grid, z_grid, theta_limits=[theta[0], theta[-1]]
     )
 
-    xi = ops.stack([rho_grid_interp, theta_grid_interp], axis=-1)
-
-    image = ops.convert_to_numpy(image)
-    rho = ops.convert_to_numpy(rho)
-    theta = ops.convert_to_numpy(theta)
-    xi = ops.convert_to_numpy(xi)
-    image_sc = scipy.interpolate.interpn(
-        (rho, theta), image, xi, method=method, bounds_error=False
+    # Map rho and theta interpolation points to grid indices
+    rho_min, rho_max = ops.min(rho), ops.max(rho)
+    theta_min, theta_max = ops.min(theta), ops.max(theta)
+    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image.shape[-2] - 1)
+    theta_idx = (
+        (theta_grid_interp - theta_min)
+        / (theta_max - theta_min)
+        * (image.shape[-1] - 1)
     )
-    image_sc = ops.convert_to_tensor(image_sc)
-    image_sc = ops.transpose(image_sc)
 
-    return image_sc
+    # Stack coordinates as required for map_coordinates
+    coordinates = ops.stack([rho_idx, theta_idx], axis=0)
+
+    images_sc = _interpolate_batch(image, coordinates, fill_value)
+
+    # swap axis to match z, x
+    images_sc = ops.swapaxes(images_sc, -1, -2)
+
+    return images_sc
+
+
+def _interpolate_batch(images, coordinates, fill_value=0.0):
+    """Interpolate a batch of images."""
+    image_shape = images.shape
+    num_image_dims = len(coordinates)
+
+    batch_dims = images.shape[:-num_image_dims]
+
+    images = ops.reshape(images, (-1, *image_shape[-num_image_dims:]))
+
+    images_sc = []
+    for image in images:
+        image_sc = ops.image.map_coordinates(
+            image, coordinates, order=1, fill_mode="constant", fill_value=np.nan
+        )
+        images_sc.append(image_sc)
+
+    images_sc = ops.convert_to_tensor(images_sc)
+    images_sc = ops.where(ops.isnan(images_sc), fill_value, images_sc)
+
+    images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc.shape))
+
+    return images_sc
 
 
 def scan_convert_3d(
@@ -132,7 +159,7 @@ def scan_convert_3d(
     theta_range: Tuple[float, float],
     phi_range: Tuple[float, float],
     resolution: Union[float, None] = None,
-    method: str = "linear",
+    fill_value: float = 0.0,
 ):
     """
     Perform scan conversion on a 3D ultrasound image from polar coordinates
@@ -148,9 +175,8 @@ def scan_convert_3d(
         phi_range (tuple): A tuple specifying the range of phi values
             (min_phi, max_phi). Defined in radians.
         resolution (float, optional): The resolution for the Cartesian grid.
-            If None, it is calculated based on the input image.
-        method (str, optional): The interpolation method to use. Defaults to
-            'linear'. See `scipy.interpolate.interpn` for available methods.
+            If None, it is calculated based on the input image. In meters / pixel.
+        fill_value (float, optional): The value to fill in for coordinates
 
     Returns:
         ndarray: The scan-converted 3D ultrasound image in Cartesian coordinates.
@@ -162,15 +188,13 @@ def scan_convert_3d(
         rho, theta and phi ranges. Cartesian grid is computed based on polar grid
         with resolutions specified by resolution parameter.
 
-    TODO: Change `scipy.interpolate.interpn` to keras equivalent (requires
-        custom implementation currently on keras 3.6)
     """
 
-    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[0], dtype=image.dtype)
+    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-3], dtype=image.dtype)
     theta = ops.linspace(
-        theta_range[0], theta_range[1], image.shape[1], dtype=image.dtype
+        theta_range[0], theta_range[1], image.shape[-2], dtype=image.dtype
     )
-    phi = ops.linspace(phi_range[0], phi_range[1], image.shape[2], dtype=image.dtype)
+    phi = ops.linspace(phi_range[0], phi_range[1], image.shape[-1], dtype=image.dtype)
 
     rho_grid, theta_grid, phi_grid = ops.meshgrid(rho, theta, phi, indexing="ij")
 
@@ -206,18 +230,25 @@ def scan_convert_3d(
         phi_limits=[phi[0], phi[-1]],
     )
 
-    xi = ops.stack([rho_grid_interp, theta_grid_interp, phi_grid_interp], axis=-1)
-
-    image = ops.convert_to_numpy(image)
-    rho = ops.convert_to_numpy(rho)
-    theta = ops.convert_to_numpy(theta)
-    phi = ops.convert_to_numpy(phi)
-    xi = ops.convert_to_numpy(xi)
-    volume = scipy.interpolate.interpn(
-        (rho, theta, phi), image, xi, method=method, bounds_error=False
+    # return volume
+    rho_min, rho_max = ops.min(rho), ops.max(rho)
+    theta_min, theta_max = ops.min(theta), ops.max(theta)
+    phi_min, phi_max = ops.min(phi), ops.max(phi)
+    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image.shape[-3] - 1)
+    theta_idx = (
+        (theta_grid_interp - theta_min)
+        / (theta_max - theta_min)
+        * (image.shape[-2] - 1)
     )
-    volume = ops.convert_to_tensor(volume)
-    volume = ops.transpose(volume, (1, 0, 2))
+    phi_idx = (phi_grid_interp - phi_min) / (phi_max - phi_min) * (image.shape[-1] - 1)
+
+    # Stack coordinates as required for map_coordinates
+    coordinates = ops.stack([rho_idx, theta_idx, phi_idx], axis=0)
+
+    volume = _interpolate_batch(image, coordinates, fill_value)
+
+    # swap axis to match z, x, y
+    volume = ops.swapaxes(volume, -3, -2)
 
     return volume
 

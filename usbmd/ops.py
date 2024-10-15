@@ -1441,6 +1441,7 @@ class ScanConvert(Operation):
                 self.theta_range,
                 self.phi_range,
                 self.resolution,
+                self.fill_value,
             )
         else:
             data_out = display.scan_convert_2d(
@@ -1448,8 +1449,8 @@ class ScanConvert(Operation):
                 self.rho_range,
                 self.theta_range,
                 self.resolution,
+                self.fill_value,
             )
-        data_out = ops.where(ops.isnan(data_out), self.fill_value, data_out)
         return data_out
 
     def _assign_config_params(self, config):
@@ -1465,6 +1466,12 @@ class ScanConvert(Operation):
                 ops.min(angles),
                 ops.max(angles),
             )
+        else:
+            log.warning(
+                "Probe does not have `angle_deg_axis` defined, using default "
+                "values (-45, 45 degree cone) for ScanConvert."
+            )
+            self.theta_range = tuple(np.deg2rad([-45, 45]))
 
     def _assign_scan_params(self, scan):
         self.rho_range = (
