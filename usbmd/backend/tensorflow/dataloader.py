@@ -268,8 +268,9 @@ def h5_dataset_from_directory(
             log.warning(
                 f"Skipping {len(skip_files)} files with not enough frames which is about "
                 f"{len(skip_files) / len(filenames) * 100:.2f}% of the dataset. "
-                f"This can be fine if you expect set `n_frames` and `frame_index_stride` to be high. "
-                "Minimum frames in a file needs to be at least n_frames * frame_index_stride = "
+                f"This can be fine if you expect set `n_frames` and `frame_index_stride` "
+                "to be high. Minimum frames in a file needs to be at "
+                "least n_frames * frame_index_stride = "
                 f"{n_frames * frame_index_stride}. "
             )
         return sum(n_samples), filenames
@@ -372,44 +373,34 @@ def h5_dataset_from_directory(
                 )
 
             resize_layer = keras.layers.Resizing(*image_size)
-            if return_filename:
-                dataset = dataset.map(
-                    lambda x, y: (resize_layer(x), y),
-                    num_parallel_calls=tf.data.AUTOTUNE,
-                )
-            else:
-                dataset = dataset.map(resize_layer, num_parallel_calls=tf.data.AUTOTUNE)
+            resize_fn = lambda x, y: (
+                (resize_layer(x), y) if return_filename else resize_layer(x)
+            )
+            dataset = dataset.map(resize_fn, num_parallel_calls=tf.data.AUTOTUNE)
         else:
             crop_layer = keras.layers.RandomCrop(*image_size)
-            if return_filename:
-                dataset = dataset.map(
-                    lambda x, y: (crop_layer(x), y),
-                    num_parallel_calls=tf.data.AUTOTUNE,
-                )
-            else:
-                dataset = dataset.map(crop_layer, num_parallel_calls=tf.data.AUTOTUNE)
+            crop_fn = lambda x, y: (
+                (crop_layer(x), y) if return_filename else crop_layer(x)
+            )
+            dataset = dataset.map(crop_fn, num_parallel_calls=tf.data.AUTOTUNE)
 
     # normalize
     if image_range is not None:
-        if return_filename:
-            dataset = dataset.map(
-                lambda x, y: (translate(x, image_range, normalization_range), y),
-                num_parallel_calls=tf.data.AUTOTUNE,
-            )
-        else:
-            dataset = dataset.map(
-                lambda x: translate(x, image_range, normalization_range),
-                num_parallel_calls=tf.data.AUTOTUNE,
-            )
-
+        translate_fn = lambda x, y: (
+            (translate(x, image_range, normalization_range), y)
+            if return_filename
+            else lambda x: translate(x, image_range, normalization_range)
+        )
+        dataset = dataset.map(
+            translate_fn,
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
     # augmentation
     if augmentation is not None:
-        if return_filename:
-            dataset = dataset.map(
-                lambda x, y: (augmentation(x), y), num_parallel_calls=tf.data.AUTOTUNE
-            )
-        else:
-            dataset = dataset.map(augmentation, num_parallel_calls=tf.data.AUTOTUNE)
+        augmentation_fn = lambda x, y: (
+            (augmentation(x), y) if return_filename else augmentation(x)
+        )
+        dataset = dataset.map(augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
 
     # prefetch
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
