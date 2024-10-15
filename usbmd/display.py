@@ -180,8 +180,6 @@ def scan_convert_3d(
     y_lim = [ops.min(y_grid), ops.max(y_grid)]
     z_lim = [ops.min(z_grid), ops.max(z_grid)]
 
-    lims = ops.array([x_lim, y_lim, z_lim])
-
     if resolution is None:
         d_rho = rho[1] - rho[0]
         d_theta = theta[1] - theta[0]
@@ -194,18 +192,11 @@ def scan_convert_3d(
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, sRP, d_rho])
 
-    dims = ops.round(ops.abs(ops.diff(lims, axis=1)) / resolution / 16) * 16
-    dims = ops.maximum(dims, 1)
+    z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
+    x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
+    y_vec = ops.arange(y_lim[0], y_lim[1], resolution)
 
-    dim_centers = 0.5 * ops.array(dims)
-    lim_centers = ops.mean(lims, axis=1)
-
-    # create vectors x, y, z centered at the center of the volume at the resolution of the volume
-    x_vec = (ops.arange(dims[0][0]) - dim_centers[0]) * resolution + lim_centers[0]
-    y_vec = (ops.arange(dims[1][0]) - dim_centers[1]) * resolution + lim_centers[1]
-    z_vec = (ops.arange(dims[2][0]) - dim_centers[2]) * resolution + lim_centers[2]
-
-    z_grid, x_grid, y_grid = ops.meshgrid(z_vec, x_vec[::-1], y_vec[::-1])
+    z_grid, x_grid, y_grid = ops.meshgrid(z_vec, x_vec, y_vec)
 
     rho_grid_interp, theta_grid_interp, phi_grid_interp = frustum_convert_xyz2rtp(
         x_grid,
