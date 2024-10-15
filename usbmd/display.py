@@ -75,6 +75,7 @@ def scan_convert_2d(
         with resolutions specified by resolution parameter.
 
     """
+    image = ops.cast(image, dtype="float32")
 
     rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-2], dtype=image.dtype)
     theta = ops.linspace(
@@ -129,30 +130,6 @@ def scan_convert_2d(
     return images_sc
 
 
-def _interpolate_batch(images, coordinates, fill_value=0.0):
-    """Interpolate a batch of images."""
-    image_shape = images.shape
-    num_image_dims = len(coordinates)
-
-    batch_dims = images.shape[:-num_image_dims]
-
-    images = ops.reshape(images, (-1, *image_shape[-num_image_dims:]))
-
-    images_sc = []
-    for image in images:
-        image_sc = ops.image.map_coordinates(
-            image, coordinates, order=1, fill_mode="constant", fill_value=np.nan
-        )
-        images_sc.append(image_sc)
-
-    images_sc = ops.convert_to_tensor(images_sc)
-    images_sc = ops.where(ops.isnan(images_sc), fill_value, images_sc)
-
-    images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc.shape))
-
-    return images_sc
-
-
 def scan_convert_3d(
     image,
     rho_range: Tuple[float, float],
@@ -189,6 +166,7 @@ def scan_convert_3d(
         with resolutions specified by resolution parameter.
 
     """
+    image = ops.cast(image, dtype="float32")
 
     rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-3], dtype=image.dtype)
     theta = ops.linspace(
@@ -251,6 +229,30 @@ def scan_convert_3d(
     volume = ops.swapaxes(volume, -3, -2)
 
     return volume
+
+
+def _interpolate_batch(images, coordinates, fill_value=0.0):
+    """Interpolate a batch of images."""
+    image_shape = images.shape
+    num_image_dims = len(coordinates)
+
+    batch_dims = images.shape[:-num_image_dims]
+
+    images = ops.reshape(images, (-1, *image_shape[-num_image_dims:]))
+
+    images_sc = []
+    for image in images:
+        image_sc = ops.image.map_coordinates(
+            image, coordinates, order=1, fill_mode="constant", fill_value=np.nan
+        )
+        images_sc.append(image_sc)
+
+    images_sc = ops.convert_to_tensor(images_sc)
+    images_sc = ops.where(ops.isnan(images_sc), fill_value, images_sc)
+
+    images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc.shape))
+
+    return images_sc
 
 
 def cart2pol(x, y):
