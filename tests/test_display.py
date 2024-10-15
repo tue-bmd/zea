@@ -26,6 +26,7 @@ from usbmd.display import (
 def test_scan_conversion(size, resolution):
     """Tests the scan_conversion function with random data"""
     data = np.random.random(size)
+    from keras import ops  # pylint: disable=import-outside-toplevel
 
     rho_range = (0, 100)
     theta_range = (-45, 45)
