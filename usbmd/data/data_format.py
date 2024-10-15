@@ -12,7 +12,12 @@ import numpy as np
 from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
 from usbmd.probes import get_probe
 from usbmd.scan import Scan, cast_scan_parameters
-from usbmd.utils import first_not_none_item, log, update_dictionary
+from usbmd.utils import (
+    first_not_none_item,
+    log,
+    update_dictionary,
+    safe_initialize_class,
+)
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
 
 
@@ -836,6 +841,6 @@ def load_usbmd_file(
         scan_params = update_dictionary(file_scan_parameters, config_scan_dict)
 
         # Initialize the scan object
-        scan = Scan(**scan_params)
+        scan = safe_initialize_class(Scan, **scan_params)
 
         return data, scan, probe

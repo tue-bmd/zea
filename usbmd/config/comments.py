@@ -108,6 +108,13 @@ DESCRIPTIONS = {
             "frequency of the transmit waveform used to demodulate the rf data to iq "
             "data."
         ),
+        "apply_lens_correction": (
+            "Set to true to apply lens correction in the time-of-flight calculation"
+        ),
+        "lens_thickness": "The thickness of the lens in meters",
+        "lens_sound_speed": (
+            "The speed of sound in the lens in m/s. Usually around 1000 m/s"
+        ),
     },
     "preprocess": {
         "description": (
