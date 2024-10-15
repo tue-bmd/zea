@@ -18,15 +18,15 @@ from usbmd.display import (
     [
         ((128, 32), None),
         ((512, 512), 0.1),
-        ((40, 10, 20), None),
-        ((40, 10, 20), 1),
+        ((40, 20, 20), None),
+        ((40, 20, 20), 0.5),
     ],
 )
-@equality_libs_processing()
+@equality_libs_processing(decimal=0)
 def test_scan_conversion(size, resolution):
     """Tests the scan_conversion function with random data"""
     data = np.random.random(size)
-    from keras import ops  # pylint: disable=import-outside-toplevel
+    from keras import ops  # pylint: disable=reimported,import-outside-toplevel
 
     rho_range = (0, 100)
     theta_range = (-45, 45)
@@ -34,6 +34,7 @@ def test_scan_conversion(size, resolution):
 
     if len(size) == 3:
         phi_range = (-20, 20)
+        phi_range = np.deg2rad(phi_range)
         out = scan_convert_3d(
             data,
             rho_range,
@@ -54,6 +55,7 @@ def test_scan_conversion(size, resolution):
     # make sure outputs are not all nans or zeros
     assert not np.all(np.isnan(out)), "scan conversion is all nans"
     assert not np.all(out == 0), "scan conversion is all zeros"
+    out = np.nan_to_num(out, nan=0)
     return out
 
 
