@@ -169,7 +169,7 @@ def h5_dataset_from_directory(
             Defaults to None.
         limit_n_samples (int, optional): take only a subset of samples.
             Useful for debuging. Defaults to None.
-        total_n_samples (int, optional): the toal number of frames in a dataset
+        total_n_samples (int, optional): the total number of frames in a dataset
             This is used to compute the cardinality of the dataset more efficiently.
         resize_type (str, optional): resize type. Defaults to 'crop'.
             can be 'crop' or 'resize'.
