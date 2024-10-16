@@ -234,7 +234,10 @@ def h5_dataset_from_directory(
 
     try:
         # this is like an np.argsort, returns the indices that would sort the array
-        indices_sorting_filenames = sorted(range(len(filenames)), key=lambda i: int(re.findall(r"\d+", filenames[i])[-2]))
+        indices_sorting_filenames = sorted(
+            range(len(filenames)),
+            key=lambda i: int(re.findall(r"\d+", filenames[i])[-2]),
+        )
         filenames = [filenames[i] for i in indices_sorting_filenames]
         file_lengths = [file_lengths[i] for i in indices_sorting_filenames]
     except:
