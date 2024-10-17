@@ -23,10 +23,10 @@ from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.utils import (
     log,
+    safe_initialize_class,
     save_to_gif,
     save_to_mp4,
     update_dictionary,
-    safe_initialize_class,
 )
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
@@ -72,9 +72,10 @@ class Interface:
             )
             try:
                 self.scan = safe_initialize_class(scan_class, **self.scan_params)
-            except Exception:
+            except Exception as e:
                 log.error(
-                    f"Could not initialize scan class with parameters: {self.scan_params}"
+                    "Could not initialize scan class with parameters: "
+                    f"{self.scan_params}\n{e}"
                 )
 
         # initialize probe

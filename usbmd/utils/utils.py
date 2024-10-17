@@ -32,10 +32,6 @@ def translate(array, range_from, range_to):
     """
     left_min, left_max = range_from
     right_min, right_max = range_to
-    assert left_min <= left_max, "boundaries are set incorrectly"
-    assert right_min < right_max, "boundaries are set incorrectly"
-    if left_min == left_max:
-        return np.ones_like(array) * right_max
 
     # Convert the left range into a 0-1 range (float)
     value_scaled = (array - left_min) / (left_max - left_min)
