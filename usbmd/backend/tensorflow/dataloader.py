@@ -233,7 +233,13 @@ def h5_dataset_from_directory(
         ], 'resize_type must be "crop" or "resize"'
 
     try:
-        filenames = sorted(filenames, key=lambda x: int(re.findall(r"\d+", x)[-2]))
+        # this is like an np.argsort, returns the indices that would sort the array
+        indices_sorting_filenames = sorted(
+            range(len(filenames)),
+            key=lambda i: int(re.findall(r"\d+", filenames[i])[-2]),
+        )
+        filenames = [filenames[i] for i in indices_sorting_filenames]
+        file_lengths = [file_lengths[i] for i in indices_sorting_filenames]
     except:
         print("H5Generator: Could not sort filenames by number.")
 
