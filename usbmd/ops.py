@@ -129,18 +129,20 @@ from keras import ops
 from scipy import ndimage, signal
 
 import usbmd.beamformer as bmf
+from usbmd import display
 from usbmd.config import Config
-from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import log, pfield
+from usbmd.utils import lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras
 # to be able to set backend properly
 importlib.reload(bmf)
 importlib.reload(pfield)
+importlib.reload(lens_correction)
+importlib.reload(display)
 
 # clear registry upon import
 ops_registry.clear()
@@ -620,6 +622,9 @@ class TOFCorrection(Operation):
         tx_apodizations=None,
         initial_times=None,
         probe_geometry=None,
+        apply_lens_correction=None,
+        lens_thickness=None,
+        lens_sound_speed=None,
     ):
         super().__init__(
             input_data_type="raw_data",
@@ -639,6 +644,9 @@ class TOFCorrection(Operation):
         self.tx_apodizations = tx_apodizations
         self.initial_times = initial_times
         self.probe_geometry = probe_geometry
+        self.apply_lens_correction = apply_lens_correction
+        self.lens_thickness = lens_thickness
+        self.lens_sound_speed = lens_sound_speed
 
     def initialize(self):
         self.grid = ops.convert_to_tensor(self.grid, dtype="float32")
@@ -676,6 +684,9 @@ class TOFCorrection(Operation):
                 angles=self.polar_angles,
                 vfocus=self.focus_distances,
                 apply_phase_rotation=bool(self.fdemod),
+                apply_lens_correction=bool(self.apply_lens_correction),
+                lens_thickness=self.lens_thickness,
+                lens_sound_speed=self.lens_sound_speed,
             )
 
             # Add batch dimension
@@ -705,6 +716,9 @@ class TOFCorrection(Operation):
         self.sampling_frequency = scan.fs
         self.f_number = scan.f_number
         self.fdemod = scan.fdemod
+        self.apply_lens_correction = scan.apply_lens_correction
+        self.lens_thickness = scan.lens_thickness
+        self.lens_sound_speed = scan.lens_sound_speed
 
     @property
     def _ready(self):
@@ -721,6 +735,10 @@ class TOFCorrection(Operation):
                 self.sampling_frequency is not None,
                 self.f_number is not None,
                 self.fdemod is not None,
+                self.apply_lens_correction is not None,
+                self.lens_thickness is not None or self.apply_lens_correction is False,
+                self.lens_sound_speed is not None
+                or self.apply_lens_correction is False,
             ]
         )
 
@@ -899,6 +917,45 @@ class Downsample(Operation):
         sample_idx = ops.arange(self.phase, length, self.factor)
 
         return take(data, sample_idx, axis=self.axis)
+
+
+@ops_registry("interpolate")
+class Interpolate(Operation):
+    """Interpolate data along a specific axis using the downsample factor."""
+
+    def __init__(
+        self, factor: int = None, axis: int = -1, method: str = "bilinear", **kwargs
+    ):
+        super().__init__(
+            input_data_type=None,
+            output_data_type=None,
+            **kwargs,
+        )
+        self.factor = factor
+        self.axis = axis
+        self.method = method
+
+    def process(self, data):
+        if self.factor is None or self.factor <= 1:
+            return data  # No interpolation needed if factor is None or <= 1
+
+        data_out = self.resize_along_axis(data, self.factor, self.axis, self.method)
+        return data_out
+
+    @staticmethod
+    def resize_along_axis(data, factor, axis, method):
+        """Resize data along a specific axis using the downsample factor."""
+        shape = ops.shape(data)
+        data_flat = ops.reshape(data, [-1, shape[axis]])
+        # fill to four dimensions for `ops.image.resize` function
+        data_flat = data_flat[..., None, None]
+        data_out = ops.image.resize(
+            data_flat, [shape[axis] * factor, 1], interpolation=method
+        )
+        new_shape = list(shape)
+        new_shape[axis] = shape[axis] * factor
+        data_out = ops.reshape(data_out, new_shape)
+        return data_out
 
 
 @ops_registry("companding")
@@ -1338,27 +1395,25 @@ class ScanConvert(Operation):
 
     def __init__(
         self,
-        x_axis=None,
-        z_axis=None,
-        spline_order=1,
+        rho_range=None,
+        theta_range=None,
+        phi_range=None,
+        resolution=None,
         fill_value=None,
-        n_pixels=None,
         **kwargs,
     ):
         """Initialize the ScanConvert operation.
 
         Args:
-            x_axis (ndarray, optional): linspace of the angles
-            z_axis (ndarray, optional): linspace of the depth
-            spline_order (int, optional): Order of spline interpolation.
-                Defaults to 1.
-            fill_value (float, optional): Value of the points that cannot be
-                mapped from sample_points to grid. Defaults to None, which sets
-                value to minimun of dynamic range.
-            n_pixels (int, optional): Number of pixels (widht) in output image.
-                height is derived by division of sqrt(2) of width. Defaults to None.
-                in this case n_pixels is set using default arg of scan_convert func.
-
+            rho_range (Tuple): Range of the rho axis in the polar coordinate system.
+                Defined in meters.
+            theta_range (Tuple): Range of the theta axis in the polar coordinate system.
+                Defined in radians.
+            phi_range (Tuple): Range of the phi axis in the polar coordinate system.
+                Defined in radians.
+            resolution (float): Resolution of the output image in meters per pixel.
+                if None, the resolution is computed based on the input data.
+            fill_value (float): Value to fill the image with outside the defined region.
         Returns:
             image_sc (ndarray): Output image (converted to cartesian coordinates).
 
@@ -1368,49 +1423,61 @@ class ScanConvert(Operation):
             output_data_type=None,
             **kwargs,
         )
-        self.x_axis = x_axis
-        self.z_axis = z_axis
-        self.spline_order = spline_order
+        self.rho_range = rho_range
+        self.theta_range = theta_range
+        self.phi_range = phi_range
+        self.resolution = resolution
         self.fill_value = fill_value
-        self.n_pixels = n_pixels
-        self.probe_type = None
 
     @property
     def _ready(self):
-        if self.probe_type != "phased":
-            return True
-        return (
-            self.x_axis is not None
-            and self.z_axis is not None
-            and self.spline_order is not None
-            and self.fill_value is not None
-            and self.n_pixels is not None
-        )
+        return self.rho_range is not None and self.theta_range is not None
 
     def process(self, data):
-        if self.probe_type != "phased":
-            return data
-
-        return scan_convert(
-            data,
-            self.x_axis,
-            self.z_axis,
-            n_pixels=self.n_pixels,
-            spline_order=self.spline_order,
-            fill_value=self.fill_value,
-        )
+        if self.phi_range is not None:
+            data_out = display.scan_convert_3d(
+                data,
+                self.rho_range,
+                self.theta_range,
+                self.phi_range,
+                self.resolution,
+                self.fill_value,
+            )
+        else:
+            data_out = display.scan_convert_2d(
+                data,
+                self.rho_range,
+                self.theta_range,
+                self.resolution,
+                self.fill_value,
+            )
+        return data_out
 
     def _assign_config_params(self, config):
-        self.n_pixels = config.data.output_size
+        self.resolution = config.data.resolution
         self.fill_value = config.data.dynamic_range[0]
 
     def _assign_probe_params(self, probe):
-        self.probe_type = probe.probe_type
-        if self.probe_type == "phased":
-            self.x_axis = probe.angle_deg_axis
+        # TODO: probably want to read coordinates from
+        # usbmd file in the future (i.e. stored in scan class)
+        if hasattr(probe, "angle_deg_axis"):
+            angles = np.deg2rad(probe.angle_deg_axis)
+            self.theta_range = (
+                ops.min(angles),
+                ops.max(angles),
+            )
+        else:
+            log.warning(
+                "Probe does not have `angle_deg_axis` defined, using default "
+                "values (-45, 45 degree cone) for ScanConvert."
+            )
+            self.theta_range = tuple(np.deg2rad([-45, 45]))
 
     def _assign_scan_params(self, scan):
-        self.z_axis = scan.z_axis
+        self.rho_range = (
+            ops.min(scan.z_axis),
+            ops.max(scan.z_axis),
+        )
 
 
 @ops_registry("doppler")
@@ -1490,10 +1557,11 @@ class Doppler(Operation):
         """Compute Doppler from packet of I/Q Data.
 
         Args:
-            x (ndarray): I/Q complex data of shape n_el, n_ax, n_frames.
-            n_frames corresponds to the ensemble length used to compute the Doppler signal.
+            data (ndarray): I/Q complex data of shape (n_el, n_ax, n_frames).
+                n_frames corresponds to the ensemble length used to compute
+                the Doppler signal.
         Returns:
-            doppler_velocities (ndarray): Doppler velocity map of shape n_el, n_ax.
+            doppler_velocities (ndarray): Doppler velocity map of shape (n_el, n_ax).
 
         """
         assert data.ndim == 3, "Data must be a 3-D array"
@@ -1881,24 +1949,3 @@ def hilbert(x, N: int = None, axis=-1):
     idx.insert(axis, idx.pop(-1))
     x = ops.transpose(x, idx)
     return x
-
-
-def translate(array, range_from, range_to):
-    """Map values in array from one range to other.
-
-    Args:
-        array (ndarray): input array.
-        range_from (Tuple): lower and upper bound of original array.
-        range_to (Tuple): lower and upper bound to which array should be mapped.
-
-    Returns:
-        (ndarray): translated array
-    """
-    left_min, left_max = range_from
-    right_min, right_max = range_to
-
-    # Convert the left range into a 0-1 range (float)
-    value_scaled = (array - left_min) / (left_max - left_min)
-
-    # Convert the 0-1 range into a value in the right range.
-    return right_min + (value_scaled * (right_max - right_min))
