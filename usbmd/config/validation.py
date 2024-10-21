@@ -134,6 +134,11 @@ scan_schema = Schema(
         Optional("demodulation_frequency", default=None): Or(None, any_number),
         Optional("downsample", default=None): Or(None, positive_integer),
         Optional("f_number", default=None): Or(None, positive_float),
+        Optional("apply_lens_correction", default=False): bool,
+        Optional("lens_thickness", default=1e-3): positive_float,
+        Optional("lens_sound_speed", default=1000): Or(
+            positive_float, positive_integer
+        ),
     }
 )
 
@@ -160,7 +165,7 @@ data_schema = Schema(
         "dtype": Or(*_DATA_TYPES),
         "dataset_folder": str,
         Optional("dataset_name", default="usbmd"): str,
-        Optional("output_size", default=500): positive_integer,
+        Optional("resolution", default=None): Or(None, positive_float),
         Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
         Optional("file_path", default=None): Or(None, str, Path),
         Optional("local", default=True): bool,

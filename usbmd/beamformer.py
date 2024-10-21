@@ -2,6 +2,7 @@
 
 import numpy as np
 from keras import ops
+from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 from usbmd.utils.cache import cache_output
 
@@ -20,6 +21,9 @@ def tof_correction(
     angles,
     vfocus,
     apply_phase_rotation=False,
+    apply_lens_correction=False,
+    lens_thickness=1e-3,
+    lens_sound_speed=1000,
 ):
     """
     Args:
@@ -40,6 +44,15 @@ def tof_correction(
         angles (ops.Tensor): The angles of the plane waves in radians of shape
             `(n_tx,)`
         vfocus (ops.Tensor): The focus distance of shape `(n_tx,)`
+        apply_phase_rotation (bool, optional): Whether to apply phase rotation to
+            time-of-flights. Defaults to False.
+        apply_lens_correction (bool, optional): Whether to apply lens correction to
+            time-of-flights. This makes it slower, but more accurate in the near-field.
+            Defaults to False.
+        lens_thickness (float, optional): Thickness of the lens in meters. Used for
+            lens correction. Defaults to 1e-3.
+        lens_sound_speed (float, optional): Speed of sound in the lens in m/s. Used
+            for lens correction Defaults to 1000.
 
     Returns:
         output (ops.Tensor): time-of-flight corrected data
@@ -82,7 +95,10 @@ def tof_correction(
     # reaching the transducer element.
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
-    txdel, rxdel = calculate_delays(
+    delay_fn = (
+        calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
+    )
+    txdel, rxdel = delay_fn(
         flatgrid,
         t0_delays,
         tx_apodizations,
@@ -94,6 +110,8 @@ def tof_correction(
         n_el,
         vfocus,
         angles,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
     )
 
     mask = apod_mask(flatgrid, probe_geometry, fnum)
@@ -151,6 +169,8 @@ def calculate_delays(
     n_el,
     focus_distances,
     polar_angles,
+    # pylint: disable=unused-argument
+    **kwargs,
 ):
     """
     Calculates the delays in samples to every pixel in the grid.
