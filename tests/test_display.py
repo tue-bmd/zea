@@ -2,29 +2,61 @@
 
 import numpy as np
 import pytest
+from keras import ops
 
+from tests.test_processing import equality_libs_processing
 from usbmd.display import (
-    project_to_cartesian_grid,
-    scan_convert,
+    scan_convert_2d,
+    scan_convert_3d,
     to_8bit,
     transform_sc_image_to_polar,
 )
 
 
 @pytest.mark.parametrize(
-    "size",
+    "size, resolution",
     [
-        (2, 1, 128, 32),
-        (512, 512),
-        (1, 128, 32),
+        ((128, 32), None),
+        ((512, 512), 0.1),
+        ((40, 20, 20), None),
+        ((40, 20, 20), 0.5),
     ],
 )
-def test_scan_conversion(size):
+@equality_libs_processing(decimal=0)
+def test_scan_conversion(size, resolution):
     """Tests the scan_conversion function with random data"""
     data = np.random.random(size)
-    x_axis = np.linspace(-50, 50, 100)  # angles
-    z_axis = np.linspace(0, 100, 2000)
-    scan_convert(data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0)
+    from keras import ops  # pylint: disable=reimported,import-outside-toplevel
+
+    rho_range = (0, 100)
+    theta_range = (-45, 45)
+    theta_range = np.deg2rad(theta_range)
+
+    if len(size) == 3:
+        phi_range = (-20, 20)
+        phi_range = np.deg2rad(phi_range)
+        out = scan_convert_3d(
+            data,
+            rho_range,
+            theta_range,
+            phi_range,
+            resolution=resolution,
+        )
+    else:
+        out = scan_convert_2d(
+            data,
+            rho_range,
+            theta_range,
+            resolution=resolution,
+        )
+
+    out = ops.convert_to_numpy(out)
+
+    # make sure outputs are not all nans or zeros
+    assert not np.all(np.isnan(out)), "scan conversion is all nans"
+    assert not np.all(out == 0), "scan conversion is all zeros"
+    out = np.nan_to_num(out, nan=0)
+    return out
 
 
 @pytest.mark.parametrize(
@@ -54,42 +86,25 @@ def test_scan_conversion_and_inverse(size, random_data_type):
     else:
         raise NotImplementedError
 
-    x_axis = np.linspace(-45, 45, 100)  # angles
-    z_axis = np.linspace(0, 100, 2000)
-    data_sc = scan_convert(
-        polar_data, x_axis, z_axis, n_pixels=500, spline_order=1, fill_value=0
+    rho_range = (0, 100)
+    theta_range = (-45, 45)
+    theta_range = np.deg2rad(theta_range)
+
+    cartesian_data = scan_convert_2d(
+        polar_data,
+        rho_range,
+        theta_range,
     )
-    data_sc_inv = transform_sc_image_to_polar(data_sc, output_size=polar_data.shape)
-    mean_squared_error = ((polar_data - data_sc_inv) ** 2).mean()
+    cartesian_data = ops.where(ops.isnan(cartesian_data), 0, cartesian_data)
+    cartesian_data = ops.convert_to_numpy(cartesian_data)
+    cartesian_data_inv = transform_sc_image_to_polar(
+        cartesian_data, output_size=polar_data.shape
+    )
+    mean_squared_error = ((polar_data - cartesian_data_inv) ** 2).mean()
 
     assert (
         mean_squared_error < allowed_error
     ), f"MSE is too high: {mean_squared_error:.4f} > {allowed_error:.4f}"
-
-
-@pytest.mark.parametrize(
-    "size",
-    [
-        (128, 32),
-        (512, 512),
-    ],
-)
-def test_grid_conversion(size):
-    """Tests the grid conversion function with random 2d data"""
-    data = np.random.random(size)
-    x_grid_points = np.linspace(-45, 45, 100)  # angles
-    z_grid_points = np.linspace(0, 100, 100)
-
-    x_sample_points = np.deg2rad(x_grid_points) + np.pi / 2
-    z_sample_points = z_grid_points
-
-    project_to_cartesian_grid(
-        data,
-        (x_sample_points, z_sample_points),
-        (x_grid_points, z_grid_points),
-        spline_order=1,
-        fill_value=0,
-    )
 
 
 @pytest.mark.parametrize(
