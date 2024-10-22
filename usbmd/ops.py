@@ -664,7 +664,8 @@ class TOFCorrection(Operation):
 
         super().initialize()
 
-    def process_batch(self, batch):
+    def process_item(self, batch):
+        """Perform time-of-flight correction on a single item in the batch."""
         return bmf.tof_correction(
             batch,
             grid=self.grid,
@@ -685,10 +686,11 @@ class TOFCorrection(Operation):
         )
 
     def process(self, data):
-        if self.with_batch_dim is False:
-            return self.process_batch(data)
+        """Perform time-of-flight correction on a batch of data."""
+        if not self.with_batch_dim:
+            return self.process_item(data)
         else:
-            return ops.map(self.process_batch, data)
+            return ops.map(self.process_item, data)
 
     def _assign_scan_params(self, scan: Scan):
         self.grid = scan.grid
