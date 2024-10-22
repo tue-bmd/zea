@@ -664,44 +664,31 @@ class TOFCorrection(Operation):
 
         super().initialize()
 
+    def process_batch(self, batch):
+        return bmf.tof_correction(
+            batch,
+            grid=self.grid,
+            t0_delays=self.t0_delays,
+            tx_apodizations=self.tx_apodizations,
+            sound_speed=self.sound_speed,
+            probe_geometry=self.probe_geometry,
+            initial_times=self.initial_times,
+            sampling_frequency=self.sampling_frequency,
+            fdemod=self.fdemod,
+            fnum=self.f_number,
+            angles=self.polar_angles,
+            vfocus=self.focus_distances,
+            apply_phase_rotation=bool(self.fdemod),
+            apply_lens_correction=bool(self.apply_lens_correction),
+            lens_thickness=self.lens_thickness,
+            lens_sound_speed=self.lens_sound_speed,
+        )
+
     def process(self, data):
-        tof_data = []
         if self.with_batch_dim is False:
-            data = ops.expand_dims(data, axis=0)
-        batch_size = data.shape[0]
-        for batch_idx in range(batch_size):
-            tof_corrected_batch = bmf.tof_correction(
-                data[batch_idx],
-                grid=self.grid,
-                t0_delays=self.t0_delays,
-                tx_apodizations=self.tx_apodizations,
-                sound_speed=self.sound_speed,
-                probe_geometry=self.probe_geometry,
-                initial_times=self.initial_times,
-                sampling_frequency=self.sampling_frequency,
-                fdemod=self.fdemod,
-                fnum=self.f_number,
-                angles=self.polar_angles,
-                vfocus=self.focus_distances,
-                apply_phase_rotation=bool(self.fdemod),
-                apply_lens_correction=bool(self.apply_lens_correction),
-                lens_thickness=self.lens_thickness,
-                lens_sound_speed=self.lens_sound_speed,
-            )
-
-            # Add batch dimension
-            # The shape is now (batch, z, x, num_transmits, num_elements)
-            tof_corrected_batch = tof_corrected_batch[None]
-
-            tof_data.append(tof_corrected_batch)
-
-        # Stack batches of TOF corrected data in a single tensor
-        output = ops.concatenate(tof_data, 0)
-
-        if self.with_batch_dim is False:
-            output = ops.squeeze(output, 0)
-
-        return output
+            return self.process_batch(data)
+        else:
+            return ops.map(self.process_batch, data)
 
     def _assign_scan_params(self, scan: Scan):
         self.grid = scan.grid
