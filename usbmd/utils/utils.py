@@ -19,6 +19,13 @@ from usbmd.utils import log
 from usbmd.utils.checks import _assert_uint8_images
 
 
+def get_divisors(n):
+    """Get the divisors of a number."""
+    candidates = np.arange(1, n + 1)
+    divisors = candidates[n % candidates == 0]
+    return divisors
+
+
 def translate(array, range_from, range_to):
     """Map values in array from one range to other.
 

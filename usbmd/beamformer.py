@@ -3,18 +3,16 @@
 import numpy as np
 from keras import ops
 
+from usbmd.utils import get_divisors
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
-def get_divisors(n):
-    candidates = np.arange(1, n + 1)
-    divisors = candidates[n % candidates == 0]
-    return divisors
-
-
-def tof_correction(data, grid, patches=20, *args, **kwargs):
+def tof_correction(data, grid, *args, patches=1, **kwargs):
+    """
+    Time-of-flight correction. The grid can be split into patches to reduce memory.
+    """
     # Flatten grid to simplify calculations
-    gridshape = grid.shape
+    gridshape = ops.shape(grid)
     flatgrid = ops.reshape(grid, (-1, 3))
 
     n_tx, _, n_el, _ = ops.shape(data)
@@ -22,6 +20,8 @@ def tof_correction(data, grid, patches=20, *args, **kwargs):
     if patches == 1:
         tof_corrected = tof_correction_flatgrid(data, flatgrid, *args, **kwargs)
     else:
+        # TODO: this is not that robust, because you can't guarantee
+        # that the divisors are close enough to the number of patches
         divisors = get_divisors(ops.shape(flatgrid)[0])
         patches = divisors[np.abs(divisors - patches).argmin()]  # closest divisor
         patched_grid = ops.reshape(flatgrid, (patches, -1, 3))
@@ -37,7 +37,7 @@ def tof_correction(data, grid, patches=20, *args, **kwargs):
     # Reshape to reintroduce the x- and z-dimensions
     return ops.reshape(
         tof_corrected,
-        (n_tx, gridshape[0], gridshape[1], n_el, tof_corrected.shape[-1]),
+        (n_tx, gridshape[0], gridshape[1], n_el, ops.shape(tof_corrected)[-1]),
     )
 
 
@@ -515,8 +515,8 @@ def apod_mask(grid, probe_geometry, f_number):
         mask = ops.ones((1))
         return mask
 
-    n_pix = grid.shape[0]
-    n_el = probe_geometry.shape[0]
+    n_pix = ops.shape(grid)[0]
+    n_el = ops.shape(probe_geometry)[0]
 
     # Get the depth of every pixel
     z_pixel = grid[:, 2]
@@ -531,9 +531,9 @@ def apod_mask(grid, probe_geometry, f_number):
 
     # Use matrix multiplication to expand aperture tensor, x_pixel tensor, and
     # x_element tensor to shape (n_pix, n_el)
-    ones_aperture = ops.ones((1, n_el), dtype=aperture.dtype)
-    ones_x_pixel = ops.ones((1, n_el), dtype=x_pixel.dtype)
-    ones_x_element = ops.ones((n_pix, 1), dtype=x_element.dtype)
+    ones_aperture = ops.ones((1, n_el), dtype=ops.dtype(aperture))
+    ones_x_pixel = ops.ones((1, n_el), dtype=ops.dtype(x_pixel))
+    ones_x_element = ops.ones((n_pix, 1), dtype=ops.dtype(x_element))
 
     aperture = aperture[..., None] @ ones_aperture
 

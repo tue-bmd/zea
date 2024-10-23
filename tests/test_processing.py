@@ -2,13 +2,12 @@
 
 import importlib
 import math
-import random
 
 import decorator
+import keras
 import numpy as np
 import pytest
-import tensorflow as tf
-import torch
+from keras import ops as keras_ops
 from scipy.signal import hilbert
 
 from usbmd import ops
@@ -18,19 +17,10 @@ from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
 
-def set_random_seed(seed=None):
-    """Set random seed to all random generators."""
-    np.random.seed(seed)
-    tf.random.set_seed(seed)
-    random.seed(seed)
-    torch.random.manual_seed(seed)
-    return seed
-
-
 def equality_libs_processing(decimal=4):
     """Test the processing functions of different libraries
 
-    Check if np / tf / torch processing funcs produce equal output.
+    Check if numpy, tensorflow, torch and jax processing funcs produce equal output.
 
     Example:
         ```python
@@ -50,6 +40,8 @@ def equality_libs_processing(decimal=4):
             - test_my_processing_func
     """
 
+    BACKENDS = ["numpy", "tensorflow", "torch", "jax"]
+
     def wrapper(test_func, *args, **kwargs):
         # Set random seed
         seed = np.random.randint(0, 1000)
@@ -57,54 +49,23 @@ def equality_libs_processing(decimal=4):
         # Extract function name from test function
         func_name = test_func.__name__.split("test_", 1)[-1]
 
-        # Run the test function
-        set_random_seed(seed)
-        set_backend("numpy")
-        importlib.reload(ops)
-        original_output = test_func(*args, **kwargs)
-
-        set_random_seed(seed)
-        set_backend("tensorflow")
-        importlib.reload(ops)
-
-        tf_output = np.array(test_func(*args, **kwargs))
-
-        # Run the test function with processing_torch module
-        set_random_seed(seed)
-        set_backend("torch")
-        importlib.reload(ops)
-
-        torch_output = np.array(test_func(*args, **kwargs))
-
-        # Run the test function with
-        set_random_seed(seed)
-        set_backend("jax")
-        importlib.reload(ops)
-
-        jax_output = np.array(test_func(*args, **kwargs))
+        output = {}
+        for backend in BACKENDS:
+            print(f"Running {func_name} in {backend}")
+            set_backend(backend)
+            importlib.reload(ops)
+            keras.utils.set_random_seed(seed)
+            output[backend] = keras_ops.convert_to_numpy(test_func(*args, **kwargs))
 
         # Check if the outputs from the individual test functions are equal
-        np.testing.assert_almost_equal(
-            original_output,
-            tf_output,
-            decimal=decimal,
-            err_msg=f"Function {func_name} failed with tensorflow processing.",
-        )
-        print(f"Function {func_name} passed with tensorflow output.")
-        np.testing.assert_almost_equal(
-            original_output,
-            torch_output,
-            decimal=decimal,
-            err_msg=f"Function {func_name} failed with pytorch processing.",
-        )
-        print(f"Function {func_name} passed with pytorch output.")
-        np.testing.assert_almost_equal(
-            original_output,
-            jax_output,
-            decimal=decimal,
-            err_msg=f"Function {func_name} failed with jax processing.",
-        )
-        print(f"Function {func_name} passed with jax output.")
+        for backend in BACKENDS[1:]:
+            np.testing.assert_almost_equal(
+                output["numpy"],
+                output[backend],
+                decimal=decimal,
+                err_msg=f"Function {func_name} failed with {backend} processing.",
+            )
+            print(f"Function {func_name} passed with {backend} output.")
 
     return decorator.decorator(wrapper)
 
