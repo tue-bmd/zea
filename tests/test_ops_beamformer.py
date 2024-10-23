@@ -1,14 +1,15 @@
 """Tests for the ops beamformer.
 """
 
+import importlib
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Do not use GPU to avoid OOM
+
 import numpy as np
 
-import usbmd
+import usbmd.beamformer as beamformer
 from tests.test_processing import equality_libs_processing
-
-usbmd.init_device()
-
-from usbmd.beamformer import tof_correction
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v
@@ -63,7 +64,11 @@ def _get(reconstruction_mode):
     decimal=0
 )  # one element in jax is different it seems by 0.7 or so
 def test_tof_correction(reconstruction_mode="generic"):
-    """Test TOF Correction between backends"""
+    """Test TOF Correction between backends.
+    Also ensures that the output is the same when it is split into patches"""
+
+    # Reload any module that uses keras
+    importlib.reload(beamformer)
     from keras import ops  # pylint: disable=import-outside-toplevel
 
     _, probe, scan, _, inputs = _get(reconstruction_mode)
@@ -90,15 +95,23 @@ def test_tof_correction(reconstruction_mode="generic"):
         # If item is a floating point numpy array, convert to float32
         if hasattr(item, "dtype") and np.issubdtype(item.dtype, np.floating):
             item = item.astype(np.float32)
-        # Convert to tensor
-        kwargs[key] = ops.convert_to_tensor(item)
-    outputs = tof_correction(
-        **kwargs,
-        apply_phase_rotation=bool(scan.fdemod),
-    )
-    outputs = ops.convert_to_numpy(outputs)
+        # Convert to tensor if numpy array
+        if isinstance(item, np.ndarray):
+            kwargs[key] = ops.convert_to_tensor(item)
 
-    return outputs
+    outputs = []
+    for patches in [1, 10]:
+        output = beamformer.tof_correction(
+            **kwargs,
+            apply_phase_rotation=bool(scan.fdemod),
+            patches=patches,
+        )
+        outputs.append(ops.convert_to_numpy(output))
+    np.testing.assert_allclose(
+        outputs[0], outputs[1], err_msg="Different results for patches=1 and patches=10"
+    )
+
+    return outputs[0]
 
 
 if __name__ == "__main__":
