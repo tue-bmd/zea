@@ -535,11 +535,9 @@ def apod_mask(grid, probe_geometry, f_number):
     ones_x_pixel = ops.ones((1, n_el), dtype=ops.dtype(x_pixel))
     ones_x_element = ops.ones((n_pix, 1), dtype=ops.dtype(x_element))
 
-    aperture = aperture[..., None] @ ones_aperture
-
-    expanded_x_pixel = x_pixel[..., None] @ ones_x_pixel
-
-    expanded_x_element = ones_x_element @ x_element[None]
+    aperture = ops.matmul(aperture[..., None], ones_aperture)
+    expanded_x_pixel = ops.matmul(x_pixel[..., None], ones_x_pixel)
+    expanded_x_element = ops.matmul(ones_x_element, x_element[None])
 
     # Compute the lateral distance between elements and pixels
     # Of shape (n_pix, n_el)

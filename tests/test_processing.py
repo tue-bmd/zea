@@ -4,6 +4,7 @@ import importlib
 import math
 
 import decorator
+import jax
 import keras
 import numpy as np
 import pytest
@@ -55,7 +56,8 @@ def equality_libs_processing(decimal=4):
             set_backend(backend)
             importlib.reload(ops)
             keras.utils.set_random_seed(seed)
-            output[backend] = keras_ops.convert_to_numpy(test_func(*args, **kwargs))
+            with jax.disable_jit():
+                output[backend] = keras_ops.convert_to_numpy(test_func(*args, **kwargs))
 
         # Check if the outputs from the individual test functions are equal
         for backend in BACKENDS[1:]:
