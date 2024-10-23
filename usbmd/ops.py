@@ -625,6 +625,7 @@ class TOFCorrection(Operation):
         apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
+        patches=1,
     ):
         super().__init__(
             input_data_type="raw_data",
@@ -647,6 +648,7 @@ class TOFCorrection(Operation):
         self.apply_lens_correction = apply_lens_correction
         self.lens_thickness = lens_thickness
         self.lens_sound_speed = lens_sound_speed
+        self.patches = patches
 
     def initialize(self):
         self.grid = ops.convert_to_tensor(self.grid, dtype="float32")
@@ -683,6 +685,7 @@ class TOFCorrection(Operation):
             apply_lens_correction=bool(self.apply_lens_correction),
             lens_thickness=self.lens_thickness,
             lens_sound_speed=self.lens_sound_speed,
+            patches=self.patches,
         )
 
     def process(self, data):

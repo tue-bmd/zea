@@ -19,6 +19,8 @@ class Config(dict):
     values can be accessed as class attributes. Furthermore it enables
     saving and loading to a yaml.
 
+    TODO: maybe we can use keras.utils.Config?
+
     """
 
     __frozen__ = False
