@@ -2,10 +2,8 @@
 """
 
 import importlib
-import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Do not use GPU to avoid OOM
-
+import keras
 import numpy as np
 
 from tests.test_processing import equality_libs_processing
@@ -111,6 +109,7 @@ def test_tof_correction(reconstruction_mode="generic"):
         outputs[0], outputs[1], err_msg="Different results for patches=1 and patches=10"
     )
 
+    keras.utils.clear_session(free_memory=True)  # Free memory
     return outputs[0]
 
 

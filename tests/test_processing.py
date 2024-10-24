@@ -8,7 +8,6 @@ import jax
 import keras
 import numpy as np
 import pytest
-from keras import ops as keras_ops
 from scipy.signal import hilbert
 
 from usbmd import ops
@@ -57,7 +56,7 @@ def equality_libs_processing(decimal=4):
             importlib.reload(ops)
             keras.utils.set_random_seed(seed)
             with jax.disable_jit():
-                output[backend] = keras_ops.convert_to_numpy(test_func(*args, **kwargs))
+                output[backend] = np.array(test_func(*args, **kwargs))
 
         # Check if the outputs from the individual test functions are equal
         for backend in BACKENDS[1:]:
