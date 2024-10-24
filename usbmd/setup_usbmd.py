@@ -15,10 +15,10 @@ from typing import Union
 
 import yaml
 
+from usbmd.backend import set_backend
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.datapaths import create_new_user, set_data_paths
-from usbmd.processing import set_backend
 from usbmd.utils import log
 from usbmd.utils.device import init_device
 from usbmd.utils.git_info import get_git_summary
