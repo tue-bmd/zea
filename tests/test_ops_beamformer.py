@@ -1,8 +1,6 @@
 """Tests for the ops beamformer.
 """
 
-import importlib
-
 import keras
 import numpy as np
 
@@ -58,15 +56,11 @@ def _get(reconstruction_mode):
     return config, probe, scan, data, inputs
 
 
-@equality_libs_processing(
-    decimal=0
-)  # one element in jax is different it seems by 0.7 or so
+@equality_libs_processing()
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends.
     Also ensures that the output is the same when it is split into patches"""
 
-    # Reload any module that uses keras
-    importlib.reload(beamformer)
     from keras import ops  # pylint: disable=import-outside-toplevel
 
     _, probe, scan, _, inputs = _get(reconstruction_mode)

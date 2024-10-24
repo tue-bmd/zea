@@ -20,7 +20,7 @@ from usbmd.utils import log
 from usbmd.utils.checks import _assert_uint8_images
 
 
-def map(f, xs, batch_size=None):
+def batched_map(f, xs, batch_size=None):
     """
     Map a function over leading array axes.
 

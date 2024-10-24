@@ -1,11 +1,9 @@
 """Tests for the processing module."""
 
-import importlib
 import math
 
 import decorator
 import jax
-import keras
 import numpy as np
 import pytest
 from scipy.signal import hilbert
@@ -53,7 +51,8 @@ def equality_libs_processing(decimal=4):
         for backend in BACKENDS:
             print(f"Running {func_name} in {backend}")
             set_backend(backend)
-            importlib.reload(ops)
+            import keras  # pylint: disable=import-outside-toplevel
+
             keras.utils.set_random_seed(seed)
             with jax.disable_jit():
                 output[backend] = np.array(test_func(*args, **kwargs))

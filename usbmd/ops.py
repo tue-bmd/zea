@@ -134,7 +134,7 @@ from usbmd.config import Config
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import lens_correction, log, map, pfield, translate
+from usbmd.utils import batched_map, lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras
@@ -615,18 +615,18 @@ class DelayAndSum(Operation):
         flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
         flat_data = ops.moveaxis(flat_data, 1, 0)
 
-        flat_data = map(self.process_patch, flat_data, batch_size=self.patches)
+        flat_data = batched_map(self.process_patch, flat_data, batch_size=self.patches)
 
         # Reshape data back to original shape
         data = ops.reshape(flat_data, (n_z, n_x, n_ch))
 
         return data
 
-    def process(self, batch):
+    def process(self, data):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
-            batch (ops.Tensor): The TOF corrected input of shape
+            data (ops.Tensor): The TOF corrected input of shape
                 `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
 
         Returns:
@@ -635,10 +635,10 @@ class DelayAndSum(Operation):
         """
 
         if not self.with_batch_dim:
-            return self.process_item(batch)
+            return self.process_item(data)
         else:
             # TODO: could be ops.vectorized_map if enough memory
-            return ops.map(self.process_item, batch)
+            return ops.map(self.process_item, data)
 
 
 @ops_registry("tof_correction")
@@ -727,12 +727,12 @@ class TOFCorrection(Operation):
             patches=self.patches,
         )
 
-    def process(self, batch):
+    def process(self, data):
         """Perform time-of-flight correction on a batch of data."""
         if not self.with_batch_dim:
-            return self.process_item(batch)
+            return self.process_item(data)
         else:
-            return ops.map(self.process_item, batch)
+            return ops.map(self.process_item, data)
 
     def _assign_scan_params(self, scan: Scan):
         self.grid = scan.grid
