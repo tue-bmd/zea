@@ -3,8 +3,28 @@
 import numpy as np
 from keras import ops
 
-from usbmd.utils import get_divisors
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
+
+
+def pad_array_to_divisible(arr, N, axis=0, pad_value=0):
+    """
+    Pad an array to be divisible by N along the specified axis.
+    """
+    # Get the length of the specified axis
+    length = ops.shape(arr)[axis]
+
+    # Calculate how much padding is needed for the specified axis
+    remainder = length % N
+    padding = N - remainder if remainder != 0 else 0
+
+    # Create a tuple with (before, after) padding for each axis
+    pad_width = [(0, 0)] * ops.ndim(arr)  # No padding for other axes
+    pad_width[axis] = (0, padding)  # Padding for the specified axis
+
+    # Pad the array
+    padded_array = ops.pad(arr, pad_width, mode="constant", constant_values=pad_value)
+
+    return padded_array
 
 
 def tof_correction(data, grid, *args, patches=1, **kwargs):
@@ -14,16 +34,15 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
     # Flatten grid to simplify calculations
     gridshape = ops.shape(grid)
     flatgrid = ops.reshape(grid, (-1, 3))
+    n_pix = ops.shape(flatgrid)[0]
 
     n_tx, _, n_el, _ = ops.shape(data)
 
     if patches == 1:
         tof_corrected = tof_correction_flatgrid(data, flatgrid, *args, **kwargs)
     else:
-        # TODO: this is not that robust, because you can't guarantee
-        # that the divisors are close enough to the number of patches
-        divisors = get_divisors(ops.shape(flatgrid)[0])
-        patches = divisors[np.abs(divisors - patches).argmin()]  # closest divisor
+        # Pad array and reshape to patches
+        flatgrid = pad_array_to_divisible(flatgrid, patches, axis=0)
         patched_grid = ops.reshape(flatgrid, (patches, -1, 3))
 
         def tof_correction_patch(grid_patch):
@@ -33,6 +52,7 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
         tof_corrected = ops.moveaxis(
             tof_corrected, 1, 0
         )  # move n_tx to the first dimension
+        tof_corrected = tof_corrected[:, :n_pix]  # remove padding
 
     # Reshape to reintroduce the x- and z-dimensions
     return ops.reshape(
