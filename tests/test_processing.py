@@ -9,8 +9,9 @@ import pytest
 from scipy.signal import hilbert
 
 from usbmd import ops
+from usbmd.backend import set_backend
 from usbmd.probes import get_probe
-from usbmd.processing import Process, set_backend
+from usbmd.processing import Process
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
