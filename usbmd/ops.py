@@ -571,35 +571,45 @@ class DelayAndSum(Operation):
 
     def initialize(self):
         if self.rx_apo is None:
-            self.rx_apo = ops.ones((1, 1, 1, 1, 1))
+            self.rx_apo = 1.0
 
         if self.tx_apo is None:
-            self.tx_apo = ops.ones((1, 1, 1, 1, 1))
+            self.tx_apo = 1.0
 
-    def process(self, data):
+    def process_item(self, data):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
-            data (ops.Tensor): The TOF corrected input of shape
-                `(n_frames, n_tx, n_ax, n_el, n_ch)`
+            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
 
         Returns:
-            ops.Tensor: The beamformed data of shape `(n_frames, n_z, n_x)`
+            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
         """
-        if self.with_batch_dim is False:
-            data = ops.expand_dims(data, axis=0)
-
         # Sum over the channels, i.e. DAS
         data = ops.sum(self.rx_apo * data, -2)
 
         # Sum over transmits, i.e. Compounding
         data = self.tx_apo * data
-        data = ops.sum(data, 1)
-
-        if self.with_batch_dim is False:
-            data = ops.squeeze(data, axis=0)
-
+        data = ops.sum(data, 0)
         return data
+
+    def process(self, batch):
+        """Performs DAS beamforming on tof-corrected input.
+
+        Args:
+            batch (ops.Tensor): The TOF corrected input of shape
+                `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
+                with optional batch dimension.
+        """
+
+        if not self.with_batch_dim:
+            return self.process_item(batch)
+        else:
+            # TODO: could be ops.vectorized_map if enough memory
+            return ops.map(self.process_item, batch)
 
 
 @ops_registry("tof_correction")
@@ -666,10 +676,10 @@ class TOFCorrection(Operation):
 
         super().initialize()
 
-    def process_item(self, batch):
+    def process_item(self, data):
         """Perform time-of-flight correction on a single item in the batch."""
         return bmf.tof_correction(
-            batch,
+            data,
             grid=self.grid,
             t0_delays=self.t0_delays,
             tx_apodizations=self.tx_apodizations,
@@ -688,12 +698,12 @@ class TOFCorrection(Operation):
             patches=self.patches,
         )
 
-    def process(self, data):
+    def process(self, batch):
         """Perform time-of-flight correction on a batch of data."""
         if not self.with_batch_dim:
-            return self.process_item(data)
+            return self.process_item(batch)
         else:
-            return ops.map(self.process_item, data)
+            return ops.map(self.process_item, batch)
 
     def _assign_scan_params(self, scan: Scan):
         self.grid = scan.grid
