@@ -8,8 +8,8 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Do not use GPU to avoid OOM
 
 import numpy as np
 
-import usbmd.beamformer as beamformer
 from tests.test_processing import equality_libs_processing
+from usbmd import beamformer
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v
