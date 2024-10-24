@@ -66,7 +66,7 @@ def test_dataset_indexing(file_idx, frame_idx):
 
 
 @pytest.mark.parametrize(
-    "ml_library, dtype, to_dtype, filetype",
+    "dtype, to_dtype, filetype",
     [
         ("raw_data", "image", "png"),
         ("beamformed_data", "image", "hdf5"),
