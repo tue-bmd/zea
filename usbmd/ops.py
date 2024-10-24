@@ -134,7 +134,7 @@ from usbmd.config import Config
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import lens_correction, log, pfield, translate
+from usbmd.utils import lens_correction, log, map, pfield, translate
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras
@@ -560,7 +560,13 @@ class Identity(Operation):
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
-    def __init__(self, rx_apo=None, tx_apo=None, **kwargs):
+    def __init__(self, rx_apo=None, tx_apo=None, patches=1, **kwargs):
+        """
+        Args:
+            rx_apo (array, optional): Receive apodization window. Defaults to None.
+            tx_apo (array, optional): Transmit apodization window. Defaults to None.
+            patches (int, optional): Number of patches to split the data into. Defaults to 1.
+        """
         super().__init__(
             input_data_type=None,
             output_data_type="beamformed_data",
@@ -568,6 +574,7 @@ class DelayAndSum(Operation):
         )
         self.rx_apo = rx_apo
         self.tx_apo = tx_apo
+        self.patches = patches
 
     def initialize(self):
         if self.rx_apo is None:
@@ -576,8 +583,25 @@ class DelayAndSum(Operation):
         if self.tx_apo is None:
             self.tx_apo = 1.0
 
-    def process_item(self, data):
+    def process_patch(self, patch):
         """Performs DAS beamforming on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_pix, n_tx, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
+        """
+        # Sum over the channels, i.e. DAS
+        data = ops.sum(self.rx_apo * patch, -2)
+
+        # Sum over transmits, i.e. Compounding
+        data = self.tx_apo * data
+        data = ops.sum(data, 1)
+        return data
+
+    def process_item(self, data):
+        """Performs DAS beamforming on tof-corrected input. Optionally splits the data into patches.
 
         Args:
             data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
@@ -585,12 +609,17 @@ class DelayAndSum(Operation):
         Returns:
             ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
         """
-        # Sum over the channels, i.e. DAS
-        data = ops.sum(self.rx_apo * data, -2)
+        n_tx, n_z, n_x, n_el, n_ch = data.shape
 
-        # Sum over transmits, i.e. Compounding
-        data = self.tx_apo * data
-        data = ops.sum(data, 0)
+        # Flatten grid and move n_pix=(n_z * n_x) to the front
+        flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
+        flat_data = ops.moveaxis(flat_data, 1, 0)
+
+        flat_data = map(self.process_patch, flat_data, batch_size=self.patches)
+
+        # Reshape data back to original shape
+        data = ops.reshape(flat_data, (n_z, n_x, n_ch))
+
         return data
 
     def process(self, batch):

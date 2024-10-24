@@ -3,28 +3,8 @@
 import numpy as np
 from keras import ops
 
+from usbmd.utils import map
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
-
-
-def pad_array_to_divisible(arr, N, axis=0, pad_value=0):
-    """
-    Pad an array to be divisible by N along the specified axis.
-    """
-    # Get the length of the specified axis
-    length = ops.shape(arr)[axis]
-
-    # Calculate how much padding is needed for the specified axis
-    remainder = length % N
-    padding = N - remainder if remainder != 0 else 0
-
-    # Create a tuple with (before, after) padding for each axis
-    pad_width = [(0, 0)] * ops.ndim(arr)  # No padding for other axes
-    pad_width[axis] = (0, padding)  # Padding for the specified axis
-
-    # Pad the array
-    padded_array = ops.pad(arr, pad_width, mode="constant", constant_values=pad_value)
-
-    return padded_array
 
 
 def tof_correction(data, grid, *args, patches=1, **kwargs):
@@ -34,30 +14,24 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
     # Flatten grid to simplify calculations
     gridshape = ops.shape(grid)
     flatgrid = ops.reshape(grid, (-1, 3))
-    n_pix = ops.shape(flatgrid)[0]
+    n_tx = ops.shape(data)[0]
 
-    n_tx, _, n_el, _ = ops.shape(data)
-
-    if patches == 1:
-        tof_corrected = tof_correction_flatgrid(data, flatgrid, *args, **kwargs)
-    else:
-        # Pad array and reshape to patches
-        flatgrid = pad_array_to_divisible(flatgrid, patches, axis=0)
-        patched_grid = ops.reshape(flatgrid, (patches, -1, 3))
-
-        def tof_correction_patch(grid_patch):
-            return tof_correction_flatgrid(data, grid_patch, *args, **kwargs)
-
-        tof_corrected = ops.map(tof_correction_patch, patched_grid)
+    def tof_correction_patch(grid_patch):
+        tof_corrected = tof_correction_flatgrid(data, grid_patch, *args, **kwargs)
         tof_corrected = ops.moveaxis(
             tof_corrected, 1, 0
-        )  # move n_tx to the first dimension
-        tof_corrected = tof_corrected[:, :n_pix]  # remove padding
+        )  # move n_pix to the first dimension
+        return tof_corrected
+
+    tof_corrected = map(tof_correction_patch, flatgrid, batch_size=patches)
+    tof_corrected = ops.moveaxis(
+        tof_corrected, 1, 0
+    )  # move n_tx to the first dimension
 
     # Reshape to reintroduce the x- and z-dimensions
     return ops.reshape(
         tof_corrected,
-        (n_tx, gridshape[0], gridshape[1], n_el, ops.shape(tof_corrected)[-1]),
+        (n_tx, gridshape[0], gridshape[1], *ops.shape(tof_corrected)[-2:]),
     )
 
 
