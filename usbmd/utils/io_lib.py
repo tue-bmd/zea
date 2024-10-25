@@ -191,6 +191,7 @@ def search_file_tree(
     dataset_info_filename="dataset_info.yaml",
     hdf5_key_for_length=None,
     redo=False,
+    multiprocessing=True,
 ):
     """Lists all files in directory and sub-directories.
 
@@ -288,20 +289,28 @@ def search_file_tree(
         # make sure to call search_file_tree from within a function
         # or use if __name__ == "__main__":
         # to avoid freezing the main process
-        with multiprocessing.Pool() as pool:
-            absolute_file_paths = [directory / file for file in file_paths]
-            file_lengths = list(
-                tqdm.tqdm(
-                    pool.imap(
-                        functools.partial(
-                            _get_length_hdf5_file, key=hdf5_key_for_length
+        absolute_file_paths = [directory / file for file in file_paths]
+        if multiprocessing:
+            with multiprocessing.Pool() as pool:
+                file_lengths = list(
+                    tqdm.tqdm(
+                        pool.imap(
+                            functools.partial(
+                                _get_length_hdf5_file, key=hdf5_key_for_length
+                            ),
+                            absolute_file_paths,
                         ),
-                        absolute_file_paths,
-                    ),
-                    total=len(file_paths),
-                    desc="Getting number of frames in each hdf5 file",
+                        total=len(file_paths),
+                        desc="Getting number of frames in each hdf5 file",
+                    )
                 )
-            )
+        else:
+            for file_path in tqdm.tqdm(
+                absolute_file_paths, desc="Getting number of frames in each hdf5 file"
+            ):
+                file_lengths.append(
+                    _get_length_hdf5_file(file_path, hdf5_key_for_length)
+                )
 
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
     log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
