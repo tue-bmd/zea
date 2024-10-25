@@ -1,3 +1,5 @@
+"""Helper functions for testing"""
+
 import decorator
 import jax
 import numpy as np
