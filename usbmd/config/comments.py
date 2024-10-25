@@ -166,7 +166,6 @@ DESCRIPTIONS = {
         },
     },
     "device": "The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)",
-    "ml_library": f"The library to use ({allows_type_to_str(_BACKENDS)})",
     "plot": {
         "description": (
             "Settings pertaining to plotting when running the UI "

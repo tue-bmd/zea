@@ -15,6 +15,8 @@ from pathlib import Path
 wd = Path(__file__).parent.resolve()
 sys.path.append(str(wd))
 
+import keras
+
 from usbmd.generate import GenerateDataSet
 from usbmd.interface import Interface
 from usbmd.setup_usbmd import setup
@@ -52,7 +54,7 @@ def main():
     if args.task == "run":
         ui = Interface(config)
 
-        log.info(f"Using {config.ml_library} backend")
+        log.info(f"Using {keras.backend.backend()} backend")
 
         if args.gui:
             log.warning(
