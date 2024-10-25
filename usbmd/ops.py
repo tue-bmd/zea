@@ -435,8 +435,8 @@ class Pipeline:
             ).on_device_torch
             return on_device_torch(func, data, device=device, return_numpy=return_numpy)
         elif backend == "jax":
-            log.warning("JAX not yet supported for on_device.")
-            return func(data)
+            on_device_jax = importlib.import_module("usbmd.backend.jax").on_device_jax
+            return on_device_jax(func, data, device=device, return_numpy=return_numpy)
         else:
             raise ValueError(f"Unsupported operations package {backend}.")
 
