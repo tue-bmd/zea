@@ -54,10 +54,9 @@ def init_device(
         device = get_device(device, verbose=verbose)
     elif ml_library is None or ml_library == "jax":
         # pylint: disable=import-outside-toplevel
-        from usbmd.utils.gpu_utils import get_device
+        from usbmd.backend.jax.utils.gpu_config import get_device
 
-        selected_gpu_ids = get_device(device, verbose=verbose)
-        device = selected_gpu_ids_to_device(selected_gpu_ids, key="gpu")
+        device = get_device(device, verbose=verbose)
     elif ml_library == "numpy":
         device = "cpu"
     else:

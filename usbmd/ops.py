@@ -537,7 +537,7 @@ class Pipeline:
                 device, (str, int)
             ), f"device should be a string or int, got {device}"
             if isinstance(device, str):
-                if backend in ["tensorflow", "jax"]:
+                if backend == "tensorflow":
                     assert device.startswith(
                         "gpu"
                     ), f"device should be 'cpu' or 'gpu:*', got {device}"
@@ -545,6 +545,12 @@ class Pipeline:
                     assert device.startswith(
                         "cuda"
                     ), f"device should be 'cpu' or 'cuda:*', got {device}"
+                elif backend == "jax":
+                    assert device.startswith(
+                        ("gpu", "cuda")
+                    ), f"device should be 'cpu', 'gpu:*', or 'cuda:*', got {device}"
+                else:
+                    raise ValueError(f"Unsupported backend {backend}.")
             return device
 
 
