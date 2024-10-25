@@ -285,9 +285,6 @@ def search_file_tree(
         # and getting the number of frames in each file
         log.info("Getting number of frames in each hdf5 file...")
 
-        _get_length_hdf5_file_partial = functools.partial(
-            _get_length_hdf5_file, key=hdf5_key_for_length
-        )
         # make sure to call search_file_tree from within a function
         # or use if __name__ == "__main__":
         # to avoid freezing the main process
@@ -296,7 +293,9 @@ def search_file_tree(
             file_lengths = list(
                 tqdm.tqdm(
                     pool.imap(
-                        _get_length_hdf5_file_partial,
+                        functools.partial(
+                            _get_length_hdf5_file, key=hdf5_key_for_length
+                        ),
                         absolute_file_paths,
                     ),
                     total=len(file_paths),
