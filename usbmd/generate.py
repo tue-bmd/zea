@@ -10,14 +10,14 @@ Example:
 - **Date**          : November 18th, 2021
 """
 
+import inspect
 from pathlib import Path
 from typing import Union
-import inspect
 
 import numpy as np
 import tqdm
 
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.data import get_dataset
 from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.display import to_8bit

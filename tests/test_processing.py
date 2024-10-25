@@ -9,10 +9,11 @@ import pytest
 from keras import ops as kops
 from scipy.signal import hilbert
 
-from usbmd import ops, set_backend
+from usbmd import ops
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.scan import PlaneWaveScan
+from usbmd.setup_usbmd import set_backend
 from usbmd.utils.simulator import UltrasoundSimulator
 
 

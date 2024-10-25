@@ -3,7 +3,7 @@
 import numpy as np
 from keras import ops
 
-from usbmd import utils
+from usbmd.utils.utils import batched_map
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
@@ -23,7 +23,7 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
         )  # move n_pix to the first dimension
         return tof_corrected
 
-    tof_corrected = utils.batched_map(
+    tof_corrected = batched_map(
         tof_correction_patch, flatgrid, batch_size=patches
     )
     tof_corrected = ops.moveaxis(
