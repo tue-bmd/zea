@@ -55,6 +55,12 @@ def on_device_jax(func, inputs, device, return_numpy=False, **kwargs):
         device_type = device[0]
         device_number = 0
 
+    if device_number > len(jax.devices(device_type)):
+        raise ValueError(
+            f"Device {device} is not available from JAX devices: "
+            f"{jax.devices(device_type)}"
+        )
+
     jax_device = jax.devices(device_type)[device_number]
 
     inputs = jnp.array(inputs)
