@@ -6,10 +6,10 @@ import decorator
 import jax
 import numpy as np
 import pytest
+from keras import ops as kops
 from scipy.signal import hilbert
 
-from usbmd import ops
-from usbmd.backend import set_backend
+from usbmd import ops, set_backend
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.scan import PlaneWaveScan
@@ -285,10 +285,10 @@ def test_hilbert_transform():
 
     data_prepared = envelope_detect.prepare_tensor(data)
     data_iq = ops.hilbert(data_prepared, axis=-3)
-    assert str(data_iq.dtype).rsplit(".", maxsplit=1)[-1] in [
+    assert kops.dtype(data_iq) in [
         "complex64",
         "complex128",
-    ], f"Data type should be complex, got {data_iq.dtype} instead."
+    ], f"Data type should be complex, got {kops.dtype(data_iq)} instead."
 
     data_iq = envelope_detect.to_numpy(data_iq)
 
