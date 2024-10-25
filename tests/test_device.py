@@ -1,10 +1,10 @@
 """ Tests for the device module. """
 
-from tests.test_imports import no_ml_lib_import
+from tests.test_imports import _no_ml_lib_import  # pylint: disable=unused-import
 from usbmd.utils.device import init_device
 
 
-def test_init_device_without_ml_libs(no_ml_lib_import):
+def test_init_device_without_ml_libs(_no_ml_lib_import):
     """
     Test that the init_device function does not import any ML libraries if ml_library is None.
     This is important because, for example, Jax should not be imported before

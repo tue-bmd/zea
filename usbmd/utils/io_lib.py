@@ -191,7 +191,7 @@ def search_file_tree(
     dataset_info_filename="dataset_info.yaml",
     hdf5_key_for_length=None,
     redo=False,
-    multiprocessing=True,
+    parallel=True,
 ):
     """Lists all files in directory and sub-directories.
 
@@ -290,7 +290,7 @@ def search_file_tree(
         # or use if __name__ == "__main__":
         # to avoid freezing the main process
         absolute_file_paths = [directory / file for file in file_paths]
-        if multiprocessing:
+        if parallel:
             with multiprocessing.Pool() as pool:
                 file_lengths = list(
                     tqdm.tqdm(
