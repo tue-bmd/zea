@@ -7,7 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from usbmd import Interface, setup_config
+from usbmd.config import setup_config
+from usbmd.interface import Interface
 
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))

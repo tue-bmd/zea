@@ -19,9 +19,11 @@ from typing import Union
 import keras
 import yaml
 
-from usbmd import init_device, load_config_from_yaml, log, set_data_paths
+from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
-from usbmd.datapaths import create_new_user
+from usbmd.datapaths import create_new_user, set_data_paths
+from usbmd.utils import log
+from usbmd.utils.device import init_device
 from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.io_lib import filename_from_window_dialog
 
@@ -34,13 +36,13 @@ def reload_usbmd():
     loaded_modules = [key for key in sys.modules if key.startswith("usbmd")]
     for key in loaded_modules:
         del sys.modules[key]
-    # Reimport usbmd with the new backend (set via KERAS_BACKEND).
-    import usbmd  # pylint: disable=import-outside-toplevel
 
-    # Finally: refresh all imported Keras submodules.
+    from usbmd import __class__  # pylint: disable=import-outside-toplevel,cyclic-import
+
+    # Finally: refresh all imported usbmd submodules.
     globs = copy.copy(globals())
     for key, value in globs.items():
-        if value.__class__ == usbmd.__class__:  # pylint: disable=no-member
+        if value.__class__ == __class__:
             if str(value).startswith("<module 'usbmd."):
                 module_name = str(value)
                 module_name = module_name[module_name.find("'") + 1 :]
