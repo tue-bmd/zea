@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-from keras import ops
 
 from usbmd import display
 from usbmd.setup_usbmd import set_backend
