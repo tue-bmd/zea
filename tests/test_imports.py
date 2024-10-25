@@ -11,7 +11,7 @@ import pytest
 
 
 @pytest.fixture
-def no_ml_lib_import():
+def _no_ml_lib_import():
     """Fixture to override and restore the built-in import function."""
     # Override the built-in import function
     original_import_func = builtins.__import__
@@ -30,7 +30,7 @@ def no_ml_lib_import():
 
 
 @pytest.fixture
-def no_torch_tensorflow():
+def _no_torch_tensorflow():
     """
     Fixture to override and restore the built-in import function.
     NOTE: This function exists because keras with numpy backend will also import jax.
@@ -80,6 +80,6 @@ def test_check_imports_errors(directory):
     assert success, "Import errors found in one or more Python files."
 
 
-def test_package_does_not_import_heavy_ml_libraries(no_torch_tensorflow):
+def test_package_does_not_import_heavy_ml_libraries(_no_torch_tensorflow):
     """Test that the package does not import heavy ML libraries like torch, tensorflow, or jax."""
     importlib.import_module("usbmd")

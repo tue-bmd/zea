@@ -94,7 +94,7 @@ def test_h5_dataset_from_directory(
         key,
         n_frames=n_frames,
         new_frames_dim=new_frames_dim,
-        search_file_tree_kwargs=dict(multiprocessing=False),
+        search_file_tree_kwargs={"parallel": False},
     )
     batch_shape = next(iter(dataset)).shape
 
