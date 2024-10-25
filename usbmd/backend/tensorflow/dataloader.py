@@ -129,6 +129,7 @@ def h5_dataset_from_directory(
     return_filename: bool = False,
     shard_index: int = None,
     num_shards: int = 1,
+    search_file_tree_kwargs: dict = {},
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -218,7 +219,10 @@ def h5_dataset_from_directory(
 
         for _dir in directory:
             dataset_info = search_file_tree(
-                _dir, filetypes=[".hdf5", ".h5"], hdf5_key_for_length=key
+                _dir,
+                filetypes=[".hdf5", ".h5"],
+                hdf5_key_for_length=key,
+                **search_file_tree_kwargs,
             )
             file_paths = dataset_info["file_paths"]
             file_paths = [str(Path(_dir) / file_path) for file_path in file_paths]

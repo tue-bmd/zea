@@ -90,7 +90,11 @@ def test_h5_dataset_from_directory(
         raise ValueError("Invalid directory for testing")
 
     dataset = h5_dataset_from_directory(
-        directory, key, n_frames=n_frames, new_frames_dim=new_frames_dim
+        directory,
+        key,
+        n_frames=n_frames,
+        new_frames_dim=new_frames_dim,
+        search_file_tree_kwargs=dict(multiprocessing=False),
     )
     batch_shape = next(iter(dataset)).shape
 
