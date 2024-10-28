@@ -89,6 +89,9 @@ ipykernel = "^6.29.5"
 
 [tool.poetry.extras]
 dev = ["pytest", "pylint", "papermill", "ipykernel"]
+jax = ["jax"]
+tensorflow = ["tensorflow"]
+torch = ["torch"]
 opencv-python = ["opencv-python"]
 opencv-python-headless = ["opencv-python-headless"]
 
