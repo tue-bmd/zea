@@ -107,10 +107,9 @@ def setup(
     config.data.user = set_data_paths(user_config, local=config.data.local)
 
     # Init GPU / CPU according to config
-    config.device = init_device(config.ml_library, config.device, config.hide_devices)
-
-    # Set compute backend (numpy, torch, tensorflow, jax)
-    set_backend(config.ml_library)
+    config.device = init_device(
+        keras.backend.backend(), config.device, config.hide_devices
+    )
 
     return config
 
