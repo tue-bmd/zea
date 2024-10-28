@@ -59,12 +59,13 @@ Make sure that before using any GPU enabled functionality (importing torch / ten
 ```python
 # import the init_device function
 from usbmd.utils.device import init_device
+import keras
 
 # initialize device manually
 device = init_device("torch", "auto:1", hide_devices=None)
 
 # or using your config
-device = init_device(config.ml_library, config.device, hide_devices=config.hide_devices)
+device = init_device(keras.backend.backend(), config.device, hide_devices=config.hide_devices)
 ```
 
 Alternatively, you can use the `setup` function using a config file, which will initialize the device and setup the data paths:

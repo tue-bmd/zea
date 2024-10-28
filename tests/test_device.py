@@ -6,7 +6,7 @@ from usbmd.utils.device import init_device
 
 def test_init_device_without_ml_libs(_no_ml_lib_import):
     """
-    Test that the init_device function does not import any ML libraries if ml_library is None.
+    Test that the init_device function does not import any ML libraries if backend is None.
     This is important because, for example, Jax should not be imported before
     CUDA_VISIBLE_DEVICES is set.
     """
