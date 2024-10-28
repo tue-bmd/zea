@@ -2,7 +2,7 @@
 
 from typing import Union
 
-from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
+from usbmd.utils.gpu_utils import hide_gpus
 
 
 def init_device(
