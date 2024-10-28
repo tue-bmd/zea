@@ -91,6 +91,9 @@ ipykernel = "^6.29.5"
 dev = ["pytest", "pylint", "papermill", "ipykernel"]
 opencv-python = ["opencv-python"]
 opencv-python-headless = ["opencv-python-headless"]
+jax = ["jax"]
+tensorflow = ["tensorflow"]
+torch = ["torch", "torchvision"]
 
 [[tool.poetry.source]]
 name = "torch-cpu"

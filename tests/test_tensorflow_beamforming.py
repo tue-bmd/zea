@@ -46,7 +46,6 @@ def test_das_beamforming(
 
     config = load_config_from_yaml(r"./tests/config_test.yaml")
     config = check_config(config)
-    config.ml_library = "tensorflow"
     if jit:
         config.model.beamformer.jit = True  # pylint: disable=no-member
 
@@ -148,7 +147,6 @@ def test_das_beamforming(
 # def test_dynamic_beamforming():
 #     """Test that the beamformer can be called with different inputs and configurations."""
 #     config = load_config_from_yaml(r"./tests/config_test.yaml")
-#     config.ml_library = "tensorflow"
 
 #     probe = Verasonics_l11_4v()
 #     probe_parameters = probe.get_parameters()
