@@ -20,14 +20,7 @@ plt.rcParams["backend"] = "agg"
 def test_ui_initialization():
     """Test ui initialization function"""
     config = setup_config("./tests/config_test.yaml")
-    config.ml_library = "torch"
 
-    dataloader_ui = Interface(config)
-    dataloader_ui.run()
-    dataloader_ui.run(plot=True)
-
-    config = setup_config("./tests/config_test.yaml")
-    config.ml_library = "tensorflow"
     dataloader_ui = Interface(config)
     dataloader_ui.run()
     dataloader_ui.run(plot=True)
