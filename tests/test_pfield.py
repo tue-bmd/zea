@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 import torch
 
-from usbmd.config import load_config_from_yaml
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 
@@ -33,8 +32,6 @@ def test_pfield(scantype, debug=False):
     Returns:
         numpy array: beamformed output
     """
-
-    config = load_config_from_yaml(r"./tests/config_test.yaml")
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_parameters()

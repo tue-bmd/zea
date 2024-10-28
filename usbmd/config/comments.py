@@ -13,7 +13,6 @@ from usbmd.config.validation import (
     _ALLOWED_DEMODULATION,
     _ALLOWED_KEYS_PROXTYPE,
     _ALLOWED_PLOT_LIBS,
-    _BACKENDS,
     _DATA_TYPES,
     _MOD_TYPES,
 )
