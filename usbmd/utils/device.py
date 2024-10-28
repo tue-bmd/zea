@@ -6,7 +6,7 @@ from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
 
 
 def init_device(
-    ml_library: Union[str, None] = None,
+    backend: Union[str, None] = None,
     device: Union[str, int, list] = "auto:1",
     hide_devices: Union[int, list] = None,
     verbose: bool = True,
@@ -17,7 +17,7 @@ def init_device(
     by setting the CUDA_VISIBLE_DEVICES.
 
     Args:
-        ml_library (str): String indicating which ml library to use. Can be
+        backend (str): String indicating which ml library to use. Can be
             'torch', 'tensorflow', 'jax', 'numpy' or `None`.
                 - When `None` or 'jax', the function will select GPU(s) without specific features
                 for the ml library and thus will not import any ml library.
@@ -42,26 +42,26 @@ def init_device(
         hide_gpus(hide_devices)
 
     # Init GPU / CPU according to config
-    if ml_library == "torch":
+    if backend == "torch":
         # pylint: disable=import-outside-toplevel
         from usbmd.backend.torch.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
-    elif ml_library == "tensorflow":
+    elif backend == "tensorflow":
         # pylint: disable=import-outside-toplevel
         from usbmd.backend.tensorflow.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
-    elif ml_library is None or ml_library == "jax":
+    elif backend is None or backend == "jax":
         # pylint: disable=import-outside-toplevel
         from usbmd.utils.gpu_utils import get_device
 
         selected_gpu_ids = get_device(device, verbose=verbose)
         device = selected_gpu_ids_to_device(selected_gpu_ids, key="gpu")
-    elif ml_library == "numpy":
+    elif backend == "numpy":
         device = "cpu"
     else:
-        raise ValueError(f"Unknown ml_library ({ml_library}) in config.")
+        raise ValueError(f"Unknown backend ({backend}) in config.")
 
     return device
 
