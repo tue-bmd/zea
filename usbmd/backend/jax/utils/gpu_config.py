@@ -39,7 +39,9 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
     Returns:
         device (str): Available device that torch can use for its computations.
     """
-    if len(jax.devices("gpu")) == 0:
+    try:
+        jax.devices("gpu")
+    except RuntimeError:
         log.warning("Cuda not available, fallback to CPU.")
         return "cpu"
 
