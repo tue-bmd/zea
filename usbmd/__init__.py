@@ -9,7 +9,11 @@ __version__ = "2.1.0"
 import os
 
 # set to numpy as default to prevent unecessary imports,
-# but will be overwritten by config.ml_library later if using setup()
+# but preferred action is to set it manually before importing usbmd
+# for instance at top of script:
+# os.environ["KERAS_BACKEND"] = "jax"
+# or in your terminal:
+# export KERAS_BACKEND=jax
 if "KERAS_BACKEND" not in os.environ:
     os.environ["KERAS_BACKEND"] = "numpy"
     print(
