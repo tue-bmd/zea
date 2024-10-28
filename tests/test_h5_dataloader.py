@@ -69,19 +69,19 @@ def test_h5_generator(filename, dataset_name, n_frames, new_frames_dim):
     ],
 )
 def test_h5_dataset_from_directory(
-    directory, key, n_frames, new_frames_dim, num_files, total_samples
+    tmp_path, directory, key, n_frames, new_frames_dim, num_files, total_samples
 ):
-    """Test the h5_dataset_from_directory function"""
+    """Test the h5_dataset_from_directory function.
+    Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
 
     if directory == "fake_directory":
         # create a fake directory with some dummy data
-        _remove_fake_directory()
-        Path("fake_directory").mkdir()
         for i in range(num_files):
-            with h5py.File(f"fake_directory/dummy_data_{i}.hdf5", "w") as f:
+            with h5py.File(tmp_path / f"dummy_data_{i}.hdf5", "w") as f:
                 data = np.random.rand(total_samples // num_files, 28, 28)
                 f.create_dataset(key, data=data)
         expected_len_dataset = total_samples // num_files // n_frames * num_files
+        directory = tmp_path
     elif directory == Path(CAMUS_DATASET_PATH).parent:
         expected_len_dataset = 18 // n_frames + 20 // n_frames
         if not Path(directory).exists():
@@ -90,7 +90,11 @@ def test_h5_dataset_from_directory(
         raise ValueError("Invalid directory for testing")
 
     dataset = h5_dataset_from_directory(
-        directory, key, n_frames=n_frames, new_frames_dim=new_frames_dim
+        directory,
+        key,
+        n_frames=n_frames,
+        new_frames_dim=new_frames_dim,
+        search_file_tree_kwargs={"parallel": False},
     )
     batch_shape = next(iter(dataset)).shape
 
@@ -112,16 +116,3 @@ def test_h5_dataset_from_directory(
         f"Something went wrong as the length of the dataset {real_len_dataset}"
         f" is not equal to the expected length {expected_len_dataset}"
     )
-
-    if directory == "fake_directory":
-        # clean up the fake directory
-        _remove_fake_directory()
-
-
-def _remove_fake_directory():
-    if Path("fake_directory").exists():
-        # clean up the fake directory
-        files = Path("fake_directory").glob("*")
-        for file in files:
-            file.unlink()
-        Path("fake_directory").rmdir()
