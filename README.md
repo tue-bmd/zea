@@ -23,16 +23,26 @@ Other install options can be found in the [Install.md](Install.md) file.
 
 
 ## Example usage
-After installation, you can use the package as follows in your own project:
+After installation, you can use the package as follows in your own project. `usbmd` is written in Python on top of [Keras 3](https://keras.io/about/). This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend ("jax", "tensorflow", "torch" or "numpy"), which means you can use `usbmd` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the `KERAS_BACKEND` environment variable, either in your code or in your terminal. The default backend used by `usbmd` is "numpy", if no backend is specified before importing `usbmd`. This will not allow you to use the GPU for processing.
+
+
+```shell
+# set the backend in your terminal
+export KERAS_BACKEND="jax"
+```
 
 ```python
-# import usbmd package
-import usbmd
-# or if you want to use the Tensorflow tools
-import usbmd.backend.tensorflow as usbmd_tf
-# or if you want to use the Pytorch tools
-import usbmd.backend.torch as usbmd_torch
+# or set the backend in your code at the top of your script
+import os
+os.environ["KERAS_BACKEND"] = "jax"
 ```
+
+After setting the backend you can simply import `usbmd`
+```python
+import usbmd
+```
+
+> **Note:** You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install. For example, if you choose "jax" as your backend, make sure to install the necessary JAX libraries. The provided docker image (see [Install.md](Install.md)) has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running `pip install usbmd[jax]` although this is not extensively tested (yet).
 
 More complete examples can be found in the [examples](examples) folder.
 
