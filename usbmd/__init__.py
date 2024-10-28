@@ -18,10 +18,11 @@ if "KERAS_BACKEND" not in os.environ:
         "at top of your script before importing usbmd or any other library."
     )
 
+
 # Main (isort: split)
 from .config import Config, load_config_from_yaml
 from .datapaths import set_data_paths
 from .interface import Interface
-from .setup_usbmd import setup, setup_config
+from .setup_usbmd import set_backend, setup, setup_config
 from .utils import log
 from .utils.device import init_device

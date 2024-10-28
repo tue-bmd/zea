@@ -134,7 +134,7 @@ from usbmd.config import Config
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import lens_correction, log, pfield, translate
+from usbmd.utils import batched_map, lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras
@@ -560,7 +560,13 @@ class Identity(Operation):
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
-    def __init__(self, rx_apo=None, tx_apo=None, **kwargs):
+    def __init__(self, rx_apo=None, tx_apo=None, patches=1, **kwargs):
+        """
+        Args:
+            rx_apo (array, optional): Receive apodization window. Defaults to None.
+            tx_apo (array, optional): Transmit apodization window. Defaults to None.
+            patches (int, optional): Number of patches to split the data into. Defaults to 1.
+        """
         super().__init__(
             input_data_type=None,
             output_data_type="beamformed_data",
@@ -568,38 +574,71 @@ class DelayAndSum(Operation):
         )
         self.rx_apo = rx_apo
         self.tx_apo = tx_apo
+        self.patches = patches
 
     def initialize(self):
         if self.rx_apo is None:
-            self.rx_apo = ops.ones((1, 1, 1, 1, 1))
+            self.rx_apo = 1.0
 
         if self.tx_apo is None:
-            self.tx_apo = ops.ones((1, 1, 1, 1, 1))
+            self.tx_apo = 1.0
+
+    def process_patch(self, patch):
+        """Performs DAS beamforming on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_pix, n_tx, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
+        """
+        # Sum over the channels, i.e. DAS
+        data = ops.sum(self.rx_apo * patch, -2)
+
+        # Sum over transmits, i.e. Compounding
+        data = self.tx_apo * data
+        data = ops.sum(data, 1)
+        return data
+
+    def process_item(self, data):
+        """Performs DAS beamforming on tof-corrected input. Optionally splits the data into patches.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
+        """
+        n_tx, n_z, n_x, n_el, n_ch = data.shape
+
+        # Flatten grid and move n_pix=(n_z * n_x) to the front
+        flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
+        flat_data = ops.moveaxis(flat_data, 1, 0)
+
+        flat_data = batched_map(self.process_patch, flat_data, batch_size=self.patches)
+
+        # Reshape data back to original shape
+        data = ops.reshape(flat_data, (n_z, n_x, n_ch))
+
+        return data
 
     def process(self, data):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
             data (ops.Tensor): The TOF corrected input of shape
-                `(n_frames, n_tx, n_ax, n_el, n_ch)`
+                `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
 
         Returns:
-            ops.Tensor: The beamformed data of shape `(n_frames, n_z, n_x)`
+            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
+                with optional batch dimension.
         """
-        if self.with_batch_dim is False:
-            data = ops.expand_dims(data, axis=0)
 
-        # Sum over the channels, i.e. DAS
-        data = ops.sum(self.rx_apo * data, -2)
-
-        # Sum over transmits, i.e. Compounding
-        data = self.tx_apo * data
-        data = ops.sum(data, 1)
-
-        if self.with_batch_dim is False:
-            data = ops.squeeze(data, axis=0)
-
-        return data
+        if not self.with_batch_dim:
+            return self.process_item(data)
+        else:
+            # TODO: could be ops.vectorized_map if enough memory
+            return ops.map(self.process_item, data)
 
 
 @ops_registry("tof_correction")
@@ -625,6 +664,7 @@ class TOFCorrection(Operation):
         apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
+        patches=1,
     ):
         super().__init__(
             input_data_type="raw_data",
@@ -647,6 +687,7 @@ class TOFCorrection(Operation):
         self.apply_lens_correction = apply_lens_correction
         self.lens_thickness = lens_thickness
         self.lens_sound_speed = lens_sound_speed
+        self.patches = patches
 
     def initialize(self):
         self.grid = ops.convert_to_tensor(self.grid, dtype="float32")
@@ -664,44 +705,34 @@ class TOFCorrection(Operation):
 
         super().initialize()
 
+    def process_item(self, data):
+        """Perform time-of-flight correction on a single item in the batch."""
+        return bmf.tof_correction(
+            data,
+            grid=self.grid,
+            t0_delays=self.t0_delays,
+            tx_apodizations=self.tx_apodizations,
+            sound_speed=self.sound_speed,
+            probe_geometry=self.probe_geometry,
+            initial_times=self.initial_times,
+            sampling_frequency=self.sampling_frequency,
+            fdemod=self.fdemod,
+            fnum=self.f_number,
+            angles=self.polar_angles,
+            vfocus=self.focus_distances,
+            apply_phase_rotation=bool(self.fdemod),
+            apply_lens_correction=bool(self.apply_lens_correction),
+            lens_thickness=self.lens_thickness,
+            lens_sound_speed=self.lens_sound_speed,
+            patches=self.patches,
+        )
+
     def process(self, data):
-        tof_data = []
-        if self.with_batch_dim is False:
-            data = ops.expand_dims(data, axis=0)
-        batch_size = data.shape[0]
-        for batch_idx in range(batch_size):
-            tof_corrected_batch = bmf.tof_correction(
-                data[batch_idx],
-                grid=self.grid,
-                t0_delays=self.t0_delays,
-                tx_apodizations=self.tx_apodizations,
-                sound_speed=self.sound_speed,
-                probe_geometry=self.probe_geometry,
-                initial_times=self.initial_times,
-                sampling_frequency=self.sampling_frequency,
-                fdemod=self.fdemod,
-                fnum=self.f_number,
-                angles=self.polar_angles,
-                vfocus=self.focus_distances,
-                apply_phase_rotation=bool(self.fdemod),
-                apply_lens_correction=bool(self.apply_lens_correction),
-                lens_thickness=self.lens_thickness,
-                lens_sound_speed=self.lens_sound_speed,
-            )
-
-            # Add batch dimension
-            # The shape is now (batch, z, x, num_transmits, num_elements)
-            tof_corrected_batch = tof_corrected_batch[None]
-
-            tof_data.append(tof_corrected_batch)
-
-        # Stack batches of TOF corrected data in a single tensor
-        output = ops.concatenate(tof_data, 0)
-
-        if self.with_batch_dim is False:
-            output = ops.squeeze(output, 0)
-
-        return output
+        """Perform time-of-flight correction on a batch of data."""
+        if not self.with_batch_dim:
+            return self.process_item(data)
+        else:
+            return ops.map(self.process_item, data)
 
     def _assign_scan_params(self, scan: Scan):
         self.grid = scan.grid

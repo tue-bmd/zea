@@ -2,12 +2,44 @@
 
 import numpy as np
 from keras import ops
+
+from usbmd.utils.utils import batched_map
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
-def tof_correction(
+def tof_correction(data, grid, *args, patches=1, **kwargs):
+    """
+    Time-of-flight correction. The grid can be split into patches to reduce memory.
+    """
+    # Flatten grid to simplify calculations
+    gridshape = ops.shape(grid)
+    flatgrid = ops.reshape(grid, (-1, 3))
+    n_tx = ops.shape(data)[0]
+
+    def tof_correction_patch(grid_patch):
+        tof_corrected = tof_correction_flatgrid(data, grid_patch, *args, **kwargs)
+        tof_corrected = ops.moveaxis(
+            tof_corrected, 1, 0
+        )  # move n_pix to the first dimension
+        return tof_corrected
+
+    tof_corrected = batched_map(
+        tof_correction_patch, flatgrid, batch_size=patches
+    )
+    tof_corrected = ops.moveaxis(
+        tof_corrected, 1, 0
+    )  # move n_tx to the first dimension
+
+    # Reshape to reintroduce the x- and z-dimensions
+    return ops.reshape(
+        tof_corrected,
+        (n_tx, gridshape[0], gridshape[1], *ops.shape(tof_corrected)[-2:]),
+    )
+
+
+def tof_correction_flatgrid(
     data,
-    grid,
+    flatgrid,
     t0_delays,
     tx_apodizations,
     sound_speed,
@@ -26,18 +58,18 @@ def tof_correction(
     """
     Args:
         data (ops.Tensor): Input RF/IQ data of shape `(n_tx, n_ax, n_el, n_ch)`.
-        grid (ops.Tensor): Pixel locations x, y, z of shape `(n_z, n_x, 3)`
+        flatgrid (ops.Tensor): Pixel locations x, y, z of shape `(n_pix, 3)`
         t0_delays (ops.Tensor): Times at which the elements fire shifted such
             that the first element fires at t=0 of shape `(n_tx, n_el)`
         tx_apodizations (ops.Tensor): Transmit apodizations of shape
             `(n_tx, n_el)`
-        c (float): Speed-of-sound.
+        sound_speed (float): Speed-of-sound.
         probe_geometry (ops.Tensor): Element positions x, y, z of shape
         (num_samples, 3)
         initial_times (ops.Tensor): Time-ofsampling_frequencyet per transmission of shape
             `(n_tx,)`.
         sampling_frequency (float): Sampling frequency.
-        n_tx (int): Number of transmissions (e.g. plane waves).
+        fdemod (float): Demodulation frequency.
         fnum (int, optional): Focus number. Defaults to 1.
         angles (ops.Tensor): The angles of the plane waves in radians of shape
             `(n_tx,)`
@@ -53,9 +85,8 @@ def tof_correction(
             for lens correction Defaults to 1000.
 
     Returns:
-        output (ops.Tensor): time-of-flight corrected data
-        with shape: `(n_z, n_x, n_tx, n_el)`.
-
+        (ops.Tensor): time-of-flight corrected data
+        with shape: `(n_tx, n_pix, n_el, num_rf_iq_channels)`.
     """
 
     assert len(data.shape) == 4, (
@@ -79,10 +110,6 @@ def tof_correction(
     #     "The second dimension of the input data should be the number of "
     #     f"elements {n_el}, got {data.shape[2]} instead."
     # )
-
-    # Flatten grid to simplify calculations
-    gridshape = grid.shape
-    flatgrid = ops.reshape(grid, (-1, 3))
 
     # Calculate delays
     # --------------------------------------------------------------------
@@ -141,17 +168,9 @@ def tof_correction(
             theta = 2 * np.pi * fdemod * (tshift - tdemod)
             tof_tx = _complex_rotate(tof_tx, theta)
 
-        # Reshape to reintroduce the x- and z-dimensions
-        tof_tx = ops.reshape(
-            tof_tx,
-            (1, gridshape[0], gridshape[1], n_el, tof_tx.shape[-1]),
-        )
-
         bf_tx.append(tof_tx)
 
-    output = ops.concatenate(bf_tx, 0)
-
-    return output
+    return ops.stack(bf_tx, 0)
 
 
 def calculate_delays(
@@ -492,8 +511,8 @@ def apod_mask(grid, probe_geometry, f_number):
         mask = ops.ones((1))
         return mask
 
-    n_pix = grid.shape[0]
-    n_el = probe_geometry.shape[0]
+    n_pix = ops.shape(grid)[0]
+    n_el = ops.shape(probe_geometry)[0]
 
     # Get the depth of every pixel
     z_pixel = grid[:, 2]
@@ -508,15 +527,13 @@ def apod_mask(grid, probe_geometry, f_number):
 
     # Use matrix multiplication to expand aperture tensor, x_pixel tensor, and
     # x_element tensor to shape (n_pix, n_el)
-    ones_aperture = ops.ones((1, n_el), dtype=aperture.dtype)
-    ones_x_pixel = ops.ones((1, n_el), dtype=x_pixel.dtype)
-    ones_x_element = ops.ones((n_pix, 1), dtype=x_element.dtype)
+    ones_aperture = ops.ones((1, n_el), dtype=ops.dtype(aperture))
+    ones_x_pixel = ops.ones((1, n_el), dtype=ops.dtype(x_pixel))
+    ones_x_element = ops.ones((n_pix, 1), dtype=ops.dtype(x_element))
 
-    aperture = aperture[..., None] @ ones_aperture
-
-    expanded_x_pixel = x_pixel[..., None] @ ones_x_pixel
-
-    expanded_x_element = ones_x_element @ x_element[None]
+    aperture = ops.matmul(aperture[..., None], ones_aperture)
+    expanded_x_pixel = ops.matmul(x_pixel[..., None], ones_x_pixel)
+    expanded_x_element = ops.matmul(ones_x_element, x_element[None])
 
     # Compute the lateral distance between elements and pixels
     # Of shape (n_pix, n_el)
