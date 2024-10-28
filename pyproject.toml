@@ -93,7 +93,7 @@ opencv-python = ["opencv-python"]
 opencv-python-headless = ["opencv-python-headless"]
 jax = ["jax"]
 tensorflow = ["tensorflow"]
-torch = ["torch"]
+torch = ["torch", "torchvision"]
 
 [[tool.poetry.source]]
 name = "torch-cpu"
