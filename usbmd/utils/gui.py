@@ -25,8 +25,8 @@ from typing import Dict, Optional, Tuple
 
 from schema import Schema
 
-import usbmd
-from usbmd import Config, load_config_from_yaml
+from usbmd import __version__
+from usbmd.config import Config, load_config_from_yaml
 from usbmd.config.validation import check_config, config_schema
 from usbmd.datapaths import set_data_paths
 from usbmd.setup_usbmd import setup_config
@@ -537,7 +537,7 @@ class USBMDApp(App):
             f'Hostname: {self.user_info["hostname"]}'
         )
 
-        self.version_text = f"USBMD version: {usbmd.__version__}"
+        self.version_text = f"USBMD version: {__version__}"
         self.data_root = f'data path: {self.user_info["data_root"]}'
 
         # Styling
