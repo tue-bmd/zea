@@ -92,9 +92,10 @@ def _verify_user_config_and_get_paths(config, system, local):
         ), f'Current OS {system} does not match user settings: {config["system"]}'
         config.pop("system")
 
-    # Assert config only contains data_root and output
+    # Only keep data_root and output keys, the rest are ignored.
     unknown_keys = [x for x in config.keys() if x not in ["data_root", "output"]]
-    assert len(unknown_keys) == 0, f"Unknown keys in user config: {unknown_keys}"
+    for key in unknown_keys:
+        del config[key]
 
     def _error_msg(key):
         return (
@@ -232,6 +233,8 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     other_username:
         data_root: ...
     ```
+
+    These will take precedence over the `data_root` that is userless and machineless.
 
     Returns:
         data_path (dict): absolute paths to location of data. Stores the following
