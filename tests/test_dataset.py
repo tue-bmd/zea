@@ -13,7 +13,6 @@ from usbmd.config import Config
 from usbmd.config.validation import check_config
 from usbmd.data import generate_usbmd_dataset, get_dataset
 from usbmd.generate import GenerateDataSet
-from usbmd.processing import set_backend
 from usbmd.setup_usbmd import setup_config
 
 wd = Path(__file__).parent.parent
@@ -67,23 +66,15 @@ def test_dataset_indexing(file_idx, frame_idx):
 
 
 @pytest.mark.parametrize(
-    "ml_library, dtype, to_dtype, filetype",
+    "dtype, to_dtype, filetype",
     [
-        ("torch", "raw_data", "image", "png"),
-        ("torch", "beamformed_data", "image", "hdf5"),
-        ("tensorflow", "raw_data", "image", "png"),
-        ("tensorflow", "beamformed_data", "image", "hdf5"),
-        ("jax", "raw_data", "image", "png"),
-        ("jax", "beamformed_data", "image", "hdf5"),
-        ("numpy", "raw_data", "image", "png"),
-        ("numpy", "beamformed_data", "image", "hdf5"),
+        ("raw_data", "image", "png"),
+        ("beamformed_data", "image", "hdf5"),
     ],
 )
-def test_generate(ml_library, dtype, to_dtype, filetype):
+def test_generate(dtype, to_dtype, filetype):
     """Test generate class"""
     config = setup_config("./tests/config_test.yaml")
-    config.ml_library = ml_library
-    set_backend(config.ml_library)
     config.data.dtype = dtype
 
     # setting sum_transmits to False and operation_chain to None

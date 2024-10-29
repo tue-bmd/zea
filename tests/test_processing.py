@@ -1,112 +1,19 @@
 """Tests for the processing module."""
 
-import importlib
 import math
-import random
 
-import decorator
 import numpy as np
 import pytest
-import tensorflow as tf
-import torch
+from keras import ops as kops
 from scipy.signal import hilbert
 
 from usbmd import ops
 from usbmd.probes import get_probe
-from usbmd.processing import Process, set_backend
+from usbmd.processing import Process
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
-
-def set_random_seed(seed=None):
-    """Set random seed to all random generators."""
-    np.random.seed(seed)
-    tf.random.set_seed(seed)
-    random.seed(seed)
-    torch.random.manual_seed(seed)
-    return seed
-
-
-def equality_libs_processing(decimal=4):
-    """Test the processing functions of different libraries
-
-    Check if np / tf / torch processing funcs produce equal output.
-
-    Example:
-        ```python
-            @pytest.mark.parametrize('some_keys', [some_values])
-            @equality_libs_processing(decimal=4) # <-- add as inner most decorator
-            def test_my_processing_func(some_arguments):
-                # Do some processing
-                output = my_processing_func(some_arguments)
-                return output
-        ```
-        To make it work with the @equality_libs_processing decorator,
-        the name of the processing function should reappear in the
-        torch / tensorflow modules:
-        my_processing_func ->
-            - my_processing_func_torch
-            - my_processing_func_tf
-            - test_my_processing_func
-    """
-
-    def wrapper(test_func, *args, **kwargs):
-        # Set random seed
-        seed = np.random.randint(0, 1000)
-
-        # Extract function name from test function
-        func_name = test_func.__name__.split("test_", 1)[-1]
-
-        # Run the test function
-        set_random_seed(seed)
-        set_backend("numpy")
-        importlib.reload(ops)
-        original_output = test_func(*args, **kwargs)
-
-        set_random_seed(seed)
-        set_backend("tensorflow")
-        importlib.reload(ops)
-
-        tf_output = np.array(test_func(*args, **kwargs))
-
-        # Run the test function with processing_torch module
-        set_random_seed(seed)
-        set_backend("torch")
-        importlib.reload(ops)
-
-        torch_output = np.array(test_func(*args, **kwargs))
-
-        # Run the test function with
-        set_random_seed(seed)
-        set_backend("jax")
-        importlib.reload(ops)
-
-        jax_output = np.array(test_func(*args, **kwargs))
-
-        # Check if the outputs from the individual test functions are equal
-        np.testing.assert_almost_equal(
-            original_output,
-            tf_output,
-            decimal=decimal,
-            err_msg=f"Function {func_name} failed with tensorflow processing.",
-        )
-        print(f"Function {func_name} passed with tensorflow output.")
-        np.testing.assert_almost_equal(
-            original_output,
-            torch_output,
-            decimal=decimal,
-            err_msg=f"Function {func_name} failed with pytorch processing.",
-        )
-        print(f"Function {func_name} passed with pytorch output.")
-        np.testing.assert_almost_equal(
-            original_output,
-            jax_output,
-            decimal=decimal,
-            err_msg=f"Function {func_name} failed with jax processing.",
-        )
-        print(f"Function {func_name} passed with jax output.")
-
-    return decorator.decorator(wrapper)
+from .helpers import equality_libs_processing
 
 
 @pytest.mark.parametrize(
@@ -323,10 +230,10 @@ def test_hilbert_transform():
 
     data_prepared = envelope_detect.prepare_tensor(data)
     data_iq = ops.hilbert(data_prepared, axis=-3)
-    assert str(data_iq.dtype).rsplit(".", maxsplit=1)[-1] in [
+    assert kops.dtype(data_iq) in [
         "complex64",
         "complex128",
-    ], f"Data type should be complex, got {data_iq.dtype} instead."
+    ], f"Data type should be complex, got {kops.dtype(data_iq)} instead."
 
     data_iq = envelope_detect.to_numpy(data_iq)
 

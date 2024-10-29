@@ -9,7 +9,7 @@ from pathlib import Path
 
 import schema
 
-from usbmd import Config
+from usbmd.config import Config
 from usbmd.config.comments import DESCRIPTIONS, add_comments_to_yaml
 from usbmd.config.validation import check_config, config_schema
 from usbmd.utils import get_date_string, strtobool

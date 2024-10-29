@@ -41,7 +41,6 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
     # probe = get_probe(config)
     config = load_config_from_yaml(r"./tests/config_test.yaml")
     config = check_config(config)
-    config.ml_library = "torch"
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_parameters()
