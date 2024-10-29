@@ -267,7 +267,7 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
         config = config[hostname]
 
     # Ensure that the remaining config contains a `data_root` key
-    if not "data_root" in config:
+    if "data_root" not in config:
         warnings.warn(
             (
                 f"Cannot find data_root for username={username} "
