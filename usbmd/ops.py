@@ -435,8 +435,8 @@ class Pipeline:
             ).on_device_torch
             return on_device_torch(func, data, device=device, return_numpy=return_numpy)
         elif backend == "jax":
-            log.warning("JAX not yet supported for on_device.")
-            return func(data)
+            on_device_jax = importlib.import_module("usbmd.backend.jax").on_device_jax
+            return on_device_jax(func, data, device=device, return_numpy=return_numpy)
         else:
             raise ValueError(f"Unsupported operations package {backend}.")
 
@@ -537,7 +537,7 @@ class Pipeline:
                 device, (str, int)
             ), f"device should be a string or int, got {device}"
             if isinstance(device, str):
-                if backend in ["tensorflow", "jax"]:
+                if backend == "tensorflow":
                     assert device.startswith(
                         "gpu"
                     ), f"device should be 'cpu' or 'gpu:*', got {device}"
@@ -545,6 +545,12 @@ class Pipeline:
                     assert device.startswith(
                         "cuda"
                     ), f"device should be 'cpu' or 'cuda:*', got {device}"
+                elif backend == "jax":
+                    assert device.startswith(
+                        ("gpu", "cuda")
+                    ), f"device should be 'cpu', 'gpu:*', or 'cuda:*', got {device}"
+                else:
+                    raise ValueError(f"Unsupported backend {backend}.")
             return device
 
 

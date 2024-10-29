@@ -19,7 +19,7 @@ def init_device(
     Args:
         backend (str): String indicating which ml library to use. Can be
             'torch', 'tensorflow', 'jax', 'numpy' or `None`.
-                - When `None` or 'jax', the function will select GPU(s) without specific features
+                - When `None`, the function will select GPU(s) without specific features
                 for the ml library and thus will not import any ml library.
                 - Selecting Tensorflow will set memory growth, check if CUDA is available
                 and format the device string for Tensorflow.
@@ -52,7 +52,12 @@ def init_device(
         from usbmd.backend.tensorflow.utils.gpu_config import get_device
 
         device = get_device(device, verbose=verbose)
-    elif backend is None or backend == "jax":
+    elif backend == "jax":
+        # pylint: disable=import-outside-toplevel
+        from usbmd.backend.jax.utils.gpu_config import get_device
+
+        device = get_device(device, verbose=verbose)
+    elif backend is None:
         # pylint: disable=import-outside-toplevel
         from usbmd.utils.gpu_utils import get_device
 
