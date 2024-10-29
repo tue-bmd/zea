@@ -16,7 +16,8 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def generate_cache_key(func, args, kwargs, arg_names):
     """Generate a unique cache key based on function name and specified parameters."""
-    key_elements = [func.__name__]
+    key_elements = [func.__name__]  # function name
+    key_elements.append(inspect.getsource(func))  # source code
     if not arg_names:
         key_elements.extend(args)
         key_elements.extend(f"{k}={v}" for k, v in kwargs.items())
