@@ -40,6 +40,12 @@ def get_args():
         type=str,
         help="which task to run",
     )
+    parser.add_argument(
+        "--skip_validate_dataset",
+        default=False,
+        action="store_true",
+        help="Skip dataset integrity checks. Useful for large datasets. Use with caution.",
+    )
     # pylint: disable=no-member
     parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
@@ -52,7 +58,12 @@ def main():
     config = setup(args.config)
 
     if args.task == "run":
-        ui = Interface(config)
+        ui = Interface(
+            config,
+            dataset_kwargs={
+                "validate_dataset": not args.skip_validate_dataset,
+            },
+        )
 
         log.info(f"Using {keras.backend.backend()} backend")
 
