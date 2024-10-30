@@ -73,37 +73,18 @@ def _default_output_path(data_root):
     return Path(DEFAULT_OUTPUT_PATH.format(data_root=data_root))
 
 
-def _verify_user_config_and_get_paths(username, config, system, hostname, local):
+def _verify_user_config_and_get_paths(config, system, local):
     """
     Get the user configuration and verify the paths.
 
     Args:
-        username (str): The username of the user.
         config (dict): The configuration dictionary containing user information.
         system (str): The current operating system.
-        hostname (str): The hostname of the system.
         local (bool): Flag indicating whether to use local paths or remote paths.
 
     Returns:
         dict: A dictionary containing the verified paths.
     """
-    # Get config for user and hostname
-    config = config[username]
-
-    if hostname in config:
-        # Check if hostname is in the config
-        config = config[hostname]
-    elif "data_root" in config:
-        # If hostname is not in the config, check if there is a default data_root
-        pass
-    else:
-        # No hostname or data_root found in config so fallback to default
-        warnings.warn(
-            f"Unknown hostname {hostname} for user {username} and no default data_root found.",
-            UnknownHostnameWarning,
-        )
-        return _fallback_to_default_data_root(system), "./output"
-
     # Check if set os system matches with the current system
     if "system" in config:
         assert (
@@ -111,12 +92,10 @@ def _verify_user_config_and_get_paths(username, config, system, hostname, local)
         ), f'Current OS {system} does not match user settings: {config["system"]}'
         config.pop("system")
 
-    # Assert that data_root is set
-    assert "data_root" in config, "Please add a data_root key."
-
-    # Assert config only contains data_root and output
+    # Only keep data_root and output keys, the rest are ignored.
     unknown_keys = [x for x in config.keys() if x not in ["data_root", "output"]]
-    assert len(unknown_keys) == 0, f"Unknown keys in user config: {unknown_keys}"
+    for key in unknown_keys:
+        del config[key]
 
     def _error_msg(key):
         return (
@@ -255,6 +234,8 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
         data_root: ...
     ```
 
+    These will take precedence over the `data_root` that is userless and machineless.
+
     Returns:
         data_path (dict): absolute paths to location of data. Stores the following
             parameters:
@@ -280,20 +261,20 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     else:
         raise ValueError("user_config should be a string or dictionary.")
 
+    # Check if username is in the config, if so, select that part of the config
     if username in config:
-        # Check if username is in the config
-        data_root, output = _verify_user_config_and_get_paths(
-            username, config, system, hostname, local
-        )
-    elif "data_root" in config:
-        # If username is not in the config, check if there is a default data_root
-        data_root = config["data_root"]
-        log.info(f"No user profile found, using default data_root: {data_root}.")
-        output = config.get("output", _default_output_path(data_root))
-    else:
+        config = config[username]
+
+    # Check if hostname is in the config, if so, select that part of the config
+    if hostname in config:
+        config = config[hostname]
+
+    # Ensure that the remaining config contains a `data_root` key
+    if "data_root" not in config:
         warnings.warn(
             (
-                f"Unknown user {username} in user file and no default `data_root`.\n"
+                f"Cannot find data_root for username={username} "
+                f"and hostname={hostname} in user file. Also no default data_root found. "
                 f"Falling back to default path for {system}: {DEFAULT_DATA_ROOT[system]}. "
                 f"Please update the `{user_config}` with your data-path settings."
             ),
@@ -301,6 +282,8 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
         )
         data_root = _fallback_to_default_data_root(system)
         output = _default_output_path(data_root)
+    else:
+        data_root, output = _verify_user_config_and_get_paths(config, system, local)
 
     # Add repo_root to sys.path
     sys.path.insert(1, repo_root)
