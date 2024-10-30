@@ -130,6 +130,7 @@ def h5_dataset_from_directory(
     shard_index: int = None,
     num_shards: int = 1,
     search_file_tree_kwargs: dict | None = None,
+    drop_remainder: bool = False,
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -200,6 +201,8 @@ def h5_dataset_from_directory(
         num_shards (int, optional): this is used to divide the dataset into `num_shards` parts.
             Sharding happens before all other operations. Defaults to 1.
             See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
+        drop_remainder (bool, optional): representing whether the last batch should be dropped
+            in the case it has fewer than batch_size elements. Defaults to False.
 
     Returns:
         tf.data.Dataset: dataset
@@ -369,7 +372,7 @@ def h5_dataset_from_directory(
 
     # batch
     if batch_size:
-        dataset = dataset.batch(batch_size)
+        dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
 
     # resize
     if image_size:
