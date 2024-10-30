@@ -7,6 +7,7 @@ Or do not pass a config file to open a file dialog to choose a config file.
 - **Date**          : November 18th, 2021
 """
 
+# pylint: disable=import-outside-toplevel
 import argparse
 import asyncio
 import sys
@@ -31,7 +32,10 @@ def get_args():
         "--backend",
         default=None,
         type=str,
-        help="Keras backend to use. Default is the one set by the environment variable KERAS_BACKEND.",
+        help=(
+            "Keras backend to use. Default is the one set by the environment "
+            "variable KERAS_BACKEND."
+        ),
     )
     parser.add_argument(
         "--skip_validate_dataset",
