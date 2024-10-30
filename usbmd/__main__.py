@@ -12,19 +12,6 @@ import asyncio
 import sys
 from pathlib import Path
 
-wd = Path(__file__).parent.resolve()
-sys.path.append(str(wd))
-
-import keras
-
-from usbmd.generate import GenerateDataSet
-from usbmd.interface import Interface
-from usbmd.setup_usbmd import setup
-from usbmd.utils import keep_trying, log, strtobool
-from usbmd.utils.checks import _DATA_TYPES
-from usbmd.utils.gui import USBMDApp
-from usbmd.utils.io_lib import start_async_app
-
 
 def get_args():
     """Command line argument parser"""
@@ -41,6 +28,12 @@ def get_args():
         help="which task to run",
     )
     parser.add_argument(
+        "--backend",
+        default=None,
+        type=str,
+        help="Keras backend to use. Default is the one set by the environment variable KERAS_BACKEND.",
+    )
+    parser.add_argument(
         "--skip_validate_dataset",
         default=False,
         action="store_true",
@@ -55,13 +48,32 @@ def get_args():
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
+
+    if args.backend:
+        from usbmd.setup_usbmd import set_backend
+
+        set_backend(args.backend)
+
+    wd = Path(__file__).parent.resolve()
+    sys.path.append(str(wd))
+
+    import keras
+
+    from usbmd.generate import GenerateDataSet
+    from usbmd.interface import Interface
+    from usbmd.setup_usbmd import setup
+    from usbmd.utils import keep_trying, log, strtobool
+    from usbmd.utils.checks import _DATA_TYPES
+    from usbmd.utils.gui import USBMDApp
+    from usbmd.utils.io_lib import start_async_app
+
     config = setup(args.config)
 
     if args.task == "run":
         ui = Interface(
             config,
             dataset_kwargs={
-                "validate_dataset": not args.skip_validate_dataset,
+                "validate": not args.skip_validate_dataset,
             },
         )
 
