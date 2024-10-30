@@ -90,9 +90,6 @@ class Interface:
 
         # intialize process class
         self.process = Process(self.config, self.scan, self.probe)
-        # initialize a second process class for postprocessing (faster this way)
-        self.process_image = Process(self.config, self.scan, self.probe)
-        self.process_image.device = "cpu"
 
         # initialize attributes for UI class
         self.data = None
