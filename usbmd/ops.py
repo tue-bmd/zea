@@ -126,7 +126,6 @@ import keras
 import numpy as np
 import scipy
 from keras import ops
-from pytest import param
 from scipy import ndimage, signal
 
 import usbmd.beamformer as bmf
