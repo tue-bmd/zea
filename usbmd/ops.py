@@ -126,6 +126,7 @@ import keras
 import numpy as np
 import scipy
 from keras import ops
+from pytest import param
 from scipy import ndimage, signal
 
 import usbmd.beamformer as bmf
@@ -234,7 +235,7 @@ class Operation(ABC):
                 "manually setting the parameters during initialization."
             )
 
-    def set_params(self, config: Config, scan: Scan, probe: Probe):
+    def set_params(self, config: Config, scan: Scan, probe: Probe, override=False):
         """Set the parameters for the operation.
 
         Parameters are assigned to the operation from the config, scan, and probe
@@ -245,45 +246,65 @@ class Operation(ABC):
             config (Config): Configuration parameters for the operation.
             scan (Scan): Scan parameters for the operation.
             probe (Probe): Probe parameters for the operation.
-
+            override (bool): Whether to override parameters if they are already set.
+                Defaults to False, meaning that only unset parameters will be set
+                from the config, scan, and probe.
         """
+        # combine all params with priority config > scan > probe
+        # combine the dicts
+        params = {}
         if config is not None:
-            self._assign_config_params(config)
+            params.update(self._assign_config_params(config))
         if scan is not None:
-            self._assign_scan_params(scan)
+            params.update(self._assign_scan_params(scan))
         if probe is not None:
-            self._assign_probe_params(probe)
+            params.update(self._assign_probe_params(probe))
+
+        for attr, value in params.items():
+            if value is None:  # don't override with None values
+                continue
+            # only override if override is True or the attribute is not set yet
+            if override or getattr(self, attr) is None:
+                setattr(self, attr, value)
 
     # pylint: disable=unused-argument
     def _assign_config_params(self, config: Config):
-        """Assign the config parameters to the operation.
+        """Return the config parameters for the operation.
 
         Args:
             config (Config): Configuration parameters for the operation.
 
+        Returns:
+            dict: The config parameters for the operation.
+
         """
-        # Assign the config parameters to the operation
-        return
+        return {}
 
     # pylint: disable=unused-argument
     def _assign_scan_params(self, scan: Scan):
-        """Assign the scan parameters to the operation.
+        """Return the scan parameters for the operation.
 
         Args:
             scan (Scan): Scan parameters for the operation.
 
+        Returns:
+            dict: The scan parameters for the operation.
+
         """
-        return
+        return {}
 
     # pylint: disable=unused-argument
     def _assign_probe_params(self, probe: Probe):
-        """Assign the probe parameters to the operation.
+        """Return the probe parameters for the operation.
 
         Args:
             probe (Probe): Probe parameters for the operation.
 
+        Returns:
+            dict: The probe parameters for the operation.
+
         """
-        return
+        return {}
 
     def prepare_tensor(self, x, dtype=None):
         """Convert input array to appropriate tensor type for the operations package.
@@ -440,10 +461,10 @@ class Pipeline:
         else:
             raise ValueError(f"Unsupported operations package {backend}.")
 
-    def set_params(self, config: Config, scan: Scan, probe: Probe):
+    def set_params(self, config: Config, scan: Scan, probe: Probe, override=False):
         """Set the parameters for the pipeline. See Operation.set_params for more info."""
         for operation in self.operations:
-            operation.set_params(config, scan, probe)
+            operation.set_params(config, scan, probe, override=override)
 
     def process(self, data, return_numpy=False):
         """Process input data through the pipeline."""
@@ -741,21 +762,22 @@ class TOFCorrection(Operation):
             return ops.map(self.process_item, data)
 
     def _assign_scan_params(self, scan: Scan):
-        self.grid = scan.grid
-        self.focus_distances = scan.focus_distances
-        self.t0_delays = scan.t0_delays
-        self.tx_apodizations = scan.tx_apodizations
-        self.initial_times = scan.initial_times
-        self.probe_geometry = scan.probe_geometry
-
-        self.sound_speed = scan.sound_speed
-        self.polar_angles = scan.polar_angles
-        self.sampling_frequency = scan.fs
-        self.f_number = scan.f_number
-        self.fdemod = scan.fdemod
-        self.apply_lens_correction = scan.apply_lens_correction
-        self.lens_thickness = scan.lens_thickness
-        self.lens_sound_speed = scan.lens_sound_speed
+        return {
+            "grid": scan.grid,
+            "focus_distances": scan.focus_distances,
+            "t0_delays": scan.t0_delays,
+            "tx_apodizations": scan.tx_apodizations,
+            "initial_times": scan.initial_times,
+            "probe_geometry": scan.probe_geometry,
+            "sound_speed": scan.sound_speed,
+            "polar_angles": scan.polar_angles,
+            "sampling_frequency": scan.fs,
+            "f_number": scan.f_number,
+            "fdemod": scan.fdemod,
+            "apply_lens_correction": scan.apply_lens_correction,
+            "lens_thickness": scan.lens_thickness,
+            "lens_sound_speed": scan.lens_sound_speed,
+        }
 
     @property
     def _ready(self):
@@ -886,8 +908,10 @@ class Normalize(Operation):
         self.input_range = input_range
 
     def _assign_config_params(self, config):
-        self.input_range = config.data.input_range
-        self.output_range = None
+        return {
+            "input_range": config.data.input_range,
+            "output_range": None,
+        }
 
     def process(self, data):
         if self.output_range is None:
@@ -916,7 +940,9 @@ class LogCompress(Operation):
         self.dynamic_range = dynamic_range
 
     def _assign_config_params(self, config):
-        self.dynamic_range = config.data.dynamic_range
+        return {
+            "dynamic_range": config.data.dynamic_range,
+        }
 
     def process(self, data):
         if self.dynamic_range is None:
@@ -943,7 +969,9 @@ class Downsample(Operation):
         self.axis = axis
 
     def _assign_config_params(self, config):
-        self.factor = config.scan.downsample
+        return {
+            "factor": config.scan.downsample,
+        }
 
     def process(self, data):
         if self.factor is None:
@@ -1178,15 +1206,17 @@ class Demodulate(Operation):
         return complex_to_channels(data, axis=-1)
 
     def _assign_scan_params(self, scan):
-        self.fs = scan.fs
-        self.fc = scan.fc
-        self.bandwidth = scan.bandwidth_percent
+        return {
+            "fs": scan.fs,
+            "fc": scan.fc,
+            "bandwidth": scan.bandwidth_percent,
+        }
 
     def _assign_config_params(self, config):
-        if config.scan.sampling_frequency is not None:
-            self.fs = config.scan.sampling_frequency
-        if config.scan.center_frequency is not None:
-            self.fc = config.scan.center_frequency
+        return {
+            "fs": config.scan.sampling_frequency,
+            "fc": config.scan.center_frequency,
+        }
 
 
 @ops_registry("upmix")
@@ -1214,14 +1244,16 @@ class UpMix(Operation):
         return data
 
     def _assign_scan_params(self, scan):
-        self.fs = scan.fs
-        self.fc = scan.fc
+        return {
+            "fs": scan.fs,
+            "fc": scan.fc,
+        }
 
     def _assign_config_params(self, config):
-        if config.scan.sampling_frequency is not None:
-            self.fs = config.scan.sampling_frequency
-        if config.scan.center_frequency is not None:
-            self.fc = config.scan.center_frequency
+        return {
+            "fs": config.scan.sampling_frequency,
+            "fc": config.scan.center_frequency,
+        }
 
 
 @ops_registry("bandpass_filter")
@@ -1261,16 +1293,6 @@ class BandPassFilter(Operation):
             and self.f2 is not None
         )
 
-    def _assign_scan_params(self, scan):
-        self.fs = scan.fs
-        self.fc = scan.fc
-
-    def _assign_config_params(self, config):
-        if config.scan.sampling_frequency is not None:
-            self.fs = config.scan.sampling_frequency
-        if config.scan.center_frequency is not None:
-            self.fc = config.scan.center_frequency
-
     def process(self, data):
         axis = data.ndim + self.axis if self.axis < 0 else self.axis
 
@@ -1285,6 +1307,18 @@ class BandPassFilter(Operation):
             data = complex_to_channels(data, axis=-1)
 
         return data
+
+    def _assign_scan_params(self, scan):
+        return {
+            "fs": scan.fs,
+            "fc": scan.fc,
+        }
+
+    def _assign_config_params(self, config):
+        return {
+            "fs": config.scan.sampling_frequency,
+            "fc": config.scan.center_frequency,
+        }
 
 
 @ops_registry("multi_bandpass_filter")
@@ -1397,16 +1431,6 @@ class MultiBandPassFilter(Operation):
             and self.fc is not None
         )
 
-    def _assign_scan_params(self, scan):
-        self.fs = scan.fs
-        self.fc = scan.fc
-
-    def _assign_config_params(self, config):
-        if config.scan.sampling_frequency is not None:
-            self.fs = config.scan.sampling_frequency
-        if config.scan.center_frequency is not None:
-            self.fc = config.scan.center_frequency
-
     def process(self, data):
         axis = data.ndim + self.axis if self.axis < 0 else self.axis
 
@@ -1424,6 +1448,18 @@ class MultiBandPassFilter(Operation):
             data_list.append(_data)
 
         return data_list
+
+    def _assign_scan_params(self, scan):
+        return {
+            "fs": scan.fs,
+            "fc": scan.fc,
+        }
+
+    def _assign_config_params(self, config):
+        return {
+            "fs": config.scan.sampling_frequency,
+            "fc": config.scan.center_frequency,
+        }
 
 
 @ops_registry("scan_convert")
@@ -1490,31 +1526,34 @@ class ScanConvert(Operation):
             )
         return data_out
 
+    def _assign_scan_params(self, scan):
+        return {
+            "rho_range": (ops.min(scan.z_axis), ops.max(scan.z_axis)),
+        }
+
     def _assign_config_params(self, config):
-        self.resolution = config.data.resolution
-        self.fill_value = config.data.dynamic_range[0]
+        return {
+            "resolution": config.data.resolution,
+            "fill_value": config.data.dynamic_range[0],
+        }
 
     def _assign_probe_params(self, probe):
         # TODO: probably want to read coordinates from
         # usbmd file in the future (i.e. stored in scan class)
         if hasattr(probe, "angle_deg_axis"):
             angles = np.deg2rad(probe.angle_deg_axis)
-            self.theta_range = (
+            theta_range = (
                 ops.min(angles),
                 ops.max(angles),
             )
         else:
-            log.warning(
-                "Probe does not have `angle_deg_axis` defined, using default "
-                "values (-45, 45 degree cone) for ScanConvert."
-            )
-            self.theta_range = tuple(np.deg2rad([-45, 45]))
+            # Probe does not have `angle_deg_axis` defined, using default
+            # values (-45, 45 degree cone) for ScanConvert.
+            theta_range = tuple(np.deg2rad([-45, 45]))
 
-    def _assign_scan_params(self, scan):
-        self.rho_range = (
-            ops.min(scan.z_axis),
-            ops.max(scan.z_axis),
-        )
+        return {
+            "theta_range": theta_range,
+        }
 
 
 @ops_registry("doppler")
@@ -1578,18 +1617,6 @@ class Doppler(Operation):
         doppler_velocities = self.iq2doppler(data)
         return doppler_velocities
 
-    def _assign_scan_params(self, scan):
-        self.fs = scan.fs
-        self.fc = scan.fc
-        self.c = scan.sound_speed
-        self.PRF = 1 / sum(scan.time_to_next_transmit[0])
-
-    def _assign_config_params(self, config):
-        if config.scan.sampling_frequency is not None:
-            self.fs = config.scan.sampling_frequency
-        if config.scan.center_frequency is not None:
-            self.fc = config.scan.center_frequency
-
     def iq2doppler(self, data):
         """Compute Doppler from packet of I/Q Data.
 
@@ -1632,6 +1659,20 @@ class Doppler(Operation):
         doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
 
         return doppler_velocities
+
+    def _assign_scan_params(self, scan):
+        return {
+            "fs": scan.fs,
+            "fc": scan.fc,
+            "c": scan.sound_speed,
+            "PRF": 1 / sum(scan.time_to_next_transmit[0]),
+        }
+
+    def _assign_config_params(self, config):
+        return {
+            "fs": config.scan.sampling_frequency,
+            "fc": config.scan.center_frequency,
+        }
 
 
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):
