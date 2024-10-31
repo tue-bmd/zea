@@ -67,7 +67,7 @@ optional = true
 [tool.poetry.group.torch.dependencies]
 # CPU only, install the dev-torch
 torch = { version = "^2.2", source = "torch-cpu" }
-torchvision = { version = "^0.17", source = "torch-cpu" }
+torchvision = { version = "*", source = "torch-cpu" } # any version because torch version handles this
 
 [tool.poetry.group.tensorflow]
 optional = true
