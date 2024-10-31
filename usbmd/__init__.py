@@ -18,7 +18,6 @@ def imported_from_main():
     we will set the backend in __main__.py just after this __init__.py.
     """
     for frame in inspect.stack():
-        print(frame.filename)
         filename = frame.filename
         if filename.endswith("__main__.py") or filename.endswith("bin/usbmd"):
             return True
