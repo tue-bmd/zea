@@ -1,33 +1,42 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-dockerfile
 {
-	"name": "Existing Dockerfile",
-	"build": {
-		// Sets the run context to one level up instead of the .devcontainer folder.
-		"context": "..",
-		// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
-		"dockerfile": "../Dockerfile"
-	},
-
-	"extensions": ["ms-python.python"],
-	"runArgs": ["--gpus", "all"],
-	// "forwardPorts": [5000, 30000],
-	"appPort": ["5000:5000", "30000:30000"],
-	"workspaceMount": "source=${localWorkspaceFolder},target=/ultrasound-bmd,type=bind",
-	"workspaceFolder": "/ultrasound-bmd"
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-
-	// Uncomment the next line to run commands after the container is created.
-	// "postCreateCommand": "cat /etc/os-release",
-
-	// Configure tool-specific properties.
-	// "customizations": {},
-
-	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "devcontainer"
+	"name": "usbmd keras3",
+	"image": "usbmd/keras3:v2.1.1",
+	"runArgs": [
+		"--gpus", "all",
+		"-m",
+		"100g",
+		"--cpus",
+		"7"
+	],
+	// Link the workspace folder to the container
+	"workspaceMount": "source=${localWorkspaceFolder},target=/ultrasound-toolbox,type=bind",
+	"workspaceFolder": "/ultrasound-toolbox",
+	"shutdownAction": "stopContainer",
+	"containerUser": "devcontainer0", // change this to your username in the container
+	// Mount the NAS drive
+	"mounts": [
+		{
+			"source": "/mnt/z", // change this to the path of your NAS drive
+			"target": "/mnt/z",
+			"type": "bind"
+		},
+	],
+	// Install vscode extensions
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.black-formatter",
+				"ms-python.isort",
+				"sleistner.vscode-fileutils",
+				"gihub.copilot",
+				"adpyke.codesnap",
+				"eamodio.gitlens",
+				"h5web.vscode-h5web",
+				"ms-toolsai.jupyter"
+			]
+		}
+	}
 }
