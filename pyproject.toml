@@ -9,7 +9,7 @@ line_length = 88
 
 [tool.poetry]
 name = "usbmd"
-version = "2.1.0"
+version = "2.1.1"
 description = "A collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts for ultrasound researchers."
 authors = [
     "Tristan Stevens <t.s.w.stevens@tue.nl>",
