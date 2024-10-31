@@ -11,9 +11,16 @@ import os
 
 
 def imported_from_main():
-    """Check if the module was imported from __main__.py."""
+    """Check if the module was imported from __main__.py
+    or usbmd was called from the command line.
+
+    In this case, we don't need to print the warning message, as
+    we will set the backend in __main__.py just after this __init__.py.
+    """
     for frame in inspect.stack():
-        if frame.filename.endswith("__main__.py"):
+        print(frame.filename)
+        filename = frame.filename
+        if filename.endswith("__main__.py") or filename.endswith("bin/usbmd"):
             return True
     return False
 
