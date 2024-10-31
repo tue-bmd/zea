@@ -7,23 +7,11 @@ Or do not pass a config file to open a file dialog to choose a config file.
 - **Date**          : November 18th, 2021
 """
 
+# pylint: disable=import-outside-toplevel
 import argparse
 import asyncio
 import sys
 from pathlib import Path
-
-wd = Path(__file__).parent.resolve()
-sys.path.append(str(wd))
-
-import keras
-
-from usbmd.generate import GenerateDataSet
-from usbmd.interface import Interface
-from usbmd.setup_usbmd import setup
-from usbmd.utils import keep_trying, log, strtobool
-from usbmd.utils.checks import _DATA_TYPES
-from usbmd.utils.gui import USBMDApp
-from usbmd.utils.io_lib import start_async_app
 
 
 def get_args():
@@ -40,6 +28,21 @@ def get_args():
         type=str,
         help="which task to run",
     )
+    parser.add_argument(
+        "--backend",
+        default=None,
+        type=str,
+        help=(
+            "Keras backend to use. Default is the one set by the environment "
+            "variable KERAS_BACKEND."
+        ),
+    )
+    parser.add_argument(
+        "--skip_validate_dataset",
+        default=False,
+        action="store_true",
+        help="Skip dataset integrity checks. Useful for large datasets. Use with caution.",
+    )
     # pylint: disable=no-member
     parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
@@ -49,10 +52,34 @@ def get_args():
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
+
+    if args.backend:
+        from usbmd.setup_usbmd import set_backend
+
+        set_backend(args.backend)
+
+    wd = Path(__file__).parent.resolve()
+    sys.path.append(str(wd))
+
+    import keras
+
+    from usbmd.generate import GenerateDataSet
+    from usbmd.interface import Interface
+    from usbmd.setup_usbmd import setup
+    from usbmd.utils import keep_trying, log, strtobool
+    from usbmd.utils.checks import _DATA_TYPES
+    from usbmd.utils.gui import USBMDApp
+    from usbmd.utils.io_lib import start_async_app
+
     config = setup(args.config)
 
     if args.task == "run":
-        ui = Interface(config)
+        ui = Interface(
+            config,
+            dataset_kwargs={
+                "validate": not args.skip_validate_dataset,
+            },
+        )
 
         log.info(f"Using {keras.backend.backend()} backend")
 
