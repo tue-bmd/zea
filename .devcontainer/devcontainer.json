@@ -22,6 +22,11 @@
 			"target": "/mnt/z",
 			"type": "bind"
 		},
+		{
+			"source": "/mnt/x", // change this to the path of your NAS drive
+			"target": "/mnt/x",
+			"type": "bind"
+		}
 	],
 	// Install vscode extensions
 	"customizations": {
