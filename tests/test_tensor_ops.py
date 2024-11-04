@@ -127,5 +127,21 @@ def test_boolean_mask(array, mask):
     return out  # Return the output for the equality_libs_processing decorator
 
 
-# TODO add tests for:
-# - `tensor_ops.func_with_one_batch_dim`
+@pytest.mark.parametrize(
+    "func, tensor, n_batch_dims, func_axis",
+    [
+        [
+            ops.image.rgb_to_grayscale,
+            np.zeros((2, 3, 4, 28, 28, 3), np.float32),  # 3 batch dims
+            3,
+            None,
+        ],
+    ],
+)
+@equality_libs_processing()
+def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
+    """Tests if func_with_one_batch_dim runs."""
+
+    out = tensor_ops.func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis)
+    assert ops.shape(out) == (*tensor.shape[:-1], 1), "Output shape is incorrect."
+    return out  # Return the output for the equality_libs_processing decorator
