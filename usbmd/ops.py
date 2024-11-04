@@ -134,7 +134,8 @@ from usbmd.config import Config
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.utils import batched_map, lens_correction, log, pfield, translate
+from usbmd.tensor_ops import batched_map
+from usbmd.utils import lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
 
 # make sure to reload all modules that import keras

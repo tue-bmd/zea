@@ -145,3 +145,8 @@ def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
     out = tensor_ops.func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis)
     assert ops.shape(out) == (*tensor.shape[:-1], 1), "Output shape is incorrect."
     return out  # Return the output for the equality_libs_processing decorator
+
+
+# TODO: Add tests for the following functions:
+# - batched_map
+# - pad_array_to_divisible

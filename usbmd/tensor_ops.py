@@ -231,3 +231,52 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
         num_obs - ddof
     )
     return cov_matrices
+
+
+def batched_map(f, xs, batch_size=None):
+    """
+    Map a function over leading array axes.
+
+    Args:
+        f (callable): Function to apply element-wise over the first axis.
+        xs (Tensor): Values over which to map along the leading axis.
+        batch_size (int, optional): Integer specifying the size of the batch for
+            each step to execute in parallel.
+
+    Idea taken from: https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.map.html
+    """
+    if batch_size == 1:
+        return f(xs)
+
+    if batch_size is None:
+        out = ops.map(f, xs)
+    else:
+        length = ops.shape(xs)[0]
+        xs = pad_array_to_divisible(xs, batch_size, axis=0)
+        xs = ops.reshape(xs, (batch_size, -1) + ops.shape(xs)[1:])
+        out = ops.map(f, xs)
+        out = ops.reshape(out, (-1,) + ops.shape(out)[2:])
+        out = out[:length]  # remove padding
+
+    return out
+
+
+def pad_array_to_divisible(arr, N, axis=0, pad_value=0):
+    """
+    Pad an array to be divisible by N along the specified axis.
+    """
+    # Get the length of the specified axis
+    length = ops.shape(arr)[axis]
+
+    # Calculate how much padding is needed for the specified axis
+    remainder = length % N
+    padding = N - remainder if remainder != 0 else 0
+
+    # Create a tuple with (before, after) padding for each axis
+    pad_width = [(0, 0)] * ops.ndim(arr)  # No padding for other axes
+    pad_width[axis] = (0, padding)  # Padding for the specified axis
+
+    # Pad the array
+    padded_array = ops.pad(arr, pad_width, mode="constant", constant_values=pad_value)
+
+    return padded_array

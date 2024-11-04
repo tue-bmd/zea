@@ -5,7 +5,7 @@ from keras import ops
 
 from usbmd.utils.cache import cache_output
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
-from usbmd.utils.utils import batched_map
+from usbmd.tensor_ops import batched_map
 
 
 def tof_correction(data, grid, *args, patches=1, **kwargs):
