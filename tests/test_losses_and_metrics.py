@@ -5,10 +5,9 @@ import inspect
 import numpy as np
 import pytest
 
-import usbmd
 from usbmd.backend.tensorflow.losses import SMSLE
 from usbmd.registry import metrics_registry
-from usbmd.utils.metrics import get_metric, _sector_reweight_image
+from usbmd.utils import metrics
 
 
 def test_smsle():
@@ -48,7 +47,7 @@ def test_metrics(y_true, y_pred):
     unsupervised_metrics = metrics_registry.filter_by_argument("supervised", False)
 
     for metric_name in metrics_registry:
-        metric = get_metric(metric_name)
+        metric = metrics.get_metric(metric_name)
         try:
             if metric_name in supervised_metrics:
                 metric_value = metric(y_true, y_pred)
@@ -66,7 +65,7 @@ def test_metrics(y_true, y_pred):
 
 def test_metrics_registry():
     """Test if all metrics are in the registry"""
-    metrics_module = inspect.getmodule(usbmd.utils.metrics)
+    metrics_module = inspect.getmodule(metrics)
     metrics_funcs = inspect.getmembers(metrics_module, inspect.isfunction)
     metrics_func_names = [func[0] for func in metrics_funcs]
 
@@ -82,7 +81,7 @@ def test_sector_reweight_image():
     cube_of_ones = np.ones((3, 3, 3))
 
     # act
-    reweighted_cube = _sector_reweight_image(cube_of_ones, 180)
+    reweighted_cube = metrics._sector_reweight_image(cube_of_ones, 180)
 
     # assert
     # depths are set at the 'center' of each pixel index

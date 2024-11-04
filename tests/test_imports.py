@@ -9,16 +9,47 @@ from pathlib import Path
 
 import pytest
 
-# Save the original import function
-original_import = builtins.__import__
+
+@pytest.fixture
+def _no_ml_lib_import():
+    """Fixture to override and restore the built-in import function."""
+    # Override the built-in import function
+    original_import_func = builtins.__import__
+
+    # Define a custom import function
+    def import_fail_on_ml_libs(name, *args, **kwargs):
+        """Custom import function that raises an error if torch, tensorflow, or jax is imported."""
+        if name.lower() in ["jax", "tensorflow", "torch"]:
+            raise ImportError(f"{name} is not allowed to be imported in this program.")
+        return original_import_func(name, *args, **kwargs)
+
+    builtins.__import__ = import_fail_on_ml_libs
+    yield
+    # Restore the original import function after the test
+    builtins.__import__ = original_import_func
 
 
-# Define a custom import function
-def import_fail_on_ml_libs(name, *args, **kwargs):
-    """Custom import function that raises an error if torch, tensorflow, or jax is imported."""
-    if name.lower() in ["jax", "tensorflow", "torch"]:
-        raise ImportError(f"{name} is not allowed to be imported in this program.")
-    return original_import(name, *args, **kwargs)
+@pytest.fixture
+def _no_torch_tensorflow():
+    """
+    Fixture to override and restore the built-in import function.
+    NOTE: This function exists because keras with numpy backend will also import jax.
+    See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py
+    """
+    # Override the built-in import function
+    original_import_func = builtins.__import__
+
+    # Define a custom import function
+    def import_fail_on_ml_libs(name, *args, **kwargs):
+        """Custom import function that raises an error if torch, tensorflow, or jax is imported."""
+        if name.lower() in ["tensorflow", "torch"]:
+            raise ImportError(f"{name} is not allowed to be imported in this program.")
+        return original_import_func(name, *args, **kwargs)
+
+    builtins.__import__ = import_fail_on_ml_libs
+    yield
+    # Restore the original import function after the test
+    builtins.__import__ = original_import_func
 
 
 @pytest.mark.parametrize("directory", [Path(__file__).parent.parent])
@@ -49,13 +80,6 @@ def test_check_imports_errors(directory):
     assert success, "Import errors found in one or more Python files."
 
 
-def test_package_does_not_import_heavy_ml_libraries():
+def test_package_does_not_import_heavy_ml_libraries(_no_torch_tensorflow):
     """Test that the package does not import heavy ML libraries like torch, tensorflow, or jax."""
-
-    # Override the built-in import function
-    builtins.__import__ = import_fail_on_ml_libs
-
     importlib.import_module("usbmd")
-
-    # Restore the original import function
-    builtins.__import__ = original_import
