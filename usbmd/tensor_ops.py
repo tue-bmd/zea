@@ -38,11 +38,11 @@ def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
     noisy_image = ops.copy(image)
 
     # Add salt noise
-    salt_mask = keras.random.uniform(ops.shape(image), seed) < salt_prob
+    salt_mask = keras.random.uniform(ops.shape(image), seed=seed) < salt_prob
     noisy_image = ops.where(salt_mask, 1.0, noisy_image)
 
     # Add pepper noise
-    pepper_mask = keras.random.uniform(ops.shape(image), seed) < pepper_prob
+    pepper_mask = keras.random.uniform(ops.shape(image), seed=seed) < pepper_prob
     noisy_image = ops.where(pepper_mask, 0.0, noisy_image)
 
     return noisy_image
