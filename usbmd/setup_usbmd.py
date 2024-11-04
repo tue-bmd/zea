@@ -10,19 +10,58 @@ Author(s): Tristan Stevens
 Date: 25/09/2023
 """
 
+import copy
+import importlib
+import sys
 from pathlib import Path
 from typing import Union
 
+import keras
 import yaml
 
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.datapaths import create_new_user, set_data_paths
-from usbmd.processing import set_backend
 from usbmd.utils import log
 from usbmd.utils.device import init_device
 from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.io_lib import filename_from_window_dialog
+
+
+def reload_usbmd():
+    """Reloads usbmd. This is useful when changing the backend.
+    Taken from `keras.config.set_backend`"""
+
+    # Clear module cache.
+    loaded_modules = [key for key in sys.modules if key.startswith("usbmd")]
+    for key in loaded_modules:
+        del sys.modules[key]
+
+    from usbmd import __class__  # pylint: disable=import-outside-toplevel,cyclic-import
+
+    # Finally: refresh all imported usbmd submodules.
+    globs = copy.copy(globals())
+    for key, value in globs.items():
+        if value.__class__ == __class__:
+            if str(value).startswith("<module 'usbmd."):
+                module_name = str(value)
+                module_name = module_name[module_name.find("'") + 1 :]
+                module_name = module_name[: module_name.find("'")]
+                globals()[key] = importlib.import_module(module_name)
+
+
+def set_backend(backend: str):
+    """Set compute backend
+
+    Note: Make sure to reimport any module you are using that uses keras
+    directly (has import keras or derivative at the top of the file).
+    This can be done with the importlib module.
+
+    """
+    # set keras backend
+    if keras.config.backend() != backend:
+        keras.config.set_backend(backend)
+        reload_usbmd()
 
 
 def setup(
@@ -68,10 +107,9 @@ def setup(
     config.data.user = set_data_paths(user_config, local=config.data.local)
 
     # Init GPU / CPU according to config
-    config.device = init_device(config.ml_library, config.device, config.hide_devices)
-
-    # Set compute backend (numpy, torch, tensorflow, jax)
-    set_backend(config.ml_library)
+    config.device = init_device(
+        keras.backend.backend(), config.device, config.hide_devices
+    )
 
     return config
 

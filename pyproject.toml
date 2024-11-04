@@ -9,7 +9,7 @@ line_length = 88
 
 [tool.poetry]
 name = "usbmd"
-version = "2.1.0"
+version = "2.1.1"
 description = "A collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts for ultrasound researchers."
 authors = [
     "Tristan Stevens <t.s.w.stevens@tue.nl>",
@@ -67,7 +67,7 @@ optional = true
 [tool.poetry.group.torch.dependencies]
 # CPU only, install the dev-torch
 torch = { version = "^2.2", source = "torch-cpu" }
-torchvision = { version = "^0.17", source = "torch-cpu" }
+torchvision = { version = "*", source = "torch-cpu" } # any version because torch version handles this
 
 [tool.poetry.group.tensorflow]
 optional = true
@@ -91,6 +91,9 @@ ipykernel = "^6.29.5"
 dev = ["pytest", "pylint", "papermill", "ipykernel"]
 opencv-python = ["opencv-python"]
 opencv-python-headless = ["opencv-python-headless"]
+jax = ["jax"]
+tensorflow = ["tensorflow"]
+torch = ["torch", "torchvision"]
 
 [[tool.poetry.source]]
 name = "torch-cpu"

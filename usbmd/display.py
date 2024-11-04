@@ -77,6 +77,10 @@ def scan_convert_2d(
     """
     image = ops.cast(image, dtype="float32")
 
+    assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
+    assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
+    assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
+
     rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-2], dtype=image.dtype)
     theta = ops.linspace(
         theta_range[0], theta_range[1], image.shape[-1], dtype=image.dtype
@@ -167,6 +171,11 @@ def scan_convert_3d(
 
     """
     image = ops.cast(image, dtype="float32")
+
+    assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
+    assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
+    assert len(phi_range) == 2, "phi_range should be a tuple of length 2"
+    assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
 
     rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-3], dtype=image.dtype)
     theta = ops.linspace(
