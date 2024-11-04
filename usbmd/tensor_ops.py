@@ -1,4 +1,4 @@
-"""Basic operations (bops) implemented with the multi-backend `keras.ops`."""
+"""Basic tensor operations implemented with the multi-backend `keras.ops`."""
 
 import os
 
@@ -81,17 +81,20 @@ def extend_n_dims(arr, axis, n_dims):
     return ops.reshape(arr, new_shape)
 
 
-def func_with_one_batch_dim(func, input, n_batch_dims=2, func_axis=0, **kwargs):
+def func_with_one_batch_dim(
+    func, tensor, n_batch_dims: int = 2, func_axis: int | None = None, **kwargs
+):
     """
-    Applies a function to an input tensor with one or more batch dimensions.
+    Applies a function to an input tensor with one or more batch dimensions. The function will
+    be executed in parallel on all batch elements.
 
     Args:
-        func: The function to apply to the image.
+        func (function): The function to apply to the image.
             Will take the `func_axis` output from the function.
-        input: The input tensor.
-        n_batch_dims: The number of batch dimensions in the input tensor.
+        tensor (Tensor): The input tensor.
+        n_batch_dims (int): The number of batch dimensions in the input tensor.
             Expects the input to start with n_batch_dims batch dimensions. Defaults to 2.
-        func_axis: The axis of the function's output to return (in case the function returns multiple outputs).
+        func_axis (int, optional): If `func` returns mulitple outputs, this axis will be returned.
         **kwargs: Additional keyword arguments to pass to the function.
 
     Returns:
@@ -101,22 +104,26 @@ def func_with_one_batch_dim(func, input, n_batch_dims=2, func_axis=0, **kwargs):
         ValueError: If the number of batch dimensions is greater than the rank of the input tensor.
     """
     # Extract the shape of the batch dimensions from the input tensor
-    batch_dims = ops.shape(input)[:n_batch_dims]
+    batch_dims = ops.shape(tensor)[:n_batch_dims]
 
     # Extract the shape of the remaining (non-batch) dimensions
-    other_dims = ops.shape(input)[n_batch_dims:]
+    other_dims = ops.shape(tensor)[n_batch_dims:]
 
     # Reshape the input tensor to merge all batch dimensions into one
-    reshaped_input = ops.reshape(input, [-1, *other_dims])
+    reshaped_input = ops.reshape(tensor, [-1, *other_dims])
 
     # Apply the given function to the reshaped input tensor
     reshaped_output = func(reshaped_input, **kwargs)
 
     # If the function returns multiple outputs, select the one corresponding to `func_axis`
     if isinstance(reshaped_output, (tuple, list)):
+        if func_axis is None:
+            raise ValueError(
+                "func_axis must be specified when the function returns multiple outputs."
+            )
         reshaped_output = reshaped_output[func_axis]
 
-    # Extract the shape of the output tensor after applying the function, excluding the batch dimension
+    # Extract the shape of the output tensor after applying the function (excluding the batch dim)
     output_other_dims = ops.shape(reshaped_output)[1:]
 
     # Reshape the output tensor to restore the original batch dimensions
@@ -126,7 +133,9 @@ def func_with_one_batch_dim(func, input, n_batch_dims=2, func_axis=0, **kwargs):
 def matrix_power(matrix, power):
     """
     Compute the power of a square matrix.
-    Should match the [numpy](https://numpy.org/doc/stable/reference/generated/numpy.linalg.matrix_power.html) implementation.
+    Should match the
+    [numpy](https://numpy.org/doc/stable/reference/generated/numpy.linalg.matrix_power.html)
+    implementation.
 
     Parameters:
         matrix (array-like): A square matrix to be raised to a power.
@@ -160,24 +169,24 @@ def boolean_mask(tensor, mask):
     if os.environ.get("KERAS_BACKEND") != "tensorflow":
         return tensor[mask]
     else:
-        import tensorflow as tf
+        import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
         return tf.boolean_mask(tensor, mask)
 
 
-def flatten(input, start_dim=0, end_dim=-1):
+def flatten(tensor, start_dim=0, end_dim=-1):
     """Should be similar to: https://pytorch.org/docs/stable/generated/torch.flatten.html"""
     # Get the shape of the input tensor
-    old_shape = ops.shape(input)
+    old_shape = ops.shape(tensor)
 
     # Adjust end_dim if it's negative
-    end_dim = ops.ndim(input) + end_dim if end_dim < 0 else end_dim
+    end_dim = ops.ndim(tensor) + end_dim if end_dim < 0 else end_dim
 
     # Create a new shape with -1 in the flattened dimensions
     new_shape = [*old_shape[:start_dim], -1, *old_shape[end_dim + 1 :]]
 
     # Reshape the tensor
-    return ops.reshape(input, new_shape)
+    return ops.reshape(tensor, new_shape)
 
 
 def batch_cov(x, rowvar=True, bias=False, ddof=None):

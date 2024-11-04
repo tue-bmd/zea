@@ -1,3 +1,5 @@
+"""Tests for the `tensor_ops` module."""
+
 import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -6,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-import usbmd.bops as bops
+from usbmd import tensor_ops
 
 
 @pytest.mark.parametrize(
@@ -18,7 +20,7 @@ import usbmd.bops as bops
 )
 def test_flatten(array):
     np.testing.assert_almost_equal(
-        torch.flatten(torch.from_numpy(array)).numpy(), bops.flatten(array)
+        torch.flatten(torch.from_numpy(array)).numpy(), tensor_ops.flatten(array)
     )
 
 
@@ -47,14 +49,14 @@ def test_batch_cov(data, rowvar, bias, ddof):
         data (np.array): [*batch_dims, num_obs, num_features]
     """
     np.testing.assert_allclose(
-        bops.batch_cov(data, rowvar=rowvar, bias=bias, ddof=ddof),
+        tensor_ops.batch_cov(data, rowvar=rowvar, bias=bias, ddof=ddof),
         recursive_cov(data, rowvar=rowvar, bias=bias, ddof=ddof),
     )
 
 
 # TODO add tests for:
-# - `bops.add_salt_and_pepper_noise`
-# - `bops.extend_n_dims`
-# - `bops.func_with_one_batch_dim`
-# - `bops.matrix_power`
-# - `bops.boolean_mask`
+# - `tensor_ops.add_salt_and_pepper_noise`
+# - `tensor_ops.extend_n_dims`
+# - `tensor_ops.func_with_one_batch_dim`
+# - `tensor_ops.matrix_power`
+# - `tensor_ops.boolean_mask`

@@ -1,11 +1,14 @@
-"""Gumbel-Softmax trick implemented with the multi-backend `keras.ops`."""
+"""
+Gumbel-Softmax trick implemented with the multi-backend `keras.ops`.
+TODO: implement tests for these functions.
+"""
 
 import keras
 import numpy as np
 from keras import ops
 
 
-class SubsetOperator(keras.layers.Layer):
+class SubsetOperator:
     """
     SubsetOperator applies the Gumbel-Softmax trick to perform continuous top-k selection.
 
@@ -15,12 +18,11 @@ class SubsetOperator(keras.layers.Layer):
     hard (bool, optional): Whether to use straight-through Gumbel-Softmax. Defaults to False.
 
     Sources:
-        - [Reparameterizable Subset Sampling via Continuous Relaxations](https://github.com/ermongroup/subsets)
-        - [SGA - Sampling Subsets with Gumbel-Top Relaxations](https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/subsets.html)
+        - [Reparameterizable Subset Sampling via Continuous Relaxations](https://github.com/ermongroup/subsets)   # pylint: disable=line-too-long
+        - [Sampling Subsets with Gumbel-Top Relaxations](https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/subsets.html)  # pylint: disable=line-too-long
     """
 
     def __init__(self, k, tau=1.0, hard=False, n_value_dims=1):
-        super(SubsetOperator, self).__init__()
         self.k = k
         self.tau = tau
         self.hard = hard
@@ -32,7 +34,7 @@ class SubsetOperator(keras.layers.Layer):
         uniform = keras.random.uniform(shape, minval=0, maxval=1)
         return -ops.log(-ops.log(uniform + self.EPSILON) + self.EPSILON)
 
-    def call(self, scores):
+    def __call__(self, scores):
         # Gumbel-Softmax trick to make the sampling differentiable
         gumbel_noise = self.gumbel_sample(ops.shape(scores))
         scores = scores + gumbel_noise
@@ -41,7 +43,7 @@ class SubsetOperator(keras.layers.Layer):
         khot = ops.zeros_like(scores)
         onehot_approx = ops.zeros_like(scores)
 
-        for i in range(self.k):
+        for _ in range(self.k):
             khot_mask = ops.max(1.0 - onehot_approx, self.EPSILON)
             scores = scores + ops.log(khot_mask)
             onehot_approx = ops.softmax(scores / self.tau, axis=1)
