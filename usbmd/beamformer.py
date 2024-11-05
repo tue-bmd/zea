@@ -3,10 +3,9 @@
 import numpy as np
 from keras import ops
 
-from usbmd.utils.lens_correction import calculate_lens_corrected_delays
-from usbmd.utils.utils import batched_map
-
 from usbmd.utils.cache import cache_output
+from usbmd.utils.lens_correction import calculate_lens_corrected_delays
+from usbmd.tensor_ops import batched_map
 
 
 def tof_correction(data, grid, *args, patches=1, **kwargs):
@@ -528,7 +527,9 @@ def apod_mask(grid, probe_geometry, f_number):
 
     # Use matrix multiplication to expand aperture tensor, x_pixel tensor, and
     # x_element tensor to shape (n_pix, n_el)
-    ones_aperture = ops.ones((1, n_el), dtype=ops.dtype(aperture))
+    ones_aperture = ops.ones(
+        (1, n_el), dtype=ops.dtype(aperture)
+    )  # getting error here? pip install -U keras ;)
     ones_x_pixel = ops.ones((1, n_el), dtype=ops.dtype(x_pixel))
     ones_x_element = ops.ones((n_pix, 1), dtype=ops.dtype(x_element))
 
