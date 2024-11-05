@@ -375,11 +375,11 @@ class Interface:
 
         self.fig, self.ax = plt.subplots(figsize=figsize)
         # darkmode
-        self.fig.patch.set_facecolor("black")
-        self.ax.set_facecolor("black")
-        text_color = "gray"
-        for spine in self.ax.spines.values():
-            spine.set_color(text_color)
+        # self.fig.patch.set_facecolor("black")
+        # self.ax.set_facecolor("black")
+        # text_color = "gray"
+        # for spine in self.ax.spines.values():
+        #     spine.set_color(text_color)
 
         image_range = self.config.data.dynamic_range
         imshow_kwargs = {
@@ -393,14 +393,14 @@ class Interface:
         cax_kwargs = {
             "pad": 0.05,
             "position": "right",
-            "color": text_color,
+            # "color": text_color,
             "size": "5%",
         }
 
-        self.ax.set_xlabel("Lateral Width (mm)", color=text_color)
-        self.ax.set_ylabel("Axial length (mm)", color=text_color)
-        self.ax.tick_params(axis="x", colors=text_color)
-        self.ax.tick_params(axis="y", colors=text_color)
+        self.ax.set_xlabel("Lateral Width (mm)")  # , color=text_color)
+        self.ax.set_ylabel("Axial length (mm)")  # , color=text_color)
+        self.ax.tick_params(axis="x")  # , colors=text_color)
+        self.ax.tick_params(axis="y")  # , colors=text_color)
 
         # assign properties of fig, ax to image viewer
         self.image_viewer.imshow_kwargs = imshow_kwargs
