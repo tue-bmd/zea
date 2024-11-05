@@ -13,6 +13,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 
 def get_args():
     """Command line argument parser"""
@@ -52,6 +54,8 @@ def get_args():
 def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
+
+    plt.style.use(str(Path(__file__).parent / "usbmd_darkmode.mplstyle"))
 
     if args.backend:
         from usbmd.setup_usbmd import set_backend

@@ -259,12 +259,12 @@
 ## relative to font.size, using the following values: xx-small, x-small,
 ## small, medium, large, x-large, xx-large, larger, or smaller
 
-font.family:  serif
+font.family: serif
 #font.style:   normal
 #font.variant: normal
 #font.weight:  normal
 #font.stretch: normal
-font.size:    9.0
+font.size: 12.0
 
 #font.serif:      DejaVu Serif, Bitstream Vera Serif, Computer Modern Roman, New Century Schoolbook, Century Schoolbook L, Utopia, ITC Bookman, Bookman, Nimbus Roman No9 L, Times New Roman, Times, Palatino, Charter, serif
 #font.sans-serif: DejaVu Sans, Bitstream Vera Sans, Computer Modern Sans Serif, Lucida Grande, Verdana, Geneva, Lucid, Arial, Helvetica, Avant Garde, sans-serif
@@ -362,14 +362,14 @@ mathtext.fontset: dejavuserif  # Should be 'dejavusans' (default),
 ## Following are default face and edge colors, default tick sizes,
 ## default font sizes for tick labels, and so on.  See
 ## https://matplotlib.org/stable/api/axes_api.html#module-matplotlib.axes
-axes.facecolor:     black   # axes background color
-axes.edgecolor:     white   # axes edge color
+axes.facecolor: black   # axes background color
+axes.edgecolor: white   # axes edge color
 #axes.linewidth:     0.8     # edge line width
 #axes.grid:          False   # display grid or not
 #axes.grid.axis:     both    # which axis the grid should apply to
 #axes.grid.which:    major   # grid lines at {major, minor, both} ticks
 #axes.titlelocation: center  # alignment of the title: {left, right, center}
-axes.titlesize:     medium   # font size of the axes title
+axes.titlesize: medium   # font size of the axes title
 #axes.titleweight:   normal  # font weight of title
 #axes.titlecolor:    auto    # color of the axes title, auto falls back to
                              # text.color as default value
@@ -378,7 +378,7 @@ axes.titlesize:     medium   # font size of the axes title
 #axes.labelsize:     medium  # font size of the x and y labels
 #axes.labelpad:      4.0     # space between label and axis
 #axes.labelweight:   normal  # weight of the x and y labels
-axes.labelcolor:    "#BBBBBB"
+axes.labelcolor: "#BBBBBB"
 #axes.axisbelow:     line    # draw axis gridlines and ticks:
                              #     - below patches (True)
                              #     - above patches but below lines ('line')
@@ -480,7 +480,7 @@ axes.prop_cycle: cycler('color', ['E02222', '0EA7FF', 'FFE70E', '67D627', '9467b
 #xtick.minor.width:   0.6     # minor tick width in points
 #xtick.major.pad:     3.5     # distance to major tick label in points
 #xtick.minor.pad:     3.4     # distance to the minor tick label in points
-xtick.color:          white   # color of the ticks
+xtick.color: white   # color of the ticks
 #xtick.labelcolor:    inherit # color of the tick labels or inherit from xtick.color
 #xtick.labelsize:     medium  # font size of the tick labels
 #xtick.direction:     out     # direction: {in, out, inout}
@@ -502,7 +502,7 @@ xtick.color:          white   # color of the ticks
 #ytick.minor.width:   0.6     # minor tick width in points
 #ytick.major.pad:     3.5     # distance to major tick label in points
 #ytick.minor.pad:     3.4     # distance to the minor tick label in points
-ytick.color:          white   # color of the ticks
+ytick.color: white   # color of the ticks
 #ytick.labelcolor:    inherit # color of the tick labels or inherit from ytick.color
 #ytick.labelsize:     medium  # font size of the tick labels
 #ytick.direction:     out     # direction: {in, out, inout}
@@ -532,7 +532,7 @@ ytick.color:          white   # color of the ticks
 #legend.framealpha:    0.8      # legend patch transparency
 #legend.facecolor:     inherit  # inherit from axes.facecolor; or color spec
 #legend.edgecolor:     0.8      # background patch boundary color
-legend.fancybox:      False     # if True, use a rounded box for the
+legend.fancybox: False     # if True, use a rounded box for the
                                 # legend background, else a rectangle
 #legend.shadow:        False    # if True, give background a shadow effect
 #legend.numpoints:     1        # the number of marker points in the legend line
@@ -561,8 +561,8 @@ legend.fancybox:      False     # if True, use a rounded box for the
 #figure.labelsize:   large     # size of the figure label (``Figure.sup[x|y]label()``)
 #figure.labelweight: normal    # weight of the figure label
 #figure.figsize:     6.4, 4.8  # figure size in inches
-figure.dpi:          150       # figure dots per inch
-figure.facecolor:   black     # figure face color
+figure.dpi: 100       # figure dots per inch
+figure.facecolor: black     # figure face color
 #figure.edgecolor:   white     # figure edge color
 #figure.frameon:     True      # enable figure frame
 #figure.max_open_warning: 20   # The maximum number of figures to open through
@@ -601,7 +601,7 @@ figure.facecolor:   black     # figure face color
 ## * IMAGES                                                                  *
 ## ***************************************************************************
 #image.aspect:          equal        # {equal, auto} or a number
-image.interpolation:   none  # see help(imshow) for options
+image.interpolation: none  # see help(imshow) for options
 #image.cmap:            viridis      # A colormap name (plasma, magma, etc.)
 #image.lut:             256          # the size of the colormap lookup table
 #image.origin:          upper        # {lower, upper}
