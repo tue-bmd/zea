@@ -1,3 +1,9 @@
+"""Module with visualization functions for 2D and 3D ultrasound data.
+
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 5/11/2024
+"""
+
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import zoom
@@ -209,7 +215,7 @@ def plot_frustum_vertices(
     ax=None,
 ):
     """
-    Plots the vertices of a frustum in spherical coordinates and optionally highlights specified planes.
+    Plots the vertices of a frustum in spherical coordinates and highlights specified planes.
 
     Args:
         rho_range (tuple): Range of rho values (min, max).
