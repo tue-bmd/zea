@@ -63,7 +63,7 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
     for i, quadrant in enumerate(quadrants):
         facecolors = cmap((quadrant - min_val) / (max_val - min_val))
         if fixed_coord == "x":
-            Y, Z = np.mgrid[0 : ny // 2, 0 : nz // 2]
+            Y, Z = np.mgrid[0 : ny // 2 + 1, 0 : nz // 2 + 1]
             X = (slice_index if slice_index is not None else nx // 2) * np.ones_like(Y)
             Y_offset = (i // 2) * ny // 2
             Z_offset = (i % 2) * nz // 2
@@ -77,7 +77,7 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
                 shade=False,
             )
         elif fixed_coord == "y":
-            X, Z = np.mgrid[0 : nx // 2, 0 : nz // 2]
+            X, Z = np.mgrid[0 : nx // 2 + 1, 0 : nz // 2 + 1]
             Y = (slice_index if slice_index is not None else ny // 2) * np.ones_like(X)
             X_offset = (i // 2) * nx // 2
             Z_offset = (i % 2) * nz // 2
@@ -91,7 +91,7 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
                 shade=False,
             )
         elif fixed_coord == "z":
-            X, Y = np.mgrid[0 : nx // 2, 0 : ny // 2]
+            X, Y = np.mgrid[0 : nx // 2 + 1, 0 : ny // 2 + 1]
             Z = (slice_index if slice_index is not None else nz // 2) * np.ones_like(X)
             X_offset = (i // 2) * nx // 2
             Y_offset = (i % 2) * ny // 2
