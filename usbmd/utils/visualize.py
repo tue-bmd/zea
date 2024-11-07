@@ -4,11 +4,150 @@
 - **Date**          : 5/11/2024
 """
 
+from typing import List, Optional, Tuple, Union
+
 import matplotlib.pyplot as plt
 import numpy as np
+from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy.ndimage import zoom
 
 from usbmd.display import frustum_convert_rtp2xyz
+
+
+def plot_image_grid(
+    images: List[np.ndarray],
+    ncols: Optional[int] = None,
+    cmap: Optional[Union[str, List[str]]] = "gray",
+    vmin: Optional[Union[float, List[float]]] = None,
+    vmax: Optional[Union[float, List[float]]] = None,
+    titles: Optional[List[str]] = None,
+    suptitle: Optional[str] = None,
+    aspect: Optional[str] = None,
+    figsize: Optional[Tuple[float, float]] = None,
+    fig: Optional[plt.Figure] = None,
+    fig_contents: Optional[List] = None,
+    remove_axis: Optional[bool] = True,
+    background_color: Optional[str] = "black",
+    text_color: Optional[str] = "white",
+    **kwargs,
+) -> Tuple[plt.Figure, List]:
+    """Plot a batch of images in a grid.
+
+    Args:
+        images (List[np.ndarray]): batch of images.
+        ncols (int, optional): Number of columns. Defaults to None.
+        cmap (str or list, optional): Colormap. Defaults to 'gray'.
+            If list, cmap must be of same length as images and is set for each axis.
+        vmin (float or list, optional): Minimum plot value. Defaults to None.
+            if list vmin must be of same length as images and is set for each axis.
+        vmax (float or list , optional): Maximum plot value. Defaults to None.
+             if list vmax must be of same length as images and is set for each axis.
+        titles (list, optional): List of titles for subplots. Defaults to None.
+        suptitle (str, optional): Title for the plot. Defaults to None.
+        aspect (optional): Aspect ratio for imshow.
+        figsize (tuple, optional): Figure size. Defaults to None.
+        fig (figure, optional): Matplotlib figure object. Defaults to None. Can
+            be used to plot on an existing figure.
+        fig_contents (list, optional): List of matplotlib image objects. Defaults to None.
+        remove_axis (bool, optional): Whether to remove axis. Defaults to True. If
+            False, the axis will be removed and the spines will be hidden, which allows
+            for the labels to still be visible if plotted after the fact.
+        background_color (str, optional): Background color. Defaults to None.
+        **kwargs: arguments for plt.Figure.
+
+    Returns:
+        fig (figure): Matplotlib figure object
+        fig_contents (list): List of matplotlib image objects.
+
+    """
+    if ncols is None:
+        factors = [i for i in range(1, len(images) + 1) if len(images) % i == 0]
+        ncols = factors[len(factors) // 2] if len(factors) else len(images) // 4 + 1
+    nrows = int(len(images) / ncols) + int(len(images) % ncols)
+    images = [images[i] if len(images) > i else None for i in range(nrows * ncols)]
+
+    aspect_ratio = images[0].shape[1] / images[0].shape[0]
+    if figsize is None:
+        figsize = (ncols * 2, nrows * 2 / aspect_ratio)
+
+    # either supply both fig and fig_contents or neither
+    assert (fig is None) == (
+        fig_contents is None
+    ), "Supply both fig and fig_contents or neither"
+
+    if fig is None:
+        fig = plt.figure(figsize=figsize, **kwargs)
+        axes = ImageGrid(fig, 111, nrows_ncols=(nrows, ncols), axes_pad=0.1)
+        if background_color:
+            fig.patch.set_facecolor(background_color)
+        fig.set_tight_layout({"pad": 0.1})
+    else:
+        axes = fig.axes[: len(images)]
+
+    if isinstance(cmap, str):
+        cmap = [cmap] * len(images)
+    else:
+        if cmap is None:
+            cmap = [None] * len(images)
+        assert len(cmap) == len(
+            images
+        ), f"cmap must be a string or list of strings of length {len(images)}"
+
+    if isinstance(vmin, (int, float)):
+        vmin = [vmin] * len(images)
+    else:
+        if vmin is None:
+            vmin = [None] * len(images)
+        assert len(vmin) == len(
+            images
+        ), f"vmin must be a float or list of floats of length {len(images)}"
+
+    if isinstance(vmax, (int, float)):
+        vmax = [vmax] * len(images)
+    else:
+        if vmax is None:
+            vmax = [None] * len(images)
+        assert len(vmax) == len(
+            images
+        ), f"vmax must be a float or list of floats of length {len(images)}"
+
+    if fig_contents is None:
+        fig_contents = [None for _ in range(len(images))]
+    for i, ax in enumerate(axes):
+        image = images[i]
+        if fig_contents[i] is None:
+            im = ax.imshow(
+                image, cmap=cmap[i], vmin=vmin[i], vmax=vmax[i], aspect=aspect
+            )
+            fig_contents[i] = im
+        else:
+            fig_contents[i].set_data(image)
+        if remove_axis:
+            ax.axis("off")
+        else:
+            for spine in ax.spines.values():
+                # spine.set_visible(False)
+                spine.set_color(background_color)
+            ax.tick_params(
+                axis="both",
+                which="both",
+                bottom=False,
+                top=False,
+                left=False,
+                right=False,
+            )
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+
+        if titles:
+            ax.set_title(titles[i], color=text_color)
+
+    if suptitle:
+        fig.suptitle(suptitle, color=text_color)
+
+    fig.set_tight_layout(False)
+    # use bbox_inches="tight" for proper tight layout when saving
+    return fig, fig_contents
 
 
 def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
