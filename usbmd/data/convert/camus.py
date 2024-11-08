@@ -95,10 +95,30 @@ def convert_camus(source_path, output_path, overwrite=False):
 def get_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=str)
-    parser.add_argument("--output", type=str)
+    parser.add_argument(
+        "--source",
+        type=str,
+        default="/mnt/z/Ultrasound-BMd/data/CAMUS_public/database_nifti",
+    )
+    parser.add_argument(
+        "--output", type=str, default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS"
+    )
     args = parser.parse_args()
     return args
+
+
+splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
+
+
+def get_split(x):
+    if splits["train"][0] <= x < splits["train"][1]:
+        return "train"
+    elif splits["val"][0] <= x < splits["val"][1]:
+        return "val"
+    elif splits["test"][0] <= x < splits["test"][1]:
+        return "test"
+    else:
+        raise ValueError(f"Did not find split for patient: {x}")
 
 
 if __name__ == "__main__":
@@ -114,10 +134,13 @@ if __name__ == "__main__":
     camus_source_folder = Path(args.source)
     camus_output_folder = Path(args.output)
 
-    # check if output folder exists if so close program
-    if camus_output_folder.exists():
-        print(f"Output folder {camus_output_folder} already exists. Exiting program.")
-        sys.exit()
+    # check if output folders already exist
+    for split in splits:
+        assert not (
+            camus_output_folder / split
+        ).exists(), (
+            f"Output folder {camus_output_folder / split} exists. Exiting program."
+        )
 
     # clone folder structure of source to output using pathlib
     # and run convert_camus() for every hdf5 found in there
@@ -127,7 +150,13 @@ if __name__ == "__main__":
         if not "database_nifti" in source_file.parts:
             continue
 
-        output_file = camus_output_folder / source_file.relative_to(camus_source_folder)
+        patient = source_file.stem.split("_")[0]
+        patient_id = int(patient.removeprefix("patient"))
+        split = get_split(patient_id)
+
+        output_file = (
+            camus_output_folder / split / source_file.relative_to(camus_source_folder)
+        )
 
         # Replace .nii.gz with .hdf5
         output_file = output_file.with_suffix("").with_suffix(".hdf5")
