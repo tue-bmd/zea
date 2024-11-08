@@ -150,7 +150,7 @@ def plot_image_grid(
     return fig, fig_contents
 
 
-def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
+def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1, centroid=None):
     """
     For a given 3D array, plot a plane with fixed_coord using four individual quadrants.
 
@@ -162,6 +162,8 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
         slice_index (int or None): The index of the slice to be plotted.
             If None, the middle slice is used.
         stride (int, optional): The stride step for plotting. Defaults to 1.
+        centroid (tuple, optional): centroid around which to break the quadrants.
+            If None, the middle of the image is used.
 
     Returns:
         matplotlib.axes.Axes3DSubplot: The axis with the plotted quadrants.
@@ -186,12 +188,15 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
     }[fixed_coord]
     plane_data = array[index]
 
-    n0, n1 = plane_data.shape
+    if centroid is None:
+        centroid = [x // 2 for x in array.shape]
+    coords = {"x": (1, 2), "y": (0, 2), "z": (0, 1)}
+    n0, n1 = (centroid[i] for i in coords[fixed_coord])
     quadrants = [
-        plane_data[: n0 // 2, : n1 // 2],
-        plane_data[: n0 // 2, n1 // 2 :],
-        plane_data[n0 // 2 :, : n1 // 2],
-        plane_data[n0 // 2 :, n1 // 2 :],
+        plane_data[:n0, :n1],
+        plane_data[:n0, n1:],
+        plane_data[n0:, :n1],
+        plane_data[n0:, n1:],
     ]
 
     min_val = np.nanmin(array)
@@ -202,10 +207,10 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
     for i, quadrant in enumerate(quadrants):
         facecolors = cmap((quadrant - min_val) / (max_val - min_val))
         if fixed_coord == "x":
-            Y, Z = np.mgrid[0 : ny // 2 + 1, 0 : nz // 2 + 1]
+            Y, Z = np.mgrid[: quadrant.shape[0] + 1, : quadrant.shape[1] + 1]
             X = (slice_index if slice_index is not None else nx // 2) * np.ones_like(Y)
-            Y_offset = (i // 2) * ny // 2
-            Z_offset = (i % 2) * nz // 2
+            Y_offset = (i // 2) * n0
+            Z_offset = (i % 2) * n1
             ax.plot_surface(
                 X,
                 Y + Y_offset,
@@ -216,10 +221,10 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
                 shade=False,
             )
         elif fixed_coord == "y":
-            X, Z = np.mgrid[0 : nx // 2 + 1, 0 : nz // 2 + 1]
+            X, Z = np.mgrid[: quadrant.shape[0] + 1, : quadrant.shape[1] + 1]
             Y = (slice_index if slice_index is not None else ny // 2) * np.ones_like(X)
-            X_offset = (i // 2) * nx // 2
-            Z_offset = (i % 2) * nz // 2
+            X_offset = (i // 2) * n0
+            Z_offset = (i % 2) * n1
             ax.plot_surface(
                 X + X_offset,
                 Y,
@@ -230,10 +235,10 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1):
                 shade=False,
             )
         elif fixed_coord == "z":
-            X, Y = np.mgrid[0 : nx // 2 + 1, 0 : ny // 2 + 1]
+            X, Y = np.mgrid[: quadrant.shape[0] + 1, : quadrant.shape[1] + 1]
             Z = (slice_index if slice_index is not None else nz // 2) * np.ones_like(X)
-            X_offset = (i // 2) * nx // 2
-            Y_offset = (i % 2) * ny // 2
+            X_offset = (i // 2) * n0
+            Y_offset = (i % 2) * n1
             ax.plot_surface(
                 X + X_offset,
                 Y + Y_offset,
