@@ -110,15 +110,16 @@ def get_args():
 splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 
 
-def get_split(x):
-    if splits["train"][0] <= x < splits["train"][1]:
+def get_split(patient_id: int) -> str:
+    """Determine the dataset split for a given patient ID."""
+    if splits["train"][0] <= patient_id < splits["train"][1]:
         return "train"
-    elif splits["val"][0] <= x < splits["val"][1]:
+    elif splits["val"][0] <= patient_id < splits["val"][1]:
         return "val"
-    elif splits["test"][0] <= x < splits["test"][1]:
+    elif splits["test"][0] <= patient_id < splits["test"][1]:
         return "test"
     else:
-        raise ValueError(f"Did not find split for patient: {x}")
+        raise ValueError(f"Did not find split for patient: {patient_id}")
 
 
 if __name__ == "__main__":
