@@ -37,6 +37,7 @@ def compute_pfield(
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Default is 1.
         perc (int, optional): minium percentile threshold to keep in the weighting
             Higher is more aggressive) Default is 10.
+        norm (bool, optional): per pixel normalization (True) or unnormalized (False)
 
     Returns:
         ops.array: The normalized pressure field (across tx events).
