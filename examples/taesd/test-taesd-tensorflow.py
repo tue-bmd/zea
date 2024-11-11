@@ -11,18 +11,17 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import set_data_paths
+from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.backend.tensorflow.models.taesd import TinyDecoder, TinyEncoder
 from usbmd.utils import get_date_string
-from usbmd.utils.gpu_utils import get_device
 from usbmd.utils.visualize import plot_image_grid
 
 if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
     data_root = data_paths["data_root"]
-    get_device()
+    init_device("tensorflow")
 
     n_imgs = 10
     val_dataset = h5_dataset_from_directory(
@@ -32,7 +31,7 @@ if __name__ == "__main__":
         shuffle=True,
         image_size=[256, 256],
         resize_type="resize",
-        image_range=[0, 255],
+        image_range=[-60, 0],
         normalization_range=[-1, 1],
     )
 
@@ -65,10 +64,12 @@ if __name__ == "__main__":
 
     plot_list = ops.unstack(batch) + ops.unstack(output)
     fig, _ = plot_image_grid(plot_list, vmin=0, vmax=1, ncols=n_imgs)
+    path = f"test_taesd_{get_date_string()}.png"
     fig.savefig(
-        f"test_taesd_{get_date_string()}.png",
+        path,
         pad_inches=0.2,
         bbox_inches="tight",
         dpi=300,
     )
     plt.close()
+    log.info(f"Saved to {log.yellow(path)}")

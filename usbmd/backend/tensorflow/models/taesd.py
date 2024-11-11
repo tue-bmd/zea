@@ -22,8 +22,7 @@ class TinyAutoencoder(keras.models.Model):
         Initializes the TAESD model with the given parameters.
 
         Args:
-            pretrained_path (str): Path to the pretrained model. Default is
-                "/mnt/z/Ultrasound-BMd/pretrained/taesdxl/wessel-20241107-124716".
+            pretrained_path (str): Path to the pretrained model.
             grayscale (bool): Whether to use grayscale images. Default is True.
             **kwargs: Additional keyword arguments to pass to the superclass initializer.
         """
