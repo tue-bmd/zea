@@ -12,10 +12,9 @@ import matplotlib.pyplot as plt
 import torch
 from keras import ops
 
-from usbmd import log, set_data_paths
+from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.utils import get_date_string
-from usbmd.utils.gpu_utils import get_device
 from usbmd.utils.visualize import plot_image_grid
 
 if __name__ == "__main__":
@@ -30,7 +29,7 @@ if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
     data_root = data_paths["data_root"]
-    get_device()
+    device = init_device("torch")
 
     n_imgs = 10
     dtype = torch.float32
@@ -41,14 +40,14 @@ if __name__ == "__main__":
         shuffle=True,
         image_size=[256, 256],
         resize_type="resize",
-        image_range=[0, 255],
+        image_range=[-60, 0],
         normalization_range=[-1, 1],
     )
 
     # Get model
     vae = AutoencoderTiny.from_pretrained(
         "madebyollin/taesdxl", torch_dtype=dtype  # or "madebyollin/taesd"
-    ).to("cuda:0")
+    ).to(device)
 
     # Calculate the total number of parameters
     total_params = sum(p.numel() for p in vae.parameters())
@@ -58,7 +57,7 @@ if __name__ == "__main__":
     batch = next(iter(val_dataset))
     batch = ops.moveaxis(batch, -1, 1)  # channels last to channels first
     batch = ops.concatenate([batch, batch, batch], axis=1)  # grayscale to RGB
-    batch = batch.to("cuda:0")
+    batch = batch.to(device)
     batch = batch.to(dtype)
 
     with torch.no_grad():
@@ -81,10 +80,13 @@ if __name__ == "__main__":
 
     plot_list = ops.unstack(batch) + ops.unstack(output)
     fig, _ = plot_image_grid(plot_list, vmin=0, vmax=1, ncols=n_imgs)
+    path = f"test_taesd_{get_date_string()}.png"
     fig.savefig(
-        f"test_taesd_{get_date_string()}.png",
+        path,
         pad_inches=0.2,
         bbox_inches="tight",
         dpi=300,
     )
     plt.close()
+
+    log.info(f"Saved to {log.yellow(path)}")
