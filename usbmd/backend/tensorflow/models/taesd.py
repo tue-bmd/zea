@@ -15,6 +15,8 @@ from keras import ops
 
 
 class TinyAutoencoder(keras.models.Model):
+    """[TAESD](https://github.com/madebyollin/taesd) model in TensorFlow."""
+
     def __init__(self, pretrained_path=None, grayscale=True, **kwargs):
         """
         Initializes the TAESD model with the given parameters.
@@ -33,6 +35,11 @@ class TinyAutoencoder(keras.models.Model):
         self.decoder = TinyDecoder(self.pretrained_path)
 
     def encode(self, inputs):
+        """Encode the input images.
+
+        Args:
+            inputs (tensor): Input images of shape (batch_size, height, width, channels).
+        """
         if self.grayscale:
             inputs = ops.concatenate(
                 [inputs, inputs, inputs], axis=-1
@@ -40,12 +47,18 @@ class TinyAutoencoder(keras.models.Model):
         return self.encoder(inputs)
 
     def decode(self, inputs):
+        """Decode the encoded images.
+
+        Args:
+            inputs (tensor): Input images of shape (batch_size, height, width, 4).
+        """
         decoded = self.decoder(inputs)
         if self.grayscale:
             decoded = ops.image.rgb_to_grayscale(decoded, data_format="channels_last")
         return decoded
 
-    def call(self, inputs):
+    def call(self, inputs):  # pylint: disable=arguments-differ
+        """Applies the full autoencoder to the input."""
         encoded = self.encode(inputs)
         decoded = self.decode(encoded)
         return decoded
@@ -64,6 +77,8 @@ def _load_layer(path, layer_name):
 
 
 class TinyEncoder(keras.models.Model):
+    """Encoder from TAESD model."""
+
     def __init__(self, pretrained_path=None, **kwargs):
         """
         Initializes the TAESD encoder.
@@ -78,7 +93,7 @@ class TinyEncoder(keras.models.Model):
 
         self.encoder = _load_layer(self.pretrained_path, "encoder")
 
-    def call(self, inputs):
+    def call(self, inputs):  # pylint: disable=arguments-differ
         """
         Applies the encoder to the input.
         """
@@ -87,6 +102,8 @@ class TinyEncoder(keras.models.Model):
 
 
 class TinyDecoder(keras.models.Model):
+    """Decoder from TAESD model."""
+
     def __init__(self, pretrained_path=None, **kwargs):
         """
         Initializes the TAESD decoder.
@@ -102,7 +119,7 @@ class TinyDecoder(keras.models.Model):
 
         self.decoder = _load_layer(self.pretrained_path, "decoder")
 
-    def call(self, inputs):
+    def call(self, inputs):  # pylint: disable=arguments-differ
         """
         Applies the decoder to the input.
         """
