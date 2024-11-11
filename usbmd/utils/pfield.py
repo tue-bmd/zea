@@ -19,6 +19,7 @@ def compute_pfield(
     downmix=4,
     alpha=1,
     perc=10,
+    norm=True,
 ):
     """
     Compute the pressure field for ultrasound imaging.
@@ -260,7 +261,10 @@ def compute_pfield(
         ops.isnan(P_arr), 0, P_arr
     )  # TODO: this is necessary for Jax / TF somehow. not sure why (not for torch)
 
-    P_norm = normalize(P_arr, alpha=alpha, perc=perc)
+    if norm:
+        P_norm = normalize(P_arr, alpha=alpha, perc=perc)
+    else:
+        P_norm = P_arr
 
     return P_norm
 
