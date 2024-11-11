@@ -36,9 +36,8 @@ if __name__ == "__main__":
     )
 
     # Get model
-    model_path = "/mnt/z/Ultrasound-BMd/pretrained/taesdxl/wessel-20241107-124716"
-    encoder = TinyEncoder(model_path)
-    decoder = TinyDecoder(model_path)
+    encoder = TinyEncoder()
+    decoder = TinyDecoder()
 
     batch = next(iter(val_dataset))
     batch = ops.concatenate([batch, batch, batch], axis=-1)  # grayscale to RGB

@@ -7,27 +7,26 @@ See example usage in [examples/taesd](examples/taesd).
 - **Author(s)**     : Wessel van Nierop
 """
 
+from pathlib import Path
+
 import keras
+from huggingface_hub import snapshot_download
 from keras import ops
 
 
 class TinyAutoencoder(keras.models.Model):
-    def __init__(
-        self,
-        pretrained_path="/mnt/z/Ultrasound-BMd/pretrained/taesdxl/wessel-20241107-124716",
-        grayscale=True,
-        **kwargs,
-    ):
+    def __init__(self, pretrained_path=None, grayscale=True, **kwargs):
         """
         Initializes the TAESD model with the given parameters.
 
         Args:
-            pretrained_path (str): Path to the pretrained model.
+            pretrained_path (str): Path to the pretrained model. Default is None which
+                will load from huggingface.
             grayscale (bool): Whether to use grayscale images. Default is True.
             **kwargs: Additional keyword arguments to pass to the superclass initializer.
         """
         super().__init__(**kwargs)
-        self.pretrained_path = str(pretrained_path)
+        self.pretrained_path = pretrained_path
         self.grayscale = grayscale
 
         self.encoder = TinyEncoder(self.pretrained_path)
@@ -52,22 +51,32 @@ class TinyAutoencoder(keras.models.Model):
         return decoded
 
 
+def _load_layer(path, layer_name):
+    assert layer_name in ["encoder", "decoder"]
+    if path is None:
+        path = snapshot_download("usbmd/taesdxl")  # will download encoder and decoder
+    path = Path(path)
+    layer = keras.layers.TFSMLayer(
+        path / layer_name,
+        call_endpoint="serving_default",
+    )
+    return layer
+
+
 class TinyEncoder(keras.models.Model):
-    def __init__(self, pretrained_path, **kwargs):
+    def __init__(self, pretrained_path=None, **kwargs):
         """
         Initializes the TAESD encoder.
 
         Args:
-            pretrained_path (str): Path to the pretrained model directory.
+            pretrained_path (str): Path to the pretrained model directory. Default is None which
+                will load from huggingface.
             **kwargs: Additional keyword arguments passed to the superclass initializer.
         """
         super().__init__(**kwargs)
-        self.pretrained_path = str(pretrained_path)
+        self.pretrained_path = pretrained_path
 
-        self.encoder = keras.layers.TFSMLayer(
-            f"{self.pretrained_path}/encoder",
-            call_endpoint="serving_default",
-        )
+        self.encoder = _load_layer(self.pretrained_path, "encoder")
 
     def call(self, inputs):
         """
@@ -78,22 +87,20 @@ class TinyEncoder(keras.models.Model):
 
 
 class TinyDecoder(keras.models.Model):
-    def __init__(self, pretrained_path, **kwargs):
+    def __init__(self, pretrained_path=None, **kwargs):
         """
         Initializes the TAESD decoder.
 
         Args:
-            pretrained_path (str): Path to the pretrained model directory.
+            pretrained_path (str): Path to the pretrained model directory. Default is None which
+                will load from huggingface.
             **kwargs: Additional keyword arguments passed to the superclass initializer.
         """
 
         super().__init__(**kwargs)
-        self.pretrained_path = str(pretrained_path)
+        self.pretrained_path = pretrained_path
 
-        self.decoder = keras.layers.TFSMLayer(
-            f"{self.pretrained_path}/decoder",
-            call_endpoint="serving_default",
-        )
+        self.decoder = _load_layer(self.pretrained_path, "decoder")
 
     def call(self, inputs):
         """
