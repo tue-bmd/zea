@@ -5,7 +5,9 @@
 """
 
 import re
+from itertools import product
 from pathlib import Path
+from typing import Generator, Tuple, Union
 
 import h5py
 import keras
@@ -13,7 +15,7 @@ import numpy as np
 import tensorflow as tf
 
 from usbmd.utils import log, translate
-from usbmd.utils.io_lib import _get_length_hdf5_file, search_file_tree
+from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
 
 
 class H5Generator:
@@ -25,6 +27,7 @@ class H5Generator:
         frames_dim: int = -1,
         new_frames_dim: bool = False,
         frame_index_stride: int = 1,
+        additional_axes_iter: tuple = None,
         return_filename: bool = False,
     ):
         """Initialize H5Generator.
@@ -40,6 +43,9 @@ class H5Generator:
                 frames will be stacked along existing dimension (frames_dim).
             frame_index_stride (int, optional): interval between frames to load.
                 Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
+            additional_axes_iter (tuple, optional): additional axes to iterate over
+                in the dataset. Defaults to None, in that case we only iterate over
+                the first axis (we assume those contain the frames).
             return_filename (bool, optional): return file name with image.
                 will return a string with the file name and frame number as follows:
                 <file_name>_<frame_number>. In case multiple frames are returned,
@@ -51,8 +57,14 @@ class H5Generator:
         self.new_frames_dim = new_frames_dim
         self.frame_index_stride = frame_index_stride
         self.return_filename = return_filename
+        self.additional_axes_iter = additional_axes_iter
 
-    def __call__(self, file_name, key):
+        assert self.n_frames >= 1, "n_frames must be greater or equal to 1."
+        self._axis_indices_cache = {}
+
+    def __call__(
+        self, file_name: str, key: str
+    ) -> Generator[Union[np.ndarray, Tuple[np.ndarray, str]], None, None]:
         """Yields image from h5 file using key.
 
         Args:
@@ -62,36 +74,90 @@ class H5Generator:
         Yields:
             np.ndarray: image of shape image_shape + (n_channels * n_frames,).
         """
-        with h5py.File(file_name, "r") as file:
-            for i in range(self._length(file, key) // self.frame_index_stride):
-                images = []
-                for j in range(
-                    0,
-                    self.n_frames * self.frame_index_stride,
+        if file_name not in self._axis_indices_cache:
+            with h5py.File(file_name, "r") as file:
+                self._axis_indices_cache[file_name] = list(
+                    self._get_iteration_indices(file, key)
+                )
+
+        axis_indices = self._axis_indices_cache[file_name]
+
+        for indices in axis_indices:
+            try:
+                with h5py.File(file_name, "r") as file:
+                    if self.additional_axes_iter:
+                        data_shape = file[key].shape
+                        full_indices = [slice(shape) for shape in data_shape]
+                        # now populate full_indices with indices at the correct position
+                        # indicated by additional_axes_iter
+                        indices = list(indices)
+                        for i, axis in enumerate([0] + list(self.additional_axes_iter)):
+                            full_indices[axis] = indices[i]
+                        indices = tuple(full_indices)
+
+                    images = file[key][tuple(indices)]
+            except Exception as exc:
+                raise ValueError(
+                    f"Could not load image at index {tuple(indices)} "
+                    f"and file {file_name} of length {len(file[key])}"
+                ) from exc
+
+            if self.new_frames_dim:
+                # move frames axis to self.frames_dim
+                images = np.moveaxis(images, 0, self.frames_dim)
+            else:
+                # append frames to existing axis
+                images = np.concatenate(images, axis=self.frames_dim)
+
+            if self.return_filename:
+                filename = Path(str(file_name)).stem + "_" + "_".join(map(str, indices))
+                yield images, filename
+            else:
+                yield images
+
+    def _length(self, file: h5py.File, key: str) -> int:
+        """
+        Returns the length of the iteration indices for a given file and key.
+
+        Args:
+            file (object): The file object.
+            key (str): The key to access the data in the file.
+        Returns:
+            int: The length of the iteration indices.
+        """
+        return len(list(self._get_iteration_indices(file, key)))
+
+    def _get_iteration_indices(self, file: h5py.File, key: str) -> iter:
+        """
+        Get the iteration indices for the given file and key.
+
+        Args:
+            file (object): The file object.
+            key (str): The key to access the data in the file.
+
+        Returns:
+            tuple: A tuple of iteration indices.
+
+        """
+        data_shape = file[key].shape
+        block_size = self.n_frames * self.frame_index_stride
+        axis_indices = [
+            [
+                range(
+                    i,
+                    i + block_size,
                     self.frame_index_stride,
-                ):
-                    try:
-                        image = file[key][i * self.n_frames + j]
-                    except Exception as exc:
-                        raise ValueError(
-                            f"Could not load image at index {i * self.n_frames + j} "
-                            f"and file {file_name} of length {len(file[key])}"
-                        ) from exc
-                    images.append(image)
-                if self.new_frames_dim:
-                    images = np.stack(images, axis=self.frames_dim)
-                else:
-                    images = np.concatenate(images, axis=self.frames_dim)
-                if self.return_filename:
-                    filename = Path(str(file_name)).stem + "_" + str(i)
-                    yield images, filename
-                else:
-                    yield images
+                )
+                for i in range(0, data_shape[0] - block_size + 1, block_size)
+            ]
+        ]
+        if self.additional_axes_iter:
+            axis_indices += [
+                range(data_shape[axis]) for axis in self.additional_axes_iter
+            ]
+        return product(*axis_indices)
 
-    def _length(self, file, key):
-        return len(file[key]) // self.n_frames
-
-    def length(self, file_name, key):
+    def length(self, file_name: str, key: str) -> int:
         """Return length (number of elements) in h5 file.
         Args:
             file_name (str): file name of h5 file.
@@ -101,6 +167,7 @@ class H5Generator:
                 if n_frames > 1, the length will be reduced by n_frames - 1.
                 this is because when indexing always n_frames are read at the
                 same time, effectively reducing the length of the dataset.
+                same holds for frame_index_stride > 1.
         """
         with h5py.File(file_name, "r") as file:
             return self._length(file, key)
@@ -109,25 +176,25 @@ class H5Generator:
 def h5_dataset_from_directory(
     directory,
     key: str,
-    batch_size: int = None,
-    image_size: tuple = None,
-    color_mode: bool = None,
+    batch_size: int | None = None,
+    image_size: tuple | None = None,
     shuffle: bool = None,
-    seed: int = None,
-    cycle_length: int = None,
-    block_length: int = None,
-    limit_n_samples: int = None,
+    seed: int | None = None,
+    cycle_length: int | None = None,
+    block_length: int | None = None,
+    limit_n_samples: int | None = None,
     resize_type: str = "crop",
     image_range: tuple = (0, 255),
     normalization_range: tuple = (0, 1),
-    augmentation: keras.Sequential = None,
-    dataset_repetitions: int = None,
+    augmentation: keras.Sequential | None = None,
+    dataset_repetitions: int | None = None,
     n_frames: int = 1,
     new_frames_dim: bool = False,
     frames_dim: int = -1,
     frame_index_stride: int = 1,
+    additional_axes_iter: tuple | None = None,
     return_filename: bool = False,
-    shard_index: int = None,
+    shard_index: int | None = None,
     num_shards: int = 1,
     search_file_tree_kwargs: dict | None = None,
     drop_remainder: bool = False,
@@ -171,8 +238,6 @@ def h5_dataset_from_directory(
             Defaults to None.
         limit_n_samples (int, optional): take only a subset of samples.
             Useful for debuging. Defaults to None.
-        total_n_samples (int, optional): the total number of frames in a dataset
-            This is used to compute the cardinality of the dataset more efficiently.
         resize_type (str, optional): resize type. Defaults to 'crop'.
             can be 'crop' or 'resize'.
         image_range (tuple, optional): image range. Defaults to (0, 255).
@@ -184,16 +249,17 @@ def h5_dataset_from_directory(
             after sharding, so the shard will be repeated. Defaults to None.
         n_frames (int, optional): number of frames to load from each hdf5 file.
             Defaults to 1. These frames are stacked along the last axis (channel).
-        frames_dim (int, optional): dimension to stack frames along.
-            Defaults to -1. If new_frames_dim is True, this will be the
-            new dimension to stack frames along.
         new_frames_dim (bool, optional): if True, new dimension to stack
             frames along will be created. Defaults to False. In that case
             frames will be stacked along existing dimension (frames_dim).
+        frames_dim (int, optional): dimension to stack frames along.
+            Defaults to -1. If new_frames_dim is True, this will be the
+            new dimension to stack frames along.
         frame_index_stride (int, optional): interval between frames to load.
             Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
-        save_file_paths (bool, optional): save file paths to file. Defaults to False.
-            Can be useful to check which files are being loaded.
+        additional_axes_iter (tuple, optional): additional axes to iterate over
+            in the dataset. Defaults to None, in that case we only iterate over
+            the first axis (we assume those contain the frames).
         return_filename (bool, optional): return file name with image. Defaults to False.
         shard_index (int, optional): index which part of the dataset should be selected.
             Can only be used if num_shards is specified. Defaults to None.
@@ -201,6 +267,7 @@ def h5_dataset_from_directory(
         num_shards (int, optional): this is used to divide the dataset into `num_shards` parts.
             Sharding happens before all other operations. Defaults to 1.
             See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
+        search_file_tree_kwargs (dict, optional): kwargs for search_file_tree.
         drop_remainder (bool, optional): representing whether the last batch should be dropped
             in the case it has fewer than batch_size elements. Defaults to False.
 
@@ -208,7 +275,7 @@ def h5_dataset_from_directory(
         tf.data.Dataset: dataset
     """
     filenames = []
-    file_lengths = []
+    file_shapes = []
 
     if search_file_tree_kwargs is None:
         search_file_tree_kwargs = {}
@@ -216,8 +283,9 @@ def h5_dataset_from_directory(
     # 'directory' is actually just a single hdf5 file
     if not isinstance(directory, list) and Path(directory).is_file():
         filename = directory
-        file_lengths = [_get_length_hdf5_file(filename, key)]
+        file_shapes = [_get_shape_hdf5_file(filename, key)]
         filenames = [str(filename)]
+
     # 'directory' points to a directory or list of directories
     else:
         if not isinstance(directory, list):
@@ -233,7 +301,30 @@ def h5_dataset_from_directory(
             file_paths = dataset_info["file_paths"]
             file_paths = [str(Path(_dir) / file_path) for file_path in file_paths]
             filenames.extend(file_paths)
-            file_lengths.extend(dataset_info["file_lengths"])
+            if "file_shapes" not in dataset_info:
+                assert additional_axes_iter is None, (
+                    "additional_axes_iter is only supported if the dataset_info "
+                    "contains file_shapes. please remove dataset_info.yaml files and rerun."
+                )
+                # since in this case we only need to iterate over the first axis it is
+                # okay we only have the lengths of the files (and not the full shape)
+                file_shapes.extend(
+                    [[length] for length in dataset_info["file_lengths"]]
+                )
+            else:
+                file_shapes.extend(dataset_info["file_shapes"])
+
+    # Extract some general information about the dataset
+    image_shapes = np.array(file_shapes)[:, -2:]
+    equal_file_shapes = np.all(image_shapes == image_shapes[0])
+    if not equal_file_shapes:
+        log.warning(
+            "H5Generator: Not all files have the same shape. "
+            "This can lead to issues when resizing images."
+        )
+        assert (
+            resize_type != "crop"
+        ), "Currently unsupported to crop images with different shapes."
 
     assert len(filenames) > 0, f"No files in directories:\n{directory}"
     if image_size is not None:
@@ -249,30 +340,37 @@ def h5_dataset_from_directory(
             key=lambda i: int(re.findall(r"\d+", filenames[i])[-2]),
         )
         filenames = [filenames[i] for i in indices_sorting_filenames]
-        file_lengths = [file_lengths[i] for i in indices_sorting_filenames]
+        file_shapes = [file_shapes[i] for i in indices_sorting_filenames]
     except:
-        print("H5Generator: Could not sort filenames by number.")
+        log.warning("H5Generator: Could not sort filenames by number.")
 
-    # n_frames=1 here to get true image shape
-    generator = H5Generator(n_frames=1)
-    image = next(generator(filenames[0], key))
-    image_shape = image.shape
-    dtype = (
-        tf.float32 if image.dtype not in ["complex64", "complex128"] else tf.complex64
-    )
-
-    # infer total number of samples in dataset from number of samples in each file
-    # not necessarily the same if n_frames > 1
-    def _compute_length_dataset(filenames, file_lengths, n_frames):
+    def _compute_length_dataset(
+        filenames, file_shapes, n_frames, additional_axes_iter=None
+    ):
         assert len(filenames) == len(
-            file_lengths
-        ), "filenames and file_lengths must have same length"
+            file_shapes
+        ), "filenames and file_shapes must have same length"
 
-        # file lengths are effectively reduced if frame_index_stride > 1
-        file_lengths = [length // frame_index_stride for length in file_lengths]
+        axis_indices_files = [
+            [
+                [
+                    range(i, i + n_frames * frame_index_stride, frame_index_stride)
+                    for i in range(0, shape[0], n_frames * frame_index_stride)
+                ]
+            ]
+            for shape in file_shapes
+        ]
+        if additional_axes_iter:
+            # now add the additional axes to iterate over to each file
+            axis_indices_files_out = []
+            for axis_indices, shape in zip(axis_indices_files, file_shapes):
+                axis_indices += [range(shape[axis]) for axis in additional_axes_iter]
+                axis_indices_files_out.append(axis_indices)
+            axis_indices_files = axis_indices_files_out
 
-        # number of samples in each file is reduced if n_frames > 1
-        n_samples = [length // n_frames for length in file_lengths]
+        n_samples = []
+        for axis_indices in axis_indices_files:
+            n_samples.append(len(list(product(*axis_indices))))
 
         # Check for files that don't have any samples (i.e. less than n_frames samples)
         if 0 in n_samples:
@@ -293,36 +391,39 @@ def h5_dataset_from_directory(
 
     n_samples, filenames = _compute_length_dataset(
         filenames,
-        file_lengths,
+        file_shapes,
         n_frames,
+        additional_axes_iter=additional_axes_iter,
     )
 
     if not shuffle:
         cycle_length = 1
 
-    generator = H5Generator(n_frames, frames_dim, new_frames_dim, frame_index_stride)
+    generator = H5Generator(
+        n_frames,
+        frames_dim,
+        new_frames_dim,
+        frame_index_stride,
+        additional_axes_iter,
+    )
     image = next(generator(filenames[0], key))
-
-    # n_frames are stacked along the last axis (channel)
-    image_shape = list(image_shape)
-    if new_frames_dim:
-        image_shape.insert(
-            frames_dim if frames_dim >= 0 else len(image_shape) + (frames_dim + 1), 1
-        )
-
-    image_shape[frames_dim] *= n_frames
+    dtype = (
+        tf.float32 if image.dtype not in ["complex64", "complex128"] else tf.complex64
+    )
+    n_axis = len(image.shape)
 
     dataset = tf.data.Dataset.from_tensor_slices(
         tf.convert_to_tensor(filenames, dtype=tf.string)
     )
 
+    # create output signature
+    output_shape = [None] * n_axis
+    output_signature = tf.TensorSpec(shape=output_shape, dtype=dtype)
     if return_filename:
         output_signature = (
-            tf.TensorSpec(shape=image_shape, dtype=dtype),
+            output_signature,
             tf.TensorSpec(shape=(), dtype=tf.string),
         )
-    else:
-        output_signature = tf.TensorSpec(shape=image_shape, dtype=dtype)
 
     dataset = dataset.interleave(
         lambda filename: tf.data.Dataset.from_generator(
@@ -342,14 +443,19 @@ def h5_dataset_from_directory(
         assert shard_index >= 0, "shard_index must be greater than or equal to 0"
         dataset = dataset.shard(num_shards, shard_index)
 
-    # add channel dim
-    if len(image_shape) != 3:
+    def dataset_map(dataset, func):
+        """Does not apply func to filename."""
         if return_filename:
-            dataset = dataset.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+            return dataset.map(
+                lambda x, filename: (func(x), filename),
+                num_parallel_calls=tf.data.AUTOTUNE,
+            )
         else:
-            dataset = dataset.map(lambda x: tf.expand_dims(x, axis=-1))
-        if color_mode == "grayscale":
-            image_shape = [*image_shape, 1]
+            return dataset.map(func, num_parallel_calls=tf.data.AUTOTUNE)
+
+    # add channel dim
+    if n_axis != 3:
+        dataset = dataset_map(dataset, lambda x: tf.expand_dims(x, axis=-1))
 
     # cache samples in dataset
     dataset = dataset.cache()
@@ -360,8 +466,8 @@ def h5_dataset_from_directory(
 
     # shuffle
     if shuffle:
-        if len(dataset) > 1000:
-            buffer_size = 1000
+        if len(dataset) > 100:
+            buffer_size = 100
         else:
             buffer_size = len(dataset)
         dataset = dataset.shuffle(buffer_size, seed=seed)
@@ -370,11 +476,7 @@ def h5_dataset_from_directory(
     if limit_n_samples:
         dataset = dataset.take(limit_n_samples)
 
-    # batch
-    if batch_size:
-        dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
-
-    # resize
+    # resize before batching to deal with different image sizes
     if image_size:
         assert (
             len(image_size) == 2
@@ -389,29 +491,24 @@ def h5_dataset_from_directory(
                 )
 
             resize_layer = keras.layers.Resizing(*image_size)
-            if return_filename:
-                resize_layer = lambda x, y: (resize_layer(x), y)
-            dataset = dataset.map(resize_layer, num_parallel_calls=tf.data.AUTOTUNE)
+            dataset = dataset_map(dataset, resize_layer)
         else:
             crop_layer = keras.layers.RandomCrop(*image_size)
-            if return_filename:
-                crop_layer = lambda x, y: (crop_layer(x), y)
-            dataset = dataset.map(crop_layer, num_parallel_calls=tf.data.AUTOTUNE)
+            dataset = dataset_map(dataset, crop_layer)
+
+    # batch
+    if batch_size:
+        dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
 
     # normalize
     if image_range is not None:
-        translate_fn = lambda x: translate(x, image_range, normalization_range)
-        if return_filename:
-            translate_fn = lambda x, y: (translate_fn(x), y)
-        dataset = dataset.map(
-            translate_fn,
-            num_parallel_calls=tf.data.AUTOTUNE,
+        dataset = dataset_map(
+            dataset, lambda x: translate(x, image_range, normalization_range)
         )
+
     # augmentation
     if augmentation is not None:
-        if return_filename:
-            augmentation = lambda x, y: (augmentation(x), y)
-        dataset = dataset.map(augmentation, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset_map(dataset, augmentation)
 
     # prefetch
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
