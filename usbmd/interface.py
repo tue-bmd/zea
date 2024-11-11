@@ -45,12 +45,14 @@ class Interface:
 
     """
 
-    def __init__(self, config=None, verbose=True):
+    def __init__(self, config=None, verbose=True, dataset_kwargs=None):
         self.config = Config(config)
         self.verbose = verbose
 
         # intialize dataset
-        self.dataset = get_dataset(self.config.data)
+        if dataset_kwargs is None:
+            dataset_kwargs = {}
+        self.dataset = get_dataset(self.config.data, **dataset_kwargs)
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
@@ -88,9 +90,6 @@ class Interface:
 
         # intialize process class
         self.process = Process(self.config, self.scan, self.probe)
-        # initialize a second process class for postprocessing (faster this way)
-        self.process_image = Process(self.config, self.scan, self.probe)
-        self.process_image.device = "cpu"
 
         # initialize attributes for UI class
         self.data = None
@@ -256,42 +255,20 @@ class Interface:
             )
             self.to_dtype = "image_sc"
 
-        # we only need processing for dtypes other than image_sc
-        if self.dtype != "image_sc":
-            # if to_dtype == image_sc, first to go to dtype = image
-            # then do processing and then convert to image_sc
-            if self.to_dtype == "image_sc":
-                to_dtype = "image"
+        if self.process.pipeline is None:
+            if self.config.preprocess.operation_chain is None:
+                self.process.set_pipeline(
+                    dtype=self.dtype,
+                    to_dtype=self.to_dtype,
+                    verbose=self.verbose,
+                )
             else:
-                to_dtype = self.to_dtype
+                self.process.set_pipeline(
+                    operation_chain=self.config.preprocess.operation_chain,
+                    verbose=self.verbose,
+                )
 
-            if self.process.pipeline is None:
-                if self.config.preprocess.operation_chain is None:
-                    self.process.set_pipeline(
-                        dtype=self.dtype,
-                        to_dtype=to_dtype,
-                        verbose=self.verbose,
-                    )
-                else:
-                    self.process.set_pipeline(
-                        operation_chain=self.config.preprocess.operation_chain,
-                        verbose=self.verbose,
-                    )
-
-            self.image = self.process.run(self.data)
-
-            if self.process.postprocess:
-                self.image = self.process.postprocess.run(self.image[None, ..., None])
-                self.image = np.squeeze(self.image)
-
-        else:
-            # data is already in image_sc format
-            self.image = self.data
-
-        if self.to_dtype == "image_sc":
-            if self.process_image.pipeline is None:
-                self.process_image.set_pipeline(dtype="image", to_dtype="image_sc")
-            self.image = self.process_image.run(self.image)
+        self.image = self.process.run(self.data)
 
         # match orientation if necessary
         if self.config.plot.fliplr:
@@ -374,12 +351,6 @@ class Interface:
             extent = None
 
         self.fig, self.ax = plt.subplots(figsize=figsize)
-        # darkmode
-        self.fig.patch.set_facecolor("black")
-        self.ax.set_facecolor("black")
-        text_color = "gray"
-        for spine in self.ax.spines.values():
-            spine.set_color(text_color)
 
         image_range = self.config.data.dynamic_range
         imshow_kwargs = {
@@ -393,14 +364,13 @@ class Interface:
         cax_kwargs = {
             "pad": 0.05,
             "position": "right",
-            "color": text_color,
             "size": "5%",
         }
 
-        self.ax.set_xlabel("Lateral Width (mm)", color=text_color)
-        self.ax.set_ylabel("Axial length (mm)", color=text_color)
-        self.ax.tick_params(axis="x", colors=text_color)
-        self.ax.tick_params(axis="y", colors=text_color)
+        self.ax.set_xlabel("Lateral Width (mm)", size=15)
+        self.ax.set_ylabel("Axial length (mm)", size=15)
+        self.ax.tick_params(axis="x")
+        self.ax.tick_params(axis="y")
 
         # assign properties of fig, ax to image viewer
         self.image_viewer.imshow_kwargs = imshow_kwargs

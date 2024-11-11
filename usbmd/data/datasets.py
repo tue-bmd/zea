@@ -40,13 +40,13 @@ _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
 
 
-def get_dataset(config):
+def get_dataset(config, **kwargs):
     """Get dataset instance given configuration file."""
     name = config.dataset_name
 
     dataset_class = dataset_registry[name]
 
-    return dataset_class(config)
+    return dataset_class(config, **kwargs)
 
 
 class DataSet:
@@ -309,7 +309,7 @@ class DataSet:
 class USBMDDataSet(DataSet):
     """Class to read dataset in USBMD format."""
 
-    def __init__(self, config):
+    def __init__(self, config, validate=True):
         """Initializes the USBMDDataSet class.
 
         Args:
@@ -326,7 +326,8 @@ class USBMDDataSet(DataSet):
             config, datafolder=self.data_root, filetype="hdf5", reader="hdf5"
         )
 
-        self.validate_dataset()
+        if validate:
+            self.validate_dataset()
 
     def __getitem__(self, index):
         """Retrieves an item from the dataset."""

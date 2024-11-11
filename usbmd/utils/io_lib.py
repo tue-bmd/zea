@@ -721,12 +721,10 @@ class ImageViewerMatplotlib(ImageViewer):
                         divider = make_axes_locatable(self.ax)
                         if "color" in self.cax_kwargs:
                             color = self.cax_kwargs.pop("color")
-                        else:
-                            color = "black"
+                            cax.yaxis.label.set_color(color)
+                            cax.tick_params(axis="y", colors=color)
+                            cax.title.set_color(color)
                         cax = divider.append_axes(**self.cax_kwargs)
-                        cax.yaxis.label.set_color(color)
-                        cax.tick_params(axis="y", colors=color)
-                        cax.title.set_color(color)
                         plt.colorbar(self.image_obj, cax=cax)
                     self.fig.tight_layout()
                     self.init_figure_props = False
