@@ -267,6 +267,24 @@ class Operation(ABC):
             if override or getattr(self, attr) is None:
                 setattr(self, attr, value)
 
+    def propagate_params(self, params: dict):
+        """Update the parameters for the operation.
+
+        Args:
+            params (dict): Parameters to update for the operation.
+
+        """
+        for attr, value in params.items():
+            if value is None:
+                continue
+            # only set attr if the param is part of the operation
+            if not hasattr(self, attr):
+                continue
+            setattr(self, attr, value)
+
+        # now update using assign_update_params
+        return self._assign_update_params(params)
+
     # pylint: disable=unused-argument
     def _assign_config_params(self, config: Config):
         """Return the config parameters for the operation.
@@ -302,6 +320,17 @@ class Operation(ABC):
 
         Returns:
             dict: The probe parameters for the operation.
+
+        """
+        return {}
+
+    # pylint: disable=unused-argument
+    def _assign_update_params(self, params: dict):
+        """Update the parameters for remaining operations in the pipeline.
+
+        Args:
+            params (dict): Parameters to update for the next
+                operation in the pipeline.
 
         """
         return {}
@@ -463,8 +492,12 @@ class Pipeline:
 
     def set_params(self, config: Config, scan: Scan, probe: Probe, override=False):
         """Set the parameters for the pipeline. See Operation.set_params for more info."""
+        params = {}
         for operation in self.operations:
+            # set parameters for each operation using initial scan, config, probe
             operation.set_params(config, scan, probe, override=override)
+            # also propagate running list of updated parameters to the next operation
+            params = operation.propagate_params(params)
 
     def process(self, data, return_numpy=False):
         """Process input data through the pipeline."""
@@ -678,7 +711,7 @@ class TOFCorrection(Operation):
         sound_speed=None,
         polar_angles=None,
         focus_distances=None,
-        sampling_frequency=None,
+        fs=None,
         f_number=None,
         n_el=None,
         n_tx=None,
@@ -701,7 +734,7 @@ class TOFCorrection(Operation):
         self.sound_speed = sound_speed
         self.polar_angles = polar_angles
         self.focus_distances = focus_distances
-        self.sampling_frequency = sampling_frequency
+        self.fs = fs
         self.f_number = f_number
         self.n_el = n_el
         self.n_tx = n_tx
@@ -742,7 +775,7 @@ class TOFCorrection(Operation):
             sound_speed=self.sound_speed,
             probe_geometry=self.probe_geometry,
             initial_times=self.initial_times,
-            sampling_frequency=self.sampling_frequency,
+            sampling_frequency=self.fs,
             fdemod=self.fdemod,
             fnum=self.f_number,
             angles=self.polar_angles,
@@ -771,7 +804,7 @@ class TOFCorrection(Operation):
             "probe_geometry": scan.probe_geometry,
             "sound_speed": scan.sound_speed,
             "polar_angles": scan.polar_angles,
-            "sampling_frequency": scan.fs,
+            "fs": scan.fs,
             "f_number": scan.f_number,
             "fdemod": scan.fdemod,
             "apply_lens_correction": scan.apply_lens_correction,
@@ -791,7 +824,7 @@ class TOFCorrection(Operation):
                 self.probe_geometry is not None,
                 self.sound_speed is not None,
                 self.polar_angles is not None,
-                self.sampling_frequency is not None,
+                self.fs is not None,
                 self.f_number is not None,
                 self.fdemod is not None,
                 self.apply_lens_correction is not None,
@@ -1217,6 +1250,14 @@ class Demodulate(Operation):
             "fs": config.scan.sampling_frequency,
             "fc": config.scan.center_frequency,
         }
+
+    def _assign_update_params(self, params):
+        updates = {
+            "n_ch": 2,
+            "fdemod": self.fc,
+        }
+        params.update(updates)
+        return params
 
 
 @ops_registry("upmix")
