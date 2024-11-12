@@ -498,6 +498,7 @@ class Pipeline:
             operation.set_params(config, scan, probe, override=override)
             # also propagate running list of updated parameters to the next operation
             params = operation.propagate_params(params)
+        return params
 
     def process(self, data, return_numpy=False):
         """Process input data through the pipeline."""
