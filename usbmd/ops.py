@@ -182,6 +182,7 @@ class Operation(ABC):
         if self.input_data_type is not None and self.output_data_type is None:
             self.output_data_type = self.input_data_type
 
+    @property
     def name(self):
         """Return the name of the registered operation."""
         names = ops_registry.registry.keys()
@@ -335,12 +336,12 @@ class Operation(ABC):
 
     # pylint: disable=unused-argument
     def _assign_update_params(self, scan: Scan):
-    def _assign_update_params(self, scan: Scan):
+        """Update the parameters for remaining operations in the pipeline.
 
         Args:
             scan (Scan): Scan class with parameters passed from
-            scan (Scan): Scan class with parameters passed from
                 the previous operation in the pipeline.
+
         """
         return {}
 
@@ -512,13 +513,7 @@ class Pipeline:
             operation.set_params(config, scan, probe, override=override)
             # also propagate running list of updated parameters to the next operation
             if scan is not None:
-            if scan is not None:
                 scan = operation.propagate_params(scan.copy())
-            else:
-                log.warning(
-                    "Did not provide a scan object to the pipeline, and therefore "
-                    "cannot propagate parameters through the pipeline."
-                )
             else:
                 log.warning(
                     "Did not provide a scan object to the pipeline, and therefore "
@@ -1280,6 +1275,7 @@ class Demodulate(Operation):
             "fc": config.scan.center_frequency,
         }
 
+    # pylint: disable=unused-argument
     def _assign_update_params(self, scan):
         return {
             "fdemod": self.fc,
