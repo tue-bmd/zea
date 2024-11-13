@@ -178,6 +178,11 @@ class Operation(ABC):
         self.scan = None
         self.probe = None
 
+        # this means that the operation doesn't change the data type
+        if self.input_data_type is not None and self.output_data_type is None:
+            self.output_data_type = self.input_data_type
+
+
     @property
     def name(self):
         """Return the name of the registered operation."""
@@ -469,6 +474,11 @@ class Pipeline:
             return f"\n{string}\n{split_line}\n"
 
         return string
+
+    def __repr__(self):
+        """String representation of the pipeline."""
+        operations = [operation.__class__.__name__ for operation in self.operations]
+        return ",".join(operations)
 
     @property
     def with_batch_dim(self):
@@ -949,12 +959,6 @@ class Normalize(Operation):
         self.output_range = output_range
         self.input_range = input_range
 
-    def _assign_config_params(self, config):
-        return {
-            "input_range": config.data.input_range,
-            "output_range": None,
-        }
-
     def process(self, data):
         if self.output_range is None:
             self.output_range = (0, 1)
@@ -967,6 +971,12 @@ class Normalize(Operation):
             a_min, a_max = self.input_range
             data = ops.clip(data, a_min, a_max)
         return translate(data, self.input_range, self.output_range)
+
+    def _assign_config_params(self, config):
+        return {
+            "input_range": config.data.input_range,
+            "output_range": None,
+        }
 
 
 @ops_registry("log_compress")
@@ -981,11 +991,6 @@ class LogCompress(Operation):
         )
         self.dynamic_range = dynamic_range
 
-    def _assign_config_params(self, config):
-        return {
-            "dynamic_range": config.data.dynamic_range,
-        }
-
     def process(self, data):
         if self.dynamic_range is None:
             self.dynamic_range = (-60, 0)
@@ -994,6 +999,11 @@ class LogCompress(Operation):
         compressed_data = 20 * ops.log10(data)
         compressed_data = ops.clip(compressed_data, *self.dynamic_range)
         return compressed_data
+
+    def _assign_config_params(self, config):
+        return {
+            "dynamic_range": config.data.dynamic_range,
+        }
 
 
 @ops_registry("downsample")
@@ -1010,11 +1020,6 @@ class Downsample(Operation):
         self.phase = phase
         self.axis = axis
 
-    def _assign_config_params(self, config):
-        return {
-            "factor": config.scan.downsample,
-        }
-
     def process(self, data):
         if self.factor is None:
             return data
@@ -1024,6 +1029,11 @@ class Downsample(Operation):
         sample_idx = ops.arange(self.phase, length, self.factor)
 
         return take(data, sample_idx, axis=self.axis)
+
+    def _assign_config_params(self, config):
+        return {
+            "factor": config.scan.downsample,
+        }
 
 
 @ops_registry("interpolate")
