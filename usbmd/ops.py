@@ -267,23 +267,29 @@ class Operation(ABC):
             if override or getattr(self, attr) is None:
                 setattr(self, attr, value)
 
-    def propagate_params(self, params: dict):
+    def propagate_params(self, scan: Scan):
         """Update the parameters for the operation.
 
         Args:
-            params (dict): Parameters to update for the operation.
+            scan (Scan): Scan class with parameters passed from
+                the previous operation in the pipeline.
 
         """
-        for attr, value in params.items():
+        updated_params = self._assign_update_params(scan)
+
+        for attr, value in updated_params.items():
             if value is None:
                 continue
-            # only set attr if the param is part of the operation
-            if not hasattr(self, attr):
+            if not hasattr(scan, attr):
+                log.warning(
+                    f"Parameter {attr} is not part of the scan "
+                    "class and cannot be updated. Please check "
+                    f"{self.__class__.__name__}._assign_update_params for "
+                    "faulty scan parameters."
+                )
                 continue
-            setattr(self, attr, value)
-
-        # now update using assign_update_params
-        return self._assign_update_params(params)
+            setattr(scan, attr, value)
+        return scan
 
     # pylint: disable=unused-argument
     def _assign_config_params(self, config: Config):
@@ -492,13 +498,15 @@ class Pipeline:
 
     def set_params(self, config: Config, scan: Scan, probe: Probe, override=False):
         """Set the parameters for the pipeline. See Operation.set_params for more info."""
-        params = {}
+        scan_objects = [scan]
         for operation in self.operations:
             # set parameters for each operation using initial scan, config, probe
             operation.set_params(config, scan, probe, override=override)
             # also propagate running list of updated parameters to the next operation
-            params = operation.propagate_params(params)
-        return params
+            scan = operation.propagate_params(scan.copy())
+            scan_objects.append(scan)
+
+        return scan_objects
 
     def process(self, data, return_numpy=False):
         """Process input data through the pipeline."""
@@ -1252,13 +1260,11 @@ class Demodulate(Operation):
             "fc": config.scan.center_frequency,
         }
 
-    def _assign_update_params(self, params):
-        updates = {
-            "n_ch": 2,
+    def _assign_update_params(self, scan):
+        return {
             "fdemod": self.fc,
+            "n_ch": 2,
         }
-        params.update(updates)
-        return params
 
 
 @ops_registry("upmix")
