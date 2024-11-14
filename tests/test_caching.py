@@ -4,10 +4,17 @@ import time
 
 import pytest
 
-from usbmd.utils.cache import CACHE_DIR, cache_output
+from usbmd.core import Object
+from usbmd.utils.cache import (
+    CACHE_DIR,
+    cache_output,
+    cache_summary,
+    clear_cache,
+    set_cache_dir,
+)
 
 # Global variable for the expected duration of the expensive operation
-EXPECTED_DURATION = 0.2
+EXPECTED_DURATION = 0.05
 
 
 @cache_output("x")
@@ -34,16 +41,41 @@ def _expensive_operation(x, y):
     return result
 
 
+@cache_output()
+def _expensive_operation_obj(obj):
+    # Simulate an expensive operation
+    result = obj.x + obj.y
+    time.sleep(EXPECTED_DURATION)
+    return result
+
+
+class CustomObject(Object):
+    """Custom core object for testing caching"""
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+class CustomNonUSBMDOjbect:
+    """Regular object for testing caching. Caching will not
+    work for this object due to improper serialization.
+    """
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
 @pytest.fixture(scope="module", autouse=True)
 def clean_cache():
     """Fixture to clean up the cache directory before and after tests."""
-    if CACHE_DIR.exists():
-        for file in CACHE_DIR.glob("*.pkl"):
-            file.unlink()
+    original_cache_dir = CACHE_DIR
+    set_cache_dir("/tmp/test_cache")
+    clear_cache()
     yield
-    if CACHE_DIR.exists():
-        for file in CACHE_DIR.glob("*.pkl"):
-            file.unlink()
+    clear_cache()
+    set_cache_dir(original_cache_dir)
 
 
 def test_caching_x():
@@ -134,3 +166,76 @@ def test_caching():
         duration >= EXPECTED_DURATION
     ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 20, f"Expected 2 + 20, got {result}"
+
+
+def test_caching_custom_object():
+    """Test caching for expensive_operation with CustomObject."""
+    obj1 = CustomObject(2, 10)
+    start_time = time.time()
+    result = _expensive_operation_obj(obj1)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert result == 2 + 10, f"Expected 2 + 10, got {result}"
+
+    start_time = time.time()
+    result = _expensive_operation_obj(obj1)
+    duration = time.time() - start_time
+    assert (
+        duration < EXPECTED_DURATION
+    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert result == 2 + 10, f"Expected 2 + 10, got {result}"
+
+    obj2 = CustomObject(3, 10)
+    start_time = time.time()
+    result = _expensive_operation_obj(obj2)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert result == 3 + 10, f"Expected 3 + 10, got {result}"
+
+    obj3 = CustomObject(2, 20)
+    start_time = time.time()
+    result = _expensive_operation_obj(obj3)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert result == 2 + 20, f"Expected 2 + 20, got {result}"
+
+
+def test_non_USBMD_object():
+    """Test caching for expensive_operation with CustomNonUSBMDOjbect."""
+    obj1 = CustomNonUSBMDOjbect(2, 10)
+
+    start_time = time.time()
+    result = _expensive_operation_obj(obj1)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert result == 2 + 10, f"Expected 2 + 10, got {result}"
+
+    # now we do exactly the same and see that it didn't use the cached result
+    # even though obj1 and obj2 are the "same".
+    obj2 = CustomNonUSBMDOjbect(2, 10)
+    start_time = time.time()
+    result = _expensive_operation_obj(obj2)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+
+
+def test_cache_summary():
+    """Test cache summary."""
+    cache_summary()
+    assert True
+
+
+def test_clear_cache():
+    """Test clear cache."""
+    clear_cache()
+    assert True
