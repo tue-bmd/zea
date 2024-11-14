@@ -119,11 +119,13 @@ def clear_cache(func_name=None):
     if total_cleared > 0:
         if func_name:
             log.info(
-                f"Cleared {total_cleared / (1024 * 1024):.2f} MB from cache for function '{func_name}'."
+                f"Cleared {total_cleared / (1024 * 1024):.2f} MB "
+                f"from cache for function '{func_name}'."
             )
         else:
             log.info(
-                f"Cleared {log.yellow(f'{total_cleared / (1024 * 1024):.2f}')} MB from cache."
+                f"Cleared {log.yellow(f'{total_cleared / (1024 * 1024):.2f}')} "
+                "MB from cache."
             )
     else:
         log.info("No cache files to clear.")
@@ -145,7 +147,8 @@ def cache_summary():
     log.info(f"usbmd cache summary at {CACHE_DIR}:")
     for func_name, total_size in summary.items():
         log.info(
-            f"Function '{func_name}' has a total cache size of {total_size / (1024 * 1024):.2f} MB"
+            f"Function '{func_name}' has a total cache size of "
+            f"{total_size / (1024 * 1024):.2f} MB"
         )
 
 
