@@ -30,3 +30,6 @@ class Object:
         if not isinstance(other, self.__class__):
             return False
         return self.serialized == other.serialized
+
+    def __hash__(self):
+        return hash(self.serialized)
