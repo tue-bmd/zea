@@ -30,6 +30,27 @@ def create_dummy_hdf5():
     Path(DUMMY_DATASET_PATH).unlink()
 
 
+def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=None):
+    if filename == CAMUS_DATASET_PATH:
+        if not Path(filename).exists():
+            return
+
+    with h5py.File(filename, "r") as f:
+        file_shapes = [f[dataset_name].shape]
+
+    file_names = [filename]
+    # Create a H5Generator instance
+    generator = H5Generator(
+        file_names=file_names,
+        file_shapes=file_shapes,
+        key=dataset_name,
+        n_frames=n_frames,
+        insert_frame_axis=insert_frame_axis,
+        seed=seed,
+    )
+    return generator
+
+
 @pytest.mark.parametrize(
     "filename, dataset_name, n_frames, insert_frame_axis",
     [
@@ -52,22 +73,8 @@ def test_h5_generator(
     create_dummy_hdf5,  # pytest fixture
 ):  # pylint: disable=unused-argument
     """Test the H5Generator class"""
-    if filename == CAMUS_DATASET_PATH:
-        if not Path(filename).exists():
-            return
 
-    with h5py.File(filename, "r") as f:
-        file_shapes = [f[dataset_name].shape]
-
-    file_names = [filename]
-    # Create a H5Generator instance
-    generator = H5Generator(
-        file_names=file_names,
-        file_shapes=file_shapes,
-        key=dataset_name,
-        n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
-    )
+    generator = _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis)
 
     batch_shape = next(generator()).shape
     if insert_frame_axis:
@@ -86,18 +93,8 @@ def test_h5_generator_shuffle(
     create_dummy_hdf5,  # pytest fixture
 ):  # pylint: disable=unused-argument
     """Test the H5Generator class"""
-    with h5py.File(DUMMY_DATASET_PATH, "r") as f:
-        file_shapes = [f["data"].shape]
 
-    file_names = [DUMMY_DATASET_PATH]
-    # Create a H5Generator instance
-    generator = H5Generator(
-        file_names=file_names,
-        file_shapes=file_shapes,
-        key="data",
-        n_frames=10,
-        seed=42,  # set seed for reproducibility
-    )
+    generator = _get_h5_generator(DUMMY_DATASET_PATH, "data", 10, False, seed=42)
 
     # Test shuffle
     indices = deepcopy(generator.indices)
