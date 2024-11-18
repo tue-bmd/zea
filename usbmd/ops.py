@@ -178,6 +178,10 @@ class Operation(ABC):
         self.scan = None
         self.probe = None
 
+        # this means that the operation doesn't change the data type
+        if self.input_data_type is not None and self.output_data_type is None:
+            self.output_data_type = self.input_data_type
+
     @property
     def name(self):
         """Return the name of the registered operation."""
@@ -267,6 +271,30 @@ class Operation(ABC):
             if override or getattr(self, attr) is None:
                 setattr(self, attr, value)
 
+    def propagate_params(self, scan: Scan):
+        """Update the parameters for the operation.
+
+        Args:
+            scan (Scan): Scan class with parameters passed from
+                the previous operation in the pipeline.
+
+        """
+        updated_params = self._assign_update_params(scan)
+
+        for attr, value in updated_params.items():
+            if value is None:
+                continue
+            if not hasattr(scan, attr):
+                log.warning(
+                    f"Parameter {attr} is not part of the scan "
+                    "class and cannot be updated. Please check "
+                    f"{self.__class__.__name__}._assign_update_params for "
+                    "faulty scan parameters."
+                )
+                continue
+            setattr(scan, attr, value)
+        return scan
+
     # pylint: disable=unused-argument
     def _assign_config_params(self, config: Config):
         """Return the config parameters for the operation.
@@ -302,6 +330,17 @@ class Operation(ABC):
 
         Returns:
             dict: The probe parameters for the operation.
+
+        """
+        return {}
+
+    # pylint: disable=unused-argument
+    def _assign_update_params(self, scan: Scan):
+        """Update the parameters for remaining operations in the pipeline.
+
+        Args:
+            scan (Scan): Scan class with parameters passed from
+                the previous operation in the pipeline.
 
         """
         return {}
@@ -435,6 +474,11 @@ class Pipeline:
 
         return string
 
+    def __repr__(self):
+        """String representation of the pipeline."""
+        operations = [operation.__class__.__name__ for operation in self.operations]
+        return ",".join(operations)
+
     @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
@@ -463,8 +507,21 @@ class Pipeline:
 
     def set_params(self, config: Config, scan: Scan, probe: Probe, override=False):
         """Set the parameters for the pipeline. See Operation.set_params for more info."""
+        scan_objects = [scan]
         for operation in self.operations:
+            # set parameters for each operation using initial scan, config, probe
             operation.set_params(config, scan, probe, override=override)
+            # also propagate running list of updated parameters to the next operation
+            if scan is not None:
+                scan = operation.propagate_params(scan.copy())
+            else:
+                log.warning(
+                    "Did not provide a scan object to the pipeline, and therefore "
+                    "cannot propagate parameters through the pipeline."
+                )
+            scan_objects.append(scan)
+
+        return scan_objects
 
     def process(self, data, return_numpy=False):
         """Process input data through the pipeline."""
@@ -678,7 +735,7 @@ class TOFCorrection(Operation):
         sound_speed=None,
         polar_angles=None,
         focus_distances=None,
-        sampling_frequency=None,
+        fs=None,
         f_number=None,
         n_el=None,
         n_tx=None,
@@ -701,7 +758,7 @@ class TOFCorrection(Operation):
         self.sound_speed = sound_speed
         self.polar_angles = polar_angles
         self.focus_distances = focus_distances
-        self.sampling_frequency = sampling_frequency
+        self.fs = fs
         self.f_number = f_number
         self.n_el = n_el
         self.n_tx = n_tx
@@ -742,7 +799,7 @@ class TOFCorrection(Operation):
             sound_speed=self.sound_speed,
             probe_geometry=self.probe_geometry,
             initial_times=self.initial_times,
-            sampling_frequency=self.sampling_frequency,
+            sampling_frequency=self.fs,
             fdemod=self.fdemod,
             fnum=self.f_number,
             angles=self.polar_angles,
@@ -771,7 +828,7 @@ class TOFCorrection(Operation):
             "probe_geometry": scan.probe_geometry,
             "sound_speed": scan.sound_speed,
             "polar_angles": scan.polar_angles,
-            "sampling_frequency": scan.fs,
+            "fs": scan.fs,
             "f_number": scan.f_number,
             "fdemod": scan.fdemod,
             "apply_lens_correction": scan.apply_lens_correction,
@@ -791,7 +848,7 @@ class TOFCorrection(Operation):
                 self.probe_geometry is not None,
                 self.sound_speed is not None,
                 self.polar_angles is not None,
-                self.sampling_frequency is not None,
+                self.fs is not None,
                 self.f_number is not None,
                 self.fdemod is not None,
                 self.apply_lens_correction is not None,
@@ -907,12 +964,6 @@ class Normalize(Operation):
         self.output_range = output_range
         self.input_range = input_range
 
-    def _assign_config_params(self, config):
-        return {
-            "input_range": config.data.input_range,
-            "output_range": None,
-        }
-
     def process(self, data):
         if self.output_range is None:
             self.output_range = (0, 1)
@@ -925,6 +976,12 @@ class Normalize(Operation):
             a_min, a_max = self.input_range
             data = ops.clip(data, a_min, a_max)
         return translate(data, self.input_range, self.output_range)
+
+    def _assign_config_params(self, config):
+        return {
+            "input_range": config.data.input_range,
+            "output_range": None,
+        }
 
 
 @ops_registry("log_compress")
@@ -939,11 +996,6 @@ class LogCompress(Operation):
         )
         self.dynamic_range = dynamic_range
 
-    def _assign_config_params(self, config):
-        return {
-            "dynamic_range": config.data.dynamic_range,
-        }
-
     def process(self, data):
         if self.dynamic_range is None:
             self.dynamic_range = (-60, 0)
@@ -952,6 +1004,11 @@ class LogCompress(Operation):
         compressed_data = 20 * ops.log10(data)
         compressed_data = ops.clip(compressed_data, *self.dynamic_range)
         return compressed_data
+
+    def _assign_config_params(self, config):
+        return {
+            "dynamic_range": config.data.dynamic_range,
+        }
 
 
 @ops_registry("downsample")
@@ -968,11 +1025,6 @@ class Downsample(Operation):
         self.phase = phase
         self.axis = axis
 
-    def _assign_config_params(self, config):
-        return {
-            "factor": config.scan.downsample,
-        }
-
     def process(self, data):
         if self.factor is None:
             return data
@@ -982,6 +1034,11 @@ class Downsample(Operation):
         sample_idx = ops.arange(self.phase, length, self.factor)
 
         return take(data, sample_idx, axis=self.axis)
+
+    def _assign_config_params(self, config):
+        return {
+            "factor": config.scan.downsample,
+        }
 
 
 @ops_registry("interpolate")
@@ -1216,6 +1273,13 @@ class Demodulate(Operation):
         return {
             "fs": config.scan.sampling_frequency,
             "fc": config.scan.center_frequency,
+        }
+
+    # pylint: disable=unused-argument
+    def _assign_update_params(self, scan):
+        return {
+            "fdemod": self.fc,
+            "n_ch": 2,
         }
 
 
