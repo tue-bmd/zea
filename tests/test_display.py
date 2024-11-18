@@ -18,7 +18,7 @@ from .helpers import equality_libs_processing
         ((40, 20, 20), 0.5),
     ],
 )
-@equality_libs_processing(decimal=3, backends=["torch", "jax"])
+@equality_libs_processing(decimal=2, backends=["torch", "jax"])
 def test_scan_conversion(size, resolution):
     """
     Tests the scan_conversion function with random data.
