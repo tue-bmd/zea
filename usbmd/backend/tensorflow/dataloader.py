@@ -198,6 +198,15 @@ def generate_h5_indices(
             Defaults to None.
         sort_files (bool, optional): sort files by number. Defaults to True.
 
+    Returns:
+        list: list of tuples with indices to extract images from hdf5 files.
+            (file_name, key, indices) with indices being a tuple of slices.
+            example: [
+                ('/folder/path_to_file.hdf5', 'data/image', [range(0, 1), slice(None, 256, None), slice(None, 256, None)]), # pylint: disable=line-too-long
+                ('/folder/path_to_file.hdf5', 'data/image', [range(1, 2), slice(None, 256, None), slice(None, 256, None)]), # pylint: disable=line-too-long
+                ...
+            ]
+
     """
 
     assert len(file_names) == len(
