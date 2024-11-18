@@ -1,6 +1,7 @@
 """Test Tensorflow H5 Dataloader functions"""
 
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import h5py
@@ -12,10 +13,10 @@ from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_dir
 DUMMY_DATASET_PATH = "dummy_data.hdf5"
 CAMUS_DATASET_PATH = (
     "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/"
-    "database_nifti/patient0001/patient0001_2CH_half_sequence.hdf5"
+    "train/patient0001/patient0001_2CH_half_sequence.hdf5"
     if os.name == "nt"
     else "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/"
-    "database_nifti/patient0001/patient0001_2CH_half_sequence.hdf5"
+    "train/patient0001/patient0001_2CH_half_sequence.hdf5"
 )
 
 
@@ -27,6 +28,23 @@ def create_dummy_hdf5():
         f.create_dataset("data", data=data)
     yield
     Path(DUMMY_DATASET_PATH).unlink()
+
+
+def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=None):
+    with h5py.File(filename, "r") as f:
+        file_shapes = [f[dataset_name].shape]
+
+    file_names = [filename]
+    # Create a H5Generator instance
+    generator = H5Generator(
+        file_names=file_names,
+        file_shapes=file_shapes,
+        key=dataset_name,
+        n_frames=n_frames,
+        insert_frame_axis=insert_frame_axis,
+        seed=seed,
+    )
+    return generator
 
 
 @pytest.mark.parametrize(
@@ -51,22 +69,12 @@ def test_h5_generator(
     create_dummy_hdf5,  # pytest fixture
 ):  # pylint: disable=unused-argument
     """Test the H5Generator class"""
+
     if filename == CAMUS_DATASET_PATH:
         if not Path(filename).exists():
             return
 
-    with h5py.File(filename, "r") as f:
-        file_shapes = [f[dataset_name].shape]
-
-    file_names = [filename]
-    # Create a H5Generator instance
-    generator = H5Generator(
-        file_names=file_names,
-        file_shapes=file_shapes,
-        key=dataset_name,
-        n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
-    )
+    generator = _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis)
 
     batch_shape = next(generator()).shape
     if insert_frame_axis:
@@ -79,6 +87,19 @@ def test_h5_generator(
             f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
             " is not divisible by the number of frames {n_frames}"
         )
+
+
+def test_h5_generator_shuffle(
+    create_dummy_hdf5,  # pytest fixture
+):  # pylint: disable=unused-argument
+    """Test the H5Generator class"""
+
+    generator = _get_h5_generator(DUMMY_DATASET_PATH, "data", 10, False, seed=42)
+
+    # Test shuffle
+    indices = deepcopy(generator.indices)
+    generator._shuffle()
+    assert indices != generator.indices, "The generator indices were not shuffled"
 
 
 @pytest.mark.parametrize(
