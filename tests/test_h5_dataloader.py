@@ -15,7 +15,7 @@ CAMUS_DATASET_PATH = (
 
 
 @pytest.mark.parametrize(
-    "filename, dataset_name, n_frames, new_frames_dim",
+    "filename, dataset_name, n_frames, insert_frame_axis",
     [
         ("dummy_data.hdf5", "data", 1, True),
         ("dummy_data.hdf5", "data", 3, True),
@@ -28,7 +28,7 @@ CAMUS_DATASET_PATH = (
         (CAMUS_DATASET_PATH, "data/image_sc", 15, False),
     ],
 )
-def test_h5_generator(filename, dataset_name, n_frames, new_frames_dim):
+def test_h5_generator(filename, dataset_name, n_frames, insert_frame_axis):
     """Test the H5Generator class"""
     # Create a dummy  hdf5 file with some dummy data
     if filename == "dummy_data.hdf5":
@@ -39,11 +39,19 @@ def test_h5_generator(filename, dataset_name, n_frames, new_frames_dim):
         if not Path(filename).exists():
             return
 
+    file_shapes = [data.shape]
+    file_names = [filename]
     # Create a H5Generator instance
-    generator = H5Generator(n_frames=n_frames, new_frames_dim=new_frames_dim)
-    generator.length(filename, dataset_name)
-    batch_shape = next(generator(filename, dataset_name)).shape
-    if new_frames_dim:
+    generator = H5Generator(
+        file_names=file_names,
+        file_shapes=file_shapes,
+        key=dataset_name,
+        n_frames=n_frames,
+        insert_frame_axis=insert_frame_axis,
+    )
+
+    batch_shape = next(generator()).shape
+    if insert_frame_axis:
         assert batch_shape[-1] == n_frames, (
             f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
             " is not equal to the number of frames {n_frames}"
@@ -60,7 +68,7 @@ def test_h5_generator(filename, dataset_name, n_frames, new_frames_dim):
 
 
 @pytest.mark.parametrize(
-    "directory, key, n_frames, new_frames_dim, num_files, total_samples",
+    "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
     [
         (Path(CAMUS_DATASET_PATH).parent, "data/image_sc", 1, True, 2, 18 + 20),
         ("fake_directory", "data", 1, True, 3, 9 * 3),
@@ -69,7 +77,7 @@ def test_h5_generator(filename, dataset_name, n_frames, new_frames_dim):
     ],
 )
 def test_h5_dataset_from_directory(
-    tmp_path, directory, key, n_frames, new_frames_dim, num_files, total_samples
+    tmp_path, directory, key, n_frames, insert_frame_axis, num_files, total_samples
 ):
     """Test the h5_dataset_from_directory function.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
@@ -93,12 +101,12 @@ def test_h5_dataset_from_directory(
         directory,
         key,
         n_frames=n_frames,
-        new_frames_dim=new_frames_dim,
+        insert_frame_axis=insert_frame_axis,
         search_file_tree_kwargs={"parallel": False},
     )
     batch_shape = next(iter(dataset)).shape
 
-    if new_frames_dim:
+    if insert_frame_axis:
         assert batch_shape[-1] == n_frames, (
             f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
             " is not equal to the number of frames {n_frames}"
