@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from huggingface_hub import HfApi, login, snapshot_download
-from zipp import Path
 
 from usbmd.utils.log import yellow
 
