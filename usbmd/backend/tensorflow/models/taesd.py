@@ -10,8 +10,8 @@ See example usage in [examples/taesd](examples/taesd).
 from pathlib import Path
 
 import keras
-from huggingface_hub import snapshot_download
 from keras import ops
+from usbmd.tools.hf import load_model_from_hf
 
 
 class TinyAutoencoder(keras.models.Model):
@@ -67,7 +67,7 @@ class TinyAutoencoder(keras.models.Model):
 def _load_layer(path, layer_name):
     assert layer_name in ["encoder", "decoder"]
     if path is None:
-        path = snapshot_download("usbmd/taesdxl")  # will download encoder and decoder
+        path = load_model_from_hf("usbmd/taesdxl")  # will download encoder and decoder
     path = Path(path)
     layer = keras.layers.TFSMLayer(
         path / layer_name,
