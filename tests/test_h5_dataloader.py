@@ -31,10 +31,6 @@ def create_dummy_hdf5():
 
 
 def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=None):
-    if filename == CAMUS_DATASET_PATH:
-        if not Path(filename).exists():
-            return
-
     with h5py.File(filename, "r") as f:
         file_shapes = [f[dataset_name].shape]
 
@@ -73,6 +69,10 @@ def test_h5_generator(
     create_dummy_hdf5,  # pytest fixture
 ):  # pylint: disable=unused-argument
     """Test the H5Generator class"""
+
+    if filename == CAMUS_DATASET_PATH:
+        if not Path(filename).exists():
+            return
 
     generator = _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis)
 
