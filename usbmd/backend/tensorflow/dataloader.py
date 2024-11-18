@@ -286,6 +286,72 @@ def generate_h5_indices(
     return indices
 
 
+def _find_h5_files_from_directory(
+    directory,
+    key: str,
+    search_file_tree_kwargs: dict | None = None,
+    additional_axes_iter: tuple | None = None,
+):
+    """
+    Find HDF5 files from a directory or list of directories and retrieve their shapes.
+
+    Args:
+        directory (str or list): A single directory path, a list of directory paths,
+            or a single HDF5 file path.
+        key (str): The key to access the HDF5 dataset.
+        search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
+            search_file_tree function. Defaults to None.
+        additional_axes_iter (tuple, optional): Additional axes to iterate over if dataset_info
+            contains file_shapes. Defaults to None.
+
+    Returns:
+        - file_names (list): List of file paths to the HDF5 files.
+        - file_shapes (list): List of shapes of the HDF5 datasets.
+    """
+
+    file_names = []
+    file_shapes = []
+
+    if search_file_tree_kwargs is None:
+        search_file_tree_kwargs = {}
+
+    # 'directory' is actually just a single hdf5 file
+    if not isinstance(directory, list) and Path(directory).is_file():
+        filename = directory
+        file_shapes = [_get_shape_hdf5_file(filename, key)]
+        file_names = [str(filename)]
+
+    # 'directory' points to a directory or list of directories
+    else:
+        if not isinstance(directory, list):
+            directory = [directory]
+
+        for _dir in directory:
+            dataset_info = search_file_tree(
+                _dir,
+                filetypes=[".hdf5", ".h5"],
+                hdf5_key_for_length=key,
+                **search_file_tree_kwargs,
+            )
+            file_paths = dataset_info["file_paths"]
+            file_paths = [str(Path(_dir) / file_path) for file_path in file_paths]
+            file_names.extend(file_paths)
+            if "file_shapes" not in dataset_info:
+                assert additional_axes_iter is None, (
+                    "additional_axes_iter is only supported if the dataset_info "
+                    "contains file_shapes. please remove dataset_info.yaml files and rerun."
+                )
+                # since in this case we only need to iterate over the first axis it is
+                # okay we only have the lengths of the files (and not the full shape)
+                file_shapes.extend(
+                    [[length] for length in dataset_info["file_lengths"]]
+                )
+            else:
+                file_shapes.extend(dataset_info["file_shapes"])
+
+    return file_names, file_shapes
+
+
 def h5_dataset_from_directory(
     directory,
     key: str,
@@ -382,45 +448,9 @@ def h5_dataset_from_directory(
     Returns:
         tf.data.Dataset: dataset
     """
-    file_names = []
-    file_shapes = []
-
-    if search_file_tree_kwargs is None:
-        search_file_tree_kwargs = {}
-
-    # 'directory' is actually just a single hdf5 file
-    if not isinstance(directory, list) and Path(directory).is_file():
-        filename = directory
-        file_shapes = [_get_shape_hdf5_file(filename, key)]
-        file_names = [str(filename)]
-
-    # 'directory' points to a directory or list of directories
-    else:
-        if not isinstance(directory, list):
-            directory = [directory]
-
-        for _dir in directory:
-            dataset_info = search_file_tree(
-                _dir,
-                filetypes=[".hdf5", ".h5"],
-                hdf5_key_for_length=key,
-                **search_file_tree_kwargs,
-            )
-            file_paths = dataset_info["file_paths"]
-            file_paths = [str(Path(_dir) / file_path) for file_path in file_paths]
-            file_names.extend(file_paths)
-            if "file_shapes" not in dataset_info:
-                assert additional_axes_iter is None, (
-                    "additional_axes_iter is only supported if the dataset_info "
-                    "contains file_shapes. please remove dataset_info.yaml files and rerun."
-                )
-                # since in this case we only need to iterate over the first axis it is
-                # okay we only have the lengths of the files (and not the full shape)
-                file_shapes.extend(
-                    [[length] for length in dataset_info["file_lengths"]]
-                )
-            else:
-                file_shapes.extend(dataset_info["file_shapes"])
+    file_names, file_shapes = _find_h5_files_from_directory(
+        directory, key, search_file_tree_kwargs, additional_axes_iter
+    )
 
     # Extract some general information about the dataset
     image_shapes = np.array(file_shapes)
