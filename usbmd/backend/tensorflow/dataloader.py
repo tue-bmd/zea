@@ -4,21 +4,23 @@ Convenient way of loading data from hdf5 files in a ML pipeline.
 
 Allows for flexible indexing and stacking of dimensions. There are a few important parameters:
 
-- `directory` can be a single file or a list of directories. If it is a directory, all hdf5 files in the directory
-    will be loaded. If it is a list of directories, all hdf5 files in all directories will be loaded.
+- `directory` can be a single file or a list of directories. If it is a directory, all hdf5 files
+    in the directory will be loaded. If it is a list of directories, all hdf5 files in all
+    directories will be loaded.
 - `key` is the key of the dataset in the hdf5 file that will be used. For example `data/image`.
     It is assumed that the dataset contains a multidimensional array.
 - `n_frames`: One of the axis of the multidimensional array is designated as the `frame_axis`.
     We will iterate over this axis and stack `n_frames` frames together.
-- `frame_index_stride`: additionally this parameter can be used to skip frames at a regular interval.
-    This can be useful to simulate a higher frame rates.
-- `additional_axes_iter`: additional axes to iterate over in the dataset. This can be useful if you have
-    additional dimensions in the dataset that you want to iterate over. For example, if you have a 3D dataset
-    but want to train on 2D slices.
-- `insert_frame_axis`: if True, a new dimension to stack frames along will be created. If False, frames will be
-    stacked along an existing dimension.
-- `frame_axis`: dimension to stack frames along. If `insert_frame_axis` is True, this will be the new dimension
-    to stack frames along. Else, this will be the existing dimension to stack frames along.
+- `frame_index_stride`: additionally this parameter can be used to skip frames at a regular
+    interval. This can be useful to simulate a higher frame rates.
+- `additional_axes_iter`: additional axes to iterate over in the dataset. This can be useful
+    if you have additional dimensions in the dataset that you want to iterate over. For example,
+    if you have a 3D dataset but want to train on 2D slices.
+- `insert_frame_axis`: if True, a new dimension to stack frames along will be created. If False,
+    frames will be stacked along an existing dimension.
+- `frame_axis`: dimension to stack frames along. If `insert_frame_axis` is True, this will be
+    the new dimension to stack frames along. Else, this will be the existing dimension to
+    stack frames along.
 
 - **Author(s)**     : Tristan Stevens
 - **Date**          : Thu Nov 18 2021
@@ -27,6 +29,7 @@ Allows for flexible indexing and stacking of dimensions. There are a few importa
 import re
 from itertools import product
 from pathlib import Path
+from typing import List
 
 import h5py
 import keras
@@ -91,7 +94,7 @@ class H5Generator:
         if self.shuffle:
             self._shuffle()
         else:
-            log.warning(f"H5Generator: Not shuffling data.")
+            log.warning("H5Generator: Not shuffling data.")
 
     def __call__(self):
         for i, indices in enumerate(self.indices):
@@ -113,6 +116,13 @@ class H5Generator:
                 yield images
 
     def extract_image(self, indices):
+        """Extract image from hdf5 file.
+        Args:
+            indices (tuple): indices to extract image from.
+                (file_name, key, indices) with indices being a tuple of slices.
+        Returns:
+            np.ndarray: image extracted from hdf5 file and indexed by indices.
+        """
         file_name, key, indices = indices
         with h5py.File(file_name, "r") as file:
             # Convert any range objects in indices to lists
@@ -161,15 +171,32 @@ class H5Generator:
 
 
 def generate_h5_indices(
-    file_names,
-    file_shapes,
-    n_frames,
-    frame_index_stride,
-    key="data/image",
-    initial_frame_axis=0,
-    additional_axes_iter=None,
-    sort_files=True,
+    file_names: list,
+    file_shapes: list,
+    n_frames: int,
+    frame_index_stride: int,
+    key: str = "data/image",
+    initial_frame_axis: int = 0,
+    additional_axes_iter: List[int] | None = None,
+    sort_files: bool = True,
 ):
+    """Generate indices for h5 files.
+
+    Generates a list of indices to extract images from hdf5 files. Length of this list
+    is the length of the extracted dataset.
+
+    Args:
+        file_names (list): list of file names.
+        file_shapes (list): list of file shapes.
+        n_frames (int): number of frames to load from each hdf5 file.
+        frame_index_stride (int): interval between frames to load.
+        key (str, optional): key of hdf5 dataset to grab data from. Defaults to "data/image".
+        initial_frame_axis (int, optional): axis to iterate over. Defaults to 0.
+        additional_axes_iter (list, optional): additional axes to iterate over in the dataset.
+            Defaults to None.
+        sort_files (bool, optional): sort files by number. Defaults to True.
+
+    """
 
     assert len(file_names) == len(
         file_shapes
@@ -224,12 +251,11 @@ def generate_h5_indices(
         # skip_files = [file_names[i] for i in remove_indices]
 
         log.warning(
-            f"H5Generator: Skipping {len(remove_indices)} files with not enough frames which is about "
-            f"{len(remove_indices) / len(file_names) * 100:.2f}% of the dataset. "
-            f"This can be fine if you expect set `n_frames` and `frame_index_stride` "
-            "to be high. Minimum frames in a file needs to be at "
-            "least n_frames * frame_index_stride = "
-            f"{n_frames * frame_index_stride}. "
+            f"H5Generator: Skipping {len(remove_indices)} files with not enough frames "
+            f"which is about {len(remove_indices) / len(file_names) * 100:.2f}% of the "
+            f"dataset. This can be fine if you expect set `n_frames` and "
+            "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
+            f"least n_frames * frame_index_stride = {n_frames * frame_index_stride}. "
         )
 
     indices = []

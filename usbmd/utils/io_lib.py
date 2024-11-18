@@ -178,10 +178,10 @@ def load_image(filename, grayscale=True, color_order="RGB"):
     return image
 
 
-def _get_length_hdf5_file(filepath, key):
+def _get_shape_hdf5_file(filepath, key):
     """Retrieve the length of a dataset in an hdf5 file."""
     with h5py.File(filepath, "r") as f:
-        return len(f[key])
+        return list(f[key].shape)
 
 
 def search_file_tree(
@@ -221,6 +221,7 @@ def search_file_tree(
                     "file_paths": list of file paths,
                     "total_num_files": total number of files
                     "file_lengths": list of number of frames in each hdf5 file
+                    "file_shapes": list of shapes of each image file
                     "total_num_frames": total number of frames in all hdf5 files
                 }
 
@@ -257,7 +258,6 @@ def search_file_tree(
         filetypes = _SUPPORTED_IMG_TYPES + _SUPPORTED_VID_TYPES + _SUPPORTED_USBMD_TYPES
 
     file_paths = []
-    file_lengths = []
 
     if isinstance(filetypes, str):
         filetypes = [filetypes]
@@ -279,25 +279,26 @@ def search_file_tree(
             if Path(file).suffix in filetypes:
                 file_path = Path(dirpath) / file
                 file_path = file_path.relative_to(directory)
-                file_paths.append(str(file))
+                file_paths.append(str(file_path))
 
     if hdf5_key_for_length is not None:
         # using multiprocessing to speed up reading hdf5 files
         # and getting the number of frames in each file
         log.info("Getting number of frames in each hdf5 file...")
 
+        _get_shape_hdf5_file_partial = functools.partial(
+            _get_shape_hdf5_file, key=hdf5_key_for_length
+        )
         # make sure to call search_file_tree from within a function
         # or use if __name__ == "__main__":
         # to avoid freezing the main process
         absolute_file_paths = [directory / file for file in file_paths]
         if parallel:
             with multiprocessing.Pool() as pool:
-                file_lengths = list(
+                file_shapes = list(
                     tqdm.tqdm(
                         pool.imap(
-                            functools.partial(
-                                _get_length_hdf5_file, key=hdf5_key_for_length
-                            ),
+                            _get_shape_hdf5_file_partial,
                             absolute_file_paths,
                         ),
                         total=len(file_paths),
@@ -305,19 +306,20 @@ def search_file_tree(
                     )
                 )
         else:
+            file_shapes = []
             for file_path in tqdm.tqdm(
                 absolute_file_paths, desc="Getting number of frames in each hdf5 file"
             ):
-                file_lengths.append(
-                    _get_length_hdf5_file(file_path, hdf5_key_for_length)
-                )
+                file_shapes.append(_get_shape_hdf5_file(file_path, hdf5_key_for_length))
 
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
     log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
     log.info(f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}")
 
     dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
-    if len(file_lengths) > 0:
+    if len(file_shapes) > 0:
+        dataset_info["file_shapes"] = file_shapes
+        file_lengths = [shape[0] for shape in file_shapes]
         dataset_info["file_lengths"] = file_lengths
         dataset_info["total_num_frames"] = sum(file_lengths)
 
