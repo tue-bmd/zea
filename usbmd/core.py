@@ -1,6 +1,7 @@
 """ Base classes for the toolbox """
 
 import pickle
+from copy import deepcopy
 
 
 class Object:
@@ -30,3 +31,7 @@ class Object:
         if not isinstance(other, self.__class__):
             return False
         return self.serialized == other.serialized
+
+    def copy(self):
+        """Return a copied version of the object"""
+        return deepcopy(self)

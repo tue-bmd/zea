@@ -442,9 +442,6 @@ class Scan(Object):
     def n_ch(self, value):
         self._n_ch = value
         self._fdemod = None  # Reset fdemod
-        log.warning(
-            f"Resetting fdemod to {self.fdemod} because n_ch was changed to {value}."
-        )
 
     @property
     def fdemod(self):
