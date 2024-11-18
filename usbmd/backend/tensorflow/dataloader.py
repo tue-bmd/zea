@@ -73,6 +73,9 @@ class H5Generator:
         self.limit_n_samples = limit_n_samples
         self.seed = seed
 
+        # Set random number generator
+        self.rng = np.random.default_rng(self.seed)
+
         self.indices = generate_h5_indices(
             file_names=file_names,
             file_shapes=file_shapes,
@@ -104,7 +107,6 @@ class H5Generator:
             # shuffle if we reached end
             if i == self.__len__() - 1:
                 if self.shuffle:
-                    log.info("H5Generator: Shuffling data.")
                     self._shuffle()
 
             if self.return_filename:
@@ -163,8 +165,8 @@ class H5Generator:
         return images
 
     def _shuffle(self):
-        rng = np.random.default_rng(self.seed)
-        rng.shuffle(self.indices)
+        log.info("H5Generator: Shuffling data.")
+        self.rng.shuffle(self.indices)
 
     def __len__(self):
         return len(self.indices)
@@ -195,6 +197,15 @@ def generate_h5_indices(
         additional_axes_iter (list, optional): additional axes to iterate over in the dataset.
             Defaults to None.
         sort_files (bool, optional): sort files by number. Defaults to True.
+
+    Returns:
+        list: list of tuples with indices to extract images from hdf5 files.
+            (file_name, key, indices) with indices being a tuple of slices.
+            example: [
+                ('/folder/path_to_file.hdf5', 'data/image', [range(0, 1), slice(None, 256, None), slice(None, 256, None)]), # pylint: disable=line-too-long
+                ('/folder/path_to_file.hdf5', 'data/image', [range(1, 2), slice(None, 256, None), slice(None, 256, None)]), # pylint: disable=line-too-long
+                ...
+            ]
 
     """
 
