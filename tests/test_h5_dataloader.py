@@ -47,10 +47,7 @@ def test_h5_generator(
     filename, dataset_name, n_frames, insert_frame_axis, create_dummy_hdf5
 ):
     """Test the H5Generator class"""
-    if filename == DUMMY_DATASET_PATH:
-        create_dummy_hdf5
-
-    elif filename == CAMUS_DATASET_PATH:
+    if filename == CAMUS_DATASET_PATH:
         if not Path(filename).exists():
             return
 
