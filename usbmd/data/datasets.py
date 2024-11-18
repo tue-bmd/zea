@@ -14,7 +14,6 @@ TODO:
 """
 
 import inspect
-import json
 import sys
 from pathlib import Path
 
@@ -471,8 +470,8 @@ class USBMDDataSet(DataSet):
 
         num_frames_per_file = []
         validated_succesfully = True
-        for i, file_path in tqdm.tqdm(
-            enumerate(self.file_paths),
+        for file_path in tqdm.tqdm(
+            self.file_paths,
             total=len(self),
             desc="Checking dataset files on validity (USBMD format)",
         ):
