@@ -73,3 +73,4 @@ if __name__ == "__main__":
     )
     plt.close()
     log.info(f"Saved to {log.yellow(path)}")
+    del val_dataset  # weird tf datasets bug if not deleted
