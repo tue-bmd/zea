@@ -8,7 +8,8 @@
 		"-m",
 		"100g",
 		"--cpus",
-		"7"
+		"7",
+		"--env-file", "${localWorkspaceFolder}/.env"
 	],
 	// Link the workspace folder to the container
 	"workspaceMount": "source=${localWorkspaceFolder},target=/ultrasound-toolbox,type=bind",
@@ -18,9 +19,9 @@
 	// Mount the NAS drive
 	"mounts": [
 		{
-			"source": "/mnt/z", // change this to the path of your NAS drive
+			"source": "bmd-ai",
 			"target": "/mnt/z",
-			"type": "bind"
+			"type": "volume"
 		}
 	],
 	// Install vscode extensions
