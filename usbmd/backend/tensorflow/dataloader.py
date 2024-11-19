@@ -220,6 +220,15 @@ class H5Generator:
         target_height, target_width = self.image_size
         current_height, current_width = images.shape[-3], images.shape[-2]
 
+        assert current_height >= target_height, (
+            f"Error in cropping images. Current height {current_height} "
+            f"is smaller than target height {target_height}"
+        )
+        assert current_width >= target_width, (
+            f"Error in cropping images. Current width {current_width} "
+            f"is smaller than target width {target_width}"
+        )
+
         if self.resize_type == "center_crop":
             top_cropping = (current_height - target_height) // 2
             left_cropping = (current_width - target_width) // 2
@@ -237,6 +246,8 @@ class H5Generator:
             left_cropping = 0
             bottom_cropping = current_height - target_height
             right_cropping = current_width - target_width
+        else:
+            raise ValueError(f"Unknown resize type: {self.resize_type}")
 
         images = ops.image.crop_images(
             images,
