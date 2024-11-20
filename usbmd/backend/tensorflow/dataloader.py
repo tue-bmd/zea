@@ -64,6 +64,7 @@ class H5Generator:
         resize_type: str = "crop",
         resize_axes: tuple | None = None,
         seed: int | None = None,
+        resize_kwargs: dict | None = None,
     ):
         self.n_frames = n_frames
         self.frame_index_stride = frame_index_stride
@@ -81,17 +82,39 @@ class H5Generator:
         self.resize_axes = resize_axes
         self.resize_type = resize_type
         self.seed = seed
+        self.resize_kwargs = resize_kwargs if resize_kwargs is not None else {}
 
         if self.resize_axes is None:
             self.resize_axes = (-2, -3)
 
         if image_size is not None:
-            assert resize_type in [
-                "crop",
-                "center_crop",
-                "random_crop",
-                "resize",
-            ], "`resize_type` must be `crop`, `center_crop`, `random_crop`, or `resize`."
+            if self.resize_type == "resize":
+                self.resizer = keras.layers.Resizing(
+                    *self.image_size, **self.resize_kwargs
+                )
+            elif self.resize_type == "center_crop":
+                self.resizer = keras.layers.CenterCrop(
+                    *self.image_size, **self.resize_kwargs
+                )
+            elif self.resize_type == "random_crop":
+                self.resizer = keras.layers.RandomCrop(
+                    *self.image_size, **self.resize_kwargs
+                )
+            elif self.resize_type == "crop":
+                # crops from top left corner
+                self.resizer = lambda images: ops.image.crop_images(
+                    images,
+                    top_cropping=0,
+                    left_cropping=0,
+                    target_height=self.image_size[0],
+                    target_width=self.image_size[1],
+                    data_format="channels_last",
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported resize type: {self.resize_type}. "
+                    "Supported types are 'crop', 'center_crop', 'random_crop', 'resize'."
+                )
 
         # Set random number generator
         self.rng = np.random.default_rng(self.seed)
@@ -123,11 +146,7 @@ class H5Generator:
     def __call__(self):
         for i, indices in enumerate(self.indices):
             images = self.extract_image(indices)
-            if self.image_size:
-                # don't have to resize if image shape is already correct
-                current_size = np.array(images.shape)[np.array(self.resize_axes)]
-                if list(current_size) != list(self.image_size):
-                    images = self._resize_images(images)
+            images = self._resize_images(images)
 
             file_name, _, indices = indices
 
@@ -195,68 +214,17 @@ class H5Generator:
         """Crop or resize images to image_size.
         Resizing and cropping is executed on resize_axes, which is a tuple of size 2.
         """
+        # Check if we need to resize images
+        if self.image_size is not None:
+            # don't have to resize if image shape is already correct
+            current_size = np.array(images.shape)[np.array(self.resize_axes)]
+            if list(current_size) != list(self.image_size):
+                # TODO: maybe could be refactored with `func_with_one_batch_dim`
+                images, shape, perm = self._prepare_images_for_resize(images)
+                images = self.resizer(images)
+                # reshape back to original shape
+                images = self._reshape_images_after_resize(images, shape, perm)
 
-        images, shape, perm = self._prepare_images_for_resize(images)
-
-        if self.resize_type == "resize":
-            images = ops.image.resize(
-                images,
-                self.image_size,
-                data_format="channels_last",
-            )
-
-        elif "crop" in self.resize_type:
-            images = self._crop_images(images)
-        else:
-            raise ValueError(f"Unknown resize type: {self.resize_type}")
-
-        # reshape back to original shape
-        images = self._reshape_images_after_resize(images, shape, perm)
-
-        return images
-
-    def _crop_images(self, images):
-        """Crop images to image_size."""
-        target_height, target_width = self.image_size
-        current_height, current_width = images.shape[-3], images.shape[-2]
-
-        assert current_height >= target_height, (
-            f"Error in cropping images. Current height {current_height} "
-            f"is smaller than target height {target_height}"
-        )
-        assert current_width >= target_width, (
-            f"Error in cropping images. Current width {current_width} "
-            f"is smaller than target width {target_width}"
-        )
-
-        if self.resize_type == "center_crop":
-            top_cropping = (current_height - target_height) // 2
-            left_cropping = (current_width - target_width) // 2
-            bottom_cropping = current_height - target_height - top_cropping
-            right_cropping = current_width - target_width - left_cropping
-
-        elif self.resize_type == "random_crop":
-            top_cropping = self.rng.integers(0, current_height - target_height + 1)
-            left_cropping = self.rng.integers(0, current_width - target_width + 1)
-            bottom_cropping = current_height - target_height - top_cropping
-            right_cropping = current_width - target_width - left_cropping
-
-        elif self.resize_type == "crop":
-            top_cropping = 0
-            left_cropping = 0
-            bottom_cropping = current_height - target_height
-            right_cropping = current_width - target_width
-        else:
-            raise ValueError(f"Unknown resize type: {self.resize_type}")
-
-        images = ops.image.crop_images(
-            images,
-            bottom_cropping=bottom_cropping,
-            right_cropping=right_cropping,
-            target_height=target_height,
-            target_width=target_width,
-            data_format="channels_last",
-        )
         return images
 
     def _prepare_images_for_resize(self, images):
@@ -507,7 +475,7 @@ def h5_dataset_from_directory(
     dataset_repetitions: int | None = None,
     n_frames: int = 1,
     insert_frame_axis: bool = True,
-    frame_axis: int | None = None,
+    frame_axis: int = -1,
     initial_frame_axis: int = 0,
     frame_index_stride: int = 1,
     additional_axes_iter: tuple | None = None,
@@ -644,9 +612,9 @@ def h5_dataset_from_directory(
 
     shape = image.shape
     if not equal_file_shapes:
-        known_axes = [frame_axis]
+        known_axes = _map_negative_indices([frame_axis], n_axis)
         if additional_axes_iter:
-            known_axes += additional_axes_iter
+            known_axes += _map_negative_indices([additional_axes_iter], n_axis)
         if image_size:
             if resize_axes is None:
                 resize_axes = (-3, -2)
@@ -728,10 +696,10 @@ def h5_dataset_from_directory(
     return dataset
 
 
-def _map_negative_indices(indices: list, lenght: int):
+def _map_negative_indices(indices: list, length: int):
     """Maps negative indices for array indexing to positive indices.
     Example:
         >>> _map_negative_indices([-1, -2], 5)
         [4, 3]
     """
-    return [i if i >= 0 else lenght + i for i in indices]
+    return [i if i >= 0 else length + i for i in indices]
