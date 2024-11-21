@@ -28,6 +28,7 @@ if "USBMD_CACHE_DIR" in os.environ:
     if _cache_dir:
         _CACHE_DIR = _cache_dir
 
+_CACHE_DIR = Path(_CACHE_DIR).resolve()
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
