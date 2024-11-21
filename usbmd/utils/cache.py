@@ -60,12 +60,12 @@ def serialize_elements(key_elements):
 
 def generate_cache_key(func, args, kwargs, arg_names):
     """Generate a unique cache key based on function name and specified parameters."""
-    key_elements = [func.__name__]  # function name
+    key_elements = [func.__qualname__]  # qualified function name
     try:
         key_elements.append(inspect.getsource(func))  # source code
     except OSError:
         log.warning(
-            f"Could not get source code for function {func.__name__}. Not caching the result."
+            f"Could not get source code for function {func.__qualname__}. Not caching the result."
         )
         return None  # Do not cache if source code cannot be retrieved
     if not arg_names:
@@ -79,7 +79,7 @@ def generate_cache_key(func, args, kwargs, arg_names):
                 key_elements.append(f"{name}={bound_args.arguments[name]}")
 
     key = "_".join(serialize_elements(key_elements))
-    return f"{func.__name__}_" + hashlib.md5(key.encode()).hexdigest()
+    return f"{func.__qualname__}_" + hashlib.md5(key.encode()).hexdigest()
 
 
 def cache_output(*arg_names, verbose=False):
@@ -98,7 +98,7 @@ def cache_output(*arg_names, verbose=False):
             cache_file = _CACHE_DIR / f"{cache_key}.pkl"
             if cache_file.exists():
                 if verbose:
-                    log.info(f"Loading cached result for {func.__name__}.")
+                    log.info(f"Loading cached result for {func.__qualname__}.")
                 return joblib.load(cache_file)
             result = func(*args, **kwargs)
             joblib.dump(result, cache_file)
