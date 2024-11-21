@@ -6,7 +6,7 @@ import pytest
 
 from usbmd.core import Object
 from usbmd.utils.cache import (
-    CACHE_DIR,
+    _CACHE_DIR,
     cache_output,
     cache_summary,
     clear_cache,
@@ -49,6 +49,16 @@ def _expensive_operation_obj(obj):
     return result
 
 
+@cache_output("x", verbose=True)
+def _expensive_verbose_operation(x, y, verbose=False):
+    # Simulate an expensive operation
+    if verbose:
+        print("Verbose mode is on")
+    result = x + y
+    time.sleep(EXPECTED_DURATION)
+    return result
+
+
 class CustomObject(Object):
     """Custom core object for testing caching"""
 
@@ -71,7 +81,7 @@ class CustomNonUSBMDOjbect:
 @pytest.fixture(scope="module", autouse=True)
 def clean_cache():
     """Fixture to clean up the cache directory before and after tests."""
-    original_cache_dir = CACHE_DIR
+    original_cache_dir = _CACHE_DIR
     set_cache_dir("/tmp/test_cache")
     clear_cache()
     yield
@@ -240,3 +250,9 @@ def test_clear_cache():
     """Test clear cache."""
     clear_cache()
     assert True
+
+
+def test_cache_verbose():
+    """Test with verbose mode."""
+    _expensive_verbose_operation(2, 10, verbose=False)
+    _expensive_verbose_operation(2, 10, verbose=True)

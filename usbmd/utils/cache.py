@@ -12,14 +12,22 @@
 
 import hashlib
 import inspect
+import os
 from pathlib import Path
 
 import joblib
 
 from usbmd.utils import log
 
-CACHE_DIR = Path.home() / ".usbmd_cache"
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_CACHE_DIR = Path.home() / ".usbmd_cache"
+
+# Set backend based on USBMD_CACHE_DIR flag, if applicable.
+if "USBMD_CACHE_DIR" in os.environ:
+    _cache_dir = os.environ["USBMD_CACHE_DIR"]
+    if _cache_dir:
+        _CACHE_DIR = _cache_dir
+
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def serialize_elements(key_elements):
@@ -73,7 +81,7 @@ def generate_cache_key(func, args, kwargs, arg_names):
     return f"{func.__name__}_" + hashlib.md5(key.encode()).hexdigest()
 
 
-def cache_output(*arg_names):
+def cache_output(*arg_names, verbose=False):
     """Decorator to cache function outputs using joblib."""
     assert all(isinstance(arg_name, str) for arg_name in arg_names), (
         "All argument names must be strings, "
@@ -84,8 +92,10 @@ def cache_output(*arg_names):
     def decorator(func):
         def wrapper(*args, **kwargs):
             cache_key = generate_cache_key(func, args, kwargs, arg_names)
-            cache_file = CACHE_DIR / f"{cache_key}.pkl"
+            cache_file = _CACHE_DIR / f"{cache_key}.pkl"
             if cache_file.exists():
+                if verbose:
+                    log.info(f"Loading cached result for {func.__name__}.")
                 return joblib.load(cache_file)
             result = func(*args, **kwargs)
             joblib.dump(result, cache_file)
@@ -111,7 +121,7 @@ def clear_cache(func_name=None):
     else:
         pattern = "*.pkl"
 
-    for cache_file in CACHE_DIR.glob(pattern):
+    for cache_file in _CACHE_DIR.glob(pattern):
         file_size = cache_file.stat().st_size
         cache_file.unlink()
         total_cleared += file_size
@@ -134,17 +144,17 @@ def clear_cache(func_name=None):
 def cache_summary():
     """Print a summary of the cache, grouping by function name and summing the sizes."""
     summary = {}
-    for cache_file in CACHE_DIR.glob("*.pkl"):
+    for cache_file in _CACHE_DIR.glob("*.pkl"):
         # Assuming cache files are named as '{func_name}_{hash}.pkl'
         func_name = "_".join(cache_file.stem.split("_")[:-1])
         file_size = cache_file.stat().st_size
         summary[func_name] = summary.get(func_name, 0) + file_size
 
     if not summary:
-        log.info(f"usbmd cache at {CACHE_DIR} is empty.")
+        log.info(f"usbmd cache at {_CACHE_DIR} is empty.")
         return
 
-    log.info(f"usbmd cache summary at {CACHE_DIR}:")
+    log.info(f"usbmd cache summary at {_CACHE_DIR}:")
     for func_name, total_size in summary.items():
         log.info(
             f"Function '{func_name}' has a total cache size of "
@@ -153,9 +163,22 @@ def cache_summary():
 
 
 def set_cache_dir(cache_dir):
-    """Set the cache directory to a custom location."""
-    global CACHE_DIR  # pylint: disable=global-statement
-    previous_cache_dir = CACHE_DIR
-    CACHE_DIR = Path(cache_dir)
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    log.info(f"Changed cache directory from {previous_cache_dir} to {CACHE_DIR}.")
+    """Set the cache directory to a custom location.
+
+    Args:
+        cache_dir (str | Path): Path to the new cache directory
+    """
+    global _CACHE_DIR  # pylint: disable=global-statement
+    previous_cache_dir = _CACHE_DIR
+
+    # Convert to Path and resolve
+    new_cache_dir = Path(cache_dir).resolve()
+
+    # Set environment variable
+    os.environ["USBMD_CACHE_DIR"] = str(new_cache_dir)
+
+    # Update module-level cache dir
+    _CACHE_DIR = new_cache_dir
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    log.info(f"Changed cache directory from {previous_cache_dir} to {_CACHE_DIR}.")
