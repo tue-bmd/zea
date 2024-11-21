@@ -1,6 +1,7 @@
 """ Base classes for the toolbox """
 
 import pickle
+from copy import deepcopy
 
 
 class Object:
@@ -33,3 +34,7 @@ class Object:
 
     def __hash__(self):
         return hash(self.serialized)
+
+    def copy(self):
+        """Return a copied version of the object"""
+        return deepcopy(self)
