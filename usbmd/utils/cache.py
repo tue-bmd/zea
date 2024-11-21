@@ -65,8 +65,9 @@ def generate_cache_key(func, args, kwargs, arg_names):
         key_elements.append(inspect.getsource(func))  # source code
     except OSError:
         log.warning(
-            f"Could not get source code for function {func.__name__}. Proceeding without it."
+            f"Could not get source code for function {func.__name__}. Not caching the result."
         )
+        return None  # Do not cache if source code cannot be retrieved
     if not arg_names:
         key_elements.extend(args)
         key_elements.extend(f"{k}={v}" for k, v in kwargs.items())
@@ -92,6 +93,8 @@ def cache_output(*arg_names, verbose=False):
     def decorator(func):
         def wrapper(*args, **kwargs):
             cache_key = generate_cache_key(func, args, kwargs, arg_names)
+            if cache_key is None:
+                return func(*args, **kwargs)  # Run function without caching
             cache_file = _CACHE_DIR / f"{cache_key}.pkl"
             if cache_file.exists():
                 if verbose:
