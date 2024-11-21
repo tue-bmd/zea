@@ -4,6 +4,7 @@
 - **Date**          : 5/11/2024
 """
 
+from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -12,6 +13,20 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy.ndimage import zoom
 
 from usbmd.display import frustum_convert_rtp2xyz
+
+
+def set_mpl_style(style: str = None) -> None:
+    """Set the matplotlib style.
+
+    Args:
+        style (str, optional): Path to the matplotlib style file.
+        Defaults to "usbmd_darkmode.mplstyle", which is the default
+        darkmode style used throughout the USBMD toolbox.
+
+    """
+    if style is None:
+        style = Path(__file__).parents[1] / "usbmd_darkmode.mplstyle"
+    plt.style.use(style)
 
 
 def plot_image_grid(
