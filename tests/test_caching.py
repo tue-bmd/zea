@@ -59,6 +59,17 @@ def _expensive_verbose_operation(x, y, verbose=False):
     return result
 
 
+def _some_random_func():
+    return 1
+
+
+@cache_output("x")
+def _expensive_nested_operation(x, y):
+    result = x + _some_random_func()
+    time.sleep(EXPECTED_DURATION)
+    return result
+
+
 class CustomObject(Object):
     """Custom core object for testing caching"""
 
@@ -256,3 +267,21 @@ def test_cache_verbose():
     """Test with verbose mode."""
     _expensive_verbose_operation(2, 10, verbose=False)
     _expensive_verbose_operation(2, 10, verbose=True)
+
+
+def test_nested_cache():
+    """Test nested caching."""
+    start_time = time.time()
+    result1 = _expensive_nested_operation(2, 10)
+    duration1 = time.time() - start_time
+    assert (
+        duration1 >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration1}"
+
+    start_time = time.time()
+    result2 = _expensive_nested_operation(2, 10)
+    duration2 = time.time() - start_time
+    assert (
+        duration2 < EXPECTED_DURATION
+    ), f"Expected duration < {EXPECTED_DURATION}, got {duration2}"
+    assert result1 == result2, "Results should be equal"

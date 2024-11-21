@@ -10,6 +10,7 @@
 - **Date**          : October 11th, 2024
 """
 
+import ast
 import hashlib
 import inspect
 import os
@@ -58,16 +59,53 @@ def serialize_elements(key_elements):
     return serialized_elements
 
 
+def get_function_source(func):
+    """Recursively get the source code of a function and its nested functions."""
+    try:
+        source = inspect.getsource(func)
+    except OSError:
+        return None  # Do not cache if source code cannot be retrieved
+
+    # Parse the source code into an AST
+    tree = ast.parse(source)
+    called_functions = set()
+
+    class FunctionCallVisitor(ast.NodeVisitor):
+        def visit_Call(self, node):
+            if isinstance(node.func, ast.Name):
+                called_functions.add(node.func.id)
+            self.generic_visit(node)
+
+    FunctionCallVisitor().visit(tree)
+
+    for called_func_name in called_functions:
+        try:
+            called_func = eval(called_func_name, func.__globals__)
+            if (
+                inspect.isfunction(called_func)
+                and called_func.__module__ != "usbmd.utils.cache"
+            ):
+                nested_source = get_function_source(called_func)
+                if nested_source is None:
+                    # If any nested function's source cannot be retrieved, do not cache
+                    return None
+                source += nested_source
+        except (NameError, TypeError):
+            continue
+
+    return source
+
+
 def generate_cache_key(func, args, kwargs, arg_names):
     """Generate a unique cache key based on function name and specified parameters."""
     key_elements = [func.__qualname__]  # qualified function name
-    try:
-        key_elements.append(inspect.getsource(func))  # source code
-    except OSError:
+    source = get_function_source(func)
+    if source is None:
         log.warning(
             f"Could not get source code for function {func.__qualname__}. Not caching the result."
         )
         return None  # Do not cache if source code cannot be retrieved
+    key_elements.append(source)  # source code
     if not arg_names:
         key_elements.extend(args)
         key_elements.extend(f"{k}={v}" for k, v in kwargs.items())
