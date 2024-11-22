@@ -10,6 +10,7 @@ from usbmd.utils.cache import (
     cache_output,
     cache_summary,
     clear_cache,
+    get_function_source,
     set_cache_dir,
 )
 
@@ -60,6 +61,7 @@ def _expensive_verbose_operation(x, y, verbose=False):
 
 
 def _some_random_func():
+    # This comment is required for some tests!
     return 1
 
 
@@ -98,6 +100,22 @@ def clean_cache():
     yield
     clear_cache()
     set_cache_dir(original_cache_dir)
+
+
+def test_get_function_source():
+    """Test getting the source code of a function."""
+
+    def some_nested_func():
+        # This comment is also required for some tests!
+        _some_random_func()
+
+    src = get_function_source(some_nested_func)
+    assert (
+        "# This comment is also required for some tests!" in src
+    ), "Did not get source code"
+    assert (
+        "# This comment is required for some tests!" in src
+    ), "Did not get nested source code"
 
 
 def test_caching_x():
