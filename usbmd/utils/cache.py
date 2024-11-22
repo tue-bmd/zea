@@ -72,7 +72,10 @@ def get_function_source(func):
     called_functions = set()
 
     class FunctionCallVisitor(ast.NodeVisitor):
+        """AST visitor to collect function calls."""
+
         def visit_Call(self, node):
+            """Visit a Call node and add the function name to the set."""
             if isinstance(node.func, ast.Name):
                 called_functions.add(node.func.id)
             self.generic_visit(node)
@@ -81,7 +84,7 @@ def get_function_source(func):
 
     for called_func_name in called_functions:
         try:
-            called_func = eval(called_func_name, func.__globals__)
+            called_func = func.__globals__.get(called_func_name)
             if (
                 inspect.isfunction(called_func)
                 and called_func.__module__ != "usbmd.utils.cache"

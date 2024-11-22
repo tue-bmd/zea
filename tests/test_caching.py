@@ -64,7 +64,7 @@ def _some_random_func():
 
 
 @cache_output("x")
-def _expensive_nested_operation(x, y):
+def _expensive_nested_operation(x, y):  # pylint: disable=unused-argument
     result = x + _some_random_func()
     time.sleep(EXPECTED_DURATION)
     return result
