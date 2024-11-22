@@ -14,6 +14,7 @@ import ast
 import hashlib
 import inspect
 import os
+import textwrap
 from pathlib import Path
 
 import joblib
@@ -68,6 +69,7 @@ def get_function_source(func):
         return None  # Do not cache if source code cannot be retrieved
 
     # Parse the source code into an AST
+    source = textwrap.dedent(source)
     tree = ast.parse(source)
     called_functions = set()
 
