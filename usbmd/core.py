@@ -32,6 +32,9 @@ class Object:
             return False
         return self.serialized == other.serialized
 
+    def __hash__(self):
+        return hash(self.serialized)
+
     def copy(self):
         """Return a copied version of the object"""
         return deepcopy(self)
