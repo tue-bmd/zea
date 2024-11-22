@@ -210,6 +210,8 @@ def test_caching():
 
 def test_caching_custom_object():
     """Test caching for expensive_operation with CustomObject."""
+
+    # First time should not be cached
     obj1 = CustomObject(2, 10)
     start_time = time.time()
     result = _expensive_operation_obj(obj1)
@@ -219,6 +221,7 @@ def test_caching_custom_object():
     ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
+    # Second time should be cached
     start_time = time.time()
     result = _expensive_operation_obj(obj1)
     duration = time.time() - start_time
@@ -227,6 +230,17 @@ def test_caching_custom_object():
     ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
+    # Another instance with the same values should also be cached
+    obj1_identical = CustomObject(2, 10)
+    start_time = time.time()
+    result = _expensive_operation_obj(obj1_identical)
+    duration = time.time() - start_time
+    assert (
+        duration < EXPECTED_DURATION
+    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert result == 2 + 10, f"Expected 2 + 10, got {result}"
+
+    # Another object with different values should not be cached
     obj2 = CustomObject(3, 10)
     start_time = time.time()
     result = _expensive_operation_obj(obj2)
@@ -236,6 +250,7 @@ def test_caching_custom_object():
     ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
     assert result == 3 + 10, f"Expected 3 + 10, got {result}"
 
+    # Another object with different values should not be cached
     obj3 = CustomObject(2, 20)
     start_time = time.time()
     result = _expensive_operation_obj(obj3)
@@ -244,29 +259,6 @@ def test_caching_custom_object():
         duration >= EXPECTED_DURATION
     ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 20, f"Expected 2 + 20, got {result}"
-
-
-def test_non_USBMD_object():
-    """Test caching for expensive_operation with CustomNonUSBMDOjbect."""
-    obj1 = CustomNonUSBMDOjbect(2, 10)
-
-    start_time = time.time()
-    result = _expensive_operation_obj(obj1)
-    duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
-    assert result == 2 + 10, f"Expected 2 + 10, got {result}"
-
-    # now we do exactly the same and see that it didn't use the cached result
-    # even though obj1 and obj2 are the "same".
-    obj2 = CustomNonUSBMDOjbect(2, 10)
-    start_time = time.time()
-    result = _expensive_operation_obj(obj2)
-    duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
 
 
 def test_cache_summary():
