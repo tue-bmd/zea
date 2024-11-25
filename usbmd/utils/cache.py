@@ -14,6 +14,7 @@ import ast
 import hashlib
 import inspect
 import os
+import pickle
 import textwrap
 from pathlib import Path
 
@@ -33,8 +34,8 @@ _CACHE_DIR = Path(_CACHE_DIR).resolve()
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def serialize_elements(key_elements):
-    """Serialize elements to generate a cache key.
+def serialize_elements(key_elements: list):
+    """Serialize elements of a list to generate a cache key.
 
     In general uses the string representation of the elements unless
     the element has a `serialized` attribute, in which case it uses that.
@@ -43,6 +44,7 @@ def serialize_elements(key_elements):
     Args:
         key_elements (list): List of elements to serialize. Can be nested lists
             or tuples. In this case the elements are serialized recursively.
+
     Returns:
         list[str]: List of serialized elements. In cases where the elements were
             lists of tuples those are combined into a single string.
@@ -51,12 +53,20 @@ def serialize_elements(key_elements):
     serialized_elements = []
     for element in key_elements:
         if isinstance(element, (list, tuple)):
+            # If element is a list or tuple, serialize its elements recursively
             element = serialize_elements(element)
             serialized_elements.append("_".join(element))
         elif hasattr(element, "serialized"):
+            # Use the serialized attribute if it exists (e.g. for usbmd.core.Object)
             serialized_elements.append(str(element.serialized))
+        elif isinstance(element, str):
+            # If element is a string, use it as is
+            serialized_elements.append(element)
         else:
-            serialized_elements.append(str(element))
+            # Otherwise, serialize the element using pickle and hash it
+            element = pickle.dumps(element)
+            element = hashlib.md5(element).hexdigest()
+            serialized_elements.append(element)
 
     return serialized_elements
 
@@ -84,7 +94,8 @@ def get_function_source(func):
 
     FunctionCallVisitor().visit(tree)
 
-    for called_func_name in called_functions:
+    # Sorting the called functions to ensure consistent cache keys
+    for called_func_name in sorted(called_functions):
         try:
             called_func = func.__globals__.get(called_func_name)
             if (
@@ -144,6 +155,10 @@ def cache_output(*arg_names, verbose=False):
                 if verbose:
                     log.info(f"Loading cached result for {func.__qualname__}.")
                 return joblib.load(cache_file)
+            elif verbose:
+                log.info(
+                    f"Running {func.__qualname__} and caching the result to {cache_file}."
+                )
             result = func(*args, **kwargs)
             joblib.dump(result, cache_file)
             return result
