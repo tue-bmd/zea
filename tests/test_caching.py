@@ -81,16 +81,6 @@ class CustomObject(Object):
         self.y = y
 
 
-class CustomNonUSBMDOjbect:
-    """Regular object for testing caching. Caching will not
-    work for this object due to improper serialization.
-    """
-
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-
 @pytest.fixture(scope="module", autouse=True)
 def clean_cache():
     """Fixture to clean up the cache directory before and after tests."""
