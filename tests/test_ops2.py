@@ -1,3 +1,7 @@
+""" Tests for the Operation and Pipeline classes in ops_v2.py """
+
+# pylint: disable=arguments-differ
+
 import keras
 import pytest
 
@@ -8,6 +12,8 @@ from usbmd.ops_v2 import AddOperation, MultiplyOperation, Operation, Pipeline
 
 # Custom test subclass of Operation
 class TestOperation(Operation):
+    """Test Operation for testing Operation class functionality"""
+
     def call(self, x, y=0):
         return {"result": x + y}
 
@@ -116,6 +122,7 @@ def test_operation_large_data_inputs():
     op = MatrixMultiplyOperation()
     result = op(matrix_a=matrix_a, matrix_b=matrix_b)
     assert result["result"].shape == (512, 512)  # Matrix multiplication output
+
 
 if __name__ == "__main__":
     pytest.main()
