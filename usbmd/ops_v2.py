@@ -1,35 +1,33 @@
 """ Experimental version of the USBMD ops module"""
 
-import os
-import timeit
 import hashlib
 import inspect
-from abc import ABC, abstractmethod
-from typing import Callable, Any, Tuple, Dict, List, Union
-import numpy as np
 import json
+import os
+import timeit
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, List, Tuple, Union
+
+import numpy as np
 
 # Set the Keras backend
 # os.environ["KERAS_BACKEND"] = "jax"
-# os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["KERAS_BACKEND"] = "torch"
+os.environ["KERAS_BACKEND"] = "tensorflow"
+# os.environ["KERAS_BACKEND"] = "torch"
 # os.environ["KERAS_BACKEND"] = "numpy"
 import keras
-
-from ops import Operation, Pipeline
-
 
 print("WARNING: This module is work in progress and may not work as expected!")
 
 
 """
-TODO: jit_compile should allow for 2 different modes: 
+TODO: jit_compile should allow for 2 different modes:
     1. Operation-based: each operation is compiled separately by setting Operation(jit_compile=True).
     This means the __call__ method is not compiled and most of the usbmd logic can be executed on the fly,
     preserving the caching functionality. (DONE)
-    2. Pipeline-based: the entire pipeline is compiled by setting Pipeline(jit_compile=True). 
+    2. Pipeline-based: the entire pipeline is compiled by setting Pipeline(jit_compile=True).
     This means the entire pipeline is compiled and executed as a single function, which may be faster but
-    may not preserve the caching functionality. 
+    may not preserve the caching functionality.
 """
 
 
@@ -64,14 +62,14 @@ class Operation(ABC):
         self._trace_signatures()
 
         # Compile the `call` method if necessary
-        self.call = jit_compile(self.call) if self.jit_compile else self.call
+        self._call = compile(self.call) if self.jit_compile else self.call
 
     def _trace_signatures(self):
         """
         Analyze and store the input/output signatures of the `call` method.
         """
-        self.input_signature = inspect.signature(self.call)
-        self.valid_keys = set(self.input_signature.parameters.keys())
+        self._input_signature = inspect.signature(self.call)
+        self._valid_keys = set(self._input_signature.parameters.keys())
 
     @abstractmethod
     def call(self, **kwargs):
@@ -81,24 +79,32 @@ class Operation(ABC):
         """
         pass
 
-    def set_cache(self, input_cache: Dict[str, Any], output_cache: Dict[str, Any]):
+    def set_input_cache(self, input_cache: Dict[str, Any]):
         """
-        Set a cache for inputs or outputs, then retrace the function if necessary.
+        Set a cache for inputs, then retrace the function if necessary.
 
         args:
             input_cache: A dictionary containing cached inputs.
+        """
+        self._input_cache.update(input_cache)
+        self._trace_signatures()  # Retrace after updating cache to ensure correctness.
+
+    def set_output_cache(self, output_cache: Dict[str, Any]):
+        """
+        Set a cache for outputs, then retrace the function if necessary.
+
+        args:
             output_cache: A dictionary containing cached outputs.
         """
-        self.input_cache.update(input_cache)
-        self.output_cache.update(output_cache)
+        self._output_cache.update(output_cache)
         self._trace_signatures()  # Retrace after updating cache to ensure correctness.
 
     def clear_cache(self):
         """
         Clear the input and output caches.
         """
-        self.input_cache.clear()
-        self.output_cache.clear()
+        self._input_cache.clear()
+        self._output_cache.clear()
 
     def _hash_inputs(self, kwargs: Dict) -> str:
         """
@@ -132,7 +138,7 @@ class Operation(ABC):
         }
 
         # Call the processing function
-        processed_output = self.call(**filtered_kwargs)
+        processed_output = self._call(**filtered_kwargs)
 
         # Ensure the output is always a dictionary
         if not isinstance(processed_output, dict):
@@ -172,9 +178,9 @@ class Operation_keras(keras.Operation):
         """
         Analyze and store the input/output signatures of the `process` method.
         """
-        self.input_signature = inspect.signature(self.call)
+        self._input_signature = inspect.signature(self.call)
         # Extract valid keys from the signature for filtering
-        self.valid_keys = set(self.input_signature.parameters.keys())
+        self._valid_keys = set(self.input_signature.parameters.keys())
 
     def set_cache(self, cache: Dict[str, Any]):
         """
@@ -289,7 +295,7 @@ class PipelineModel(keras.models.Model):
 ### TESTS ###
 
 
-def jit_compile(func):
+def compile(func):
     """
     Applies JIT compilation to the given function based on the current Keras backend.
 
@@ -388,7 +394,7 @@ def test_pipeline_with_gpu_operations():
 
     # framework warm-up
     _ = keras.ops.matmul(matrix_a, matrix_b)
-    _ = jit_compile(keras.ops.matmul)(matrix_a, matrix_b)
+    _ = compile(keras.ops.matmul)(matrix_a, matrix_b)
 
     # Create operations
     multiply_op = MultiplyOperation(cache_outputs=False)
@@ -415,7 +421,7 @@ def test_pipeline_with_gpu_operations():
             scalar=scalar,
         )
 
-    run_pipeline = jit_compile(run_pipeline)
+    run_pipeline = compile(run_pipeline)
 
     # Timing the pipeline
     print("\nTiming the pipeline:")
@@ -450,7 +456,7 @@ def test_pipeline_with_gpu_operations():
             scalar=scalar,
         )
 
-    run_pipeline_different_inputs = jit_compile(run_pipeline_different_inputs)
+    run_pipeline_different_inputs = compile(run_pipeline_different_inputs)
 
     print("\nWith cache (different inputs):")
     run_pipeline_different_inputs()  # Warm-up run
@@ -500,7 +506,7 @@ def test_pipeline_with_gpu_operations():
     import tensorflow as tf
 
     # run in async scope
-    model = jit_compile(model)
+    model = compile(model)
     _ = model(**inputs)  # Warm-up run
     start = perf_counter()
     for _ in range(20):
