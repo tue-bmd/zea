@@ -1,12 +1,15 @@
 """ Experimental version of the USBMD ops module"""
 
+# pylint: disable=arguments-differ
+
 import hashlib
 import inspect
 import json
 import os
 import timeit
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Tuple, Union
+from time import perf_counter
+from typing import Any, Dict, List, Union
 
 import numpy as np
 
@@ -20,17 +23,16 @@ import keras
 print("WARNING: This module is work in progress and may not work as expected!")
 
 
-"""
-TODO: jit_compile should allow for 2 different modes:
-    1. Operation-based: each operation is compiled separately by setting Operation(jit_compile=True).
-    This means the __call__ method is not compiled and most of the usbmd logic can be executed on the fly,
-    preserving the caching functionality. (DONE)
-    2. Pipeline-based: the entire pipeline is compiled by setting Pipeline(jit_compile=True).
-    This means the entire pipeline is compiled and executed as a single function, which may be faster but
-    may not preserve the caching functionality.
-"""
+# TODO: jit_compile should allow for 2 different modes:
+# 1. Operation-based: each operation is compiled separately by setting Operation(jit_compile=True).
+# This means the __call__ method is not compiled and most of the usbmd logic can be executed on the
+# fly, preserving the caching functionality. (DONE)
+# 2. Pipeline-based: the entire pipeline is compiled by setting Pipeline(jit_compile=True).
+# This means the entire pipeline is compiled and executed as a single function, which may be faster
+# but may not preserve the caching functionality (need to check).
 
 
+# TODO: check if inheriting from keras.Operation is better than using the ABC class.
 class Operation(ABC):
     """
     A base abstract class for operations in the pipeline with caching functionality.
@@ -62,7 +64,7 @@ class Operation(ABC):
         self._trace_signatures()
 
         # Compile the `call` method if necessary
-        self._call = compile(self.call) if self.jit_compile else self.call
+        self._call = jit(self.call) if self.jit_compile else self.call
 
     def _trace_signatures(self):
         """
@@ -72,12 +74,11 @@ class Operation(ABC):
         self._valid_keys = set(self._input_signature.parameters.keys())
 
     @abstractmethod
-    def call(self, **kwargs):
+    def call(self, *args, **kwargs):
         """
         Abstract method that defines the processing logic for the operation.
         Subclasses must implement this method.
         """
-        pass
 
     def set_input_cache(self, input_cache: Dict[str, Any]):
         """
@@ -162,94 +163,6 @@ class Operation(ABC):
         return combined_kwargs
 
 
-class Operation_keras(keras.Operation):
-    def __init__(
-        self, cache_outputs: bool = False, dtype: Any = None, name: str = None
-    ):
-        super().__init__(dtype=dtype, name=name)
-
-        self.cache_outputs = cache_outputs
-        self.input_cache = {}
-        self.output_cache = {}
-        self.valid_keys = None
-        self._trace_signatures()
-
-    def _trace_signatures(self):
-        """
-        Analyze and store the input/output signatures of the `process` method.
-        """
-        self._input_signature = inspect.signature(self.call)
-        # Extract valid keys from the signature for filtering
-        self._valid_keys = set(self.input_signature.parameters.keys())
-
-    def set_cache(self, cache: Dict[str, Any]):
-        """
-        Set a cache for inputs or outputs, then retrace the function if necessary.
-
-        :param cache: A dictionary containing cached inputs and/or outputs.
-        """
-        self.input_cache.update(cache.get("inputs", {}))
-        self.output_cache.update(cache.get("outputs", {}))
-        self._trace_signatures()  # Retrace after updating cache to ensure correctness.
-
-    @abstractmethod
-    def call(self, **kwargs):
-        """
-        Abstract method that defines the processing logic for the operation.
-        Subclasses must implement this method.
-        """
-        pass
-
-    def __call__(self, **kwargs) -> Dict:
-        """
-        Process the input keyword arguments and return the processed results.
-
-        :param kwargs: Keyword arguments to be processed.
-        :return: Combined input and output as kwargs.
-        """
-        # Merge cached inputs with provided ones
-        merged_kwargs = {**self.input_cache, **kwargs}
-
-        # Return cached output if available
-        if self.cache_outputs:
-
-            cache_key = self._hash_inputs(merged_kwargs)
-
-            if cache_key in self.output_cache:
-                return {**merged_kwargs, **self.output_cache[cache_key]}
-
-        # Filter kwargs to match the valid keys of the `process` method
-        filtered_kwargs = {
-            k: v for k, v in merged_kwargs.items() if k in self.valid_keys
-        }
-
-        # Call the processing function
-        processed_output = self.call(**filtered_kwargs)
-
-        # Ensure the output is always a dictionary
-        # if not isinstance(processed_output, dict):
-        #     raise TypeError(f"The `process` method must return a dictionary. Got {type(processed_output)}.")
-
-        # Merge outputs with inputs
-        combined_kwargs = {**merged_kwargs, **processed_output}
-
-        # Cache the result if caching is enabled
-        if self.cache_outputs:
-            self.output_cache[cache_key] = processed_output
-
-        return combined_kwargs
-
-    def _hash_inputs(self, kwargs: Dict) -> str:
-        """
-        Generate a hash for the given inputs to use as a cache key.
-
-        :param kwargs: Keyword arguments.
-        :return: A unique hash representing the inputs.
-        """
-        input_json = json.dumps(kwargs, sort_keys=True, default=str)
-        return hashlib.md5(input_json.encode()).hexdigest()
-
-
 class Pipeline:
     """
     A modular and flexible data pipeline class.
@@ -282,6 +195,8 @@ class Pipeline:
 
 
 class PipelineModel(keras.models.Model):
+    """Test pipeline that inherits from Keras Model."""
+
     def __init__(self, pipeline: Pipeline, **kwargs):
         super().__init__(**kwargs)
         self.pipeline = pipeline
@@ -295,7 +210,7 @@ class PipelineModel(keras.models.Model):
 ### TESTS ###
 
 
-def compile(func):
+def jit(func):
     """
     Applies JIT compilation to the given function based on the current Keras backend.
 
@@ -312,22 +227,22 @@ def compile(func):
 
     if backend == "tensorflow":
         try:
-            import tensorflow as tf
+            import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
             return tf.function(func, jit_compile=True)
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "TensorFlow is not installed. Please install it to use this backend."
-            )
+            ) from exc
     elif backend == "jax":
         try:
-            import jax
+            import jax  # pylint: disable=import-outside-toplevel
 
             return jax.jit(func)
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "JAX is not installed. Please install it to use this backend."
-            )
+            ) from exc
     else:
         print(
             f"Unsupported backend: {backend}. Supported backends are 'tensorflow' and 'jax'."
@@ -337,6 +252,8 @@ def compile(func):
 
 
 class MultiplyOperation(Operation):
+    """Multiply Operation for testing purposes."""
+
     def call(self, x, factor=1):
         """
         Multiplies the input x by the specified factor.
@@ -346,6 +263,8 @@ class MultiplyOperation(Operation):
 
 
 class AddOperation(Operation):
+    """Add Operation for testing purposes."""
+
     def call(self, result, y):
         """
         Adds the result from MultiplyOperation with y.
@@ -355,6 +274,8 @@ class AddOperation(Operation):
 
 
 class LargeMatrixMultiplicationOperation(Operation):
+    """Large Matrix Multiplication Operation for testing purposes."""
+
     def call(self, matrix_a, matrix_b):
         """
         Performs large matrix multiplication using Keras ops.
@@ -368,6 +289,8 @@ class LargeMatrixMultiplicationOperation(Operation):
 
 
 class ElementwiseMatrixOperation(Operation):
+    """Elementwise Matrix Operation for testing purposes."""
+
     def call(self, matrix, scalar):
         """
         Performs elementwise operations on a matrix (adds and multiplies by scalar).
@@ -394,7 +317,7 @@ def test_pipeline_with_gpu_operations():
 
     # framework warm-up
     _ = keras.ops.matmul(matrix_a, matrix_b)
-    _ = compile(keras.ops.matmul)(matrix_a, matrix_b)
+    _ = jit(keras.ops.matmul)(matrix_a, matrix_b)
 
     # Create operations
     multiply_op = MultiplyOperation(cache_outputs=False)
@@ -421,7 +344,7 @@ def test_pipeline_with_gpu_operations():
             scalar=scalar,
         )
 
-    run_pipeline = compile(run_pipeline)
+    run_pipeline = jit(run_pipeline)
 
     # Timing the pipeline
     print("\nTiming the pipeline:")
@@ -456,15 +379,12 @@ def test_pipeline_with_gpu_operations():
             scalar=scalar,
         )
 
-    run_pipeline_different_inputs = compile(run_pipeline_different_inputs)
+    run_pipeline_different_inputs = jit(run_pipeline_different_inputs)
 
     print("\nWith cache (different inputs):")
     run_pipeline_different_inputs()  # Warm-up run
     time = timeit.timeit(run_pipeline_different_inputs, number=N)
     print(f"Time per run: {time/N:.4f} seconds")
-
-    # test model
-    from ops import PipelineModel
 
     print("\n Without cache, keras model:")
     multiply_op = MultiplyOperation(cache_outputs=False)
@@ -494,23 +414,19 @@ def test_pipeline_with_gpu_operations():
 
     inputs = convert_dict_to_tensor(inputs)
 
-    from time import perf_counter, sleep
-
     _ = model(**inputs)  # Warm-up run
     start = perf_counter()
     for _ in range(20):
-        outputs = model(**inputs)
+        _ = model(**inputs)
     end = perf_counter()
     print(f"Time per run: {(end - start) / 100:.4f} seconds")
 
-    import tensorflow as tf
-
     # run in async scope
-    model = compile(model)
+    model = jit(model)
     _ = model(**inputs)  # Warm-up run
     start = perf_counter()
     for _ in range(20):
-        outputs = model(**inputs)
+        _ = model(**inputs)
     end = perf_counter()
     print(f"Time per run compiled: {(end - start) / 100:.4f} seconds")
 
