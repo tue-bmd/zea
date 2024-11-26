@@ -5,8 +5,9 @@ import timeit
 import hashlib
 import inspect
 from abc import ABC, abstractmethod
-from typing import Callable, Any, Tuple, Dict, List
+from typing import Callable, Any, Tuple, Dict, List, Union
 import numpy as np
+import json
 
 # Set the Keras backend
 # os.environ["KERAS_BACKEND"] = "jax"
@@ -20,30 +21,56 @@ from ops import Operation, Pipeline
 
 print("WARNING: This module is work in progress and may not work as expected!")
 
+
+"""
+TODO: jit_compile should allow for 2 different modes: 
+    1. Operation-based: each operation is compiled separately by setting Operation(jit_compile=True).
+    This means the __call__ method is not compiled and most of the usbmd logic can be executed on the fly,
+    preserving the caching functionality. (DONE)
+    2. Pipeline-based: the entire pipeline is compiled by setting Pipeline(jit_compile=True). 
+    This means the entire pipeline is compiled and executed as a single function, which may be faster but
+    may not preserve the caching functionality. 
+"""
+
+
 class Operation(ABC):
     """
     A base abstract class for operations in the pipeline with caching functionality.
     """
 
-    def __init__(self, cache_outputs: bool = False):
+    def __init__(
+        self,
+        cache_inputs: Union[bool, List[str]] = False,
+        cache_outputs: bool = False,
+        jit_compile=True,
+    ):
         """
-        Initialize the Operation and analyze its input/output signature.
+        args:
+            cache_inputs: A list of input keys to cache or True to cache all inputs
+            cache_outputs: A list of output keys to cache or True to cache all outputs
+            jit_compile: Whether to JIT compile the 'call' method for faster execution
+        """
+        self.cache_inputs = cache_inputs
+        self.cache_outputs = cache_outputs
+        self.jit_compile = jit_compile
 
-        :param cache_outputs: If True, outputs will be cached for identical inputs.
-        """
-        self.input_signature = None
-        self.valid_keys = None  # Keys valid for the `process` method
-        self.input_cache = {}  # Cached default inputs
-        self.output_cache = {}  # Cached outputs
-        self.cache_outputs = cache_outputs  # Whether to cache outputs
+        # Initialize input and output caches
+        self._input_cache = {}
+        self._output_cache = {}
+
+        # Obtain the input signature of the `call` method
+        self._input_signature = None
+        self._valid_keys = None  # Keys valid for the `call` method
         self._trace_signatures()
+
+        # Compile the `call` method if necessary
+        self.call = jit_compile(self.call) if self.jit_compile else self.call
 
     def _trace_signatures(self):
         """
-        Analyze and store the input/output signatures of the `process` method.
+        Analyze and store the input/output signatures of the `call` method.
         """
         self.input_signature = inspect.signature(self.call)
-        # Extract valid keys from the signature for filtering
         self.valid_keys = set(self.input_signature.parameters.keys())
 
     @abstractmethod
@@ -54,15 +81,24 @@ class Operation(ABC):
         """
         pass
 
-    def set_cache(self, cache: Dict[str, Any]):
+    def set_cache(self, input_cache: Dict[str, Any], output_cache: Dict[str, Any]):
         """
         Set a cache for inputs or outputs, then retrace the function if necessary.
 
-        :param cache: A dictionary containing cached inputs and/or outputs.
+        args:
+            input_cache: A dictionary containing cached inputs.
+            output_cache: A dictionary containing cached outputs.
         """
-        self.input_cache.update(cache.get("inputs", {}))
-        self.output_cache.update(cache.get("outputs", {}))
+        self.input_cache.update(input_cache)
+        self.output_cache.update(output_cache)
         self._trace_signatures()  # Retrace after updating cache to ensure correctness.
+
+    def clear_cache(self):
+        """
+        Clear the input and output caches.
+        """
+        self.input_cache.clear()
+        self.output_cache.clear()
 
     def _hash_inputs(self, kwargs: Dict) -> str:
         """
@@ -82,38 +118,48 @@ class Operation(ABC):
         :return: Combined input and output as kwargs.
         """
         # Merge cached inputs with provided ones
-        merged_kwargs = {**self.input_cache, **kwargs}
+        merged_kwargs = {**self._input_cache, **kwargs}
 
         # Return cached output if available
         if self.cache_outputs:
-
             cache_key = self._hash_inputs(merged_kwargs)
+            if cache_key in self._output_cache:
+                return {**merged_kwargs, **self._output_cache[cache_key]}
 
-            if cache_key in self.output_cache:
-                return {**merged_kwargs, **self.output_cache[cache_key]}
-
-        # Filter kwargs to match the valid keys of the `process` method
-        filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in self.valid_keys}
+        # Filter kwargs to match the valid keys of the `call` method
+        filtered_kwargs = {
+            k: v for k, v in merged_kwargs.items() if k in self._valid_keys
+        }
 
         # Call the processing function
         processed_output = self.call(**filtered_kwargs)
 
         # Ensure the output is always a dictionary
         if not isinstance(processed_output, dict):
-            raise TypeError(f"The `process` method must return a dictionary. Got {type(processed_output)}.")
+            raise TypeError(
+                f"The `call` method must return a dictionary. Got {type(processed_output)}."
+            )
 
         # Merge outputs with inputs
         combined_kwargs = {**merged_kwargs, **processed_output}
 
         # Cache the result if caching is enabled
         if self.cache_outputs:
-            self.output_cache[cache_key] = processed_output
+            if isinstance(self.cache_outputs, list):
+                cached_output = {
+                    k: v for k, v in processed_output.items() if k in self.cache_outputs
+                }
+            else:
+                cached_output = processed_output
+            self._output_cache[cache_key] = cached_output
 
         return combined_kwargs
-    
+
 
 class Operation_keras(keras.Operation):
-    def __init__(self, cache_outputs: bool = False, dtype: Any = None, name: str = None):
+    def __init__(
+        self, cache_outputs: bool = False, dtype: Any = None, name: str = None
+    ):
         super().__init__(dtype=dtype, name=name)
 
         self.cache_outputs = cache_outputs
@@ -167,7 +213,9 @@ class Operation_keras(keras.Operation):
                 return {**merged_kwargs, **self.output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `process` method
-        filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in self.valid_keys}
+        filtered_kwargs = {
+            k: v for k, v in merged_kwargs.items() if k in self.valid_keys
+        }
 
         # Call the processing function
         processed_output = self.call(**filtered_kwargs)
@@ -194,8 +242,6 @@ class Operation_keras(keras.Operation):
         """
         input_json = json.dumps(kwargs, sort_keys=True, default=str)
         return hashlib.md5(input_json.encode()).hexdigest()
-
-
 
 
 class Pipeline:
@@ -228,6 +274,7 @@ class Pipeline:
             kwargs = operation(**kwargs)  # Only kwargs are passed and returned
         return kwargs
 
+
 class PipelineModel(keras.models.Model):
     def __init__(self, pipeline: Pipeline, **kwargs):
         super().__init__(**kwargs)
@@ -237,11 +284,10 @@ class PipelineModel(keras.models.Model):
         # Assuming inputs is a dictionary of inputs required by the pipeline
         outputs = self.pipeline.run(**inputs)
         return outputs
-    
-
 
 
 ### TESTS ###
+
 
 def jit_compile(func):
     """
@@ -261,26 +307,35 @@ def jit_compile(func):
     if backend == "tensorflow":
         try:
             import tensorflow as tf
+
             return tf.function(func, jit_compile=True)
         except ImportError:
-            raise ImportError("TensorFlow is not installed. Please install it to use this backend.")
+            raise ImportError(
+                "TensorFlow is not installed. Please install it to use this backend."
+            )
     elif backend == "jax":
         try:
             import jax
+
             return jax.jit(func)
         except ImportError:
-            raise ImportError("JAX is not installed. Please install it to use this backend.")
+            raise ImportError(
+                "JAX is not installed. Please install it to use this backend."
+            )
     else:
-        print(f"Unsupported backend: {backend}. Supported backends are 'tensorflow' and 'jax'.")
+        print(
+            f"Unsupported backend: {backend}. Supported backends are 'tensorflow' and 'jax'."
+        )
         print("Falling back to non-compiled mode.")
         return func
+
 
 class MultiplyOperation(Operation):
     def call(self, x, factor=1):
         """
         Multiplies the input x by the specified factor.
         """
-        #print(f"Processing MultiplyOperation: x={x}, factor={factor}")
+        # print(f"Processing MultiplyOperation: x={x}, factor={factor}")
         return {"result": keras.ops.multiply(x, factor)}
 
 
@@ -289,8 +344,9 @@ class AddOperation(Operation):
         """
         Adds the result from MultiplyOperation with y.
         """
-        #print(f"Processing AddOperation: result={result}, y={y}")
+        # print(f"Processing AddOperation: result={result}, y={y}")
         return {"final_result": keras.ops.add(result, y)}
+
 
 class LargeMatrixMultiplicationOperation(Operation):
     def call(self, matrix_a, matrix_b):
@@ -304,17 +360,17 @@ class LargeMatrixMultiplicationOperation(Operation):
         result3 = keras.ops.matmul(result2, matrix_b)
         return {"matrix_result": result3}
 
+
 class ElementwiseMatrixOperation(Operation):
     def call(self, matrix, scalar):
         """
         Performs elementwise operations on a matrix (adds and multiplies by scalar).
         """
-        #print("Processing ElementwiseMatrixOperation...")
+        # print("Processing ElementwiseMatrixOperation...")
         # Perform elementwise addition and multiplication
         result = keras.ops.add(matrix, scalar)
         result = keras.ops.multiply(result, scalar)
         return {"elementwise_result": result}
-
 
 
 def test_pipeline_with_gpu_operations():
@@ -329,7 +385,6 @@ def test_pipeline_with_gpu_operations():
 
     matrix_a = keras.ops.convert_to_tensor(matrix_a)
     matrix_b = keras.ops.convert_to_tensor(matrix_b)
-
 
     # framework warm-up
     _ = keras.ops.matmul(matrix_a, matrix_b)
@@ -350,7 +405,15 @@ def test_pipeline_with_gpu_operations():
 
     # Define the run function
     def run_pipeline():
-        pipeline.run(x=2, factor=3, y=5, matrix_a=matrix_a, matrix_b=matrix_b, matrix=matrix_a, scalar=scalar)
+        pipeline.run(
+            x=2,
+            factor=3,
+            y=5,
+            matrix_a=matrix_a,
+            matrix_b=matrix_b,
+            matrix=matrix_a,
+            scalar=scalar,
+        )
 
     run_pipeline = jit_compile(run_pipeline)
 
@@ -371,24 +434,32 @@ def test_pipeline_with_gpu_operations():
     elementwise_op.cache_outputs = False
 
     print("\nWith cache:")
-    run_pipeline() # Warm-up run
+    run_pipeline()  # Warm-up run
     time = timeit.timeit(run_pipeline, number=N)
     print(f"Time per run: {time/N:.4f} seconds")
 
     # With cache and different inputs
     def run_pipeline_different_inputs():
-        pipeline.run(x=2, factor=4, y=5, matrix_a=matrix_a, matrix_b=matrix_b, matrix=matrix_a, scalar=scalar)
+        pipeline.run(
+            x=2,
+            factor=4,
+            y=5,
+            matrix_a=matrix_a,
+            matrix_b=matrix_b,
+            matrix=matrix_a,
+            scalar=scalar,
+        )
+
     run_pipeline_different_inputs = jit_compile(run_pipeline_different_inputs)
 
     print("\nWith cache (different inputs):")
-    run_pipeline_different_inputs() # Warm-up run
+    run_pipeline_different_inputs()  # Warm-up run
     time = timeit.timeit(run_pipeline_different_inputs, number=N)
     print(f"Time per run: {time/N:.4f} seconds")
 
-
-
     # test model
     from ops import PipelineModel
+
     print("\n Without cache, keras model:")
     multiply_op = MultiplyOperation(cache_outputs=False)
     add_op = AddOperation(cache_outputs=False)
@@ -409,9 +480,8 @@ def test_pipeline_with_gpu_operations():
         "matrix_a": matrix_a,
         "matrix_b": matrix_b,
         "matrix": matrix_a,
-        "scalar": scalar
+        "scalar": scalar,
     }
-
 
     def convert_dict_to_tensor(inputs):
         return {k: keras.ops.convert_to_tensor(v) for k, v in inputs.items()}
@@ -419,13 +489,13 @@ def test_pipeline_with_gpu_operations():
     inputs = convert_dict_to_tensor(inputs)
 
     from time import perf_counter, sleep
+
     _ = model(**inputs)  # Warm-up run
     start = perf_counter()
     for _ in range(20):
         outputs = model(**inputs)
     end = perf_counter()
     print(f"Time per run: {(end - start) / 100:.4f} seconds")
-
 
     import tensorflow as tf
 
@@ -441,4 +511,3 @@ def test_pipeline_with_gpu_operations():
 
 if __name__ == "__main__":
     test_pipeline_with_gpu_operations()
-
