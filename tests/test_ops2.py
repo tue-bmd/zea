@@ -1,6 +1,6 @@
 """Tests for the Operation and Pipeline classes in ops_v2.py."""
 
-# pylint: disable=arguments-differ
+# pylint: disable=arguments-differ, abstract-class-instantiated
 
 import keras
 import pytest
@@ -47,8 +47,9 @@ def test_operation_initialization(test_operation):
 
 def test_operation_abstract_call():
     """Ensures Operation cannot be instantiated directly."""
+
     class IncompleteOperation(Operation):
-        pass
+        """Incomplete Operation class for testiing."""
 
     with pytest.raises(TypeError, match="Can't instantiate abstract class"):
         _ = IncompleteOperation()
@@ -114,7 +115,10 @@ def test_operation_empty_input(test_operation):
 
 def test_operation_large_data_inputs():
     """Tests operation with large data inputs."""
+
     class MatrixMultiplyOperation(Operation):
+        """Matrix multiplication operation for testing."""
+
         def call(self, matrix_a, matrix_b):
             return {"result": keras.ops.dot(matrix_a, matrix_b)}
 
