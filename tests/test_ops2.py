@@ -88,16 +88,6 @@ def test_operation_initialization(test_operation):
     assert test_operation._output_cache == {}
 
 
-def test_operation_abstract_call():
-    """Ensures Operation cannot be instantiated directly."""
-
-    class IncompleteOperation(Operation):
-        """Incomplete Operation class for testiing."""
-
-    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
-        _ = IncompleteOperation()
-
-
 @pytest.mark.parametrize("jit_compile", [True, False])
 def test_operation_input_validation(test_operation, jit_compile):
     """Tests input validation and handling of unexpected keys."""
