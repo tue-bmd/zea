@@ -12,7 +12,10 @@ from usbmd.ops import GaussianBlur, LeeFilter
 
 @pytest.mark.parametrize("sigma", [0.5, 1.0, 2.0])
 def test_gaussian_blur(sigma):
-    # output for default args should be equalivalent to scipy.ndimage.gaussian_filter
+    """
+    Test `ops.GaussianBlur against scipy.ndimage.gaussian_filter.`
+    `GaussianBlur` with default args should be equivalent to scipy.
+    """
     blur = GaussianBlur(sigma=sigma, with_batch_dim=False)
 
     rng = np.random.default_rng(seed=42)
@@ -27,6 +30,9 @@ def test_gaussian_blur(sigma):
 
 @pytest.mark.parametrize("sigma", [1.0, 2.0])
 def test_lee_filter(sigma):
+    """
+    Test `ops.LeeFilter, only checks if variance is reduced.`
+    """
     rng = np.random.default_rng(seed=42)
     image = rng.normal(size=(32, 32)).astype(np.float32)
 
