@@ -1749,21 +1749,32 @@ class GaussianBlur(Operation):
     Src: https://docs.scipy.org/doc/scipy/reference/generated/scipy.ndimage.gaussian_filter.html
     """
 
-    def __init__(self, kernel_size: int, sigma: float, pad_mode="symmetric", **kwargs):
+    def __init__(
+        self,
+        sigma: float,
+        kernel_size: int | None = None,
+        pad_mode="symmetric",
+        truncate=4.0,
+        **kwargs,
+    ):
         """
         Args:
-            kernel_size (int): The size of the kernel to be used.
             sigma (float): Standard deviation for Gaussian kernel. The standard deviations of the
                 Gaussian filter are given for each axis as a sequence, or as a single number,
                 in which case it is equal for all axes.
+            kernel_size (int, optional): The size of the kernel to be used. If None, the kernel
+                size is calculated based on the sigma and truncate. Default is None.
             pad_mode (str): Padding mode for the input image. Default is 'symmetric'.
                 See [keras docs](https://www.tensorflow.org/api_docs/python/tf/keras/ops/pad) for
                 all options and [tensoflow docs](https://www.tensorflow.org/api_docs/python/tf/pad)
                 for some examples. Note that the naming differs from scipy.ndimage.gaussian_filter!
         """
-
         super().__init__(**kwargs)
-        self.kernel_size = kernel_size
+        if kernel_size is None:
+            radius = round(truncate * sigma)
+            self.kernel_size = 2 * radius + 1
+        else:
+            self.kernel_size = kernel_size
         self.sigma = sigma
         self.pad_mode = pad_mode
         self.radius = self.kernel_size // 2
@@ -1819,22 +1830,26 @@ class GaussianBlur(Operation):
 
 class LeeFilter(Operation):
     """
-    Speckle noise removal using Lee filter. Uses Gaussian filter for local statistics.
+    The Lee filter is a speckle reduction filter commonly used insynthetic aperture radar (SAR)
+    image processing. It smooths the image while preserving edges and details. This implementation
+    uses Gaussian filter for local statistics and treats channels independently.
     Based on: https://stackoverflow.com/questions/39785970/speckle-lee-filter-in-python
     """
 
-    def __init__(
-        self, kernel_size=None, sigma=3, truncate=4.0, pad_mode="reflect", **kwargs
-    ):
+    def __init__(self, sigma=3, kernel_size=None, pad_mode="symmetric", **kwargs):
+        """
+        Args:
+            sigma (float, optional): Standard deviation for Gaussian kernel. Default is 3.
+            kernel_size (int or tuple, optional): Size of the Gaussian kernel. If None,
+                it will be calculated based on sigma. See `GaussianBlur` for more details.
+                Default is None.
+            pad_mode (str, optional): Padding mode to be used before Gaussian blur.
+                Default is "symmetric".
+        """
+
         super().__init__(**kwargs)
         self.sigma = sigma
-
-        # If kernel_size is not provided, calculate it based on sigma and truncate (same as scipy)
-        if kernel_size is None:
-            radius = round(truncate * sigma)
-            self.kernel_size = 2 * radius + 1
-        else:
-            self.kernel_size = kernel_size
+        self.kernel_size = kernel_size
 
         self.blur = GaussianBlur(
             kernel_size=self.kernel_size,
@@ -1857,6 +1872,7 @@ class LeeFilter(Operation):
         img_sqr_mean = self.blur(data**2)
         img_variance = img_sqr_mean - img_mean**2
 
+        # treating channels independently!
         overall_variance = ops.var(data, axis=(-2, -3), keepdims=True)
 
         img_weights = img_variance / (img_variance + overall_variance)
