@@ -251,55 +251,21 @@ def jit(func):
         return func
 
 
-class MultiplyOperation(Operation):
-    """Multiply Operation for testing purposes."""
 
-    def call(self, x, factor=1):
+class Merge(Operation):
+    """Operation that merges sets of input dictionaries."""
+
+    def call(self, *args) -> Dict:
         """
-        Multiplies the input x by the specified factor.
+        Merges the input dictionaries. Priority is given to the last input.
         """
-        # print(f"Processing MultiplyOperation: x={x}, factor={factor}")
-        return {"result": keras.ops.multiply(x, factor)}
+        merged = {}
+        for arg in args:
+            if not isinstance(arg, dict):
+                raise TypeError("All inputs must be dictionaries.")
+            merged.update(arg)
+        return merged
 
-
-class AddOperation(Operation):
-    """Add Operation for testing purposes."""
-
-    def call(self, result, y):
-        """
-        Adds the result from MultiplyOperation with y.
-        """
-        # print(f"Processing AddOperation: result={result}, y={y}")
-        return {"final_result": keras.ops.add(result, y)}
-
-
-class LargeMatrixMultiplicationOperation(Operation):
-    """Large Matrix Multiplication Operation for testing purposes."""
-
-    def call(self, matrix_a, matrix_b):
-        """
-        Performs large matrix multiplication using Keras ops.
-        """
-        # print("Processing LargeMatrixMultiplicationOperation...")
-        # Perform matrix multiplication
-        result = keras.ops.matmul(matrix_a, matrix_b)
-        result2 = keras.ops.matmul(result, matrix_a)
-        result3 = keras.ops.matmul(result2, matrix_b)
-        return {"matrix_result": result3}
-
-
-class ElementwiseMatrixOperation(Operation):
-    """Elementwise Matrix Operation for testing purposes."""
-
-    def call(self, matrix, scalar):
-        """
-        Performs elementwise operations on a matrix (adds and multiplies by scalar).
-        """
-        # print("Processing ElementwiseMatrixOperation...")
-        # Perform elementwise addition and multiplication
-        result = keras.ops.add(matrix, scalar)
-        result = keras.ops.multiply(result, scalar)
-        return {"elementwise_result": result}
 
 
 def test_pipeline_with_gpu_operations():

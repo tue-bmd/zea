@@ -5,23 +5,70 @@
 import keras
 import pytest
 
-from usbmd.ops_v2 import AddOperation, MultiplyOperation, Operation, Pipeline
+from usbmd.ops_v2 import Operation, Pipeline
 
 # TODO: Run tests for all backends
 
 
-class TestOperation(Operation):
-    """Simple addition operation for testing."""
+@pytest.fixture
+class MultiplyOperation(Operation):
+    """Multiply Operation for testing purposes."""
 
-    def call(self, x, y=0):
-        """Adds `x` and `y`."""
-        return {"result": x + y}
+    def call(self, x, y):
+        """
+        Multiplies the input x by the specified factor.
+        """
+        # print(f"Processing MultiplyOperation: x={x}, factor={factor}")
+        return {"result": keras.ops.multiply(x, y)}
+
+
+@pytest.fixture
+class AddOperation(Operation):
+    """Add Operation for testing purposes."""
+
+    def call(self, result, y):
+        """
+        Adds the result from MultiplyOperation with y.
+        """
+        # print(f"Processing AddOperation: result={result}, y={y}")
+        return {"final_result": keras.ops.add(result, y)}
+
+
+@pytest.fixture
+class LargeMatrixMultiplicationOperation(Operation):
+    """Large Matrix Multiplication Operation for testing purposes."""
+
+    def call(self, matrix_a, matrix_b):
+        """
+        Performs large matrix multiplication using Keras ops.
+        """
+        # print("Processing LargeMatrixMultiplicationOperation...")
+        # Perform matrix multiplication
+        result = keras.ops.matmul(matrix_a, matrix_b)
+        result2 = keras.ops.matmul(result, matrix_a)
+        result3 = keras.ops.matmul(result2, matrix_b)
+        return {"matrix_result": result3}
+
+
+@pytest.fixture
+class ElementwiseMatrixOperation(Operation):
+    """Elementwise Matrix Operation for testing purposes."""
+
+    def call(self, matrix, scalar):
+        """
+        Performs elementwise operations on a matrix (adds and multiplies by scalar).
+        """
+        # print("Processing ElementwiseMatrixOperation...")
+        # Perform elementwise addition and multiplication
+        result = keras.ops.add(matrix, scalar)
+        result = keras.ops.multiply(result, scalar)
+        return {"elementwise_result": result}
 
 
 @pytest.fixture
 def test_operation():
-    """Returns a TestOperation instance."""
-    return TestOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
+    """Returns a MultiplyOperation instance."""
+    return MultiplyOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
 
 
 @pytest.fixture
@@ -86,13 +133,13 @@ def test_operation_input_caching(test_operation, jit_compile):
 
 def test_operation_jit_compilation():
     """Ensures JIT compilation works."""
-    op = TestOperation(jit_compile=True)
+    op = MultiplyOperation(jit_compile=True)
     assert callable(op.call)
 
 
 def test_operation_cache_persistence():
     """Tests persistence of output cache."""
-    op = TestOperation(cache_outputs=True)
+    op = MultiplyOperation(cache_outputs=True)
     result1 = op(x=5, y=3)
     assert result1["result"] == 8
     assert len(op._output_cache) == 1
