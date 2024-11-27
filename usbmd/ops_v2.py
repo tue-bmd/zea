@@ -251,7 +251,6 @@ def jit(func):
         return func
 
 
-
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
@@ -267,135 +266,134 @@ class Merge(Operation):
         return merged
 
 
+# def test_pipeline_with_gpu_operations():
+#     """
+#     A test function to validate the pipeline with GPU-heavy operations and measure execution times.
+#     """
+#     # Initialize matrices
+#     matrix_size = 2048
+#     matrix_a = np.random.rand(matrix_size, matrix_size).astype(np.float32)
+#     matrix_b = np.random.rand(matrix_size, matrix_size).astype(np.float32)
+#     scalar = 2.5
 
-def test_pipeline_with_gpu_operations():
-    """
-    A test function to validate the pipeline with GPU-heavy operations and measure execution times.
-    """
-    # Initialize matrices
-    matrix_size = 2048
-    matrix_a = np.random.rand(matrix_size, matrix_size).astype(np.float32)
-    matrix_b = np.random.rand(matrix_size, matrix_size).astype(np.float32)
-    scalar = 2.5
+#     matrix_a = keras.ops.convert_to_tensor(matrix_a)
+#     matrix_b = keras.ops.convert_to_tensor(matrix_b)
 
-    matrix_a = keras.ops.convert_to_tensor(matrix_a)
-    matrix_b = keras.ops.convert_to_tensor(matrix_b)
+#     # framework warm-up
+#     _ = keras.ops.matmul(matrix_a, matrix_b)
+#     _ = jit(keras.ops.matmul)(matrix_a, matrix_b)
 
-    # framework warm-up
-    _ = keras.ops.matmul(matrix_a, matrix_b)
-    _ = jit(keras.ops.matmul)(matrix_a, matrix_b)
+#     # Create operations
+#     multiply_op = MultiplyOperation(cache_outputs=False)
+#     add_op = AddOperation(cache_outputs=False)
+#     large_matmul_op = LargeMatrixMultiplicationOperation(cache_outputs=False)
+#     elementwise_op = ElementwiseMatrixOperation(cache_outputs=False)
 
-    # Create operations
-    multiply_op = MultiplyOperation(cache_outputs=False)
-    add_op = AddOperation(cache_outputs=False)
-    large_matmul_op = LargeMatrixMultiplicationOperation(cache_outputs=False)
-    elementwise_op = ElementwiseMatrixOperation(cache_outputs=False)
+#     # Create a pipeline and add operations
+#     pipeline = Pipeline()
+#     pipeline.add_operation(multiply_op)
+#     pipeline.add_operation(add_op)
+#     pipeline.add_operation(large_matmul_op)
+#     pipeline.add_operation(elementwise_op)
 
-    # Create a pipeline and add operations
-    pipeline = Pipeline()
-    pipeline.add_operation(multiply_op)
-    pipeline.add_operation(add_op)
-    pipeline.add_operation(large_matmul_op)
-    pipeline.add_operation(elementwise_op)
+#     # Define the run function
+#     def run_pipeline():
+#         pipeline.run(
+#             x=2,
+#             factor=3,
+#             y=5,
+#             matrix_a=matrix_a,
+#             matrix_b=matrix_b,
+#             matrix=matrix_a,
+#             scalar=scalar,
+#         )
 
-    # Define the run function
-    def run_pipeline():
-        pipeline.run(
-            x=2,
-            factor=3,
-            y=5,
-            matrix_a=matrix_a,
-            matrix_b=matrix_b,
-            matrix=matrix_a,
-            scalar=scalar,
-        )
+#     run_pipeline = jit(run_pipeline)
 
-    run_pipeline = jit(run_pipeline)
+#     # Timing the pipeline
+#     print("\nTiming the pipeline:")
 
-    # Timing the pipeline
-    print("\nTiming the pipeline:")
+#     N = 20  # Number of iterations for timing
 
-    N = 20  # Number of iterations for timing
+#     # No cache
+#     print("\nNo cache:")
+#     time = timeit.timeit(run_pipeline, number=N)
+#     print(f"Time per run: {time/N:.4f} seconds")
 
-    # No cache
-    print("\nNo cache:")
-    time = timeit.timeit(run_pipeline, number=N)
-    print(f"Time per run: {time/N:.4f} seconds")
+#     # With cache
+#     multiply_op.cache_outputs = True
+#     add_op.cache_outputs = True
+#     large_matmul_op.cache_outputs = True
+#     elementwise_op.cache_outputs = False
 
-    # With cache
-    multiply_op.cache_outputs = True
-    add_op.cache_outputs = True
-    large_matmul_op.cache_outputs = True
-    elementwise_op.cache_outputs = False
+#     print("\nWith cache:")
+#     run_pipeline()  # Warm-up run
+#     time = timeit.timeit(run_pipeline, number=N)
+#     print(f"Time per run: {time/N:.4f} seconds")
 
-    print("\nWith cache:")
-    run_pipeline()  # Warm-up run
-    time = timeit.timeit(run_pipeline, number=N)
-    print(f"Time per run: {time/N:.4f} seconds")
+#     # With cache and different inputs
+#     def run_pipeline_different_inputs():
+#         pipeline.run(
+#             x=2,
+#             factor=4,
+#             y=5,
+#             matrix_a=matrix_a,
+#             matrix_b=matrix_b,
+#             matrix=matrix_a,
+#             scalar=scalar,
+#         )
 
-    # With cache and different inputs
-    def run_pipeline_different_inputs():
-        pipeline.run(
-            x=2,
-            factor=4,
-            y=5,
-            matrix_a=matrix_a,
-            matrix_b=matrix_b,
-            matrix=matrix_a,
-            scalar=scalar,
-        )
+#     run_pipeline_different_inputs = jit(run_pipeline_different_inputs)
 
-    run_pipeline_different_inputs = jit(run_pipeline_different_inputs)
+#     print("\nWith cache (different inputs):")
+#     run_pipeline_different_inputs()  # Warm-up run
+#     time = timeit.timeit(run_pipeline_different_inputs, number=N)
+#     print(f"Time per run: {time/N:.4f} seconds")
 
-    print("\nWith cache (different inputs):")
-    run_pipeline_different_inputs()  # Warm-up run
-    time = timeit.timeit(run_pipeline_different_inputs, number=N)
-    print(f"Time per run: {time/N:.4f} seconds")
+#     print("\n Without cache, keras model:")
+#     multiply_op = MultiplyOperation(cache_outputs=False)
+#     add_op = AddOperation(cache_outputs=False)
+#     large_matmul_op = LargeMatrixMultiplicationOperation(cache_outputs=False)
+#     elementwise_op = ElementwiseMatrixOperation(cache_outputs=False)
 
-    print("\n Without cache, keras model:")
-    multiply_op = MultiplyOperation(cache_outputs=False)
-    add_op = AddOperation(cache_outputs=False)
-    large_matmul_op = LargeMatrixMultiplicationOperation(cache_outputs=False)
-    elementwise_op = ElementwiseMatrixOperation(cache_outputs=False)
+#     pipeline = Pipeline()
+#     pipeline.add_operation(multiply_op)
+#     pipeline.add_operation(add_op)
+#     pipeline.add_operation(large_matmul_op)
+#     pipeline.add_operation(elementwise_op)
+#     model = PipelineModel(pipeline)
 
-    pipeline = Pipeline()
-    pipeline.add_operation(multiply_op)
-    pipeline.add_operation(add_op)
-    pipeline.add_operation(large_matmul_op)
-    pipeline.add_operation(elementwise_op)
-    model = PipelineModel(pipeline)
+#     inputs = {
+#         "x": 2,
+#         "factor": 3,
+#         "y": 5,
+#         "matrix_a": matrix_a,
+#         "matrix_b": matrix_b,
+#         "matrix": matrix_a,
+#         "scalar": scalar,
+#     }
 
-    inputs = {
-        "x": 2,
-        "factor": 3,
-        "y": 5,
-        "matrix_a": matrix_a,
-        "matrix_b": matrix_b,
-        "matrix": matrix_a,
-        "scalar": scalar,
-    }
+#     def convert_dict_to_tensor(inputs):
+#         return {k: keras.ops.convert_to_tensor(v) for k, v in inputs.items()}
 
-    def convert_dict_to_tensor(inputs):
-        return {k: keras.ops.convert_to_tensor(v) for k, v in inputs.items()}
+#     inputs = convert_dict_to_tensor(inputs)
 
-    inputs = convert_dict_to_tensor(inputs)
+#     _ = model(**inputs)  # Warm-up run
+#     start = perf_counter()
+#     for _ in range(20):
+#         _ = model(**inputs)
+#     end = perf_counter()
+#     print(f"Time per run: {(end - start) / 100:.4f} seconds")
 
-    _ = model(**inputs)  # Warm-up run
-    start = perf_counter()
-    for _ in range(20):
-        _ = model(**inputs)
-    end = perf_counter()
-    print(f"Time per run: {(end - start) / 100:.4f} seconds")
-
-    # run in async scope
-    model = jit(model)
-    _ = model(**inputs)  # Warm-up run
-    start = perf_counter()
-    for _ in range(20):
-        _ = model(**inputs)
-    end = perf_counter()
-    print(f"Time per run compiled: {(end - start) / 100:.4f} seconds")
+#     # run in async scope
+#     model = jit(model)
+#     _ = model(**inputs)  # Warm-up run
+#     start = perf_counter()
+#     for _ in range(20):
+#         _ = model(**inputs)
+#     end = perf_counter()
+#     print(f"Time per run compiled: {(end - start) / 100:.4f} seconds")
 
 
-if __name__ == "__main__":
-    test_pipeline_with_gpu_operations()
+# if __name__ == "__main__":
+#     test_pipeline_with_gpu_operations()
