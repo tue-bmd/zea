@@ -10,7 +10,6 @@ from usbmd.ops_v2 import Operation, Pipeline
 # TODO: Run tests for all backends
 
 
-@pytest.fixture
 class MultiplyOperation(Operation):
     """Multiply Operation for testing purposes."""
 
@@ -22,19 +21,17 @@ class MultiplyOperation(Operation):
         return {"result": keras.ops.multiply(x, y)}
 
 
-@pytest.fixture
 class AddOperation(Operation):
     """Add Operation for testing purposes."""
 
-    def call(self, result, y):
+    def call(self, x, y):
         """
         Adds the result from MultiplyOperation with y.
         """
         # print(f"Processing AddOperation: result={result}, y={y}")
-        return {"final_result": keras.ops.add(result, y)}
+        return {"result": keras.ops.add(x, y)}
 
 
-@pytest.fixture
 class LargeMatrixMultiplicationOperation(Operation):
     """Large Matrix Multiplication Operation for testing purposes."""
 
@@ -50,7 +47,6 @@ class LargeMatrixMultiplicationOperation(Operation):
         return {"matrix_result": result3}
 
 
-@pytest.fixture
 class ElementwiseMatrixOperation(Operation):
     """Elementwise Matrix Operation for testing purposes."""
 
@@ -68,7 +64,7 @@ class ElementwiseMatrixOperation(Operation):
 @pytest.fixture
 def test_operation():
     """Returns a MultiplyOperation instance."""
-    return MultiplyOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
+    return AddOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
 
 
 @pytest.fixture
@@ -133,13 +129,13 @@ def test_operation_input_caching(test_operation, jit_compile):
 
 def test_operation_jit_compilation():
     """Ensures JIT compilation works."""
-    op = MultiplyOperation(jit_compile=True)
+    op = AddOperation(jit_compile=True)
     assert callable(op.call)
 
 
 def test_operation_cache_persistence():
     """Tests persistence of output cache."""
-    op = MultiplyOperation(cache_outputs=True)
+    op = AddOperation(cache_outputs=True)
     result1 = op(x=5, y=3)
     assert result1["result"] == 8
     assert len(op._output_cache) == 1
