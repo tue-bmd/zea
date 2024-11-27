@@ -253,27 +253,30 @@ class Pipeline(keras.Model):
         else:
             processing_func = self._jitted_process
 
-        if self.device:
-            return self.on_device(
-                processing_func, data, device=self.device, return_numpy=return_numpy
-            )
-        data_out = processing_func(data)
+        kwargs = self.
 
         if return_numpy:
             return keras.ops.convert_to_numpy(data_out)
         return data_out
 
-    def __call__(self, *args, **kwargs):
-        super().__call__(*args, **kwargs)
+    def prepare_input(self, *args)
+        """ Convert input data and parameters to dictionary of tensors following the CCC"""
+
+
+        return kwargs
+
+    def prepare_output(self, kwargs):
+        """ Convert output data to dictionary of tensors following the CCC"""
+
+        return data_out
 
     def run(self, *args, **kwargs):
         """Execute all operations in the pipeline"""
 
         # TODO: compatiblity with Stack operation
         for operation in self.operations:
-                kwargs = operation(*args, **kwargs) # TODO: check if args are needed
+            kwargs = operation(*args, **kwargs)  # TODO: check if args are needed
         return kwargs
-
 
     @property
     def with_batch_dim(self):
@@ -318,8 +321,6 @@ class Pipeline(keras.Model):
             return on_device_jax(func, data, device=device, return_numpy=return_numpy)
         else:
             raise ValueError(f"Unsupported operations package {backend}.")
-
-
 
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
@@ -441,35 +442,35 @@ class Pipeline(keras.Model):
             return device
 
 
-class Pipeline:
-    """
-    A modular and flexible data pipeline class.
-    """
+# class Pipeline:
+#     """
+#     A modular and flexible data pipeline class.
+#     """
 
-    def __init__(self):
-        """
-        Initialize an empty pipeline.
-        """
-        self.operations: List[Operation] = []
+#     def __init__(self):
+#         """
+#         Initialize an empty pipeline.
+#         """
+#         self.operations: List[Operation] = []
 
-    def add_operation(self, operation: Operation):
-        """
-        Add an operation to the pipeline.
+#     def add_operation(self, operation: Operation):
+#         """
+#         Add an operation to the pipeline.
 
-        :param operation: An instance of the Operation class.
-        """
-        self.operations.append(operation)
+#         :param operation: An instance of the Operation class.
+#         """
+#         self.operations.append(operation)
 
-    def run(self, **kwargs) -> Dict:
-        """
-        Execute all operations in the pipeline sequentially.
+#     def run(self, **kwargs) -> Dict:
+#         """
+#         Execute all operations in the pipeline sequentially.
 
-        :param kwargs: Initial keyword arguments.
-        :return: Final processed keyword arguments.
-        """
-        for operation in self.operations:
-            kwargs = operation(**kwargs)  # Only kwargs are passed and returned
-        return kwargs
+#         :param kwargs: Initial keyword arguments.
+#         :return: Final processed keyword arguments.
+#         """
+#         for operation in self.operations:
+#             kwargs = operation(**kwargs)  # Only kwargs are passed and returned
+#         return kwargs
 
 
 ## Helper functions
@@ -532,6 +533,31 @@ class Merge(Operation):
                 raise TypeError("All inputs must be dictionaries.")
             merged.update(arg)
         return merged
+
+
+class Stack(Operation):
+    """Stack multiple data arrays along a new axis.
+    Useful to merge data from parallel pipelines.
+    """
+
+    def __init__(
+        self,
+        keys: Union[str, List[str], None] = None,
+        axis: Union[int, List[int], None] = 0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.keys = keys
+        self.axis = axis
+
+    def call(self, **kwargs) -> Dict:
+        """
+        Stacks the inputs corresponding to the specified keys along the specified axis.
+        If a list of axes is provided, the length must match the number of keys.
+        If an integer axis is provided, all inputs are stacked along the same axis.
+        """
+
+        raise NotImplementedError
 
 
 # def test_pipeline_with_gpu_operations():
