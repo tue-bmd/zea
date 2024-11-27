@@ -158,7 +158,9 @@ def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
 )
 @equality_libs_processing()
 def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
-    """Test that stack_volume_data_along_axis and split_volume_data_from_axis are inverse operations."""
+    """Test that stack_volume_data_along_axis and split_volume_data_from_axis
+    are inverse operations.
+    """
     # Create random test data (gradient)
     data = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
 
