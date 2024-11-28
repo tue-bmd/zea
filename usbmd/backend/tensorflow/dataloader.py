@@ -437,7 +437,9 @@ class Resizer:
     Can do resize, center_crop and random_crop.
     """
 
-    def __init__(self, image_size, resize_type, resize_axes=None, **resize_kwargs):
+    def __init__(
+        self, image_size, resize_type, resize_axes=None, seed=None, **resize_kwargs
+    ):
         """
         Get a resize layer based on the resize type.
         """
@@ -449,7 +451,9 @@ class Resizer:
             elif resize_type == "center_crop":
                 self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
             elif resize_type == "random_crop":
-                self.resizer = keras.layers.RandomCrop(*image_size, **resize_kwargs)
+                self.resizer = keras.layers.RandomCrop(
+                    *image_size, seed=seed, **resize_kwargs
+                )
             else:
                 raise ValueError(
                     f"Unsupported resize type: {resize_type}. "
@@ -721,7 +725,7 @@ def h5_dataset_from_directory(
             len(image_size) == 2
         ), f"image_size must be of length 2 (height, width), got {image_size}"
 
-        resizer = Resizer(image_size, resize_type, resize_axes)
+        resizer = Resizer(image_size, resize_type, resize_axes, seed=seed)
         dataset = dataset_map(dataset, resizer)
 
     # repeat dataset if needed (used for smaller datasets)
