@@ -40,7 +40,7 @@ def create_ndim_hdf5_dataset():
     n_dims = 5
     n_files = 3
     n_samples = 10
-    image_shape = [i + 20 for i in range(1, n_dims + 1)]
+    image_shape = [i + 20 for i in range(1, n_dims + 1)] + [1]
     folder = Path(NDIM_DUMMY_DATASET_FOLDER)
     folder.mkdir(parents=True, exist_ok=True)
 
