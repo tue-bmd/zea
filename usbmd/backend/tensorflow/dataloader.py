@@ -409,19 +409,70 @@ def _find_h5_files_from_directory(
     return file_names, file_shapes
 
 
-def get_resize_layer(image_size, resize_type, **resize_kwargs):
-    if image_size is not None:
-        if resize_type == "resize":
-            return keras.layers.Resizing(*image_size, **resize_kwargs)
-        elif resize_type == "center_crop":
-            return keras.layers.CenterCrop(*image_size, **resize_kwargs)
-        elif resize_type == "random_crop":
-            return keras.layers.RandomCrop(*image_size, **resize_kwargs)
+def recursive_map_fn(func, data, num_maps):
+    """
+    Recursively apply tf.map_fn.
+    """
+    # Base case: when no more maps are needed
+    if num_maps == 0:
+        return func(data)
+
+    # Apply tf.map_fn and recursively reduce num_maps
+    return tf.map_fn(lambda x: recursive_map_fn(func, x, num_maps - 1), data)
+
+
+class Resizer:
+    """
+    Resize layer for resizing images. Can deal with N-dimensional images.
+    Can do resize, center_crop and random_crop.
+    """
+
+    def __init__(self, image_size, resize_type, resize_axes=None, **resize_kwargs):
+        """
+        Get a resize layer based on the resize type.
+        """
+        if image_size is not None:
+            if resize_type == "resize":
+                self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
+            elif resize_type == "center_crop":
+                self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
+            elif resize_type == "random_crop":
+                self.resizer = keras.layers.RandomCrop(*image_size, **resize_kwargs)
+            else:
+                raise ValueError(
+                    f"Unsupported resize type: {resize_type}. "
+                    "Supported types are 'center_crop', 'random_crop', 'resize'."
+                )
         else:
-            raise ValueError(
-                f"Unsupported resize type: {resize_type}. "
-                "Supported types are 'center_crop', 'random_crop', 'resize'."
-            )
+            self.resizer = None
+
+        self.resize_axes = resize_axes
+        if resize_axes is not None:
+            assert len(resize_axes) == 2, "resize_axes must be of length 2"
+
+    def __call__(self, x):
+        """
+        Resize the input tensor.
+        """
+        if self.resizer is None:
+            return x
+
+        ndim = tf.experimental.numpy.ndim(x)
+        if ndim > 4:
+            assert (
+                self.resize_axes is not None
+            ), "resize_axes must be specified when ndim > 4"
+            x = tf.experimental.numpy.swapaxes(x, self.resize_axes[-1], -3)
+            x = tf.experimental.numpy.swapaxes(x, self.resize_axes[-2], -2)
+
+            # TODO: maybe parallelize this instead of using map_fn
+            x = recursive_map_fn(self.resizer, x, ndim - 4)
+
+            x = tf.experimental.numpy.swapaxes(x, -2, self.resize_axes[-2])
+            x = tf.experimental.numpy.swapaxes(x, -3, self.resize_axes[-1])
+        else:
+            x = self.resizer(x)
+        return x
 
 
 def h5_dataset_from_directory(
@@ -433,7 +484,7 @@ def h5_dataset_from_directory(
     seed: int | None = None,
     limit_n_samples: int | None = None,
     resize_type: str = "crop",
-    resize_axes: tuple | None = None,  # TODO: re-implement this
+    resize_axes: tuple | None = None,
     image_range: tuple = (0, 255),
     normalization_range: tuple = (0, 1),
     augmentation: keras.Sequential | None = None,
@@ -614,7 +665,7 @@ def h5_dataset_from_directory(
             len(image_size) == 2
         ), f"image_size must be of length 2 (height, width), got {image_size}"
 
-        resizer = get_resize_layer(image_size, resize_type)
+        resizer = Resizer(image_size, resize_type, resize_axes)
         dataset = dataset_map(dataset, resizer)
 
     # repeat dataset if needed (used for smaller datasets)
