@@ -462,6 +462,41 @@ class Resizer:
         if resize_axes is not None:
             assert len(resize_axes) == 2, "resize_axes must be of length 2"
 
+    def _permute_before_resize(self, x, ndim, resize_axes):
+        """Permutes tensor to put resize axes in correct position before resizing."""
+        # Create permutation that moves resize axes to second to last dimensions
+        # Keeping channel axis as last dimension
+        perm = list(range(ndim))
+        perm.remove(resize_axes[0])
+        perm.remove(resize_axes[1])
+        perm.insert(-1, resize_axes[0])
+        perm.insert(-1, resize_axes[1])
+
+        # Apply permutation
+        x = tf.transpose(x, perm)
+        perm_shape = tuple(tf.shape(x))
+
+        # Reshape to collapse all leading dimensions
+        x = tf.reshape(x, (-1,) + perm_shape[-3:])
+
+        return x, perm, perm_shape
+
+    def _permute_after_resize(self, x, perm, perm_shape, ndim):
+        """Restores original tensor shape and axes order after resizing."""
+        # Restore original shape with new resized dimensions
+        perm_shape = list(perm_shape)
+        perm_shape[-3] = self.image_size[0]
+        perm_shape[-2] = self.image_size[1]
+        x = tf.reshape(x, perm_shape)
+
+        # Transpose back to original axis order
+        inverse_perm = list(range(ndim))
+        for i, p in enumerate(perm):
+            inverse_perm[p] = i
+        x = tf.transpose(x, inverse_perm)
+
+        return x
+
     def __call__(self, x):
         """
         Resize the input tensor.
@@ -471,43 +506,24 @@ class Resizer:
 
         ndim = tf.experimental.numpy.ndim(x)
         resize_axes = _map_negative_indices(self.resize_axes, ndim)
+
         if ndim > 4:
             assert (
                 self.resize_axes is not None
             ), "resize_axes must be specified when ndim > 4"
-            # Move resize axes to last dimensions for resizing
-            # Create permutation that moves resize axes to second to last dimensions
-            # Keeping channel axis as last dimension
-            perm = list(range(ndim))
-            perm.remove(resize_axes[0])
-            perm.remove(resize_axes[1])
 
-            # Insert resize axes at -2 and -3 positions to keep channel as last dim
-            perm.insert(-1, resize_axes[0])
-            perm.insert(-1, resize_axes[1])
-            x = tf.transpose(x, perm)
-            perm_shape = list(tf.shape(x).numpy())
-
-            # Reshape to collapse all leading dimensions, preserving last 3 dims
-            # (-1, resize_h, resize_w, channels)
-            x = tf.reshape(x, (-1,) + perm_shape[-3:])
+            # Prepare tensor for resizing
+            x, perm, perm_shape = self._permute_before_resize(x, ndim, resize_axes)
 
             # Apply resize
             x = self.resizer(x)
 
-            # Restore original shape with new resized dimensions
-            perm_shape[-3] = self.image_size[0]
-            perm_shape[-2] = self.image_size[1]
-            x = tf.reshape(x, perm_shape)
-
-            # Transpose back to original axis order
-            inverse_perm = list(range(ndim))
-            for i, p in enumerate(perm):
-                inverse_perm[p] = i
-            x = tf.transpose(x, inverse_perm)
+            # Restore original shape and order
+            x = self._permute_after_resize(x, perm, perm_shape, ndim)
         else:
             assert self.resize_axes is None, "resize_axes must be None when ndim <= 4"
             x = self.resizer(x)
+
         return x
 
 
