@@ -1,13 +1,14 @@
 """Test Tensorflow H5 Dataloader functions"""
 
+import hashlib
 import os
+import pickle
 from copy import deepcopy
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
-import tensorflow as tf
 
 from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
 
@@ -139,6 +140,7 @@ def test_h5_dataset_from_directory(
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
         search_file_tree_kwargs={"parallel": False},
+        shuffle=True,
         seed=42,
     )
     batch_shape = next(iter(dataset)).shape
@@ -163,12 +165,11 @@ def test_h5_dataset_from_directory(
     )
 
     # Test shuffling
-    for i, batch in enumerate(iter(dataset)):
-        if i == 0:
-            batch_0 = tf.identity(batch)
-        print(i, end=" ")
+    shuffle_key = {}
+    for i in range(2):
+        shuffle_key[i] = ""
+        for batch in iter(dataset):
+            key = hashlib.md5(pickle.dumps(batch)).hexdigest()
+            shuffle_key[i] += key
 
-    batch = next(iter(dataset))
-    assert not tf.reduce_all(
-        tf.equal(batch, batch_0)  # pylint: disable=possibly-used-before-assignment
-    ), "The batches are equal, shuffling failed"
+    assert shuffle_key[0] != shuffle_key[1], "The dataset was not shuffled"
