@@ -215,7 +215,7 @@ def test_h5_dataset_return_filename(
     n_frames,
     insert_frame_axis,
     image_size,
-    create_dummy_hdf5,
+    create_dummy_hdf5,  # pylint: disable=unused-argument
 ):
     """Test the h5_dataset_from_directory function with return_filename=True.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
@@ -242,7 +242,7 @@ def test_h5_dataset_return_filename(
     assert (
         len(batch) == 2
     ), "The batch should contain two elements: images and file names"
-    images, file_names = batch
+    images, file_names = batch  # pylint: disable=unused-variable
     assert file_names.dtype == "string", "The file names should be of type string"
     file_name = file_names[()].numpy().decode("utf-8")
     assert isinstance(file_name, str), "The returned file name is not a string"
@@ -295,7 +295,7 @@ def test_h5_dataset_resize_types(
     key,
     image_size,
     resize_type,
-    create_dummy_hdf5,
+    create_dummy_hdf5,  # pylint: disable=unused-argument
 ):
     """Test the h5_dataset_from_directory function with different resize types.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
@@ -378,7 +378,7 @@ def test_ndim_hdf5_dataset(
     frame_index_stride,
     resize_type,
     image_size,
-    create_ndim_hdf5_dataset,
+    create_ndim_hdf5_dataset,  # pylint: disable=unused-argument
 ):
     """Test the h5_dataset_from_directory function with an n-dimensional HDF5 dataset.
     Uses the create_ndim_hdf5_dataset fixture."""
