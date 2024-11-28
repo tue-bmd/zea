@@ -170,5 +170,5 @@ def test_h5_dataset_from_directory(
 
     batch = next(iter(dataset))
     assert not tf.reduce_all(
-        tf.equal(batch, batch_0)
+        tf.equal(batch, batch_0)  # pylint: disable=possibly-used-before-assignment
     ), "The batches are equal, shuffling failed"
