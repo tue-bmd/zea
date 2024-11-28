@@ -7,6 +7,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+import tensorflow as tf
 
 from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
 
@@ -138,6 +139,7 @@ def test_h5_dataset_from_directory(
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
         search_file_tree_kwargs={"parallel": False},
+        seed=42,
     )
     batch_shape = next(iter(dataset)).shape
 
@@ -159,3 +161,14 @@ def test_h5_dataset_from_directory(
         f"Something went wrong as the length of the dataset {real_len_dataset}"
         f" is not equal to the expected length {expected_len_dataset}"
     )
+
+    # Test shuffling
+    for i, batch in enumerate(iter(dataset)):
+        if i == 0:
+            batch_0 = tf.identity(batch)
+        print(i, end=" ")
+
+    batch = next(iter(dataset))
+    assert not tf.reduce_all(
+        tf.equal(batch, batch_0)
+    ), "The batches are equal, shuffling failed"
