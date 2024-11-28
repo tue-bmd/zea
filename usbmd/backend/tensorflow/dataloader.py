@@ -579,6 +579,9 @@ def h5_dataset_from_directory(
         search_file_tree_kwargs (dict, optional): kwargs for search_file_tree.
         drop_remainder (bool, optional): representing whether the last batch should be dropped
             in the case it has fewer than batch_size elements. Defaults to False.
+        cache (bool or str, optional): cache dataset. If a string is provided, caching will
+            be done to disk with that filename. Defaults to False.
+        prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
 
     Returns:
         tf.data.Dataset: dataset
