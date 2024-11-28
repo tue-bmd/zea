@@ -583,12 +583,11 @@ def h5_dataset_from_directory(
     Returns:
         tf.data.Dataset: dataset
     """
-    if cache and shuffle:
+    tf_data_shuffle = shuffle and cache  # shuffle after caching
+    generator_shuffle = shuffle and not cache  # shuffle on the generator level
+
+    if tf_data_shuffle:
         log.warning("Will shuffle on the image level, this can be slower.")
-        generator_shuffle = False
-    else:
-        generator_shuffle = True
-    tf_data_shuffle = shuffle and not generator_shuffle
 
     file_names, file_shapes = _find_h5_files_from_directory(
         directory, key, search_file_tree_kwargs, additional_axes_iter
