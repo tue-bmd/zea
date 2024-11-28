@@ -507,12 +507,12 @@ class Resizer:
             return x
 
         ndim = tf.experimental.numpy.ndim(x)
-        resize_axes = _map_negative_indices(self.resize_axes, ndim)
 
         if ndim > 4:
             assert (
                 self.resize_axes is not None
             ), "resize_axes must be specified when ndim > 4"
+            resize_axes = _map_negative_indices(self.resize_axes, ndim)
 
             # Prepare tensor for resizing
             x, perm, perm_shape = self._permute_before_resize(x, ndim, resize_axes)
