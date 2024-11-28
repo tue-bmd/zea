@@ -61,8 +61,8 @@ class H5Generator:
         limit_n_samples: int | None = None,
         seed: int | None = None,
     ):
-        self.n_frames = n_frames
-        self.frame_index_stride = frame_index_stride
+        self.n_frames = int(n_frames)
+        self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = frame_axis
         self.insert_frame_axis = insert_frame_axis
         self.initial_frame_axis = initial_frame_axis
@@ -77,6 +77,13 @@ class H5Generator:
         self.overlapping_blocks = overlapping_blocks
         self.limit_n_samples = limit_n_samples
         self.seed = seed
+
+        assert (
+            self.frame_index_stride > 0
+        ), f"`frame_index_stride` must be greater than 0, got {self.frame_index_stride}"
+        assert (
+            self.n_frames > 0
+        ), f"`n_frames` must be greater than 0, got {self.n_frames}"
 
         # Extract some general information about the dataset
         image_shapes = np.array(file_shapes)
@@ -132,7 +139,10 @@ class H5Generator:
         """
         Extracts one image from the dataset to get the dtype. Converts it to a tensorflow dtype.
         """
-        dtype = next(self()).dtype
+        out = next(self())
+        if self.return_filename:
+            out = out[0]
+        dtype = out.dtype
         if "float" in str(dtype):
             dtype = tf.float32
         elif "complex" in str(dtype):
@@ -316,7 +326,7 @@ def generate_h5_indices(
     for file, shape, axis_indices in zip(file_names, file_shapes, axis_indices_files):
         # remove all the files that have empty list at initial_frame_axis
         # this can happen if the file is too small to fit a block
-        if not axis_indices[initial_frame_axis]:
+        if not axis_indices[0]:  # initial_frame_axis is the first entry in axis_indices
             skipped_files += 1
             continue
 
@@ -431,6 +441,8 @@ class Resizer:
         """
         Get a resize layer based on the resize type.
         """
+        self.image_size = image_size
+
         if image_size is not None:
             if resize_type == "resize":
                 self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
@@ -458,19 +470,43 @@ class Resizer:
             return x
 
         ndim = tf.experimental.numpy.ndim(x)
+        resize_axes = _map_negative_indices(self.resize_axes, ndim)
         if ndim > 4:
             assert (
                 self.resize_axes is not None
             ), "resize_axes must be specified when ndim > 4"
-            x = tf.experimental.numpy.swapaxes(x, self.resize_axes[-1], -3)
-            x = tf.experimental.numpy.swapaxes(x, self.resize_axes[-2], -2)
+            # Move resize axes to last dimensions for resizing
+            # Create permutation that moves resize axes to second to last dimensions
+            # Keeping channel axis as last dimension
+            perm = list(range(ndim))
+            perm.remove(resize_axes[0])
+            perm.remove(resize_axes[1])
 
-            # TODO: maybe parallelize this instead of using map_fn
-            x = recursive_map_fn(self.resizer, x, ndim - 4)
+            # Insert resize axes at -2 and -3 positions to keep channel as last dim
+            perm.insert(-1, resize_axes[0])
+            perm.insert(-1, resize_axes[1])
+            x = tf.transpose(x, perm)
+            perm_shape = list(tf.shape(x).numpy())
 
-            x = tf.experimental.numpy.swapaxes(x, -2, self.resize_axes[-2])
-            x = tf.experimental.numpy.swapaxes(x, -3, self.resize_axes[-1])
+            # Reshape to collapse all leading dimensions, preserving last 3 dims
+            # (-1, resize_h, resize_w, channels)
+            x = tf.reshape(x, (-1,) + perm_shape[-3:])
+
+            # Apply resize
+            x = self.resizer(x)
+
+            # Restore original shape with new resized dimensions
+            perm_shape[-3] = self.image_size[0]
+            perm_shape[-2] = self.image_size[1]
+            x = tf.reshape(x, perm_shape)
+
+            # Transpose back to original axis order
+            inverse_perm = list(range(ndim))
+            for i, p in enumerate(perm):
+                inverse_perm[p] = i
+            x = tf.transpose(x, inverse_perm)
         else:
+            assert self.resize_axes is None, "resize_axes must be None when ndim <= 4"
             x = self.resizer(x)
         return x
 
@@ -669,6 +705,8 @@ def h5_dataset_from_directory(
 
         resizer = Resizer(image_size, resize_type, resize_axes)
         dataset = dataset_map(dataset, resizer)
+
+    next(iter(dataset))
 
     # repeat dataset if needed (used for smaller datasets)
     if dataset_repetitions:
