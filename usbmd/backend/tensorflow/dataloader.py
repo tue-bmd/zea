@@ -474,20 +474,22 @@ class Resizer:
 
         # Apply permutation
         x = tf.transpose(x, perm)
-        perm_shape = tuple(tf.shape(x))
+        perm_shape = tf.shape(x)
 
         # Reshape to collapse all leading dimensions
-        x = tf.reshape(x, (-1,) + perm_shape[-3:])
+        flattened_shape = [-1, perm_shape[-3], perm_shape[-2], perm_shape[-1]]
+        x = tf.reshape(x, flattened_shape)
 
         return x, perm, perm_shape
 
     def _permute_after_resize(self, x, perm, perm_shape, ndim):
         """Restores original tensor shape and axes order after resizing."""
         # Restore original shape with new resized dimensions
-        perm_shape = list(perm_shape)
-        perm_shape[-3] = self.image_size[0]
-        perm_shape[-2] = self.image_size[1]
-        x = tf.reshape(x, perm_shape)
+        # Get all dimensions except the resized ones and channel dim
+        shape_prefix = perm_shape[:-3]
+        # Create new shape list starting with original prefix dims, then resize dims, then channel
+        new_shape = tf.concat([shape_prefix, self.image_size, [perm_shape[-1]]], axis=0)
+        x = tf.reshape(x, new_shape)
 
         # Transpose back to original axis order
         inverse_perm = list(range(ndim))
@@ -721,8 +723,6 @@ def h5_dataset_from_directory(
 
         resizer = Resizer(image_size, resize_type, resize_axes)
         dataset = dataset_map(dataset, resizer)
-
-    next(iter(dataset))
 
     # repeat dataset if needed (used for smaller datasets)
     if dataset_repetitions:
