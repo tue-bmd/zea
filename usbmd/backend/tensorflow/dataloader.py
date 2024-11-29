@@ -63,9 +63,9 @@ class H5Generator:
     ):
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
-        self.frame_axis = frame_axis
+        self.frame_axis = int(frame_axis)
         self.insert_frame_axis = insert_frame_axis
-        self.initial_frame_axis = initial_frame_axis
+        self.initial_frame_axis = int(initial_frame_axis)
         self.return_filename = return_filename
         if additional_axes_iter is None:
             self.additional_axes_iter = []
