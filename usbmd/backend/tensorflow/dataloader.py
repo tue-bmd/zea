@@ -513,7 +513,7 @@ class Resizer:
 
         return x
 
-    def call(self, x):
+    def __call__(self, x):
         """
         Resize the input tensor.
         """
