@@ -440,18 +440,16 @@ class Resizer:
     def __init__(
         self, image_size, resize_type, resize_axes=None, seed=None, **resize_kwargs
     ):
-        """
-        Get a resize layer based on the resize type.
-        """
+        """Get a resize layer based on the resize type."""
         self.image_size = image_size
 
         if image_size is not None:
             if resize_type == "resize":
-                self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
+                self.resizer = tf.keras.layers.Resizing(*image_size, **resize_kwargs)
             elif resize_type == "center_crop":
-                self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
+                self.resizer = tf.keras.layers.CenterCrop(*image_size, **resize_kwargs)
             elif resize_type == "random_crop":
-                self.resizer = keras.layers.RandomCrop(
+                self.resizer = tf.keras.layers.RandomCrop(
                     *image_size, seed=seed, **resize_kwargs
                 )
             else:
