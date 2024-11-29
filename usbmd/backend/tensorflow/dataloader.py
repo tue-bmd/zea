@@ -35,6 +35,7 @@ import h5py
 import keras
 import numpy as np
 import tensorflow as tf
+from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
@@ -431,10 +432,12 @@ def recursive_map_fn(func, data, num_maps):
     return tf.map_fn(lambda x: recursive_map_fn(func, x, num_maps - 1), data)
 
 
-class Resizer:
+class Resizer(TFDataLayer):
     """
     Resize layer for resizing images. Can deal with N-dimensional images.
     Can do resize, center_crop and random_crop.
+
+    Only use tensorflow ops in this layer!
     """
 
     def __init__(
@@ -445,16 +448,19 @@ class Resizer:
         seed: int | None = None,
         **resize_kwargs,
     ):
-        """Get a resize layer based on the resize type."""
+        """
+        Get a resize layer based on the resize type.
+        """
+        super().__init__()
         self.image_size = image_size
 
         if image_size is not None:
             if resize_type == "resize":
-                self.resizer = tf.keras.layers.Resizing(*image_size, **resize_kwargs)
+                self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
             elif resize_type == "center_crop":
-                self.resizer = tf.keras.layers.CenterCrop(*image_size, **resize_kwargs)
+                self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
             elif resize_type == "random_crop":
-                self.resizer = tf.keras.layers.RandomCrop(
+                self.resizer = keras.layers.RandomCrop(
                     *image_size, seed=seed, **resize_kwargs
                 )
             else:
@@ -506,7 +512,7 @@ class Resizer:
 
         return x
 
-    def __call__(self, x):
+    def call(self, x):
         """
         Resize the input tensor.
         """
