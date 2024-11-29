@@ -438,7 +438,12 @@ class Resizer:
     """
 
     def __init__(
-        self, image_size, resize_type, resize_axes=None, seed=None, **resize_kwargs
+        self,
+        image_size: tuple,
+        resize_type: str,
+        resize_axes: tuple | None = None,
+        seed: int | None = None,
+        **resize_kwargs,
     ):
         """
         Get a resize layer based on the resize type.
@@ -601,8 +606,9 @@ def h5_dataset_from_directory(
             Useful for debuging. Defaults to None.
         resize_type (str, optional): resize type. Defaults to 'crop'.
             can be 'crop' or 'resize'.
-        resize_axes (tuple, optional): axes to resize along. should be of length 2
-            (height, width) as resizing function only supports 2D resizing / cropping.
+        resize_axes (tuple, optional): axes to resize along. Should be of length 2
+            (height, width) as resizing function only supports 2D resizing / cropping. Should only
+            be set when your data is more than (h, w, c). Defaults to None.
         image_range (tuple, optional): image range. Defaults to (0, 255).
             will always normalize from specified image range to normalization range.
             if image_range is set to None, no normalization will be done.
