@@ -49,7 +49,7 @@ class H5Generator:
         file_shapes: list,
         n_frames: int = 1,
         frame_index_stride: int = 1,
-        frame_axis: int | None = None,
+        frame_axis: int = -1,
         insert_frame_axis: bool = False,
         initial_frame_axis: int = 0,
         return_filename: bool = False,
@@ -57,21 +57,55 @@ class H5Generator:
         key: str = "data/image",
         shuffle: bool = True,
         sort_files: bool = True,
+        overlapping_blocks: bool = False,
         limit_n_samples: int | None = None,
         seed: int | None = None,
     ):
-        self.n_frames = n_frames
-        self.frame_index_stride = frame_index_stride
-        self.frame_axis = frame_axis
+        self.n_frames = int(n_frames)
+        self.frame_index_stride = int(frame_index_stride)
+        self.frame_axis = int(frame_axis)
         self.insert_frame_axis = insert_frame_axis
-        self.initial_frame_axis = initial_frame_axis
+        self.initial_frame_axis = int(initial_frame_axis)
         self.return_filename = return_filename
-        self.additional_axes_iter = additional_axes_iter
+        if additional_axes_iter is None:
+            self.additional_axes_iter = []
+        else:
+            self.additional_axes_iter = additional_axes_iter
         self.key = key
         self.shuffle = shuffle
         self.sort_files = sort_files
+        self.overlapping_blocks = overlapping_blocks
         self.limit_n_samples = limit_n_samples
         self.seed = seed
+
+        assert (
+            self.frame_index_stride > 0
+        ), f"`frame_index_stride` must be greater than 0, got {self.frame_index_stride}"
+        assert (
+            self.n_frames > 0
+        ), f"`n_frames` must be greater than 0, got {self.n_frames}"
+
+        # Extract some general information about the dataset
+        image_shapes = np.array(file_shapes)
+        image_shapes = np.delete(
+            image_shapes, (self.initial_frame_axis, *self.additional_axes_iter), axis=1
+        )
+        n_dims = len(image_shapes[0])
+
+        self.equal_file_shapes = np.all(image_shapes == image_shapes[0])
+        if not self.equal_file_shapes:
+            log.warning(
+                "H5Generator: Not all files have the same shape. "
+                "This can lead to issues when resizing images later...."
+            )
+            self.shape = np.array([None] * n_dims)
+        else:
+            self.shape = np.array(image_shapes[0])
+
+        if insert_frame_axis:
+            _frame_axis = _map_negative_indices([frame_axis], len(self.shape) + 1)
+            self.shape = np.insert(self.shape, _frame_axis, 1)
+        self.shape[frame_axis] = self.shape[frame_axis] * n_frames
 
         # Set random number generator
         self.rng = np.random.default_rng(self.seed)
@@ -85,6 +119,7 @@ class H5Generator:
             initial_frame_axis=self.initial_frame_axis,
             additional_axes_iter=self.additional_axes_iter,
             sort_files=self.sort_files,
+            overlapping_blocks=self.overlapping_blocks,
         )
 
         if limit_n_samples:
@@ -99,9 +134,44 @@ class H5Generator:
         else:
             log.warning("H5Generator: Not shuffling data.")
 
+    @property
+    def tensorflow_dtype(self):
+        """
+        Extracts one image from the dataset to get the dtype. Converts it to a tensorflow dtype.
+        """
+        out = next(self())
+        if self.return_filename:
+            out = out[0]
+        dtype = out.dtype
+        if "float" in str(dtype):
+            dtype = tf.float32
+        elif "complex" in str(dtype):
+            dtype = tf.complex64
+        else:
+            raise ValueError(f"Unsupported dtype: {dtype}")
+        return dtype
+
+    @property
+    def output_signature(self):
+        """
+        Get the output signature of the generator as a tensorflow `TensorSpec`.
+        This is useful for creating a `tf.data.Dataset` from the generator.
+        """
+        output_signature = tf.TensorSpec(shape=self.shape, dtype=self.tensorflow_dtype)
+        if self.return_filename:
+            output_signature = (
+                output_signature,
+                tf.TensorSpec(shape=(), dtype=tf.string),
+            )
+        return output_signature
+
     def __call__(self):
+        """
+        Generator that yields images from the hdf5 files.
+        """
         for i, indices in enumerate(self.indices):
             images = self.extract_image(indices)
+
             file_name, _, indices = indices
 
             # shuffle if we reached end
@@ -152,13 +222,9 @@ class H5Generator:
                     axis < self.initial_frame_axis for axis in self.additional_axes_iter
                 )
                 initial_frame_axis = initial_frame_axis - additional_axes_before
-            if self.frame_axis is None:
-                frame_axis = len(images.shape) - 1
 
             images = np.moveaxis(images, initial_frame_axis, frame_axis)
         else:
-            if self.frame_axis is None:
-                frame_axis = len(images.shape) - 2
             # append frames to existing axis
             images = np.concatenate(images, axis=frame_axis)
 
@@ -181,6 +247,7 @@ def generate_h5_indices(
     initial_frame_axis: int = 0,
     additional_axes_iter: List[int] | None = None,
     sort_files: bool = True,
+    overlapping_blocks: bool = False,
 ):
     """Generate indices for h5 files.
 
@@ -235,42 +302,33 @@ def generate_h5_indices(
             log.warning("H5Generator: Could not sort file_names by number.")
 
     block_size = n_frames * frame_index_stride
+
+    if not overlapping_blocks:
+        block_step_size = block_size
+    else:
+        # now blocks overlap by n_frames - 1
+        block_step_size = 1
+
     axis_indices_files = [
         [
             [
-                range(
-                    i,
-                    i + block_size,
-                    frame_index_stride,
-                )
+                range(i, i + block_size, frame_index_stride)
                 for i in range(
-                    0, shape[initial_frame_axis] - block_size + 1, block_size
+                    0, shape[initial_frame_axis] - block_size + 1, block_step_size
                 )
             ]
         ]
         for shape in file_shapes
     ]
 
-    # remove all the files that have empty list at initial_frame_axis
-    # this can happen if the file is too small to fit a block
-    remove_indices = []
-    for i, axis_indices in enumerate(axis_indices_files):
-        if not axis_indices[0]:
-            remove_indices.append(i)
-
-    if remove_indices:
-        # skip_files = [file_names[i] for i in remove_indices]
-
-        log.warning(
-            f"H5Generator: Skipping {len(remove_indices)} files with not enough frames "
-            f"which is about {len(remove_indices) / len(file_names) * 100:.2f}% of the "
-            f"dataset. This can be fine if you expect set `n_frames` and "
-            "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
-            f"least n_frames * frame_index_stride = {n_frames * frame_index_stride}. "
-        )
-
     indices = []
+    skipped_files = 0
     for file, shape, axis_indices in zip(file_names, file_shapes, axis_indices_files):
+        # remove all the files that have empty list at initial_frame_axis
+        # this can happen if the file is too small to fit a block
+        if not axis_indices[0]:  # initial_frame_axis is the first entry in axis_indices
+            skipped_files += 1
+            continue
 
         if additional_axes_iter:
             axis_indices += [range(shape[axis]) for axis in additional_axes_iter]
@@ -282,6 +340,15 @@ def generate_h5_indices(
             for i, axis in enumerate([initial_frame_axis] + list(additional_axes_iter)):
                 full_indices[axis] = axis_index[i]
             indices.append((file, key, full_indices))
+
+    if skipped_files > 0:
+        log.warning(
+            f"H5Generator: Skipping {skipped_files} files with not enough frames "
+            f"which is about {skipped_files / len(file_names) * 100:.2f}% of the "
+            f"dataset. This can be fine if you expect set `n_frames` and "
+            "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
+            f"least n_frames * frame_index_stride = {n_frames * frame_index_stride}. "
+        )
 
     return indices
 
@@ -352,6 +419,130 @@ def _find_h5_files_from_directory(
     return file_names, file_shapes
 
 
+def recursive_map_fn(func, data, num_maps):
+    """
+    Recursively apply tf.map_fn.
+    """
+    # Base case: when no more maps are needed
+    if num_maps == 0:
+        return func(data)
+
+    # Apply tf.map_fn and recursively reduce num_maps
+    return tf.map_fn(lambda x: recursive_map_fn(func, x, num_maps - 1), data)
+
+
+class Resizer:
+    """
+    Resize layer for resizing images. Can deal with N-dimensional images.
+    Can do resize, center_crop and random_crop.
+    """
+
+    def __init__(
+        self,
+        image_size: tuple,
+        resize_type: str,
+        resize_axes: tuple | None = None,
+        seed: int | None = None,
+        **resize_kwargs,
+    ):
+        """
+        Get a resize layer based on the resize type.
+        """
+        super().__init__()
+        self.image_size = image_size
+
+        if image_size is not None:
+            if resize_type == "resize":
+                self.resizer = tf.keras.layers.Resizing(  # pylint: disable=no-member
+                    *image_size, **resize_kwargs
+                )
+            elif resize_type == "center_crop":
+                self.resizer = tf.keras.layers.CenterCrop(  # pylint: disable=no-member
+                    *image_size, **resize_kwargs
+                )  # pylint: disable=no-member
+            elif resize_type == "random_crop":
+                self.resizer = tf.keras.layers.RandomCrop(  # pylint: disable=no-member
+                    *image_size, seed=seed, **resize_kwargs
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported resize type: {resize_type}. "
+                    "Supported types are 'center_crop', 'random_crop', 'resize'."
+                )
+        else:
+            self.resizer = None
+
+        self.resize_axes = resize_axes
+        if resize_axes is not None:
+            assert len(resize_axes) == 2, "resize_axes must be of length 2"
+
+    def _permute_before_resize(self, x, ndim, resize_axes):
+        """Permutes tensor to put resize axes in correct position before resizing."""
+        # Create permutation that moves resize axes to second to last dimensions
+        # Keeping channel axis as last dimension
+        perm = list(range(ndim))
+        perm.remove(resize_axes[0])
+        perm.remove(resize_axes[1])
+        perm.insert(-1, resize_axes[0])
+        perm.insert(-1, resize_axes[1])
+
+        # Apply permutation
+        x = tf.transpose(x, perm)
+        perm_shape = tf.shape(x)
+
+        # Reshape to collapse all leading dimensions
+        flattened_shape = [-1, perm_shape[-3], perm_shape[-2], perm_shape[-1]]
+        x = tf.reshape(x, flattened_shape)
+
+        return x, perm, perm_shape
+
+    def _permute_after_resize(self, x, perm, perm_shape, ndim):
+        """Restores original tensor shape and axes order after resizing."""
+        # Restore original shape with new resized dimensions
+        # Get all dimensions except the resized ones and channel dim
+        shape_prefix = perm_shape[:-3]
+        # Create new shape list starting with original prefix dims, then resize dims, then channel
+        new_shape = tf.concat([shape_prefix, self.image_size, [perm_shape[-1]]], axis=0)
+        x = tf.reshape(x, new_shape)
+
+        # Transpose back to original axis order
+        inverse_perm = list(range(ndim))
+        for i, p in enumerate(perm):
+            inverse_perm[p] = i
+        x = tf.transpose(x, inverse_perm)
+
+        return x
+
+    def __call__(self, x):
+        """
+        Resize the input tensor.
+        """
+        if self.resizer is None:
+            return x
+
+        ndim = tf.experimental.numpy.ndim(x)
+
+        if ndim > 4:
+            assert (
+                self.resize_axes is not None
+            ), "resize_axes must be specified when ndim > 4"
+            resize_axes = _map_negative_indices(self.resize_axes, ndim)
+
+            # Prepare tensor for resizing
+            x, perm, perm_shape = self._permute_before_resize(x, ndim, resize_axes)
+
+            # Apply resize
+            x = self.resizer(x)
+
+            # Restore original shape and order
+            x = self._permute_after_resize(x, perm, perm_shape, ndim)
+        else:
+            assert self.resize_axes is None, "resize_axes must be None when ndim <= 4"
+            x = self.resizer(x)
+
+        return x
+
+
 def h5_dataset_from_directory(
     directory,
     key: str,
@@ -361,21 +552,25 @@ def h5_dataset_from_directory(
     seed: int | None = None,
     limit_n_samples: int | None = None,
     resize_type: str = "crop",
+    resize_axes: tuple | None = None,
     image_range: tuple = (0, 255),
     normalization_range: tuple = (0, 1),
     augmentation: keras.Sequential | None = None,
     dataset_repetitions: int | None = None,
     n_frames: int = 1,
     insert_frame_axis: bool = True,
-    frame_axis: int | None = None,
+    frame_axis: int = -1,
     initial_frame_axis: int = 0,
     frame_index_stride: int = 1,
     additional_axes_iter: tuple | None = None,
+    overlapping_blocks: bool = False,
     return_filename: bool = False,
     shard_index: int | None = None,
     num_shards: int = 1,
     search_file_tree_kwargs: dict | None = None,
     drop_remainder: bool = False,
+    cache: bool | str = False,
+    prefetch: bool = True,
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -390,13 +585,15 @@ def h5_dataset_from_directory(
     - Find all .hdf5 files in the directory
     - Load the dataset from each file using the specified key
     - Apply the following transformations in order (if specified):
-        - shuffle
+        - limit_n_samples
+        - shuffle (if not cached)
+        - shard
         - add channel dim
         - cache
-        - repeat
-        - limit_n_samples
-        - batch
+        - shuffle (if cached)
         - resize
+        - repeat
+        - batch
         - normalize
         - augmentation
         - prefetch
@@ -414,6 +611,9 @@ def h5_dataset_from_directory(
             Useful for debuging. Defaults to None.
         resize_type (str, optional): resize type. Defaults to 'crop'.
             can be 'crop' or 'resize'.
+        resize_axes (tuple, optional): axes to resize along. Should be of length 2
+            (height, width) as resizing function only supports 2D resizing / cropping. Should only
+            be set when your data is more than (h, w, c). Defaults to None.
         image_range (tuple, optional): image range. Defaults to (0, 255).
             will always normalize from specified image range to normalization range.
             if image_range is set to None, no normalization will be done.
@@ -429,11 +629,15 @@ def h5_dataset_from_directory(
         frame_axis (int, optional): dimension to stack frames along.
             Defaults to -1. If insert_frame_axis is True, this will be the
             new dimension to stack frames along.
+        initial_frame_axis (int, optional): axis where in the files the frames are stored.
+            Defaults to 0.
         frame_index_stride (int, optional): interval between frames to load.
             Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
         additional_axes_iter (tuple, optional): additional axes to iterate over
             in the dataset. Defaults to None, in that case we only iterate over
             the first axis (we assume those contain the frames).
+        overlapping_blocks (bool, optional): if True, blocks overlap by n_frames - 1.
+            Defaults to False. Has no effect if n_frames = 1.
         return_filename (bool, optional): return file name with image. Defaults to False.
         shard_index (int, optional): index which part of the dataset should be selected.
             Can only be used if num_shards is specified. Defaults to None.
@@ -444,46 +648,29 @@ def h5_dataset_from_directory(
         search_file_tree_kwargs (dict, optional): kwargs for search_file_tree.
         drop_remainder (bool, optional): representing whether the last batch should be dropped
             in the case it has fewer than batch_size elements. Defaults to False.
+        cache (bool or str, optional): cache dataset. If a string is provided, caching will
+            be done to disk with that filename. Defaults to False.
+        prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
 
     Returns:
         tf.data.Dataset: dataset
     """
+    tf_data_shuffle = shuffle and cache  # shuffle after caching
+    generator_shuffle = shuffle and not cache  # shuffle on the generator level
+
+    if tf_data_shuffle:
+        log.warning("Will shuffle on the image level, this can be slower.")
+
     file_names, file_shapes = _find_h5_files_from_directory(
         directory, key, search_file_tree_kwargs, additional_axes_iter
     )
 
-    # Extract some general information about the dataset
-    image_shapes = np.array(file_shapes)
-    # depending on which axis we iterate over and frame dimension
-    # we need to adjust the image shapes
-    if additional_axes_iter:
-        # we iterate over these axis so we don't care about their size
-        # remove that dim
-        for axis in additional_axes_iter:
-            image_shapes = np.delete(image_shapes, axis, axis=1)
-    # also don't care about frame axis
-    image_shapes = np.delete(image_shapes, 0, axis=1)
-
-    equal_file_shapes = np.all(image_shapes == image_shapes[0])
-    if not equal_file_shapes:
-        log.warning(
-            "H5Generator: Not all files have the same shape. "
-            "This can lead to issues when resizing images."
-        )
-        assert (
-            resize_type != "crop"
-        ), "Currently unsupported to crop images with different shapes."
-
     assert len(file_names) > 0, f"No files in directories:\n{directory}"
-    if image_size is not None:
-        assert resize_type in [
-            "crop",
-            "resize",
-        ], 'resize_type must be "crop" or "resize"'
 
     image_extractor = H5Generator(
         file_names,
         file_shapes,
+        key=key,
         n_frames=n_frames,
         frame_index_stride=frame_index_stride,
         frame_axis=frame_axis,
@@ -491,52 +678,31 @@ def h5_dataset_from_directory(
         initial_frame_axis=initial_frame_axis,
         return_filename=return_filename,
         additional_axes_iter=additional_axes_iter,
-        key=key,
+        overlapping_blocks=overlapping_blocks,
         limit_n_samples=limit_n_samples,
         sort_files=True,
-        shuffle=shuffle,
+        shuffle=generator_shuffle,
         seed=seed,
     )
 
-    image = next(image_extractor())
-
-    dtype = (
-        tf.float32 if image.dtype not in ["complex64", "complex128"] else tf.complex64
+    # Create dataset
+    dataset = tf.data.Dataset.from_generator(
+        image_extractor, output_signature=image_extractor.output_signature
     )
 
-    n_axis = len(image.shape)
+    # Assert cardinality
+    dataset = dataset.apply(
+        tf.data.experimental.assert_cardinality(len(image_extractor))
+    )
 
-    assert n_axis in [
-        2,
-        3,
-    ], f"Currently only supports 2D and 3D dimensions, got {n_axis}. "
-
-    if not equal_file_shapes:
-        shape = [None] * n_axis
-        # channels need to be defined
-        if n_axis == 3:
-            shape[-1] = image.shape[-1]
-    else:
-        shape = image.shape
-
-    dataset = tf.data.Dataset.from_generator(
-        image_extractor,
-        output_signature=(
-            (
-                tf.TensorSpec(shape=shape, dtype=dtype),
-                tf.TensorSpec(shape=(), dtype=tf.string),
-            )
-            if return_filename
-            else tf.TensorSpec(shape=shape, dtype=dtype)
-        ),
-    ).apply(tf.data.experimental.assert_cardinality(len(image_extractor)))
-
+    # Shard dataset
     if num_shards > 1:
         assert shard_index is not None, "shard_index must be specified"
         assert shard_index < num_shards, "shard_index must be less than num_shards"
         assert shard_index >= 0, "shard_index must be greater than or equal to 0"
         dataset = dataset.shard(num_shards, shard_index)
 
+    # Define helper function to apply map function to dataset
     def dataset_map(dataset, func):
         """Does not apply func to filename."""
         if return_filename:
@@ -548,35 +714,34 @@ def h5_dataset_from_directory(
             return dataset.map(func, num_parallel_calls=tf.data.AUTOTUNE)
 
     # add channel dim
-    if n_axis != 3:
+    if len(image_extractor.shape) != 3:
         dataset = dataset_map(dataset, lambda x: tf.expand_dims(x, axis=-1))
 
-    # cache samples in dataset
-    dataset = dataset.cache()
+    # If cache is a string, caching will be done to disk with that filename
+    # Otherwise caching will be done in memory
+    if cache:
+        filename = cache if isinstance(cache, str) else ""
+        dataset = dataset.cache(filename)
 
-    # repeat dataset if needed (used for smaller datasets)
-    if dataset_repetitions:
-        dataset = dataset.repeat(dataset_repetitions)
+    if num_shards > 1 and shuffle:
+        log.warning("Shuffling after sharding, so the shard will be shuffled.")
 
-    # resize before batching to deal with different image sizes
-    if image_size:
+    # Shuffle after caching for random order every epoch
+    if tf_data_shuffle:
+        buffer_size = len(image_extractor) if len(image_extractor) < 1000 else 1000
+        dataset = dataset.shuffle(buffer_size, seed=seed)
+
+    if image_size is not None:
         assert (
             len(image_size) == 2
         ), f"image_size must be of length 2 (height, width), got {image_size}"
 
-        if resize_type == "resize":
-            dims = len(dataset.element_spec.shape)
-            if dims > 4:
-                log.warning(
-                    f"Resizing not supported with dimensions > 4, got {dims} dims which "
-                    "could be result of `insert_frame_axis=True`."
-                )
+        resizer = Resizer(image_size, resize_type, resize_axes, seed=seed)
+        dataset = dataset_map(dataset, resizer)
 
-            resize_layer = keras.layers.Resizing(*image_size)
-            dataset = dataset_map(dataset, resize_layer)
-        else:
-            crop_layer = keras.layers.RandomCrop(*image_size)
-            dataset = dataset_map(dataset, crop_layer)
+    # repeat dataset if needed (used for smaller datasets)
+    if dataset_repetitions:
+        dataset = dataset.repeat(dataset_repetitions)
 
     # batch
     if batch_size:
@@ -593,6 +758,16 @@ def h5_dataset_from_directory(
         dataset = dataset_map(dataset, augmentation)
 
     # prefetch
-    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    if prefetch:
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
+
+
+def _map_negative_indices(indices: list, length: int):
+    """Maps negative indices for array indexing to positive indices.
+    Example:
+        >>> _map_negative_indices([-1, -2], 5)
+        [4, 3]
+    """
+    return [i if i >= 0 else length + i for i in indices]
