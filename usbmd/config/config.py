@@ -9,35 +9,9 @@ import copy
 import difflib
 import inspect
 import json
-from collections.abc import Mapping
 from pathlib import Path
 
 import yaml
-
-
-def update_leaves(data, func):
-    """
-    Recursively update the leaves of a nested structure using a given function.
-
-    Args:
-        data: The nested structure (e.g., dict, list, tuple, Config) to process.
-        func: A function to apply to the leaves.
-
-    Returns:
-        The updated structure with the function applied to its leaves.
-    """
-    if isinstance(data, (Mapping, Config)):
-        # If it's a dictionary, recurse for each value
-        return type(data)(
-            **{key: update_leaves(value, func) for key, value in data.items()}
-        )
-    elif isinstance(data, (list, tuple)):
-        # If it's a list or tuple, recurse for each element
-        updated = [update_leaves(item, func) for item in data]
-        return type(data)(updated)  # Preserve the original type (list or tuple)
-    else:
-        # Base case: Apply the function to the leaf
-        return func(data)
 
 
 class Config:
@@ -104,8 +78,8 @@ class Config:
         # Ensures lists and tuples of dictionaries are converted to Config objects as well
         if isinstance(value, (list, tuple)):
             value = [self.__class__(x) if isinstance(x, dict) else x for x in value]
-        else:
-            value = self.__class__(value) if isinstance(value, dict) else value
+        elif isinstance(value, dict):
+            value = self.__class__(value)
 
         self.__config__[name] = value
 
@@ -181,20 +155,25 @@ class Config:
     def __repr__(self):
         return f"<Config {self.as_dict()}>"
 
-    def as_dict(self):
-        """Convert the config to a dictionary (recursively)."""
+    def as_dict(self, func_on_leaves=None):
+        """
+        Convert the config to a dictionary (recursively).
+        """
         dictionary = {}
         for key, value in self.items():
             if isinstance(value, Config):
                 value = value.as_dict()
+            elif isinstance(value, (list, tuple)):
+                value = [v.as_dict() if isinstance(v, Config) else v for v in value]
+            # a dict does not exist inside a Config object, because it is a Config object itself
+            if func_on_leaves:
+                value = func_on_leaves(value)
             dictionary[key] = value
         return dictionary
 
     def serialize(self):
         """Return a dict of this config object with all Path objects converted to strings."""
-        return update_leaves(
-            self.as_dict(), lambda x: str(x) if isinstance(x, Path) else x
-        )
+        return self.as_dict(lambda x: str(x) if isinstance(x, Path) else x)
 
     def deep_copy(self):
         """Deep copy"""
