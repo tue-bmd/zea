@@ -261,9 +261,21 @@ def batched_map(f, xs, batch_size=None):
     return out
 
 
-def pad_array_to_divisible(arr, N, axis=0, pad_value=0):
-    """
-    Pad an array to be divisible by N along the specified axis.
+def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
+    """Pad an array to be divisible by N along the specified axis.
+    Args:
+        arr (Tensor): The input array to pad.
+        N (int): The number to which the length of the specified axis should be divisible.
+        axis (int, optional): The axis along which to pad the array. Defaults to 0.
+        mode (str, optional): The padding mode to use. Defaults to 'constant'.
+            One of `"constant"`, `"edge"`, `"linear_ramp"`,
+            `"maximum"`, `"mean"`, `"median"`, `"minimum"`,
+            `"reflect"`, `"symmetric"`, `"wrap"`, `"empty"`,
+            `"circular"`. Defaults to `"constant"`.
+        pad_value (float, optional): The value to use for padding when mode='constant'.
+            Defaults to None. If mode is not `constant`, this value should be None.
+    Returns:
+        Tensor: The padded array.
     """
     # Get the length of the specified axis
     length = ops.shape(arr)[axis]
@@ -277,6 +289,6 @@ def pad_array_to_divisible(arr, N, axis=0, pad_value=0):
     pad_width[axis] = (0, padding)  # Padding for the specified axis
 
     # Pad the array
-    padded_array = ops.pad(arr, pad_width, mode="constant", constant_values=pad_value)
+    padded_array = ops.pad(arr, pad_width, mode=mode, constant_values=pad_value)
 
     return padded_array
