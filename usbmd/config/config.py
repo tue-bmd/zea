@@ -89,10 +89,6 @@ class Config:
             setattr(self, k, v)
 
     def __setattr__(self, name, value):
-        if name == "__frozen__":
-            super().__setattr__(name, value)
-            return
-
         # Check if attribute is a method of the Config class, this cannot be overridden
         if hasattr(self, "__protected__") and name in self.__protected__:
             raise AttributeError(
@@ -219,11 +215,11 @@ class Config:
         Freeze config object. This means that no new attributes can be added.
         Only existing attributes can be modified.
         """
-        self.__frozen__ = True
+        super().__setattr__("__frozen__", True)
 
     def unfreeze(self):
         """Unfreeze config object. This means that new attributes can be added."""
-        self.__frozen__ = False
+        super().__setattr__("__frozen__", False)
 
     @staticmethod
     def load(path):
