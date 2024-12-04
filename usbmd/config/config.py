@@ -222,12 +222,9 @@ class Config:
         super().__setattr__("__frozen__", False)
 
     @staticmethod
-    def load(path):
+    def load_from_yaml(path):
         """Load config object from yaml file"""
         return load_config_from_yaml(path)
-
-    copy = deep_copy  # Alias for deep_copy
-    save = save_to_yaml  # Alias for save_to_yaml
 
 
 def load_config_from_yaml(path, loader=yaml.FullLoader):
