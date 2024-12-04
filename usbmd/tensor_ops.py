@@ -349,7 +349,7 @@ def interpolate_data(subsampled_data, mask, order=1, axis=-1):
                 ops.any(~mask, axis=tuple(i for i in range(mask.ndim) if i != _axis))
             )[0]
             # unknown indices
-            indices = map_indices(indices)
+            indices = map_indices_for_interpolation(indices)
             subsampled_shape.append(length_axis - len(indices))
         else:
             # broadcast indices
@@ -407,21 +407,30 @@ def is_monotonic(array, increasing=True):
     return ops.all(array[1:] >= array[:-1])
 
 
-def map_indices(indices):
-    """
+def map_indices_for_interpolation(indices):
+    """Map a 1D array of indices with gaps to a 1D array where gaps
+    would be between the integers.
+
+    Used in the `interpolate_data` function.
+
     Args:
         (indices): A 1D array of indices with gaps.
     Returns:
         (indices): mapped to a 1D array where gaps would be between
         the integers
 
-    Example:
-        indices = [5, 6, 7, 8, 12, 13, 19]
-        mapped_indices = [5, 5.25, 5.5, 5.75, 8, 8.5, 12.5]
+    There are two segments here of length 4 and 2
 
-        there are two segments here of length 4 and 2
+    Example:
+        >>> indices = [5, 6, 7, 8, 12, 13, 19]
+        >>> mapped_indices = [5, 5.25, 5.5, 5.75, 8, 8.5, 12.5]
+
     """
     indices = ops.array(indices, dtype="int32")
+
+    assert is_monotonic(
+        indices, increasing=True
+    ), "Indices should be monotonically increasing"
 
     gap_starts = ops.where(indices[1:] - indices[:-1] > 1)[0]
     gap_starts = ops.concatenate([ops.array([0]), gap_starts + 1], axis=0)
@@ -454,15 +463,15 @@ def map_indices(indices):
     return mapped_indices
 
 
-def stack_volume_data_along_axis(data, batch_axis, stack_axis, n_frames):
+def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number: int):
     """
-    Stack volume data along a specified axis by splitting it into blocks along the batch axis.
+    Stack tensor data along a specified stack axis by splitting it into blocks along the batch axis.
 
     Args:
         data (Tensor): Input tensor to be stacked.
         batch_axis (int): Axis along which to split the data into blocks.
         stack_axis (int): Axis along which to stack the blocks.
-        n_frames (int): Number of frames per block.
+        number (int): Number of slices per stack.
 
     Returns:
         Tensor: Reshaped tensor with data stacked along stack_axis.
@@ -476,7 +485,7 @@ def stack_volume_data_along_axis(data, batch_axis, stack_axis, n_frames):
         (20, 10, 30)
 
     """
-    blocks = int(ops.ceil(data.shape[batch_axis] / n_frames))
+    blocks = int(ops.ceil(data.shape[batch_axis] / number))
     data = pad_array_to_divisible(data, axis=batch_axis, N=blocks, mode="reflect")
     data = ops.split(data, blocks, axis=batch_axis)
     data = ops.stack(data, axis=batch_axis)
@@ -493,16 +502,18 @@ def stack_volume_data_along_axis(data, batch_axis, stack_axis, n_frames):
     return data
 
 
-def split_volume_data_from_axis(data, batch_axis, stack_axis, n_frames, padding):
+def split_volume_data_from_axis(
+    data, batch_axis: int, stack_axis: int, number: int, padding: int
+):
     """
-    Split previously stacked volume data back to its original shape.
-    This function reverses the operation performed by stack_volume_data_along_axis.
+    Split previously stacked tensor data back to its original shape.
+    This function reverses the operation performed by `stack_volume_data_along_axis`.
 
     Args:
         data (Tensor): Input tensor to be split.
         batch_axis (int): Axis along which to restore the blocks.
         stack_axis (int): Axis from which to split the stacked data.
-        n_frames (int): Number of frames per block.
+        number (int): Number of slices per stack.
         padding (int): Amount of padding to remove from the result.
 
     Returns:
@@ -519,7 +530,7 @@ def split_volume_data_from_axis(data, batch_axis, stack_axis, n_frames, padding)
     if data.shape[stack_axis] == 1:
         # in this case it was a broadcasted axis which does not need to be split
         return data
-    data = ops.split(data, n_frames, axis=stack_axis)
+    data = ops.split(data, number, axis=stack_axis)
     data = ops.stack(data, axis=batch_axis + 1)
     # combine the unstacked axes (dim 1 and 2)
     total_block_size = data.shape[batch_axis] * data.shape[batch_axis + 1]
