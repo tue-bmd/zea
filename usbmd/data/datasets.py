@@ -14,14 +14,12 @@ TODO:
 """
 
 import inspect
-import json
 import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import tqdm
-from deepdiff import DeepDiff
 
 from usbmd.config import Config
 from usbmd.data.read_h5 import ReadH5, recursively_load_dict_contents_from_group
@@ -472,8 +470,8 @@ class USBMDDataSet(DataSet):
 
         num_frames_per_file = []
         validated_succesfully = True
-        for i, file_path in tqdm.tqdm(
-            enumerate(self.file_paths),
+        for file_path in tqdm.tqdm(
+            self.file_paths,
             total=len(self),
             desc="Checking dataset files on validity (USBMD format)",
         ):
@@ -487,37 +485,21 @@ class USBMDDataSet(DataSet):
                 log.warning(f"Error in file {file_path}.\n{e}")
                 validated_succesfully = False
 
-            try:
-                if not self.event_structure:
-                    scan_parameters = self.get_scan_parameters_from_file(i)
-                    if i == 0:
-                        self.scan_parameters = scan_parameters
-                    else:
-                        diff = DeepDiff(self.scan_parameters, scan_parameters)
-                        assert not diff, (
-                            "Scan parameters are not the same in all files in dataset."
-                            f"\n{diff}"
-                        )
-                num_frames_per_file.append(self.num_frames)
-            except Exception as e:
-                # convert into warning
-                log.warning(f"Error in scan parameters from file {file_path}.\n{e}")
-                validation_error_log.append(
-                    f"File {file_path} has different scan parameters than "
-                    f"file {self.file_paths[0]}."
-                    f"\n{diff}\n"
-                )
-                validated_succesfully = False
-
         if not validated_succesfully:
             log.warning(
                 "Not all files in dataset have the same scan parameters. "
                 "Check warnings above for details. No validation file was created. "
                 f"See {validation_error_file_path} for details."
             )
-            with open(validation_error_file_path, "w", encoding="utf-8") as f:
-                for error in validation_error_log:
-                    f.write(error)
+            try:
+                with open(validation_error_file_path, "w", encoding="utf-8") as f:
+                    for error in validation_error_log:
+                        f.write(error)
+            except Exception as e:
+                log.error(
+                    f"Could not write validation errors to {validation_error_file_path}."
+                    f"\n{e}"
+                )
             return
 
         # Create the validated flag file
@@ -561,6 +543,7 @@ class USBMDDataSet(DataSet):
     def _write_validation_file(self, num_frames_per_file):
         """Write validation file."""
         validation_file_path = Path(self.data_root, _VALIDATED_FLAG_FILE)
+        self.file = self.get_file(0)  # read a file to initiate self.file
         if "data" in self.file:
             data_types = list(self.file["data"].keys())
         else:
@@ -578,30 +561,6 @@ class USBMDDataSet(DataSet):
             # write all file names (not entire path) with number of frames on a new line
             for file_path, num_frames in zip(self.file_paths, num_frames_per_file):
                 f.write(f"{file_path.name}: {num_frames}\n")
-            f.write(f"{'-' * 80}\n")
-            if self.event_structure:
-                f.write(
-                    "Event structure with mixed scan parameters found in dataset.\n"
-                )
-            elif self.scan_parameters:
-                f.write("Scan parameters:\n")
-                scan_parameters = dict(self.scan_parameters)
-                for key, value in scan_parameters.items():
-                    if isinstance(value, np.ndarray):
-                        scan_parameters[key] = value.tolist()
-                    elif isinstance(value, (list, tuple)):
-                        scan_parameters[key] = np.array(value).tolist()
-                    elif isinstance(value, str):
-                        scan_parameters[key] = str(value)
-                    elif value is None:
-                        scan_parameters[key] = None
-                    elif int(value) == value:
-                        scan_parameters[key] = int(value)
-                    else:
-                        scan_parameters[key] = float(value)
-                f.write(json.dumps(scan_parameters, indent=4))
-            else:
-                f.write("\tEmpty\n")
             f.write(f"{'-' * 80}\n")
 
         # Write the hash of the validation file
