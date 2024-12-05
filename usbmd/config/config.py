@@ -22,8 +22,8 @@ class Config(dict):
 
     Other features:
     - `save_to_yaml` method to save the config to a yaml file.
-    - `copy` method to create a deep copy of the config.
-    - dictionary-like methods `keys`, `values`, `items`, `pop`, `update`, `get`.
+    - `deep_copy` method to create a deep copy of the config.
+    - Normal dictionary methods such as `keys`, `values`, `items`, `pop`, `update`, `get`.
     - Propose similar attribute names if a non-existing attribute is accessed.
     - Freeze the config object to prevent new attributes from being added.
     - Load config object from yaml file.
