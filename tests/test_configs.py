@@ -195,7 +195,7 @@ def test_dict_and_attributes_equal(dictionary):
             assert getattr(config, key) == value
 
         # Check if config raises an error when indexing a missing key
-        with pytest.raises(AttributeError):
+        with pytest.raises(KeyError):
             print(config["key_not_in_config"])
 
     config = Config(dictionary=dictionary)

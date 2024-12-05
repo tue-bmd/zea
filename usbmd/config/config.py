@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 
-class Config:
+class Config(dict):
     """Config class.
 
     This Config class extends a normal dictionary with easydict such that
@@ -46,13 +46,11 @@ class Config:
             **kwargs: Additional key-value pairs to initialize the Config object.
                 Will override values in the dictionary if they have the same key.
         """
-        super().__setattr__("__config__", {})
-
         # Get all methods of the Config class and store them in a list as protected attributes
         super().__setattr__(
             "__protected__",
             [x[0] for x in inspect.getmembers(Config, predicate=inspect.isroutine)]
-            + ["__config__", "__protected__"],
+            + ["__protected__"],
         )
 
         if dictionary is None:
@@ -81,83 +79,48 @@ class Config:
         elif isinstance(value, dict):
             value = self.__class__(value)
 
-        self.__config__[name] = value
+        super().__setitem__(name, value)
 
     def __setitem__(self, key, value):
         return self.__setattr__(key, value)
 
-    def __getattr__(self, name):
-        if name in self.__config__:
-            return self.__config__[name]
-
+    def _unknown_attr(self, name):
         msg = f"Unknown attribute: '{name}'."
         if "difflib" in globals():
             closest_matches = difflib.get_close_matches(
-                name, self.__config__.keys(), n=1, cutoff=0.7
+                name, self.keys(), n=1, cutoff=0.7
             )
             if closest_matches:
                 msg += f" Did you mean '{closest_matches[0]}'?"
+        return msg
+
+    def __getattr__(self, name):
+        if name in self:
+            return super().__getitem__(name)
+
+        msg = self._unknown_attr(name)
         raise AttributeError(msg)
 
     def __getitem__(self, key):
-        return self.__getattr__(key)
+        if key in self:
+            return super().__getitem__(key)
 
-    def to_json(self):
-        """Return the config as a json string."""
-        return json.dumps(self.__config__)
-
-    def keys(self):
-        """Return the keys of the config."""
-        return self.__config__.keys()
-
-    def values(self):
-        """Return the values of the config."""
-        return self.__config__.values()
-
-    def items(self):
-        """Return the items of the config."""
-        return self.__config__.items()
-
-    def pop(self, *args):
-        """Remove and return the value of the given key."""
-        return self.__config__.pop(*args)
-
-    def update(self, override_dict):
-        """
-        Update the configuration object with values from the given dictionary.
-
-        Args:
-            override_dict (dict): A dictionary containing the values to update.
-        """
-        for name, value in override_dict.items():
-            setattr(self, name, value)
-
-    def get(self, keyname, value=None):
-        """Get the value of the given key."""
-        return self.__config__.get(keyname, value)
+        msg = self._unknown_attr(key)
+        raise KeyError(msg)
 
     def __delattr__(self, name):
-        del self.__config__[name]
-
-    def __delitem__(self, key):
-        self.__delattr__(key)
-
-    def __iter__(self):
-        keys = sorted(self.__config__.keys())
-        yield from keys
-
-    def __contains__(self, item):
-        return item in self.__config__
-
-    def __len__(self):
-        return len(self.__config__)
+        del self[name]
 
     def __repr__(self):
         return f"<Config {self.as_dict()}>"
 
+    def to_json(self):
+        """Return the config as a json string."""
+        return json.dumps(self)
+
     def as_dict(self, func_on_leaves=None):
         """
-        Convert the config to a dictionary (recursively).
+        Convert the config to a normal dictionary (recursively).
         """
         dictionary = {}
         for key, value in self.items():
