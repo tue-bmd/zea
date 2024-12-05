@@ -1,5 +1,7 @@
 """Masks generation utilities."""
 
+from typing import List
+
 import keras
 from keras import ops
 
@@ -55,3 +57,52 @@ def lines_to_im_size(lines, img_size: tuple):
     masks = ops.repeat(masks[:, None], height, axis=1)
 
     return masks
+
+
+def make_line_mask(
+    line_indices: List[int],
+    image_shape: List[int],
+    line_width: int = 1,
+    dtype="float32",
+):
+    """
+    Creates a mask with vertical (i.e. second axis) lines at specified indices.
+
+    Args:
+        line_indices (List[int]): A list of indices where the lines should be drawn.
+        image_shape (List[int]): The shape of the image as [height, width, channels].
+        line_width (int, optional): The width of each line. Defaults to 1.
+        dtype (str, optional): The data type of the mask. Defaults to "float32".
+
+    Returns:
+        mask (Tensor): A tensor of the same shape as `image_shape` with lines drawn
+            at the specified indices.
+    """
+
+    height, _, channels = image_shape
+    mask = ops.zeros(image_shape, dtype=dtype)
+    # index columns based on line indices and line width
+    selected_columns = ops.convert_to_tensor(
+        [list(range(line_width * k, line_width * (k + 1))) for k in line_indices]
+    )
+    selected_columns = ops.reshape(selected_columns, (-1,))
+    num_columns = len(selected_columns)
+
+    # Create indices for the mask
+    rows = ops.arange(height)
+    rows = ops.reshape(rows, (height, 1, 1))
+    rows = ops.broadcast_to(rows, (height, num_columns, channels))
+    columns = ops.broadcast_to(
+        ops.reshape(selected_columns, (1, num_columns, 1)),
+        (height, num_columns, channels),
+    )
+    channel_indices = ops.arange(channels)
+    channel_indices = ops.reshape(channel_indices, (1, 1, channels))
+    channel_indices = ops.broadcast_to(channel_indices, (height, num_columns, channels))
+
+    indices = ops.stack([rows, columns, channel_indices], axis=-1)
+    indices = ops.reshape(indices, (-1, 3))
+    updates = ops.ones((height * num_columns * channels,), dtype="float32")
+
+    mask = ops.scatter_update(mask, indices, updates)
+    return mask
