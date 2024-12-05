@@ -1,6 +1,5 @@
 """Test configs"""
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -89,7 +88,7 @@ def test_recursive_config(dictionary):
 
 
 @pytest.mark.parametrize("dictionary", config_initializers)
-def test_yaml_saving_loading(request, dictionary):
+def test_yaml_saving_loading(tmp_path, request, dictionary):
     """Tests if the config can be saved to a yaml file."""
     config = Config(dictionary=dictionary)
 
@@ -97,7 +96,7 @@ def test_yaml_saving_loading(request, dictionary):
     test_id = request.node.name
 
     # Define the save path
-    path = Path(f"temp_{test_id}", "config.yaml")
+    path = Path(tmp_path, f"temp_{test_id}", "config.yaml")
 
     # Create the directory if it does not exist
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,9 +106,6 @@ def test_yaml_saving_loading(request, dictionary):
 
     # Load the config from the yaml file
     config2 = load_config_from_yaml(path)
-
-    # Delete the directory and file
-    shutil.rmtree(path.parent)
 
     try:
         # Check if the config is the same
