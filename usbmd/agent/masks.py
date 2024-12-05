@@ -34,6 +34,38 @@ def generate_random_lines(
     return masks
 
 
+def generate_equispaced_lines(
+    n_actions: int,
+    n_possible_actions: int,
+    previous_mask=None,
+):
+    """
+    Generates equispaced one-hot line mask.
+    If a previous mask is provided, will shift the mask by one.
+
+    Args:
+        n_actions (int): Number of actions to be selected.
+        n_possible_actions (int): Number of possible actions.
+        previous_actions (Tensor, optional): Previous actions. Defaults to None.
+
+    Returns:
+        Tensor: Line mask of shape (n_possible_actions).
+    """
+    assert (
+        n_possible_actions % n_actions == 0
+    ), "Number of actions must divide evenly into possible actions to use equispaced sampling."
+    if previous_mask is None:
+        selected_indices = ops.arange(
+            0, n_possible_actions - 1, n_possible_actions // n_actions
+        )
+        masks = ops.zeros(n_possible_actions)
+        return ops.scatter_update(
+            masks, ops.expand_dims(selected_indices, axis=1), ops.ones(n_actions)
+        )
+    else:
+        return ops.roll(previous_mask, shift=1)
+
+
 def lines_to_im_size(lines, img_size: tuple):
     """
     Args:
