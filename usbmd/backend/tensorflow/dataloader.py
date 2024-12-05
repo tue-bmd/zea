@@ -122,17 +122,17 @@ class H5Generator:
             overlapping_blocks=self.overlapping_blocks,
         )
 
+        if self.shuffle:
+            self._shuffle()
+        else:
+            log.warning("H5Generator: Not shuffling data.")
+
         if limit_n_samples:
             log.warning(
                 f"H5Generator: Limiting number of samples to {limit_n_samples} "
                 f"out of {len(self.indices)}"
             )
             self.indices = self.indices[:limit_n_samples]
-
-        if self.shuffle:
-            self._shuffle()
-        else:
-            log.warning("H5Generator: Not shuffling data.")
 
     @property
     def tensorflow_dtype(self):
@@ -656,7 +656,7 @@ def h5_dataset_from_directory(
         tf.data.Dataset: dataset
     """
     tf_data_shuffle = shuffle and cache  # shuffle after caching
-    generator_shuffle = shuffle and not cache  # shuffle on the generator level
+    generator_shuffle = shuffle  # shuffle on the generator level
 
     if tf_data_shuffle:
         log.warning("Will shuffle on the image level, this can be slower.")
