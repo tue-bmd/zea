@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from usbmd.utils import log
+
 
 class Config(dict):
     """Config class.
@@ -52,6 +54,7 @@ class Config(dict):
             [x[0] for x in inspect.getmembers(Config, predicate=inspect.isroutine)]
             + ["__protected__"],
         )
+        super().__setattr__("__accessed__", {})
 
         if dictionary is None:
             dictionary = {}
@@ -94,8 +97,37 @@ class Config(dict):
                 msg += f" Did you mean '{closest_matches[0]}'?"
         return msg
 
+    def _reset_accessed(self):
+        """Reset accessed attributes."""
+        super().__setattr__("__accessed__", {})
+
+    def _mark_accessed(self, name):
+        """Mark an attribute as accessed."""
+        super().__setattr__("__accessed__", {name: True})
+
+    def _assert_key_accessed(self, key, value, _assert=True):
+        """Assert that a key has been accessed."""
+        if key not in self.__accessed__:
+            msg = f"Attribute '{key}'='{value}' has not been accessed."
+            if _assert:
+                raise AttributeError(msg)
+            else:
+                log.warning(msg)
+        return key, value
+
+    def _assert_all_accessed(self):
+        """Assert that all attributes have been accessed."""
+        self.as_dict(self._assert_key_accessed, as_config=True)
+
+    def _log_all_unaccessed(self):
+        """Log all unaccessed attributes."""
+        self.as_dict(
+            lambda k, v: self._assert_key_accessed(k, v, _assert=False), as_config=True
+        )
+
     def __getattr__(self, name):
         if name in self:
+            self._mark_accessed(name)
             return super().__getitem__(name)
 
         msg = self._unknown_attr(name)
@@ -103,6 +135,7 @@ class Config(dict):
 
     def __getitem__(self, key):
         if key in self:
+            self._mark_accessed(key)
             return super().__getitem__(key)
 
         msg = self._unknown_attr(key)
@@ -118,11 +151,14 @@ class Config(dict):
         """Return the config as a json string."""
         return json.dumps(self)
 
-    def as_dict(self, func_on_leaves=None):
+    def as_dict(self, func_on_leaves=None, as_config=False):
         """
         Convert the config to a normal dictionary (recursively).
         """
-        dictionary = {}
+        if as_config:
+            dictionary = Config()
+        else:
+            dictionary = {}
         for key, value in self.items():
             if isinstance(value, Config):
                 value = value.as_dict()
@@ -130,13 +166,13 @@ class Config(dict):
                 value = [v.as_dict() if isinstance(v, Config) else v for v in value]
             # a dict does not exist inside a Config object, because it is a Config object itself
             if func_on_leaves:
-                value = func_on_leaves(value)
+                key, value = func_on_leaves(key, value)
             dictionary[key] = value
         return dictionary
 
     def serialize(self):
         """Return a dict of this config object with all Path objects converted to strings."""
-        return self.as_dict(lambda x: str(x) if isinstance(x, Path) else x)
+        return self.as_dict(lambda k, v: str(v) if isinstance(v, Path) else v)
 
     def deep_copy(self):
         """Deep copy"""
