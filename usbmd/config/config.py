@@ -302,6 +302,8 @@ class Config(dict):
         """
         return Config(copy.deepcopy(self.as_dict()))
 
+    deep_copy = copy  # Alias for copy
+
     def save_to_yaml(self, path):
         """Save config contents to yaml"""
         with open(Path(path), "w", encoding="utf-8") as save_file:
