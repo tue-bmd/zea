@@ -18,7 +18,7 @@ simple_dict = {"a": 1, "b": 2, "c": 3}
 nested_dict = {"a": 1, "nested_dictionary": {"b": 2, "c": 3}}
 doubly_nested_dict = {
     "a": 1,
-    "nested_dictionary": {"b": 2, "doubly_nested_dictionary": 4},
+    "nested_dictionary": {"b": 2, "doubly_nested_dictionary": {"c": 3}},
 }
 dict_strings = {"a": "first", "b": "second"}
 dict_none = {"a": 1, "b": None, "c": 3}
@@ -204,3 +204,24 @@ def test_dict_and_attributes_equal(dictionary):
     config.update({"update_with_update": 2})
     config.update_with_attribute = 3
     test_getitem(config)
+
+
+@pytest.mark.parametrize("dictionary", [nested_dict])
+def test_config_accessed(dictionary):
+    """
+    Tests if the _assert_all_accessed method works correctly.
+    """
+    # Case 1: access all attributes
+    config = Config(**dictionary)
+    tmp = config.a
+    tmp = config.nested_dictionary.b
+    tmp = config.nested_dictionary.c
+    config._assert_all_accessed()  # should not raise an error
+
+    # Case 2: access only some attributes
+    config = Config(**dictionary)
+    tmp = config.nested_dictionary.b
+    with pytest.raises(AssertionError):
+        config._assert_all_accessed()  # should raise an error
+
+    del tmp  # remove tmp to avoid unused variable warning
