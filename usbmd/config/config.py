@@ -317,11 +317,22 @@ class Config(dict):
         Freeze config object. This means that no new attributes can be added.
         Only existing attributes can be modified.
         """
-        super().__setattr__("__frozen__", True)
+        self._recursive_freeze_unfreeze(freeze=True)
 
     def unfreeze(self):
         """Unfreeze config object. This means that new attributes can be added."""
-        super().__setattr__("__frozen__", False)
+        self._recursive_freeze_unfreeze(freeze=False)
+
+    def _recursive_freeze_unfreeze(self, freeze):
+        """Helper function to recursively freeze or unfreeze nested Config objects."""
+        super().__setattr__("__frozen__", freeze)
+        for _, value in self._dict_items():
+            if isinstance(value, Config):
+                value._recursive_freeze_unfreeze(freeze)
+            elif isinstance(value, (list, tuple)):
+                for v in value:
+                    if isinstance(v, Config):
+                        v._recursive_freeze_unfreeze(freeze)
 
     @staticmethod
     def load_from_yaml(path):
