@@ -113,14 +113,13 @@ def make_line_mask(
 
     height, _, channels = image_shape
     mask = ops.zeros(image_shape, dtype=dtype)
-    # index columns based on line indices and line width
-    selected_columns = ops.convert_to_tensor(
-        [list(range(line_width * k, line_width * (k + 1))) for k in line_indices]
-    )
-    selected_columns = ops.reshape(selected_columns, (-1,))
-    num_columns = len(selected_columns)
 
-    # Create indices for the mask
+    line_indices = ops.expand_dims(line_indices, axis=1)
+    base_range = ops.arange(line_width)
+    selected_columns = line_indices * line_width + base_range
+    selected_columns = ops.reshape(selected_columns, (-1,))
+    num_columns = selected_columns.shape[0]
+
     rows = ops.arange(height)
     rows = ops.reshape(rows, (height, 1, 1))
     rows = ops.broadcast_to(rows, (height, num_columns, channels))
