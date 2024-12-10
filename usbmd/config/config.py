@@ -185,7 +185,7 @@ class Config(dict):
 
     def _reset_accessed(self):
         """Reset accessed attributes."""
-        super().__setattr__("__accessed__", {})
+        self._recursive_setattr("__accessed__", {})
 
     def _mark_accessed(self, name):
         """Mark an attribute as accessed."""
@@ -319,22 +319,22 @@ class Config(dict):
         Freeze config object. This means that no new attributes can be added.
         Only existing attributes can be modified.
         """
-        self._recursive_freeze_unfreeze(freeze=True)
+        self._recursive_setattr("__frozen__", True)
 
     def unfreeze(self):
         """Unfreeze config object. This means that new attributes can be added."""
-        self._recursive_freeze_unfreeze(freeze=False)
+        self._recursive_setattr("__frozen__", False)
 
-    def _recursive_freeze_unfreeze(self, freeze):
-        """Helper function to recursively freeze or unfreeze nested Config objects."""
-        super().__setattr__("__frozen__", freeze)
+    def _recursive_setattr(self, key, value):
+        """Helper function to recursively set an attribute on all nested configs."""
+        super().__setattr__(key, value)
         for _, value in self._dict_items():
             if isinstance(value, Config):
-                value._recursive_freeze_unfreeze(freeze)
+                value._recursive_setattr(key, value)
             elif isinstance(value, (list, tuple)):
                 for v in value:
                     if isinstance(v, Config):
-                        v._recursive_freeze_unfreeze(freeze)
+                        v._recursive_setattr(key, value)
 
     @staticmethod
     def load_from_yaml(path):
