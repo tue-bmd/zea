@@ -197,6 +197,15 @@ class Config(dict):
         if name in self.__accessed__:
             del self.__accessed__[name]
 
+    def _mark_accessed_recursive(self):
+        """Mark an attribute and all its children as accessed."""
+
+        def mark_accessed(config, key, value):
+            config._mark_accessed(key)
+            return key, value
+
+        self.as_dict(mark_accessed)
+
     def _dict_items(self):
         """Return the items of the config object. Only used for internal purposes."""
         return super().items()
@@ -208,8 +217,15 @@ class Config(dict):
         if self.__parent__ is None:
             return self, key_trace
         for key, value in self.__parent__._dict_items():
+            if isinstance(value, (list, tuple)):
+                for i, v in enumerate(value):
+                    if v == self:
+                        return self.__parent__._trace_through_ancestors(
+                            [key + f"_{i}"] + key_trace
+                        )
             if value == self:
                 return self.__parent__._trace_through_ancestors([key] + key_trace)
+        raise ValueError("Parent not found in ancestors. Report to usbmd developers.")
 
     @staticmethod
     def _assert_key_accessed(config, key, value, _assert=True):
