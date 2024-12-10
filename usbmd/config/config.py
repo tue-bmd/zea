@@ -31,11 +31,12 @@ class Config(dict):
 
     Other features:
     - `save_to_yaml` method to save the config to a yaml file.
-    - `deep_copy` method to create a deep copy of the config.
+    - `copy` method to create a deep copy of the config.
     - Normal dictionary methods such as `keys`, `values`, `items`, `pop`, `update`, `get`.
     - Propose similar attribute names if a non-existing attribute is accessed.
     - Freeze the config object to prevent new attributes from being added.
     - Load config object from yaml file.
+    - Logs all accessed attributes such that you can check if all attributes have been accessed.
 
     We took inspiration from the following sources:
     - [EasyDict](https://pypi.org/project/easydict/)
@@ -71,6 +72,77 @@ class Config(dict):
         for k, v in dictionary.items():
             setattr(self, k, v)
 
+    def clear(self):
+        """Clear the config object."""
+        super().clear()
+        self._reset_accessed()
+
+    def fromkeys(self, keys, value=None):
+        """Returns a config with the specified keys and value"""
+        super().fromkeys(keys, value)
+
+    def get(self, key, default=None):
+        """Returns the value of the specified key"""
+        self._mark_accessed(key)
+        return super().get(key, default)
+
+    def items(self):
+        """Returns a list containing a tuple for each key value pair"""
+        # Use a generator that calls __getitem__ for every key
+        return [
+            (key, self[key])
+            for key in self.keys()  # pylint: disable=consider-using-dict-items
+        ]
+
+    def keys(self):  # pylint: disable=useless-parent-delegation
+        """Returns a list containing the config's keys"""
+        return super().keys()
+
+    def pop(self, key, default=None):
+        """Removes the element with the specified key"""
+        self._mark_accessed(key)
+        return super().pop(key, default)
+
+    def popitem(self):
+        """Removes the last inserted key-value pair"""
+        key, value = super().popitem()
+        self._mark_accessed(key)
+        return key, value
+
+    def setdefault(self, key, default=None):
+        """Returns the value of the specified key. If the key does not exist: insert the key,
+        with the specified value"""
+        # Use __getitem__ to get values and __setitem__ to set values
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def update(self, dictionary: dict | None = None, **kwargs):
+        """Updates the config with the specified key-value pairs"""
+        # Use __setitem__ to set values
+        if dictionary is None:
+            dictionary = {}
+        dictionary.update(kwargs)
+        for key, value in dictionary.items():
+            self[key] = value
+
+    def values(self):
+        """Returns a list of all the values in the config"""
+        # Use __getitem__ to get values
+        return (
+            self[key]
+            for key in self.keys()  # pylint: disable=consider-using-dict-items
+        )
+
+    def __iter__(self):
+        """Returns an iterator that iterates through the keys of the config"""
+        # Overwritten to ensure iteration respects our logic
+        return iter(self.keys())
+
+    def __contains__(self, key):
+        """Returns True if the specified key exists in the config"""
+        return super().__contains__(key)
+
     def __setattr__(self, name, value):
         # Check if attribute is a method of the Config class, this cannot be overridden
         if hasattr(self, "__protected__") and name in self.__protected__:
@@ -83,6 +155,9 @@ class Config(dict):
             raise TypeError(
                 f"Config is a frozen, no new attributes can be added. Tried to add: `{name}`"
             )
+
+        # If overriding an existing attribute, mark it as unaccessed
+        self._mark_unaccessed(name)
 
         # Ensures lists and tuples of dictionaries are converted to Config objects as well
         if isinstance(value, (list, tuple)):
@@ -114,7 +189,17 @@ class Config(dict):
 
     def _mark_accessed(self, name):
         """Mark an attribute as accessed."""
-        self.__accessed__[name] = True
+        if name in self:
+            self.__accessed__[name] = True
+
+    def _mark_unaccessed(self, name):
+        """Mark an attribute as unaccessed."""
+        if name in self.__accessed__:
+            del self.__accessed__[name]
+
+    def _dict_items(self):
+        """Return the items of the config object. Only used for internal purposes."""
+        return super().items()
 
     def _trace_through_ancestors(self, key_trace=None):
         """Find the root ancestor of the config object."""
@@ -122,7 +207,7 @@ class Config(dict):
             key_trace = []
         if self.__parent__ is None:
             return self, key_trace
-        for key, value in self.__parent__.items():
+        for key, value in self.__parent__._dict_items():
             if value == self:
                 return self.__parent__._trace_through_ancestors([key] + key_trace)
 
@@ -192,7 +277,7 @@ class Config(dict):
                 You can change the key and value inside the function. Defaults to None.
         """
         dictionary = {}
-        for key, value in self.items():
+        for key, value in self._dict_items():
             if isinstance(value, Config):
                 value = value.as_dict(func_on_leaves)
             elif isinstance(value, (list, tuple)):
@@ -210,7 +295,7 @@ class Config(dict):
         """Return a dict of this config object with all Path objects converted to strings."""
         return self.as_dict(lambda _, key, value: (key, path_to_str(value)))
 
-    def deep_copy(self):
+    def copy(self):
         """
         Deep copy the config object. This is useful when you want to modify the config object
         without changing the original. Does not preserve the access history or frozen state!
