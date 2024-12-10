@@ -325,16 +325,16 @@ class Config(dict):
         """Unfreeze config object. This means that new attributes can be added."""
         self._recursive_setattr("__frozen__", False)
 
-    def _recursive_setattr(self, key, value):
+    def _recursive_setattr(self, set_key, set_value):
         """Helper function to recursively set an attribute on all nested configs."""
-        super().__setattr__(key, value)
+        super().__setattr__(set_key, set_value)
         for _, value in self._dict_items():
             if isinstance(value, Config):
-                value._recursive_setattr(key, value)
+                value._recursive_setattr(set_key, set_value)
             elif isinstance(value, (list, tuple)):
                 for v in value:
                     if isinstance(v, Config):
-                        v._recursive_setattr(key, value)
+                        v._recursive_setattr(set_key, set_value)
 
     @staticmethod
     def load_from_yaml(path):
