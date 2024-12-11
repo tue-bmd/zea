@@ -134,6 +134,25 @@ class Config(dict):
             for key in self.keys()  # pylint: disable=consider-using-dict-items
         )
 
+    def __or__(self, other):
+        """
+        `self | other` operator. Returns a new config object with the contents of both configs.
+        """
+        return Config(super().__or__(other))
+
+    def __ror__(self, other):
+        """
+        `other | self` operator. Returns a new config object with the contents of both configs.
+        """
+        return Config(super().__ror__(other))
+
+    def __ior__(self, other):
+        """
+        `|=` operator. Updates the config with the contents of the other config.
+        """
+        self.update(other)
+        return self
+
     def __iter__(self):
         """Returns an iterator that iterates through the keys of the config"""
         # Overwritten to ensure iteration respects our logic
