@@ -8,7 +8,7 @@ from keras import ops
 from usbmd.agent.gumbel import hard_straight_through
 
 
-def generate_random_lines(
+def random_uniform_lines(
     n_actions: int,
     n_possible_actions: int,
     n_masks: int,
@@ -34,7 +34,7 @@ def generate_random_lines(
     return masks
 
 
-def generate_equispaced_lines(
+def equispaced_lines(
     n_actions: int,
     n_possible_actions: int,
     previous_mask=None,
