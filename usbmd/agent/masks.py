@@ -115,7 +115,7 @@ def make_line_mask(
     mask = ops.zeros(image_shape, dtype=dtype)
 
     line_indices = ops.expand_dims(line_indices, axis=1)
-    base_range = ops.arange(line_width)
+    base_range = ops.arange(line_width, dtype=line_indices.dtype)
     selected_columns = line_indices * line_width + base_range
     selected_columns = ops.reshape(selected_columns, (-1,))
     num_columns = selected_columns.shape[0]
