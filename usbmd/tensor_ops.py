@@ -256,11 +256,15 @@ def batched_map(f, xs, batch_size=None):
 
     Idea taken from: https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.map.html
     """
-    if batch_size == 1:
+    # If the batch size of the data is smaller than the specified batch size,
+    # run the function on the entire input
+    if ops.shape(xs)[0] < batch_size:
         return f(xs)
 
+    # If the batch size is not specified, map over the leading axis
     if batch_size is None:
         out = ops.map(f, xs)
+    # If the batch size is specified, map over the leading axis in batches
     else:
         length = ops.shape(xs)[0]
         xs = pad_array_to_divisible(xs, batch_size, axis=0)
