@@ -82,7 +82,12 @@ def extend_n_dims(arr, axis, n_dims):
 
 
 def func_with_one_batch_dim(
-    func, tensor, n_batch_dims: int = 2, func_axis: int | None = None, **kwargs
+    func,
+    tensor,
+    n_batch_dims: int,
+    batch_size: int | None = None,
+    func_axis: int | None = None,
+    **kwargs,
 ):
     """
     Applies a function to an input tensor with one or more batch dimensions. The function will
@@ -94,6 +99,9 @@ def func_with_one_batch_dim(
         tensor (Tensor): The input tensor.
         n_batch_dims (int): The number of batch dimensions in the input tensor.
             Expects the input to start with n_batch_dims batch dimensions. Defaults to 2.
+        batch_size (int, optional): Integer specifying the size of the batch for
+            each step to execute in parallel. Defaults to None, in which case the function
+            will run everything in parallel.
         func_axis (int, optional): If `func` returns mulitple outputs, this axis will be returned.
         **kwargs: Additional keyword arguments to pass to the function.
 
@@ -113,7 +121,10 @@ def func_with_one_batch_dim(
     reshaped_input = ops.reshape(tensor, [-1, *other_dims])
 
     # Apply the given function to the reshaped input tensor
-    reshaped_output = func(reshaped_input, **kwargs)
+    if batch_size is None:
+        reshaped_output = func(reshaped_input, **kwargs)
+    else:
+        reshaped_output = batched_map(func, reshaped_input, batch_size=batch_size)
 
     # If the function returns multiple outputs, select the one corresponding to `func_axis`
     if isinstance(reshaped_output, (tuple, list)):
