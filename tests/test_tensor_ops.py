@@ -147,6 +147,117 @@ def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
     return out  # Return the output for the equality_libs_processing decorator
 
 
-# TODO: Add tests for the following functions:
-# - batched_map
-# - pad_array_to_divisible
+@pytest.mark.parametrize(
+    "shape, batch_axis, stack_axis, n_frames",
+    [
+        [(10, 20, 30), 0, 1, 2],  # Simple 3D case
+        [(8, 16, 24, 32), 1, 2, 4],  # 4D case
+        [(5, 10, 15, 20, 25), 2, 3, 5],  # 5D case
+        [(10, 20, 30), 0, 2, 1],
+    ],
+)
+@equality_libs_processing()
+def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
+    """Test that stack_volume_data_along_axis and split_volume_data_from_axis
+    are inverse operations.
+    """
+    # Create random test data (gradient)
+    data = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
+
+    # First stack the data
+    stacked = tensor_ops.stack_volume_data_along_axis(
+        data, batch_axis, stack_axis, n_frames
+    )
+
+    # Calculate padding that was added (if any)
+    original_size = data.shape[batch_axis]
+    blocks = int(np.ceil(original_size / n_frames))
+    padded_size = blocks * n_frames
+    padding = padded_size - original_size
+
+    # Then split it back
+    restored = tensor_ops.split_volume_data_from_axis(
+        stacked, batch_axis, stack_axis, n_frames, padding
+    )
+
+    # Verify shapes match
+    assert (
+        restored.shape == data.shape
+    ), "Shapes don't match after stack/split operations"
+
+    # Verify contents match
+    np.testing.assert_allclose(restored, data, rtol=1e-5, atol=1e-5)
+
+    return restored  # Return for equality_libs_processing decorator
+
+
+@pytest.mark.parametrize(
+    "array, batch_dims, func",
+    [
+        [np.random.normal(size=(2, 3, 4, 5)), 2, ops.square],
+        [np.random.normal(size=(3, 4, 5, 6)), 1, lambda x: x * 2],
+        [np.random.normal(size=(2, 2, 3, 4)), 3, ops.abs],
+    ],
+)
+@equality_libs_processing()
+def test_batched_map(array, batch_dims, func):
+    """Test the batched_map function against manual batch processing."""
+    array = ops.convert_to_tensor(array)
+    out = tensor_ops.batched_map(func, array, batch_dims)
+
+    # Compute expected result manually
+    expected = []
+    batch_shape = array.shape[:batch_dims]
+    for idx in np.ndindex(*batch_shape):
+        slicing = tuple(
+            slice(None) if i >= len(idx) else idx[i] for i in range(array.ndim)
+        )
+        expected.append(func(array[slicing]))
+
+    expected = ops.stack(expected, axis=0)
+    expected = ops.reshape(expected, batch_shape + array.shape[batch_dims:])
+
+    np.testing.assert_allclose(out, expected, rtol=1e-5, atol=1e-5)
+    return out
+
+
+@pytest.mark.parametrize(
+    "array, divisor, axis",
+    [
+        [np.random.normal(size=(10, 15)), 8, -1],
+        [np.random.normal(size=(7, 9, 11)), 4, 1],
+        [np.random.normal(size=(5, 6, 7, 8)), 2, 0],
+    ],
+)
+@equality_libs_processing()
+def test_pad_array_to_divisible(array, divisor, axis):
+    """Test the pad_array_to_divisible function."""
+    padded = tensor_ops.pad_array_to_divisible(array, divisor, axis=axis)
+
+    # Check that output shape is divisible by divisor only on specified axis
+    assert (
+        padded.shape[axis] % divisor == 0
+    ), "Output dimension not divisible by divisor on specified axis"
+
+    # Check that the original array is preserved in the first part
+    np.testing.assert_array_equal(
+        padded[tuple(slice(0, s) for s in array.shape)], array
+    )
+
+    # Check that padding size is minimal on specified axis
+    axis_dim = padded.shape[axis]
+    orig_dim = array.shape[axis]
+    assert (
+        axis_dim >= orig_dim and axis_dim - orig_dim < divisor
+    ), "Padding is not minimal"
+
+    if axis < 0:  # deal with negative axis
+        axis = array.ndim + axis
+    # Check other dimensions remain unchanged
+    for i, (p_dim, o_dim) in enumerate(zip(padded.shape, array.shape)):
+        if i != axis:
+            assert (
+                p_dim == o_dim
+            ), "Dimensions not matching axis should remain unchanged"
+
+    return padded
