@@ -253,7 +253,7 @@ def batched_map(f, xs, batch_size=None):
     else:
         length = ops.shape(xs)[0]
         xs = pad_array_to_divisible(xs, batch_size, axis=0)
-        xs = ops.reshape(xs, (batch_size, -1) + ops.shape(xs)[1:])
+        xs = ops.reshape(xs, (-1, batch_size) + ops.shape(xs)[1:])
         out = ops.map(f, xs)
         out = ops.reshape(out, (-1,) + ops.shape(out)[2:])
         out = out[:length]  # remove padding
