@@ -483,12 +483,12 @@ class Scan(Object):
         angles usually used in 2D imaging."""
         return self._polar_angles[self.selected_transmits]
 
-    @deprecated("Scan.polar_angles")
-    @property
-    def angles(self):
-        """Identical to `Scan.polar_angles`. This attribute is added for backward
-        compatibility."""
-        return self.polar_angles
+    # @deprecated("Scan.polar_angles")
+    # @property
+    # def angles(self):
+    #     """Identical to `Scan.polar_angles`. This attribute is added for backward
+    #     compatibility."""
+    #     return self.polar_angles
 
     @property
     def azimuth_angles(self):
