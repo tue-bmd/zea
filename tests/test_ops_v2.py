@@ -5,7 +5,10 @@
 import keras
 import pytest
 
+from usbmd.config.config import Config
 from usbmd.ops_v2 import DataTypes, Operation, Pipeline
+from usbmd.probes import Dummy
+from usbmd.scan import Scan
 
 # TODO: Run tests for all backends
 
@@ -226,10 +229,6 @@ def test_pipeline_validation():
 
 def test_pipeline_with_scan_probe_config():
     """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
-
-    from usbmd.config.config import Config
-    from usbmd.probes import Dummy
-    from usbmd.scan import Scan
 
     probe = Dummy()
     scan = Scan(
