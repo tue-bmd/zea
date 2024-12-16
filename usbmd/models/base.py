@@ -2,15 +2,20 @@ from pathlib import Path
 
 import keras
 from keras_hub.src.models.preprocessor import Preprocessor
-from keras_hub.src.utils.preset_utils import (
+
+from usbmd import log
+from usbmd.models.preset_utils import (
     builtin_presets,
-    find_subclass,
     get_preset_loader,
     get_preset_saver,
 )
-from keras_hub.src.utils.python_utils import classproperty
 
-from usbmd import log
+
+class classproperty(property):
+    """Define a class level property."""
+
+    def __get__(self, _, owner_cls):
+        return self.fget(owner_cls)
 
 
 class BaseModel(keras.models.Model):
@@ -82,14 +87,14 @@ class BaseModel(keras.models.Model):
         ```
         """
         loader = get_preset_loader(preset)
-        backbone_cls = loader.check_backbone_class()
-        if not issubclass(backbone_cls, cls):
+        model_cls = loader.check_model_class()
+        if not issubclass(model_cls, cls):
             raise ValueError(
-                f"Saved preset has type `{backbone_cls.__name__}` which is not "
+                f"Saved preset has type `{model_cls.__name__}` which is not "
                 f"a subclass of calling class `{cls.__name__}`. Call "
-                f"`from_preset` directly on `{backbone_cls.__name__}` instead."
+                f"`from_preset` directly on `{model_cls.__name__}` instead."
             )
-        return loader.load_backbone(backbone_cls, load_weights, **kwargs)
+        return loader.load_model(model_cls, load_weights, **kwargs)
 
     def save_to_preset(self, preset_dir):
         """Save backbone to a preset directory.
@@ -98,4 +103,4 @@ class BaseModel(keras.models.Model):
             preset_dir: The path to the local model preset directory.
         """
         saver = get_preset_saver(preset_dir)
-        saver.save_backbone(self)
+        saver.save_model(self)
