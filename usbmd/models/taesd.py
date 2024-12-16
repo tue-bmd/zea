@@ -11,6 +11,11 @@ from pathlib import Path
 
 import keras
 from keras import ops
+
+from usbmd.models.base import BaseModel
+from usbmd.models.presets import taesdxl_presets
+from usbmd.models.utils import register_presets
+from usbmd.registry import model_registry
 from usbmd.tools.hf import load_model_from_hf
 
 
@@ -101,6 +106,7 @@ class TinyEncoder(keras.models.Model):
         return encoded[next(iter(encoded))]  # because encoded is dict, take first key
 
 
+@model_registry(name="taesd")
 class TinyDecoder(keras.models.Model):
     """Decoder from TAESD model."""
 
@@ -126,3 +132,6 @@ class TinyDecoder(keras.models.Model):
 
         decoded = self.decoder(inputs)
         return decoded[next(iter(decoded))]  # because decoded is dict, take first key
+
+
+register_presets(taesdxl_presets, TinyDecoder)
