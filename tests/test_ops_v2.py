@@ -5,7 +5,7 @@
 import keras
 import pytest
 
-from usbmd.ops_v2 import Operation, Pipeline
+from usbmd.ops_v2 import DataTypes, Operation, Pipeline
 
 # TODO: Run tests for all backends
 
@@ -17,8 +17,7 @@ class MultiplyOperation(Operation):
         """
         Multiplies the input x by the specified factor.
         """
-        # print(f"Processing MultiplyOperation: x={x}, factor={factor}")
-        return {"result": keras.ops.multiply(x, y)}
+        return {"x": keras.ops.multiply(x, y)}
 
 
 class AddOperation(Operation):
@@ -29,7 +28,7 @@ class AddOperation(Operation):
         Adds the result from MultiplyOperation with y.
         """
         # print(f"Processing AddOperation: result={result}, y={y}")
-        return {"result": keras.ops.add(x, y)}
+        return {"z": keras.ops.add(x, y)}
 
 
 class LargeMatrixMultiplicationOperation(Operation):
@@ -83,7 +82,7 @@ def test_operation_initialization(test_operation):
     """Tests initialization of an Operation."""
     assert test_operation.cache_inputs is True
     assert test_operation.cache_outputs is True
-    assert test_operation.jit_compile is False
+    assert test_operation._jit_compile is False
     assert test_operation._input_cache == {}
     assert test_operation._output_cache == {}
 
@@ -91,16 +90,16 @@ def test_operation_initialization(test_operation):
 @pytest.mark.parametrize("jit_compile", [True, False])
 def test_operation_input_validation(test_operation, jit_compile):
     """Tests input validation and handling of unexpected keys."""
-    test_operation.jit_compile = jit_compile
-    outputs = test_operation(x=5, y=3, z=10)
-    assert outputs["z"] == 10
-    assert outputs["result"] == 8
+    test_operation.set_jit(jit_compile)
+    outputs = test_operation(x=5, y=3, other=10)
+    assert outputs["other"] == 10
+    assert outputs["z"] == 8
 
 
 @pytest.mark.parametrize("jit_compile", [True, False])
 def test_operation_output_caching(test_operation, jit_compile):
     """Tests output caching behavior."""
-    test_operation.jit_compile = jit_compile
+    test_operation.set_jit(jit_compile)
     output1 = test_operation(x=5, y=3)
     output2 = test_operation(x=5, y=3)
     assert output1 == output2
@@ -111,10 +110,10 @@ def test_operation_output_caching(test_operation, jit_compile):
 @pytest.mark.parametrize("jit_compile", [True, False])
 def test_operation_input_caching(test_operation, jit_compile):
     """Tests input caching behavior."""
-    test_operation.jit_compile = jit_compile
+    test_operation.set_jit(jit_compile)
     test_operation.set_input_cache(input_cache={"x": 10})
     result = test_operation(y=5)
-    assert result["result"] == 15
+    assert result["z"] == 15
 
 
 def test_operation_jit_compilation():
@@ -127,14 +126,102 @@ def test_operation_cache_persistence():
     """Tests persistence of output cache."""
     op = AddOperation(cache_outputs=True)
     result1 = op(x=5, y=3)
-    assert result1["result"] == 8
+    assert result1["z"] == 8
     assert len(op._output_cache) == 1
     result2 = op(x=5, y=3)
     assert result2 == result1
     assert len(op._output_cache) == 1
 
 
-# 2. Pipeline Class Tests TODO
+# 2. Pipeline Class Tests
+
+
+def test_pipeline_initialization():
+    """Tests initialization of a Pipeline."""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations)
+    assert len(pipeline.operations) == 2
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+    assert isinstance(pipeline.operations[1], AddOperation)
+
+
+def test_pipeline_call():
+    """Tests the call method of the Pipeline."""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations)
+    result = pipeline(x=2, y=3)
+    assert result["z"] == 9  # (2 * 3) + 3
+
+
+def test_pipeline_with_large_matrix_multiplication():
+    """Tests the Pipeline with a large matrix multiplication operation."""
+    operations = [LargeMatrixMultiplicationOperation()]
+    pipeline = Pipeline(operations=operations)
+    matrix_a = keras.random.normal(shape=(512, 512))
+    matrix_b = keras.random.normal(shape=(512, 512))
+    result = pipeline(matrix_a=matrix_a, matrix_b=matrix_b)
+    assert result["matrix_result"].shape == (512, 512)
+
+
+def test_pipeline_with_elementwise_operation():
+    """Tests the Pipeline with an elementwise matrix operation."""
+    operations = [ElementwiseMatrixOperation()]
+    pipeline = Pipeline(operations=operations)
+    matrix = keras.random.normal(shape=(512, 512))
+    scalar = 2
+    result = pipeline(matrix=matrix, scalar=scalar)
+    assert result["elementwise_result"].shape == (512, 512)
+
+
+def test_pipeline_jit_options():
+    """Tests the JIT options for the Pipeline."""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations, jit_options="pipeline")
+    assert callable(pipeline.call)
+
+    pipeline = Pipeline(operations=operations, jit_options="ops")
+    for operation in pipeline.operations:
+        assert operation._jit_compile is True
+
+    pipeline = Pipeline(operations=operations, jit_options=None)
+    for operation in pipeline.operations:
+        assert operation._jit_compile is False
+
+
+def test_pipeline_set_params():
+    """Tests setting parameters for the Pipeline."""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations)
+    pipeline.set_params(x=5, y=3)
+    params = pipeline.get_params()
+    assert params["x"] == 5
+    assert params["y"] == 3
+
+
+def test_pipeline_get_params_per_operation():
+    """Tests getting parameters per operation in the Pipeline."""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations)
+    pipeline.set_params(x=5, y=3)
+    params = pipeline.get_params(per_operation=True)
+    assert params[0]["x"] == 5
+    assert params[1]["y"] == 3
+
+
+def test_pipeline_validation():
+    """Tests the validation of the Pipeline."""
+    operations = [
+        MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
+        AddOperation(input_data_type=DataTypes.RAW_DATA),
+    ]
+    pipeline = Pipeline(operations=operations)
+
+    operations = [
+        MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
+        AddOperation(input_data_type=DataTypes.IMAGE),
+    ]
+    with pytest.raises(ValueError):
+        pipeline = Pipeline(operations=operations)
 
 
 # 3. Edge Case Tests
