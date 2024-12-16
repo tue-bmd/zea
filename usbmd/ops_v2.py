@@ -1,12 +1,8 @@
 """ Experimental version of the USBMD ops module"""
-
-# pylint: disable=arguments-differ
-
 import enum
 import hashlib
 import inspect
 import json
-import os
 from typing import Any, Dict, List, Union
 
 import keras
@@ -59,8 +55,6 @@ class Operation(keras.Operation):
         self.cache_inputs = cache_inputs
         self.cache_outputs = cache_outputs
 
-        self._jit_compile = jit_compile
-
         # Initialize input and output caches
         self._input_cache = {}
         self._output_cache = {}
@@ -70,8 +64,8 @@ class Operation(keras.Operation):
         self._valid_keys = None  # Keys valid for the `call` method
         self._trace_signatures()
 
-        # Compile the `call` method if necessary
-        self._call = jit(self.call) if self.jit_compile else self.call
+        # Set the jit compilation flag and compile the `call` method
+        self.set_jit(jit_compile)
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
