@@ -7,7 +7,7 @@ from huggingface_hub import HfApi, login, snapshot_download
 from usbmd.utils.log import yellow
 
 
-def load_model_from_hf(repo_id, revision="main"):
+def load_model_from_hf(repo_id, revision="main", verbose=True):
     """
     Load the model from a given repo_id using the Hugging Face library.
 
@@ -17,6 +17,7 @@ def load_model_from_hf(repo_id, revision="main"):
     Args:
         repo_id (str): The ID of the repository.
         revision (str): The revision to download. Can be a branch, tag, or commit hash.
+        verbose (bool): Whether to print the download message. Default is True.
 
     Returns:
         model_dir (Path): The path to the downloaded model directory.
@@ -33,11 +34,13 @@ def load_model_from_hf(repo_id, revision="main"):
     commit = api.list_repo_commits(repo_id, revision=revision)[0]
     commit_message = commit.title
     commit_time = commit.created_at.strftime("%B %d, %Y at %I:%M %p %Z")
-    print(
-        yellow(
-            f"Succesfully loaded model {commit_message} from "
-            f"'https://huggingface.co/{repo_id}'. Last updated on {commit_time}."
+
+    if verbose:
+        print(
+            yellow(
+                f"Succesfully loaded model {commit_message} from "
+                f"'https://huggingface.co/{repo_id}'. Last updated on {commit_time}."
+            )
         )
-    )
 
     return Path(model_dir)

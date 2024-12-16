@@ -9,6 +9,7 @@ import keras
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import usbmd
+from usbmd.registry import model_registry
 
 HF_PREFIX = "hf://"
 
@@ -31,10 +32,10 @@ HF_CONFIG_FILE = "config.json"
 
 # Global state for preset registry.
 BUILTIN_PRESETS = {}
-BUILTIN_PRESETS_FOR_BACKBONE = collections.defaultdict(dict)
+BUILTIN_PRESETS_FOR_MODEL = collections.defaultdict(dict)
 
 
-def register_presets(presets, backbone_cls):
+def register_presets(presets, model_cls):
     """Register built-in presets for a set of classes.
 
     Note that this is intended only for models and presets shipped in the
@@ -42,16 +43,14 @@ def register_presets(presets, backbone_cls):
     """
     for preset in presets:
         BUILTIN_PRESETS[preset] = presets[preset]
-        BUILTIN_PRESETS_FOR_BACKBONE[backbone_cls][preset] = presets[preset]
+        BUILTIN_PRESETS_FOR_MODEL[model_cls][preset] = presets[preset]
 
 
 def builtin_presets(cls):
     """Find all registered built-in presets for a class."""
     presets = {}
-    if cls in BUILTIN_PRESETS_FOR_BACKBONE:
-        presets.update(BUILTIN_PRESETS_FOR_BACKBONE[cls])
-    name = getattr(cls, "name", None)
-    presets.update(builtin_presets(name))
+    if cls in BUILTIN_PRESETS_FOR_MODEL:
+        presets.update(BUILTIN_PRESETS_FOR_MODEL[cls])
     return presets
 
 
@@ -61,6 +60,12 @@ def get_file(preset, path):
         raise ValueError(
             f"A preset identifier must be a string. Received: preset={preset}"
         )
+
+    if preset in BUILTIN_PRESETS:
+        if "hf_handle" in BUILTIN_PRESETS[preset]:
+            preset = BUILTIN_PRESETS[preset]["hf_handle"]
+        else:
+            preset = BUILTIN_PRESETS[preset]["path"]
 
     scheme = None
     if "://" in preset:
@@ -116,42 +121,6 @@ def load_json(preset, config_file=CONFIG_FILE):
     return config
 
 
-class PresetLoader:
-    def __init__(self, preset, config):
-        self.config = config
-        self.preset = preset
-
-    def get_model_kwargs(self, **kwargs):
-        model_kwargs = {}
-
-        # Forward `dtype` to backbone.
-        model_kwargs["dtype"] = kwargs.pop("dtype", None)
-
-        # Forward `height` and `width` to backbone when using `TextToImage`.
-        if "image_shape" in kwargs:
-            model_kwargs["image_shape"] = kwargs.pop("image_shape", None)
-
-        return model_kwargs, kwargs
-
-    def load_model(self, cls, load_weights, **kwargs):
-        """Load the backbone model from the preset."""
-        raise NotImplementedError
-
-    def load_image_converter(self, cls, **kwargs):
-        """Load an image converter layer from the preset."""
-        raise NotImplementedError
-
-    def load_preprocessor(self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs):
-        """Load a prepocessor layer from the preset.
-
-        By default, we create a preprocessor from a tokenizer with default
-        arguments. This allow us to support transformers checkpoints by
-        only converting the backbone and tokenizer.
-        """
-        kwargs = cls._add_missing_kwargs(self, kwargs)
-        return cls(**kwargs)
-
-
 def load_serialized_object(config, **kwargs):
     # `dtype` in config might be a serialized `DTypePolicy` or `DTypePolicyMap`.
     # Ensure that `dtype` is properly configured.
@@ -167,13 +136,17 @@ def check_config_class(config):
     registered_name = config["registered_name"]
     if registered_name in ("Functional", "Sequential"):
         return keras.Model
-    cls = keras.saving.get_registered_object(registered_name)
+    # cls = keras.saving.get_registered_object(registered_name)
+    name = keras_to_usbmd_registry(registered_name, model_registry)
+
+    cls = model_registry[name]
+
     if cls is None:
         raise ValueError(
             f"Attempting to load class {registered_name} with "
-            "`from_preset()`, but there is no class registered with Keras "
+            "`from_preset()`, but there is no class registered with USBMD "
             f"for {registered_name}. Make sure to register any custom "
-            "classes with `register_keras_serializable()`."
+            "classes with `usbmd.registry.model_registry()`."
         )
     return cls
 
@@ -188,6 +161,28 @@ def jax_memory_cleanup(layer):
                 weight._value.delete()
 
 
+def set_dtype_in_config(config, dtype=None):
+    if dtype is None:
+        return config
+
+    config = config.copy()
+    if "dtype" not in config["config"]:
+        # Forward `dtype` to the config.
+        config["config"]["dtype"] = dtype
+    elif (
+        "dtype" in config["config"]
+        and isinstance(config["config"]["dtype"], dict)
+        and "DTypePolicyMap" in config["config"]["dtype"]["class_name"]
+    ):
+        # If it is `DTypePolicyMap` in `config`, forward `dtype` as its default
+        # policy.
+        policy_map_config = config["config"]["dtype"]["config"]
+        policy_map_config["default_policy"] = dtype
+        for k in policy_map_config["policy_map"].keys():
+            policy_map_config["policy_map"][k]["config"]["source_name"] = dtype
+    return config
+
+
 def check_file_exists(preset, path):
     try:
         get_file(preset, path)
@@ -196,16 +191,51 @@ def check_file_exists(preset, path):
     return True
 
 
+def keras_to_usbmd_registry(keras_name, usbmd_registry):
+    """Convert a Keras class name to a USBMD registry name."""
+    for registry_name, entry in usbmd_registry.registry.items():
+        if entry.__name__ == keras_name:
+            return registry_name
+    return None
+
+
+class PresetLoader:
+    def __init__(self, preset, config):
+        self.config = config
+        self.preset = preset
+
+    def get_model_kwargs(self, **kwargs):
+        model_kwargs = {}
+
+        # Forward `dtype` to model
+        model_kwargs["dtype"] = kwargs.pop("dtype", None)
+
+        # Forward `height` and `width` to model
+        if "image_shape" in kwargs:
+            model_kwargs["image_shape"] = kwargs.pop("image_shape", None)
+
+        return model_kwargs, kwargs
+
+    def load_model(self, cls, load_weights, **kwargs):
+        """Load the backbone model from the preset."""
+        raise NotImplementedError
+
+    def load_preprocessor(self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs):
+        """Load a prepocessor layer from the preset."""
+        kwargs = cls._add_missing_kwargs(self, kwargs)
+        return cls(**kwargs)
+
+
 class KerasPresetLoader(PresetLoader):
-    def check_backbone_class(self):
+    def check_model_class(self):
         return check_config_class(self.config)
 
-    def load_backbone(self, cls, load_weights, **kwargs):
-        backbone = load_serialized_object(self.config, **kwargs)
+    def load_model(self, cls, load_weights, **kwargs):
+        model = load_serialized_object(self.config, **kwargs)
         if load_weights:
-            jax_memory_cleanup(backbone)
-            backbone.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
-        return backbone
+            jax_memory_cleanup(model)
+            model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
+        return model
 
     def load_image_converter(self, cls, **kwargs):
         converter_config = load_json(self.preset, IMAGE_CONVERTER_CONFIG_FILE)
@@ -231,11 +261,11 @@ class KerasPresetSaver:
         os.makedirs(preset_dir, exist_ok=True)
         self.preset_dir = preset_dir
 
-    def save_backbone(self, backbone):
-        self._save_serialized_object(backbone, config_file=CONFIG_FILE)
-        backbone_weight_path = os.path.join(self.preset_dir, MODEL_WEIGHTS_FILE)
-        backbone.save_weights(backbone_weight_path)
-        self._save_metadata(backbone)
+    def save_model(self, model):
+        self._save_serialized_object(model, config_file=CONFIG_FILE)
+        model_weight_path = os.path.join(self.preset_dir, MODEL_WEIGHTS_FILE)
+        model.save_weights(model_weight_path)
+        self._save_metadata(model)
 
     def save_image_converter(self, converter):
         self._save_serialized_object(converter, IMAGE_CONVERTER_CONFIG_FILE)
@@ -278,3 +308,32 @@ class KerasPresetSaver:
         metadata_path = os.path.join(self.preset_dir, METADATA_FILE)
         with open(metadata_path, "w") as metadata_file:
             metadata_file.write(json.dumps(metadata, indent=4))
+
+
+def get_preset_saver(preset):
+    # We only support one form of saving; Keras serialized
+    # configs and saved weights.
+    return KerasPresetSaver(preset)
+
+
+def get_preset_loader(preset):
+    if not check_file_exists(preset, CONFIG_FILE):
+        raise ValueError(
+            f"Preset {preset} has no {CONFIG_FILE}. Make sure the URL or "
+            "directory you are trying to load is a valid KerasHub preset and "
+            "and that you have permissions to read/download from this location."
+        )
+    # We currently assume all formats we support have a `config.json`, this is
+    # true, for Keras, Transformers, and timm. We infer the on disk format by
+    # inspecting the `config.json` file.
+    config = load_json(preset, CONFIG_FILE)
+    if "registered_name" in config:
+        # If we see registered_name, we assume a serialized Keras object.
+        return KerasPresetLoader(preset, config)
+    else:
+        contents = json.dumps(config, indent=4)
+        raise ValueError(
+            f"Unrecognized format for {CONFIG_FILE} in {preset}. "
+            "Create a preset with the `save_to_preset` utility on KerasHub "
+            f"models. Contents of {CONFIG_FILE}:\n{contents}"
+        )
