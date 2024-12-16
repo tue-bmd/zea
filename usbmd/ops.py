@@ -127,6 +127,7 @@ import numpy as np
 import scipy
 from keras import ops
 from scipy import ndimage, signal
+from scipy.ndimage import gaussian_filter
 
 import usbmd.beamformer as bmf
 from usbmd import display
@@ -1737,6 +1738,146 @@ class Doppler(Operation):
             "fs": config.scan.sampling_frequency,
             "fc": config.scan.center_frequency,
         }
+
+
+@ops_registry("gaussian_blur")
+class GaussianBlur(Operation):
+    """
+    GaussianBlur is an operation that applies a Gaussian blur to an input image.
+    Uses scipy.ndimage.gaussian_filter to create a kernel.
+
+    Src: https://docs.scipy.org/doc/scipy/reference/generated/scipy.ndimage.gaussian_filter.html
+    """
+
+    def __init__(
+        self,
+        sigma: float,
+        kernel_size: int | None = None,
+        pad_mode="symmetric",
+        truncate=4.0,
+        **kwargs,
+    ):
+        """
+        Args:
+            sigma (float): Standard deviation for Gaussian kernel. The standard deviations of the
+                Gaussian filter are given for each axis as a sequence, or as a single number,
+                in which case it is equal for all axes.
+            kernel_size (int, optional): The size of the kernel to be used. If None, the kernel
+                size is calculated based on the sigma and truncate. Default is None.
+            pad_mode (str): Padding mode for the input image. Default is 'symmetric'.
+                See [keras docs](https://www.tensorflow.org/api_docs/python/tf/keras/ops/pad) for
+                all options and [tensoflow docs](https://www.tensorflow.org/api_docs/python/tf/pad)
+                for some examples. Note that the naming differs from scipy.ndimage.gaussian_filter!
+        """
+        super().__init__(**kwargs)
+        if kernel_size is None:
+            radius = round(truncate * sigma)
+            self.kernel_size = 2 * radius + 1
+        else:
+            self.kernel_size = kernel_size
+        self.sigma = sigma
+        self.pad_mode = pad_mode
+        self.radius = self.kernel_size // 2
+        self.kernel = self.get_kernel()
+
+    def get_kernel(self):
+        """
+        Create a gaussian kernel for blurring.
+
+        Returns:
+            kernel (Tensor): A gaussian kernel for blurring.
+                Shape is (kernel_size, kernel_size, 1, 1).
+        """
+        n = np.zeros((self.kernel_size, self.kernel_size))
+        n[self.radius, self.radius] = 1
+        kernel = gaussian_filter(
+            n, sigma=self.sigma, radius=self.radius, mode="constant"
+        ).astype(np.float32)
+        kernel = kernel[:, :, None, None]
+        return ops.convert_to_tensor(kernel)
+
+    def process(self, data):
+        """Blur the input image with a gaussian kernel."""
+
+        # Add batch dimension if not present
+        if not self.with_batch_dim:
+            data = data[None]
+
+        # Add channel dimension to kernel
+        kernel = ops.tile(self.kernel, (1, 1, data.shape[-1], data.shape[-1]))
+
+        # Pad the input image according to the padding mode
+        padded = ops.pad(
+            data,
+            [[0, 0], [self.radius, self.radius], [self.radius, self.radius], [0, 0]],
+            mode=self.pad_mode,
+        )
+
+        # Apply the gaussian kernel to the padded image
+        out = ops.conv(padded, kernel, padding="valid", data_format="channels_last")
+
+        # Remove padding
+        out = keras.layers.CenterCrop(
+            data.shape[-2], data.shape[-3], data_format="channels_last"
+        )(out)
+
+        # Remove batch dimension if it was not present before
+        if not self.with_batch_dim:
+            out = ops.squeeze(out, axis=0)
+
+        return out
+
+
+class LeeFilter(Operation):
+    """
+    The Lee filter is a speckle reduction filter commonly used insynthetic aperture radar (SAR)
+    image processing. It smooths the image while preserving edges and details. This implementation
+    uses Gaussian filter for local statistics and treats channels independently.
+    Based on: https://stackoverflow.com/questions/39785970/speckle-lee-filter-in-python
+    """
+
+    def __init__(self, sigma=3, kernel_size=None, pad_mode="symmetric", **kwargs):
+        """
+        Args:
+            sigma (float, optional): Standard deviation for Gaussian kernel. Default is 3.
+            kernel_size (int or tuple, optional): Size of the Gaussian kernel. If None,
+                it will be calculated based on sigma. See `GaussianBlur` for more details.
+                Default is None.
+            pad_mode (str, optional): Padding mode to be used before Gaussian blur.
+                Default is "symmetric".
+        """
+
+        super().__init__(**kwargs)
+        self.sigma = sigma
+        self.kernel_size = kernel_size
+
+        self.blur = GaussianBlur(
+            kernel_size=self.kernel_size,
+            sigma=self.sigma,
+            with_batch_dim=self.with_batch_dim,
+            pad_mode=pad_mode,
+        )
+
+    def process(self, data):
+        """
+        Apply Lee filter to the input data.
+
+        Args:
+            data (Tensor): Input data to be filtered.
+
+        Returns:
+            Tensor: Filtered data.
+        """
+        img_mean = self.blur(data)
+        img_sqr_mean = self.blur(data**2)
+        img_variance = img_sqr_mean - img_mean**2
+
+        # treating channels independently!
+        overall_variance = ops.var(data, axis=(-2, -3), keepdims=True)
+
+        img_weights = img_variance / (img_variance + overall_variance)
+        img_output = img_mean + img_weights * (data - img_mean)
+        return img_output
 
 
 def demodulate(rf_data, fs=None, fc=None, bandwidth=None, filter_coeff=None):

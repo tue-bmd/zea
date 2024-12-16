@@ -292,3 +292,256 @@ def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
     padded_array = ops.pad(arr, pad_width, mode=mode, constant_values=pad_value)
 
     return padded_array
+
+
+def interpolate_data(subsampled_data, mask, order=1, axis=-1):
+    """
+    Interpolate subsampled data along a specified axis using `map_coordinates`.
+
+    Args:
+        subsampled_data (ndarray): The data subsampled along the specified axis.
+            Its shape matches `mask` except along the subsampled axis.
+        mask (ndarray): Boolean array with the same shape as the full data.
+            `True` where data is known.
+        order (int, optional): The order of the spline interpolation. Default is `1`.
+        axis (int, optional): The axis along which the data is subsampled. Default is `-1`.
+
+    Returns:
+        ndarray: The data interpolated back to the original grid.
+
+    ValueError: If `mask` does not indicate any missing data or if `mask` has `False`
+        values along multiple axes.
+    """
+    mask = ops.cast(mask, "bool")
+    # Check that mask indicates subsampled data along the specified axis
+    if ops.sum(mask) == 0:
+        raise ValueError("Mask does not indicate any known data.")
+
+    if ops.sum(mask) == ops.prod(mask.shape):
+        raise ValueError("Mask does not indicate any missing data.")
+
+    # make sure subsampled data corresponds with number of 1s in the mask
+    assert len(ops.where(mask)[0]) == ops.prod(
+        subsampled_data.shape
+    ), "Subsampled data does not match the number of 1s in the mask."
+
+    assert subsampled_data.ndim == 1, "Subsampled data should be a flattened 1D array"
+
+    assert mask.ndim == 2, "Currently only 2D interpolation supported"
+
+    # Get the indices of the known data points
+    known_indices = ops.stack(ops.where(mask), axis=-1)
+
+    # Get the indices of the unknown data points
+    unknown_indices = ops.stack(ops.where(~mask), axis=-1)
+
+    # map the unknown indices to the new coordinate system
+    # which basically is range(0, mask.shape[axis]) for each axis
+    # but with the gaps removed
+    interp_coords = []
+    subsampled_shape = []
+    axis = axis if axis >= 0 else mask.ndim + axis
+
+    for _axis in range(mask.ndim):
+        length_axis = mask.shape[_axis]
+        if _axis == axis:
+            indices = ops.where(
+                ops.any(~mask, axis=tuple(i for i in range(mask.ndim) if i != _axis))
+            )[0]
+            # unknown indices
+            indices = map_indices_for_interpolation(indices)
+            subsampled_shape.append(length_axis - len(indices))
+        else:
+            # broadcast indices
+            indices = ops.arange(length_axis, dtype="float32")
+            subsampled_shape.append(length_axis)
+
+        interp_coords.append(indices)
+
+    # create the grid of coordinates for the interpolation
+    interp_coords = ops.meshgrid(*interp_coords, indexing="ij")
+    # should be of shape (mask.ndim, -1)
+
+    subsampled_data = ops.reshape(subsampled_data, subsampled_shape)
+
+    # Use map_coordinates to interpolate the data
+    interpolated_data = ops.image.map_coordinates(
+        subsampled_data,
+        interp_coords,
+        order=order,
+    )
+
+    interpolated_data = ops.reshape(interpolated_data, -1)
+
+    # now distirubute the interpolated data back to the original grid
+    output_data = ops.zeros_like(mask, dtype=subsampled_data.dtype)
+
+    output_data = ops.scatter_update(output_data, unknown_indices, interpolated_data)
+
+    # Get the values at the known data points
+    known_values = ops.reshape(subsampled_data, (-1,))
+    output_data = ops.scatter_update(
+        output_data,
+        known_indices,
+        known_values,
+    )
+
+    return output_data
+
+
+def is_monotonic(array, increasing=True):
+    """
+    Checks if a given 1D array is monotonic (either entirely non-decreasing or non-increasing).
+
+    Args:
+        array (ndarray): A 1D numpy array.
+    Returns:
+        bool: True if the array is monotonic, False otherwise.
+    """
+    # Convert to numpy array to handle general cases
+    array = ops.array(array)
+
+    # Check if the array is non-decreasing or non-increasing
+    if increasing:
+        return ops.all(array[1:] <= array[:-1])
+    return ops.all(array[1:] >= array[:-1])
+
+
+def map_indices_for_interpolation(indices):
+    """Map a 1D array of indices with gaps to a 1D array where gaps
+    would be between the integers.
+
+    Used in the `interpolate_data` function.
+
+    Args:
+        (indices): A 1D array of indices with gaps.
+    Returns:
+        (indices): mapped to a 1D array where gaps would be between
+        the integers
+
+    There are two segments here of length 4 and 2
+
+    Example:
+        >>> indices = [5, 6, 7, 8, 12, 13, 19]
+        >>> mapped_indices = [5, 5.25, 5.5, 5.75, 8, 8.5, 12.5]
+
+    """
+    indices = ops.array(indices, dtype="int32")
+
+    assert is_monotonic(
+        indices, increasing=True
+    ), "Indices should be monotonically increasing"
+
+    gap_starts = ops.where(indices[1:] - indices[:-1] > 1)[0]
+    gap_starts = ops.concatenate([ops.array([0]), gap_starts + 1], axis=0)
+
+    gap_lengths = ops.concatenate(
+        [gap_starts[1:] - gap_starts[:-1], ops.array([len(indices) - gap_starts[-1]])],
+        axis=0,
+    )
+
+    cumul_gap_lengths = ops.cumsum(gap_lengths)
+    cumul_gap_lengths = ops.concatenate([ops.array([0]), cumul_gap_lengths], axis=0)
+
+    gap_start_values = ops.take(indices, gap_starts)
+    mapped_starts = gap_start_values - cumul_gap_lengths[:-1]
+    mapped_starts = ops.cast(mapped_starts, "float32")
+    gap_lengths = ops.cast(gap_lengths, "float32")
+
+    spacing = 1 / (gap_lengths + 1)
+
+    # Vectorized creation of gap_length entries between the start and end
+    mapped_indices = ops.concatenate(
+        [
+            (mapped_starts[i] + spacing[i]) + spacing[i] * ops.arange(gap_lengths[i])
+            for i in range(len(gap_lengths))
+        ],
+        axis=0,
+    )
+    mapped_indices -= 1
+
+    return mapped_indices
+
+
+def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number: int):
+    """
+    Stack tensor data along a specified stack axis by splitting it into blocks along the batch axis.
+
+    Args:
+        data (Tensor): Input tensor to be stacked.
+        batch_axis (int): Axis along which to split the data into blocks.
+        stack_axis (int): Axis along which to stack the blocks.
+        number (int): Number of slices per stack.
+
+    Returns:
+        Tensor: Reshaped tensor with data stacked along stack_axis.
+
+    Example:
+        ```python
+        >>> keras.random.uniform((10, 20, 30))
+        >>> # stacking along 1st axis with 2 frames per block
+        >>> stacked_data = stack_volume_data_along_axis(data, 0, 1, 2)
+        >>> stacked_data.shape
+        (20, 10, 30)
+
+    """
+    blocks = int(ops.ceil(data.shape[batch_axis] / number))
+    data = pad_array_to_divisible(data, axis=batch_axis, N=blocks, mode="reflect")
+    data = ops.split(data, blocks, axis=batch_axis)
+    data = ops.stack(data, axis=batch_axis)
+    # put batch_axis in front
+    data = ops.transpose(
+        data,
+        (
+            batch_axis + 1,
+            *range(batch_axis + 1),
+            *range(batch_axis + 2, data.ndim),
+        ),
+    )
+    data = ops.concatenate(list(data), axis=stack_axis)
+    return data
+
+
+def split_volume_data_from_axis(
+    data, batch_axis: int, stack_axis: int, number: int, padding: int
+):
+    """
+    Split previously stacked tensor data back to its original shape.
+    This function reverses the operation performed by `stack_volume_data_along_axis`.
+
+    Args:
+        data (Tensor): Input tensor to be split.
+        batch_axis (int): Axis along which to restore the blocks.
+        stack_axis (int): Axis from which to split the stacked data.
+        number (int): Number of slices per stack.
+        padding (int): Amount of padding to remove from the result.
+
+    Returns:
+        Tensor: Reshaped tensor with data split back to original format.
+
+    Example:
+        >>> data = keras.random.uniform((20, 10, 30))
+        >>> # splitting along 1st axis with 2 frames per block and padding of 2
+        >>> split_data = split_volume_data_from_axis(data, 0, 1, 2, 2)
+        >>> split_data.shape
+        (10, 20, 30)
+
+    """
+    if data.shape[stack_axis] == 1:
+        # in this case it was a broadcasted axis which does not need to be split
+        return data
+    data = ops.split(data, number, axis=stack_axis)
+    data = ops.stack(data, axis=batch_axis + 1)
+    # combine the unstacked axes (dim 1 and 2)
+    total_block_size = data.shape[batch_axis] * data.shape[batch_axis + 1]
+    data = ops.reshape(
+        data,
+        (*data.shape[:batch_axis], total_block_size, *data.shape[batch_axis + 2 :]),
+    )
+
+    # cut off padding
+    if padding > 0:
+        indices = ops.arange(data.shape[batch_axis] - padding + 1)
+        data = ops.take(data, indices, axis=batch_axis)
+
+    return data
