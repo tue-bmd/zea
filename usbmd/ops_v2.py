@@ -15,8 +15,11 @@ from typing import Any, Dict, List, Union
 
 import numpy as np
 
-from usbmd.utils import log
 from usbmd.backend import jit
+from usbmd.config.config import Config
+from usbmd.probes import Probe
+from usbmd.scan import Scan
+from usbmd.utils import log
 
 # Set the Keras backend
 # os.environ["KERAS_BACKEND"] = "jax"
@@ -35,16 +38,6 @@ print("WARNING: This module is work in progress and may not work as expected!")
 # 2. Pipeline-based: the entire pipeline is compiled by setting Pipeline(jit_compile=True).
 # This means the entire pipeline is compiled and executed as a single function, which may be faster
 # but may not preserve the caching functionality (need to check).
-
-
-# _DATA_TYPES = [
-#     "raw_data",
-#     "aligned_data",
-#     "beamformed_data",
-#     "envelope_data",
-#     "image",
-#     "image_sc",
-# ]
 
 
 class DataTypes(enum.Enum):
@@ -208,7 +201,6 @@ class Pipeline(keras.Pipeline):
         self,
         operations: List[Operation],
         with_batch_dim: bool = True,
-        device: Union[str, None] = None,
         jit_options: Union[str, None] = "ops",
     ):
         """Initialize a pipeline
@@ -229,60 +221,69 @@ class Pipeline(keras.Pipeline):
             Defaults to "ops".
         """
 
-        # TODO: add the option to
+        # TODO: add the option to load pipeline from e.g. json
 
-
+        # add functionality here
+        # operations = ...
 
         super().__init__(layers=operations)
 
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
-        self.operations = operations
-        self.device = self._check_device(device)
-
-        for operation in self.operations:
+        for operation in self.layers():  # We use self.layers() from keras.Pipeline here
             operation.with_batch_dim = with_batch_dim
             operation.set_jit(True if jit_options == "ops" else False)
 
         self.validate()
 
-        self._call = jit(self.call) if jit_options == "pipeline" else self.call
+        self.call = jit(self.call) if jit_options == "pipeline" else self.call
 
-    def call(self, *args, return_numpy=False, **kwargs):
+    def call(self, *args, training=False, mask=None, return_numpy=False, **kwargs):
         """Process input data through the pipeline."""
 
-        # TODO: convert args and kwargs to tensors
+        ## PREPARE INPUT
 
-        if self._jitted_process is None:
-            processing_func = self._process
-        else:
-            processing_func = self._jitted_process
+        # Extract from args Probe, Scan and Config objects
+        probe, scan, config = {}, {}, {}
+        for arg in args:
+            if isinstance(arg, Probe):
+                probe = arg
+            elif isinstance(arg, Scan):
+                scan = arg
+            elif isinstance(arg, Config):
+                config = arg
 
-        kwargs = self.
+        # combine probe, scan, config and kwargs
+        inputs = {**probe, **scan, **config, **kwargs}
+
+        ## PROCESSING
+        outputs = super().call(inputs, training=training, mask=mask)
 
         if return_numpy:
-            return keras.ops.convert_to_numpy(data_out)
-        return data_out
+            outputs = {k: v.numpy() for k, v in outputs.items()}
 
-    def prepare_input(self, *args)
-        """ Convert input data and parameters to dictionary of tensors following the CCC"""
+        ## PREPARE OUTPUT
 
+        # update probe, scan, config with outputs
+        for arg in args:
+            if isinstance(arg, Probe):
+                arg.update(outputs)
+            elif isinstance(arg, Scan):
+                arg.update(outputs)
+            elif isinstance(arg, Config):
+                arg.update(outputs)
 
-        return kwargs
+        # TODO Ben: I'm not too sure if this is the best option, suggestions are welcome
+        return outputs if not args else args
+
+    def prepare_input(self, *args):
+        """Convert input data and parameters to dictionary of tensors following the CCC"""
+        raise NotImplementedError
 
     def prepare_output(self, kwargs):
-        """ Convert output data to dictionary of tensors following the CCC"""
-
-        return data_out
-
-    def run(self, *args, **kwargs):
-        """Execute all operations in the pipeline"""
-
-        # TODO: compatiblity with Stack operation
-        for operation in self.operations:
-            kwargs = operation(*args, **kwargs)  # TODO: check if args are needed
-        return kwargs
+        """Convert output data to dictionary of tensors following the CCC"""
+        raise NotImplementedError
 
     @property
     def with_batch_dim(self):
@@ -291,60 +292,43 @@ class Pipeline(keras.Pipeline):
 
     def validate(self):
         """Validate the pipeline by checking the compatibility of the operations."""
-        for i in range(len(self.operations) - 1):
-            if self.operations[i].output_data_type is None:
+        layers = self.layers()
+        for i in range(len(layers) - 1):
+            if layers[i].output_data_type is None:
                 continue
-            if self.operations[i + 1].input_data_type is None:
+            if layers[i + 1].input_data_type is None:
                 continue
-            if (
-                self.operations[i].output_data_type
-                != self.operations[i + 1].input_data_type
-            ):
+            if layers[i].output_data_type != layers[i + 1].input_data_type:
                 raise ValueError(
-                    f"Operation {self.operations[i].name} output data type is not compatible "
-                    f"with the input data type of operation {self.operations[i + 1].name}"
+                    f"Operation {layers[i].name} output data type is not compatible "
+                    f"with the input data type of operation {layers[i + 1].name}"
                 )
-
-    # TODO: Ben: is it actually possible to change backend at runtime?
-    # Should this be handled by the pipeline or at a higher level?
-    def on_device(self, func, data, device=None, return_numpy=False):
-        """On device function for running pipeline on specific device."""
-        backend = keras.backend.backend()
-        if backend == "numpy":
-            return func(data)
-        elif backend == "tensorflow":
-            on_device_tf = importlib.import_module(
-                "usbmd.backend.tensorflow"
-            ).on_device_tf
-            return on_device_tf(func, data, device=device, return_numpy=return_numpy)
-        elif backend == "torch":
-            on_device_torch = importlib.import_module(
-                "usbmd.backend.torch"
-            ).on_device_torch
-            return on_device_torch(func, data, device=device, return_numpy=return_numpy)
-        elif backend == "jax":
-            on_device_jax = importlib.import_module("usbmd.backend.jax").on_device_jax
-            return on_device_jax(func, data, device=device, return_numpy=return_numpy)
-        else:
-            raise ValueError(f"Unsupported operations package {backend}.")
 
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
-        raise NotImplementedError
+        for operation in self.layers():
+            operation_params = {
+                key: value
+                for key, value in params.items()
+                if key in operation._valid_keys
+            }
+            if operation_params:
+                operation.set_input_cache(operation_params)
 
-    def _process(self, data):
-        for operation in self.operations:
-            if isinstance(data, list) and operation.__class__.__name__ != "Stack":
-                data = [operation(_data) for _data in data]
-            else:
-                data = operation(data)
-        return data
+    def get_params(self, per_operation: bool = False):
+        """Get a snapshot of the current parameters of the operations in the pipeline.
 
-    def prepare_tensor(self, x, dtype=None, device=None):
-        """Convert input array to appropriate tensor type for the operations package."""
-        if len(self.operations) == 0:
-            return x
-        return self.operations[0].prepare_tensor(x, dtype=dtype, device=device)
+        Args:
+            per_operation (bool): If True, return a list of dictionaries for each operation.
+                                  If False, return a single dictionary with all parameters combined.
+        """
+        if per_operation:
+            return [operation._input_cache.copy() for operation in self.layers()]
+        else:
+            params = {}
+            for operation in self.layers():
+                params.update(operation._input_cache)
+            return params
 
     def __str__(self):
         """String representation of the pipeline.
@@ -409,45 +393,6 @@ class Pipeline(keras.Pipeline):
         operations = [operation.__class__.__name__ for operation in self.operations]
         return ",".join(operations)
 
-    def _check_device(self, device):
-        if device is None:
-            return None
-
-        if device == "cpu":
-            return "cpu"
-
-        backend = keras.backend.backend()
-
-        if backend == "numpy":
-            if device not in [None, "cpu"]:
-                log.warning(
-                    f"Device {device} is not supported for numpy operations, using cpu."
-                )
-            return "cpu"
-
-        else:
-            # assert device to be cpu, cuda, cuda:{int} or int or None
-            assert isinstance(
-                device, (str, int)
-            ), f"device should be a string or int, got {device}"
-            if isinstance(device, str):
-                if backend == "tensorflow":
-                    assert device.startswith(
-                        "gpu"
-                    ), f"device should be 'cpu' or 'gpu:*', got {device}"
-                elif backend == "torch":
-                    assert device.startswith(
-                        "cuda"
-                    ), f"device should be 'cpu' or 'cuda:*', got {device}"
-                elif backend == "jax":
-                    assert device.startswith(
-                        ("gpu", "cuda")
-                    ), f"device should be 'cpu', 'gpu:*', or 'cuda:*', got {device}"
-                else:
-                    raise ValueError(f"Unsupported backend {backend}.")
-            return device
-
-
 
 ## Base Operations
 class Merge(Operation):
@@ -463,6 +408,7 @@ class Merge(Operation):
                 raise TypeError("All inputs must be dictionaries.")
             merged.update(arg)
         return merged
+
 
 class Split(Operation):
     """Operation that splits an input dictionary  n copies."""
