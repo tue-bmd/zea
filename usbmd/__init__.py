@@ -44,8 +44,13 @@ if "KERAS_BACKEND" not in os.environ:
 
 # Main (isort: split)
 from .config import Config, load_config_from_yaml
+from .data.datasets import USBMDDataSet
 from .datapaths import set_data_paths
 from .interface import Interface
+from .ops import Pipeline
+from .probes import Probe
+from .processing import Process
+from .scan import Scan
 from .setup_usbmd import set_backend, setup, setup_config
 from .utils import log
 from .utils.device import init_device
