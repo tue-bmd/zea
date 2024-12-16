@@ -3,12 +3,16 @@
 import pickle
 from copy import deepcopy
 
+import keras
+import numpy as np
+
 
 class Object:
     """Base class for all data objects in the toolbox"""
 
     def __init__(self):
         self._serialized = None
+        self._except_tensors = None
 
     @property
     def serialized(self):
@@ -38,3 +42,28 @@ class Object:
     def copy(self):
         """Return a copied version of the object"""
         return deepcopy(self)
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def __delitem__(self, key):
+        delattr(self, key)
+
+    def to_tensor(self):
+        """Convert the attributes in the object to keras tensors"""
+        for key in dir(self):
+            if key[0] != "_" and key not in self._except_tensors:
+                value = getattr(self, key)
+                if isinstance(value, (np.ndarray, int, float, list)):
+
+                    # if data is of double precision, convert to float32
+                    if isinstance(value, np.ndarray) and value.dtype == np.float64:
+                        dtype = "float32"
+                    else:
+                        dtype = None
+
+                value = keras.convert_to_tensor(value, dtype=dtype)
+                setattr(self, key, value)
