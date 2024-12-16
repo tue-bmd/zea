@@ -4,16 +4,12 @@
 
 import enum
 import hashlib
-import importlib
 import inspect
 import json
 import os
-import timeit
-from abc import ABC, abstractmethod
-from time import perf_counter
 from typing import Any, Dict, List, Union
 
-import numpy as np
+import keras
 
 from usbmd.backend import jit
 from usbmd.config.config import Config
@@ -21,25 +17,10 @@ from usbmd.probes import Probe
 from usbmd.scan import Scan
 from usbmd.utils import log
 
-# Set the Keras backend
-# os.environ["KERAS_BACKEND"] = "jax"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-# os.environ["KERAS_BACKEND"] = "torch"
-# os.environ["KERAS_BACKEND"] = "numpy"
-import keras
-
 print("WARNING: This module is work in progress and may not work as expected!")
 
 
-# TODO: jit_compile should allow for 2 different modes:
-# 1. Operation-based: each operation is compiled separately by setting Operation(jit_compile=True).
-# This means the __call__ method is not compiled and most of the usbmd logic can be executed on the
-# fly, preserving the caching functionality. (DONE)
-# 2. Pipeline-based: the entire pipeline is compiled by setting Pipeline(jit_compile=True).
-# This means the entire pipeline is compiled and executed as a single function, which may be faster
-# but may not preserve the caching functionality (need to check).
-
-
+# TODO: Move this to Core?
 class DataTypes(enum.Enum):
     """Enum class for USBMD data types."""
 
