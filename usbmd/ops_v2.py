@@ -1,4 +1,5 @@
 """ Experimental version of the USBMD ops module"""
+
 import enum
 import hashlib
 import inspect
@@ -169,7 +170,7 @@ class Operation(keras.Operation):
         return combined_kwargs
 
 
-class Pipeline(keras.Pipeline):
+class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
     def __init__(
@@ -201,20 +202,25 @@ class Pipeline(keras.Pipeline):
         # add functionality here
         # operations = ...
 
-        super().__init__(layers=operations)
+        self._pipeline_layers = operations
 
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
-        for operation in self.layers():  # We use self.layers() from keras.Pipeline here
+        for operation in self.operations:  # We use self.layers from keras.Pipeline here
             operation.with_batch_dim = with_batch_dim
             operation.set_jit(True if jit_options == "ops" else False)
 
         self.validate()
 
-        self.call = jit(self.call) if jit_options == "pipeline" else self.call
+        # self.call = jit(self.call) if jit_options == "pipeline" else self.call
 
-    def call(self, *args, training=False, mask=None, return_numpy=False, **kwargs):
+    @property
+    def operations(self):
+        """Alias for self.layers to match the USBMD naming convention"""
+        return self._pipeline_layers
+
+    def __call__(self, *args, return_numpy=False, **kwargs):
         """Process input data through the pipeline."""
 
         ## PREPARE INPUT
@@ -233,7 +239,9 @@ class Pipeline(keras.Pipeline):
         inputs = {**probe, **scan, **config, **kwargs}
 
         ## PROCESSING
-        outputs = super().call(inputs, training=training, mask=mask)
+        for operation in self._pipeline_layers:
+            outputs = operation(**inputs)
+            inputs = outputs
 
         if return_numpy:
             outputs = {k: v.numpy() for k, v in outputs.items()}
@@ -267,21 +275,21 @@ class Pipeline(keras.Pipeline):
 
     def validate(self):
         """Validate the pipeline by checking the compatibility of the operations."""
-        layers = self.layers()
-        for i in range(len(layers) - 1):
-            if layers[i].output_data_type is None:
+        operations = self.operations
+        for i in range(len(operations) - 1):
+            if operations[i].output_data_type is None:
                 continue
-            if layers[i + 1].input_data_type is None:
+            if operations[i + 1].input_data_type is None:
                 continue
-            if layers[i].output_data_type != layers[i + 1].input_data_type:
+            if operations[i].output_data_type != operations[i + 1].input_data_type:
                 raise ValueError(
-                    f"Operation {layers[i].name} output data type is not compatible "
-                    f"with the input data type of operation {layers[i + 1].name}"
+                    f"Operation {operations[i].name} output data type is not compatible "
+                    f"with the input data type of operation {operations[i + 1].name}"
                 )
 
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
-        for operation in self.layers():
+        for operation in self.operations:
             operation_params = {
                 key: value
                 for key, value in params.items()
@@ -298,10 +306,10 @@ class Pipeline(keras.Pipeline):
                                   If False, return a single dictionary with all parameters combined.
         """
         if per_operation:
-            return [operation._input_cache.copy() for operation in self.layers()]
+            return [operation._input_cache.copy() for operation in self.operations]
         else:
             params = {}
-            for operation in self.layers():
+            for operation in self.operations:
                 params.update(operation._input_cache)
             return params
 
