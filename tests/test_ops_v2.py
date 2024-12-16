@@ -224,6 +224,33 @@ def test_pipeline_validation():
         pipeline = Pipeline(operations=operations)
 
 
+def test_pipeline_with_scan_probe_config():
+    """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
+
+    from usbmd.config.config import Config
+    from usbmd.probes import Dummy
+    from usbmd.scan import Scan
+
+    probe = Dummy()
+    scan = Scan(
+        n_tx=128,
+        n_ax=256,
+        n_el=128,
+        n_ch=2,
+        center_frequency=5.0,
+        sampling_frequency=5.0,
+        xlims=(-2e-3, 2e-3),
+    )
+
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations)
+
+    result = pipeline(scan, probe, x=2, y=3)
+    assert "z" in result
+    assert "n_tx" in result  # Check if we parsed the scan object correctly
+    assert "probe_geometry" in result  # Check if we parsed the probe object correctly
+
+
 # 3. Edge Case Tests
 
 

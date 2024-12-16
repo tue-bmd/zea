@@ -213,12 +213,18 @@ class Pipeline:
 
         self.validate()
 
-        # self.call = jit(self.call) if jit_options == "pipeline" else self.call
+        self.call = jit(self.call) if jit_options == "pipeline" else self.call
 
     @property
     def operations(self):
         """Alias for self.layers to match the USBMD naming convention"""
         return self._pipeline_layers
+
+    def call(self, inputs):
+        for operation in self._pipeline_layers:
+            outputs = operation(**inputs)
+            inputs = outputs
+        return outputs
 
     def __call__(self, *args, return_numpy=False, **kwargs):
         """Process input data through the pipeline."""
@@ -229,36 +235,35 @@ class Pipeline:
         probe, scan, config = {}, {}, {}
         for arg in args:
             if isinstance(arg, Probe):
-                probe = arg
+                probe = arg.to_tensor()
             elif isinstance(arg, Scan):
-                scan = arg
+                scan = arg.to_tensor()
             elif isinstance(arg, Config):
-                config = arg
+                config = arg.to_tensor()
 
         # combine probe, scan, config and kwargs
         inputs = {**probe, **scan, **config, **kwargs}
 
         ## PROCESSING
-        for operation in self._pipeline_layers:
-            outputs = operation(**inputs)
-            inputs = outputs
+        outputs = self.call(inputs)
 
         if return_numpy:
             outputs = {k: v.numpy() for k, v in outputs.items()}
 
         ## PREPARE OUTPUT
 
-        # update probe, scan, config with outputs
-        for arg in args:
-            if isinstance(arg, Probe):
-                arg.update(outputs)
-            elif isinstance(arg, Scan):
-                arg.update(outputs)
-            elif isinstance(arg, Config):
-                arg.update(outputs)
+        # TODO: if we can in-place update the Scan, Probe and Config objects, we can output those.
 
-        # TODO Ben: I'm not too sure if this is the best option, suggestions are welcome
-        return outputs if not args else args
+        # update probe, scan, config with outputs
+        # for arg in args:
+        #     if isinstance(arg, Probe):
+        #         arg.update(outputs)
+        #     elif isinstance(arg, Scan):
+        #         arg.update(outputs)
+        #     elif isinstance(arg, Config):
+        #         arg.update(outputs)
+
+        return outputs
 
     def prepare_input(self, *args):
         """Convert input data and parameters to dictionary of tensors following the CCC"""

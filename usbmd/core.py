@@ -12,7 +12,7 @@ class Object:
 
     def __init__(self):
         self._serialized = None
-        self._except_tensors = None
+        self._except_tensors = []  # To be filled by child classes
 
     @property
     def serialized(self):
@@ -43,6 +43,12 @@ class Object:
         """Return a copied version of the object"""
         return deepcopy(self)
 
+    def update(self, **kwargs):
+        """Update the attributes of the object if they exist"""
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
     def __getitem__(self, key):
         return getattr(self, key)
 
@@ -54,16 +60,23 @@ class Object:
 
     def to_tensor(self):
         """Convert the attributes in the object to keras tensors"""
+        snapshot = (
+            {}
+        )  # TODO: change attributes of 'self' instead of creating a new dict
         for key in dir(self):
             if key[0] != "_" and key not in self._except_tensors:
                 value = getattr(self, key)
-                if isinstance(value, (np.ndarray, int, float, list)):
+                if not isinstance(value, (np.ndarray, int, float, list, bool)):
+                    continue
 
-                    # if data is of double precision, convert to float32
-                    if isinstance(value, np.ndarray) and value.dtype == np.float64:
-                        dtype = "float32"
-                    else:
-                        dtype = None
+                # if data is of double precision, convert to float32
+                if isinstance(value, np.ndarray) and value.dtype == np.float64:
+                    dtype = "float32"
+                else:
+                    dtype = None
 
-                value = keras.convert_to_tensor(value, dtype=dtype)
-                setattr(self, key, value)
+                value = keras.ops.convert_to_tensor(value, dtype=dtype)
+
+                snapshot[key] = value
+
+        return snapshot
