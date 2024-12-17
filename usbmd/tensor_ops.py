@@ -5,27 +5,6 @@ import os
 import keras
 from keras import ops
 
-if keras.backend.backend() == "tensorflow":
-    import tensorflow as tf
-
-    _logdet = tf.linalg.logdet
-else:
-    # TODO: test other backends
-    _logdet = ops.logdet
-
-
-def logdet(*args, **kwargs):
-    """
-    Computes log of the determinant of a hermitian positive definite matrix.
-
-    Args:
-        x: Input matrix. It must 2D and square.
-
-    Returns:
-        The natural log of the determinant of matrix.
-    """
-    return _logdet(*args, **kwargs)
-
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
     """

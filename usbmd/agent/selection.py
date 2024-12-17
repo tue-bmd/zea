@@ -132,7 +132,7 @@ class MaxEntropySamplingLines(MaskActionModel):
         subsampled_cov_matrices = ops.stack(subsampled_cov_matrices)
 
         # [n_masks, batch_size, 1]
-        entropies = tensor_ops.logdet(subsampled_cov_matrices)[..., None]
+        entropies = ops.logdet(subsampled_cov_matrices)[..., None]
 
         # [1, batch_size, 1]
         best_mask_index = ops.argmax(entropies, axis=0, keepdims=True)
