@@ -26,14 +26,14 @@ class MaskActionModel:
         return observation * action
 
 
-class MaxEntropySamplingLines(MaskActionModel):
+class CovarianceSamplingLines(MaskActionModel):
     """
     This class models the line-to-line correlation to select the mask with the highest entropy.
     """
 
     def __init__(
         self,
-        img_size: int,
+        img_shape: tuple[int, int],
         n_actions: int,
         n_possible_actions: int,
         decoder: keras.layers.Layer = None,
@@ -42,7 +42,7 @@ class MaxEntropySamplingLines(MaskActionModel):
     ):
         """
         Args:
-            img_size (int): The size of the input image.
+            img_shape (tuple[int, int]): The shape of the input image.
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
             decoder (keras.layers.Layer, optional): The decoder layer that brings the particles to
@@ -51,9 +51,9 @@ class MaxEntropySamplingLines(MaskActionModel):
             n_masks (int, optional): The number of masks. Defaults to 200.
 
         Raises:
-            AssertionError: If img_size is not divisible by n_possible_actions.
+            AssertionError: If image width (img_shape[1]) is not divisible by n_possible_actions.
         """
-        self.img_size = img_size
+        self.img_shape = img_shape
         self.n_actions = n_actions
         self.n_possible_actions = n_possible_actions
         if decoder is None:
@@ -64,7 +64,7 @@ class MaxEntropySamplingLines(MaskActionModel):
         self.seed = keras.random.SeedGenerator(seed)
         self.n_masks = n_masks
 
-        stack_n_cols = self.img_size / self.n_possible_actions
+        stack_n_cols = self.img_shape[1] / self.n_possible_actions
         assert (
             stack_n_cols.is_integer()
         ), "Image size must be divisible by n_possible_actions."
@@ -142,4 +142,4 @@ class MaxEntropySamplingLines(MaskActionModel):
         best_mask = ops.squeeze(best_mask, axis=0)
 
         # [batch_size, h, w]
-        return masks.lines_to_im_size(best_mask, (self.img_size, self.img_size))
+        return masks.lines_to_im_size(best_mask, self.img_shape)
