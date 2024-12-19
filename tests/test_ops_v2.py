@@ -69,15 +69,6 @@ def test_operation():
     return AddOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
 
 
-@pytest.fixture
-def test_pipeline():
-    """Returns a Pipeline with basic operations."""
-    pipeline = Pipeline()
-    pipeline.add_operation(MultiplyOperation(cache_outputs=True))
-    pipeline.add_operation(AddOperation(cache_outputs=True))
-    return pipeline
-
-
 # 1. Operation Class Tests
 
 
