@@ -11,34 +11,38 @@ from pathlib import Path
 
 import keras
 from keras import ops
+from regex import P
 
 from usbmd.models.base import BaseModel
-from usbmd.models.preset_utils import register_presets
-from usbmd.models.presets import taesdxl_presets
+from usbmd.models.preset_utils import get_preset_loader, register_presets
+from usbmd.models.presets import (
+    taesdxl_decoder_presets,
+    taesdxl_encoder_presets,
+    taesdxl_presets,
+)
 from usbmd.registry import model_registry
-from usbmd.tools.hf import load_model_from_hf
 
 
-@model_registry(name="taesd")
+@model_registry(name="taesdxl")
 class TinyAutoencoder(BaseModel):
-    """[TAESD](https://github.com/madebyollin/taesd) model in TensorFlow."""
+    """[TAESD](https://github.com/madebyollin/taesd) model in TensorFlow.
 
-    def __init__(self, pretrained_path=None, grayscale=True, **kwargs):
+    custom_load_weights is implemen
+    """
+
+    def __init__(self, **kwargs):
         """
         Initializes the TAESD model with the given parameters.
 
         Args:
-            pretrained_path (str): Path to the pretrained model. Default is None which
-                will load from huggingface.
-            grayscale (bool): Whether to use grayscale images. Default is True.
             **kwargs: Additional keyword arguments to pass to the superclass initializer.
         """
         super().__init__(**kwargs)
-        self.pretrained_path = pretrained_path
-        self.grayscale = grayscale
 
-        self.encoder = TinyEncoder(self.pretrained_path)
-        self.decoder = TinyDecoder(self.pretrained_path)
+        self.encoder = TinyEncoder()
+        self.decoder = TinyDecoder()
+
+        self._grayscale = False
 
     def encode(self, inputs):
         """Encode the input images.
@@ -46,7 +50,13 @@ class TinyAutoencoder(BaseModel):
         Args:
             inputs (tensor): Input images of shape (batch_size, height, width, channels).
         """
-        if self.grayscale:
+        if self.encoder.network is None or self.decoder.network is None:
+            raise ValueError(
+                "Please load model using `TinyAutoencoder.from_preset()` before calling."
+            )
+
+        if ops.shape(inputs)[-1] == 1:
+            self._grayscale = True
             inputs = ops.concatenate(
                 [inputs, inputs, inputs], axis=-1
             )  # grayscale to RGB
@@ -59,7 +69,7 @@ class TinyAutoencoder(BaseModel):
             inputs (tensor): Input images of shape (batch_size, height, width, 4).
         """
         decoded = self.decoder(inputs)
-        if self.grayscale:
+        if self._grayscale:
             decoded = ops.image.rgb_to_grayscale(decoded, data_format="channels_last")
         return decoded
 
@@ -69,15 +79,104 @@ class TinyAutoencoder(BaseModel):
         decoded = self.decode(encoded)
         return decoded
 
-    def load_weights(self, filepath, skip_mismatch=False, **kwargs):
+    def custom_load_weights(self, preset, skip_mismatch=False, **kwargs):
         """TFSM layer does not support loading weights."""
-        pass
+        self.encoder.custom_load_weights(preset)
+        self.decoder.custom_load_weights(preset)
+
+
+@model_registry(name="taesdxl_encoder")
+class TinyEncoder(BaseModel):
+    """Encoder from TAESD model."""
+
+    def __init__(self, **kwargs):
+        """
+        Initializes the TAESD encoder.
+
+        Args:
+            **kwargs: Additional keyword arguments passed to the superclass initializer.
+        """
+        super().__init__(**kwargs)
+
+        self.download_files = [
+            "encoder/variables/variables.data-00000-of-00001",
+            "encoder/variables/variables.index",
+            "encoder/saved_model.pb",
+            "encoder/fingerprint.pb",
+        ]
+        self.network = None
+
+    def call(self, inputs):  # pylint: disable=arguments-differ
+        """
+        Applies the encoder to the input.
+        """
+        if self.network is None:
+            raise ValueError(
+                "Please load model using `TinyEncoder.from_preset()` before calling."
+            )
+        encoded = self.network(inputs)
+        return encoded[next(iter(encoded))]  # because encoded is dict, take first key
+
+    def custom_load_weights(self, preset, **kwargs):
+        """TFSM layer does not support loading weights."""
+        loader = get_preset_loader(preset)
+
+        for file in self.download_files:
+            filename = loader.get_file(file)
+
+        base_path = Path(filename)
+        base_path = str(base_path).split("encoder")[0]
+
+        self.network = _load_layer(base_path, "encoder")
+
+
+@model_registry(name="taesdxl_decoder")
+class TinyDecoder(BaseModel):
+    """Decoder from TAESD model."""
+
+    def __init__(self, **kwargs):
+        """
+        Initializes the TAESD decoder.
+
+        Args:
+            **kwargs: Additional keyword arguments passed to the superclass initializer.
+        """
+
+        super().__init__(**kwargs)
+
+        self.download_files = [
+            "decoder/variables/variables.data-00000-of-00001",
+            "decoder/variables/variables.index",
+            "decoder/saved_model.pb",
+            "decoder/fingerprint.pb",
+        ]
+        self.network = None
+
+    def call(self, inputs):  # pylint: disable=arguments-differ
+        """
+        Applies the decoder to the input.
+        """
+        if self.network is None:
+            raise ValueError(
+                "Please load model using `TinyDecoder.from_preset()` before calling."
+            )
+        decoded = self.network(inputs)
+        return decoded[next(iter(decoded))]  # because decoded is dict, take first key
+
+    def custom_load_weights(self, preset, **kwargs):
+        """TFSM layer does not support loading weights."""
+        loader = get_preset_loader(preset)
+        for file in self.download_files:
+            filename = loader.get_file(file)
+
+        base_path = Path(filename)
+        base_path = str(base_path).split("decoder")[0]
+
+        self.network = _load_layer(base_path, "decoder")
 
 
 def _load_layer(path, layer_name):
     assert layer_name in ["encoder", "decoder"]
-    if path is None:
-        path = load_model_from_hf("usbmd/taesdxl")  # will download encoder and decoder
     path = Path(path)
     layer = keras.layers.TFSMLayer(
         path / layer_name,
@@ -86,66 +185,6 @@ def _load_layer(path, layer_name):
     return layer
 
 
-@model_registry(name="taesd_encoder")
-class TinyEncoder(keras.models.Model):
-    """Encoder from TAESD model."""
-
-    def __init__(self, pretrained_path=None, **kwargs):
-        """
-        Initializes the TAESD encoder.
-
-        Args:
-            pretrained_path (str): Path to the pretrained model directory. Default is None which
-                will load from huggingface.
-            **kwargs: Additional keyword arguments passed to the superclass initializer.
-        """
-        super().__init__(**kwargs)
-        self.pretrained_path = pretrained_path
-
-        self.encoder = _load_layer(self.pretrained_path, "encoder")
-
-    def call(self, inputs):  # pylint: disable=arguments-differ
-        """
-        Applies the encoder to the input.
-        """
-        encoded = self.encoder(inputs)
-        return encoded[next(iter(encoded))]  # because encoded is dict, take first key
-
-    def load_weights(self, filepath, skip_mismatch=False, **kwargs):
-        """TFSM layer does not support loading weights."""
-        pass
-
-
-@model_registry(name="taesd_decoder")
-class TinyDecoder(keras.models.Model):
-    """Decoder from TAESD model."""
-
-    def __init__(self, pretrained_path=None, **kwargs):
-        """
-        Initializes the TAESD decoder.
-
-        Args:
-            pretrained_path (str): Path to the pretrained model directory. Default is None which
-                will load from huggingface.
-            **kwargs: Additional keyword arguments passed to the superclass initializer.
-        """
-
-        super().__init__(**kwargs)
-        self.pretrained_path = pretrained_path
-
-        self.decoder = _load_layer(self.pretrained_path, "decoder")
-
-    def call(self, inputs):  # pylint: disable=arguments-differ
-        """
-        Applies the decoder to the input.
-        """
-
-        decoded = self.decoder(inputs)
-        return decoded[next(iter(decoded))]  # because decoded is dict, take first key
-
-    def load_weights(self, filepath, skip_mismatch=False, **kwargs):
-        """TFSM layer does not support loading weights."""
-        pass
-
-
 register_presets(taesdxl_presets, TinyAutoencoder)
+register_presets(taesdxl_encoder_presets, TinyEncoder)
+register_presets(taesdxl_decoder_presets, TinyDecoder)
