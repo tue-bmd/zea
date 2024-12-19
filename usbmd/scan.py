@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from usbmd.core import Object
-from usbmd.utils import deprecated, log
+from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 
