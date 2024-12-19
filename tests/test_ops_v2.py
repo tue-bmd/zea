@@ -241,6 +241,14 @@ def test_pipeline_with_scan_probe_config():
         xlims=(-2e-3, 2e-3),
     )
 
+    # Currently not supported
+    # config = Config(
+    #     {
+    #         "file_path": "/path/to/file",
+    #         "date": "2024-01-01",
+    #     }
+    # )
+
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = Pipeline(operations=operations)
 
