@@ -124,6 +124,9 @@ class CovarianceSamplingLines(MaskActionModel):
 
         # Subsample the covariance matrix with random lines
         def subsample_with_mask(mask):
+            """
+            Subsample the covariance matrix with a single mask
+            """
             subsampled_cov_matrix = tensor_ops.boolean_mask(
                 cov_matrix, mask, size=self.n_actions**2
             )
