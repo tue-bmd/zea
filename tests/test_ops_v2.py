@@ -5,7 +5,6 @@
 import keras
 import pytest
 
-from usbmd.config.config import Config
 from usbmd.ops_v2 import DataTypes, Operation, Pipeline
 from usbmd.probes import Dummy
 from usbmd.scan import Scan
@@ -208,14 +207,14 @@ def test_pipeline_validation():
         MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
         AddOperation(input_data_type=DataTypes.RAW_DATA),
     ]
-    pipeline = Pipeline(operations=operations)
+    _ = Pipeline(operations=operations)
 
     operations = [
         MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
         AddOperation(input_data_type=DataTypes.IMAGE),
     ]
     with pytest.raises(ValueError):
-        pipeline = Pipeline(operations=operations)
+        _ = Pipeline(operations=operations)
 
 
 def test_pipeline_with_scan_probe_config():
@@ -232,13 +231,7 @@ def test_pipeline_with_scan_probe_config():
         xlims=(-2e-3, 2e-3),
     )
 
-    # Currently not supported
-    # config = Config(
-    #     {
-    #         "file_path": "/path/to/file",
-    #         "date": "2024-01-01",
-    #     }
-    # )
+    # TODO: Add Config object as input to the Pipeline, currently config is not an Object
 
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = Pipeline(operations=operations)
