@@ -28,7 +28,7 @@ class Object:
     def __setattr__(self, name: str, value):
         """Reset the serialized data if the object is modified"""
         if name != "_serialized":  # Avoid resetting when setting _serialized itself
-            self._serialized = None
+            super().__setattr__("_serialized", None)
         super().__setattr__(name, value)
 
     def __eq__(self, other):
