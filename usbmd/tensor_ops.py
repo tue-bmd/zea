@@ -155,7 +155,7 @@ def matrix_power(matrix, power):
     return ops.matmul(matrix, matrix_power(matrix, power - 1))
 
 
-def boolean_mask(tensor, mask):
+def boolean_mask(tensor, mask, size=None):
     """
     Apply a boolean mask to a tensor.
 
@@ -166,6 +166,11 @@ def boolean_mask(tensor, mask):
     Returns:
         Tensor: The masked tensor.
     """
+    if os.environ.get("KERAS_BACKEND") == "jax":
+        assert size is not None
+        import jax.numpy as jnp
+        indices = jnp.where(mask, size=size)  # Fixed size allows Jax tracing
+        return tensor[indices]
     if os.environ.get("KERAS_BACKEND") != "tensorflow":
         return tensor[mask]
     else:

@@ -33,7 +33,8 @@ class CovarianceSamplingLines(MaskActionModel):
 
     def __init__(
         self,
-        img_shape: tuple[int, int],
+        img_width: int,
+        img_height: int,
         n_actions: int,
         n_possible_actions: int,
         decoder: keras.layers.Layer = None,
@@ -42,7 +43,8 @@ class CovarianceSamplingLines(MaskActionModel):
     ):
         """
         Args:
-            img_shape (tuple[int, int]): The shape of the input image.
+            img_width (int): The width of the input image
+            img_height (int): The height of the input image
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
             decoder (keras.layers.Layer, optional): The decoder layer that brings the particles to
@@ -51,9 +53,10 @@ class CovarianceSamplingLines(MaskActionModel):
             n_masks (int, optional): The number of masks. Defaults to 200.
 
         Raises:
-            AssertionError: If image width (img_shape[1]) is not divisible by n_possible_actions.
+            AssertionError: If image width is not divisible by n_possible_actions.
         """
-        self.img_shape = img_shape
+        self.img_width = img_width
+        self.img_height = img_height
         self.n_actions = n_actions
         self.n_possible_actions = n_possible_actions
         if decoder is None:
@@ -64,7 +67,7 @@ class CovarianceSamplingLines(MaskActionModel):
         self.seed = keras.random.SeedGenerator(seed)
         self.n_masks = n_masks
 
-        stack_n_cols = self.img_shape[1] / self.n_possible_actions
+        stack_n_cols = self.img_width / self.n_possible_actions
         assert (
             stack_n_cols.is_integer()
         ), "Image size must be divisible by n_possible_actions."
@@ -120,13 +123,15 @@ class CovarianceSamplingLines(MaskActionModel):
         bool_masks = ops.logical_and(bool_lines, ops.swapaxes(bool_lines, -1, -2))
 
         # Subsample the covariance matrix with random lines
-        subsampled_cov_matrices = []
-        for mask in bool_masks:
-            subsampled_cov_matrix = tensor_ops.boolean_mask(cov_matrix, mask)
-            subsampled_cov_matrix = ops.reshape(
+        def subsample_with_mask(mask):
+            subsampled_cov_matrix = tensor_ops.boolean_mask(
+                cov_matrix, mask, size=self.n_actions**2
+            )
+            return ops.reshape(
                 subsampled_cov_matrix, [batch_size, self.n_actions, self.n_actions]
             )
-            subsampled_cov_matrices.append(subsampled_cov_matrix)
+
+        subsampled_cov_matrices = ops.vectorized_map(subsample_with_mask, bool_masks)
 
         # [n_masks, batch_size, cols, cols]
         subsampled_cov_matrices = ops.stack(subsampled_cov_matrices)
@@ -142,4 +147,4 @@ class CovarianceSamplingLines(MaskActionModel):
         best_mask = ops.squeeze(best_mask, axis=0)
 
         # [batch_size, h, w]
-        return masks.lines_to_im_size(best_mask, self.img_shape)
+        return masks.lines_to_im_size(best_mask, (self.img_height, self.img_width))
