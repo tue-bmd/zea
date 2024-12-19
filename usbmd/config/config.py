@@ -13,8 +13,10 @@ from pathlib import Path
 
 import yaml
 
+from usbmd.core import Object
 
-class Config(dict):
+
+class Config(Object):
     """Config class.
 
     This Config class extends a normal dictionary with easydict such that
