@@ -44,7 +44,7 @@ class Operation(keras.Operation):
         jit_compile: bool = True,
     ):
         """
-        args:
+        Args:
             cache_inputs: A list of input keys to cache or True to cache all inputs
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
@@ -91,7 +91,7 @@ class Operation(keras.Operation):
         """
         Set a cache for inputs, then retrace the function if necessary.
 
-        args:
+        Args:
             input_cache: A dictionary containing cached inputs.
         """
         self._input_cache.update(input_cache)
@@ -101,7 +101,7 @@ class Operation(keras.Operation):
         """
         Set a cache for outputs, then retrace the function if necessary.
 
-        args:
+        Args:
             output_cache: A dictionary containing cached outputs.
         """
         self._output_cache.update(output_cache)
@@ -118,8 +118,11 @@ class Operation(keras.Operation):
         """
         Generate a hash for the given inputs to use as a cache key.
 
-        :param kwargs: Keyword arguments.
-        :return: A unique hash representing the inputs.
+        Args:
+            kwargs: Keyword arguments.
+
+        Returns:
+            A unique hash representing the inputs.
         """
         input_json = json.dumps(kwargs, sort_keys=True, default=str)
         return hashlib.md5(input_json.encode()).hexdigest()
@@ -128,8 +131,11 @@ class Operation(keras.Operation):
         """
         Process the input keyword arguments and return the processed results.
 
-        :param kwargs: Keyword arguments to be processed.
-        :return: Combined input and output as kwargs.
+        Args:
+            kwargs: Keyword arguments to be processed.
+
+        Returns:
+            Combined input and output as kwargs.
         """
         # Merge cached inputs with provided ones
         merged_kwargs = {**self._input_cache, **kwargs}
@@ -209,10 +215,11 @@ class Pipeline:
 
         for operation in self.operations:  # We use self.layers from keras.Pipeline here
             operation.with_batch_dim = with_batch_dim
-            operation.set_jit(True if jit_options == "ops" else False)
+            operation.set_jit(jit_options == "ops")
 
         self.validate()
 
+        # pylint: disable=method-hidden
         self.call = jit(self.call) if jit_options == "pipeline" else self.call
 
     @property
@@ -221,6 +228,7 @@ class Pipeline:
         return self._pipeline_layers
 
     def call(self, inputs):
+        """Process input data through the pipeline."""
         for operation in self._pipeline_layers:
             outputs = operation(**inputs)
             inputs = outputs
@@ -386,7 +394,7 @@ class Pipeline:
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
-    def call(self, *args) -> Dict:
+    def call(self, *args, **kwargs) -> Dict:
         """
         Merges the input dictionaries. Priority is given to the last input.
         """
@@ -405,7 +413,7 @@ class Split(Operation):
         super().__init__(**kwargs)
         self.n = n
 
-    def call(self, **kwargs) -> List[Dict]:
+    def call(self, *args, **kwargs) -> List[Dict]:
         """
         Splits the input dictionary into n copies.
         """
@@ -427,7 +435,7 @@ class Stack(Operation):
         self.keys = keys
         self.axis = axis
 
-    def call(self, **kwargs) -> Dict:
+    def call(self, *args, **kwargs) -> Dict:
         """
         Stacks the inputs corresponding to the specified keys along the specified axis.
         If a list of axes is provided, the length must match the number of keys.
