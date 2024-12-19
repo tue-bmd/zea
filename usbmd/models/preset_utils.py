@@ -1,3 +1,5 @@
+"""Mostly from keras_hub.src.models import preset_utils"""
+
 import collections
 import datetime
 import json
@@ -234,12 +236,19 @@ class KerasPresetLoader(PresetLoader):
         model = load_serialized_object(self.config, **kwargs)
         if load_weights:
             jax_memory_cleanup(model)
-            model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
+            # if model has a custom load_weights method, call it
+            if hasattr(model, "custom_load_weights"):
+                model.custom_load_weights(self.preset)
+            else:
+                model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
         return model
 
     def load_image_converter(self, cls, **kwargs):
         converter_config = load_json(self.preset, IMAGE_CONVERTER_CONFIG_FILE)
         return load_serialized_object(converter_config, **kwargs)
+
+    def get_file(self, path):
+        return get_file(self.preset, path)
 
     def load_preprocessor(self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs):
         # If there is no `preprocessing.json` or it's for the wrong class,

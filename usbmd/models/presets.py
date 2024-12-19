@@ -3,9 +3,31 @@
 taesdxl_presets = {
     "taesdxl": {
         "metadata": {
-            "description": ("Tiny Autoencoder (TAESD) model"),
+            "description": "Tiny Autoencoder (TAESD) model",
             "params": 0,
-            "path": "taesd",
+            "path": "taesdxl",
+        },
+        "hf_handle": "hf://usbmd/taesdxl",
+    },
+}
+
+taesdxl_encoder_presets = {
+    "taesdxl_encoder": {
+        "metadata": {
+            "description": "Tiny encoder from TAESD model",
+            "params": 0,
+            "path": "taesdxl_encoder",
+        },
+        "hf_handle": "hf://usbmd/taesdxl",
+    },
+}
+
+taesdxl_decoder_presets = {
+    "taesdxl_decoder": {
+        "metadata": {
+            "description": "Tiny decoder from TAESD model",
+            "params": 0,
+            "path": "taesdxl_decoder",
         },
         "hf_handle": "hf://usbmd/taesdxl",
     },
