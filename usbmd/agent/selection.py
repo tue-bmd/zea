@@ -26,6 +26,163 @@ class MaskActionModel:
         return observation * action
 
 
+class GreedyEntropy(MaskActionModel):
+    def __init__(
+        self,
+        n_actions: int,
+        n_possible_actions: int,
+        img_width: int,
+        img_height: int,
+        mean: float = 0,
+        std_dev: float = 1,
+        num_stds_to_span: float = 2,
+        num_samples: int = 5,
+    ):
+        """
+        Args:
+            n_actions (int): The number of actions the agent can take.
+            n_possible_actions (int): The number of possible actions.
+            img_width (int): The width of the input image.
+            img_height (int): The height of the input image.
+            mean (float, optional): The mean of the RBF. Defaults to 0.
+            std_dev (float, optional): The standard deviation of the RBF. Defaults to 1.
+            num_stds_to_span (float, optional): The number of standard deviations to span. Defaults to 4.
+        """
+        # see here what I mean by upside_down_rbf:
+        # https://colab.research.google.com/drive/1CQp_Z6nADzOFsybdiH5Cag0vtVZjjioU?usp=sharing
+        upside_down_rbf = lambda x: 1 - ops.exp(-0.5 * ((x - mean) / std_dev) ** 2)
+        # Sample 21 points symmetrically around the mean.
+        # This can be tuned to determine how the entropy for neighbouring lines is updated
+        # TODO: learn this function from training data
+        points_to_evaluate = ops.linspace(
+            mean - num_stds_to_span * std_dev,
+            mean + num_stds_to_span * std_dev,
+            num_samples,
+        )
+        self.points_on_upside_down_rbf = upside_down_rbf(points_to_evaluate)
+        self.entropy_sigma = 1
+        self.n_actions = n_actions
+        self.n_possible_actions = n_possible_actions
+        self.img_width = img_width
+        self.img_height = img_height
+
+        stack_n_cols = self.img_width / self.n_possible_actions
+        assert (
+            stack_n_cols.is_integer()
+        ), "Image size must be divisible by n_possible_actions."
+        self.stack_n_cols = int(stack_n_cols)
+
+    def compute_entropy_per_line(self, particles):
+        """
+        Args:
+            particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
+
+        Returns:
+            Tensor: batch of entropies per line, of shape (batch, n_possible_actions)
+        """
+        # TODO: I think we only need to compute the lower triangular
+        # of this matrix, since it's symmetric
+        squared_l2_error_matrices = (
+            particles[:, None, ...] - particles[None, :, ...]
+        ) ** 2
+        gaussian_error_per_pixel_i_j = ops.exp(
+            (squared_l2_error_matrices) / (2 * self.entropy_sigma**2)
+        )
+        # Vertically stack all columns corresponding with the same line
+        # This way we can just sum across the height axis and get the entropy
+        # for each pixel in a given line
+        n_particles, n_particles, batch_size, height, width = (
+            gaussian_error_per_pixel_i_j.shape
+        )
+        gaussian_error_per_pixel_stacked = ops.reshape(
+            gaussian_error_per_pixel_i_j,
+            [
+                n_particles,
+                n_particles,
+                batch_size,
+                height * self.stack_n_cols,
+                self.n_possible_actions,
+            ],
+        )
+        gaussian_error_per_line = ops.sum(gaussian_error_per_pixel_stacked, axis=3)
+        # sum out first dimension of (n_particles x n_particles) error matrix
+        # [n_particles, batch, n_possible_actions]
+        entropy_per_line_i = ops.sum(gaussian_error_per_line, axis=0)
+        # sum out second dimension of (n_particles x n_particles) error matrix
+        # [batch, n_possible_actions]
+        entropy_per_line = ops.sum(entropy_per_line_i, axis=0)
+        return entropy_per_line
+
+    def sample(self, particles):
+        """
+        Args:
+            particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
+
+        Returns:
+            Tensor: Batch of masks of shape (batch_size, height, width)
+        """
+        entropy_per_line = self.compute_entropy_per_line(particles)
+
+        def select_line_and_reweight_entropy(entropy_per_line):
+            """
+            Selected the max entropy line and reweights the entropy values around it,
+            approximating the decrease in entropy that would occur from observing that line.
+
+            Args:
+                entropy_per_line (Tensor): Entropy per line of shape (batch_size, n_possible_actions)
+
+            Returns:
+                Tuple: The selected line index and the updated entropies per line
+            """
+            rbf_size = self.points_on_upside_down_rbf.shape[0]
+
+            # Find the line with maximum entropy
+            max_entropy_line = ops.argmax(entropy_per_line)
+
+            # Compute re-weighting indices (clipped to valid range)
+            start_index = ops.clip(
+                max_entropy_line - rbf_size // 2, 0, self.n_possible_actions - rbf_size
+            )
+
+            # Pad the entropy per line to allow for re-weighting with fixed
+            # size RBF, which is necessary for tracing.
+            padded_entropy_per_line = ops.pad(
+                entropy_per_line, (rbf_size // 2, rbf_size // 2)
+            )
+
+            # Create the re-weighting vector
+            reweighting = ops.ones_like(padded_entropy_per_line)
+            reweighting = ops.slice_update(
+                reweighting, (start_index,), self.points_on_upside_down_rbf
+            )
+
+            # Apply re-weighting to entropy values
+            updated_entropy_per_line_padded = padded_entropy_per_line * reweighting
+            updated_entropy_per_line = ops.slice(
+                updated_entropy_per_line_padded,
+                (rbf_size // 2,),
+                (self.n_possible_actions,),
+            )
+            return max_entropy_line, updated_entropy_per_line
+
+        # Greedily select best line, reweight entropies, and repeat
+        all_selected_lines = []
+        for _ in range(self.n_actions):
+            max_entropy_line, entropy_per_line = ops.vectorized_map(
+                select_line_and_reweight_entropy, entropy_per_line
+            )
+            all_selected_lines.append(max_entropy_line)
+
+        ops.convert_to_tensor(all_selected_lines)
+
+        def selected_lines_to_line_mask(selected_lines):
+            return masks.make_line_mask(
+                selected_lines, (self.img_height, self.img_width, 1)
+            )
+
+        return ops.vectorized_map(selected_lines_to_line_mask, all_selected_lines)
+
+
 class CovarianceSamplingLines(MaskActionModel):
     """
     This class models the line-to-line correlation to select the mask with the highest entropy.
