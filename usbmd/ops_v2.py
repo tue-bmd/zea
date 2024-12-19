@@ -220,7 +220,7 @@ class Pipeline:
         self.validate()
 
         # pylint: disable=method-hidden
-        self.call = jit(self.call) if jit_options == "pipeline" else self.call
+        self._call_pipeline = jit(self.call) if jit_options == "pipeline" else self.call
 
     @property
     def operations(self):
@@ -253,7 +253,7 @@ class Pipeline:
         inputs = {**probe, **scan, **config, **kwargs}
 
         ## PROCESSING
-        outputs = self.call(inputs)
+        outputs = self._call_pipeline(inputs)
 
         if return_numpy:
             outputs = {k: v.numpy() for k, v in outputs.items()}
