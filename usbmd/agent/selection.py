@@ -178,7 +178,7 @@ class GreedyEntropy(MaskActionModel):
         def selected_lines_to_line_mask(selected_lines):
             return masks.make_line_mask(
                 selected_lines, (self.img_height, self.img_width, 1)
-            )
+            )[..., 0]
 
         return ops.vectorized_map(selected_lines_to_line_mask, all_selected_lines)
 
