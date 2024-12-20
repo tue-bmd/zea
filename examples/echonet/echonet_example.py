@@ -20,7 +20,6 @@ from keras import ops
 from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.models.echonet import EchoNetDynamic
-from usbmd.utils import get_date_string
 from usbmd.utils.selection_tool import add_shape_from_mask
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
@@ -46,9 +45,7 @@ if __name__ == "__main__":
     presets = list(EchoNetDynamic.presets.keys())
     log.info(f"Available built-in usbmd presets for TAESD: {presets}")
 
-    model = EchoNetDynamic.from_preset(
-        "/mnt/z/Ultrasound-BMd/pretrained/echonet-dynamic/tristan-20241220-143743"
-    )
+    model = EchoNetDynamic.from_preset("echonet-dynamic")
 
     batch = next(iter(val_dataset))
 
