@@ -1,3 +1,9 @@
+""" Base model class for all USBMD Keras models.
+
+- **Author(s)**: Tristan Stevens
+- **Date**: 20/12/2024
+"""
+
 import keras
 
 from usbmd.models.preset_utils import (
