@@ -1,7 +1,8 @@
 """
 Converts the taesdxl model to ONNX and then to TensorFlow.
 
-Run a usbmd/keras3:latest container and install:
+Run a usbmd/keras3:v2.1.1 (or try with latest) container and install:
+
 ```bash
 sudo pip install diffusers["torch"] \
 onnx==1.16.1 \
@@ -30,6 +31,8 @@ import torch
 from diffusers import AutoencoderTiny
 from onnx2tf import convert
 
+from usbmd import log
+
 # Load torch model
 model_name = "madebyollin/taesdxl"
 # model_name = "madebyollin/taesd"
@@ -45,11 +48,12 @@ timestamp = time.strftime("%Y%m%d-%H%M%S")
 save_to_path = Path(f"/mnt/z/Ultrasound-BMd/pretrained/taesdxl/wessel-{timestamp}")
 save_to_path.mkdir()
 
+encoder_onnx_path = str(save_to_path / "taesdxl-encoder.onnx")
 # Go to ONNX
 torch.onnx.export(
     vae.encoder,  # model to export
     (input_encoder_tensor,),  # inputs of the model,
-    str(save_to_path / "taesdxl-encoder.onnx"),  # filename of the ONNX model
+    encoder_onnx_path,  # filename of the ONNX model
     input_names=["input"],  # Rename inputs for the ONNX model
     dynamic_axes={  # Allow dynamic axes for the spatial dimensions
         "input": {0: "batch_size", 2: "height", 3: "width"},
@@ -57,10 +61,11 @@ torch.onnx.export(
     },
 )
 
+decoder_onnx_path = str(save_to_path / "taesdxl-decoder.onnx")
 torch.onnx.export(
     vae.decoder,  # model to export
     (input_decoder_tensor,),  # inputs of the model,
-    str(save_to_path / "taesdxl-decoder.onnx"),  # filename of the ONNX model
+    decoder_onnx_path,  # filename of the ONNX model
     input_names=["input"],  # Rename inputs for the ONNX model
     dynamic_axes={  # Allow dynamic axes for the spatial dimensions
         "input": {0: "batch_size", 2: "height", 3: "width"},
@@ -70,12 +75,14 @@ torch.onnx.export(
 
 # Convert to TF
 convert(
-    str(save_to_path / "taesdxl-encoder.onnx"),
+    encoder_onnx_path,
     output_folder_path=str(save_to_path / "encoder"),
     output_keras_v3=True,
 )
 convert(
-    str(save_to_path / "taesdxl-decoder.onnx"),
+    decoder_onnx_path,
     output_folder_path=str(save_to_path / "decoder"),
     output_keras_v3=True,
 )
+
+log.info(f"Saved models to {save_to_path}")
