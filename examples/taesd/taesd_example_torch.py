@@ -2,7 +2,8 @@
 TAESD model from: https://github.com/madebyollin/taesd
 run: `pip install diffusers`
 
-Script by Wessel
+- **Author(s)**: Wessel van Nierop
+- **Date**: 20/11/2024
 """
 
 import importlib

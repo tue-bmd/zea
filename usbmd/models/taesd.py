@@ -10,8 +10,7 @@ See example usage in [examples/taesd](examples/taesd).
 from pathlib import Path
 
 import keras
-from keras import ops
-from regex import P
+from keras import backend, ops
 
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
@@ -37,6 +36,12 @@ class TinyAutoencoder(BaseModel):
         Args:
             **kwargs: Additional keyword arguments to pass to the superclass initializer.
         """
+        if backend.backend() != "tensorflow":
+            raise NotImplementedError(
+                "TinyAutoencoder is only currently supported with the "
+                "TensorFlow backend."
+            )
+
         super().__init__(**kwargs)
 
         self.encoder = TinyEncoder()
@@ -99,6 +104,12 @@ class TinyEncoder(BaseModel):
         Args:
             **kwargs: Additional keyword arguments passed to the superclass initializer.
         """
+        if backend.backend() != "tensorflow":
+            raise NotImplementedError(
+                "TinyEncoder is only currently supported with the "
+                "TensorFlow backend."
+            )
+
         super().__init__(**kwargs)
 
         self.download_files = [
@@ -144,7 +155,11 @@ class TinyDecoder(BaseModel):
         Args:
             **kwargs: Additional keyword arguments passed to the superclass initializer.
         """
-
+        if backend.backend() != "tensorflow":
+            raise NotImplementedError(
+                "TinyDecoder is only currently supported with the "
+                "TensorFlow backend."
+            )
         super().__init__(**kwargs)
 
         self.download_files = [

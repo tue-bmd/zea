@@ -7,6 +7,7 @@ TAESD model from: https://github.com/madebyollin/taesd
 
 import os
 
+# NOTE: should be `tensorflow` for TAESD
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
 import matplotlib.pyplot as plt
