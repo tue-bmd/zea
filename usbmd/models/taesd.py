@@ -76,6 +76,9 @@ class TinyAutoencoder(BaseModel):
     def call(self, inputs):  # pylint: disable=arguments-differ
         """Applies the full autoencoder to the input."""
         encoded = self.encode(inputs)
+        # NOTE: Here you can compress the encoding a little bit more by going
+        # to uint8 like in the original model
+        # https://github.com/huggingface/diffusers/blob/cd30820/src/diffusers/models/autoencoders/autoencoder_tiny.py?plain=1#L336-L342 # pylint: disable=line-too-long
         decoded = self.decode(encoded)
         return decoded
 
