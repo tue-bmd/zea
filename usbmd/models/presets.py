@@ -33,8 +33,8 @@ taesdxl_decoder_presets = {
     },
 }
 
-echonet_segment_presets = {
-    "echonet_segment": {
+echonet_dynamic_presets = {
+    "echonet-dynamic": {
         "metadata": {
             "description": (
                 "EchoNet-Dynamic segmentation model for cardiac ultrasound segmentation. "
@@ -43,6 +43,6 @@ echonet_segment_presets = {
             "params": 0,
             "path": "echonet",
         },
-        "hf_handle": "hf://usbmd/taesdxl",
+        "hf_handle": "hf://usbmd/echonet-dynamic",
     },
 }
