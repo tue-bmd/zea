@@ -135,6 +135,7 @@ torch.onnx.export(
     (input_tensor,),  # inputs of the model,
     output_onnx_path,  # filename of the ONNX model
     input_names=["input"],  # Rename inputs for the ONNX model
+    output_names=["segmentation"],  # Rename outputs for the ONNX model
     # couldn't do all spatial dimensions because of ResizeBilinear
     dynamic_axes={  # Allow dynamic axes for the spatial dimensions
         "input": {0: "batch_size"},
@@ -143,10 +144,12 @@ torch.onnx.export(
 )
 
 # Convert to TF
-convert(
+model = convert(
     output_onnx_path,
     output_folder_path=save_to_path / "tensorflow",
-    output_keras_v3=True,
+    output_keras_v3=False,  # we do manually
+    output_signaturedefs=False,
 )
 
-log.success(f"Model saved to {save_to_path}")
+log.success(f"Model saved to {log.yellow(save_to_path)}")
+
