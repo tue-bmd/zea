@@ -26,9 +26,6 @@ class BaseModel(keras.models.Model):
     A `BaseModel` is the basic model.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     @classmethod
     def from_config(cls, config):  # pylint: disable=arguments-differ
         # The default `from_config()` for functional models will return a
