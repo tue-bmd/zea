@@ -93,9 +93,8 @@ def get_file(preset, path):
             if message.find("403 Client Error"):
                 raise FileNotFoundError(
                     f"`{path}` doesn't exist in preset directory `{preset}`."
-                )
-            else:
-                raise ValueError(message)
+                ) from e
+            raise ValueError(message) from e
     elif Path(preset).exists():
         # Assume a local filepath
         local_path = Path(preset) / path

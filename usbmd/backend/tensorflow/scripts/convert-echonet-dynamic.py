@@ -48,7 +48,6 @@ from pathlib import Path
 import torch
 import torchvision
 import wget
-from onnx2tf import convert
 
 from usbmd import log
 
@@ -65,6 +64,7 @@ EJECTION_FRACTION_WEIGHTS_URL = (
 
 
 def download_weights(weights_folder):
+    """Download the weights for the EchoNet segmentation model."""
     weights_folder = Path(weights_folder)
     url = SEGMENTATION_WEIGHTS_URL
 
@@ -152,4 +152,3 @@ model = convert(
 )
 
 log.success(f"Model saved to {log.yellow(save_to_path)}")
-

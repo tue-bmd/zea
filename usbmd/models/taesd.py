@@ -87,7 +87,7 @@ class TinyAutoencoder(BaseModel):
         decoded = self.decode(encoded)
         return decoded
 
-    def custom_load_weights(self, preset, skip_mismatch=False, **kwargs):
+    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
         """TFSM layer does not support loading weights."""
         self.encoder.custom_load_weights(preset)
         self.decoder.custom_load_weights(preset)
@@ -131,7 +131,7 @@ class TinyEncoder(BaseModel):
         encoded = self.network(inputs)
         return encoded[next(iter(encoded))]  # because encoded is dict, take first key
 
-    def custom_load_weights(self, preset, **kwargs):
+    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
         """TFSM layer does not support loading weights."""
         loader = get_preset_loader(preset)
 
@@ -139,7 +139,7 @@ class TinyEncoder(BaseModel):
             filename = loader.get_file(file)
 
         base_path = Path(filename)
-        base_path = str(base_path).split("encoder")[0]
+        base_path = str(base_path).split("encoder", maxsplit=1)[0]
 
         self.network = _load_layer(base_path, "encoder")
 
@@ -188,7 +188,7 @@ class TinyDecoder(BaseModel):
             filename = loader.get_file(file)
 
         base_path = Path(filename)
-        base_path = str(base_path).split("decoder")[0]
+        base_path = str(base_path).split("decoder", maxsplit=1)[0]
 
         self.network = _load_layer(base_path, "decoder")
 
