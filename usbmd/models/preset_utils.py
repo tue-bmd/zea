@@ -1,5 +1,7 @@
 """Mostly from keras_hub.src.models import preset_utils"""
 
+# pylint: disable=redefined-argument-from-local
+
 import collections
 import datetime
 import json
@@ -226,11 +228,15 @@ class PresetLoader:
 
         return model_kwargs, kwargs
 
-    def load_model(self, cls, load_weights, **kwargs):
+    def load_model(
+        self, cls, load_weights, **kwargs
+    ):  # pylint: disable=unused-argument
         """Load the backbone model from the preset."""
         raise NotImplementedError
 
-    def load_preprocessor(self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs):
+    def load_preprocessor(
+        self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs
+    ):  # pylint: disable=unused-argument
         """Load a prepocessor layer from the preset."""
         kwargs = cls._add_missing_kwargs(self, kwargs)
         return cls(**kwargs)
@@ -257,7 +263,7 @@ class KerasPresetLoader(PresetLoader):
                 model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
         return model
 
-    def load_image_converter(self, cls, **kwargs):
+    def load_image_converter(self, cls, **kwargs):  # pylint: disable=unused-argument
         """Load an image converter from the preset."""
         converter_config = load_json(self.preset, IMAGE_CONVERTER_CONFIG_FILE)
         return load_serialized_object(converter_config, **kwargs)
@@ -324,7 +330,7 @@ class KerasPresetSaver:
         config_to_skip = ["compile_config", "build_config"]
         for key in config_to_skip:
             self._recursive_pop(config, key)
-        with open(config_path, "w") as config_file:
+        with open(config_path, "w", encoding="utf-8") as config_file:
             config_file.write(json.dumps(config, indent=4))
 
     def _save_metadata(self, layer):
@@ -338,7 +344,7 @@ class KerasPresetSaver:
             "date_saved": datetime.datetime.now().strftime("%Y-%m-%d@%H:%M:%S"),
         }
         metadata_path = os.path.join(self.preset_dir, METADATA_FILE)
-        with open(metadata_path, "w") as metadata_file:
+        with open(metadata_path, "w", encoding="utf-8") as metadata_file:
             metadata_file.write(json.dumps(metadata, indent=4))
 
 

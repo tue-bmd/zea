@@ -181,7 +181,7 @@ class TinyDecoder(BaseModel):
         decoded = self.network(inputs)
         return decoded[next(iter(decoded))]  # because decoded is dict, take first key
 
-    def custom_load_weights(self, preset, **kwargs):
+    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
         """TFSM layer does not support loading weights."""
         loader = get_preset_loader(preset)
         for file in self.download_files:

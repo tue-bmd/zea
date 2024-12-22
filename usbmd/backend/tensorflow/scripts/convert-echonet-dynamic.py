@@ -30,7 +30,7 @@ flatbuffers>=23.5.26
 
 import os
 
-os.environ["KERAS_BACKEND"] = "torch"
+os.environ["KERAS_BACKEND"] = "tensorflow"
 
 SEGMENTATION_WEIGHTS_URL = (
     "https://github.com/douyang/EchoNetDynamic/releases"
@@ -48,6 +48,7 @@ from pathlib import Path
 import torch
 import torchvision
 import wget
+from onnx2tf import convert  # noqa
 
 from usbmd import log
 
