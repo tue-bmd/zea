@@ -116,6 +116,7 @@ def get_file(preset, path):
 
 
 def load_json(preset, config_file=CONFIG_FILE):
+    """Load a JSON file from a preset."""
     config_path = get_file(preset, config_file)
     with open(config_path, encoding="utf-8") as config_file:
         config = json.load(config_file)
@@ -123,6 +124,7 @@ def load_json(preset, config_file=CONFIG_FILE):
 
 
 def load_serialized_object(config, **kwargs):
+    """Load a serialized Keras object from a config."""
     # `dtype` in config might be a serialized `DTypePolicy` or `DTypePolicyMap`.
     # Ensure that `dtype` is properly configured.
     dtype = kwargs.pop("dtype", None)
@@ -153,6 +155,7 @@ def check_config_class(config):
 
 
 def jax_memory_cleanup(layer):
+    """Cleanup memory for JAX models."""
     # For jax, delete all previous allocated memory to avoid temporarily
     # duplicating variable allocations. torch and tensorflow have stateful
     # variable types and do not need this fix.
@@ -163,6 +166,7 @@ def jax_memory_cleanup(layer):
 
 
 def set_dtype_in_config(config, dtype=None):
+    """Set the `dtype` in a serialized Keras config."""
     if dtype is None:
         return config
 
@@ -185,6 +189,7 @@ def set_dtype_in_config(config, dtype=None):
 
 
 def check_file_exists(preset, path):
+    """Check if a file exists in a preset."""
     try:
         get_file(preset, path)
     except FileNotFoundError:
@@ -201,11 +206,15 @@ def keras_to_usbmd_registry(keras_name, usbmd_registry):
 
 
 class PresetLoader:
+    """Base class for loading a model from a preset."""
+
     def __init__(self, preset, config):
+        """Initialize a preset loader."""
         self.config = config
         self.preset = preset
 
     def get_model_kwargs(self, **kwargs):
+        """Extract model kwargs from the preset."""
         model_kwargs = {}
 
         # Forward `dtype` to model
@@ -228,10 +237,16 @@ class PresetLoader:
 
 
 class KerasPresetLoader(PresetLoader):
+    """Loader for Keras serialized presets."""
+
     def check_model_class(self):
+        """Check the model class is correct for the preset."""
         return check_config_class(self.config)
 
-    def load_model(self, cls, load_weights, **kwargs):
+    def load_model(
+        self, cls, load_weights, **kwargs
+    ):  # pylint: disable=unused-argument
+        """Load a model from a serialized Keras config."""
         model = load_serialized_object(self.config, **kwargs)
         if load_weights:
             jax_memory_cleanup(model)
@@ -243,13 +258,16 @@ class KerasPresetLoader(PresetLoader):
         return model
 
     def load_image_converter(self, cls, **kwargs):
+        """Load an image converter from the preset."""
         converter_config = load_json(self.preset, IMAGE_CONVERTER_CONFIG_FILE)
         return load_serialized_object(converter_config, **kwargs)
 
     def get_file(self, path):
+        """Get a file from the preset."""
         return get_file(self.preset, path)
 
     def load_preprocessor(self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs):
+        """Load a preprocessor from the preset."""
         # If there is no `preprocessing.json` or it's for the wrong class,
         # delegate to the super class loader.
         if not check_file_exists(self.preset, config_file):
@@ -265,20 +283,26 @@ class KerasPresetLoader(PresetLoader):
 
 
 class KerasPresetSaver:
+    """Saver for Keras serialized presets."""
+
     def __init__(self, preset_dir):
+        """Initialize a preset saver."""
         os.makedirs(preset_dir, exist_ok=True)
         self.preset_dir = preset_dir
 
     def save_model(self, model):
+        """Save a model to a preset."""
         self._save_serialized_object(model, config_file=CONFIG_FILE)
         model_weight_path = os.path.join(self.preset_dir, MODEL_WEIGHTS_FILE)
         model.save_weights(model_weight_path)
         self._save_metadata(model)
 
     def save_image_converter(self, converter):
+        """Save an image converter to a preset."""
         self._save_serialized_object(converter, IMAGE_CONVERTER_CONFIG_FILE)
 
     def save_preprocessor(self, preprocessor):
+        """Save a preprocessor to a preset."""
         config_file = PREPROCESSOR_CONFIG_FILE
         if hasattr(preprocessor, "config_file"):
             config_file = preprocessor.config_file
@@ -319,12 +343,14 @@ class KerasPresetSaver:
 
 
 def get_preset_saver(preset):
+    """Get a preset saver."""
     # We only support one form of saving; Keras serialized
     # configs and saved weights.
     return KerasPresetSaver(preset)
 
 
 def get_preset_loader(preset):
+    """Get a preset loader."""
     if not check_file_exists(preset, CONFIG_FILE):
         raise ValueError(
             f"Preset {preset} has no {CONFIG_FILE}. Make sure the URL or "
