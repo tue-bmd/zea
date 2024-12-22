@@ -57,7 +57,7 @@ class EchoNetDynamic(BaseModel):
         ]
         self.network = None
 
-    def call(self, inputs):
+    def call(self, inputs):  # pylint: disable=arguments-differ
         """Segment the input image."""
         if self.network is None:
             raise ValueError(
@@ -86,7 +86,7 @@ class EchoNetDynamic(BaseModel):
 
         return output
 
-    def custom_load_weights(self, preset, **kwargs):
+    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
         """TFSM layer does not support loading weights."""
         loader = get_preset_loader(preset)
         for file in self.download_files:

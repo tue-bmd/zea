@@ -26,17 +26,17 @@ class BaseModel(keras.models.Model):
     A `BaseModel` is the basic model.
     """
 
-    def __init__(self, *args, dtype=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls, config):  # pylint: disable=arguments-differ
         # The default `from_config()` for functional models will return a
         # vanilla `keras.Model`. We override it to get a subclass instance back.
         return cls(**config)
 
     @classproperty
-    def presets(cls):
+    def presets(cls):  # pylint: disable=no-self-argument
         """List built-in presets for a `BaseModel` subclass."""
         return builtin_presets(cls)
 

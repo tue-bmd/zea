@@ -26,12 +26,11 @@ from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
-    data_root = data_paths["data_root"]
     init_device("tensorflow")
 
     n_imgs = 16
     val_dataset = h5_dataset_from_directory(
-        data_root / "USBMD_datasets/CAMUS/val",
+        data_paths.data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,
         shuffle=True,
