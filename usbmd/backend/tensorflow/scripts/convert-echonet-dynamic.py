@@ -32,16 +32,6 @@ import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
-SEGMENTATION_WEIGHTS_URL = (
-    "https://github.com/douyang/EchoNetDynamic/releases"
-    "/download/v1.0.0/deeplabv3_resnet50_random.pt"
-)
-EJECTION_FRACTION_WEIGHTS_URL = (
-    "https://github.com/douyang/EchoNetDynamic/releases"
-    "/download/v1.0.0/r2plus1d_18_32_2_pretrained.pt"
-)
-
-
 import time
 from pathlib import Path
 
@@ -62,6 +52,7 @@ EJECTION_FRACTION_WEIGHTS_URL = (
     "https://github.com/douyang/EchoNetDynamic/releases"
     "/download/v1.0.0/r2plus1d_18_32_2_pretrained.pt"
 )
+# NOTE: can also be downloaded from /mnt/z/Ultrasound-BMd/pretrained/echonet-dynamic/original
 
 
 def download_weights(weights_folder):
