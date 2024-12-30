@@ -26,7 +26,37 @@ class MaskActionModel:
         return observation * action
 
 
-class GreedyEntropy(MaskActionModel):
+class LinesActionModel(MaskActionModel):
+    """Base class for action selection methods that select lines."""
+
+    def __init__(
+        self, n_actions: int, n_possible_actions: int, img_width: int, img_height: int
+    ):
+        """
+        Args:
+            n_actions (int): The number of actions the agent can take.
+            n_possible_actions (int): The number of possible actions.
+            img_width (int): The width of the input image.
+            img_height (int): The height of the input image.
+
+        Attributes:
+            stack_n_cols (int): The number of columns in the image that correspond
+                to a single action.
+        """
+        super().__init__()
+        self.n_actions = n_actions
+        self.n_possible_actions = n_possible_actions
+        self.img_width = img_width
+        self.img_height = img_height
+
+        stack_n_cols = self.img_width / self.n_possible_actions
+        assert (
+            stack_n_cols.is_integer()
+        ), "Image size must be divisible by n_possible_actions."
+        self.stack_n_cols = int(stack_n_cols)
+
+
+class GreedyEntropy(LinesActionModel):
     """
     Selects the max entropy line and reweights the entropy values around it,
     approximating the decrease in entropy that would occur from observing that line.
@@ -53,11 +83,15 @@ class GreedyEntropy(MaskActionModel):
             std_dev (float, optional): The standard deviation of the RBF. Defaults to 1.
             num_stds_to_span (float, optional): The number of standard deviations to span.
                 Defaults to 4.
+            num_samples (int, optional): The number of points to sample symmetrically around
+                the mean. Defaults to 5.
         """
+        super().__init__(n_actions, n_possible_actions, img_width, img_height)
+
         # see here what I mean by upside_down_rbf:
         # https://colab.research.google.com/drive/1CQp_Z6nADzOFsybdiH5Cag0vtVZjjioU?usp=sharing
         upside_down_rbf = lambda x: 1 - ops.exp(-0.5 * ((x - mean) / std_dev) ** 2)
-        # Sample 21 points symmetrically around the mean.
+        # Sample `num_samples` points symmetrically around the mean.
         # This can be tuned to determine how the entropy for neighbouring lines is updated
         # TODO: learn this function from training data
         points_to_evaluate = ops.linspace(
@@ -67,16 +101,6 @@ class GreedyEntropy(MaskActionModel):
         )
         self.points_on_upside_down_rbf = upside_down_rbf(points_to_evaluate)
         self.entropy_sigma = 1
-        self.n_actions = n_actions
-        self.n_possible_actions = n_possible_actions
-        self.img_width = img_width
-        self.img_height = img_height
-
-        stack_n_cols = self.img_width / self.n_possible_actions
-        assert (
-            stack_n_cols.is_integer()
-        ), "Image size must be divisible by n_possible_actions."
-        self.stack_n_cols = int(stack_n_cols)
 
     def compute_entropy_per_line(self, particles):
         """
@@ -188,45 +212,35 @@ class GreedyEntropy(MaskActionModel):
         return ops.vectorized_map(selected_lines_to_line_mask, all_selected_lines)
 
 
-class CovarianceSamplingLines(MaskActionModel):
+class CovarianceSamplingLines(LinesActionModel):
     """
     This class models the line-to-line correlation to select the mask with the highest entropy.
     """
 
     def __init__(
         self,
-        img_width: int,
-        img_height: int,
         n_actions: int,
         n_possible_actions: int,
+        img_width: int,
+        img_height: int,
         seed: int = 42,
         n_masks: int = 200,
     ):
         """
         Args:
-            img_width (int): The width of the input image
-            img_height (int): The height of the input image
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
+            img_width (int): The width of the input image.
+            img_height (int): The height of the input image.
             seed (int, optional): The seed for random number generation. Defaults to 42.
             n_masks (int, optional): The number of masks. Defaults to 200.
 
         Raises:
             AssertionError: If image width is not divisible by n_possible_actions.
         """
-        self.img_width = img_width
-        self.img_height = img_height
-        self.n_actions = n_actions
-        self.n_possible_actions = n_possible_actions
-
+        super().__init__(n_actions, n_possible_actions, img_width, img_height)
         self.seed = keras.random.SeedGenerator(seed)
         self.n_masks = n_masks
-
-        stack_n_cols = self.img_width / self.n_possible_actions
-        assert (
-            stack_n_cols.is_integer()
-        ), "Image size must be divisible by n_possible_actions."
-        self.stack_n_cols = int(stack_n_cols)
 
     def random_uniform_lines(self, batch_size):
         """Wrapper around `random_uniform_lines` function to use attributes from class."""
