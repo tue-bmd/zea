@@ -60,6 +60,8 @@ class GreedyEntropy(LinesActionModel):
     """
     Selects the max entropy line and reweights the entropy values around it,
     approximating the decrease in entropy that would occur from observing that line.
+
+    The neighbouring values are decreased by a Gaussian function centered at the selected line.
     """
 
     def __init__(
@@ -70,8 +72,7 @@ class GreedyEntropy(LinesActionModel):
         img_height: int,
         mean: float = 0,
         std_dev: float = 1,
-        num_stds_to_span: float = 2,
-        num_samples: int = 5,
+        num_lines_to_update: int = 5,
     ):
         """
         Args:
@@ -81,39 +82,46 @@ class GreedyEntropy(LinesActionModel):
             img_height (int): The height of the input image.
             mean (float, optional): The mean of the RBF. Defaults to 0.
             std_dev (float, optional): The standard deviation of the RBF. Defaults to 1.
-            num_stds_to_span (float, optional): The number of standard deviations to span.
-                Defaults to 4.
-            num_samples (int, optional): The number of points to sample symmetrically around
-                the mean. Defaults to 5.
+            num_lines_to_update (int, optional): The number of lines around the selected line
+                to update. Must be odd.
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
 
         # Number of samples must be odd so that the entropy
         # of the selected line is set to 0 once it's been selected.
-        assert num_samples % 2 == 1, "num_samples must be odd."
+        assert num_lines_to_update % 2 == 1, "num_samples must be odd."
+        self.num_lines_to_update = num_lines_to_update
 
-        # see here what I mean by upside_down_rbf:
+        # see here what I mean by upside_down_gaussian:
         # https://colab.research.google.com/drive/1CQp_Z6nADzOFsybdiH5Cag0vtVZjjioU?usp=sharing
-        upside_down_rbf = lambda x: 1 - ops.exp(-0.5 * ((x - mean) / std_dev) ** 2)
-        # Sample `num_samples` points symmetrically around the mean.
+        upside_down_gaussian = lambda x: 1 - ops.exp(-0.5 * ((x - mean) / std_dev) ** 2)
+        # Sample `num_lines_to_update` points symmetrically around the mean.
         # This can be tuned to determine how the entropy for neighbouring lines is updated
         # TODO: learn this function from training data
         points_to_evaluate = ops.linspace(
-            mean - num_stds_to_span * std_dev,
-            mean + num_stds_to_span * std_dev,
-            num_samples,
+            mean - 2 * std_dev,
+            mean + 2 * std_dev,
+            self.num_lines_to_update,
         )
-        self.points_on_upside_down_rbf = upside_down_rbf(points_to_evaluate)
+        self.upside_down_gaussian = upside_down_gaussian(points_to_evaluate)
         self.entropy_sigma = 1
 
-    def compute_entropy_per_line(self, particles):
+    def compute_gmm_entropy_per_line(self, particles):
         """
+        This function computes the entropy for each line using a Gaussian Mixture Model
+        approximation of the posterior distribution.
+        For more details see Section 4 here: https://arxiv.org/abs/2406.14388
+
         Args:
             particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
 
         Returns:
             Tensor: batch of entropies per line, of shape (batch, n_possible_actions)
         """
+        assert (
+            particles.shape[0] > 1
+        ), "The entropy cannot be approximated using a single sample."
+
         # TODO: I think we only need to compute the lower triangular
         # of this matrix, since it's symmetric
         squared_l2_error_matrices = (
@@ -153,7 +161,7 @@ class GreedyEntropy(LinesActionModel):
         Returns:
             Tensor: Batch of masks of shape (batch_size, height, width)
         """
-        entropy_per_line = self.compute_entropy_per_line(particles)
+        entropy_per_line = self.compute_gmm_entropy_per_line(particles)
 
         def select_line_and_reweight_entropy(entropy_per_line):
             """
@@ -167,34 +175,36 @@ class GreedyEntropy(LinesActionModel):
             Returns:
                 Tuple: The selected line index and the updated entropies per line
             """
-            rbf_size = self.points_on_upside_down_rbf.shape[0]
 
             # Find the line with maximum entropy
             max_entropy_line = ops.argmax(entropy_per_line)
 
-            # Compute re-weighting indices (clipped to valid range)
-            start_index = ops.clip(
-                max_entropy_line - rbf_size // 2, 0, self.n_possible_actions - rbf_size
-            )
+            ## The rest of this function updates the entropy values around max_entropy_line
+            ## by multiplying them with an upside-down Gaussian function centered at max_entropy_line,
+            ## setting the entropy of the selected line to 0, and decreasing the entropies of
+            ## neighbouring lines.
 
             # Pad the entropy per line to allow for re-weighting with fixed
             # size RBF, which is necessary for tracing.
             padded_entropy_per_line = ops.pad(
-                entropy_per_line, (rbf_size // 2, rbf_size // 2)
+                entropy_per_line,
+                (self.num_lines_to_update // 2, self.num_lines_to_update // 2),
             )
-            start_index_padded = start_index + rbf_size // 2
+            # because the entropy per line has now been padded, the start index
+            # of the set of lines to update is simply the index of the max_entropy_line
+            start_index = max_entropy_line
 
             # Create the re-weighting vector
             reweighting = ops.ones_like(padded_entropy_per_line)
             reweighting = ops.slice_update(
-                reweighting, (start_index_padded,), self.points_on_upside_down_rbf
+                reweighting, (start_index,), self.upside_down_gaussian
             )
 
             # Apply re-weighting to entropy values
             updated_entropy_per_line_padded = padded_entropy_per_line * reweighting
             updated_entropy_per_line = ops.slice(
                 updated_entropy_per_line_padded,
-                (rbf_size // 2,),
+                (self.num_lines_to_update // 2,),
                 (self.n_possible_actions,),
             )
             return max_entropy_line, updated_entropy_per_line
