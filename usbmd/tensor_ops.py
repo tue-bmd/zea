@@ -162,17 +162,19 @@ def boolean_mask(tensor, mask, size=None):
     Args:
         tensor (Tensor): The input tensor.
         mask (Tensor): The boolean mask to apply.
+        size (int, optional): The size of the output tensor. Only used for Jax backend if you
+            want to trace the function. Defaults to None.
 
     Returns:
         Tensor: The masked tensor.
     """
-    if os.environ.get("KERAS_BACKEND") == "jax":
-        assert size is not None, "Size must be provided for Jax backend"
+    backend = os.environ.get("KERAS_BACKEND")
+    if backend == "jax" and size is not None:
         import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
 
         indices = jnp.where(mask, size=size)  # Fixed size allows Jax tracing
         return tensor[indices]
-    elif os.environ.get("KERAS_BACKEND") == "tensorflow":
+    elif backend == "tensorflow":
         import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
         return tf.boolean_mask(tensor, mask)
