@@ -24,8 +24,8 @@ def random_uniform_lines(
         seed (int | SeedGenerator, optional): Seed for random number generation. Defaults to None.
 
     Returns:
-        Tensor: Line vectors of shape (n_masks, n_possible_actions).
-                Need to be converted to image size.
+        Tensor: One-hot-encoded line vectors of shape (n_masks, n_possible_actions).
+                Needs to be converted to image size.
     """
     masks = keras.random.uniform(
         [n_masks, n_possible_actions], seed=seed, dtype="float32"
@@ -49,7 +49,8 @@ def equispaced_lines(
         previous_actions (Tensor, optional): Previous actions. Defaults to None.
 
     Returns:
-        Tensor: Line mask of shape (n_possible_actions).
+        Tensor: One-hot-encoded line vector of shape (n_possible_actions).
+                Needs to be converted to image size.
     """
     assert (
         n_possible_actions % n_actions == 0
@@ -68,6 +69,8 @@ def equispaced_lines(
 
 def lines_to_im_size(lines, img_size: tuple):
     """
+    Convert one-hot-encoded line vectors to image size.
+
     Args:
         lines (Tensor): shape is (n_masks, n_possible_actions)
         img_size (tuple): (height, width)
