@@ -1,3 +1,5 @@
+""" Tests for usbmd.agent.gumbel """
+
 import numpy as np
 import pytest
 from keras import ops
@@ -29,6 +31,7 @@ from usbmd.agent.gumbel import hard_straight_through
     ],
 )
 def test_hard_straight_through(khot_orig, k, n_value_dims, expected_output):
+    """Test the hard_straight_through function"""
     output = hard_straight_through(khot_orig, k, n_value_dims)
     assert np.allclose(
         output, expected_output
