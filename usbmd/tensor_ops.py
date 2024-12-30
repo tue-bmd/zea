@@ -167,16 +167,17 @@ def boolean_mask(tensor, mask, size=None):
         Tensor: The masked tensor.
     """
     if os.environ.get("KERAS_BACKEND") == "jax":
-        assert size is not None
-        import jax.numpy as jnp
+        assert size is not None, "Size must be provided for Jax backend"
+        import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+
         indices = jnp.where(mask, size=size)  # Fixed size allows Jax tracing
         return tensor[indices]
-    if os.environ.get("KERAS_BACKEND") != "tensorflow":
-        return tensor[mask]
-    else:
+    elif os.environ.get("KERAS_BACKEND") == "tensorflow":
         import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
         return tf.boolean_mask(tensor, mask)
+    else:
+        return tensor[mask]
 
 
 def flatten(tensor, start_dim=0, end_dim=-1):
