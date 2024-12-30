@@ -24,7 +24,7 @@ def random_uniform_lines(
         seed (int | SeedGenerator, optional): Seed for random number generation. Defaults to None.
 
     Returns:
-        Tensor: One-hot-encoded line vectors of shape (n_masks, n_possible_actions).
+        Tensor: k-hot-encoded line vectors of shape (n_masks, n_possible_actions).
                 Needs to be converted to image size.
     """
     masks = keras.random.uniform(
@@ -40,7 +40,7 @@ def equispaced_lines(
     previous_mask=None,
 ):
     """
-    Generates equispaced one-hot line mask.
+    Generates equispaced k-hot line mask.
     If a previous mask is provided, will shift the mask by one.
 
     Args:
@@ -49,7 +49,7 @@ def equispaced_lines(
         previous_actions (Tensor, optional): Previous actions. Defaults to None.
 
     Returns:
-        Tensor: One-hot-encoded line vector of shape (n_possible_actions).
+        Tensor: k-hot-encoded line vector of shape (n_possible_actions).
                 Needs to be converted to image size.
     """
     assert (
@@ -69,7 +69,7 @@ def equispaced_lines(
 
 def lines_to_im_size(lines, img_size: tuple):
     """
-    Convert one-hot-encoded line vectors to image size.
+    Convert k-hot-encoded line vectors to image size.
 
     Args:
         lines (Tensor): shape is (n_masks, n_possible_actions)
