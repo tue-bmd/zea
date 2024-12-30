@@ -88,6 +88,10 @@ class GreedyEntropy(LinesActionModel):
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
 
+        # Number of samples must be odd so that the entropy
+        # of the selected line is set to 0 once it's been selected.
+        assert num_samples % 2 == 1, "num_samples must be odd."
+
         # see here what I mean by upside_down_rbf:
         # https://colab.research.google.com/drive/1CQp_Z6nADzOFsybdiH5Cag0vtVZjjioU?usp=sharing
         upside_down_rbf = lambda x: 1 - ops.exp(-0.5 * ((x - mean) / std_dev) ** 2)
@@ -178,11 +182,12 @@ class GreedyEntropy(LinesActionModel):
             padded_entropy_per_line = ops.pad(
                 entropy_per_line, (rbf_size // 2, rbf_size // 2)
             )
+            start_index_padded = start_index + rbf_size // 2
 
             # Create the re-weighting vector
             reweighting = ops.ones_like(padded_entropy_per_line)
             reweighting = ops.slice_update(
-                reweighting, (start_index,), self.points_on_upside_down_rbf
+                reweighting, (start_index_padded,), self.points_on_upside_down_rbf
             )
 
             # Apply re-weighting to entropy values
