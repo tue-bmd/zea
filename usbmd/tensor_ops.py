@@ -244,6 +244,21 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     return cov_matrices
 
 
+def patched_map(f, xs, patches):
+    """
+    Wrapper around `batched_map` which allows you to specify the number of patches rather than
+    the batch size.
+    """
+    assert patches > 0, "Number of patches must be greater than 0."
+
+    if patches == 1:
+        return f(xs)
+    else:
+        length = ops.shape(xs)[0]
+        batch_size = (length // patches) + 1
+        return batched_map(f, xs, batch_size)
+
+
 def batched_map(f, xs, batch_size=None):
     """
     Map a function over leading array axes.

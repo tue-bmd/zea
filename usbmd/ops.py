@@ -135,7 +135,7 @@ from usbmd.config import Config
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.tensor_ops import batched_map
+from usbmd.tensor_ops import patched_map
 from usbmd.utils import lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
 
@@ -700,7 +700,7 @@ class DelayAndSum(Operation):
         flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
         flat_data = ops.moveaxis(flat_data, 1, 0)
 
-        flat_data = batched_map(self.process_patch, flat_data, batch_size=self.patches)
+        flat_data = patched_map(self.process_patch, flat_data, self.patches)
 
         # Reshape data back to original shape
         data = ops.reshape(flat_data, (n_z, n_x, n_ch))
