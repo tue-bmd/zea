@@ -245,7 +245,7 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     return cov_matrices
 
 
-def patched_map(f, xs, patches):
+def patched_map(f, xs, patches: int):
     """
     Wrapper around `batched_map` which allows you to specify the number of patches rather than
     the batch size.
