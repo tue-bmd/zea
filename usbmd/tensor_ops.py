@@ -3,6 +3,7 @@
 import os
 
 import keras
+import numpy as np
 from keras import ops
 
 
@@ -255,7 +256,7 @@ def patched_map(f, xs, patches):
         return f(xs)
     else:
         length = ops.shape(xs)[0]
-        batch_size = (length // patches) + 1
+        batch_size = np.ceil(length / patches).astype(int)
         return batched_map(f, xs, batch_size)
 
 
