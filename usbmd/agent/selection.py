@@ -27,6 +27,11 @@ class MaskActionModel:
 
 
 class GreedyEntropy(MaskActionModel):
+    """
+    Selects the max entropy line and reweights the entropy values around it,
+    approximating the decrease in entropy that would occur from observing that line.
+    """
+
     def __init__(
         self,
         n_actions: int,
@@ -46,7 +51,8 @@ class GreedyEntropy(MaskActionModel):
             img_height (int): The height of the input image.
             mean (float, optional): The mean of the RBF. Defaults to 0.
             std_dev (float, optional): The standard deviation of the RBF. Defaults to 1.
-            num_stds_to_span (float, optional): The number of standard deviations to span. Defaults to 4.
+            num_stds_to_span (float, optional): The number of standard deviations to span.
+                Defaults to 4.
         """
         # see here what I mean by upside_down_rbf:
         # https://colab.research.google.com/drive/1CQp_Z6nADzOFsybdiH5Cag0vtVZjjioU?usp=sharing
@@ -91,9 +97,7 @@ class GreedyEntropy(MaskActionModel):
         # Vertically stack all columns corresponding with the same line
         # This way we can just sum across the height axis and get the entropy
         # for each pixel in a given line
-        n_particles, n_particles, batch_size, height, width = (
-            gaussian_error_per_pixel_i_j.shape
-        )
+        _, n_particles, batch_size, height, _ = gaussian_error_per_pixel_i_j.shape
         gaussian_error_per_pixel_stacked = ops.reshape(
             gaussian_error_per_pixel_i_j,
             [
@@ -129,7 +133,8 @@ class GreedyEntropy(MaskActionModel):
             approximating the decrease in entropy that would occur from observing that line.
 
             Args:
-                entropy_per_line (Tensor): Entropy per line of shape (batch_size, n_possible_actions)
+                entropy_per_line (Tensor): Entropy per line of shape
+                    (batch_size, n_possible_actions)
 
             Returns:
                 Tuple: The selected line index and the updated entropies per line
