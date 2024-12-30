@@ -138,10 +138,8 @@ class TinyEncoder(BaseModel):
         for file in self.download_files:
             filename = loader.get_file(file)
 
-        base_path = Path(filename)
-        base_path = str(base_path).split("encoder", maxsplit=1)[0]
-
-        self.network = _load_layer(base_path, "encoder")
+        base_path = Path(filename).parent
+        self.network = _load_layer(base_path)
 
 
 @model_registry(name="taesdxl_decoder")
@@ -187,20 +185,12 @@ class TinyDecoder(BaseModel):
         for file in self.download_files:
             filename = loader.get_file(file)
 
-        base_path = Path(filename)
-        base_path = str(base_path).split("decoder", maxsplit=1)[0]
-
-        self.network = _load_layer(base_path, "decoder")
+        base_path = Path(filename).parent
+        self.network = _load_layer(base_path)
 
 
-def _load_layer(path, layer_name):
-    assert layer_name in ["encoder", "decoder"]
-    path = Path(path)
-    layer = keras.layers.TFSMLayer(
-        path / layer_name,
-        call_endpoint="serving_default",
-    )
-    return layer
+def _load_layer(path: Path | str):
+    return keras.layers.TFSMLayer(path, call_endpoint="serving_default")
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)
