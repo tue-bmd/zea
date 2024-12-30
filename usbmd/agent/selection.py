@@ -194,7 +194,6 @@ class CovarianceSamplingLines(MaskActionModel):
         img_height: int,
         n_actions: int,
         n_possible_actions: int,
-        decoder: keras.layers.Layer = None,
         seed: int = 42,
         n_masks: int = 200,
     ):
@@ -204,8 +203,6 @@ class CovarianceSamplingLines(MaskActionModel):
             img_height (int): The height of the input image
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
-            decoder (keras.layers.Layer, optional): The decoder layer that brings the particles to
-                the image space. Defaults to None.
             seed (int, optional): The seed for random number generation. Defaults to 42.
             n_masks (int, optional): The number of masks. Defaults to 200.
 
@@ -216,10 +213,6 @@ class CovarianceSamplingLines(MaskActionModel):
         self.img_height = img_height
         self.n_actions = n_actions
         self.n_possible_actions = n_possible_actions
-        if decoder is None:
-            self.decoder = keras.layers.Identity()
-        else:
-            self.decoder = decoder
 
         self.seed = keras.random.SeedGenerator(seed)
         self.n_masks = n_masks
@@ -243,18 +236,16 @@ class CovarianceSamplingLines(MaskActionModel):
     def sample(self, particles):
         """
         Args:
-            particles (Tensor): Particles of shape (n_particles, batch_size, *features)
+            particles (Tensor): Particles of shape (n_particles, batch_size, h, w)
 
         Returns:
             Tensor: The mask of shape (batch_size, img_size, img_size)
         """
-        particles_img_space = self.decoder(particles)
-
         # [n_particles, batch_size, rows, cols]
-        n_particles, batch_size, rows, _ = ops.shape(particles_img_space)
+        n_particles, batch_size, rows, _ = ops.shape(particles)
 
         # [batch_size, rows, cols, n_particles]
-        particles_img_space = ops.transpose(particles_img_space, (1, 2, 3, 0))
+        particles = ops.transpose(particles, (1, 2, 3, 0))
 
         # [batch_size, rows * stack_n_cols, n_possible_actions, n_particles]
         shape = [
@@ -263,10 +254,10 @@ class CovarianceSamplingLines(MaskActionModel):
             self.n_possible_actions,
             n_particles,
         ]
-        particles_img_space = ops.reshape(particles_img_space, shape)
+        particles = ops.reshape(particles, shape)
 
         # [batch_size, rows, n_possible_actions, n_possible_actions]
-        cov_matrix = tensor_ops.batch_cov(particles_img_space)
+        cov_matrix = tensor_ops.batch_cov(particles)
 
         # Sum over the row dimension [batch_size, n_possible_actions, n_possible_actions]
         cov_matrix = ops.sum(cov_matrix, axis=1)
