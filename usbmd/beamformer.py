@@ -3,9 +3,9 @@
 import numpy as np
 from keras import ops
 
+from usbmd.tensor_ops import patched_map
 from usbmd.utils.cache import cache_output
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
-from usbmd.tensor_ops import batched_map
 
 
 def tof_correction(data, grid, *args, patches=1, **kwargs):
@@ -24,7 +24,8 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
         )  # move n_pix to the first dimension
         return tof_corrected
 
-    tof_corrected = batched_map(tof_correction_patch, flatgrid, batch_size=patches)
+    tof_corrected = patched_map(tof_correction_patch, flatgrid, patches)
+
     tof_corrected = ops.moveaxis(
         tof_corrected, 1, 0
     )  # move n_tx to the first dimension
