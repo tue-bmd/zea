@@ -42,7 +42,7 @@ if __name__ == "__main__":
     )
 
     presets = list(EchoNetDynamic.presets.keys())
-    log.info(f"Available built-in usbmd presets for TAESD: {presets}")
+    log.info(f"Available built-in usbmd presets for EchoNetDynamic: {presets}")
 
     model = EchoNetDynamic.from_preset("echonet-dynamic")
 
