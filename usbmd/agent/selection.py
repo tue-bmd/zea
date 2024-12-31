@@ -180,9 +180,9 @@ class GreedyEntropy(LinesActionModel):
             max_entropy_line = ops.argmax(entropy_per_line)
 
             ## The rest of this function updates the entropy values around max_entropy_line
-            ## by multiplying them with an upside-down Gaussian function centered at max_entropy_line,
-            ## setting the entropy of the selected line to 0, and decreasing the entropies of
-            ## neighbouring lines.
+            ## by multiplying them with an upside-down Gaussian function centered at
+            ## max_entropy_line, setting the entropy of the selected line to 0, and decreasing
+            ## the entropies of neighbouring lines.
 
             # Pad the entropy per line to allow for re-weighting with fixed
             # size RBF, which is necessary for tracing.
