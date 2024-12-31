@@ -1,10 +1,11 @@
 """Test agent functions."""
 
-import pytest
 import numpy as np
+import pytest
 from keras import ops
+
+from usbmd.agent import selection
 from usbmd.agent.masks import equispaced_lines
-import usbmd.agent.selection as selection
 
 
 def test_equispaced_lines():
