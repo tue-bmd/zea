@@ -555,3 +555,12 @@ def plot_frustum_vertices(
     ax.zaxis.pane.fill = False
 
     return fig, ax
+
+
+def visualize_matrix(matrix, font_color="white", **kwargs):
+    fig, ax = plt.subplots()
+    cax = ax.imshow(matrix, **kwargs)
+    fig.colorbar(cax)
+    for (j, i), label in np.ndenumerate(matrix):
+        ax.text(i, j, f"{label:.2f}", ha="center", va="center", color=font_color)
+    return fig
