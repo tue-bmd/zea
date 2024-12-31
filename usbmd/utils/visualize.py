@@ -558,6 +558,9 @@ def plot_frustum_vertices(
 
 
 def visualize_matrix(matrix, font_color="white", **kwargs):
+    """
+    Visualize a matrix with the values in each cell.
+    """
     fig, ax = plt.subplots()
     cax = ax.imshow(matrix, **kwargs)
     fig.colorbar(cax)
