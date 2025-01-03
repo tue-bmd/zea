@@ -243,3 +243,41 @@ process.set_pipeline(operation_chain=operation_chain, with_batch_dim=True)
 
 images = process.run(data)
 ```
+
+## Models
+
+`usbmd` also contains a collection of models that can be used for various tasks. An example of how to use the `EchoNetDynamic` model is shown below. Simply use the `from_preset` method to load a model with a specific preset. All models can be found in the `usbmd.models` module.
+
+```python
+import os
+
+os.environ["KERAS_BACKEND"] = "tensorflow"
+
+from usbmd import init_device, log, set_data_paths
+from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
+from usbmd.models.echonet import EchoNetDynamic
+
+data_paths = set_data_paths()
+init_device("tensorflow")
+
+val_dataset = h5_dataset_from_directory(
+    data_paths.data_root / "USBMD_datasets/CAMUS/val",
+    key="data/image",
+    batch_size=16,
+    shuffle=True,
+    image_size=[256, 256],
+    resize_type="resize",
+    image_range=[-60, 0],
+    normalization_range=[-1, 1],
+    seed=42,
+)
+
+presets = list(EchoNetDynamic.presets.keys())
+log.info(f"Available built-in usbmd presets for EchoNet: {presets}")
+
+model = EchoNetDynamic.from_preset("echonet-dynamic")
+
+batch = next(iter(val_dataset))
+
+masks = model(batch)
+```

@@ -61,6 +61,7 @@ bm4d = "==4.2.3" # we don't depend on bm4d, but bm3d breaks if the latest bm4d i
 keras = "^3.6"
 huggingface_hub = "^0.26"
 wandb = "^0.18"
+wget = "^3.2"
 
 [tool.poetry.group.torch]
 optional = true

@@ -454,10 +454,7 @@ def matplotlib_figure_to_numpy(fig):
             warnings.simplefilter("ignore")
             canvas.draw()
 
-        if matplotlib.get_backend() == "Qt5Agg":
-            image = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
-        else:
-            image = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
+        image = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
 
         width, height = fig.canvas.get_width_height()
         image = image.reshape((height, width, 3))
