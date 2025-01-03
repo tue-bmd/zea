@@ -7,6 +7,13 @@ import keras
 import numpy as np
 from keras import ops
 
+if keras.backend.backend() != "jax":
+    # This allows tensorflow tracing
+    prod = ops.prod
+else:
+    # Jax does not allow shapes to be tensors
+    prod = np.prod
+
 
 class SubsetOperator:
     """
@@ -76,7 +83,7 @@ def hard_straight_through(khot_orig, k, n_value_dims=1):
     value_dims = original_shape[-n_value_dims:]
 
     # Flatten the input tensor along the value dimensions
-    khot = ops.reshape(khot_orig, (-1, np.prod(value_dims)))
+    khot = ops.reshape(khot_orig, (-1, prod(value_dims)))
 
     # Get the top-k indices
     indices = ops.top_k(khot, k)[1]
@@ -93,7 +100,7 @@ def hard_straight_through(khot_orig, k, n_value_dims=1):
     # Create the hard k-hot tensor
     khot_hard = ops.scatter(
         scatter_indices,
-        ops.ones(np.prod(ops.shape(indices)), "float32"),
+        ops.ones(prod(ops.shape(indices)), "float32"),
         ops.shape(khot),
     )
 
