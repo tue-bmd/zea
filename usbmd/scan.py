@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from usbmd.core import Object
-from usbmd.utils import deprecated, log
+from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 
@@ -483,12 +483,12 @@ class Scan(Object):
         angles usually used in 2D imaging."""
         return self._polar_angles[self.selected_transmits]
 
-    @deprecated("Scan.polar_angles")
-    @property
-    def angles(self):
-        """Identical to `Scan.polar_angles`. This attribute is added for backward
-        compatibility."""
-        return self.polar_angles
+    # @deprecated("Scan.polar_angles")
+    # @property
+    # def angles(self):
+    #     """Identical to `Scan.polar_angles`. This attribute is added for backward
+    #     compatibility."""
+    #     return self.polar_angles
 
     @property
     def azimuth_angles(self):
