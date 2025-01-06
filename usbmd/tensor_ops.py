@@ -3,6 +3,7 @@
 import os
 
 import keras
+import numpy as np
 from keras import ops
 
 
@@ -82,7 +83,12 @@ def extend_n_dims(arr, axis, n_dims):
 
 
 def func_with_one_batch_dim(
-    func, tensor, n_batch_dims: int = 2, func_axis: int | None = None, **kwargs
+    func,
+    tensor,
+    n_batch_dims: int,
+    batch_size: int | None = None,
+    func_axis: int | None = None,
+    **kwargs,
 ):
     """
     Applies a function to an input tensor with one or more batch dimensions. The function will
@@ -94,6 +100,9 @@ def func_with_one_batch_dim(
         tensor (Tensor): The input tensor.
         n_batch_dims (int): The number of batch dimensions in the input tensor.
             Expects the input to start with n_batch_dims batch dimensions. Defaults to 2.
+        batch_size (int, optional): Integer specifying the size of the batch for
+            each step to execute in parallel. Defaults to None, in which case the function
+            will run everything in parallel.
         func_axis (int, optional): If `func` returns mulitple outputs, this axis will be returned.
         **kwargs: Additional keyword arguments to pass to the function.
 
@@ -113,7 +122,10 @@ def func_with_one_batch_dim(
     reshaped_input = ops.reshape(tensor, [-1, *other_dims])
 
     # Apply the given function to the reshaped input tensor
-    reshaped_output = func(reshaped_input, **kwargs)
+    if batch_size is None:
+        reshaped_output = func(reshaped_input, **kwargs)
+    else:
+        reshaped_output = batched_map(func, reshaped_input, batch_size=batch_size)
 
     # If the function returns multiple outputs, select the one corresponding to `func_axis`
     if isinstance(reshaped_output, (tuple, list)):
@@ -241,6 +253,21 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     return cov_matrices
 
 
+def patched_map(f, xs, patches: int):
+    """
+    Wrapper around `batched_map` which allows you to specify the number of patches rather than
+    the batch size.
+    """
+    assert patches > 0, "Number of patches must be greater than 0."
+
+    if patches == 1:
+        return f(xs)
+    else:
+        length = ops.shape(xs)[0]
+        batch_size = np.ceil(length / patches).astype(int)
+        return batched_map(f, xs, batch_size)
+
+
 def batched_map(f, xs, batch_size=None):
     """
     Map a function over leading array axes.
@@ -253,15 +280,19 @@ def batched_map(f, xs, batch_size=None):
 
     Idea taken from: https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.map.html
     """
-    if batch_size == 1:
+    # If the batch size of the data is smaller than the specified batch size,
+    # run the function on the entire input
+    if ops.shape(xs)[0] < batch_size:
         return f(xs)
 
+    # If the batch size is not specified, map over the leading axis
     if batch_size is None:
         out = ops.map(f, xs)
+    # If the batch size is specified, map over the leading axis in batches
     else:
         length = ops.shape(xs)[0]
         xs = pad_array_to_divisible(xs, batch_size, axis=0)
-        xs = ops.reshape(xs, (batch_size, -1) + ops.shape(xs)[1:])
+        xs = ops.reshape(xs, (-1, batch_size) + ops.shape(xs)[1:])
         out = ops.map(f, xs)
         out = ops.reshape(out, (-1,) + ops.shape(out)[2:])
         out = out[:length]  # remove padding
