@@ -125,9 +125,15 @@ def test_operation_cache_persistence():
     assert result2 == result1
     assert len(op._output_cache) == 1
 
+def test_string_representation():
+    """Print the string representation of the Pipeline"""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations)
+    print(str(pipeline))
+    assert str(pipeline) == 'MultiplyOperation -> AddOperation'
+
 
 # 2. Pipeline Class Tests
-
 
 def test_pipeline_initialization():
     """Tests initialization of a Pipeline."""
