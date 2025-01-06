@@ -14,7 +14,7 @@ from usbmd.probes import Probe
 from usbmd.scan import Scan
 from usbmd.utils import log
 
-print("WARNING: This module is work in progress and may not work as expected!")
+log.warning("WARNING: This module is work in progress and may not work as expected!")
 
 
 # TODO: Move this to Core?
