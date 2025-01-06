@@ -4,6 +4,7 @@ This document describes how to install the usbmd package and how to use it in a 
 Make sure you always use a virtual environment such as `miniconda` or `venv` to avoid conflicts with other packages!
 
 - [Install usbmd](#install-usbmd)
+  - [Backend installation](#backend-installation)
   - [Editable install](#editable-install)
   - [Install from github](#install-from-github)
     - [Using a Personal Access Token](#using-a-personal-access-token)
@@ -18,6 +19,15 @@ Make sure you always use a virtual environment such as `miniconda` or `venv` to 
     - [Development in the container using vscode](#development-in-the-container-using-vscode)
       - [Using git](#using-git)
       - [Installing more packages](#installing-more-packages)
+
+## Backend installation
+
+First, install one machine learning backend of choice. Note that usbmd can run with a numpy backend, but it is not recommended. Also, using the [Docker image](#docker) will automatically install all compatible backends, so in that case you can skip this step.
+
+- [Install JAX](https://jax.readthedocs.io/en/latest/installation.html)
+- [Install PyTorch](https://pytorch.org/get-started/locally/)
+- [Install TensorFlow](https://www.tensorflow.org/install)
+
 
 ## Editable install
 
@@ -75,6 +85,8 @@ If you get host key errors, you may need to update your known host for Github, s
 ## Docker
 
 ### Build
+
+We provide two Docker images in this repository. The first is a base image that includes only the necessary packages and dependencies for usbmd to run. However it comes without any machine learning backends. The second image includes the base image and also installs compatible versions of `torch`, `tensorflow` and `jax`.
 
 #### Base
 
