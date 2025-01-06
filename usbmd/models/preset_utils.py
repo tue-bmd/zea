@@ -82,8 +82,17 @@ def get_file(preset, path):
                 "Please install with `pip install huggingface_hub`."
             )
         hf_handle = preset.removeprefix(HF_SCHEME + "://")
+
+        def _download_from_hf(repo_id, filename):
+            return huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+
         try:
-            return huggingface_hub.hf_hub_download(repo_id=hf_handle, filename=path)
+            # Try without login first
+            return _download_from_hf(hf_handle, path)
+        except huggingface_hub.utils.RepositoryNotFoundError:
+            # Try to login and retry download
+            huggingface_hub.login(new_session=False)
+            return _download_from_hf(hf_handle, path)
         except HFValidationError as e:
             raise ValueError(
                 "Unexpected Hugging Face preset. Hugging Face model handles "
