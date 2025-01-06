@@ -84,8 +84,8 @@ class DocUpdater:
         if not os.path.exists(repo_dir):
             subprocess.run(["git", "clone", repo_url, repo_dir], check=True)
 
-        subprocess.run(["git", "-C", repo_dir, "checkout", "main"], check=True)
-        subprocess.run(["git", "-C", repo_dir, "pull", "origin", "main"], check=True)
+        subprocess.run(["git", "-C", repo_dir, "checkout", "update_pdoc"], check=True)
+        subprocess.run(["git", "-C", repo_dir, "pull", "origin", "update_pdoc"], check=True)
 
     def build_docker_image(self):
         """Build the Docker image from the Dockerfile in the repository."""
@@ -187,7 +187,7 @@ def login_required(f):
 
 
 @app.route("/update")
-@login_required
+#@login_required
 def update_docs():
     """Manually force an update of the repository."""
     try:
@@ -215,7 +215,7 @@ def authorize():
 
 
 @app.route("/<path:path>")
-@login_required
+#@login_required
 def serve_docs(path):
     """Serve the documentation."""
     try:
@@ -225,7 +225,7 @@ def serve_docs(path):
 
 
 @app.route("/")
-@login_required
+#@login_required
 def index():
     """Serve the index page."""
     try:
