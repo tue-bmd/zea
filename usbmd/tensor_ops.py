@@ -155,23 +155,31 @@ def matrix_power(matrix, power):
     return ops.matmul(matrix, matrix_power(matrix, power - 1))
 
 
-def boolean_mask(tensor, mask):
+def boolean_mask(tensor, mask, size=None):
     """
     Apply a boolean mask to a tensor.
 
     Args:
         tensor (Tensor): The input tensor.
         mask (Tensor): The boolean mask to apply.
+        size (int, optional): The size of the output tensor. Only used for Jax backend if you
+            want to trace the function. Defaults to None.
 
     Returns:
         Tensor: The masked tensor.
     """
-    if os.environ.get("KERAS_BACKEND") != "tensorflow":
-        return tensor[mask]
-    else:
+    backend = os.environ.get("KERAS_BACKEND")
+    if backend == "jax" and size is not None:
+        import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+
+        indices = jnp.where(mask, size=size)  # Fixed size allows Jax tracing
+        return tensor[indices]
+    elif backend == "tensorflow":
         import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
         return tf.boolean_mask(tensor, mask)
+    else:
+        return tensor[mask]
 
 
 def flatten(tensor, start_dim=0, end_dim=-1):

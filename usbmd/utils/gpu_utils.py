@@ -111,7 +111,7 @@ def select_gpus(
         available_gpu_ids (list): list of available GPU ids.
         memory_free (list): list of available memory for each gpu in MiB.
         device (str/int/list): GPU device(s) to select.
-            - If 'cpu', use CPU.
+            - If 'cpu', use CPU. This function will be a no-op.
             - If 'gpu', select GPU based on available memory.
                 Throw an error if no GPU is available.
             - If None, try to select GPU based on available memory.
@@ -249,6 +249,9 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
             empty list. If a CPU is selected, returns None.
     """
     if device.lower() == "cpu":
+        os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jax
+        if hide_others:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ""
         return None
 
     if verbose:
@@ -277,15 +280,15 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
 
 def selected_gpu_ids_to_device(selected_gpu_ids, key="cuda"):
     """Convert selected GPU ids to device string."""
-    if selected_gpu_ids is not None:
-        if len(selected_gpu_ids) > 1:
-            log.warning(
-                (
-                    "Specified multiple GPU's but this function will just return "
-                    f"one GPU: {selected_gpu_ids[0]}"
-                )
-            )
-
-        return f"{key}:{selected_gpu_ids[0]}"
-    else:
+    if selected_gpu_ids is None or len(selected_gpu_ids) == 0:
         return "cpu"
+
+    if len(selected_gpu_ids) > 1:
+        log.warning(
+            (
+                "Specified multiple GPU's but this function will just return "
+                f"one GPU: {selected_gpu_ids[0]}"
+            )
+        )
+
+    return f"{key}:{selected_gpu_ids[0]}"
