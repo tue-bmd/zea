@@ -79,7 +79,7 @@ The typical PR workflow to make changes to the code will look as follows:
    ```shell
       git checkout main
       git pull
-      ```
+   ```
 
 2. Create a new feature branch for your changes:
 
