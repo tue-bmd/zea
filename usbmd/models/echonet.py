@@ -1,4 +1,6 @@
 """Echonet-Dynamic segmentation model for cardiac ultrasound segmentation.
+Link below does not work it seems, this is slightly different but does have some info:
+https://github.com/bryanhe/dynamic
 
 - **Author(s)**     : Tristan Stevens, adapted from https://echonet.github.io/dynamic/
 - **Date**          : 20/11/2023

@@ -92,7 +92,12 @@ users_paths = "users.yaml"
 config = setup(config_path, users_paths, create_user=True)
 
 # we now manually point to our data
-data_path = "Z:/Ultrasound-BMd/data/USBMD_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
+data_root = config.data.user.data_root
+user = config.data.user.username
+
+print(f"\n🔔 Hi {user}! You are using data from {data_root}\n")
+
+data_path = data_root / "USBMD_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
 
 # only 1 frame in PICMUS to be selected
 selected_frames = [0]
