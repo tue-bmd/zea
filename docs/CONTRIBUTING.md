@@ -74,10 +74,10 @@ repository will contain three types of branches:
 
 The typical PR workflow to make changes to the code will look as follows:
 
-1. Switch to the develop branch and pull the latest changes:
+1. Switch to the main branch and pull the latest changes:
 
    ```shell
-      git checkout develop
+      git checkout main
       git pull
       ```
 
