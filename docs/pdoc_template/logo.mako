@@ -1,6 +1,6 @@
 <header>
     <a style="font-size: 3em; font-weight:bold; color: #555; padding-bottom:0.5em; border-bottom: 2px solid silver;" rel="home" title="pdoc Home" href="index.html">
-    <img style="max-width: 20%; max-height: 5em; margin: auto; margin-bottom: 0.3em;" src="usbmd_logo_v2.png" alt=""> usbmd
+    <img style="max-width: 20%; max-height: 5em; margin: auto; margin-bottom: 0.3em;" src="usbmd_logo_v3.png" alt=""> usbmd
     </a>
 </header>
 <!-- .homelink {
