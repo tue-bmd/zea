@@ -16,28 +16,27 @@ from usbmd.utils.gpu_utils import get_device as _get_device
 from usbmd.utils.gpu_utils import selected_gpu_ids_to_device
 
 # Get a list of all tf devices
-GPUS = tf.config.experimental.list_physical_devices("GPU")
+GPUS = tf.config.list_physical_devices("GPU")
 
 
-def set_memory_growth(gpu_ids=None):
-    """Set memory growth for all visible GPUs.
+def set_visible_devices(gpu_ids):
+    """Set visible devices for Tensorflow.
     Args:
-        gpu_ids: list of GPU ids to set memory growth for.
-            If None, set memory growth for all visible GPUs.
+        gpu_ids: list of GPU ids to set visible.
     """
 
-    # Select GPUs
-    if gpu_ids is None:
-        gpu_ids = list(range(len(GPUS)))
-
-    tf.config.experimental.set_visible_devices(
+    tf.config.set_visible_devices(
         [GPUS[gpu] for gpu in gpu_ids],
         "GPU",
     )
 
+
+def set_memory_growth():
+    """Attempts to allocate only as much GPU memory as needed for the runtime allocations"""
+
     try:
         # Currently, memory growth needs to be the same across GPUs
-        for gpu in tf.config.experimental.get_visible_devices("GPU"):
+        for gpu in tf.config.get_visible_devices("GPU"):
             tf.config.experimental.set_memory_growth(gpu, True)
     except RuntimeError as e:
         log.warning(
@@ -46,7 +45,7 @@ def set_memory_growth(gpu_ids=None):
         print(e)
 
 
-def get_device(device="auto:1", verbose=True, hide_others=True):
+def get_device(device="auto:1", verbose=True, hide_others=True, allow_preallocate=True):
     """Sets the GPU usage for Tensorflow by searching for available GPUs and
     selecting one or more GPUs based on the device argument.
     If CUDA is unavailable, fallback to CPU.
@@ -83,7 +82,14 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
 
     selected_gpu_ids = _get_device(device, verbose=verbose, hide_others=hide_others)
 
-    set_memory_growth(gpu_ids=selected_gpu_ids)
+    # In case CPU is selected
+    if selected_gpu_ids is None:
+        selected_gpu_ids = []
+
+    set_visible_devices(selected_gpu_ids)
+
+    if not allow_preallocate:
+        set_memory_growth()
 
     return selected_gpu_ids_to_device(selected_gpu_ids, key="gpu")
 
