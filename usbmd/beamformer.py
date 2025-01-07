@@ -247,6 +247,9 @@ def calculate_delays(
                 t0_delays[tx],
                 tx_apodizations[tx],
                 probe_geometry,
+                focus_distances[tx],
+                polar_angles[tx],
+                polar_angles[tx] * 0.0,  # TODO: azimuth angle
                 sound_speed,
             ),
         )
@@ -422,11 +425,37 @@ def distance_Tx_planewave(grid, angle):
     return dist
 
 
+def compute_vsource(focus_distance, polar_angle, azimuth_angle, focus_origin):
+    """Computes the virtual source from origin, distance, and angles.
+
+    Args:
+        focus_distance (float): The distance to the focus.
+        polar_angle (float): The polar angle in radians.
+        azimuth_angle (float): The azimuth angle in radians.
+        focus_origin (ops.Tensor): The origin of the focus of shape (3,).
+
+    Returns:
+        ops.Tensor: The virtual source of shape (3,).
+    """
+    vfocus = focus_origin + focus_distance * ops.array(
+        [
+            ops.sin(polar_angle) * ops.cos(azimuth_angle),
+            ops.sin(polar_angle) * ops.sin(azimuth_angle),
+            ops.cos(polar_angle),
+        ]
+    )
+
+    return vfocus
+
+
 def distance_Tx_generic(
     grid,
     t0_delays,
     tx_apodization,
     probe_geometry,
+    focus_distance,
+    polar_angle,
+    azimuth_angle,
     sound_speed=1540,
 ):
     """
@@ -471,25 +500,26 @@ def distance_Tx_generic(
 
     # Define an infinite offset for elements that do not fire to not consider them in
     # the transmit distance calculation.
-    offset = ops.where(tx_apodization == 0, np.inf, 0.0)
+    offset = ops.where(tx_apodization == 0, 0.0, 0.0)
 
     # Compute the distance between the elements and the pixels of shape
     # (n_pix, n_el)
-    dist = (
-        t0_delays[None] * sound_speed + ops.sqrt(dx**2 + dy**2 + dz**2) + offset[None]
+    dist = t0_delays[None] * sound_speed + ops.sqrt(dx**2 + dy**2 + dz**2)
+    dist_max = dist - offset[None]
+    dist_min = dist + offset[None]
+
+    vsource = compute_vsource(
+        focus_distance, polar_angle, azimuth_angle, focus_origin=ops.zeros(3)
     )
-
-    # Sort the distances to find the top and bottom 2 distances
-    dist = ops.sort(dist, 1)
-
-    # Compute the difference between the top and bottom 2 distances
-    delta_max = ops.abs(dist[:, -1] - dist[:, -2])
-    delta_min = ops.abs(dist[:, 1] - dist[:, 0])
 
     # Compute the effective distance of the pixels to the wavefront by computing the
     # largest distance over all the elements when the pixel is behind the virtual
     # source and the smallest distance otherwise.
-    dist = ops.where(delta_min <= delta_max, dist[:, 0], dist[:, -1])
+    dist = ops.where(
+        ops.sign(focus_distance) * (grid[:, 2] - vsource[2]) < 0.0,
+        ops.min(dist_max, 1),
+        ops.max(dist_min, 1),
+    )
 
     return dist
 
