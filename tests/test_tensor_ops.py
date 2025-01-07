@@ -261,3 +261,60 @@ def test_pad_array_to_divisible(array, divisor, axis):
             ), "Dimensions not matching axis should remain unchanged"
 
     return padded
+
+
+@pytest.mark.parametrize(
+    "image, patch_size, overlap",
+    [
+        [np.random.normal(size=(1, 28, 28, 3)), (7, 7), (0, 0)],
+        [np.random.normal(size=(2, 32, 32, 3)), (8, 8), (4, 4)],
+        [np.random.normal(size=(1, 28, 28, 1)), (4, 4), (2, 2)],
+    ],
+)
+@equality_libs_processing()
+def test_images_to_patches(image, patch_size, overlap):
+    """Test the images_to_patches function."""
+    patches = tensor_ops.images_to_patches(image, patch_size, overlap)
+    assert patches.shape[0] == image.shape[0]
+    assert patches.shape[3] == patch_size[0]
+    assert patches.shape[4] == patch_size[1]
+    assert patches.shape[5] == image.shape[-1]
+    return patches
+
+
+@pytest.mark.parametrize(
+    "patches, image_shape, overlap, window_type",
+    [
+        [np.random.normal(size=(1, 4, 4, 7, 7, 3)), (28, 28, 3), (0, 0), "average"],
+        [np.random.normal(size=(2, 3, 3, 8, 8, 3)), (32, 32, 3), (4, 4), "replace"],
+        [np.random.normal(size=(1, 7, 7, 4, 4, 1)), (28, 28, 1), (2, 2), "average"],
+    ],
+)
+@equality_libs_processing()
+def test_patches_to_images(patches, image_shape, overlap, window_type):
+    """Test the patches_to_images function."""
+    image = tensor_ops.patches_to_images(patches, image_shape, overlap, window_type)
+    assert image.shape[1:] == image_shape
+    return image
+
+
+@pytest.mark.parametrize(
+    "image, patch_size, overlap, window_type",
+    [
+        [np.random.normal(size=(1, 28, 28, 3)), (7, 7), (0, 0), "average"],
+        [np.random.normal(size=(2, 32, 32, 3)), (8, 8), (4, 4), "replace"],
+        [np.random.normal(size=(1, 28, 28, 1)), (4, 4), (2, 2), "average"],
+    ],
+)
+@equality_libs_processing()
+def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
+    """Test images_to_patches and patches_to_images together."""
+    patches = tensor_ops.images_to_patches(image, patch_size, overlap)
+    reconstructed_image = tensor_ops.patches_to_images(
+        patches,
+        image.shape[1:],
+        overlap,
+        window_type,
+    )
+    np.testing.assert_allclose(image, reconstructed_image, rtol=1e-5, atol=1e-5)
+    return reconstructed_image
