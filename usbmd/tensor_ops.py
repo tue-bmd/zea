@@ -753,9 +753,7 @@ def patches_to_images(
     ], "window_type must be one of 'average', or 'replace'."
 
     # Extract dimensions
-    batch_size, n_patches_y, n_patches_x, patch_size_y, patch_size_x, n_channels = (
-        patches.shape
-    )
+    batch_size, n_patches_y, n_patches_x, patch_size_y, patch_size_x, _ = patches.shape
     dtype = patches.dtype
 
     if isinstance(overlap, int):
