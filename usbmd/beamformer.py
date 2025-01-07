@@ -479,11 +479,18 @@ def distance_Tx_generic(
         t0_delays[None] * sound_speed + ops.sqrt(dx**2 + dy**2 + dz**2) + offset[None]
     )
 
+    # Sort the distances to find the top and bottom 2 distances
+    dist = ops.sort(dist, 1)
+
+    # Compute the difference between the top and bottom 2 distances
+    delta_max = ops.abs(dist[:, -1] - dist[:, -2])
+    delta_min = ops.abs(dist[:, 1] - dist[:, 0])
+
     # Compute the effective distance of the pixels to the wavefront by
     # computing the smallest distance over all the elements. This is the wave
     # front that reaches the pixel first and thus is the overal wavefront
     # distance.
-    dist = ops.min(dist, 1)
+    dist = ops.where(delta_min <= delta_max, dist[:, 0], dist[:, -1])
 
     return dist
 
