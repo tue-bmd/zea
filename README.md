@@ -260,6 +260,9 @@ import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
+from keras import ops
+import matplotlib.pyplot as plt
+
 from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.models.echonet import EchoNetDynamic
