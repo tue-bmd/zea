@@ -7,6 +7,8 @@ import keras
 import numpy as np
 from keras import ops
 
+from usbmd.utils import log
+
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
     """
@@ -627,10 +629,6 @@ def check_patches_fit(
             (image_y - patch_y) // stride_y * stride_y + patch_y,
             (image_x - patch_x) // stride_x * stride_x + patch_x,
         )
-        print(
-            f"Warning: patches with overlap do not fit an integer amount in the original image. "
-            f"Cropping image to closest dimensions that work: {new_shape}."
-        )
 
         n_patch_y = image_y // stride_y
         n_patch_x = image_x // stride_x
@@ -640,7 +638,33 @@ def check_patches_fit(
             (image_x + (n_patch_x - 1) * overlap_x) / n_patch_x,
         )
 
-        print(f"Alternatively, change patch shape to: {new_patch_shape} ")
+        # Calculate new overlap only if we have more than one patch
+        new_overlap = (
+            (
+                (patch_y * (n_patch_y + 1) - image_y) / (n_patch_y)
+                if n_patch_y > 1
+                else 0
+            ),
+            (
+                (patch_x * (n_patch_x + 1) - image_x) / (n_patch_x)
+                if n_patch_x > 1
+                else 0
+            ),
+        )
+
+        new_overlap = tuple(map(int, new_overlap))
+        new_patch_shape = tuple(map(int, new_patch_shape))
+
+        log.warning(
+            "patches with overlap do not fit an integer amount in the original image. "
+            f"Cropping image to closest dimensions that work: {new_shape}. "
+            f"Alternatively, change patch shape to: {new_patch_shape} "
+            + (
+                f"or change overlap to: {new_overlap}"
+                if n_patch_y > 1 or n_patch_x > 1
+                else ""
+            )
+        )
 
         return False, new_shape
     return True, image_shape
