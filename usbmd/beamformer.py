@@ -486,10 +486,9 @@ def distance_Tx_generic(
     delta_max = ops.abs(dist[:, -1] - dist[:, -2])
     delta_min = ops.abs(dist[:, 1] - dist[:, 0])
 
-    # Compute the effective distance of the pixels to the wavefront by
-    # computing the smallest distance over all the elements. This is the wave
-    # front that reaches the pixel first and thus is the overal wavefront
-    # distance.
+    # Compute the effective distance of the pixels to the wavefront by computing the
+    # largest distance over all the elements when the pixel is behind the virtual
+    # source and the smallest distance otherwise.
     dist = ops.where(delta_min <= delta_max, dist[:, 0], dist[:, -1])
 
     return dist
