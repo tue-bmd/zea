@@ -249,7 +249,6 @@ def calculate_delays(
                 probe_geometry,
                 focus_distances[tx],
                 polar_angles[tx],
-                polar_angles[tx] * 0.0,  # TODO: azimuth angle
                 sound_speed,
             ),
         )
@@ -425,29 +424,6 @@ def distance_Tx_planewave(grid, angle):
     return dist
 
 
-def compute_vsource(focus_distance, polar_angle, azimuth_angle, focus_origin):
-    """Computes the virtual source from origin, distance, and angles.
-
-    Args:
-        focus_distance (float): The distance to the focus.
-        polar_angle (float): The polar angle in radians.
-        azimuth_angle (float): The azimuth angle in radians.
-        focus_origin (ops.Tensor): The origin of the focus of shape (3,).
-
-    Returns:
-        ops.Tensor: The virtual source of shape (3,).
-    """
-    vfocus = focus_origin + focus_distance * ops.array(
-        [
-            ops.sin(polar_angle) * ops.cos(azimuth_angle),
-            ops.sin(polar_angle) * ops.sin(azimuth_angle),
-            ops.cos(polar_angle),
-        ]
-    )
-
-    return vfocus
-
-
 def distance_Tx_generic(
     grid,
     t0_delays,
@@ -455,7 +431,6 @@ def distance_Tx_generic(
     probe_geometry,
     focus_distance,
     polar_angle,
-    azimuth_angle,
     sound_speed=1540,
 ):
     """
@@ -505,20 +480,17 @@ def distance_Tx_generic(
     # Compute the distance between the elements and the pixels of shape
     # (n_pix, n_el)
     dist = t0_delays[None] * sound_speed + ops.sqrt(dx**2 + dy**2 + dz**2)
-    dist_max = dist - offset[None]
-    dist_min = dist + offset[None]
 
-    vsource = compute_vsource(
-        focus_distance, polar_angle, azimuth_angle, focus_origin=ops.zeros(3)
-    )
+    # Compute the z-coordinate of the focal point
+    focal_z = ops.cos(polar_angle) * focus_distance
 
     # Compute the effective distance of the pixels to the wavefront by computing the
     # largest distance over all the elements when the pixel is behind the virtual
     # source and the smallest distance otherwise.
     dist = ops.where(
-        ops.sign(focus_distance) * (grid[:, 2] - vsource[2]) < 0.0,
-        ops.min(dist_max, 1),
-        ops.max(dist_min, 1),
+        ops.sign(focus_distance) * (grid[:, 2] - focal_z) < 0.0,
+        ops.min(dist - offset[None], 1),
+        ops.max(dist + offset[None], 1),
     )
 
     return dist
