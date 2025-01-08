@@ -23,6 +23,7 @@ from usbmd.utils import log, strtobool
 DEFAULT_DATA_ROOT = {
     "windows": "Z:/Ultrasound-BMd/data",
     "linux": "/mnt/z/Ultrasound-BMd/data",
+    "darwin": "/mnt/z/Ultrasound-BMd/data",
     None: "/mnt/z/Ultrasound-BMd/data",  # for other system
 }
 
