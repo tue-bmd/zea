@@ -11,11 +11,15 @@ import keras
 from usbmd.backend import jit
 from usbmd.config.config import Config
 from usbmd.probes import Probe
+from usbmd.registry import ops_v2_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
 
+
+# clear registry upon import
+ops_v2_registry.clear()
 
 # TODO: Move this to Core?
 class DataTypes(enum.Enum):
@@ -390,7 +394,16 @@ class Pipeline:
         return ",".join(operations)
 
 
+@ops_v2_registry("identity")
+class Identity(Operation):
+    """Identity operation."""
+
+    def call(self, *args, **kwargs) -> Dict:
+        """Returns the input dictionary."""
+        return kwargs
+
 ## Base Operations
+@ops_v2_registry("merge")
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
@@ -406,6 +419,7 @@ class Merge(Operation):
         return merged
 
 
+@ops_v2_registry("split")
 class Split(Operation):
     """Operation that splits an input dictionary  n copies."""
 
@@ -419,7 +433,7 @@ class Split(Operation):
         """
         return [kwargs.copy() for _ in range(self.n)]
 
-
+@ops_v2_registry("stack")
 class Stack(Operation):
     """Stack multiple data arrays along a new axis.
     Useful to merge data from parallel pipelines.

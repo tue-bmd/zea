@@ -1,0 +1,55 @@
+/* General body styling */
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+}
+
+/* Toolbar styling */
+#toolbar {
+    padding: 10px;
+    border-bottom: 1px solid #ccc;
+    background-color: #f9f9f9;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#operations-list {
+    display: flex;
+    gap: 10px;
+}
+
+.operation {
+    padding: 5px 10px;
+    border: 1px solid #000;
+    cursor: pointer;
+    background-color: #e0e0e0;
+    border-radius: 5px;
+    transition: background-color 0.2s;
+}
+
+.operation:hover {
+    background-color: #d0d0d0;
+}
+
+/* Canvas styling */
+#canvas {
+    width: 100%;
+    height: calc(100vh - 60px);
+    border: 1px solid #ccc;
+    position: relative;
+    overflow: auto;
+}
+
+/* Block styling */
+.block {
+    width: 100px;
+    height: 50px;
+    border: 1px solid #000;
+    background-color: #f4f4f4;
+    text-align: center;
+    line-height: 50px;
+    position: absolute;
+    cursor: move;
+    border-radius: 5px;
+}

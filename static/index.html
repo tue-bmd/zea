@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Builder</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div id="toolbar">
+        <div id="operations-list"></div>
+        <button onclick="exportPipeline()">Export Pipeline</button>
+    </div>
+    <div id="canvas"></div>
+
+    <!-- Load jsPlumb library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsPlumb/2.15.6/js/jsplumb.min.js"></script>
+    <!-- Load js-yaml library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <!-- Load your custom script -->
+    <script src="/static/script.js"></script>
+</body>
+</html>

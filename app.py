@@ -1,0 +1,35 @@
+"""This module contains a web-based GUI for designing and checking pipelines."""
+
+import yaml
+from flask import Flask, jsonify, request, send_from_directory
+
+import usbmd.ops_v2 as ops_v2
+from usbmd.registry import ops_v2_registry
+
+app = Flask(__name__, static_folder="static")
+
+
+@app.route("/")
+def serve_frontend():
+    """Serve the main HTML file."""
+    return send_from_directory(app.static_folder, "index.html")
+
+
+@app.route("/operations", methods=["GET"])
+def get_operations():
+    """Fetch the list of registered operations."""
+    operations = list(ops_v2_registry.registered_names())
+    return jsonify(operations)
+
+
+@app.route("/save_pipeline", methods=["POST"])
+def save_pipeline():
+    """Save the pipeline configuration to a YAML file."""
+    pipeline = request.json
+    with open("pipeline_config.yaml", "w") as file:
+        yaml.dump(pipeline, file)
+    return jsonify({"status": "success", "message": "Pipeline saved successfully!"})
+
+
+if __name__ == "__main__":
+    app.run(debug=False)
