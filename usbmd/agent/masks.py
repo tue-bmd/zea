@@ -21,7 +21,8 @@ def random_uniform_lines(
         n_actions (int): Number of actions to be selected.
         n_possible_actions (int): Number of possible actions.
         n_masks (int): Number of masks to generate.
-        seed (int | SeedGenerator, optional): Seed for random number generation. Defaults to None.
+        seed (int | SeedGenerator | jax.random.key, optional): Seed for random number generation.
+            Defaults to None.
 
     Returns:
         Tensor: k-hot-encoded line vectors of shape (n_masks, n_possible_actions).
