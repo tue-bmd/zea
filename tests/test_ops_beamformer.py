@@ -29,12 +29,10 @@ def _get(reconstruction_mode):
         n_ax=2047,
         sampling_frequency=probe_parameters["sampling_frequency"],
         center_frequency=probe_parameters["center_frequency"],
-        polar_angles=np.zeros((1,), dtype=np.float32),
+        polar_angles=np.array([0.0]),
     )
     scan._focus_distances = (
-        np.array([0.0], dtype=np.float32)
-        if reconstruction_mode == "generic"
-        else np.array([np.inf])
+        np.array([0.0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
     # Set scan grid parameters
