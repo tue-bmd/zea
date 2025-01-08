@@ -475,7 +475,7 @@ def distance_Tx_generic(
 
     # Define an infinite offset for elements that do not fire to not consider them in
     # the transmit distance calculation.
-    offset = ops.where(tx_apodization == 0, 10.0, 0.0)
+    offset = ops.where(tx_apodization == 0, np.inf, 0.0)
 
     # Compute the distance between the elements and the pixels of shape
     # (n_pix, n_el)
