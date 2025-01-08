@@ -21,7 +21,6 @@ def _get(reconstruction_mode):
 
     probe = Verasonics_l11_4v()
     probe_parameters = probe.get_parameters()
-    angles = np.zeros((1,), dtype=np.float32)
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
         n_tx=1,
@@ -30,8 +29,7 @@ def _get(reconstruction_mode):
         n_ax=2047,
         sampling_frequency=probe_parameters["sampling_frequency"],
         center_frequency=probe_parameters["center_frequency"],
-        polar_angles=angles,
-        azimuth_angles=angles,
+        polar_angles=np.zeros((1,), dtype=np.float32),
     )
     scan._focus_distances = (
         np.array([0.0], dtype=np.float32)
