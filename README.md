@@ -260,9 +260,14 @@ import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
+from keras import ops
+import matplotlib.pyplot as plt
+
 from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.models.echonet import EchoNetDynamic
+from usbmd.utils.selection_tool import add_shape_from_mask
+from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
 data_paths = set_data_paths()
 init_device("tensorflow")
@@ -287,4 +292,17 @@ model = EchoNetDynamic.from_preset("echonet-dynamic")
 batch = next(iter(val_dataset))
 
 masks = model(batch)
+
+masks = ops.squeeze(masks, axis=-1)
+masks = ops.convert_to_numpy(masks)
+
+set_mpl_style()
+
+# create figure of images in batch
+fig, _ = plot_image_grid(batch)
+axes = fig.axes[:batch.shape[0]]
+for ax, mask in zip(axes, masks):
+    # add segmentation on top of image in figure
+    add_shape_from_mask(ax, mask, color="red", alpha=0.5)
+plt.show()
 ```

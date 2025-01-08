@@ -256,20 +256,22 @@ class CovarianceSamplingLines(LinesActionModel):
         self.seed = keras.random.SeedGenerator(seed)
         self.n_masks = n_masks
 
-    def random_uniform_lines(self, batch_size):
+    def random_uniform_lines(self, batch_size, seed=None):
         """Wrapper around `random_uniform_lines` function to use attributes from class."""
         lines = masks.random_uniform_lines(
             self.n_actions,
             self.n_possible_actions,
             batch_size * self.n_masks,
-            seed=self.seed,
+            seed=self.seed if seed is None else seed,
         )
         return ops.reshape(lines, [self.n_masks, batch_size, self.n_possible_actions])
 
-    def sample(self, particles):
+    def sample(self, particles, seed=None):
         """
         Args:
             particles (Tensor): Particles of shape (n_particles, batch_size, h, w)
+            seed (int | SeedGenerator | jax.random.key, optional): Seed for random number
+                generation. Defaults to None.
 
         Returns:
             Tensor: The mask of shape (batch_size, img_size, img_size)
@@ -296,7 +298,7 @@ class CovarianceSamplingLines(LinesActionModel):
         cov_matrix = ops.sum(cov_matrix, axis=1)
 
         # Generate random lines [n_masks, batch_size, n_possible_actions]
-        lines = self.random_uniform_lines(batch_size)
+        lines = self.random_uniform_lines(batch_size, seed=seed)
         bool_lines = ops.cast(lines, "bool")
 
         # Make matrix masks [n_masks, batch_size, n_possible_actions, n_possible_actions]
@@ -309,7 +311,7 @@ class CovarianceSamplingLines(LinesActionModel):
             Subsample the covariance matrix with a single mask
             """
             subsampled_cov_matrix = tensor_ops.boolean_mask(
-                cov_matrix, mask, size=self.n_actions**2
+                cov_matrix, mask, size=batch_size * self.n_actions**2
             )
             return ops.reshape(
                 subsampled_cov_matrix, [batch_size, self.n_actions, self.n_actions]

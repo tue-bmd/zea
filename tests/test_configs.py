@@ -18,7 +18,7 @@ simple_dict = {"a": 1, "b": 2, "c": 3}
 nested_dict = {"a": 1, "nested_dictionary": {"b": 2, "c": 3}}
 doubly_nested_dict = {
     "a": 1,
-    "nested_dictionary": {"b": 2, "doubly_nested_dictionary": 4},
+    "nested_dictionary": {"b": 2, "doubly_nested_dictionary": {"c": 3}},
 }
 dict_strings = {"a": "first", "b": "second"}
 dict_none = {"a": 1, "b": None, "c": 3}
@@ -204,3 +204,38 @@ def test_dict_and_attributes_equal(dictionary):
     config.update({"update_with_update": 2})
     config.update_with_attribute = 3
     test_getitem(config)
+
+
+def test_config_accessed():
+    """
+    Tests if the _assert_all_accessed method works correctly.
+    """
+    # Case 1: access all attributes
+    config = Config(**nested_dict)
+    tmp = config.a
+    tmp = config.nested_dictionary.get("b")
+    tmp = config.nested_dictionary.pop("c")
+    config._assert_all_accessed()  # should not raise an error
+
+    # Case 2: access only some attributes
+    config = Config(**nested_dict)
+    tmp = config.nested_dictionary.b
+    with pytest.raises(AssertionError):
+        config._assert_all_accessed()  # should raise an error
+
+    # Case 3: access all attributes using **kwargs
+    config = Config(**simple_dict)
+    Config(**config)
+    config._assert_all_accessed()  # should not raise an error
+
+    del tmp  # remove tmp to avoid unused variable warning
+
+
+def test_config_update():
+    """Tests if the update method works correctly."""
+    config = Config(simple_dict)
+    config.update(**nested_dict)  # update with kwargs
+    config.update(nested_dict)  # update with dict
+    assert isinstance(
+        config.nested_dictionary, Config
+    ), "config.nested_dictionary should be a Config object not just a dictionary"
