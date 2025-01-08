@@ -779,6 +779,7 @@ class TOFCorrection(Operation):
         self.focus_distances = ops.convert_to_tensor(
             self.focus_distances, dtype="float32"
         )
+        self.polar_angles = ops.convert_to_tensor(self.polar_angles, dtype="float32")
         self.t0_delays = ops.convert_to_tensor(self.t0_delays, dtype="float32")
         self.tx_apodizations = ops.convert_to_tensor(
             self.tx_apodizations, dtype="float32"
