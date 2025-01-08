@@ -32,7 +32,7 @@ def _get(reconstruction_mode):
         polar_angles=np.array([0.0]),
     )
     scan._focus_distances = (
-        np.array([0.0]) if reconstruction_mode == "generic" else np.array([np.inf])
+        np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
     # Set scan grid parameters
