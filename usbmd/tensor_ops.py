@@ -445,8 +445,8 @@ def is_monotonic(array, increasing=True):
 
     # Check if the array is non-decreasing or non-increasing
     if increasing:
-        return ops.all(array[1:] <= array[:-1])
-    return ops.all(array[1:] >= array[:-1])
+        return ops.all(array[1:] >= array[:-1])
+    return ops.all(array[1:] <= array[:-1])
 
 
 def map_indices_for_interpolation(indices):
@@ -589,6 +589,85 @@ def split_volume_data_from_axis(
     return data
 
 
+def compute_required_patch_overlap(image_shape, patch_shape):
+    """Compute required overlap between patches to cover the entire image.
+
+    Args:
+        image_shape: Tuple of (height, width)
+        patch_shape: Tuple of (patch_height, patch_width)
+
+    Returns:
+        Tuple of (overlap_y, overlap_x)
+
+        Or None if there is no overlap that will result in integer number of patches
+        given the image and patch shapes.
+    """
+    assert len(image_shape) == 2, "image_shape must be a tuple of (height, width)"
+    assert (
+        len(patch_shape) == 2
+    ), "patch_shape must be a tuple of (patch_height, patch_width)"
+
+    assert all(
+        [image_shape[i] >= patch_shape[i] for i in range(2)]
+    ), "patch_shape must be equal or smaller than image_shape"
+
+    image_y, image_x = image_shape
+    patch_y, patch_x = patch_shape
+
+    # Calculate number of patches needed in each dimension
+    n_patch_y = max(1, int(ops.ceil(image_y / patch_y)))
+    n_patch_x = max(1, int(ops.ceil(image_x / patch_x)))
+
+    # Calculate new overlap only if we have more than one patch
+    new_overlap = (
+        ((patch_y * n_patch_y - image_y) / (n_patch_y - 1) if n_patch_y > 1 else 0),
+        ((patch_x * n_patch_x - image_x) / (n_patch_x - 1) if n_patch_x > 1 else 0),
+    )
+
+    # check if can be integer
+    if not all(ops.isclose(new_overlap, ops.round(new_overlap))):
+        return
+
+    new_overlap = tuple(map(int, new_overlap))
+
+    return new_overlap
+
+
+def compute_required_patch_shape(image_shape, patch_shape, overlap):
+    """Compute patch_shape closest to the original patch_shape that will result
+    in integer number of patches given the image and overlap.
+
+    Args:
+        image_shape: Tuple of (height, width)
+        patch_shape: Tuple of (patch_height, patch_width)
+        overlap: Tuple of (overlap_y, overlap_x)
+
+    Returns:
+        Tuple of (patch_shape_y, patch_shape_x)
+
+        or None if there is no patch_shape that will result in integer number of patches
+        given the image and overlap.
+    """
+    image_y, image_x = image_shape
+    overlap_y, overlap_x = overlap
+    patch_y, patch_x = patch_shape
+
+    def compute_patch_size(image_size, patch_size, overlap):
+        n_patches = (image_size - overlap) // (patch_size - overlap)
+        new_patch_size = (image_size + (n_patches - 1) * overlap) / n_patches
+        return int(new_patch_size)
+
+    new_patch_y = compute_patch_size(image_y, patch_y, overlap_y)
+    new_patch_x = compute_patch_size(image_x, patch_x, overlap_x)
+
+    if (image_y - new_patch_y) % (new_patch_y - overlap_y) != 0 or (
+        image_x - new_patch_x
+    ) % (new_patch_x - overlap_x) != 0:
+        return None
+
+    return new_patch_y, new_patch_x
+
+
 def check_patches_fit(
     image_shape: tuple, patch_shape: tuple, overlap: Union[int, Tuple[int, int]]
 ) -> tuple:
@@ -622,49 +701,32 @@ def check_patches_fit(
     stride_y, stride_x = stride
     patch_y, patch_x = patch_shape
     image_y, image_x = image_shape
-    overlap_y, overlap_x = overlap
 
     if (image_y - patch_y) % stride_y != 0 or (image_x - patch_x) % stride_x != 0:
         new_shape = (
             (image_y - patch_y) // stride_y * stride_y + patch_y,
             (image_x - patch_x) // stride_x * stride_x + patch_x,
         )
-
-        n_patch_y = image_y // stride_y
-        n_patch_x = image_x // stride_x
-
-        new_patch_shape = (
-            (image_y + (n_patch_y - 1) * overlap_y) / n_patch_y,
-            (image_x + (n_patch_x - 1) * overlap_x) / n_patch_x,
+        # new_patch_shape = tuple(map(int, new_patch_shape))
+        new_patch_shape = compute_required_patch_shape(
+            image_shape, patch_shape, overlap
         )
 
         # Calculate new overlap only if we have more than one patch
-        new_overlap = (
-            (
-                (patch_y * (n_patch_y + 1) - image_y) / (n_patch_y)
-                if n_patch_y > 1
-                else 0
-            ),
-            (
-                (patch_x * (n_patch_x + 1) - image_x) / (n_patch_x)
-                if n_patch_x > 1
-                else 0
-            ),
-        )
+        new_overlap = compute_required_patch_overlap(image_shape, patch_shape)
 
-        new_overlap = tuple(map(int, new_overlap))
-        new_patch_shape = tuple(map(int, new_patch_shape))
-
-        log.warning(
+        msg = (
             "patches with overlap do not fit an integer amount in the original image. "
             f"Cropping image to closest dimensions that work: {new_shape}. "
-            f"Alternatively, change patch shape to: {new_patch_shape} "
-            + (
-                f"or change overlap to: {new_overlap}"
-                if n_patch_y > 1 or n_patch_x > 1
-                else ""
-            )
         )
+
+        if new_patch_shape is not None:
+            msg += f"Alternatively, change patch shape to: {new_patch_shape} "
+
+        if new_overlap is not None:
+            msg += f"or change overlap to: {new_overlap}"
+
+        log.warning(msg)
 
         return False, new_shape
     return True, image_shape
@@ -726,10 +788,20 @@ def images_to_patches(
     assert np.all(stride <= patch_shape), "Stride should be smaller than patch shape"
     assert np.all(stride >= 0), "Stride should be larger than 0"
 
-    # create patches
-    patches = ops.image.extract_patches(
-        images, size=patch_shape, strides=list(stride), padding="valid"
-    )
+    ## create patches using ops (this operation is too memory intensive)
+    # patches = ops.image.extract_patches(
+    #     images, size=patch_shape, strides=list(stride), padding="valid"
+    # )
+
+    ## manual solution instead
+    patches_list = []
+    for i in range(0, image_shape[0] - patch_size_y + 1, stride[0]):
+        row_patches = []
+        for j in range(0, image_shape[1] - patch_size_x + 1, stride[1]):
+            patch = images[:, i : i + patch_size_y, j : j + patch_size_x, :]
+            row_patches.append(patch)
+        patches_list.append(ops.stack(row_patches, axis=1))
+    patches = ops.stack(patches_list, axis=1)
 
     _, n_patch_y, n_patch_x, *_ = patches.shape
 
