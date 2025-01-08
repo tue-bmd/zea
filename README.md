@@ -1,6 +1,6 @@
 
 <!-- This is the readme for the github page (more complete readme for pdocs can be found in usmbd/README.md) -->
-# usbmd <img src="docs/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
+# usbmd <img src="docs/static/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
 
 The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the full documentation [here](http://131.155.125.142:6001/) (only available within the TU/e network).
 

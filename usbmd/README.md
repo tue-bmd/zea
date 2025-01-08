@@ -1,5 +1,5 @@
 <!-- This is the readme for the pdoc documentation (used as header in index.html) -->
-# usbmd <img src="../docs/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
+# usbmd <img src="../docs/static/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
 
 The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the full documentation [here](http://131.155.125.142:6001/) (only available within the TU/e network).
 
@@ -139,8 +139,7 @@ data_file.hdf5                  // [unit], [array shape], [type]
 
 #### Data Flow Diagram
 
-![Data flow](../docs/usbmd/diagrams_dataflow.png)
-![Data flow](diagrams_dataflow.png)
+![Data flow](../docs/static/diagrams_dataflow.png)
 
 #### Data types
 
