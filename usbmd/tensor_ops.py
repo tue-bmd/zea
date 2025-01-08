@@ -814,7 +814,7 @@ def patches_to_images(
     patches: keras.KerasTensor,
     image_shape: tuple,
     overlap: Union[int, Tuple[int, int]] = None,
-    window_type="replace",
+    window_type="average",
 ) -> keras.KerasTensor:
     """Reconstructs images from patches.
 
@@ -823,7 +823,7 @@ def patches_to_images(
             [batch_size, #patch_y, #patch_x, patch_size_y, patch_size_x, n_channels]
         image_shape (Tuple): Shape of output image. (height, width, channels)
         overlap (int or tuple, optional): Overlap between patches in px. Defaults to None.
-        window_type (str, optional): Type of stitching to use. Defaults to 'replace'.
+        window_type (str, optional): Type of stitching to use. Defaults to 'average'.
             Options: 'average', 'replace'.
 
     Returns:
