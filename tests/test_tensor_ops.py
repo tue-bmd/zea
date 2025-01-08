@@ -269,6 +269,7 @@ def test_pad_array_to_divisible(array, divisor, axis):
         [np.random.normal(size=(1, 28, 28, 3)), (7, 7), (0, 0)],
         [np.random.normal(size=(2, 32, 32, 3)), (8, 8), (4, 4)],
         [np.random.normal(size=(1, 28, 28, 1)), (4, 4), (2, 2)],
+        [np.random.normal(size=(1, 28, 28, 3)), (6, 6), (2, 2)],
     ],
 )
 @equality_libs_processing()
