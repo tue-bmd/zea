@@ -608,7 +608,7 @@ def compute_required_patch_overlap(image_shape, patch_shape):
     ), "patch_shape must be a tuple of (patch_height, patch_width)"
 
     assert all(
-        [image_shape[i] >= patch_shape[i] for i in range(2)]
+        image_shape[i] >= patch_shape[i] for i in range(2)
     ), "patch_shape must be equal or smaller than image_shape"
 
     image_y, image_x = image_shape
