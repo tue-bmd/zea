@@ -1,10 +1,13 @@
 """Basic tensor operations implemented with the multi-backend `keras.ops`."""
 
 import os
+from typing import Tuple, Union
 
 import keras
 import numpy as np
 from keras import ops
+
+from usbmd.utils import log
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
@@ -442,8 +445,8 @@ def is_monotonic(array, increasing=True):
 
     # Check if the array is non-decreasing or non-increasing
     if increasing:
-        return ops.all(array[1:] <= array[:-1])
-    return ops.all(array[1:] >= array[:-1])
+        return ops.all(array[1:] >= array[:-1])
+    return ops.all(array[1:] <= array[:-1])
 
 
 def map_indices_for_interpolation(indices):
@@ -584,3 +587,320 @@ def split_volume_data_from_axis(
         data = ops.take(data, indices, axis=batch_axis)
 
     return data
+
+
+def compute_required_patch_overlap(image_shape, patch_shape):
+    """Compute required overlap between patches to cover the entire image.
+
+    Args:
+        image_shape: Tuple of (height, width)
+        patch_shape: Tuple of (patch_height, patch_width)
+
+    Returns:
+        Tuple of (overlap_y, overlap_x)
+
+        Or None if there is no overlap that will result in integer number of patches
+        given the image and patch shapes.
+    """
+    assert len(image_shape) == 2, "image_shape must be a tuple of (height, width)"
+    assert (
+        len(patch_shape) == 2
+    ), "patch_shape must be a tuple of (patch_height, patch_width)"
+
+    assert all(
+        image_shape[i] >= patch_shape[i] for i in range(2)
+    ), "patch_shape must be equal or smaller than image_shape"
+
+    image_y, image_x = image_shape
+    patch_y, patch_x = patch_shape
+
+    # Calculate number of patches needed in each dimension
+    n_patch_y = max(1, int(ops.ceil(image_y / patch_y)))
+    n_patch_x = max(1, int(ops.ceil(image_x / patch_x)))
+
+    # Calculate new overlap only if we have more than one patch
+    new_overlap = (
+        ((patch_y * n_patch_y - image_y) / (n_patch_y - 1) if n_patch_y > 1 else 0),
+        ((patch_x * n_patch_x - image_x) / (n_patch_x - 1) if n_patch_x > 1 else 0),
+    )
+
+    # check if can be integer
+    if not all(ops.isclose(new_overlap, ops.round(new_overlap))):
+        return
+
+    new_overlap = tuple(map(int, new_overlap))
+
+    return new_overlap
+
+
+def compute_required_patch_shape(image_shape, patch_shape, overlap):
+    """Compute patch_shape closest to the original patch_shape that will result
+    in integer number of patches given the image and overlap.
+
+    Args:
+        image_shape: Tuple of (height, width)
+        patch_shape: Tuple of (patch_height, patch_width)
+        overlap: Tuple of (overlap_y, overlap_x)
+
+    Returns:
+        Tuple of (patch_shape_y, patch_shape_x)
+
+        or None if there is no patch_shape that will result in integer number of patches
+        given the image and overlap.
+    """
+    image_y, image_x = image_shape
+    overlap_y, overlap_x = overlap
+    patch_y, patch_x = patch_shape
+
+    def compute_patch_size(image_size, patch_size, overlap):
+        n_patches = (image_size - overlap) // (patch_size - overlap)
+        new_patch_size = (image_size + (n_patches - 1) * overlap) / n_patches
+        return int(new_patch_size)
+
+    new_patch_y = compute_patch_size(image_y, patch_y, overlap_y)
+    new_patch_x = compute_patch_size(image_x, patch_x, overlap_x)
+
+    if (image_y - new_patch_y) % (new_patch_y - overlap_y) != 0 or (
+        image_x - new_patch_x
+    ) % (new_patch_x - overlap_x) != 0:
+        return None
+
+    return new_patch_y, new_patch_x
+
+
+def check_patches_fit(
+    image_shape: tuple, patch_shape: tuple, overlap: Union[int, Tuple[int, int]]
+) -> tuple:
+    """Checks if patches with overlap fit an integer amount in the original image.
+
+    Args:
+        image_shape: A tuple representing the shape of the original image.
+        patch_size: A tuple representing the shape of the patches.
+        overlap: A float representing the overlap between patches.
+
+    Returns:
+        A tuple containing a boolean indicating if the patches fit an integer amount
+        in the original image and the new image shape if the patches do not fit.
+
+    Example:
+        >>> image_shape = (10, 10)
+        >>> patch_shape = (4, 4)
+        >>> overlap = (2, 2)
+        >>> patches_fit, new_shape = check_patches_fit(image_shape, patch_shape, overlap)
+        >>> patches_fit
+        False
+        >>> new_shape
+        (10, 10)
+    """
+    if overlap:
+        stride = (np.array(patch_shape) - np.array(overlap)).astype(int)
+    else:
+        stride = (np.array(patch_shape)).astype(int)
+        overlap = (0, 0)
+
+    stride_y, stride_x = stride
+    patch_y, patch_x = patch_shape
+    image_y, image_x = image_shape
+
+    if (image_y - patch_y) % stride_y != 0 or (image_x - patch_x) % stride_x != 0:
+        new_shape = (
+            (image_y - patch_y) // stride_y * stride_y + patch_y,
+            (image_x - patch_x) // stride_x * stride_x + patch_x,
+        )
+        # new_patch_shape = tuple(map(int, new_patch_shape))
+        new_patch_shape = compute_required_patch_shape(
+            image_shape, patch_shape, overlap
+        )
+
+        # Calculate new overlap only if we have more than one patch
+        new_overlap = compute_required_patch_overlap(image_shape, patch_shape)
+
+        msg = (
+            "patches with overlap do not fit an integer amount in the original image. "
+            f"Cropping image to closest dimensions that work: {new_shape}. "
+        )
+
+        if new_patch_shape is not None:
+            msg += f"Alternatively, change patch shape to: {new_patch_shape} "
+
+        if new_overlap is not None:
+            msg += f"or change overlap to: {new_overlap}"
+
+        log.warning(msg)
+
+        return False, new_shape
+    return True, image_shape
+
+
+def images_to_patches(
+    images: keras.KerasTensor,
+    patch_shape: Union[int, Tuple[int, int]],
+    overlap: Union[int, Tuple[int, int]] = None,
+) -> keras.KerasTensor:
+    """Creates patches from images.
+
+    Args:
+        images (Tensor): input images [batch, height, width, channels].
+        patch_shape (int or tuple, optional): Height and width of patch. Defaults to 4.
+        overlap (int or tuple, optional): Overlap between patches in px. Defaults to None.
+
+    Returns:
+        patches (Tensor): batch of patches of size:
+            [batch, #patch_y, #patch_x, patch_size_y, patch_size_x, #channels].
+
+    Example:
+        >>> images = keras.random.uniform((2, 8, 8, 3))
+        >>> patches = images_to_patches(images, patch_shape=(4, 4), overlap=(2, 2))
+        >>> patches.shape
+        (2, 3, 3, 4, 4, 3)
+    """
+    assert (
+        len(images.shape) == 4
+    ), f"input array should have 4 dimensions, but has {len(images.shape)} dimensions"
+    assert (
+        isinstance(patch_shape, int) or len(patch_shape) == 2
+    ), f"patch_shape should be an integer or a tuple of length 2, but is {patch_shape}"
+    assert (
+        isinstance(overlap, (int, type(None))) or len(overlap) == 2
+    ), f"overlap should be an integer or a tuple of length 2, but is {overlap}"
+
+    batch_size, *image_shape, n_channels = images.shape
+
+    if isinstance(patch_shape, int):
+        patch_shape = (patch_shape, patch_shape)
+    if isinstance(overlap, int):
+        overlap = (overlap, overlap)
+
+    patch_size_y, patch_size_x = patch_shape
+
+    patches_fit, image_shape = check_patches_fit(image_shape, patch_shape, overlap)
+    if not patches_fit:
+        images = images[:, : image_shape[0], : image_shape[1], :]
+
+    if overlap:
+        stride = (np.array(patch_shape) - np.array(overlap)).astype(int)
+    else:
+        stride = np.array(patch_shape).astype(int)
+
+    # assert that stride is never smaller than 0 or larger than patch_shape
+    stride = np.maximum(stride, 1)
+    stride = np.minimum(stride, patch_shape)
+    assert np.all(stride <= patch_shape), "Stride should be smaller than patch shape"
+    assert np.all(stride >= 0), "Stride should be larger than 0"
+
+    ## create patches using ops (this operation is too memory intensive)
+    # patches = ops.image.extract_patches(
+    #     images, size=patch_shape, strides=list(stride), padding="valid"
+    # )
+
+    ## manual solution instead
+    patches_list = []
+    for i in range(0, image_shape[0] - patch_size_y + 1, stride[0]):
+        row_patches = []
+        for j in range(0, image_shape[1] - patch_size_x + 1, stride[1]):
+            patch = images[:, i : i + patch_size_y, j : j + patch_size_x, :]
+            row_patches.append(patch)
+        patches_list.append(ops.stack(row_patches, axis=1))
+    patches = ops.stack(patches_list, axis=1)
+
+    _, n_patch_y, n_patch_x, *_ = patches.shape
+
+    shape = [batch_size, n_patch_y, n_patch_x, patch_size_y, patch_size_x, n_channels]
+    patches = ops.reshape(patches, shape)
+    return patches
+
+
+def patches_to_images(
+    patches: keras.KerasTensor,
+    image_shape: tuple,
+    overlap: Union[int, Tuple[int, int]] = None,
+    window_type="average",
+) -> keras.KerasTensor:
+    """Reconstructs images from patches.
+
+    Args:
+        patches (Tensor): Array with batch of patches to convert to batch of images.
+            [batch_size, #patch_y, #patch_x, patch_size_y, patch_size_x, n_channels]
+        image_shape (Tuple): Shape of output image. (height, width, channels)
+        overlap (int or tuple, optional): Overlap between patches in px. Defaults to None.
+        window_type (str, optional): Type of stitching to use. Defaults to 'average'.
+            Options: 'average', 'replace'.
+
+    Returns:
+        images (Tensor): Reconstructed batch of images from batch of patches.
+
+    Example:
+        >>> patches = keras.random.uniform((2, 3, 3, 4, 4, 3))
+        >>> images = patches_to_images(patches, image_shape=(8, 8, 3), overlap=(2, 2))
+        >>> images.shape
+        (2, 8, 8, 3)
+    """
+    # Input validation
+    assert (
+        len(image_shape) == 3
+    ), "image_shape must have 3 dimensions: (height, width, channels)."
+    assert len(patches.shape) == 6, (
+        "patches must have 6 dimensions: [batch_size, n_patch_y, n_patch_x, "
+        "patch_size_y, patch_size_x, n_channels]."
+    )
+    assert window_type in [
+        "average",
+        "replace",
+    ], "window_type must be one of 'average', or 'replace'."
+
+    # Extract dimensions
+    batch_size, n_patches_y, n_patches_x, patch_size_y, patch_size_x, _ = patches.shape
+    dtype = patches.dtype
+
+    if isinstance(overlap, int):
+        overlap = (overlap, overlap)
+    if overlap is None:
+        overlap = (0, 0)
+
+    stride_y, stride_x = np.array([patch_size_y, patch_size_x]) - np.array(overlap)
+
+    # Initialize the output tensor (image) and mask
+    images = keras.ops.zeros((batch_size, *image_shape), dtype=dtype)
+    mask = keras.ops.zeros((batch_size, *image_shape), dtype=dtype)
+
+    # Loop through each patch
+    for i in range(n_patches_y):
+        for j in range(n_patches_x):
+            start_y = i * stride_y
+            start_x = j * stride_x
+            patch = patches[:, i, j]
+
+            if window_type == "replace":
+                # Replace pixels directly with the current patch
+                images = keras.ops.slice_update(images, [0, start_y, start_x, 0], patch)
+            else:
+                # Add the current patch to the image
+                images = keras.ops.slice_update(
+                    images,
+                    [0, start_y, start_x, 0],
+                    images[
+                        :,
+                        start_y : start_y + patch_size_y,
+                        start_x : start_x + patch_size_x,
+                        :,
+                    ]
+                    + patch,
+                )
+                # Update the mask for averaging
+                mask = keras.ops.slice_update(
+                    mask,
+                    [0, start_y, start_x, 0],
+                    mask[
+                        :,
+                        start_y : start_y + patch_size_y,
+                        start_x : start_x + patch_size_x,
+                        :,
+                    ]
+                    + 1,
+                )
+
+    if window_type == "average":
+        # Normalize overlapping regions if needed
+        images = keras.ops.where(mask > 0, images / mask, images)
+
+    return images
