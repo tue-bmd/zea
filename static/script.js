@@ -30,9 +30,14 @@ document.addEventListener("DOMContentLoaded", function () {
         block.id = id;
         block.innerHTML = `
             <span>${op.name}</span>
-            <button class="toggle-params-btn">Show/Hide Parameters</button>
+            <button class="toggle-params-btn">Parameters</button>
             <div class="parameters" style="display: none;">
-                ${op.init_keys.map(key => `<label>${key}: <input type="text" data-key="${key}" /></label>`).join("")}
+                ${op.init_keys.map(key => `
+                    <div style="display: flex; align-items: center; gap: 5px; line-height: 1;">
+                        <label for="${key}" style="white-space: nowrap;">${key}:</label>
+                        <input type="text" id="${key}" data-key="${key}" style="flex: 1; min-width: 100px;" />
+                    </div>
+                `).join("")}
             </div>
             <button class="delete-btn" onclick="deleteBlock('${id}')" style="position: absolute; top: 0px; right: 0px; border-radius: 30%; width: 18px; height: 18px;">x</button>
         `;
