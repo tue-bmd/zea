@@ -472,3 +472,35 @@ class Stack(Operation):
         """
 
         raise NotImplementedError
+
+
+@ops_v2_registry("rename")
+class Rename(Operation):
+    """Rename keys in the input dictionary."""
+
+    def __init__(self, mapping: Dict[str, str], **kwargs):
+        super().__init__(**kwargs)
+        self.mapping = mapping
+
+    def call(self, *args, **kwargs) -> Dict:
+        """
+        Renames the keys in the input dictionary according to the mapping.
+        """
+        renamed = {self.mapping.get(k, k): v for k, v in kwargs.items()}
+        return renamed
+
+
+@ops_v2_registry("filter")
+class Filter(Operation):
+    """Filter keys in the input dictionary."""
+
+    def __init__(self, keys: List[str], **kwargs):
+        super().__init__(**kwargs)
+        self.keys = keys
+
+    def call(self, *args, **kwargs) -> Dict:
+        """
+        Filters the input dictionary to include only the specified keys.
+        """
+        filtered = {k: v for k, v in kwargs.items() if k in self.keys}
+        return filtered
