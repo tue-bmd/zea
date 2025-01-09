@@ -13,14 +13,14 @@ document.addEventListener("DOMContentLoaded", function () {
         .then(operations => {
             operations.forEach(op => {
                 const button = document.createElement("button");
-                button.innerText = `${op}`;
+                button.innerText = op.name;
                 button.onclick = () => addBlock(op);
                 operationsList.appendChild(button);
             });
         })
         .catch(error => console.error('Error fetching operations:', error));
 
-    function addBlock(name) {
+    function addBlock(op) {
         const id = `block-${Object.keys(blocks).length}`;
         const x = 50 + Object.keys(blocks).length * 120;
         const y = 100;
@@ -29,8 +29,12 @@ document.addEventListener("DOMContentLoaded", function () {
         block.classList.add("block");
         block.id = id;
         block.innerHTML = `
-            <span>${name}</span>
-            <button class="delete-btn" onclick="deleteBlock('${id}')">X</button>
+            <span>${op.name}</span>
+            <button class="toggle-params-btn">Show/Hide Parameters</button>
+            <div class="parameters" style="display: none;">
+                ${op.init_keys.map(key => `<label>${key}: <input type="text" data-key="${key}" /></label>`).join("")}
+            </div>
+            <button class="delete-btn" onclick="deleteBlock('${id}')" style="position: absolute; top: 0px; right: 0px; border-radius: 30%; width: 18px; height: 18px;">x</button>
         `;
         block.style.left = `${x}px`;
         block.style.top = `${y}px`;
@@ -39,14 +43,40 @@ document.addEventListener("DOMContentLoaded", function () {
 
         jsPlumbInstance.draggable(block);
 
-        // Add input endpoint
-        jsPlumbInstance.addEndpoint(block, {
-            isSource: false,
-            isTarget: true,
-            endpoint: "Dot",
-            anchor: "LeftMiddle",
-            maxConnections: 1
+        // Toggle parameters visibility
+        const toggleParamsBtn = block.querySelector(".toggle-params-btn");
+        const parametersDiv = block.querySelector(".parameters");
+        toggleParamsBtn.addEventListener("click", () => {
+            parametersDiv.style.display = parametersDiv.style.display === "none" ? "block" : "none";
         });
+
+        // Add input endpoints for multiple inputs
+        if (op.allow_multiple_inputs) {
+            jsPlumbInstance.addEndpoint(block, {
+                isSource: false,
+                isTarget: true,
+                endpoint: "Dot",
+                anchor: "TopLeft",
+                maxConnections: 1
+            });
+
+            jsPlumbInstance.addEndpoint(block, {
+                isSource: false,
+                isTarget: true,
+                endpoint: "Dot",
+                anchor: "BottomLeft",
+                maxConnections: 1
+            });
+        } else {
+            // Single input endpoint
+            jsPlumbInstance.addEndpoint(block, {
+                isSource: false,
+                isTarget: true,
+                endpoint: "Dot",
+                anchor: "LeftMiddle",
+                maxConnections: 1
+            });
+        }
 
         // Add output endpoint
         jsPlumbInstance.addEndpoint(block, {
@@ -54,10 +84,10 @@ document.addEventListener("DOMContentLoaded", function () {
             isTarget: false,
             endpoint: "Dot",
             anchor: "RightMiddle",
-            maxConnections: -1 // Unlimited connections
+            maxConnections: -1 // Unlimited outputs
         });
 
-        blocks[id] = { id, name, x, y };
+        blocks[id] = { id, name: op.name, parameters: op.init_keys.reduce((acc, key) => ({ ...acc, [key]: "" }), {}), x, y };
     }
 
     // Delete a block and its connections
@@ -92,10 +122,10 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 
-    // Prevent multiple connections to a single input
+    // Prevent multiple connections to a single input unless allowed
     jsPlumbInstance.bind("beforeDrop", function (info) {
         const targetEndpoint = info.targetEndpoint;
-        if (targetEndpoint.connections.length >= targetEndpoint.maxConnections) {
+        if (targetEndpoint && targetEndpoint.maxConnections !== -1 && targetEndpoint.connections.length >= targetEndpoint.maxConnections) {
             alert("This input already has a connection.");
             return false;
         }
@@ -104,15 +134,21 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function exportPipeline() {
         const pipelineConfig = {
-            blocks: Object.values(blocks),
+            blocks: Object.values(blocks).map(block => ({
+                id: block.id,
+                name: block.name,
+                parameters: block.parameters,
+                x: block.x,
+                y: block.y
+            })),
             connections: connections
         };
 
-        // Export as YAML (optional: you can also just log it or send it to the backend)
+        // Export as YAML
         const yaml = jsyaml.dump(pipelineConfig);
         console.log("Pipeline YAML:\n", yaml);
 
-        // Example: POST the pipeline config to the backend for saving
+        // POST the pipeline config to the backend
         fetch('/save_pipeline', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -125,4 +161,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Expose the export function globally
     window.exportPipeline = exportPipeline;
+
+    // Track changes to parameter inputs
+    canvas.addEventListener("input", function (event) {
+        const blockElement = event.target.closest(".block");
+        if (blockElement) {
+            const blockId = blockElement.id;
+            const key = event.target.dataset.key;
+            blocks[blockId].parameters[key] = event.target.value;
+        }
+    });
 });

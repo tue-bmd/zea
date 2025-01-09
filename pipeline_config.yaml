@@ -1,0 +1,90 @@
+blocks:
+- id: block-0
+  name: identity
+  parameters:
+    cache_inputs: ''
+    cache_outputs: ''
+    input_data_type: ''
+    jit_compile: ''
+    output_data_type: ''
+  x: 50
+  y: 100
+- id: block-1
+  name: merge
+  parameters: {}
+  x: 170
+  y: 100
+- id: block-2
+  name: identity
+  parameters:
+    cache_inputs: ''
+    cache_outputs: ''
+    input_data_type: ''
+    jit_compile: ''
+    output_data_type: ''
+  x: 290
+  y: 100
+- id: block-3
+  name: identity
+  parameters:
+    cache_inputs: ''
+    cache_outputs: ''
+    input_data_type: ''
+    jit_compile: ''
+    output_data_type: ''
+  x: 410
+  y: 100
+- id: block-4
+  name: identity
+  parameters:
+    cache_inputs: ''
+    cache_outputs: ''
+    input_data_type: ''
+    jit_compile: ''
+    output_data_type: ''
+  x: 530
+  y: 100
+- id: block-5
+  name: identity
+  parameters:
+    cache_inputs: ''
+    cache_outputs: ''
+    input_data_type: ''
+    jit_compile: ''
+    output_data_type: ''
+  x: 650
+  y: 100
+- id: block-6
+  name: stack
+  parameters:
+    axis: '0'
+    keys: raw_data
+  x: 770
+  y: 100
+- id: block-7
+  name: identity
+  parameters:
+    cache_inputs: ''
+    cache_outputs: ''
+    input_data_type: ''
+    jit_compile: ''
+    output_data_type: ''
+  x: 890
+  y: 100
+connections:
+- source: block-0
+  target: block-2
+- source: block-2
+  target: block-1
+- source: block-3
+  target: block-1
+- source: block-1
+  target: block-4
+- source: block-5
+  target: block-0
+- source: block-5
+  target: block-3
+- source: block-1
+  target: block-6
+- source: block-2
+  target: block-6
