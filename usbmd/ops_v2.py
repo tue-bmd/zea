@@ -21,6 +21,10 @@ log.warning("WARNING: This module is work in progress and may not work as expect
 # clear registry upon import
 ops_v2_registry.clear()
 
+
+MULTIPLE_INPUT_OPS = ["merge", "stack"]
+
+
 # TODO: Move this to Core?
 class DataTypes(enum.Enum):
     """Enum class for USBMD data types."""
@@ -57,6 +61,10 @@ class Operation(keras.Operation):
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
+
+        self.inputs = []  # Source(s) of input data (name of a previous operation)
+        self.allow_multiple_inputs = False  # Only single input allowed by default
+
         self.cache_inputs = cache_inputs
         self.cache_outputs = cache_outputs
 
@@ -402,10 +410,15 @@ class Identity(Operation):
         """Returns the input dictionary."""
         return kwargs
 
+
 ## Base Operations
 @ops_v2_registry("merge")
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.allow_multiple_inputs = True
 
     def call(self, *args, **kwargs) -> Dict:
         """
@@ -433,6 +446,7 @@ class Split(Operation):
         """
         return [kwargs.copy() for _ in range(self.n)]
 
+
 @ops_v2_registry("stack")
 class Stack(Operation):
     """Stack multiple data arrays along a new axis.
@@ -448,6 +462,7 @@ class Stack(Operation):
         super().__init__(**kwargs)
         self.keys = keys
         self.axis = axis
+        self.allow_multiple_inputs = True
 
     def call(self, *args, **kwargs) -> Dict:
         """
