@@ -7,6 +7,9 @@ https://echonet.github.io/dynamic/
 - **Date**: 20/12/2024
 """
 
+# pylint: disable=wrong-import-order
+# pylint: disable=ungrouped-imports
+
 import os
 
 # NOTE: should be `tensorflow` for EchoNetDynamic
