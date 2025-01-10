@@ -13,12 +13,14 @@ import os
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
+from usbmd import init_device
+
 init_device()
 
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
+from usbmd import log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.models.echonet import EchoNetDynamic
 from usbmd.utils.selection_tool import add_shape_from_mask
