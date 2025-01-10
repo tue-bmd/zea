@@ -554,28 +554,25 @@ class TFDatasetToKeras(TFDatasetAdapter):
 
     def __iter__(self):
         if keras.backend.backend() == "tensorflow":
-            iterator = iter(self.get_tf_dataset())
+            return iter(self.get_tf_dataset())
         elif keras.backend.backend() == "jax":
-            iterator = self.get_jax_iterator()
+            return self.get_jax_iterator()
         elif keras.backend.backend() == "torch":
-            iterator = self.get_torch_dataloader()
+            return self.get_torch_dataloader()
         elif keras.backend.backend() == "numpy":
-            iterator = self.get_numpy_iterator()
+            return self.get_numpy_iterator()
         else:
             raise ValueError(
                 f"Unsupported backend: {keras.backend.backend()}. "
                 "Please use one of the following: 'tensorflow', 'jax', 'torch', 'numpy'."
             )
-        return iterator
 
     def __len__(self):
         return self.num_batches
 
     def __getattr__(self, name):
         # Delegate all other unknown calls to the tf.data.Dataset object
-        attr = getattr(self._dataset, name)
-        if isinstance(attr, tf.data.Dataset):
-            return TFDatasetToKeras(attr)
+        return getattr(self._dataset, name)
 
 
 def h5_dataset_from_directory(
@@ -606,7 +603,7 @@ def h5_dataset_from_directory(
     drop_remainder: bool = False,
     cache: bool | str = False,
     prefetch: bool = True,
-    wrap_in_keras: bool = True,
+    wrap_in_keras: bool = False,
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -687,7 +684,7 @@ def h5_dataset_from_directory(
         cache (bool or str, optional): cache dataset. If a string is provided, caching will
             be done to disk with that filename. Defaults to False.
         prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
-        wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
+        wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to False.
 
     Returns:
         tf.data.Dataset: dataset
