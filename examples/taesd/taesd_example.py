@@ -7,8 +7,9 @@ TAESD model from: https://github.com/madebyollin/taesd
 
 import os
 
-# NOTE: should be `tensorflow` for TAESD
-os.environ["KERAS_BACKEND"] = "tensorflow"
+# NOTE: should be `tensorflow` or `jax`
+backend = "tensorflow"
+os.environ["KERAS_BACKEND"] = backend
 
 import matplotlib.pyplot as plt
 from keras import ops
@@ -23,7 +24,7 @@ if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
     data_root = data_paths["data_root"]
-    init_device("tensorflow")
+    init_device(backend=backend)
 
     n_imgs = 10
     val_dataset = h5_dataset_from_directory(
@@ -52,8 +53,8 @@ if __name__ == "__main__":
     output = model(batch[..., 0][..., None])
     # model.save_to_preset("./test_model_savings")
 
-    mse = ops.mean((output - batch) ** 2)
-    print("MSE: ", mse.numpy())
+    mse = ops.convert_to_numpy(ops.mean((output - batch) ** 2))
+    print("MSE: ", mse)
 
     output = (output + 1) / 2
     batch = (batch + 1) / 2
