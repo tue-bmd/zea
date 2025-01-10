@@ -30,7 +30,7 @@ if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
     data_root = data_paths["data_root"]
-    device = init_device("torch")
+    device = init_device(backend="torch")
 
     n_imgs = 10
     dtype = torch.float32
