@@ -22,7 +22,7 @@ log.warning("WARNING: This module is work in progress and may not work as expect
 ops_v2_registry.clear()
 
 
-MULTIPLE_INPUT_OPS = ["merge", "stack"]
+MULTIPLE_INPUT_OPS = ["merge", "stack", "concatenate"]
 
 
 # TODO: Move this to Core?
@@ -440,7 +440,7 @@ class Split(Operation):
         super().__init__(**kwargs)
         self.n = n
 
-    def call(self, *args, **kwargs) -> List[Dict]:
+    def call(self, **kwargs) -> List[Dict]:
         """
         Splits the input dictionary into n copies.
         """
@@ -474,6 +474,7 @@ class Stack(Operation):
         return kwargs
 
 
+@ops_v2_registry("concatenate")
 class Concatenate(Operation):
     """Concatenate multiple data arrays along an existing axis."""
 
@@ -501,7 +502,7 @@ class Rename(Operation):
         super().__init__(**kwargs)
         self.mapping = mapping
 
-    def call(self, *args, **kwargs) -> Dict:
+    def call(self, **kwargs) -> Dict:
         """
         Renames the keys in the input dictionary according to the mapping.
         """
@@ -523,3 +524,20 @@ class Filter(Operation):
         """
         filtered = {k: v for k, v in kwargs.items() if k in self.keys}
         return filtered
+
+
+class Output(Operation):
+    """Output operation. This operation is used to mark outputs in the pipeline.
+    Optionally, keys can be specified to only output a subset of the input dictionary. Otherwise
+    the entire input dictionary is returned.
+    """
+
+    def __init__(self, keys: List[str] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.keys = keys
+
+    def call(self, *args, **kwargs) -> Dict:
+        """Returns the input dictionary."""
+        if self.keys:
+            return {k: v for k, v in kwargs.items() if k in self.keys}
+        return kwargs
