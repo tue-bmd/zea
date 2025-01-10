@@ -182,7 +182,7 @@ from usbmd.scan import Scan
 from usbmd.utils import update_dictionary, safe_initialize_class
 from usbmd.utils.device import init_device
 
-device = init_device("torch", "auto:1")
+device = init_device("auto:1", "torch")
 
 # let's check if your usbmd version is up to date
 assert usbmd.__version__ >= "2.0", "Please update usbmd to version 2.0 or higher"
@@ -275,7 +275,7 @@ from usbmd.utils.selection_tool import add_shape_from_mask
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
 data_paths = set_data_paths()
-init_device("tensorflow")
+init_device()
 
 val_dataset = h5_dataset_from_directory(
     data_paths.data_root / "USBMD_datasets/CAMUS/val",

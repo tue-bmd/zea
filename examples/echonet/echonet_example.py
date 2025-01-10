@@ -13,6 +13,7 @@ import os
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
+init_device()
 
 import matplotlib.pyplot as plt
 from keras import ops
@@ -26,7 +27,6 @@ from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
-    init_device("tensorflow")
 
     n_imgs = 16
     val_dataset = h5_dataset_from_directory(

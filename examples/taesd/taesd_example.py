@@ -23,7 +23,7 @@ if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
     data_root = data_paths["data_root"]
-    init_device("tensorflow")
+    init_device()
 
     n_imgs = 10
     val_dataset = h5_dataset_from_directory(
