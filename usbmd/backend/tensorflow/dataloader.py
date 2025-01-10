@@ -35,6 +35,7 @@ import h5py
 import keras
 import numpy as np
 import tensorflow as tf
+from keras.src.trainers.data_adapters import TFDatasetAdapter
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
@@ -543,6 +544,40 @@ class Resizer:
         return x
 
 
+class TFDatasetToKeras(TFDatasetAdapter):
+    """
+    This class wraps a tf.data.Dataset object and allows it to be used with Keras backends.
+    """
+
+    def __init__(self, dataset):
+        super().__init__(dataset)
+
+    def __iter__(self):
+        if keras.backend.backend() == "tensorflow":
+            iterator = iter(self.get_tf_dataset())
+        elif keras.backend.backend() == "jax":
+            iterator = self.get_jax_iterator()
+        elif keras.backend.backend() == "torch":
+            iterator = self.get_torch_dataloader()
+        elif keras.backend.backend() == "numpy":
+            iterator = self.get_numpy_iterator()
+        else:
+            raise ValueError(
+                f"Unsupported backend: {keras.backend.backend()}. "
+                "Please use one of the following: 'tensorflow', 'jax', 'torch', 'numpy'."
+            )
+        return iterator
+
+    def __len__(self):
+        return self.num_batches
+
+    def __getattr__(self, name):
+        # Delegate all other unknown calls to the tf.data.Dataset object
+        attr = getattr(self._dataset, name)
+        if isinstance(attr, tf.data.Dataset):
+            return TFDatasetToKeras(attr)
+
+
 def h5_dataset_from_directory(
     directory,
     key: str,
@@ -571,6 +606,7 @@ def h5_dataset_from_directory(
     drop_remainder: bool = False,
     cache: bool | str = False,
     prefetch: bool = True,
+    wrap_in_keras: bool = True,
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -651,6 +687,7 @@ def h5_dataset_from_directory(
         cache (bool or str, optional): cache dataset. If a string is provided, caching will
             be done to disk with that filename. Defaults to False.
         prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
+        wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
 
     Returns:
         tf.data.Dataset: dataset
@@ -760,6 +797,9 @@ def h5_dataset_from_directory(
     # prefetch
     if prefetch:
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
+
+    if wrap_in_keras:
+        dataset = TFDatasetToKeras(dataset)
 
     return dataset
 
