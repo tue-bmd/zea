@@ -464,14 +464,33 @@ class Stack(Operation):
         self.axis = axis
         self.allow_multiple_inputs = True
 
-    def call(self, *args, **kwargs) -> Dict:
+    def call(self, **kwargs) -> Dict:
         """
         Stacks the inputs corresponding to the specified keys along the specified axis.
         If a list of axes is provided, the length must match the number of keys.
-        If an integer axis is provided, all inputs are stacked along the same axis.
         """
+        for key, axis in zip(self.keys, self.axis):
+            kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
+        return kwargs
 
-        raise NotImplementedError
+
+class Concatenate(Operation):
+    """Concatenate multiple data arrays along an existing axis."""
+
+    def __init__(self, keys: List[str], axis: int = 0, **kwargs):
+        super().__init__(**kwargs)
+        self.keys = keys
+        self.axis = axis
+
+    def call(self, **kwargs) -> Dict:
+        """
+        Concatenates the inputs corresponding to the specified keys along the specified axis.
+        """
+        for key, axis in zip(self.keys, self.axis):
+            kwargs[key] = keras.ops.concat(
+                [kwargs[key] for key in self.keys], axis=axis
+            )
+        return kwargs
 
 
 @ops_v2_registry("rename")
