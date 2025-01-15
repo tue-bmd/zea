@@ -107,7 +107,12 @@ def setup(
     config.data.user = set_data_paths(user_config, local=config.data.local)
 
     # Init GPU / CPU according to config
-    config.device = init_device(config.device, config.hide_devices)
+    config.device = init_device(
+          device=config.device, 
+          backend="auto", 
+          hide_devices=config.hide_devices,
+    )
+
 
     return config
 
