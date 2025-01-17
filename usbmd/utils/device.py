@@ -1,29 +1,27 @@
 """ Device utilities """
 
+import os
 from typing import Union
 
 from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
 
 
 def init_device(
-    backend: Union[str, None] = None,
     device: Union[str, int, list] = "auto:1",
+    backend: Union[str, None] = "auto",
     hide_devices: Union[int, list] = None,
+    allow_preallocate: bool = True,
     verbose: bool = True,
 ):
     """Selects a GPU or CPU device based on the config.
-    For PyTorch, this will return the device.
-    For TensorFlow, this will hide all other GPUs from the system
-    by setting the CUDA_VISIBLE_DEVICES.
 
     Args:
-        backend (str): String indicating which ml library to use. Can be
-            'torch', 'tensorflow', 'jax', 'numpy' or `None`.
+        backend (str): String indicating which backend to use. Can be
+            'torch', 'tensorflow', 'jax', 'numpy', `None` or "auto".
                 - When `None`, the function will select GPU(s) without specific features
-                for the ml library and thus will not import any ml library.
-                - Selecting Tensorflow will set memory growth, check if CUDA is available
-                and format the device string for Tensorflow.
-                - Selecting Torch will also check if CUDA is available.
+                for the backend and thus will not import any backend.
+                - When "auto", the function will select the backend based on the
+                `KERAS_BACKEND` environment variable.
                 - For numpy this function will return 'cpu'.
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
@@ -34,12 +32,18 @@ def init_device(
             little tensor cores to be useful for training, or when some GPUs
             are reserved for other tasks. Defaults to None, in which case no
             GPUs are hidden and all are available for use.
+        allow_preallocate (bool, optional): allow preallocation of memory.
+            Used for jax and tensorflow.
         verbose (bool, optional): print device selection. Defaults to True.
     Returns:
         device (str/int/list): selected device(s).
     """
     if hide_devices is not None:
         hide_gpus(hide_devices)
+
+    # Get backend from environment variable
+    if backend == "auto":
+        backend = os.environ.get("KERAS_BACKEND")
 
     # Init GPU / CPU according to config
     if backend == "torch":
@@ -51,12 +55,19 @@ def init_device(
         # pylint: disable=import-outside-toplevel
         from usbmd.backend.tensorflow.utils.gpu_config import get_device
 
-        device = get_device(device, verbose=verbose)
+        device = get_device(
+            device, verbose=verbose, allow_preallocate=allow_preallocate
+        )
     elif backend == "jax":
         # pylint: disable=import-outside-toplevel
-        from usbmd.backend.jax.utils.gpu_config import get_device
+        from usbmd.utils.gpu_utils import get_device
 
-        device = get_device(device, verbose=verbose)
+        # NOTE: JAX must not be imported before this point
+        if not allow_preallocate:
+            os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = False
+
+        selected_gpu_ids = get_device(device, verbose=verbose)
+        device = selected_gpu_ids_to_device(selected_gpu_ids, key="cuda")
     elif backend is None:
         # pylint: disable=import-outside-toplevel
         from usbmd.utils.gpu_utils import get_device
@@ -69,7 +80,3 @@ def init_device(
         raise ValueError(f"Unknown backend ({backend}) in config.")
 
     return device
-
-
-if __name__ == "__main__":
-    init_device("torch", "auto:1", hide_devices=None)

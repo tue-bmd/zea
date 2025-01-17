@@ -1,14 +1,13 @@
 """Example script for training deep learning based beamforming.
 
-Author(s): Ben Luijten
-Date: 09/12/2022
-
 Summary: This script trains a deep learning based beamformer (ABLE) on a single angle plane wave
 input, towards a multi angle plane wave target. As such, the target is created using the same scan
 parameters as the input, but with a different number of angles and DAS beamforming.
 
 This script should be compatible with plane wave data in USBMD format.
 
+- **Author(s)**     : Ben Luijten
+- **Date**          : 09/12/2022
 """
 
 import os
@@ -27,7 +26,7 @@ from usbmd.data import get_dataset
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.setup_usbmd import setup
-from usbmd.utils import update_dictionary, safe_initialize_class
+from usbmd.utils import safe_initialize_class, update_dictionary
 
 
 def train_beamformer(config):

@@ -3,9 +3,9 @@
 import numpy as np
 from keras import ops
 
+from usbmd.tensor_ops import patched_map
 from usbmd.utils.cache import cache_output
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
-from usbmd.tensor_ops import batched_map
 
 
 def tof_correction(data, grid, *args, patches=1, **kwargs):
@@ -24,7 +24,8 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
         )  # move n_pix to the first dimension
         return tof_corrected
 
-    tof_corrected = batched_map(tof_correction_patch, flatgrid, batch_size=patches)
+    tof_corrected = patched_map(tof_correction_patch, flatgrid, patches)
+
     tof_corrected = ops.moveaxis(
         tof_corrected, 1, 0
     )  # move n_tx to the first dimension
@@ -246,6 +247,8 @@ def calculate_delays(
                 t0_delays[tx],
                 tx_apodizations[tx],
                 probe_geometry,
+                focus_distances[tx],
+                polar_angles[tx],
                 sound_speed,
             ),
         )
@@ -426,6 +429,8 @@ def distance_Tx_generic(
     t0_delays,
     tx_apodization,
     probe_geometry,
+    focus_distance,
+    polar_angle,
     sound_speed=1540,
 ):
     """
@@ -474,15 +479,19 @@ def distance_Tx_generic(
 
     # Compute the distance between the elements and the pixels of shape
     # (n_pix, n_el)
-    dist = (
-        t0_delays[None] * sound_speed + ops.sqrt(dx**2 + dy**2 + dz**2) + offset[None]
-    )
+    dist = t0_delays[None] * sound_speed + ops.sqrt(dx**2 + dy**2 + dz**2)
 
-    # Compute the effective distance of the pixels to the wavefront by
-    # computing the smallest distance over all the elements. This is the wave
-    # front that reaches the pixel first and thus is the overal wavefront
-    # distance.
-    dist = ops.min(dist, 1)
+    # Compute the z-coordinate of the focal point
+    focal_z = ops.cos(polar_angle) * focus_distance
+
+    # Compute the effective distance of the pixels to the wavefront by computing the
+    # largest distance over all the elements when the pixel is behind the virtual
+    # source and the smallest distance otherwise.
+    dist = ops.where(
+        float(ops.sign(focus_distance)) * (grid[:, 2] - focal_z) < 0.0,
+        ops.min(dist - offset[None], 1),
+        ops.max(dist + offset[None], 1),
+    )
 
     return dist
 
