@@ -108,7 +108,9 @@ def setup(
 
     # Init GPU / CPU according to config
     config.device = init_device(
-        keras.backend.backend(), config.device, config.hide_devices
+        device=config.device,
+        backend="auto",
+        hide_devices=config.hide_devices,
     )
 
     return config

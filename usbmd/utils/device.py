@@ -7,8 +7,8 @@ from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
 
 
 def init_device(
-    backend: Union[str, None] = None,
     device: Union[str, int, list] = "auto:1",
+    backend: Union[str, None] = "auto",
     hide_devices: Union[int, list] = None,
     allow_preallocate: bool = True,
     verbose: bool = True,
@@ -17,9 +17,11 @@ def init_device(
 
     Args:
         backend (str): String indicating which backend to use. Can be
-            'torch', 'tensorflow', 'jax', 'numpy' or `None`.
+            'torch', 'tensorflow', 'jax', 'numpy', `None` or "auto".
                 - When `None`, the function will select GPU(s) without specific features
                 for the backend and thus will not import any backend.
+                - When "auto", the function will select the backend based on the
+                `KERAS_BACKEND` environment variable.
                 - For numpy this function will return 'cpu'.
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
@@ -38,6 +40,10 @@ def init_device(
     """
     if hide_devices is not None:
         hide_gpus(hide_devices)
+
+    # Get backend from environment variable
+    if backend == "auto":
+        backend = os.environ.get("KERAS_BACKEND")
 
     # Init GPU / CPU according to config
     if backend == "torch":
@@ -74,7 +80,3 @@ def init_device(
         raise ValueError(f"Unknown backend ({backend}) in config.")
 
     return device
-
-
-if __name__ == "__main__":
-    init_device("torch", "auto:1", hide_devices=None)
