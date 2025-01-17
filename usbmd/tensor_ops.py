@@ -10,6 +10,16 @@ from keras import ops
 from usbmd.utils import log
 
 
+def maybe_tf_function(func, *args, **kwargs):
+    """Wrap a function in a tf.function if the backend is tensorflow."""
+    if keras.backend.backend() == "tensorflow":
+        import tensorflow as tf  # pylint: disable=import-outside-toplevel
+
+        return tf.function(func, *args, **kwargs)
+    else:
+        return func
+
+
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
     """
     Adds salt and pepper noise to the input image.
@@ -271,6 +281,7 @@ def patched_map(f, xs, patches: int):
         return batched_map(f, xs, batch_size)
 
 
+@maybe_tf_function
 def batched_map(f, xs, batch_size=None):
     """
     Map a function over leading array axes.
