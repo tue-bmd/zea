@@ -1,11 +1,13 @@
 """
 TAESD model from: https://github.com/madebyollin/taesd
 
-Script by Wessel
+- **Author(s)**: Wessel van Nierop
+- **Date**: 20/11/2024
 """
 
 import os
 
+# NOTE: should be `tensorflow` or `jax`
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
 import matplotlib.pyplot as plt
@@ -13,19 +15,18 @@ from keras import ops
 
 from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
-from usbmd.backend.tensorflow.models.taesd import TinyDecoder, TinyEncoder
+from usbmd.models.taesd import TinyAutoencoder
 from usbmd.utils import get_date_string
 from usbmd.utils.visualize import plot_image_grid
 
 if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
-    data_root = data_paths["data_root"]
-    init_device("tensorflow")
+    init_device()
 
     n_imgs = 10
     val_dataset = h5_dataset_from_directory(
-        data_root / "USBMD_datasets/CAMUS/val",
+        data_paths.data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,
         shuffle=True,
@@ -36,29 +37,22 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    # Get model
-    encoder = TinyEncoder()
-    decoder = TinyDecoder()
+    presets = list(TinyAutoencoder.presets.keys())
+    log.info(f"Available built-in usbmd presets for TAESD: {presets}")
+
+    model = TinyAutoencoder.from_preset("taesdxl")
+    # model = TinyAutoencoder.from_preset("hf://usbmd/taesdxl")
+    # model = TinyAutoencoder.from_preset("/mnt/z/Ultrasound-BMd/pretrained/taesdxl")
+    # model = TinyAutoencoder.from_preset("./test_model_savings")
 
     batch = next(iter(val_dataset))
     batch = ops.concatenate([batch, batch, batch], axis=-1)  # grayscale to RGB
 
-    encoded = encoder(batch)
+    output = model(batch[..., 0][..., None])
+    # model.save_to_preset("./test_model_savings")
 
-    # NOTE: Here you can compress the encoding a little bit more by going
-    # to uint8 like in the original model
-    # https://github.com/huggingface/diffusers/blob/cd30820/src/diffusers/models/autoencoders/autoencoder_tiny.py?plain=1#L336-L342 # pylint: disable=line-too-long
-
-    output = decoder(encoded)
-
-    mse = ops.mean((output - batch) ** 2)
-    print("MSE: ", mse.numpy())
-
-    batch = ops.image.rgb_to_grayscale(batch, data_format="channels_last")
-    output = ops.image.rgb_to_grayscale(output, data_format="channels_last")
-
-    batch = ops.squeeze(batch, axis=-1)
-    output = ops.squeeze(output, axis=-1)
+    mse = ops.convert_to_numpy(ops.mean((output - batch) ** 2))
+    print("MSE: ", mse)
 
     output = (output + 1) / 2
     batch = (batch + 1) / 2

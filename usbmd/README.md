@@ -1,33 +1,52 @@
 <!-- This is the readme for the pdoc documentation (used as header in index.html) -->
-# Ultrasound toolbox
+# usbmd <img src="../docs/static/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
 
-The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts.
+The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the full documentation [here](http://131.155.125.142:6001/) (only available within the TU/e network).
+
 The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox. This repository is being maintained by researchers from the [BM/d lab](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab/) at Eindhoven University of Technology. Currently for [internal](LICENSE) use only.
 
 In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 
-## Table of contents
+Currently usbmd offers:
 
-* [Quick setup](#quick-setup)
-* [Data](#data)
-* [How to use with Verasonics](#how-to-use-with-verasonics)
-* [Detailed installation guide](#detailed-installation-guide)
-* [How to contribute](#how-to-contribute)
+- Complete ultrasound signal processing and image reconstruction pipeline.
+- A collection of models for ultrasound image and signal processing.
+- Multi-Backend Support via [Keras3](https://keras.io/keras_3/): You can use [PyTorch](https://github.com/pytorch/pytorch), [TensorFlow](https://github.com/tensorflow/tensorflow), or [JAX](https://github.com/google/jax)
 
-## Quick setup
 
-### Installation
+## Installation
 
-This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](../pyproject.toml) file is located and run the following command from terminal:
+Install options can be found in the [Install.md](Install.md) file.
+
+## Example usage
+After installation, you can use the package as follows in your own project. `usbmd` is written in Python on top of [Keras 3](https://keras.io/about/). This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend ("jax", "tensorflow", "torch" or "numpy"), which means you can use `usbmd` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the `KERAS_BACKEND` environment variable, either in your code or in your terminal. The default backend used by `usbmd` is "numpy", if no backend is specified before importing `usbmd`. This will not allow you to use the GPU for processing.
+
 
 ```shell
-pip install -e .[opencv-python-headless]
+# set the backend in your terminal
+export KERAS_BACKEND="jax"
 ```
 
-Other install options can be found in the [Install.md](Install.md) file.
+```python
+# or set the backend in your code at the top of your script
+import os
+os.environ["KERAS_BACKEND"] = "jax"
+```
 
-### Getting started
+After setting the backend you can simply import `usbmd`
+```python
+import usbmd
+```
+
+> **Note:** You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install. For example, if you choose "jax" as your backend, make sure to install the necessary JAX libraries. The provided docker image (see [Install.md](Install.md)) has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running `pip install usbmd[jax]` although this is not extensively tested (yet).
+
+More complete examples can be found in the [examples](examples) folder.
+
+## Installation
+
+For install options see the [Install.md](Install.md).
+
+## Getting started
 
 #### Importing
 
@@ -62,10 +81,10 @@ from usbmd.utils.device import init_device
 import keras
 
 # initialize device manually
-device = init_device("torch", "auto:1", hide_devices=None)
+device = init_device("auto:1", "torch", hide_devices=None)
 
 # or using your config
-device = init_device(keras.backend.backend(), config.device, hide_devices=config.hide_devices)
+device = init_device(config.device, hide_devices=config.hide_devices)
 ```
 
 Alternatively, you can use the `setup` function using a config file, which will initialize the device and setup the data paths:
@@ -120,8 +139,7 @@ data_file.hdf5                  // [unit], [array shape], [type]
 
 #### Data Flow Diagram
 
-![Data flow](../docs/usbmd/diagrams_dataflow.png)
-![Data flow](diagrams_dataflow.png)
+![Data flow](../docs/static/diagrams_dataflow.png)
 
 #### Data types
 

@@ -1,6 +1,6 @@
 
 <!-- This is the readme for the github page (more complete readme for pdocs can be found in usmbd/README.md) -->
-# Ultrasound toolbox
+# usbmd <img src="docs/static/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
 
 The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the full documentation [here](http://131.155.125.142:6001/) (only available within the TU/e network).
 
@@ -8,23 +8,40 @@ The idea of this toolbox is that it is self-sustained, meaning ultrasound resear
 
 In case of any questions, feel free to [contact](mailto:t.s.w.stevens@tue.nl).
 
+Currently usbmd offers:
+
+- Complete ultrasound signal processing and image reconstruction [pipeline](usbmd/ops.py).
+- A collection of [models](usbmd/models) for ultrasound image and signal processing.
+- Multi-Backend Support via [Keras3](https://keras.io/keras_3/): You can use [PyTorch](https://github.com/pytorch/pytorch), [TensorFlow](https://github.com/tensorflow/tensorflow), or [JAX](https://github.com/google/jax)
+
+
 ## Installation
 
 ### Editable install
 
 This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from terminal:
+Run the following commands from terminal to checkout the toolbox and install:
 
 ```shell
+# checkout and move into directory
+git clone git@github.com:tue-bmd/ultrasound-toolbox.git
+cd ultrasound-toolbox
+# editable install
 pip install -e .[opencv-python-headless]
 ```
 
-Other install options can be found in the [Install.md](Install.md) file.
+> [!TIP]
+> Other install options can be found in the [Install.md](Install.md) file.
 
+
+> [!IMPORTANT]
+> You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the [Jax installation guide](https://jax.readthedocs.io/en/latest/installation.html). The easiest way to set up your environment is through the provided docker image (see [Install.md](Install.md#docker)), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running `pip install usbmd[jax]` although this is not extensively tested (yet).
 
 ## Example usage
-After installation, you can use the package as follows in your own project. `usbmd` is written in Python on top of [Keras 3](https://keras.io/about/). This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend ("jax", "tensorflow", "torch" or "numpy"), which means you can use `usbmd` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the `KERAS_BACKEND` environment variable, either in your code or in your terminal. The default backend used by `usbmd` is "numpy", if no backend is specified before importing `usbmd`. This will not allow you to use the GPU for processing.
+> [!TIP]
+> A more complete set of examples can be found in the [examples](examples) folder.
 
+After installation, you can use the package as follows in your own project. `usbmd` is written in Python on top of [Keras 3](https://keras.io/about/). This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend ("jax", "tensorflow", "torch" or "numpy"), which means you can use `usbmd` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the `KERAS_BACKEND` environment variable, either in your code or in your terminal. The default backend used by `usbmd` is "numpy", if no backend is specified before importing `usbmd`. This will not allow you to use the GPU for processing.
 
 ```shell
 # set the backend in your terminal
@@ -41,10 +58,6 @@ After setting the backend you can simply import `usbmd`
 ```python
 import usbmd
 ```
-
-> **Note:** You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install. For example, if you choose "jax" as your backend, make sure to install the necessary JAX libraries. The provided docker image (see [Install.md](Install.md)) has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running `pip install usbmd[jax]` although this is not extensively tested (yet).
-
-More complete examples can be found in the [examples](examples) folder.
 
 The easiest way to get started is to use the Interface class
 ```python
@@ -92,7 +105,12 @@ users_paths = "users.yaml"
 config = setup(config_path, users_paths, create_user=True)
 
 # we now manually point to our data
-data_path = "Z:/Ultrasound-BMd/data/USBMD_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
+data_root = config.data.user.data_root
+user = config.data.user.username
+
+print(f"\n🔔 Hi {user}! You are using data from {data_root}\n")
+
+data_path = data_root / "USBMD_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
 
 # only 1 frame in PICMUS to be selected
 selected_frames = [0]
@@ -170,7 +188,7 @@ from usbmd.scan import Scan
 from usbmd.utils import update_dictionary, safe_initialize_class
 from usbmd.utils.device import init_device
 
-device = init_device("torch", "auto:1")
+device = init_device()
 
 # let's check if your usbmd version is up to date
 assert usbmd.__version__ >= "2.0", "Please update usbmd to version 2.0 or higher"
@@ -242,4 +260,61 @@ data = dataset[(file_idx, frame_idx)]
 process.set_pipeline(operation_chain=operation_chain, with_batch_dim=True)
 
 images = process.run(data)
+```
+
+## Models
+
+`usbmd` also contains a collection of models that can be used for various tasks. An example of how to use the `EchoNetDynamic` model is shown below. Simply use the `from_preset` method to load a model with a specific preset. All models can be found in the `usbmd.models` module.
+
+```python
+import os
+
+# NOTE: should be `tensorflow` for EchoNetDynamic
+os.environ["KERAS_BACKEND"] = "tensorflow"
+
+from keras import ops
+import matplotlib.pyplot as plt
+
+from usbmd import init_device, log, set_data_paths
+from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
+from usbmd.models.echonet import EchoNetDynamic
+from usbmd.utils.selection_tool import add_shape_from_mask
+from usbmd.utils.visualize import plot_image_grid, set_mpl_style
+
+data_paths = set_data_paths()
+init_device()
+
+val_dataset = h5_dataset_from_directory(
+    data_paths.data_root / "USBMD_datasets/CAMUS/val",
+    key="data/image",
+    batch_size=16,
+    shuffle=True,
+    image_size=[256, 256],
+    resize_type="resize",
+    image_range=[-60, 0],
+    normalization_range=[-1, 1],
+    seed=42,
+)
+
+presets = list(EchoNetDynamic.presets.keys())
+log.info(f"Available built-in usbmd presets for EchoNet: {presets}")
+
+model = EchoNetDynamic.from_preset("echonet-dynamic")
+
+batch = next(iter(val_dataset))
+
+masks = model(batch)
+
+masks = ops.squeeze(masks, axis=-1)
+masks = ops.convert_to_numpy(masks)
+
+set_mpl_style()
+
+# create figure of images in batch
+fig, _ = plot_image_grid(batch)
+axes = fig.axes[:batch.shape[0]]
+for ax, mask in zip(axes, masks):
+    # add segmentation on top of image in figure
+    add_shape_from_mask(ax, mask, color="red", alpha=0.5)
+plt.show()
 ```

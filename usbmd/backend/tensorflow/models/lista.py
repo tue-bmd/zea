@@ -106,8 +106,9 @@ class Prox(Layer):
         )
         super().build(input_shape)
 
-    def call(self, inputs, *args, **kwargs):
-        # pylint: disable=missing-function-docstring,arguments-differ
+    def call(
+        self, inputs, *args, **kwargs
+    ):  # pylint: disable=arguments-differ, unused-argument, missing-function-docstring
         return ops.sign(inputs) * ops.relu(ops.abs(inputs) - ops.softplus(self.alpha))
 
     def compute_output_shape(self, input_shape):

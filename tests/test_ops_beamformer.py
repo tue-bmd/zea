@@ -29,11 +29,7 @@ def _get(reconstruction_mode):
         n_ax=2047,
         sampling_frequency=probe_parameters["sampling_frequency"],
         center_frequency=probe_parameters["center_frequency"],
-        angles=np.array(
-            [
-                0,
-            ]
-        ),
+        polar_angles=np.array([0.0]),
     )
     scan._focus_distances = (
         np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
