@@ -188,7 +188,7 @@ from usbmd.scan import Scan
 from usbmd.utils import update_dictionary, safe_initialize_class
 from usbmd.utils.device import init_device
 
-device = init_device("auto:1", "torch")
+device = init_device()
 
 # let's check if your usbmd version is up to date
 assert usbmd.__version__ >= "2.0", "Please update usbmd to version 2.0 or higher"
@@ -269,6 +269,7 @@ images = process.run(data)
 ```python
 import os
 
+# NOTE: should be `tensorflow` for EchoNetDynamic
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
 from keras import ops
