@@ -7,7 +7,7 @@ TAESD model from: https://github.com/madebyollin/taesd
 
 import os
 
-# NOTE: should be `tensorflow` for TAESD
+# NOTE: should be `tensorflow` or `jax`
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
 import matplotlib.pyplot as plt
@@ -51,8 +51,8 @@ if __name__ == "__main__":
     output = model(batch[..., 0][..., None])
     # model.save_to_preset("./test_model_savings")
 
-    mse = ops.mean((output - batch) ** 2)
-    print("MSE: ", mse.numpy())
+    mse = ops.convert_to_numpy(ops.mean((output - batch) ** 2))
+    print("MSE: ", mse)
 
     output = (output + 1) / 2
     batch = (batch + 1) / 2
