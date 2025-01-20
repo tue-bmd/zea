@@ -1,5 +1,8 @@
 """LPIPS model for perceptual similarity.
 
+See original code: https://github.com/richzhang/PerceptualSimilarity
+As well as the paper: https://arxiv.org/abs/1801.03924
+
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 20/01/2025
 """
