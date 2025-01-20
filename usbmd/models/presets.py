@@ -46,3 +46,14 @@ echonet_dynamic_presets = {
         "hf_handle": "hf://usbmd/echonet-dynamic",
     },
 }
+
+lpips_presets = {
+    "lpips": {
+        "metadata": {
+            "description": "Learned Perceptual Image Patch Similarity (LPIPS) metric.",
+            "params": 14716160,
+            "path": "lpips",
+        },
+        "hf_handle": "hf://usbmd/lpips",
+    },
+}
