@@ -13,6 +13,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import keras
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from keras import ops
 
 from usbmd import init_device, log, set_data_paths
@@ -24,9 +25,9 @@ if __name__ == "__main__":
     TEST_WITH_TORCH = False  # set to True to test with torch variant
     # Set up data paths and device
     data_paths = set_data_paths()
-    init_device()
+    device = init_device()
 
-    n_imgs = 16
+    n_imgs = 9
     val_dataset = h5_dataset_from_directory(
         data_paths.data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
@@ -42,43 +43,60 @@ if __name__ == "__main__":
     model = LPIPS.from_preset("lpips")
 
     batch = next(iter(val_dataset))
-    # to rgb
-    batch = ops.tile(batch, [1, 1, 1, 3])
+    batch = ops.tile(batch, [1, 1, 1, 3])  # to RGB
 
     reference_image = batch[0]
     example_images = batch[1:]
 
     # Compute LPIPS similarity between reference image and example images
-    reference_images = ops.expand_dims(reference_image, axis=0)
-    reference_images = ops.tile(reference_images, [n_imgs - 1, 1, 1, 1])
-    lpips_scores = model((reference_images, example_images))
+
+    # process one at a time (so we consume less memory)
+    lpips_scores = []
+    for example_image in example_images:
+        score = model((reference_image, example_image))
+        lpips_scores.append(score)
+    lpips_scores = ops.concatenate(lpips_scores, axis=0)
+
     lpips_scores = ops.convert_to_numpy(lpips_scores)
 
     if TEST_WITH_TORCH:
-        assert keras.backend.backend() == "torch", "This test requires torch backend."
+        # assert keras.backend.backend() == "torch", "This test requires torch backend."
         # test with torch variant to see if it is exactly the same
         # note that backend should be set to "torch" for this to work
         from torchmetrics.image import LearnedPerceptualImagePatchSimilarity
 
         torch_lpips = LearnedPerceptualImagePatchSimilarity(
-            net_type="vgg", normalize=False, reduction="mean"
+            net_type="vgg",
+            normalize=False,
         )
 
         # channel first
-        reference_images_torch = ops.transpose(reference_images, (0, 3, 1, 2))
+        reference_image_torch = ops.transpose(reference_image, (2, 0, 1))
         example_images_torch = ops.transpose(example_images, (0, 3, 1, 2))
 
-        torch_lpips.to(reference_images_torch.device)
-        torch_lpips_scores = torch_lpips(
-            reference_images_torch,
-            example_images_torch,
-        )
+        reference_image_torch = ops.convert_to_numpy(reference_image_torch)
+        example_images_torch = ops.convert_to_numpy(example_images_torch)
+        reference_image_torch = torch.tensor(reference_image_torch).to("cpu")
+        example_images_torch = torch.tensor(example_images_torch).to("cpu")
+
+        torch_lpips = torch_lpips.to("cpu")
+
+        # process in batches
+        torch_lpips_scores = []
+        for example_image in example_images_torch:
+            score = torch_lpips(
+                reference_image_torch[None, ...], example_image[None, ...]
+            )
+            torch_lpips_scores.append(score)
         torch_lpips_scores = ops.convert_to_numpy(torch_lpips_scores)
 
         # check if the scores are the same
-        assert np.mean(lpips_scores) == torch_lpips_scores
+        np.testing.assert_array_almost_equal(
+            lpips_scores, torch_lpips_scores, decimal=4
+        ), "LPIPS scores are not the same as the torch variant. Please report this issue."
         log.success("LPIPS scores are the same as the torch variant.")
 
+    # plotting
     set_mpl_style()
 
     batch = ops.convert_to_numpy(batch)
