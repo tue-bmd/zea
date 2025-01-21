@@ -6,7 +6,7 @@ import numpy as np
 from usbmd.core import Object
 
 
-class TestObj(Object):
+class SomeObj(Object):
     """Test object with random data"""
 
     def __init__(self):
@@ -20,10 +20,10 @@ def test_equality():
     """Test the equality of the Object class"""
     # Create 3 objects, 2 of which are equal
     np.random.seed(0)
-    obj1 = TestObj()
+    obj1 = SomeObj()
     np.random.seed(0)
-    obj2 = TestObj()
-    obj3 = TestObj()
+    obj2 = SomeObj()
+    obj3 = SomeObj()
 
     assert obj1 == obj2
     assert obj1 != obj3
@@ -33,10 +33,10 @@ def test_timing():
     """Test the timing of the equality comparison"""
     # Create 3 objects, 2 of which are equal
     np.random.seed(0)
-    obj1 = TestObj()
+    obj1 = SomeObj()
     np.random.seed(0)
-    obj2 = TestObj()
-    obj3 = TestObj()
+    obj2 = SomeObj()
+    obj3 = SomeObj()
 
     print(f"obj1 == obj2: {obj1 == obj2}")
     print(f"obj1 == obj3: {obj1 == obj3}")
