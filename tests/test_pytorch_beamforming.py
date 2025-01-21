@@ -26,7 +26,9 @@ sys.path.append(str(wd))
 
 
 @pytest.mark.parametrize("reconstruction_mode", ["generic", "pw"])
-def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
+def test_das_beamforming(
+    reconstruction_mode, debug=False, compare_gt=True, verbose=False
+):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
 
@@ -87,7 +89,8 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
     device = config.device
     if not device == "cpu" and not torch.cuda.is_available():
         device = "cpu"
-        print("Warning: CUDA not available. Using CPU instead.")
+        if verbose:
+            print("Warning: CUDA not available. Using CPU instead.")
 
     # Perform beamforming and convert to numpy array
     outputs = on_device_torch(beamformer, inputs, device=device, return_numpy=True)
@@ -113,7 +116,8 @@ def test_das_beamforming(reconstruction_mode, debug=False, compare_gt=True):
     y_pred = y_pred / y_pred.max()
 
     MSE = np.mean(np.square(y_true - y_pred))
-    print(f"MSE: {MSE}")
+    if verbose:
+        print(f"MSE: {MSE}")
 
     # Free all GPU memory
     torch.cuda.empty_cache()
