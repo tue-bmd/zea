@@ -35,7 +35,13 @@ precho "Current directory: $(pwd)"
 
 # Update poetry lockfile
 precho "Updating poetry lockfile..."
-poetry lock --no-interaction
+if command -v poetry &> /dev/null; then
+    # If poetry is installed, use it
+    poetry lock --no-interaction
+else
+    # If poetry is not installed, use docker
+    docker run --rm -v $(pwd):/ultrasound-toolbox --user "$(id -u):$(id -g)" usbmd/base:latest sudo /opt/poetry-venv/bin/python3 -m poetry lock --no-interaction
+fi
 
 # Get usbmd version
 version=$(awk -F'"' '/__version__/ {print $2}' usbmd/__init__.py)
