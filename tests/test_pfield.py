@@ -61,7 +61,7 @@ def test_pfield(scantype, debug=False):
 
     assert scan._pfield is None, "scan._pfield is None when not called yet"
 
-    pfield_out = scan.pfield
+    _ = scan.pfield
 
     # plot results
     if debug:
