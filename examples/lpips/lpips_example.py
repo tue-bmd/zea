@@ -10,7 +10,6 @@ import os
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -60,7 +59,6 @@ if __name__ == "__main__":
     lpips_scores = ops.convert_to_numpy(lpips_scores)
 
     if TEST_WITH_TORCH:
-        # assert keras.backend.backend() == "torch", "This test requires torch backend."
         # test with torch variant to see if it is exactly the same
         # note that backend should be set to "torch" for this to work
         from torchmetrics.image import LearnedPerceptualImagePatchSimilarity
@@ -92,8 +90,14 @@ if __name__ == "__main__":
 
         # check if the scores are the same
         np.testing.assert_array_almost_equal(
-            lpips_scores, torch_lpips_scores, decimal=4
-        ), "LPIPS scores are not the same as the torch variant. Please report this issue."
+            lpips_scores,
+            torch_lpips_scores,
+            decimal=4,
+            err_msg=(
+                "LPIPS scores are not the same as the torch variant. "
+                "Please report this issue."
+            ),
+        )
         log.success("LPIPS scores are the same as the torch variant.")
 
     # plotting
