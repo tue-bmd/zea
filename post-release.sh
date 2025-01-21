@@ -6,7 +6,7 @@
 
 # Run this script on the linux server where the docker images are built.
 # Depends on: docker, apptainer, scp, awk and poetry
-# Run this script using `./post-release.sh <SNELLIUS_USER> &`
+# Run this script using `./post-release.sh <SNELLIUS_USER>`
 
 # Constants
 TMP_USBMD_IMAGE_TAR=/tmp/usbmd.tar
