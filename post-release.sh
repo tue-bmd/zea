@@ -3,7 +3,7 @@
 # Update usbmd version in __init__.py
 
 # Run this script on the linux server where the docker images are built.
-# Depends on: docker, apptainer, scp and poetry
+# Depends on: docker, apptainer, scp, awk and poetry
 # ADVICE: run this script using `nohup ./post-release.sh &`
 
 TMP_USBMD_IMAGE_TAR=/tmp/usbmd.tar
@@ -13,10 +13,10 @@ REPO_DIR=~/ultrasound-toolbox
 
 # Update lockfile
 cd $REPO_DIR
-poetry lock
+poetry lock --no-interaction
 
 # Get usbmd version
-version=$(pip show usbmd | grep Version | cut -d ' ' -f 2)
+version=$(awk -F'"' '/__version__/ {print $2}' usbmd/__init__.py)
 
 # Build images
 docker build . -t usbmd/base:v$version
