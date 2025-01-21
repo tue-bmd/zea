@@ -1,6 +1,7 @@
 """ Tests for the core Object class."""
 
 import timeit
+
 import numpy as np
 
 from usbmd.core import Object
@@ -31,6 +32,8 @@ def test_equality():
 
 def test_timing():
     """Test the timing of the equality comparison"""
+    # TODO: this test only prints, no assertions
+
     # Create 3 objects, 2 of which are equal
     np.random.seed(0)
     obj1 = SomeObj()

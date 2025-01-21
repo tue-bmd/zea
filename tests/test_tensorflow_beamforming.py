@@ -31,7 +31,7 @@ sys.path.append(str(wd))
     [("generic", None), ("generic", 4), ("pw", None), ("pw", 4)],
 )
 def test_das_beamforming(
-    reconstruction_mode, patches, debug=False, compare_gt=True, jit=False
+    reconstruction_mode, patches, debug=False, compare_gt=True, jit=False, verbose=False
 ):
     """Performs DAS beamforming on random data to verify that no errors occur. Does
     not check correctness of the output.
@@ -119,7 +119,8 @@ def test_das_beamforming(
     y_pred = y_pred / y_pred.max()
 
     MSE = np.mean(np.square(y_true - y_pred))
-    print(f"MSE: {MSE}")
+    if verbose:
+        print(f"MSE: {MSE}")
 
     # Free all GPU memory
     keras.backend.clear_session()
