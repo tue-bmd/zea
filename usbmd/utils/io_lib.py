@@ -313,7 +313,9 @@ def search_file_tree(
         else:
             file_shapes = []
             for file_path in tqdm.tqdm(
-                absolute_file_paths, desc="Getting number of frames in each hdf5 file"
+                absolute_file_paths,
+                desc="Getting number of frames in each hdf5 file",
+                disable=not verbose,
             ):
                 file_shapes.append(_get_shape_hdf5_file(file_path, hdf5_key_for_length))
 
