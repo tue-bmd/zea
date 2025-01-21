@@ -307,7 +307,7 @@ class DataSet:
 class USBMDDataSet(DataSet):
     """Class to read dataset in USBMD format."""
 
-    def __init__(self, config, validate=True):
+    def __init__(self, config, validate=True, verbose=True):
         """Initializes the USBMDDataSet class.
 
         Args:
@@ -315,6 +315,7 @@ class USBMDDataSet(DataSet):
         """
         self.config = config
         self.dtype = config.dtype
+        self.verbose = verbose
 
         if "user" in config and config.user is not None:
             self.data_root = Path(config.user["data_root"]) / config["dataset_folder"]
@@ -474,6 +475,7 @@ class USBMDDataSet(DataSet):
             self.file_paths,
             total=len(self),
             desc="Checking dataset files on validity (USBMD format)",
+            disable=not self.verbose,
         ):
             try:
                 validate_dataset(file_path)

@@ -166,6 +166,7 @@ class GenerateDataSet:
         pbar = tqdm.tqdm(
             total=total_num_frames,
             desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
+            disable=not self.verbose,
         )
         for idx in range(len(self.dataset)):
             try:
