@@ -64,7 +64,7 @@ user_config3 = {
     "user_config",
     [user_config0, user_config1, user_config2, user_config3],
 )
-def test_set_data_paths(tmp_path, user_config):
+def test_set_data_paths(user_config):
     """Test set data paths"""
 
     for local in [True, False]:
