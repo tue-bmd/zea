@@ -10,8 +10,6 @@ from pathlib import Path
 import papermill as pm
 import pytest
 
-VERBOSE = False
-
 # Find all notebooks in the folder examples
 notebook_paths = set(Path("examples").rglob("*.ipynb"))
 
@@ -21,8 +19,7 @@ notebooks_to_remove = set([Path("examples", "notebooks")])
 # Filter out the undesired notebook names
 notebook_paths = notebook_paths - notebooks_to_remove
 
-if VERBOSE:
-    print(f"Found {len(notebook_paths)} notebooks to test.")
+print(f"Found {len(notebook_paths)} notebooks to test.")
 
 
 @pytest.mark.parametrize("notebook_path", notebook_paths, ids=lambda x: x.name)
