@@ -4,7 +4,7 @@ The official documentation for the Python package `usbmd` - a convenient ultraso
 .. include:: ./README.md
 """
 
-__version__ = "2.1.1"
+__version__ = "2.2.0"
 
 import inspect
 import os
