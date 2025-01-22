@@ -78,10 +78,10 @@ docker build --build-arg KERAS3=True . -t usbmd/keras3:$VERSION
 
 # Tag images
 docker tag usbmd/base:$VERSION usbmd/base:latest
-docker tag usbmd/keras3:$version usbmd/keras3:latest
+docker tag usbmd/keras3:$VERSION usbmd/keras3:latest
 
 # Update image on snellius
 precho "Updating images on snellius..."
 docker save -o $TMP_USBMD_IMAGE_TAR usbmd/keras3:latest # save docker image to file.
 apptainer build $TMP_USBMD_IMAGE_SIF docker-archive://$TMP_USBMD_IMAGE_TAR # convert docker image to apptainer image
-scp $TMP_USBMD_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/usbmd-keras3-$version.sif # copy apptainer image to snellius
+scp $TMP_USBMD_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/usbmd-keras3-$VERSION.sif # copy apptainer image to snellius
