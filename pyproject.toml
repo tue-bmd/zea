@@ -22,6 +22,7 @@ authors = [
     "Ruud van Sloun <r.j.g.v.sloun@tue.nl>",
     "Simon Penninga <s.w.penninga@tue.nl>",
     "Louis van Harten <l.d.v.harten@tue.nl>",
+    "Noortje Schueler <n.i.p.schueler@tue.nl>",
 ]
 readme = "README.md"
 homepage = "https://github.com/tue-bmd/ultrasound-toolbox/"
