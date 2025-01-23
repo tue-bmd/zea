@@ -197,7 +197,7 @@ class H5Generator:
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
         file_name, key, indices = indices
-        with h5py.File(file_name, "r") as file:
+        with h5py.File(file_name, "r", locking=False) as file:
             # Convert any range objects in indices to lists
             processed_indices = tuple(
                 list(idx) if isinstance(idx, range) else idx for idx in indices
