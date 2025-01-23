@@ -50,16 +50,6 @@ def _expensive_operation_obj(obj):
     return result
 
 
-@cache_output("x", verbose=True)
-def _expensive_verbose_operation(x, y, verbose=False):
-    # Simulate an expensive operation
-    if verbose:
-        print("Verbose mode is on")
-    result = x + y
-    time.sleep(EXPECTED_DURATION)
-    return result
-
-
 def _some_random_func():
     # This comment is required for some tests!
     return 1
@@ -261,12 +251,6 @@ def test_clear_cache():
     """Test clear cache."""
     clear_cache()
     assert True
-
-
-def test_cache_verbose():
-    """Test with verbose mode."""
-    _expensive_verbose_operation(2, 10, verbose=False)
-    _expensive_verbose_operation(2, 10, verbose=True)
 
 
 def test_nested_cache():

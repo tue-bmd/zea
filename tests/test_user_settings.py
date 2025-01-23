@@ -6,7 +6,7 @@ import socket
 
 import pytest
 
-from usbmd.datapaths import set_data_paths
+from usbmd.datapaths import NoYamlFileError, UnknownUsernameWarning, set_data_paths
 
 user_config0 = {
     getpass.getuser(): {
@@ -62,9 +62,24 @@ user_config3 = {
 
 @pytest.mark.parametrize(
     "user_config",
-    [user_config0, user_config1, user_config2, user_config3, "users.test.yaml"],
+    [user_config0, user_config1, user_config2, user_config3],
 )
-def test_set_data_paths(tmp_path, user_config):
+def test_set_data_paths(user_config):
+    """Test set data paths"""
+
+    for local in [True, False]:
+        data_paths = set_data_paths(user_config, local=local)
+        assert (
+            "data_root" in data_paths
+        ), f"data_root not in data_paths for local={local}"
+        assert "output" in data_paths, f"output not in data_paths for local={local}"
+
+
+@pytest.mark.parametrize(
+    "user_config",
+    ["users.test.yaml"],  # non-existing file
+)
+def test_set_data_paths_defaults(tmp_path, user_config):
     """Test set data paths"""
 
     if isinstance(user_config, str):
@@ -72,7 +87,8 @@ def test_set_data_paths(tmp_path, user_config):
         user_config = str(tmp_path / user_config)
 
     for local in [True, False]:
-        data_paths = set_data_paths(user_config, local=local)
+        with pytest.warns((UnknownUsernameWarning, NoYamlFileError)):
+            data_paths = set_data_paths(user_config, local=local)
         assert (
             "data_root" in data_paths
         ), f"data_root not in data_paths for local={local}"
