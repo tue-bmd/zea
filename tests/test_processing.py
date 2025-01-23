@@ -137,7 +137,6 @@ def test_complex_to_channels(size, axis):
     _data = ops.complex_to_channels(data, axis=axis)
     __data = ops.channels_to_complex(_data)
     np.testing.assert_almost_equal(data, __data)
-    return _data
 
 
 @pytest.mark.parametrize(
@@ -154,7 +153,6 @@ def test_channels_to_complex(size, axis):
     _data = ops.channels_to_complex(data)
     __data = ops.complex_to_channels(_data, axis=axis)
     np.testing.assert_almost_equal(data, __data)
-    return _data
 
 
 @pytest.mark.parametrize(

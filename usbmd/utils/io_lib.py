@@ -192,6 +192,7 @@ def search_file_tree(
     hdf5_key_for_length=None,
     redo=False,
     parallel=True,
+    verbose=True,
 ):
     """Lists all files in directory and sub-directories.
 
@@ -239,16 +240,17 @@ def search_file_tree(
     )
 
     if (directory / dataset_info_filename).is_file() and not redo:
-        log.info(
-            "Using pregenerated dataset info file: "
-            f"{log.yellow(directory / dataset_info_filename)} ..."
-        )
-        log.info(f"...for reading file paths in {log.yellow(directory)}")
+        if verbose:
+            log.info(
+                "Using pregenerated dataset info file: "
+                f"{log.yellow(directory / dataset_info_filename)} ..."
+            )
+            log.info(f"...for reading file paths in {log.yellow(directory)}")
         with open(directory / dataset_info_filename, "r", encoding="utf-8") as file:
             dataset_info = yaml.load(file, Loader=yaml.FullLoader)
         return dataset_info
 
-    if redo:
+    if redo and verbose:
         log.info(
             f"Overwriting dataset info file: {log.yellow(directory / dataset_info_filename)}"
         )
@@ -272,7 +274,8 @@ def search_file_tree(
         )
 
     # Traverse file tree to index all files from filetypes
-    log.info(f"Searching {log.yellow(directory)} for {filetypes} files...")
+    if verbose:
+        log.info(f"Searching {log.yellow(directory)} for {filetypes} files...")
     for dirpath, _, filenames in os.walk(directory):
         for file in filenames:
             # Append to file_paths if it is a filetype file
@@ -284,7 +287,8 @@ def search_file_tree(
     if hdf5_key_for_length is not None:
         # using multiprocessing to speed up reading hdf5 files
         # and getting the number of frames in each file
-        log.info("Getting number of frames in each hdf5 file...")
+        if verbose:
+            log.info("Getting number of frames in each hdf5 file...")
 
         _get_shape_hdf5_file_partial = functools.partial(
             _get_shape_hdf5_file, key=hdf5_key_for_length
@@ -303,18 +307,24 @@ def search_file_tree(
                         ),
                         total=len(file_paths),
                         desc="Getting number of frames in each hdf5 file",
+                        disable=not verbose,
                     )
                 )
         else:
             file_shapes = []
             for file_path in tqdm.tqdm(
-                absolute_file_paths, desc="Getting number of frames in each hdf5 file"
+                absolute_file_paths,
+                desc="Getting number of frames in each hdf5 file",
+                disable=not verbose,
             ):
                 file_shapes.append(_get_shape_hdf5_file(file_path, hdf5_key_for_length))
 
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
-    log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
-    log.info(f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}")
+    if verbose:
+        log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
+        log.info(
+            f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}"
+        )
 
     dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
     if len(file_shapes) > 0:
