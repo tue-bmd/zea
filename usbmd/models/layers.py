@@ -13,6 +13,7 @@ from keras import layers, ops
 def sinusoidal_embedding(
     x, embedding_min_frequency, embedding_max_frequency, embedding_dims
 ):
+    """Sinusoidal embedding layer."""
     frequencies = ops.exp(
         ops.linspace(
             ops.log(embedding_min_frequency),
@@ -28,6 +29,8 @@ def sinusoidal_embedding(
 
 
 def ResidualBlock(width):
+    """Residual block with swish activation."""
+
     def apply(x):
         input_width = ops.shape(x)[3]
         if input_width == width:
@@ -44,6 +47,8 @@ def ResidualBlock(width):
 
 
 def DownBlock(width, block_depth):
+    """Downsampling block with residual connections."""
+
     def apply(x):
         x, skips = x
         for _ in range(block_depth):
@@ -56,6 +61,8 @@ def DownBlock(width, block_depth):
 
 
 def UpBlock(width, block_depth):
+    """Upsampling block with residual connections."""
+
     def apply(x):
         x, skips = x
         x = layers.UpSampling2D(size=2, interpolation="bilinear")(x)
