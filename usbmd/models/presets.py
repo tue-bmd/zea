@@ -1,4 +1,4 @@
-"""Model presets"""
+"""Model presets for usbmd.models"""
 
 taesdxl_presets = {
     "taesdxl": {
