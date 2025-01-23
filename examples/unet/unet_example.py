@@ -16,11 +16,18 @@ from keras import ops
 from usbmd import init_device, log, set_data_paths
 from usbmd.agent.masks import random_uniform_lines
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
+from usbmd.models.lpips import LPIPS
 from usbmd.models.unet import UNet
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
 
-def plot_unet_example(ground_truth, corrupted, inpainted, save_path="unet_example.png"):
+def plot_unet_example(
+    ground_truth,
+    corrupted,
+    inpainted,
+    scores,
+    save_path="unet_example.png",
+):
     """Plot a grid comparing ground truth, corrupted, inpainted and error images."""
     error = ops.abs(ground_truth - inpainted)
     set_mpl_style()
@@ -39,6 +46,19 @@ def plot_unet_example(ground_truth, corrupted, inpainted, save_path="unet_exampl
     for i, ax in enumerate(fig.axes[: len(titles) * n_imgs]):
         if i % n_imgs == 0:
             ax.set_ylabel(titles[i // n_imgs])
+
+    # 2nd row of images is the inpainted images
+    for ax, lpips_score in zip(fig.axes[n_imgs * 2 : 3 * n_imgs], scores):
+        ax.text(
+            0.95,
+            0.95,
+            f"LPIPS: {float(lpips_score):.4f}",
+            ha="right",
+            va="top",
+            transform=ax.transAxes,
+            fontsize=8,
+            color="yellow",
+        )
 
     fig.savefig(
         save_path,
@@ -83,8 +103,12 @@ if __name__ == "__main__":
 
     inpainted_batch = model(batch)
 
-    # Replace all plotting code with single function call
-    saved_path = plot_unet_example(ground_truth, batch, inpainted_batch)
+    # compute lpips metric between ground truth and inpainted images
+    lpips = LPIPS.from_preset("lpips")
+    lpips_scores = lpips([ground_truth, inpainted_batch])
+    lpips_scores = ops.convert_to_numpy(lpips_scores)
+
+    saved_path = plot_unet_example(ground_truth, batch, inpainted_batch, lpips_scores)
     log.info(f"Saved to {log.yellow(saved_path)}")
 
     del val_dataset  # weird tf datasets bug if not deleted
