@@ -26,10 +26,15 @@ from usbmd.scan import Scan
 class MultiplyOperation(Operation):
     """Multiply Operation for testing purposes."""
 
+    def __init__(self, useless_parameter: int = None, **kwargs):
+        super().__init__(**kwargs)
+        self.useless_parameter = useless_parameter
+
     def call(self, x, y):
         """
         Multiplies the input x by the specified factor.
         """
+
         return {"x": keras.ops.multiply(x, y)}
 
 
@@ -89,6 +94,17 @@ def pipeline_config():
         "operations": [
             {"name": "multiply", "params": {}},
             {"name": "add", "params": {}},
+        ]
+    }
+
+
+@pytest.fixture
+def pipeline_config_with_params():
+    """Returns a test pipeline configuration with parameters."""
+    return {
+        "operations": [
+            {"name": "multiply", "params": {"useless_parameter": 10}},
+            {"name": "add"},
         ]
     }
 
@@ -279,33 +295,43 @@ def test_pipeline_with_scan_probe_config():
 """Pipeline build from config / json tests"""
 
 
-def test_pipeline_from_json(pipeline_config):
+@pytest.mark.parametrize(
+    "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
+)
+def test_pipeline_from_json(config_fixture, request):
     """Tests creating a pipeline from a JSON string."""
-
-    json_string = json.dumps(pipeline_config)
+    config = request.getfixturevalue(config_fixture)
+    json_string = json.dumps(config)
     pipeline = pipeline_from_json(json_string, jit_options=None)
 
     assert len(pipeline.operations) == 2
     assert isinstance(pipeline.operations[0], MultiplyOperation)
     assert isinstance(pipeline.operations[1], AddOperation)
 
-    # Test the pipeline works
     result = pipeline(x=2, y=3)
+    if config_fixture == "pipeline_config_with_params":
+        assert pipeline.operations[0].useless_parameter == 10
+
     assert result["z"] == 9  # (2 * 3) + 3
 
 
-def test_pipeline_from_config(pipeline_config):
+@pytest.mark.parametrize(
+    "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
+)
+def test_pipeline_from_config(config_fixture, request):
     """Tests creating a pipeline from a Config object."""
-
-    config = Config(**pipeline_config)
+    config_dict = request.getfixturevalue(config_fixture)
+    config = Config(**config_dict)
     pipeline = pipeline_from_config(config, jit_options=None)
 
     assert len(pipeline.operations) == 2
     assert isinstance(pipeline.operations[0], MultiplyOperation)
     assert isinstance(pipeline.operations[1], AddOperation)
 
-    # Test the pipeline works
     result = pipeline(x=2, y=3)
+    if config_fixture == "pipeline_config_with_params":
+        assert pipeline.operations[0].useless_parameter == 10
+
     assert result["z"] == 9  # (2 * 3) + 3
 
 
