@@ -11,6 +11,7 @@ import keras
 from usbmd.backend import jit
 from usbmd.config.config import Config
 from usbmd.probes import Probe
+from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
 
@@ -391,6 +392,18 @@ class Pipeline:
 
 
 ## Base Operations
+
+
+@ops_registry("identity")
+class Identity(Operation):
+    """Identity operation."""
+
+    def call(self, *args, **kwargs) -> Dict:
+        """Returns the input as is."""
+        return kwargs
+
+
+@ops_registry("merge")
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
@@ -406,6 +419,7 @@ class Merge(Operation):
         return merged
 
 
+@ops_registry("split")
 class Split(Operation):
     """Operation that splits an input dictionary  n copies."""
 
@@ -420,6 +434,7 @@ class Split(Operation):
         return [kwargs.copy() for _ in range(self.n)]
 
 
+@ops_registry("stack")
 class Stack(Operation):
     """Stack multiple data arrays along a new axis.
     Useful to merge data from parallel pipelines.
