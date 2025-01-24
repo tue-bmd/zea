@@ -37,8 +37,12 @@ import numpy as np
 import tensorflow as tf
 from keras.src.trainers.data_adapters import TFDatasetAdapter
 
-from usbmd.utils import log, translate
+from usbmd.utils import find_methods_with_return_type, log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
+
+METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
+    tf.data.Dataset, "DatasetV2"
+)
 
 
 class H5Generator:
@@ -197,7 +201,7 @@ class H5Generator:
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
         file_name, key, indices = indices
-        with h5py.File(file_name, "r") as file:
+        with h5py.File(file_name, "r", locking=False) as file:
             # Convert any range objects in indices to lists
             processed_indices = tuple(
                 list(idx) if isinstance(idx, range) else idx for idx in indices
@@ -571,8 +575,16 @@ class TFDatasetToKeras(TFDatasetAdapter):
         return self.num_batches
 
     def __getattr__(self, name):
-        # Delegate all other unknown calls to the tf.data.Dataset object
-        return getattr(self._dataset, name)
+        # Delegate all calls to self._dataset, and wraps the result in TFDatasetToKeras
+        if name in METHODS_THAT_RETURN_DATASET:
+
+            def method(*args, **kwargs):
+                result = getattr(self._dataset, name)(*args, **kwargs)
+                return TFDatasetToKeras(result)
+
+            return method
+        else:
+            return getattr(self._dataset, name)
 
 
 def h5_dataset_from_directory(
