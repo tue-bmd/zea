@@ -86,6 +86,7 @@ if __name__ == "__main__":
         image_range=[-60, 0],
         normalization_range=[-1, 1],
         seed=42,
+        wrap_in_keras=True,
     )
 
     presets = list(UNet.presets.keys())
