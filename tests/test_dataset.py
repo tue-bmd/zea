@@ -93,6 +93,7 @@ def test_generate(dtype, to_dtype, filetype):
         retain_folder_structure=True,
         filetype=filetype,
         overwrite=True,
+        verbose=False,
     )
     generator.generate()
     shutil.rmtree(temp_folder)
