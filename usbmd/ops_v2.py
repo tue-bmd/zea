@@ -1,7 +1,7 @@
 """ Experimental version of the USBMD ops module"""
 
-import enum
 import hashlib
+import importlib
 import inspect
 import json
 from typing import Any, Dict, List, Union
@@ -10,6 +10,7 @@ import keras
 
 from usbmd.backend import jit
 from usbmd.config.config import Config
+from usbmd.core import DataTypes
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
@@ -17,17 +18,20 @@ from usbmd.utils import log
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
 
+# make sure to reload all modules that import keras
+# to be able to set backend properly
+# importlib.reload(bmf)
+# importlib.reload(pfield)
+# importlib.reload(lens_correction)
+# importlib.reload(display)
 
-# TODO: Move this to Core?
-class DataTypes(enum.Enum):
-    """Enum class for USBMD data types."""
+# clear registry upon import
+ops_registry.clear()
 
-    RAW_DATA = "raw_data"
-    ALIGNED_DATA = "aligned_data"
-    BEAMFORMED_DATA = "beamformed_data"
-    ENVELOPE_DATA = "envelope_data"
-    IMAGE = "image"
-    IMAGE_SC = "image_sc"
+
+def get_ops(ops_name):
+    """Get the operation from the registry."""
+    return ops_registry[ops_name]
 
 
 # TODO: check if inheriting from keras.Operation is better than using the ABC class.
@@ -203,8 +207,6 @@ class Pipeline:
             - None disables JIT compilation.
             Defaults to "ops".
         """
-
-        # TODO: add the option to load pipeline from e.g. json
 
         # add functionality here
         # operations = ...
@@ -391,10 +393,60 @@ class Pipeline:
         return ",".join(operations)
 
 
+def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
+    """Make an operation chain from a custom list of operations.
+
+    Args:
+        operation_chain (list): List of operations to be performed.
+            Each operation can be a string or a dictionary.
+            if a string, the operation is initialized with default parameters.
+            if a dictionary, the operation is initialized with the parameters
+            provided in the dictionary, which should have the keys 'name' and 'params'.
+
+    Returns:
+        list: List of operations to be performed.
+
+    """
+    chain = []
+    for operation in operation_chain:
+        assert isinstance(
+            operation, (str, dict, Config)
+        ), f"Operation {operation} should be a string, dictionary or Config object"
+        if isinstance(operation, str):
+            operation = get_ops(operation)()
+        else:
+            if isinstance(operation, Config):
+                operation = operation.serialize()
+            # should have either name or name and params keys
+            assert set(operation.keys()).issubset({"name", "params"}), (
+                f"Operation {operation} should have keys 'name' and 'params'"
+                f"or only 'name' got {operation.keys()}"
+            )
+            if operation.get("params") is None:
+                operation["params"] = {}
+            operation = get_ops(operation["name"])(**operation["params"])
+        chain.append(operation)
+
+    return chain
+
+
+def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
+    """Create a pipeline from a json string."""
+    pipeline_config = json.loads(json_string)
+    operations = make_operation_chain(pipeline_config["operations"])
+    return Pipeline(operations=operations, **kwargs)
+
+
+def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+    """Create a pipeline from a Config / dict kobject."""
+    operations = make_operation_chain(config.operations)
+    return Pipeline(operations=operations, **kwargs)
+
+
 ## Base Operations
 
 
-@ops_registry("identity")
+@ops_registry("identity_v2")
 class Identity(Operation):
     """Identity operation."""
 
@@ -403,7 +455,7 @@ class Identity(Operation):
         return kwargs
 
 
-@ops_registry("merge")
+@ops_registry("merge_v2")
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
@@ -419,7 +471,7 @@ class Merge(Operation):
         return merged
 
 
-@ops_registry("split")
+@ops_registry("split_v2")
 class Split(Operation):
     """Operation that splits an input dictionary  n copies."""
 
@@ -434,7 +486,7 @@ class Split(Operation):
         return [kwargs.copy() for _ in range(self.n)]
 
 
-@ops_registry("stack")
+@ops_registry("stack_v2")
 class Stack(Operation):
     """Stack multiple data arrays along a new axis.
     Useful to merge data from parallel pipelines.
