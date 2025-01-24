@@ -1,17 +1,28 @@
-"""Tests for the Operation and Pipeline classes in ops_v2.py."""
+"""Tests for the Operation and Pipeline classes in ops_v2.py.
+
+# TODO: Run tests for all backends
+# TODO: merge with original ops
+"""
 
 # pylint: disable=arguments-differ, abstract-class-instantiated
+
+import json
 
 import keras
 import pytest
 
-from usbmd.ops_v2 import DataTypes, Operation, Pipeline
+from usbmd import ops
+from usbmd.config.config import Config
+from usbmd.core import DataTypes
+from usbmd.ops_v2 import Operation, Pipeline, pipeline_from_config, pipeline_from_json
 from usbmd.probes import Dummy
+from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 
-# TODO: Run tests for all backends
+"""Some operations for testing"""
 
 
+@ops_registry("multiply")
 class MultiplyOperation(Operation):
     """Multiply Operation for testing purposes."""
 
@@ -22,6 +33,7 @@ class MultiplyOperation(Operation):
         return {"x": keras.ops.multiply(x, y)}
 
 
+@ops_registry("add")
 class AddOperation(Operation):
     """Add Operation for testing purposes."""
 
@@ -33,6 +45,7 @@ class AddOperation(Operation):
         return {"z": keras.ops.add(x, y)}
 
 
+@ops_registry("large_matrix_multiplication")
 class LargeMatrixMultiplicationOperation(Operation):
     """Large Matrix Multiplication Operation for testing purposes."""
 
@@ -48,6 +61,7 @@ class LargeMatrixMultiplicationOperation(Operation):
         return {"matrix_result": result3}
 
 
+@ops_registry("elementwise_matrix_operation")
 class ElementwiseMatrixOperation(Operation):
     """Elementwise Matrix Operation for testing purposes."""
 
@@ -68,7 +82,18 @@ def test_operation():
     return AddOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
 
 
-# 1. Operation Class Tests
+@pytest.fixture
+def pipeline_config():
+    """Returns a test pipeline configuration."""
+    return {
+        "operations": [
+            {"name": "multiply", "params": {}},
+            {"name": "add", "params": {}},
+        ]
+    }
+
+
+"""Operation Class Tests"""
 
 
 def test_operation_initialization(test_operation):
@@ -135,7 +160,7 @@ def test_string_representation(verbose=False):
     assert str(pipeline) == "MultiplyOperation -> AddOperation"
 
 
-# 2. Pipeline Class Tests
+"""Pipeline Class Tests"""
 
 
 def test_pipeline_initialization():
@@ -251,7 +276,40 @@ def test_pipeline_with_scan_probe_config():
     assert "probe_geometry" in result  # Check if we parsed the probe object correctly
 
 
-# 3. Edge Case Tests
+"""Pipeline build from config / json tests"""
+
+
+def test_pipeline_from_json(pipeline_config):
+    """Tests creating a pipeline from a JSON string."""
+
+    json_string = json.dumps(pipeline_config)
+    pipeline = pipeline_from_json(json_string, jit_options=None)
+
+    assert len(pipeline.operations) == 2
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+    assert isinstance(pipeline.operations[1], AddOperation)
+
+    # Test the pipeline works
+    result = pipeline(x=2, y=3)
+    assert result["z"] == 9  # (2 * 3) + 3
+
+
+def test_pipeline_from_config(pipeline_config):
+    """Tests creating a pipeline from a Config object."""
+
+    config = Config(**pipeline_config)
+    pipeline = pipeline_from_config(config, jit_options=None)
+
+    assert len(pipeline.operations) == 2
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+    assert isinstance(pipeline.operations[1], AddOperation)
+
+    # Test the pipeline works
+    result = pipeline(x=2, y=3)
+    assert result["z"] == 9  # (2 * 3) + 3
+
+
+"""Edge Case Tests"""
 
 
 def test_operation_empty_input(test_operation):

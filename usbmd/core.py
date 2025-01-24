@@ -1,10 +1,22 @@
 """ Base classes for the toolbox """
 
+import enum
 import pickle
 from copy import deepcopy
 
 import keras
 import numpy as np
+
+
+class DataTypes(enum.Enum):
+    """Enum class for USBMD data types."""
+
+    RAW_DATA = "raw_data"
+    ALIGNED_DATA = "aligned_data"
+    BEAMFORMED_DATA = "beamformed_data"
+    ENVELOPE_DATA = "envelope_data"
+    IMAGE = "image"
+    IMAGE_SC = "image_sc"
 
 
 class Object:
