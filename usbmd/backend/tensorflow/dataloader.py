@@ -27,6 +27,7 @@ Allows for flexible indexing and stacking of dimensions. There are a few importa
 """
 
 import re
+import time
 from itertools import product
 from pathlib import Path
 from typing import List
@@ -40,8 +41,12 @@ from keras.src.trainers.data_adapters import TFDatasetAdapter
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
 
+METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
+    tf.data.Dataset, "DatasetV2"
+)
 
-class H5Generator:
+
+class H5Generator(keras.utils.PyDataset):
     """Generator from h5 file using provided indices."""
 
     def __init__(
@@ -61,7 +66,10 @@ class H5Generator:
         overlapping_blocks: bool = False,
         limit_n_samples: int | None = None,
         seed: int | None = None,
+        workers=10,
+        use_multiprocessing=True,
     ):
+        super().__init__(workers=workers, use_multiprocessing=use_multiprocessing)
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
@@ -123,9 +131,7 @@ class H5Generator:
             overlapping_blocks=self.overlapping_blocks,
         )
 
-        if self.shuffle:
-            self._shuffle()
-        else:
+        if not self.shuffle:
             log.warning("H5Generator: Not shuffling data.")
 
         if limit_n_samples:
@@ -140,7 +146,7 @@ class H5Generator:
         """
         Extracts one image from the dataset to get the dtype. Converts it to a tensorflow dtype.
         """
-        out = next(self())
+        out = next(iter(self))
         if self.return_filename:
             out = out[0]
         dtype = out.dtype
@@ -166,27 +172,29 @@ class H5Generator:
             )
         return output_signature
 
-    def __call__(self):
+    def __getitem__(self, index):
+        indices = self.indices[index]
+
+        if index == 0 and self.shuffle:
+            self._shuffle()
+
+        images = self.extract_image(indices)
+
+        if self.return_filename:
+            file_name = Path(str(file_name)).stem + "_" + "_".join(map(str, indices))
+            return images, file_name
+        else:
+            return images
+
+    def __iter__(self):
         """
         Generator that yields images from the hdf5 files.
         """
-        for i, indices in enumerate(self.indices):
-            images = self.extract_image(indices)
+        for idx in range(len(self)):
+            yield self[idx]
 
-            file_name, _, indices = indices
-
-            # shuffle if we reached end
-            if i == self.__len__() - 1:
-                if self.shuffle:
-                    self._shuffle()
-
-            if self.return_filename:
-                file_name = (
-                    Path(str(file_name)).stem + "_" + "_".join(map(str, indices))
-                )
-                yield images, file_name
-            else:
-                yield images
+    def __call__(self):
+        return iter(self)
 
     def extract_image(self, indices):
         """Extract image from hdf5 file.
@@ -197,7 +205,11 @@ class H5Generator:
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
         file_name, key, indices = indices
-        with h5py.File(file_name, "r") as file:
+        start_time = time.perf_counter()
+        with h5py.File(file_name, "r", locking=False) as file:
+            open_h5 = time.perf_counter()
+            diff = (open_h5 - start_time) * 1000
+            print(f"Time to open h5: {diff:.4f} ms")
             # Convert any range objects in indices to lists
             processed_indices = tuple(
                 list(idx) if isinstance(idx, range) else idx for idx in indices
@@ -209,6 +221,9 @@ class H5Generator:
                     f"Could not load image at index {processed_indices} "
                     f"and file {file_name} of shape {file[key].shape}"
                 ) from exc
+        end_h5 = time.perf_counter()
+        diff = (end_h5 - open_h5) * 1000
+        print(f"Time to load from h5: {diff:.4f} ms")
 
         # stack frames along frame_axis, and default to last axis
         frame_axis = self.frame_axis
@@ -229,6 +244,8 @@ class H5Generator:
             # append frames to existing axis
             images = np.concatenate(images, axis=frame_axis)
 
+        diff = (time.perf_counter() - end_h5) * 1000
+        print(f"Time to stack frames: {diff:.4f} ms")
         return images
 
     def _shuffle(self):
