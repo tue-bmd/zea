@@ -15,6 +15,7 @@ import hashlib
 import inspect
 import os
 import pickle
+import tempfile
 import textwrap
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import joblib
 
 from usbmd.utils import log
 
+# Default cache directory
 _CACHE_DIR = Path.home() / ".usbmd_cache"
 
 # Set backend based on USBMD_CACHE_DIR flag, if applicable.
@@ -31,7 +33,17 @@ if "USBMD_CACHE_DIR" in os.environ:
         _CACHE_DIR = _cache_dir
 
 _CACHE_DIR = Path(_CACHE_DIR).resolve()
-_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+try:
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    unavailable_cache_dir = _CACHE_DIR
+    _CACHE_DIR = Path(tempfile.gettempdir()) / ".usbmd_cache"
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    log.warning(
+        f"Could not create cache directory {unavailable_cache_dir}: {e} "
+        + f"Using a temporary directory instead {_CACHE_DIR}"
+    )
 
 
 def serialize_elements(key_elements: list):
