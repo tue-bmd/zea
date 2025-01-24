@@ -7,7 +7,9 @@ import numpy as np
 from usbmd.setup_usbmd import set_backend
 
 
-def equality_libs_processing(decimal=4, backends: list | None = None):
+def equality_libs_processing(
+    decimal=4, backends: list | None = None, verbose: bool = False
+):
     """Test the processing functions of different libraries
 
     Check if numpy, tensorflow, torch and jax processing funcs produce equal output.
@@ -27,7 +29,8 @@ def equality_libs_processing(decimal=4, backends: list | None = None):
     gt_backend = "numpy"
     if backends is None:
         backends = ["tensorflow", "torch", "jax"]
-    print(f"Running tests with backends: {backends}")
+    if verbose:
+        print(f"Running tests with backends: {backends}")
 
     def wrapper(test_func, *args, **kwargs):
         # Set random seed
@@ -38,7 +41,8 @@ def equality_libs_processing(decimal=4, backends: list | None = None):
 
         output = {}
         for backend in [gt_backend, *backends]:
-            print(f"Running {func_name} in {backend}")
+            if verbose:
+                print(f"Running {func_name} in {backend}")
             set_backend(backend)
             import keras  # pylint: disable=import-outside-toplevel
 
@@ -54,6 +58,7 @@ def equality_libs_processing(decimal=4, backends: list | None = None):
                 decimal=decimal,
                 err_msg=f"Function {func_name} failed with {backend} processing.",
             )
-            print(f"Function {func_name} passed with {backend} output.")
+            if verbose:
+                print(f"Function {func_name} passed with {backend} output.")
 
     return decorator.decorator(wrapper)
