@@ -155,3 +155,9 @@ series, [How to Contribute to an Open Source Project on GitHub](https://app.eggh
 and <https://www.firsttimersonly.com/>
 
 At this point, you're ready to make your changes! Feel free to ask for help; everyone is a beginner at first :relaxed:
+
+## Adding models
+Please see the [usbmd.models README](../usbmd/models/README.md) for instructions on how to add new models to the repository.
+
+## Adding ops
+TBA
