@@ -16,7 +16,6 @@ import keras
 import numpy as np
 from keras import ops
 
-from usbmd.data.dataloader import H5Generator, Resizer
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
 
