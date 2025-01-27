@@ -495,6 +495,7 @@ class Resizer:
         resize_type: str,
         resize_axes: tuple | None = None,
         seed: int | None = None,
+        keras=tf.keras,
         **resize_kwargs,
     ):
         """
@@ -505,15 +506,15 @@ class Resizer:
 
         if image_size is not None:
             if resize_type == "resize":
-                self.resizer = tf.keras.layers.Resizing(  # pylint: disable=no-member
+                self.resizer = keras.layers.Resizing(  # pylint: disable=no-member
                     *image_size, **resize_kwargs
                 )
             elif resize_type == "center_crop":
-                self.resizer = tf.keras.layers.CenterCrop(  # pylint: disable=no-member
+                self.resizer = keras.layers.CenterCrop(  # pylint: disable=no-member
                     *image_size, **resize_kwargs
                 )  # pylint: disable=no-member
             elif resize_type == "random_crop":
-                self.resizer = tf.keras.layers.RandomCrop(  # pylint: disable=no-member
+                self.resizer = keras.layers.RandomCrop(  # pylint: disable=no-member
                     *image_size, seed=seed, **resize_kwargs
                 )
             else:
@@ -642,7 +643,7 @@ def h5_dataset_from_directory(
     shuffle: bool = None,
     seed: int | None = None,
     limit_n_samples: int | None = None,
-    resize_type: str = "crop",
+    resize_type: str = "center_crop",
     resize_axes: tuple | None = None,
     image_range: tuple = (0, 255),
     normalization_range: tuple = (0, 1),
@@ -701,8 +702,8 @@ def h5_dataset_from_directory(
         seed (int, optional): random seed of shuffle.
         limit_n_samples (int, optional): take only a subset of samples.
             Useful for debuging. Defaults to None.
-        resize_type (str, optional): resize type. Defaults to 'crop'.
-            can be 'crop' or 'resize'.
+        resize_type (str, optional): resize type. Defaults to 'center_crop'.
+            can be 'center_crop', 'random_crop' or 'resize'.
         resize_axes (tuple, optional): axes to resize along. Should be of length 2
             (height, width) as resizing function only supports 2D resizing / cropping. Should only
             be set when your data is more than (h, w, c). Defaults to None.
