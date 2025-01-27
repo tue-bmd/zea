@@ -15,6 +15,7 @@ import h5py
 import keras
 import numpy as np
 from keras import ops
+from keras.src.utils.backend_utils import DynamicBackend
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
@@ -214,6 +215,8 @@ class Resizer:
     """
     Resize layer for resizing images. Can deal with N-dimensional images.
     Can do resize, center_crop and random_crop.
+
+    Can be used in tf.data pipelines, but you must set backend = "tensorflow".
     """
 
     def __init__(
@@ -222,7 +225,7 @@ class Resizer:
         resize_type: str,
         resize_axes: tuple | None = None,
         seed: int | None = None,
-        keras=keras,
+        backend: str | None = None,
         **resize_kwargs,
     ):
         """
@@ -230,6 +233,13 @@ class Resizer:
         """
         super().__init__()
         self.image_size = image_size
+
+        if backend == "tensorflow":
+            import tensorflow as tf
+
+            keras = tf.keras
+
+        self.backend = DynamicBackend(backend)
 
         if image_size is not None:
             if resize_type == "resize":
@@ -263,12 +273,12 @@ class Resizer:
         perm.insert(-1, resize_axes[1])
 
         # Apply permutation
-        x = ops.transpose(x, perm)
-        perm_shape = ops.shape(x)
+        x = self.backend.numpy.transpose(x, perm)
+        perm_shape = self.backend.core.shape(x)
 
         # Reshape to collapse all leading dimensions
         flattened_shape = [-1, perm_shape[-3], perm_shape[-2], perm_shape[-1]]
-        x = ops.reshape(x, flattened_shape)
+        x = self.backend.numpy.reshape(x, flattened_shape)
 
         return x, perm, perm_shape
 
@@ -278,16 +288,14 @@ class Resizer:
         # Get all dimensions except the resized ones and channel dim
         shape_prefix = perm_shape[:-3]
         # Create new shape list starting with original prefix dims, then resize dims, then channel
-        new_shape = ops.concatenate(
-            [shape_prefix, self.image_size, [perm_shape[-1]]], axis=0
-        )
-        x = ops.reshape(x, new_shape)
+        new_shape = list(shape_prefix) + list(self.image_size) + [perm_shape[-1]]
+        x = self.backend.numpy.reshape(x, new_shape)
 
         # Transpose back to original axis order
         inverse_perm = list(range(ndim))
         for i, p in enumerate(perm):
             inverse_perm[p] = i
-        x = ops.transpose(x, inverse_perm)
+        x = self.backend.numpy.transpose(x, inverse_perm)
 
         return x
 
@@ -298,7 +306,7 @@ class Resizer:
         if self.resizer is None:
             return x
 
-        ndim = ops.ndim(x)
+        ndim = self.backend.numpy.ndim(x)
 
         if ndim > 4:
             assert (
@@ -581,3 +589,7 @@ class H5Dataloader(H5Generator):
             return images, filenames
         else:
             return images
+
+
+if __name__ == "__main__":
+    backend = DynamicBackend("tensorflow")
