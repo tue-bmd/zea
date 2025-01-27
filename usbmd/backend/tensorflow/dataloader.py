@@ -303,11 +303,7 @@ def h5_dataset_from_directory(
         ), f"image_size must be of length 2 (height, width), got {image_size}"
 
         resizer = Resizer(
-            image_size,
-            resize_type,
-            resize_axes,
-            seed=seed,
-            keras=tf.keras,  # pylint: disable=no-member
+            image_size, resize_type, resize_axes, seed=seed, backend="tensorflow"
         )
         dataset = dataset_map(dataset, resizer)
 
