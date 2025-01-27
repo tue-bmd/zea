@@ -53,12 +53,11 @@ class H5Generator(keras.utils.PyDataset):
 
     def __init__(
         self,
-        file_names: list,
-        file_shapes: list,
+        directory: str,
         n_frames: int = 1,
         frame_index_stride: int = 1,
         frame_axis: int = -1,
-        insert_frame_axis: bool = False,
+        insert_frame_axis: bool = True,
         initial_frame_axis: int = 0,
         return_filename: bool = False,
         additional_axes_iter: tuple = None,
@@ -70,9 +69,11 @@ class H5Generator(keras.utils.PyDataset):
         seed: int | None = None,
         batch_size: int = 1,
         as_tensor: bool = True,
+        search_file_tree_kwargs: dict | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self.directory = directory
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
@@ -91,8 +92,18 @@ class H5Generator(keras.utils.PyDataset):
         self.seed = seed
         self.batch_size = batch_size
         self.as_tensor = as_tensor
+        self.search_file_tree_kwargs = search_file_tree_kwargs
 
         self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
+
+        file_names, file_shapes = _find_h5_files_from_directory(
+            self.directory,
+            self.key,
+            self.search_file_tree_kwargs,
+            self.additional_axes_iter,
+        )
+
+        assert len(file_names) > 0, f"No files in directories:\n{directory}"
 
         assert (
             self.frame_index_stride > 0
@@ -743,15 +754,8 @@ def h5_dataset_from_directory(
     if tf_data_shuffle:
         log.warning("Will shuffle on the image level, this can be slower.")
 
-    file_names, file_shapes = _find_h5_files_from_directory(
-        directory, key, search_file_tree_kwargs, additional_axes_iter
-    )
-
-    assert len(file_names) > 0, f"No files in directories:\n{directory}"
-
     image_extractor = H5Generator(
-        file_names,
-        file_shapes,
+        directory,
         key=key,
         n_frames=n_frames,
         frame_index_stride=frame_index_stride,
@@ -766,6 +770,7 @@ def h5_dataset_from_directory(
         shuffle=generator_shuffle,
         seed=seed,
         as_tensor=False,
+        search_file_tree_kwargs=search_file_tree_kwargs,
     )
 
     # Create dataset
