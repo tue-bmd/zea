@@ -233,15 +233,11 @@ class Resizer:
 
         if image_size is not None:
             if resize_type == "resize":
-                self.resizer = keras.layers.Resizing(  # pylint: disable=no-member
-                    *image_size, **resize_kwargs
-                )
+                self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
             elif resize_type == "center_crop":
-                self.resizer = keras.layers.CenterCrop(  # pylint: disable=no-member
-                    *image_size, **resize_kwargs
-                )  # pylint: disable=no-member
+                self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
             elif resize_type == "random_crop":
-                self.resizer = keras.layers.RandomCrop(  # pylint: disable=no-member
+                self.resizer = keras.layers.RandomCrop(
                     *image_size, seed=seed, **resize_kwargs
                 )
             else:
@@ -282,7 +278,7 @@ class Resizer:
         # Get all dimensions except the resized ones and channel dim
         shape_prefix = perm_shape[:-3]
         # Create new shape list starting with original prefix dims, then resize dims, then channel
-        new_shape = ops.concat(
+        new_shape = ops.concatenate(
             [shape_prefix, self.image_size, [perm_shape[-1]]], axis=0
         )
         x = ops.reshape(x, new_shape)
@@ -330,7 +326,9 @@ class H5Generator(keras.utils.PyDataset):
 
     def __init__(
         self,
-        directory: str,
+        directory: str = None,
+        file_names: List[str] = None,
+        file_shapes: List[tuple] = None,
         n_frames: int = 1,
         frame_index_stride: int = 1,
         frame_axis: int = -1,
@@ -349,6 +347,10 @@ class H5Generator(keras.utils.PyDataset):
         search_file_tree_kwargs: dict | None = None,
         **kwargs,
     ):
+        assert (directory is not None) ^ (
+            file_names is not None and file_shapes is not None
+        ), "Either `directory` or `file_names` and `file_shapes` must be provided."
+
         super().__init__(**kwargs)
         self.directory = directory
         self.n_frames = int(n_frames)
@@ -373,12 +375,13 @@ class H5Generator(keras.utils.PyDataset):
 
         self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
 
-        file_names, file_shapes = _find_h5_files_from_directory(
-            self.directory,
-            self.key,
-            self.search_file_tree_kwargs,
-            self.additional_axes_iter,
-        )
+        if self.directory is not None:
+            file_names, file_shapes = _find_h5_files_from_directory(
+                self.directory,
+                self.key,
+                self.search_file_tree_kwargs,
+                self.additional_axes_iter,
+            )
 
         assert len(file_names) > 0, f"No files in directories:\n{directory}"
 
@@ -537,6 +540,8 @@ class H5Generator(keras.utils.PyDataset):
 
 
 class H5Dataloader(H5Generator):
+    """Dataloader for h5 files. Can resize images and normalize them."""
+
     def __init__(
         self,
         resize_type: str = "center_crop",
