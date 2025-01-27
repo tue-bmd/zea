@@ -26,8 +26,9 @@ Allows for flexible indexing and stacking of dimensions. There are a few importa
 - **Date**          : Thu Nov 18 2021
 """
 
+import math
 import re
-import time
+from functools import lru_cache
 from itertools import product
 from pathlib import Path
 from typing import List
@@ -66,6 +67,7 @@ class H5Generator(keras.utils.PyDataset):
         overlapping_blocks: bool = False,
         limit_n_samples: int | None = None,
         seed: int | None = None,
+        batch_size=1,
         workers=10,
         use_multiprocessing=True,
     ):
@@ -86,6 +88,7 @@ class H5Generator(keras.utils.PyDataset):
         self.overlapping_blocks = overlapping_blocks
         self.limit_n_samples = limit_n_samples
         self.seed = seed
+        self.batch_size = batch_size
 
         assert (
             self.frame_index_stride > 0
@@ -173,13 +176,21 @@ class H5Generator(keras.utils.PyDataset):
         return output_signature
 
     def __getitem__(self, index):
-        indices = self.indices[index]
-
         if index == 0 and self.shuffle:
             self._shuffle()
 
-        images = self.extract_image(indices)
+        low = index * self.batch_size
+        high = min(low + self.batch_size, len(self.indices))
+        indices_list = self.indices[low:high]
 
+        images = []
+        for indices in indices_list:
+            images.append(self.extract_image(indices))
+        images = np.stack(images)
+        if self.batch_size == 1:
+            return images[0]
+
+        # TODO: fix this, this is not working for batch_size > 1
         if self.return_filename:
             file_name = Path(str(file_name)).stem + "_" + "_".join(map(str, indices))
             return images, file_name
@@ -196,6 +207,11 @@ class H5Generator(keras.utils.PyDataset):
     def __call__(self):
         return iter(self)
 
+    @lru_cache(maxsize=300)
+    def _get_file(self, file_name):
+        """Open an HDF5 file and cache it."""
+        return h5py.File(file_name, "r", locking=False)
+
     def extract_image(self, indices):
         """Extract image from hdf5 file.
         Args:
@@ -205,25 +221,19 @@ class H5Generator(keras.utils.PyDataset):
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
         file_name, key, indices = indices
-        start_time = time.perf_counter()
-        with h5py.File(file_name, "r", locking=False) as file:
-            open_h5 = time.perf_counter()
-            diff = (open_h5 - start_time) * 1000
-            print(f"Time to open h5: {diff:.4f} ms")
-            # Convert any range objects in indices to lists
-            processed_indices = tuple(
-                list(idx) if isinstance(idx, range) else idx for idx in indices
-            )
-            try:
-                images = file[key][processed_indices]
-            except Exception as exc:
-                raise ValueError(
-                    f"Could not load image at index {processed_indices} "
-                    f"and file {file_name} of shape {file[key].shape}"
-                ) from exc
-        end_h5 = time.perf_counter()
-        diff = (end_h5 - open_h5) * 1000
-        print(f"Time to load from h5: {diff:.4f} ms")
+        file = self._get_file(file_name)
+
+        # Convert any range objects in indices to lists
+        processed_indices = tuple(
+            list(idx) if isinstance(idx, range) else idx for idx in indices
+        )
+        try:
+            images = file[key][processed_indices]
+        except Exception as exc:
+            raise ValueError(
+                f"Could not load image at index {processed_indices} "
+                f"and file {file_name} of shape {file[key].shape}"
+            ) from exc
 
         # stack frames along frame_axis, and default to last axis
         frame_axis = self.frame_axis
@@ -244,8 +254,6 @@ class H5Generator(keras.utils.PyDataset):
             # append frames to existing axis
             images = np.concatenate(images, axis=frame_axis)
 
-        diff = (time.perf_counter() - end_h5) * 1000
-        print(f"Time to stack frames: {diff:.4f} ms")
         return images
 
     def _shuffle(self):
@@ -253,7 +261,13 @@ class H5Generator(keras.utils.PyDataset):
         self.rng.shuffle(self.indices)
 
     def __len__(self):
-        return len(self.indices)
+        return math.ceil(len(self.indices) / self.batch_size)
+
+    def __del__(self):
+        """Ensure cached files are closed."""
+        for file_name, _, _ in range(len(self.indices)):
+            if (file_name,) in self._get_file.cache_info().keys():
+                self._get_file(file_name).close()
 
 
 def generate_h5_indices(
