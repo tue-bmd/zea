@@ -235,9 +235,11 @@ class Resizer:
         self.image_size = image_size
 
         if backend == "tensorflow":
-            import tensorflow as tf
+            import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
-            keras = tf.keras
+            keras = tf.keras  # pylint: disable=no-member
+        else:
+            keras = keras
 
         self.backend = DynamicBackend(backend)
 
