@@ -264,7 +264,7 @@ images = process.run(data)
 
 ## Models
 
-`usbmd` also contains a collection of models that can be used for various tasks. An example of how to use the `EchoNetDynamic` model is shown below. Simply use the `from_preset` method to load a model with a specific preset. All models can be found in the `usbmd.models` module.
+`usbmd` also contains a collection of models that can be used for various tasks. An example of how to use the `EchoNetDynamic` model is shown below. Simply use the `from_preset` method to load a model with a specific preset. All models can be found in the `usbmd.models` module. See the [models README](usbmd/models/README.md) for more information.
 
 ```python
 import os
