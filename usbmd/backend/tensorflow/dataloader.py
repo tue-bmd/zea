@@ -38,7 +38,7 @@ import numpy as np
 import tensorflow as tf
 from keras.src.trainers.data_adapters import TFDatasetAdapter
 
-from usbmd.utils import log, translate
+from usbmd.utils import find_methods_with_return_type, log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
 
 METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
@@ -588,8 +588,16 @@ class TFDatasetToKeras(TFDatasetAdapter):
         return self.num_batches
 
     def __getattr__(self, name):
-        # Delegate all other unknown calls to the tf.data.Dataset object
-        return getattr(self._dataset, name)
+        # Delegate all calls to self._dataset, and wraps the result in TFDatasetToKeras
+        if name in METHODS_THAT_RETURN_DATASET:
+
+            def method(*args, **kwargs):
+                result = getattr(self._dataset, name)(*args, **kwargs)
+                return TFDatasetToKeras(result)
+
+            return method
+        else:
+            return getattr(self._dataset, name)
 
 
 def h5_dataset_from_directory(
