@@ -156,7 +156,6 @@ and <https://www.firsttimersonly.com/>
 
 At this point, you're ready to make your changes! Feel free to ask for help; everyone is a beginner at first :relaxed:
 
-
 ### Bumping usbmd version
 Bumping and releasing a new version of usbmd is done by the maintainers of the repository. To bump the version, follow these steps:
 
@@ -176,3 +175,9 @@ Then run the following command to bump the version:
 The usbmd `new_version` should be a valid version number, e.g. `v0.1.0`, with the `v` prefix and major, minor and patch version numbers. The `snellius_username` is the username you use to log in to the Snellius cluster.
 
 Make sure to follow the instructions in the [`post-release.sh`](../post-release.sh) script. This script will build the new (Docker) environment and version of usbmd.
+
+## Adding models
+Please see the [usbmd.models README](../usbmd/models/README.md) for instructions on how to add new models to the repository.
+
+## Adding ops
+TBA
