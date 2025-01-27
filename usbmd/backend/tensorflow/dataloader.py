@@ -37,6 +37,7 @@ import h5py
 import keras
 import numpy as np
 import tensorflow as tf
+from keras import ops
 from keras.src.trainers.data_adapters import TFDatasetAdapter
 
 from usbmd.utils import find_methods_with_return_type, log, translate
@@ -67,11 +68,11 @@ class H5Generator(keras.utils.PyDataset):
         overlapping_blocks: bool = False,
         limit_n_samples: int | None = None,
         seed: int | None = None,
-        batch_size=1,
-        workers=10,
-        use_multiprocessing=True,
+        batch_size: int = 1,
+        as_tensor: bool = True,
+        **kwargs,
     ):
-        super().__init__(workers=workers, use_multiprocessing=use_multiprocessing)
+        super().__init__(**kwargs)
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
@@ -89,6 +90,9 @@ class H5Generator(keras.utils.PyDataset):
         self.limit_n_samples = limit_n_samples
         self.seed = seed
         self.batch_size = batch_size
+        self.as_tensor = as_tensor
+
+        self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
 
         assert (
             self.frame_index_stride > 0
@@ -186,16 +190,23 @@ class H5Generator(keras.utils.PyDataset):
         images = []
         for indices in indices_list:
             images.append(self.extract_image(indices))
-        images = np.stack(images)
-        if self.batch_size == 1:
-            return images[0]
 
-        # TODO: fix this, this is not working for batch_size > 1
-        if self.return_filename:
-            file_name = Path(str(file_name)).stem + "_" + "_".join(map(str, indices))
-            return images, file_name
+        if self.batch_size == 1:
+            images = images[0]
         else:
-            return images
+            images = np.stack(images)
+
+        file_names = [
+            Path(file_name).stem + "_" + "_".join(map(str, indices))
+            for file_name, _, indices in indices_list
+        ]
+        if self.batch_size == 1:
+            file_names = file_names[0]
+
+        if self.return_filename:
+            return self.maybe_tensor(images), file_names
+        else:
+            return self.maybe_tensor(images)
 
     def __iter__(self):
         """
@@ -207,7 +218,7 @@ class H5Generator(keras.utils.PyDataset):
     def __call__(self):
         return iter(self)
 
-    @lru_cache(maxsize=300)
+    @lru_cache(maxsize=512)
     def _get_file(self, file_name):
         """Open an HDF5 file and cache it."""
         return h5py.File(file_name, "r", locking=False)
@@ -265,13 +276,11 @@ class H5Generator(keras.utils.PyDataset):
 
     def __del__(self):
         """Ensure cached files are closed."""
-        for file_name, _, _ in range(len(self.indices)):
-            if (file_name,) in self._get_file.cache_info().keys():
-                self._get_file(file_name).close()
+        self._get_file.cache_clear()
 
 
 def generate_h5_indices(
-    file_names: list,
+    file_names: List[str],
     file_shapes: list,
     n_frames: int,
     frame_index_stride: int,
@@ -756,6 +765,7 @@ def h5_dataset_from_directory(
         sort_files=True,
         shuffle=generator_shuffle,
         seed=seed,
+        as_tensor=False,
     )
 
     # Create dataset
