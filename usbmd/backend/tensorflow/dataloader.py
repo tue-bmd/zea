@@ -39,6 +39,8 @@ METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
 
 
 class H5GeneratorTF(H5Generator):
+    """Adds a tensorflow dtype property and output_signature to the H5Generator class."""
+
     @property
     def tensorflow_dtype(self):
         """
@@ -301,7 +303,11 @@ def h5_dataset_from_directory(
         ), f"image_size must be of length 2 (height, width), got {image_size}"
 
         resizer = Resizer(
-            image_size, resize_type, resize_axes, seed=seed, keras=tf.keras
+            image_size,
+            resize_type,
+            resize_axes,
+            seed=seed,
+            keras=tf.keras,  # pylint: disable=no-member
         )
         dataset = dataset_map(dataset, resizer)
 
