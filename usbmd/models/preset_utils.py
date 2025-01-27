@@ -265,6 +265,8 @@ class KerasPresetLoader(PresetLoader):
         model = load_serialized_object(self.config, **kwargs)
         if load_weights:
             jax_memory_cleanup(model)
+            if hasattr(model, "image_shape"):  # needed to add this after Keras 3.7
+                model.build(input_shape=model.image_shape)
             # if model has a custom load_weights method, call it
             if hasattr(model, "custom_load_weights"):
                 model.custom_load_weights(self.preset)
