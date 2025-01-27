@@ -180,4 +180,4 @@ pip install -e .[dev] # in case dev dependencies were not installed
 pytest ./tests
 ```
 
-Currently this is only required for the develop / main branch.
+Currently this is only required for the main branch.
