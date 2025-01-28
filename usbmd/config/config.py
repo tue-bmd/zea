@@ -146,9 +146,9 @@ class Config(dict):
             dictionary = {}
         dictionary.update(kwargs)
         for key, value in dictionary.items():
-            if isinstance(self[key], Config):
+            if key in self and isinstance(self[key], Config):
                 self[key].update_recursive(value)
-            elif isinstance(value, list):
+            elif key in self and isinstance(value, list):
                 for i, v in enumerate(value):
                     if isinstance(v, Config):
                         self[key][i].update_recursive(v)
