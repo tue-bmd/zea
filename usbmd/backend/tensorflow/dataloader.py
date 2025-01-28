@@ -82,17 +82,18 @@ class TFDatasetToKeras(TFDatasetAdapter):
         super().__init__(dataset)
 
     def __iter__(self):
-        if keras.backend.backend() == "tensorflow":
+        backend = keras.backend.backend()
+        if backend == "tensorflow":
             return iter(self.get_tf_dataset())
-        elif keras.backend.backend() == "jax":
+        elif backend == "jax":
             return self.get_jax_iterator()
-        elif keras.backend.backend() == "torch":
+        elif backend == "torch":
             return self.get_torch_dataloader()
-        elif keras.backend.backend() == "numpy":
+        elif backend == "numpy":
             return self.get_numpy_iterator()
         else:
             raise ValueError(
-                f"Unsupported backend: {keras.backend.backend()}. "
+                f"Unsupported backend: {backend}. "
                 "Please use one of the following: 'tensorflow', 'jax', 'torch', 'numpy'."
             )
 
