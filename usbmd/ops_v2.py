@@ -11,10 +11,12 @@ from keras import ops
 from usbmd.backend import jit
 from usbmd.config.config import Config
 from usbmd.core import DataTypes
+from usbmd.ops import channels_to_complex, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
+from usbmd.utils.checks import _assert_keys_and_axes
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
 
@@ -517,13 +519,13 @@ class Stack(Operation):
 
     def __init__(
         self,
-        keys: Union[str, List[str], None] = None,
-        axis: Union[int, List[int], None] = 0,
+        keys: Union[str, List[str], None],
+        axes: Union[int, List[int], None],
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.keys = keys
-        self.axis = axis
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
 
     def call(self, *args, **kwargs) -> Dict:
         """
@@ -539,13 +541,36 @@ class Stack(Operation):
 class Mean(Operation):
     """Take the mean of the input data along a specific axis."""
 
-    def __init__(self, axis, keys, **kwargs):
+    def __init__(self, keys, axes, **kwargs):
         super().__init__(**kwargs)
-        self.axis = axis
-        self.keys = keys
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
 
     def call(self, **kwargs):
-        for key in self.keys:
-            kwargs[key] = ops.mean(kwargs[key], axis=self.axis)
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = ops.mean(kwargs[key], axis=axis)
 
         return kwargs
+
+
+@ops_registry("upmix_v2")
+class UpMix(Operation):
+    """Upmix IQ data to RF data."""
+
+    def __init__(self, key: str, **kwargs):
+        super().__init__(**kwargs)
+        self.key = key
+
+    def call(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
+
+        data = kwargs[self.key]
+
+        if data.shape[-1] == 1:
+            log.warning("Upmixing is not applicable to RF data.")
+            return data
+        elif data.shape[-1] == 2:
+            data = channels_to_complex(data)
+
+        data = upmix(data, fs, fc, upsampling_rate)
+        data = ops.expand_dims(data, axis=-1)
+        return data
