@@ -7,7 +7,7 @@ from copy import deepcopy
 import keras
 import numpy as np
 
-CONVERT_TO_KERAS_TYPES = [np.ndarray, int, float, list, bool]
+CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, bool)
 BASE_PRECISION = "float32"
 
 
