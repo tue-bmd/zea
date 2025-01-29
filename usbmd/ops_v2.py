@@ -525,7 +525,7 @@ class Filter(Operation):
         filtered = {k: v for k, v in kwargs.items() if k in self.keys}
         return filtered
 
-
+@ops_v2_registry("output")
 class Output(Operation):
     """Output operation. This operation is used to mark outputs in the pipeline.
     Optionally, keys can be specified to only output a subset of the input dictionary. Otherwise
