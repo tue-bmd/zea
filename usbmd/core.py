@@ -22,6 +22,13 @@ class DataTypes(enum.Enum):
     IMAGE_SC = "image_sc"
 
 
+class classproperty(property):
+    """Define a class level property."""
+
+    def __get__(self, _, owner_cls):
+        return self.fget(owner_cls)
+
+
 class Object:
     """Base class for all data objects in the toolbox"""
 
