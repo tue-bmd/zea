@@ -11,7 +11,6 @@ import json
 import keras
 import pytest
 
-from usbmd import ops
 from usbmd.config.config import Config
 from usbmd.core import DataTypes
 from usbmd.ops_v2 import Operation, Pipeline, pipeline_from_config, pipeline_from_json
