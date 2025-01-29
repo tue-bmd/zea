@@ -4,7 +4,7 @@
 # TODO: merge with original ops
 """
 
-# pylint: disable=arguments-differ, abstract-class-instantiated
+# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 
 import json
 

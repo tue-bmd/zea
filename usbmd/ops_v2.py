@@ -1,7 +1,6 @@
 """ Experimental version of the USBMD ops module"""
 
 import hashlib
-import importlib
 import inspect
 import json
 from typing import Any, Dict, List, Union
@@ -11,13 +10,15 @@ from keras import ops
 
 from usbmd.backend import jit
 from usbmd.config.config import Config
-from usbmd.core import DataTypes, Object
+from usbmd.core import DataTypes
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
+
+# pylint: disable=arguments-differ
 
 # make sure to reload all modules that import keras
 # to be able to set backend properly
@@ -241,7 +242,7 @@ class Pipeline:
     def __call__(self, *args, return_numpy=False, **kwargs):
         """Process input data through the pipeline."""
 
-        if "probe" or "scan" or "config" in kwargs:
+        if any(key in kwargs for key in ["probe", "scan", "config"]):
             raise ValueError(
                 "Probe, Scan and Config objects should be passed as positional arguments. "
                 "e.g. pipeline(probe, scan, config, **kwargs)"
