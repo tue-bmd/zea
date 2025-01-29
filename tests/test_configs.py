@@ -32,6 +32,28 @@ config_initializers = [
 ]
 
 
+def config_check_equal_recursive(config, dictionary):
+    """Helper funtcion which recursively check if all values in config are
+    of the correct type and equal as to corresponding key in the config.
+
+    NOTE: This function is must only be used in the tests. Why? See:
+    https://stackoverflow.com/questions/4527942/comparing-two-dictionaries-and-checking-how-many-key-value-pairs-are-equal
+
+    Args:
+        config (utils.config.Config): The config to check.
+        dictionary (dict): The dictionary to check against.
+
+    Raises:
+        AssertionError: If the types or values do not match.
+    """
+    for value1, value2 in zip(config.values(), dictionary.values()):
+        if isinstance(value1, Config):
+            config_check_equal_recursive(value1, value2)
+        else:
+            assert value1 == value2, "All values must be the same"
+            assert isinstance(value1, type(value2)), "All types must be the same"
+
+
 @pytest.mark.parametrize(
     "file",
     [
@@ -124,25 +146,6 @@ def test_serialize(dictionary):
 
     # Check if the config is the same
     config_check_equal_recursive(config, serialized)
-
-
-def config_check_equal_recursive(config, dictionary):
-    """Recursively check if all values in config are of the correct type and
-    equal as to corresponding key in the config.
-
-    Args:
-        config (utils.config.Config): The config to check.
-        dictionary (dict): The dictionary to check against.
-
-    Raises:
-        AssertionError: If the types or values do not match.
-    """
-    for value1, value2 in zip(config.values(), dictionary.values()):
-        if isinstance(value1, Config):
-            config_check_equal_recursive(value1, value2)
-        else:
-            assert value1 == value2, "All values must be the same"
-            assert isinstance(value1, type(value2)), "All types must be the same"
 
 
 def test_check_equal():
@@ -239,3 +242,12 @@ def test_config_update():
     assert isinstance(
         config.nested_dictionary, Config
     ), "config.nested_dictionary should be a Config object not just a dictionary"
+
+
+def test_config_recursive():
+    """Tests if the update_recursive method works correctly."""
+    config = Config({"a": 1, "b": {"c": 2, "d": 3}})
+    config.update_recursive({"a": 4, "b": {"c": 5}})
+    expected_config = Config({"a": 4, "b": {"c": 5, "d": 3}})
+
+    config_check_equal_recursive(config, expected_config)
