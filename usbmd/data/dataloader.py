@@ -6,7 +6,7 @@ This module can be used with any backend.
 
 import math
 import re
-from functools import lru_cache
+from collections import OrderedDict
 from itertools import product
 from pathlib import Path
 from typing import List
@@ -449,6 +449,10 @@ class H5Generator(keras.utils.PyDataset):
             )
             self.indices = self.indices[:limit_n_samples]
 
+        # LRU cache for file handles
+        self._file_handle_cache = OrderedDict()
+        self._capacity = 128
+
     def __getitem__(self, index):
         if index == 0 and self.shuffle:
             self._shuffle()
@@ -488,10 +492,19 @@ class H5Generator(keras.utils.PyDataset):
     def __call__(self):
         return iter(self)
 
-    @lru_cache(maxsize=512)
     def _get_file(self, file_name):
         """Open an HDF5 file and cache it."""
-        return h5py.File(file_name, "r", locking=False)
+        if file_name in self._file_handle_cache:
+            # Move the accessed file to the end to mark it as recently used
+            self._file_handle_cache.move_to_end(file_name)
+            return self._file_handle_cache[file_name]
+        else:
+            if len(self._file_handle_cache) >= self._capacity:
+                _, close_file = self._file_handle_cache.popitem(last=False)
+                close_file.close()
+            file = h5py.File(file_name, "r", locking=False)
+            self._file_handle_cache[file_name] = file
+            return file
 
     def extract_image(self, indices):
         """Extract image from hdf5 file.
@@ -538,15 +551,17 @@ class H5Generator(keras.utils.PyDataset):
         return images
 
     def _shuffle(self):
-        log.info("H5Generator: Shuffling data.")
         self.rng.shuffle(self.indices)
+        log.info("H5Generator: Shuffled data.")
 
     def __len__(self):
         return math.ceil(len(self.indices) / self.batch_size)
 
     def __del__(self):
         """Ensure cached files are closed."""
-        self._get_file.cache_clear()
+        for _, file in self._file_handle_cache.items():
+            file.close()
+        self._file_handle_cache = OrderedDict()
 
 
 class H5Dataloader(H5Generator):
@@ -591,7 +606,3 @@ class H5Dataloader(H5Generator):
             return images, filenames
         else:
             return images
-
-
-if __name__ == "__main__":
-    backend = DynamicBackend("tensorflow")
