@@ -427,6 +427,25 @@ def get_function_args(func):
     return tuple(sig.parameters)
 
 
+def find_methods_with_return_type(cls, return_type_hint):
+    """
+    Find all methods in a class that have the specified return type hint.
+
+    Args:
+        cls: The class to inspect.
+        return_type_hint: The return type hint to match (as a string).
+
+    Returns:
+        A list of method names that match the return type hint.
+    """
+    matching_methods = []
+    for name, member in inspect.getmembers(cls, predicate=inspect.isfunction):
+        annotations = getattr(member, "__annotations__", {})
+        if annotations.get("return") == return_type_hint:
+            matching_methods.append(name)
+    return matching_methods
+
+
 def keep_trying(fn, args=None, required_set=None):
     """Keep trying to run a function until it succeeds.
     Args:
