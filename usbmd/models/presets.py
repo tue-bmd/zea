@@ -1,4 +1,4 @@
-"""Model presets"""
+"""Model presets for usbmd.models"""
 
 taesdxl_presets = {
     "taesdxl": {
@@ -55,5 +55,19 @@ lpips_presets = {
             "path": "lpips",
         },
         "hf_handle": "hf://usbmd/lpips",
+    },
+}
+
+unet_presets = {
+    "unet-echonet-inpainter": {
+        "metadata": {
+            "description": (
+                "U-Net model used to inpaint skipped lines (columns). "
+                "Trained on 75% masked data (center values)."
+            ),
+            "params": 0,
+            "path": "unet",
+        },
+        "hf_handle": "hf://usbmd/unet-echonet-inpainter",
     },
 }
