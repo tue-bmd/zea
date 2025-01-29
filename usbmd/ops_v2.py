@@ -10,7 +10,7 @@ import keras
 
 from usbmd.backend import jit
 from usbmd.config.config import Config
-from usbmd.core import DataTypes
+from usbmd.core import DataTypes, Object
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
@@ -240,7 +240,11 @@ class Pipeline:
     def __call__(self, *args, return_numpy=False, **kwargs):
         """Process input data through the pipeline."""
 
-        ## PREPARE INPUT
+        if "probe" or "scan" or "config" in kwargs:
+            raise ValueError(
+                "Probe, Scan and Config objects should be passed as positional arguments. "
+                "e.g. pipeline(probe, scan, config, **kwargs)"
+            )
 
         # Extract from args Probe, Scan and Config objects
         probe, scan, config = {}, {}, {}
@@ -250,9 +254,17 @@ class Pipeline:
             elif isinstance(arg, Scan):
                 scan = arg.to_tensor()
             elif isinstance(arg, Config):
-                config = arg.to_tensor()
+                config = arg.to_tensor()  # TODO
+            else:
+                raise ValueError(
+                    f"Unsupported input type for pipeline *args: {type(arg)}. "
+                    "Pipeline call expects a `usbmd.core.Object` (Probe, Scan, Config) as args. "
+                    "Alternatively, pass the input as keyword argument (kwargs)."
+                )
 
         # combine probe, scan, config and kwargs
+        # explicitly so we know which keys overwrite which
+        # kwargs > config > scan > probe
         inputs = {**probe, **scan, **config, **kwargs}
 
         ## PROCESSING

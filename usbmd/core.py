@@ -7,6 +7,9 @@ from copy import deepcopy
 import keras
 import numpy as np
 
+CONVERT_TO_KERAS_TYPES = [np.ndarray, int, float, list, bool]
+BASE_PRECISION = "float32"
+
 
 class DataTypes(enum.Enum):
     """Enum class for USBMD data types."""
@@ -72,23 +75,30 @@ class Object:
 
     def to_tensor(self):
         """Convert the attributes in the object to keras tensors"""
-        snapshot = (
-            {}
-        )  # TODO: change attributes of 'self' instead of creating a new dict
-        for key in dir(self):
-            if key[0] != "_" and key not in self._except_tensors:
-                value = getattr(self, key)
-                if not isinstance(value, (np.ndarray, int, float, list, bool)):
-                    continue
+        return object_to_tensor(self)
 
-                # if data is of double precision, convert to float32
-                if isinstance(value, np.ndarray) and value.dtype == np.float64:
-                    dtype = "float32"
-                else:
-                    dtype = None
 
-                value = keras.ops.convert_to_tensor(value, dtype=dtype)
+def object_to_tensor(obj: Object):
+    """Convert an object to a tensor"""
+    snapshot = {}
+    if hasattr(obj, "_except_tensors"):
+        except_tensors = obj._except_tensors
+    else:
+        except_tensors = []
 
-                snapshot[key] = value
+    for key in dir(obj):
+        # Skip dunder/hidden methods and excepted tensors
+        if key.startswith("_") or key in except_tensors:
+            continue
 
-        return snapshot
+        value = getattr(obj, key)
+        if not isinstance(value, CONVERT_TO_KERAS_TYPES):
+            continue
+
+        dtype = None
+        # Convert double precision arrays to float32
+        if isinstance(value, np.ndarray) and value.dtype == np.float64:
+            dtype = BASE_PRECISION
+
+        snapshot[key] = keras.ops.convert_to_tensor(value, dtype=dtype)
+    return snapshot
