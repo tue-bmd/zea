@@ -420,6 +420,8 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
     Returns:
         list: List of operations to be performed.
 
+    TODO: add support for nested operations such that parallel pipelines can be defined.
+
     """
     chain = []
     for operation in operation_chain:
