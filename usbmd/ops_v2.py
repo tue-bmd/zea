@@ -7,6 +7,7 @@ import json
 from typing import Any, Dict, List, Union
 
 import keras
+from keras import ops
 
 from usbmd.backend import jit
 from usbmd.config.config import Config
@@ -26,7 +27,7 @@ log.warning("WARNING: This module is work in progress and may not work as expect
 # importlib.reload(display)
 
 # clear registry upon import
-ops_registry.clear()
+# ops_registry.clear()
 
 
 def get_ops(ops_name):
@@ -449,6 +450,13 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     return Pipeline(operations=operations, **kwargs)
 
 
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
+    """Create a pipeline from a yaml file."""
+    config = Config.load_from_yaml(yaml_path)
+    operations = make_operation_chain(config.operations)
+    return Pipeline(operations=operations, **kwargs)
+
+
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     """Create a pipeline from a Config / dict kobject."""
     operations = make_operation_chain(config.operations)
@@ -522,3 +530,19 @@ class Stack(Operation):
         """
 
         raise NotImplementedError
+
+
+@ops_registry("mean_v2")
+class Mean(Operation):
+    """Take the mean of the input data along a specific axis."""
+
+    def __init__(self, axis, keys, **kwargs):
+        super().__init__(**kwargs)
+        self.axis = axis
+        self.keys = keys
+
+    def call(self, **kwargs):
+        for key in self.keys:
+            kwargs[key] = ops.mean(kwargs[key], axis=self.axis)
+
+        return kwargs
