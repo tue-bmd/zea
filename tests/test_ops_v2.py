@@ -25,9 +25,6 @@ from usbmd.scan import Scan
 class MultiplyOperation(Operation):
     """Multiply Operation for testing purposes."""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
     def call(self, x, y):
         """
         Multiplies x and y.
@@ -42,7 +39,9 @@ class AddOperation(Operation):
     This version is made flexible: if 'y' is not provided, it will look for 'input_y'.
     """
 
-    def call(self, x, y):
+    def call(self, x, y=None, **kwargs):
+        if y is None:
+            y = kwargs.get("input_y")
         return {"z": keras.ops.add(x, y)}
 
 
@@ -71,6 +70,39 @@ class ElementwiseMatrixOperation(Operation):
         result = keras.ops.add(matrix, scalar)
         result = keras.ops.multiply(result, scalar)
         return {"elementwise_result": result}
+
+
+@ops_registry("merge")
+class MergeOperation(Operation):
+    """Merge Operation for testing purposes.
+
+    Simply merges multiple dictionaries (later keys overwrite earlier ones).
+    """
+
+    def call(self, *args, **kwargs):
+        merged = {}
+        for arg in args:
+            if not isinstance(arg, dict):
+                raise TypeError("All inputs must be dictionaries.")
+            merged.update(arg)
+        merged.update(kwargs)
+        return merged
+
+
+@ops_registry("rename")
+class RenameOperation(Operation):
+    """Rename Operation for testing purposes.
+
+    Renames keys in the input dictionary according to a mapping.
+    """
+
+    def __init__(self, mapping: dict, **kwargs):
+        super().__init__(**kwargs)
+        self.mapping = mapping
+
+    def call(self, **kwargs):
+        renamed = {self.mapping.get(k, k): v for k, v in kwargs.items()}
+        return renamed
 
 
 """Fixtures"""
@@ -111,7 +143,8 @@ def pipeline_config_with_branch():
 
     In this configuration:
       - 'prod' (a multiply op) computes {"x": x*y}
-      - 'branch1' (an add op) takes the full output from 'prod' and a global input 'input_y'
+      - 'branch1' (an add op) takes the full output from 'prod'
+        (i.e. it will receive all key–value pairs from prod) and global input 'input_y'
         to compute {"z": add(prod.x, input_y)}
       - 'branch2' (an add op) does the same as branch1.
       - 'rename1' (a rename op) renames the output 'z' from 'branch1' to 'z1'.
@@ -121,19 +154,18 @@ def pipeline_config_with_branch():
     With inputs x=2, y=3, input_y=10:
       - prod: 2*3 = 6, so its output is {"x": 6}
       - branch1 and branch2 each receive the full output from 'prod' (i.e. {"x": 6})
-        and also receive input 'input_y' = 10. Thus, they call add(x=6, input_y=10)
+        and also (from the global input) input_y=10. Thus, they call add(x=6, input_y=10)
         (the add op will use input_y as y), yielding {"z": 16}.
       - rename1 renames 'z' from branch1 to 'z1', so its output is {"z1": 16}
       - rename2 renames 'z' from branch2 to 'z2', so its output is {"z2": 16}
-      - merge receives 'z1' and 'z2' and merges them, so the final output contains
-        {"z1": 16, "z2": 16}
+      - merge receives the outputs from rename1 and rename2 and merges them,
+        so the final output contains {"z1": 16, "z2": 16}.
     """
     return {
         "operations": [
             {"id": "prod", "op": "multiply", "params": {}},
             {"id": "branch1", "op": "add", "params": {}, "inputs": ["prod"]},
             {"id": "branch2", "op": "add", "params": {}, "inputs": ["prod"]},
-            # rename outputs of branches z to z1 and z2
             {
                 "id": "rename1",
                 "op": "rename",
@@ -146,7 +178,6 @@ def pipeline_config_with_branch():
                 "params": {"mapping": {"z": "z2"}},
                 "inputs": ["branch2"],
             },
-            # merge the outputs of the branches
             {
                 "id": "merge",
                 "op": "merge",
@@ -375,22 +406,27 @@ def test_pipeline_from_config(config_fixture, request):
 
     # For branched pipelines, _ops_list contains all ops.
     if config_fixture == "pipeline_config_with_branch":
-        # Expect 5 operations in branched pipeline.
-        assert len(pipeline._ops_list) == 5
+        # Expect 6 operations in branched pipeline.
+        assert len(pipeline._ops_list) == 6
     else:
         assert len(pipeline._ops_list) == 2
 
-    # For the branched pipeline, pass global inputs: x=2, y=3 for multiply and input_y=10 for branches.
+    # For the branched pipeline, we pass global inputs: x=2, y=3, input_y=10.
     result = pipeline(x=2, y=3, input_y=10)
     if config_fixture != "pipeline_config_with_branch":
         assert result["z"] == 9  # (2 * 3) + 3
     else:
-        # In the branched pipeline:
-        #   prod: 2 * 3 = 6  → output {"x": 6}
-        #   branch1 and branch2: add receives merged inputs: {"x": 6, "input_y": 10} → returns {"z": 16}
-        #   merge: merges branch1.z and branch2.z (last wins) → {"z": 16}
-        #   rename: maps "merge.z" to "result" → {"result": 16}
-        assert result["result"] == 16
+        # Expected behavior for the branched pipeline:
+        #  - prod: multiply: 2*3 = 6 → {"x": 6} stored under key "prod"
+        #  - branch1: add gets merged global inputs and outputs from prod.
+        #             It calls add(x=6, input_y=10) → {"z": 16}
+        #  - branch2: similarly returns {"z": 16}
+        #  - rename1: renames branch1's {"z": 16} to {"z1": 16}
+        #  - rename2: renames branch2's {"z": 16} to {"z2": 16}
+        #  - merge: merges rename1 and rename2, yielding {"z1": 16, "z2": 16}
+        assert "z1" in result and "z2" in result
+        assert result["z1"] == 16
+        assert result["z2"] == 16
 
 
 """Pipeline Save/Load Tests"""
@@ -429,22 +465,20 @@ def test_complex_branched_pipeline(pipeline_config_with_branch):
 
     Pipeline structure:
       - 'prod' (multiply): computes {"x": x*y}
-      - 'branch1' (add): takes full output from 'prod' and global input 'input_y' to compute {"z": add(x, input_y)}
-      - 'branch2' (add): same as branch1.
-      - 'merge' (merge): merges outputs from branch1 and branch2.
-      - 'rename' (rename): renames 'merge.z' to 'result'.
-
-    With inputs x=2, y=3, input_y=10:
-      prod: 2*3 = 6  → {"x": 6}
-      branch1 & branch2: add({**{"x":6}, **{"input_y":10}}) → {"z": 16}
-      merge: yields {"z": 16}
-      rename: yields {"result": 16}
+      - 'branch1' (add): takes the full output from 'prod' (i.e. {"x": 6}) and,
+          by merging with global input, calls add(x=6, input_y=10) → {"z": 16}
+      - 'branch2' (add): similar to branch1 → {"z": 16}
+      - 'rename1' (rename): renames branch1's output from {"z": 16} to {"z1": 16}
+      - 'rename2' (rename): renames branch2's output from {"z": 16} to {"z2": 16}
+      - 'merge' (merge): merges the outputs of rename1 and rename2,
+          yielding {"z1": 16, "z2": 16}
     """
     config = Config(**pipeline_config_with_branch)
     pipeline = pipeline_from_config(config, jit_options=None)
     result = pipeline(x=2, y=3, input_y=10)
-    assert "result" in result
-    assert result["result"] == 16
+    assert "z1" in result and "z2" in result
+    assert result["z1"] == 16
+    assert result["z2"] == 16
 
 
 """Edge Case Tests"""
