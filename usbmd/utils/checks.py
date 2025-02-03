@@ -564,7 +564,9 @@ def _assert_uint8_images(images: np.ndarray):
 
 
 def _assert_keys_and_axes(keys, axes):
-    """Quick check to ensure that the keys and axes are lists of the same length."""
+    """Quick check to ensure that the keys and axes are lists of the same length,
+    and that the keys are strings and the axes are integers."""
+
     if not isinstance(keys, list):
         keys = [keys]
     if not isinstance(axes, list):
