@@ -544,6 +544,76 @@ class Stack(Operation):
         raise NotImplementedError
 
 
+@ops_registry("concatenate_v2")
+class Concatenate(Operation):
+    """Concatenate multiple data arrays along an existing axis."""
+
+    def __init__(self, keys: List[str], axis: int = 0, **kwargs):
+        super().__init__(**kwargs)
+        self.keys = keys
+        self.axis = axis
+
+    def call(self, **kwargs) -> Dict:
+        """
+        Concatenates the inputs corresponding to the specified keys along the specified axis.
+        """
+        for key, axis in zip(self.keys, self.axis):
+            kwargs[key] = keras.ops.concat(
+                [kwargs[key] for key in self.keys], axis=axis
+            )
+        return kwargs
+
+
+@ops_registry("rename_v2")
+class Rename(Operation):
+    """Rename keys in the input dictionary."""
+
+    def __init__(self, mapping: Dict[str, str], **kwargs):
+        super().__init__(**kwargs)
+        self.mapping = mapping
+
+    def call(self, **kwargs) -> Dict:
+        """
+        Renames the keys in the input dictionary according to the mapping.
+        """
+        renamed = {self.mapping.get(k, k): v for k, v in kwargs.items()}
+        return renamed
+
+
+@ops_registry("filter_v2")
+class Filter(Operation):
+    """Filter keys in the input dictionary."""
+
+    def __init__(self, keys: List[str], **kwargs):
+        super().__init__(**kwargs)
+        self.keys = keys
+
+    def call(self, *args, **kwargs) -> Dict:
+        """
+        Filters the input dictionary to include only the specified keys.
+        """
+        filtered = {k: v for k, v in kwargs.items() if k in self.keys}
+        return filtered
+
+
+@ops_registry("output_v2")
+class Output(Operation):
+    """Output operation. This operation is used to mark outputs in the pipeline.
+    Optionally, keys can be specified to only output a subset of the input dictionary. Otherwise
+    the entire input dictionary is returned.
+    """
+
+    def __init__(self, keys: List[str] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.keys = keys
+
+    def call(self, *args, **kwargs) -> Dict:
+        """Returns the input dictionary."""
+        if self.keys:
+            return {k: v for k, v in kwargs.items() if k in self.keys}
+        return kwargs
+
+
 @ops_registry("mean_v2")
 class Mean(Operation):
     """Take the mean of the input data along a specific axis."""
