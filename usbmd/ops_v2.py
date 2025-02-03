@@ -60,6 +60,8 @@ class Operation(keras.Operation):
         """
         super().__init__()
 
+        self.inputs = None  # List of Operation outputs that are input to this Operation
+
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
         self.cache_inputs = cache_inputs
@@ -76,6 +78,11 @@ class Operation(keras.Operation):
 
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
+
+    @property
+    def connected(self):
+        """Check if the operation is connected to another operation."""
+        return self.inputs is not None
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
