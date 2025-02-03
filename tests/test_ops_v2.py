@@ -91,8 +91,8 @@ def pipeline_config():
     """Returns a test pipeline configuration."""
     return {
         "operations": [
-            {"name": "multiply", "params": {}},
-            {"name": "add", "params": {}},
+            {"op": "multiply", "params": {}},
+            {"op": "add", "params": {}},
         ]
     }
 
@@ -102,8 +102,20 @@ def pipeline_config_with_params():
     """Returns a test pipeline configuration with parameters."""
     return {
         "operations": [
-            {"name": "multiply", "params": {"useless_parameter": 10}},
-            {"name": "add"},
+            {"op": "multiply", "params": {"useless_parameter": 10}},
+            {"op": "add"},
+        ]
+    }
+
+@pytest.fixture
+def pipeline_config_with_branch():
+    """Returns a test pipeline configuration with parameters."""
+    return {
+        "operations": [
+            {"op": "multiply", "params": {}},
+            {"op": "add", "params": {}},
+            {"op": "add", "params": {}, "inputs": ["multiply"]},
+            {"op": "rename", "params":
         ]
     }
 
@@ -315,7 +327,7 @@ def test_pipeline_from_json(config_fixture, request):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
+    "config_fixture", ["pipeline_config", "pipeline_config_with_params", "pipeline_config_with_branch"]
 )
 def test_pipeline_from_config(config_fixture, request):
     """Tests creating a pipeline from a Config object."""
