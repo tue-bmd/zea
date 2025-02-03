@@ -194,76 +194,60 @@ class Operation(keras.Operation):
 
 class Pipeline:
     """
-    A Pipeline that supports both sequential (simple) and branched pipelines.
+    A Pipeline that supports both simple sequential definitions and more
+    detailed (branched) pipelines. In a simple pipeline you may define a list
+    of operations as strings or dicts with just "op" and "params". For branched
+    pipelines, you may specify extra keys ("id" and "inputs").
 
-    In the simple (sequential) case, you may provide a list of Operation instances
-    without needing to specify IDs or input keys. In that case each operation receives
-    the entire global input dictionary (or the output of the previous op).
-
-    In the branched case, at least one operation must have an explicit 'id' or define an
-    'input_keys' attribute. In this mode every operation is assigned (or must provide) a
-    unique ID. Operations can then specify in their "input_keys" a list of keys of the form
-    "other_op_id.suffix" so that their inputs come from the output of a particular op.
+    Internally, every op is assigned an ID. If an op does not specify input keys,
+    it will receive the full data dictionary (i.e. the pipeline runs sequentially).
+    If any op defines input keys (of the form "otherOpID.suffix"), the pipeline builds
+    a dependency graph and executes ops in topologically sorted order.
     """
 
     def __init__(
         self,
-        operations: List[Any],  # A list of Operation instances.
+        operations: List[Any],
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
     ):
-        """
-        Args:
-            operations: A list of Operation instances.
-                • For a sequential pipeline, no extra info is needed.
-                • For a branched pipeline, each op must have a unique 'id' (or one is assigned)
-                  and can optionally define 'input_keys' (a list of strings) to select inputs.
-            with_batch_dim: Whether to include a batch dimension.
-            jit_options: "pipeline", "ops", or None.
-                - "pipeline": jit-compiles the entire pipeline.
-                - "ops": jit-compiles each op separately.
-                - None: no JIT.
-        """
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
-        # Decide the mode:
-        # If any op has an "id" attribute or an "input_keys" attribute, we assume branched.
-        self._branched = any(
-            hasattr(op, "id") or hasattr(op, "input_keys") for op in operations
-        )
+        # Always work with the complete list of operations.
+        # For any op that lacks an "id", assign one automatically.
+        # For any op that lacks an "input_keys" attribute, leave it as None.
+        self._ops_list = operations
+        for idx, op in enumerate(self._ops_list):
+            if not hasattr(op, "id"):
+                op.id = f"op_{idx}"
+            if not hasattr(op, "input_keys"):
+                op.input_keys = None
+            op.with_batch_dim = with_batch_dim
+            op.set_jit(jit_options == "ops")
 
-        if not self._branched:
-            # SIMPLE / SEQUENTIAL MODE:
-            self._pipeline_layers = operations
-            for op in self._pipeline_layers:
-                op.with_batch_dim = with_batch_dim
-                op.set_jit(jit_options == "ops")
-        else:
-            # BRANCHED MODE:
-            # Ensure every op has a unique id. (If missing, assign one automatically.)
-            for idx, op in enumerate(operations):
-                if not hasattr(op, "id"):
-                    op.id = f"op_{idx}"
-            # It’s okay if some ops do not define 'input_keys': those will simply receive the full data-store.
-            self._op_dict: Dict[str, Any] = {op.id: op for op in operations}
-            for op in operations:
-                op.with_batch_dim = with_batch_dim
-                op.set_jit(jit_options == "ops")
-            self._top_order = self._topological_sort(operations)
-            self.validate()  # Validate branched dependencies
+        # Determine whether this is a simple sequential pipeline.
+        # A simple pipeline is one where no op defines explicit input_keys.
+        self._sequential = all(op.input_keys is None for op in self._ops_list)
 
-        # Wrap the pipeline call in jit if requested
+        if not self._sequential:
+            # Build a mapping of op id to op instance and a topological ordering.
+            self._op_dict: Dict[str, Any] = {op.id: op for op in self._ops_list}
+            self._top_order = self._topological_sort(self._ops_list)
+            # Validate that all input_keys (if provided) refer to valid op ids.
+            self.validate()
+
         self._call_pipeline = jit(self.call) if jit_options == "pipeline" else self.call
 
     def _build_dependency_graph(self, operations: List[Any]) -> Dict[str, Set[str]]:
         """
-        Build a dependency graph where each key is an op id and each value is the set of op ids
-        that must be executed before it (because its input_keys reference those ops).
+        Build a dependency graph mapping each op id to the set of op ids that
+        must be executed before it. Only operations that define input_keys (with keys like "otherOpID.suffix")
+        contribute dependencies.
         """
         dep_graph: Dict[str, Set[str]] = {op.id: set() for op in operations}
         for op in operations:
-            if hasattr(op, "input_keys") and op.input_keys:
+            if op.input_keys:
                 for key in op.input_keys:
                     if "." in key:
                         source_op_id = key.split(".")[0]
@@ -273,8 +257,8 @@ class Pipeline:
 
     def _topological_sort(self, operations: List[Any]) -> List[str]:
         """
-        Return a list of op ids sorted in topological order (dependencies come first).
-        Raises an error if a cycle is detected.
+        Returns a list of op ids sorted in topological order (i.e. dependencies come first).
+        Raises a ValueError if a cycle is detected.
         """
         dep_graph = self._build_dependency_graph(operations)
         in_degree = {op_id: len(deps) for op_id, deps in dep_graph.items()}
@@ -296,31 +280,27 @@ class Pipeline:
     def call(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the pipeline.
-
-        In sequential mode, each op receives the full data dictionary (or the output of the previous op).
-        In branched mode, operations are executed in topological order using their input_keys to select data
-        from a shared data_store.
+          • In sequential mode, each op receives the entire data dictionary (or the output of the previous op).
+          • In branched mode, ops are executed in topological order; each op that defined input_keys
+            receives only the specified keys from a shared data store.
         """
-        if not self._branched:
-            # SIMPLE / SEQUENTIAL MODE:
+        if self._sequential:
             data = inputs.copy()
-            for op in self._pipeline_layers:
+            for op in self._ops_list:
                 data = op(**data)
             return data
         else:
-            # BRANCHED MODE:
             data_store = inputs.copy()
             for op_id in self._top_order:
                 op = self._op_dict[op_id]
-                # If the op defines input_keys, pick those from the data_store; else pass full data_store.
-                if hasattr(op, "input_keys") and op.input_keys:
+                if op.input_keys:
                     op_inputs = {}
                     for key in op.input_keys:
                         if key in data_store:
                             op_inputs[key] = data_store[key]
                         else:
                             raise ValueError(
-                                f"Input key '{key}' for operation '{op_id}' not found in data_store."
+                                f"Input key '{key}' for operation '{op.id}' not found."
                             )
                 else:
                     op_inputs = data_store
@@ -330,10 +310,8 @@ class Pipeline:
 
     def __call__(self, *args, return_numpy=False, **kwargs) -> Dict[str, Any]:
         """
-        Prepare input data and execute the pipeline.
-
-        (This version assumes that Probe, Scan, Config objects (if any) are passed as positional
-         arguments and have a .to_tensor() method, similar to your original design.)
+        Prepares inputs (merging Probe, Scan, and Config if provided as positional args)
+        and then executes the pipeline.
         """
         if any(key in kwargs for key in ["probe", "scan", "config"]):
             raise ValueError(
@@ -362,102 +340,189 @@ class Pipeline:
 
     def validate(self):
         """
-        In branched mode, ensure that all input_keys referencing a previous op actually refer to a valid op.
-        (For sequential pipelines, no extra validation is needed.)
+        In branched mode, validate that every input key of the form "someOp.suffix"
+        references a valid op id.
         """
-        if self._branched:
-            for op in self._op_dict.values():
-                if hasattr(op, "input_keys") and op.input_keys:
-                    for key in op.input_keys:
-                        if "." in key:
-                            source_op_id = key.split(".")[0]
-                            if source_op_id not in self._op_dict:
-                                raise ValueError(
-                                    f"Operation '{op.id}' expects input from '{source_op_id}', which is not defined."
-                                )
+        for op in self._ops_list:
+            if op.input_keys:
+                for key in op.input_keys:
+                    if "." in key:
+                        source_op_id = key.split(".")[0]
+                        if source_op_id not in self._op_dict:
+                            raise ValueError(
+                                f"Operation '{op.id}' expects input from '{source_op_id}', which is not defined."
+                            )
 
     def __str__(self):
-        """
-        Provide a string representation of the pipeline.
-        In sequential mode, this prints a simple arrow chain.
-        In branched mode, you might extend this to visualize the DAG.
-        """
-        if not self._branched:
-            ops_str = " -> ".join(
-                [op.__class__.__name__ for op in self._pipeline_layers]
-            )
-            return ops_str
+        if self._sequential:
+            ops_str = " -> ".join([op.__class__.__name__ for op in self._ops_list])
         else:
             ops_str = " -> ".join(
-                [
-                    f"{op_id}:{self._op_dict[op_id].__class__.__name__}"
-                    for op_id in self._top_order
-                ]
+                [f"{op_id}:{self._op_dict[op_id].__class__.__name__}" for op_id in self._top_order]
             )
-            return f"Branched Pipeline: {ops_str}"
+        return ops_str
 
     def __repr__(self):
         return self.__str__()
 
+    @classmethod
+    def load(cls, file_path: str, **kwargs) -> "Pipeline":
+        """
+        Class method to load a pipeline from a configuration file.
+        The file extension (.json, .yaml, or .yml) is used to select the correct loader.
 
-def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
-    """Make an operation chain from a custom list of operations.
+        Args:
+            file_path: Path to the pipeline configuration file.
+            **kwargs: Additional keyword arguments passed to the pipeline loader.
 
-    Args:
-        operation_chain (list): List of operations to be performed.
-            Each operation can be a string or a dictionary.
-            if a string, the operation is initialized with default parameters.
-            if a dictionary, the operation is initialized with the parameters
-            provided in the dictionary, which should have the keys 'name' and 'params'.
+        Returns:
+            A Pipeline instance.
+        """
+        if file_path.endswith(".json"):
+            with open(file_path, "r") as f:
+                json_str = f.read()
+            return pipeline_from_json(json_str, **kwargs)
+        elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
+            return pipeline_from_yaml(file_path, **kwargs)
+        else:
+            raise ValueError("File must have extension .json, .yaml, or .yml")
+
+    def save(self, file_path: str, format: str = "json") -> None:
+        """
+        Instance method to save the pipeline configuration to a file.
+
+        Args:
+            file_path: Path where the configuration will be saved.
+            format: Either "json" or "yaml".
+        """
+        if format.lower() == "json":
+            config_str = pipeline_to_json(self)
+        elif format.lower() == "yaml":
+            config_str = pipeline_to_yaml(self)
+        else:
+            raise ValueError("Format must be either 'json' or 'yaml'.")
+        with open(file_path, "w") as f:
+            f.write(config_str)
+
+########################################################################
+# Pipeline Construction and Serialization Functions
+########################################################################
+
+def make_operation_chain(
+    operation_chain: List[Union[str, Dict, Config]]
+) -> List[Operation]:
+    """
+    Build an operation chain from a list of operations.
+
+    For a simple (sequential) pipeline, you can specify each op as a string
+    (which initializes the op with default parameters) or as a dict with keys
+    "op" and "params". For branched pipelines, you may also specify extra keys:
+      • "id": a unique identifier for the op (optional in simple pipelines)
+      • "inputs": a list of strings (e.g. "op1.out1") that indicate which outputs
+                  from previous ops should be passed as inputs.
 
     Returns:
-        list: List of operations to be performed.
-
-    TODO: add support for nested operations such that parallel pipelines can be defined.
-
+        A list of Operation instances.
     """
     chain = []
-    for operation in operation_chain:
+    for op_def in operation_chain:
         assert isinstance(
-            operation, (str, dict, Config)
-        ), f"Operation {operation} should be a string, dictionary or Config object"
-        if isinstance(operation, str):
-            operation = get_ops(operation)()
+            op_def, (str, dict, Config)
+        ), f"Operation {op_def} must be a string, dict, or Config object"
+        if isinstance(op_def, str):
+            op_instance = get_ops(op_def)()
         else:
-            if isinstance(operation, Config):
-                operation = operation.serialize()
-            # should have either name or name and params keys
-            assert set(operation.keys()).issubset({"op", "params", "inputs"}), (
-                f"Operation {operation} should have keys 'op', 'params' and 'inputs'"
-                f"or only 'op' got {operation.keys()}"
+            if isinstance(op_def, Config):
+                op_def = op_def.serialize()
+            allowed = {"op", "params", "inputs", "id"}
+            assert set(op_def.keys()).issubset(allowed), (
+                f"Operation {op_def} has invalid keys. Allowed keys: {allowed}"
             )
-            if operation.get("params") is None:
-                operation["params"] = {}
-            operation = get_ops(operation["op"])(**operation["params"])
-        chain.append(operation)
-
+            if op_def.get("params") is None:
+                op_def["params"] = {}
+            op_instance = get_ops(op_def["op"])(**op_def["params"])
+            if "id" in op_def:
+                op_instance.id = op_def["id"]
+            if "inputs" in op_def:
+                op_instance.input_keys = op_def["inputs"]
+        chain.append(op_instance)
     return chain
 
-
-def pipeline_from_json(json_string: str, **kwargs) -> "Pipeline":
-    """Create a pipeline from a JSON string."""
+def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a JSON string.
+    """
     pipeline_config = json.loads(json_string)
     operations = make_operation_chain(pipeline_config["operations"])
     return Pipeline(operations=operations, **kwargs)
 
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a YAML file.
+    """
+    import yaml
+    with open(yaml_path, "r") as f:
+        pipeline_config = yaml.safe_load(f)
+    operations = make_operation_chain(pipeline_config["operations"])
+    return Pipeline(operations=operations, **kwargs)
 
-def pipeline_from_yaml(yaml_path: str, **kwargs) -> "Pipeline":
-    """Create a pipeline from a YAML file."""
-    config = Config.load_from_yaml(yaml_path)
+def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a Config object.
+    """
     operations = make_operation_chain(config.operations)
     return Pipeline(operations=operations, **kwargs)
 
+########################################################################
+# Pipeline Saving / Serialization Functions (External)
+########################################################################
 
-def pipeline_from_config(config: Config, **kwargs) -> "Pipeline":
-    """Create a pipeline from a Config / dict-like object."""
-    operations = make_operation_chain(config.operations)
-    return Pipeline(operations=operations, **kwargs)
+def pipeline_to_dict(pipeline: Pipeline) -> Dict:
+    """
+    Serialize the pipeline configuration to a dictionary.
 
+    For a simple (sequential) pipeline, each operation is represented with just its
+    op name and parameters. For a branched pipeline (i.e. if any op defined input_keys),
+    the extra keys ("id" and "inputs") are included.
+
+    Note: This function assumes that each operation supports a serialize() method.
+    """
+    op_list = []
+    # Determine if any op has explicit input_keys.
+    is_sequential = all(getattr(op, "input_keys", None) is None for op in pipeline._ops_list)
+    if is_sequential:
+        for op in pipeline._ops_list:
+            op_conf = {
+                "op": op.__class__.__name__,
+                "params": op.serialize() if hasattr(op, "serialize") else {}
+            }
+            op_list.append(op_conf)
+    else:
+        # In branched mode include the extra keys.
+        for op_id in pipeline._top_order:
+            op = pipeline._op_dict[op_id]
+            op_conf = {
+                "id": op.id,
+                "op": op.__class__.__name__,
+                "params": op.serialize() if hasattr(op, "serialize") else {}
+            }
+            if getattr(op, "input_keys", None) is not None:
+                op_conf["inputs"] = op.input_keys
+            op_list.append(op_conf)
+    return {"operations": op_list}
+
+def pipeline_to_json(pipeline: Pipeline, indent: int = 4) -> str:
+    """
+    Serialize the pipeline to a JSON string.
+    """
+    return json.dumps(pipeline_to_dict(pipeline), indent=indent)
+
+def pipeline_to_yaml(pipeline: Pipeline) -> str:
+    """
+    Serialize the pipeline to a YAML string.
+    """
+    import yaml
+    return yaml.dump(pipeline_to_dict(pipeline))
 
 ## Base Operations
 
