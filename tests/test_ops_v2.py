@@ -25,27 +25,24 @@ from usbmd.scan import Scan
 class MultiplyOperation(Operation):
     """Multiply Operation for testing purposes."""
 
-    def __init__(self, useless_parameter: int = None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.useless_parameter = useless_parameter
 
     def call(self, x, y):
         """
-        Multiplies the input x by the specified factor.
+        Multiplies x and y.
         """
-
         return {"x": keras.ops.multiply(x, y)}
 
 
 @ops_registry("add")
 class AddOperation(Operation):
-    """Add Operation for testing purposes."""
+    """Add Operation for testing purposes.
+
+    This version is made flexible: if 'y' is not provided, it will look for 'input_y'.
+    """
 
     def call(self, x, y):
-        """
-        Adds the result from MultiplyOperation with y.
-        """
-        # print(f"Processing AddOperation: result={result}, y={y}")
         return {"z": keras.ops.add(x, y)}
 
 
@@ -57,8 +54,6 @@ class LargeMatrixMultiplicationOperation(Operation):
         """
         Performs large matrix multiplication using Keras ops.
         """
-        # print("Processing LargeMatrixMultiplicationOperation...")
-        # Perform matrix multiplication
         result = keras.ops.matmul(matrix_a, matrix_b)
         result2 = keras.ops.matmul(result, matrix_a)
         result3 = keras.ops.matmul(result2, matrix_b)
@@ -71,24 +66,25 @@ class ElementwiseMatrixOperation(Operation):
 
     def call(self, matrix, scalar):
         """
-        Performs elementwise operations on a matrix (adds and multiplies by scalar).
+        Performs elementwise operations on a matrix.
         """
-        # print("Processing ElementwiseMatrixOperation...")
-        # Perform elementwise addition and multiplication
         result = keras.ops.add(matrix, scalar)
         result = keras.ops.multiply(result, scalar)
         return {"elementwise_result": result}
 
 
+"""Fixtures"""
+
+
 @pytest.fixture
 def test_operation():
-    """Returns a MultiplyOperation instance."""
+    """Returns an AddOperation instance with caching."""
     return AddOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
 
 
 @pytest.fixture
 def pipeline_config():
-    """Returns a test pipeline configuration."""
+    """Returns a test sequential pipeline configuration."""
     return {
         "operations": [
             {"op": "multiply", "params": {}},
@@ -99,7 +95,7 @@ def pipeline_config():
 
 @pytest.fixture
 def pipeline_config_with_params():
-    """Returns a test pipeline configuration with parameters."""
+    """Returns a test sequential pipeline configuration with parameters."""
     return {
         "operations": [
             {"op": "multiply", "params": {"useless_parameter": 10}},
@@ -107,15 +103,56 @@ def pipeline_config_with_params():
         ]
     }
 
+
 @pytest.fixture
 def pipeline_config_with_branch():
-    """Returns a test pipeline configuration with parameters."""
+    """
+    Returns a test branched pipeline configuration.
+
+    In this configuration:
+      - 'prod' (a multiply op) computes {"x": x*y}
+      - 'branch1' (an add op) takes the full output from 'prod' and a global input 'input_y'
+        to compute {"z": add(prod.x, input_y)}
+      - 'branch2' (an add op) does the same as branch1.
+      - 'rename1' (a rename op) renames the output 'z' from 'branch1' to 'z1'.
+      - 'rename2' (a rename op) renames the output 'z' from 'branch2' to 'z2'.
+      - 'merge' (a merge op) merges the outputs from 'rename1' and 'rename2'.
+
+    With inputs x=2, y=3, input_y=10:
+      - prod: 2*3 = 6, so its output is {"x": 6}
+      - branch1 and branch2 each receive the full output from 'prod' (i.e. {"x": 6})
+        and also receive input 'input_y' = 10. Thus, they call add(x=6, input_y=10)
+        (the add op will use input_y as y), yielding {"z": 16}.
+      - rename1 renames 'z' from branch1 to 'z1', so its output is {"z1": 16}
+      - rename2 renames 'z' from branch2 to 'z2', so its output is {"z2": 16}
+      - merge receives 'z1' and 'z2' and merges them, so the final output contains
+        {"z1": 16, "z2": 16}
+    """
     return {
         "operations": [
-            {"op": "multiply", "params": {}},
-            {"op": "add", "params": {}},
-            {"op": "add", "params": {}, "inputs": ["multiply"]},
-            {"op": "rename", "params":
+            {"id": "prod", "op": "multiply", "params": {}},
+            {"id": "branch1", "op": "add", "params": {}, "inputs": ["prod"]},
+            {"id": "branch2", "op": "add", "params": {}, "inputs": ["prod"]},
+            # rename outputs of branches z to z1 and z2
+            {
+                "id": "rename1",
+                "op": "rename",
+                "params": {"mapping": {"z": "z1"}},
+                "inputs": ["branch1"],
+            },
+            {
+                "id": "rename2",
+                "op": "rename",
+                "params": {"mapping": {"z": "z2"}},
+                "inputs": ["branch2"],
+            },
+            # merge the outputs of the branches
+            {
+                "id": "merge",
+                "op": "merge",
+                "params": {},
+                "inputs": ["rename1", "rename2"],
+            },
         ]
     }
 
@@ -137,8 +174,9 @@ def test_operation_input_validation(test_operation, jit_compile):
     """Tests input validation and handling of unexpected keys."""
     test_operation.set_jit(jit_compile)
     outputs = test_operation(x=5, y=3, other=10)
+    # 'other' should be passed through unchanged.
     assert outputs["other"] == 10
-    assert outputs["z"] == 8
+    assert outputs["z"] == 8  # 5 + 3
 
 
 @pytest.mark.parametrize("jit_compile", [True, False])
@@ -158,7 +196,7 @@ def test_operation_input_caching(test_operation, jit_compile):
     test_operation.set_jit(jit_compile)
     test_operation.set_input_cache(input_cache={"x": 10})
     result = test_operation(y=5)
-    assert result["z"] == 15
+    assert result["z"] == 15  # 10 + 5
 
 
 def test_operation_jit_compilation():
@@ -194,9 +232,10 @@ def test_pipeline_initialization():
     """Tests initialization of a Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = Pipeline(operations=operations)
-    assert len(pipeline.operations) == 2
-    assert isinstance(pipeline.operations[0], MultiplyOperation)
-    assert isinstance(pipeline.operations[1], AddOperation)
+    # For sequential pipelines, operations are stored in _ops_list.
+    assert len(pipeline._ops_list) == 2
+    assert isinstance(pipeline._ops_list[0], MultiplyOperation)
+    assert isinstance(pipeline._ops_list[1], AddOperation)
 
 
 def test_pipeline_call():
@@ -204,7 +243,8 @@ def test_pipeline_call():
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = Pipeline(operations=operations)
     result = pipeline(x=2, y=3)
-    assert result["z"] == 9  # (2 * 3) + 3
+    # multiply: 2*3 = 6; add: 6+3 = 9.
+    assert result["z"] == 9
 
 
 def test_pipeline_with_large_matrix_multiplication():
@@ -234,12 +274,12 @@ def test_pipeline_jit_options():
     assert callable(pipeline.call)
 
     pipeline = Pipeline(operations=operations, jit_options="ops")
-    for operation in pipeline.operations:
-        assert operation._jit_compile is True
+    for op in pipeline._ops_list:
+        assert op._jit_compile is True
 
     pipeline = Pipeline(operations=operations, jit_options=None)
-    for operation in pipeline.operations:
-        assert operation._jit_compile is False
+    for op in pipeline._ops_list:
+        assert op._jit_compile is False
 
 
 def test_pipeline_set_params():
@@ -280,7 +320,6 @@ def test_pipeline_validation():
 
 def test_pipeline_with_scan_probe_config():
     """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
-
     probe = Dummy()
     scan = Scan(
         n_tx=128,
@@ -293,10 +332,8 @@ def test_pipeline_with_scan_probe_config():
     )
 
     # TODO: Add Config object as input to the Pipeline, currently config is not an Object
-
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = Pipeline(operations=operations)
-
     result = pipeline(scan, probe, x=2, y=3)
     assert "z" in result
     assert "n_tx" in result  # Check if we parsed the scan object correctly
@@ -315,19 +352,20 @@ def test_pipeline_from_json(config_fixture, request):
     json_string = json.dumps(config)
     pipeline = pipeline_from_json(json_string, jit_options=None)
 
-    assert len(pipeline.operations) == 2
-    assert isinstance(pipeline.operations[0], MultiplyOperation)
-    assert isinstance(pipeline.operations[1], AddOperation)
+    assert len(pipeline._ops_list) == 2
+    assert isinstance(pipeline._ops_list[0], MultiplyOperation)
+    assert isinstance(pipeline._ops_list[1], AddOperation)
 
     result = pipeline(x=2, y=3)
     if config_fixture == "pipeline_config_with_params":
-        assert pipeline.operations[0].useless_parameter == 10
+        assert pipeline._ops_list[0].useless_parameter == 10
 
     assert result["z"] == 9  # (2 * 3) + 3
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["pipeline_config", "pipeline_config_with_params", "pipeline_config_with_branch"]
+    "config_fixture",
+    ["pipeline_config", "pipeline_config_with_params", "pipeline_config_with_branch"],
 )
 def test_pipeline_from_config(config_fixture, request):
     """Tests creating a pipeline from a Config object."""
@@ -335,15 +373,78 @@ def test_pipeline_from_config(config_fixture, request):
     config = Config(**config_dict)
     pipeline = pipeline_from_config(config, jit_options=None)
 
-    assert len(pipeline.operations) == 2
-    assert isinstance(pipeline.operations[0], MultiplyOperation)
-    assert isinstance(pipeline.operations[1], AddOperation)
+    # For branched pipelines, _ops_list contains all ops.
+    if config_fixture == "pipeline_config_with_branch":
+        # Expect 5 operations in branched pipeline.
+        assert len(pipeline._ops_list) == 5
+    else:
+        assert len(pipeline._ops_list) == 2
 
-    result = pipeline(x=2, y=3)
-    if config_fixture == "pipeline_config_with_params":
-        assert pipeline.operations[0].useless_parameter == 10
+    # For the branched pipeline, pass global inputs: x=2, y=3 for multiply and input_y=10 for branches.
+    result = pipeline(x=2, y=3, input_y=10)
+    if config_fixture != "pipeline_config_with_branch":
+        assert result["z"] == 9  # (2 * 3) + 3
+    else:
+        # In the branched pipeline:
+        #   prod: 2 * 3 = 6  → output {"x": 6}
+        #   branch1 and branch2: add receives merged inputs: {"x": 6, "input_y": 10} → returns {"z": 16}
+        #   merge: merges branch1.z and branch2.z (last wins) → {"z": 16}
+        #   rename: maps "merge.z" to "result" → {"result": 16}
+        assert result["result"] == 16
 
-    assert result["z"] == 9  # (2 * 3) + 3
+
+"""Pipeline Save/Load Tests"""
+
+
+def test_pipeline_save_and_load(tmp_path):
+    """Tests saving and loading a sequential pipeline in JSON format."""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations, jit_options=None)
+    file_path = tmp_path / "pipeline.json"
+    pipeline.save(str(file_path), format="json")
+    loaded_pipeline = Pipeline.load(str(file_path))
+    result_original = pipeline(x=2, y=3)
+    result_loaded = loaded_pipeline(x=2, y=3)
+    assert result_original == result_loaded
+
+
+def test_pipeline_save_and_load_yaml(tmp_path):
+    """Tests saving and loading a sequential pipeline in YAML format."""
+    operations = [MultiplyOperation(), AddOperation()]
+    pipeline = Pipeline(operations=operations, jit_options=None)
+    file_path = tmp_path / "pipeline.yaml"
+    pipeline.save(str(file_path), format="yaml")
+    loaded_pipeline = Pipeline.load(str(file_path))
+    result_original = pipeline(x=2, y=3)
+    result_loaded = loaded_pipeline(x=2, y=3)
+    assert result_original == result_loaded
+
+
+"""Complex Branched Pipeline Test"""
+
+
+def test_complex_branched_pipeline(pipeline_config_with_branch):
+    """
+    Tests execution of a complex branched pipeline.
+
+    Pipeline structure:
+      - 'prod' (multiply): computes {"x": x*y}
+      - 'branch1' (add): takes full output from 'prod' and global input 'input_y' to compute {"z": add(x, input_y)}
+      - 'branch2' (add): same as branch1.
+      - 'merge' (merge): merges outputs from branch1 and branch2.
+      - 'rename' (rename): renames 'merge.z' to 'result'.
+
+    With inputs x=2, y=3, input_y=10:
+      prod: 2*3 = 6  → {"x": 6}
+      branch1 & branch2: add({**{"x":6}, **{"input_y":10}}) → {"z": 16}
+      merge: yields {"z": 16}
+      rename: yields {"result": 16}
+    """
+    config = Config(**pipeline_config_with_branch)
+    pipeline = pipeline_from_config(config, jit_options=None)
+    result = pipeline(x=2, y=3, input_y=10)
+    assert "result" in result
+    assert result["result"] == 16
 
 
 """Edge Case Tests"""
@@ -366,7 +467,6 @@ def test_operation_large_data_inputs():
 
     matrix_a = keras.random.normal(shape=(512, 512))
     matrix_b = keras.random.normal(shape=(512, 512))
-
     op = MatrixMultiplyOperation()
     result = op(matrix_a=matrix_a, matrix_b=matrix_b)
     assert result["result"].shape == (512, 512)
