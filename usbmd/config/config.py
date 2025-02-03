@@ -13,6 +13,7 @@ from pathlib import Path
 
 import yaml
 
+from usbmd.core import object_to_tensor
 from usbmd.utils import log
 
 
@@ -411,6 +412,10 @@ class Config(dict):
     def load_from_yaml(path):
         """Load config object from yaml file"""
         return load_config_from_yaml(path)
+
+    def to_tensor(self):
+        """Convert the attributes in the object to keras tensors"""
+        return object_to_tensor(self)
 
 
 def load_config_from_yaml(path, loader=yaml.FullLoader):
