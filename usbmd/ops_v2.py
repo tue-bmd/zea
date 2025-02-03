@@ -201,8 +201,10 @@ class Pipeline:
 
     Internally, every op is assigned an ID. If an op does not specify input keys,
     it will receive the full data dictionary (i.e. the pipeline runs sequentially).
-    If any op defines input keys (of the form "otherOpID.suffix"), the pipeline builds
-    a dependency graph and executes ops in topologically sorted order.
+    If any op defines input keys, then the pipeline builds a dependency graph and
+    executes ops in topologically sorted order.
+    When an input key is specified without a dot (e.g. "prod"), the entire output
+    dictionary from the op with that ID is merged into the op's inputs.
     """
 
     def __init__(
@@ -240,11 +242,6 @@ class Pipeline:
         self._call_pipeline = jit(self.call) if jit_options == "pipeline" else self.call
 
     def _build_dependency_graph(self, operations: List[Any]) -> Dict[str, Set[str]]:
-        """
-        Build a dependency graph mapping each op id to the set of op ids that
-        must be executed before it. Only operations that define input_keys (with keys like "otherOpID.suffix")
-        contribute dependencies.
-        """
         dep_graph: Dict[str, Set[str]] = {op.id: set() for op in operations}
         for op in operations:
             if op.input_keys:
@@ -256,10 +253,6 @@ class Pipeline:
         return dep_graph
 
     def _topological_sort(self, operations: List[Any]) -> List[str]:
-        """
-        Returns a list of op ids sorted in topological order (i.e. dependencies come first).
-        Raises a ValueError if a cycle is detected.
-        """
         dep_graph = self._build_dependency_graph(operations)
         in_degree = {op_id: len(deps) for op_id, deps in dep_graph.items()}
         zero_in_degree = [op_id for op_id, deg in in_degree.items() if deg == 0]
@@ -278,12 +271,6 @@ class Pipeline:
         return sorted_order
 
     def call(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute the pipeline.
-          • In sequential mode, each op receives the entire data dictionary (or the output of the previous op).
-          • In branched mode, ops are executed in topological order; each op that defined input_keys
-            receives only the specified keys from a shared data store.
-        """
         if self._sequential:
             data = inputs.copy()
             for op in self._ops_list:
@@ -297,7 +284,12 @@ class Pipeline:
                     op_inputs = {}
                     for key in op.input_keys:
                         if key in data_store:
-                            op_inputs[key] = data_store[key]
+                            # If key does not contain a dot and the corresponding value is a dict,
+                            # merge its content into op_inputs.
+                            if "." not in key and isinstance(data_store[key], dict):
+                                op_inputs.update(data_store[key])
+                            else:
+                                op_inputs[key] = data_store[key]
                         else:
                             raise ValueError(
                                 f"Input key '{key}' for operation '{op.id}' not found."
@@ -305,14 +297,13 @@ class Pipeline:
                 else:
                     op_inputs = data_store
                 outputs = op(**op_inputs)
+                # Store the op's full output under its own ID.
+                data_store[op.id] = outputs
+                # Also update the global data store with individual output keys.
                 data_store.update(outputs)
             return outputs
 
     def __call__(self, *args, return_numpy=False, **kwargs) -> Dict[str, Any]:
-        """
-        Prepares inputs (merging Probe, Scan, and Config if provided as positional args)
-        and then executes the pipeline.
-        """
         if any(key in kwargs for key in ["probe", "scan", "config"]):
             raise ValueError(
                 "Probe, Scan and Config objects should be passed as positional arguments. "
@@ -339,10 +330,6 @@ class Pipeline:
         return outputs
 
     def validate(self):
-        """
-        In branched mode, validate that every input key of the form "someOp.suffix"
-        references a valid op id.
-        """
         for op in self._ops_list:
             if op.input_keys:
                 for key in op.input_keys:
@@ -358,7 +345,10 @@ class Pipeline:
             ops_str = " -> ".join([op.__class__.__name__ for op in self._ops_list])
         else:
             ops_str = " -> ".join(
-                [f"{op_id}:{self._op_dict[op_id].__class__.__name__}" for op_id in self._top_order]
+                [
+                    f"{op_id}:{self._op_dict[op_id].__class__.__name__}"
+                    for op_id in self._top_order
+                ]
             )
         return ops_str
 
@@ -367,17 +357,6 @@ class Pipeline:
 
     @classmethod
     def load(cls, file_path: str, **kwargs) -> "Pipeline":
-        """
-        Class method to load a pipeline from a configuration file.
-        The file extension (.json, .yaml, or .yml) is used to select the correct loader.
-
-        Args:
-            file_path: Path to the pipeline configuration file.
-            **kwargs: Additional keyword arguments passed to the pipeline loader.
-
-        Returns:
-            A Pipeline instance.
-        """
         if file_path.endswith(".json"):
             with open(file_path, "r") as f:
                 json_str = f.read()
@@ -388,13 +367,6 @@ class Pipeline:
             raise ValueError("File must have extension .json, .yaml, or .yml")
 
     def save(self, file_path: str, format: str = "json") -> None:
-        """
-        Instance method to save the pipeline configuration to a file.
-
-        Args:
-            file_path: Path where the configuration will be saved.
-            format: Either "json" or "yaml".
-        """
         if format.lower() == "json":
             config_str = pipeline_to_json(self)
         elif format.lower() == "yaml":
@@ -404,9 +376,11 @@ class Pipeline:
         with open(file_path, "w") as f:
             f.write(config_str)
 
+
 ########################################################################
 # Pipeline Construction and Serialization Functions
 ########################################################################
+
 
 def make_operation_chain(
     operation_chain: List[Union[str, Dict, Config]]
@@ -435,9 +409,9 @@ def make_operation_chain(
             if isinstance(op_def, Config):
                 op_def = op_def.serialize()
             allowed = {"op", "params", "inputs", "id"}
-            assert set(op_def.keys()).issubset(allowed), (
-                f"Operation {op_def} has invalid keys. Allowed keys: {allowed}"
-            )
+            assert set(op_def.keys()).issubset(
+                allowed
+            ), f"Operation {op_def} has invalid keys. Allowed keys: {allowed}"
             if op_def.get("params") is None:
                 op_def["params"] = {}
             op_instance = get_ops(op_def["op"])(**op_def["params"])
@@ -448,6 +422,7 @@ def make_operation_chain(
         chain.append(op_instance)
     return chain
 
+
 def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
@@ -456,15 +431,18 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     operations = make_operation_chain(pipeline_config["operations"])
     return Pipeline(operations=operations, **kwargs)
 
+
 def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a YAML file.
     """
     import yaml
+
     with open(yaml_path, "r") as f:
         pipeline_config = yaml.safe_load(f)
     operations = make_operation_chain(pipeline_config["operations"])
     return Pipeline(operations=operations, **kwargs)
+
 
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     """
@@ -473,9 +451,11 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     operations = make_operation_chain(config.operations)
     return Pipeline(operations=operations, **kwargs)
 
+
 ########################################################################
 # Pipeline Saving / Serialization Functions (External)
 ########################################################################
+
 
 def pipeline_to_dict(pipeline: Pipeline) -> Dict:
     """
@@ -489,12 +469,14 @@ def pipeline_to_dict(pipeline: Pipeline) -> Dict:
     """
     op_list = []
     # Determine if any op has explicit input_keys.
-    is_sequential = all(getattr(op, "input_keys", None) is None for op in pipeline._ops_list)
+    is_sequential = all(
+        getattr(op, "input_keys", None) is None for op in pipeline._ops_list
+    )
     if is_sequential:
         for op in pipeline._ops_list:
             op_conf = {
                 "op": op.__class__.__name__,
-                "params": op.serialize() if hasattr(op, "serialize") else {}
+                "params": op.serialize() if hasattr(op, "serialize") else {},
             }
             op_list.append(op_conf)
     else:
@@ -504,12 +486,13 @@ def pipeline_to_dict(pipeline: Pipeline) -> Dict:
             op_conf = {
                 "id": op.id,
                 "op": op.__class__.__name__,
-                "params": op.serialize() if hasattr(op, "serialize") else {}
+                "params": op.serialize() if hasattr(op, "serialize") else {},
             }
             if getattr(op, "input_keys", None) is not None:
                 op_conf["inputs"] = op.input_keys
             op_list.append(op_conf)
     return {"operations": op_list}
+
 
 def pipeline_to_json(pipeline: Pipeline, indent: int = 4) -> str:
     """
@@ -517,12 +500,15 @@ def pipeline_to_json(pipeline: Pipeline, indent: int = 4) -> str:
     """
     return json.dumps(pipeline_to_dict(pipeline), indent=indent)
 
+
 def pipeline_to_yaml(pipeline: Pipeline) -> str:
     """
     Serialize the pipeline to a YAML string.
     """
     import yaml
+
     return yaml.dump(pipeline_to_dict(pipeline))
+
 
 ## Base Operations
 
