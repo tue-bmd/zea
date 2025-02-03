@@ -439,22 +439,22 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
     return chain
 
 
-def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
-    """Create a pipeline from a json string."""
+def pipeline_from_json(json_string: str, **kwargs) -> "Pipeline":
+    """Create a pipeline from a JSON string."""
     pipeline_config = json.loads(json_string)
     operations = make_operation_chain(pipeline_config["operations"])
     return Pipeline(operations=operations, **kwargs)
 
 
-def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
-    """Create a pipeline from a yaml file."""
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> "Pipeline":
+    """Create a pipeline from a YAML file."""
     config = Config.load_from_yaml(yaml_path)
     operations = make_operation_chain(config.operations)
     return Pipeline(operations=operations, **kwargs)
 
 
-def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
-    """Create a pipeline from a Config / dict kobject."""
+def pipeline_from_config(config: Config, **kwargs) -> "Pipeline":
+    """Create a pipeline from a Config / dict-like object."""
     operations = make_operation_chain(config.operations)
     return Pipeline(operations=operations, **kwargs)
 
