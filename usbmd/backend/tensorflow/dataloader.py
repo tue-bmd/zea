@@ -562,7 +562,7 @@ class TFDatasetToKeras(TFDatasetAdapter):
         elif keras.backend.backend() == "jax":
             return self.get_jax_iterator()
         elif keras.backend.backend() == "torch":
-            return self.get_torch_dataloader()
+            return iter(self.get_torch_dataloader())
         elif keras.backend.backend() == "numpy":
             return self.get_numpy_iterator()
         else:
