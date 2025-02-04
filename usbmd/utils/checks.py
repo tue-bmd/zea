@@ -561,3 +561,25 @@ def _assert_uint8_images(images: np.ndarray):
             "RGB images must have 3 channels, and RGBA images must have 4 channels. "
             f"Got shape: {images.shape}, channels: {images.shape[-1]}"
         )
+
+
+def _assert_keys_and_axes(keys, axes):
+    """Quick check to ensure that the keys and axes are lists of the same length,
+    and that the keys are strings and the axes are integers."""
+
+    if not isinstance(keys, list):
+        keys = [keys]
+    if not isinstance(axes, list):
+        axes = [axes]
+    if len(keys) != len(axes):
+        raise ValueError("The number of keys and axes must match.")
+
+    # assert that all keys are strings
+    for key in keys:
+        assert isinstance(key, str), "All keys must be strings."
+
+    # assert that all axes are integers
+    for axis in axes:
+        assert isinstance(axis, int), "All axes must be integers."
+
+    return keys, axes

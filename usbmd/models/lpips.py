@@ -19,9 +19,7 @@ from usbmd.registry import model_registry
 
 @model_registry(name="lpips")
 class LPIPS(BaseModel):
-    """Learned Perceptual Image Patch Similarity (LPIPS) metric.
-    Images should be in the range [-1, 1].
-    """
+    """Learned Perceptual Image Patch Similarity (LPIPS) metric."""
 
     def __init__(
         self,
@@ -29,7 +27,6 @@ class LPIPS(BaseModel):
         **kwargs,
     ):
         """Initialize the LPIPS model.
-        Expects weights to be in the [-1, 1] range.
 
         Exported weights using:
             https://github.com/moono/lpips-tf2.x/blob/master/example_export_script/convert_to_tensorflow.py
@@ -60,11 +57,21 @@ class LPIPS(BaseModel):
         """Compute the LPIPS metric.
 
         Args:
-            inputs (list): List of two input images of shape [B, H, W, C].
+            inputs (list): List of two input images of shape [B, H, W, C] or [H, W, C].
                 Images should be in the range [-1, 1].
 
         """
         input1, input2 = inputs
+
+        # check input images
+        if not (self._valid_img(input1) and self._valid_img(input2)):
+            raise ValueError(
+                "Expected both input arguments to be normalized tensors with shape [B, H, W, C]"
+                f" or [H, W, C]. Got input with shape {input1.shape} and {input2.shape} and values"
+                f" in range {[ops.min(input1), ops.max(input1)]} and"
+                f" {[ops.min(input2), ops.max(input2)]} when all values are expected to be in"
+                " the [-1, 1] range."
+            )
 
         # preprocess input images
         net_out1 = Lambda(lambda x: self.preprocess_input(x))(input1)
@@ -114,12 +121,19 @@ class LPIPS(BaseModel):
         return lin_out
 
     @staticmethod
+    def _valid_img(img) -> bool:
+        """Check that input is a valid image to the network."""
+        value_check = ops.max(img) <= 1.0 and ops.min(img) >= -1
+        shape_check = ops.ndim(img) in [3, 4] and ops.shape(img)[-1] == 3
+        return shape_check and value_check
+
+    @staticmethod
     def preprocess_input(image):
         """Preprocess the input images
 
         Args:
             image (Tensor): Input image tensor of shape [B, H, W, C]
-                and values in the range [0, 1].
+                and values in the range [-1, 1].
         Returns:
             Tensor: Preprocessed image tensor of shape [B, H, W, C]
                 and standardized values for VGG model.

@@ -1,32 +1,41 @@
 """ Experimental version of the USBMD ops module"""
 
-import enum
 import hashlib
 import inspect
 import json
 from typing import Any, Dict, List, Union
 
 import keras
+from keras import ops
 
 from usbmd.backend import jit
 from usbmd.config.config import Config
+from usbmd.core import DataTypes
+from usbmd.ops import channels_to_complex, upmix
 from usbmd.probes import Probe
+from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
+from usbmd.utils.checks import _assert_keys_and_axes
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
 
+# pylint: disable=arguments-differ
 
-# TODO: Move this to Core?
-class DataTypes(enum.Enum):
-    """Enum class for USBMD data types."""
+# make sure to reload all modules that import keras
+# to be able to set backend properly
+# importlib.reload(bmf)
+# importlib.reload(pfield)
+# importlib.reload(lens_correction)
+# importlib.reload(display)
 
-    RAW_DATA = "raw_data"
-    ALIGNED_DATA = "aligned_data"
-    BEAMFORMED_DATA = "beamformed_data"
-    ENVELOPE_DATA = "envelope_data"
-    IMAGE = "image"
-    IMAGE_SC = "image_sc"
+# clear registry upon import
+# ops_registry.clear()
+
+
+def get_ops(ops_name):
+    """Get the operation from the registry."""
+    return ops_registry[ops_name]
 
 
 # TODO: check if inheriting from keras.Operation is better than using the ABC class.
@@ -203,8 +212,6 @@ class Pipeline:
             Defaults to "ops".
         """
 
-        # TODO: add the option to load pipeline from e.g. json
-
         # add functionality here
         # operations = ...
 
@@ -237,7 +244,11 @@ class Pipeline:
     def __call__(self, *args, return_numpy=False, **kwargs):
         """Process input data through the pipeline."""
 
-        ## PREPARE INPUT
+        if any(key in kwargs for key in ["probe", "scan", "config"]):
+            raise ValueError(
+                "Probe, Scan and Config objects should be passed as positional arguments. "
+                "e.g. pipeline(probe, scan, config, **kwargs)"
+            )
 
         # Extract from args Probe, Scan and Config objects
         probe, scan, config = {}, {}, {}
@@ -247,9 +258,17 @@ class Pipeline:
             elif isinstance(arg, Scan):
                 scan = arg.to_tensor()
             elif isinstance(arg, Config):
-                config = arg.to_tensor()
+                config = arg.to_tensor()  # TODO
+            else:
+                raise ValueError(
+                    f"Unsupported input type for pipeline *args: {type(arg)}. "
+                    "Pipeline call expects a `usbmd.core.Object` (Probe, Scan, Config) as args. "
+                    "Alternatively, pass the input as keyword argument (kwargs)."
+                )
 
         # combine probe, scan, config and kwargs
+        # explicitly so we know which keys overwrite which
+        # kwargs > config > scan > probe
         inputs = {**probe, **scan, **config, **kwargs}
 
         ## PROCESSING
@@ -390,7 +409,78 @@ class Pipeline:
         return ",".join(operations)
 
 
+def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
+    """Make an operation chain from a custom list of operations.
+
+    Args:
+        operation_chain (list): List of operations to be performed.
+            Each operation can be a string or a dictionary.
+            if a string, the operation is initialized with default parameters.
+            if a dictionary, the operation is initialized with the parameters
+            provided in the dictionary, which should have the keys 'name' and 'params'.
+
+    Returns:
+        list: List of operations to be performed.
+
+    TODO: add support for nested operations such that parallel pipelines can be defined.
+
+    """
+    chain = []
+    for operation in operation_chain:
+        assert isinstance(
+            operation, (str, dict, Config)
+        ), f"Operation {operation} should be a string, dictionary or Config object"
+        if isinstance(operation, str):
+            operation = get_ops(operation)()
+        else:
+            if isinstance(operation, Config):
+                operation = operation.serialize()
+            # should have either name or name and params keys
+            assert set(operation.keys()).issubset({"name", "params"}), (
+                f"Operation {operation} should have keys 'name' and 'params'"
+                f"or only 'name' got {operation.keys()}"
+            )
+            if operation.get("params") is None:
+                operation["params"] = {}
+            operation = get_ops(operation["name"])(**operation["params"])
+        chain.append(operation)
+
+    return chain
+
+
+def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
+    """Create a pipeline from a json string."""
+    pipeline_config = json.loads(json_string)
+    operations = make_operation_chain(pipeline_config["operations"])
+    return Pipeline(operations=operations, **kwargs)
+
+
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
+    """Create a pipeline from a yaml file."""
+    config = Config.load_from_yaml(yaml_path)
+    operations = make_operation_chain(config.operations)
+    return Pipeline(operations=operations, **kwargs)
+
+
+def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+    """Create a pipeline from a Config / dict kobject."""
+    operations = make_operation_chain(config.operations)
+    return Pipeline(operations=operations, **kwargs)
+
+
 ## Base Operations
+
+
+@ops_registry("identity_v2")
+class Identity(Operation):
+    """Identity operation."""
+
+    def call(self, *args, **kwargs) -> Dict:
+        """Returns the input as is."""
+        return kwargs
+
+
+@ops_registry("merge_v2")
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
@@ -406,6 +496,7 @@ class Merge(Operation):
         return merged
 
 
+@ops_registry("split_v2")
 class Split(Operation):
     """Operation that splits an input dictionary  n copies."""
 
@@ -420,6 +511,7 @@ class Split(Operation):
         return [kwargs.copy() for _ in range(self.n)]
 
 
+@ops_registry("stack_v2")
 class Stack(Operation):
     """Stack multiple data arrays along a new axis.
     Useful to merge data from parallel pipelines.
@@ -427,13 +519,13 @@ class Stack(Operation):
 
     def __init__(
         self,
-        keys: Union[str, List[str], None] = None,
-        axis: Union[int, List[int], None] = 0,
+        keys: Union[str, List[str], None],
+        axes: Union[int, List[int], None],
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.keys = keys
-        self.axis = axis
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
 
     def call(self, *args, **kwargs) -> Dict:
         """
@@ -443,3 +535,42 @@ class Stack(Operation):
         """
 
         raise NotImplementedError
+
+
+@ops_registry("mean_v2")
+class Mean(Operation):
+    """Take the mean of the input data along a specific axis."""
+
+    def __init__(self, keys, axes, **kwargs):
+        super().__init__(**kwargs)
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
+
+    def call(self, **kwargs):
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = ops.mean(kwargs[key], axis=axis)
+
+        return kwargs
+
+
+@ops_registry("upmix_v2")
+class UpMix(Operation):
+    """Upmix IQ data to RF data."""
+
+    def __init__(self, key: str, **kwargs):
+        super().__init__(**kwargs)
+        self.key = key
+
+    def call(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
+
+        data = kwargs[self.key]
+
+        if data.shape[-1] == 1:
+            log.warning("Upmixing is not applicable to RF data.")
+            return data
+        elif data.shape[-1] == 2:
+            data = channels_to_complex(data)
+
+        data = upmix(data, fs, fc, upsampling_rate)
+        data = ops.expand_dims(data, axis=-1)
+        return data
