@@ -88,7 +88,7 @@ class TFDatasetToKeras(TFDatasetAdapter):
         elif backend == "jax":
             return self.get_jax_iterator()
         elif backend == "torch":
-            return self.get_torch_dataloader()
+            return iter(self.get_torch_dataloader())
         elif backend == "numpy":
             return self.get_numpy_iterator()
         else:
