@@ -141,7 +141,7 @@ def h5_dataset_from_directory(
     drop_remainder: bool = False,
     cache: bool | str = False,
     prefetch: bool = True,
-    wrap_in_keras: bool = False,
+    wrap_in_keras: bool = True,
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -222,7 +222,8 @@ def h5_dataset_from_directory(
         cache (bool or str, optional): cache dataset. If a string is provided, caching will
             be done to disk with that filename. Defaults to False.
         prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
-        wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to False.
+        wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
+            If True, will convert the dataset that returns backend tensors.
 
     Returns:
         tf.data.Dataset: dataset
