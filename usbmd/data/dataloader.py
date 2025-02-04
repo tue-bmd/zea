@@ -16,9 +16,15 @@ import keras
 import numpy as np
 from keras import ops
 from keras.src.utils.backend_utils import DynamicBackend
+from regex import D
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
+
+FILE_TYPES = [".hdf5", ".h5"]
+FILE_HANDLE_CACHE_CAPACITY = 128
+DEFAULT_IMAGE_RANGE = (0, 255)
+DEFAULT_NORMALIZATION_RANGE = (0, 1)
 
 
 def _map_negative_indices(indices: list, length: int):
@@ -188,7 +194,7 @@ def _find_h5_files_from_directory(
         for _dir in directory:
             dataset_info = search_file_tree(
                 _dir,
-                filetypes=[".hdf5", ".h5"],
+                filetypes=FILE_TYPES,
                 hdf5_key_for_length=key,
                 **search_file_tree_kwargs,
             )
@@ -355,7 +361,7 @@ class H5Generator(keras.utils.PyDataset):
         batch_size: int = 1,
         as_tensor: bool = True,
         search_file_tree_kwargs: dict | None = None,
-        file_handle_cache_capacity: int = 128,
+        file_handle_cache_capacity: int = FILE_HANDLE_CACHE_CAPACITY,
         **kwargs,
     ):
         assert (directory is not None) ^ (
@@ -574,8 +580,8 @@ class H5Dataloader(H5Generator):
         self,
         resize_type: str = "center_crop",
         image_size: tuple | None = None,
-        image_range: tuple = (0, 255),
-        normalization_range: tuple = (0, 1),
+        image_range: tuple = DEFAULT_IMAGE_RANGE,
+        normalization_range: tuple = DEFAULT_NORMALIZATION_RANGE,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -584,7 +590,9 @@ class H5Dataloader(H5Generator):
         self.image_range = image_range
         self.normalization_range = normalization_range
         self.resizer = Resizer(
-            resize_type=resize_type, image_size=image_size, seed=self.seed
+            resize_type=resize_type,
+            image_size=image_size,
+            seed=self.seed,
         )
 
     def __getitem__(self, index):
