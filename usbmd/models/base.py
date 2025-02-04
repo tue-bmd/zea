@@ -6,18 +6,12 @@
 
 import keras
 
+from usbmd.core import classproperty
 from usbmd.models.preset_utils import (
     builtin_presets,
     get_preset_loader,
     get_preset_saver,
 )
-
-
-class classproperty(property):
-    """Define a class level property."""
-
-    def __get__(self, _, owner_cls):
-        return self.fget(owner_cls)
 
 
 class BaseModel(keras.models.Model):
