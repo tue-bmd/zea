@@ -16,7 +16,6 @@ import keras
 import numpy as np
 from keras import ops
 from keras.src.utils.backend_utils import DynamicBackend
-from regex import D
 
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
