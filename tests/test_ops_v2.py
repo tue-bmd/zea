@@ -1,27 +1,43 @@
-"""Tests for the Operation and Pipeline classes in ops_v2.py."""
+"""Tests for the Operation and Pipeline classes in ops_v2.py.
 
-# pylint: disable=arguments-differ, abstract-class-instantiated
+# TODO: Run tests for all backends
+# TODO: merge with original ops
+"""
+
+# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
+
+import json
 
 import keras
 import pytest
 
-from usbmd.ops_v2 import DataTypes, Operation, Pipeline
+from usbmd.config.config import Config
+from usbmd.core import DataTypes
+from usbmd.ops_v2 import Operation, Pipeline, pipeline_from_config, pipeline_from_json
 from usbmd.probes import Dummy
+from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 
-# TODO: Run tests for all backends
+"""Some operations for testing"""
 
 
+@ops_registry("multiply")
 class MultiplyOperation(Operation):
     """Multiply Operation for testing purposes."""
+
+    def __init__(self, useless_parameter: int = None, **kwargs):
+        super().__init__(**kwargs)
+        self.useless_parameter = useless_parameter
 
     def call(self, x, y):
         """
         Multiplies the input x by the specified factor.
         """
+
         return {"x": keras.ops.multiply(x, y)}
 
 
+@ops_registry("add")
 class AddOperation(Operation):
     """Add Operation for testing purposes."""
 
@@ -33,6 +49,7 @@ class AddOperation(Operation):
         return {"z": keras.ops.add(x, y)}
 
 
+@ops_registry("large_matrix_multiplication")
 class LargeMatrixMultiplicationOperation(Operation):
     """Large Matrix Multiplication Operation for testing purposes."""
 
@@ -48,6 +65,7 @@ class LargeMatrixMultiplicationOperation(Operation):
         return {"matrix_result": result3}
 
 
+@ops_registry("elementwise_matrix_operation")
 class ElementwiseMatrixOperation(Operation):
     """Elementwise Matrix Operation for testing purposes."""
 
@@ -68,7 +86,29 @@ def test_operation():
     return AddOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
 
 
-# 1. Operation Class Tests
+@pytest.fixture
+def pipeline_config():
+    """Returns a test pipeline configuration."""
+    return {
+        "operations": [
+            {"name": "multiply", "params": {}},
+            {"name": "add", "params": {}},
+        ]
+    }
+
+
+@pytest.fixture
+def pipeline_config_with_params():
+    """Returns a test pipeline configuration with parameters."""
+    return {
+        "operations": [
+            {"name": "multiply", "params": {"useless_parameter": 10}},
+            {"name": "add"},
+        ]
+    }
+
+
+"""Operation Class Tests"""
 
 
 def test_operation_initialization(test_operation):
@@ -135,7 +175,7 @@ def test_string_representation(verbose=False):
     assert str(pipeline) == "MultiplyOperation -> AddOperation"
 
 
-# 2. Pipeline Class Tests
+"""Pipeline Class Tests"""
 
 
 def test_pipeline_initialization():
@@ -251,7 +291,50 @@ def test_pipeline_with_scan_probe_config():
     assert "probe_geometry" in result  # Check if we parsed the probe object correctly
 
 
-# 3. Edge Case Tests
+"""Pipeline build from config / json tests"""
+
+
+@pytest.mark.parametrize(
+    "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
+)
+def test_pipeline_from_json(config_fixture, request):
+    """Tests creating a pipeline from a JSON string."""
+    config = request.getfixturevalue(config_fixture)
+    json_string = json.dumps(config)
+    pipeline = pipeline_from_json(json_string, jit_options=None)
+
+    assert len(pipeline.operations) == 2
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+    assert isinstance(pipeline.operations[1], AddOperation)
+
+    result = pipeline(x=2, y=3)
+    if config_fixture == "pipeline_config_with_params":
+        assert pipeline.operations[0].useless_parameter == 10
+
+    assert result["z"] == 9  # (2 * 3) + 3
+
+
+@pytest.mark.parametrize(
+    "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
+)
+def test_pipeline_from_config(config_fixture, request):
+    """Tests creating a pipeline from a Config object."""
+    config_dict = request.getfixturevalue(config_fixture)
+    config = Config(**config_dict)
+    pipeline = pipeline_from_config(config, jit_options=None)
+
+    assert len(pipeline.operations) == 2
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+    assert isinstance(pipeline.operations[1], AddOperation)
+
+    result = pipeline(x=2, y=3)
+    if config_fixture == "pipeline_config_with_params":
+        assert pipeline.operations[0].useless_parameter == 10
+
+    assert result["z"] == 9  # (2 * 3) + 3
+
+
+"""Edge Case Tests"""
 
 
 def test_operation_empty_input(test_operation):
