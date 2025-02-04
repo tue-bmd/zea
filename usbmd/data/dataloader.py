@@ -237,19 +237,19 @@ class Resizer:
         if backend == "tensorflow":
             import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
-            keras = tf.keras  # pylint: disable=no-member
+            layers = tf.keras.layers  # pylint: disable=no-member
         else:
-            keras = keras
+            layers = keras.layers
 
         self.backend = DynamicBackend(backend)
 
         if image_size is not None:
             if resize_type == "resize":
-                self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
+                self.resizer = layers.Resizing(*image_size, **resize_kwargs)
             elif resize_type == "center_crop":
-                self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
+                self.resizer = layers.CenterCrop(*image_size, **resize_kwargs)
             elif resize_type == "random_crop":
-                self.resizer = keras.layers.RandomCrop(
+                self.resizer = layers.RandomCrop(
                     *image_size, seed=seed, **resize_kwargs
                 )
             else:
@@ -355,6 +355,7 @@ class H5Generator(keras.utils.PyDataset):
         batch_size: int = 1,
         as_tensor: bool = True,
         search_file_tree_kwargs: dict | None = None,
+        file_handle_cache_capacity: int = 128,
         **kwargs,
     ):
         assert (directory is not None) ^ (
@@ -451,7 +452,7 @@ class H5Generator(keras.utils.PyDataset):
 
         # LRU cache for file handles
         self._file_handle_cache = OrderedDict()
-        self._capacity = 128
+        self.file_handle_cache_capacity = file_handle_cache_capacity
 
     def __getitem__(self, index):
         if index == 0 and self.shuffle:
@@ -494,12 +495,14 @@ class H5Generator(keras.utils.PyDataset):
 
     def _get_file(self, file_name):
         """Open an HDF5 file and cache it."""
+        # If file is already in cache, return it and move it to the end
         if file_name in self._file_handle_cache:
-            # Move the accessed file to the end to mark it as recently used
             self._file_handle_cache.move_to_end(file_name)
             return self._file_handle_cache[file_name]
+        # If file is not in cache, open it and add it to the cache
         else:
-            if len(self._file_handle_cache) >= self._capacity:
+            # If cache is full, close the least recently used file
+            if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
             file = h5py.File(file_name, "r", locking=False)
@@ -581,7 +584,7 @@ class H5Dataloader(H5Generator):
         self.image_range = image_range
         self.normalization_range = normalization_range
         self.resizer = Resizer(
-            resize_type=resize_type, image_size=image_size, keras=keras, seed=self.seed
+            resize_type=resize_type, image_size=image_size, seed=self.seed
         )
 
     def __getitem__(self, index):
