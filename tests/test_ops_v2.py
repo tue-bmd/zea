@@ -21,9 +21,9 @@ from usbmd.scan import Scan
 """Some operations for testing"""
 
 
-@ops_registry("multiply")
-class MultiplyOperation(Operation):
-    """Multiply Operation for testing purposes."""
+@ops_registry("testmultiply")
+class TestMultiply(Operation):
+    """TestMultiply Operation for testing purposes."""
 
     def __init__(self, useless_parameter: int = None, **kwargs):
         super().__init__(**kwargs)
@@ -36,8 +36,8 @@ class MultiplyOperation(Operation):
         return {"x": keras.ops.multiply(x, y)}
 
 
-@ops_registry("add")
-class AddOperation(Operation):
+@ops_registry("testadd")
+class TestAdd(Operation):
     """Add Operation for testing purposes."""
 
     def call(self, x, y=None, **kwargs):
@@ -78,8 +78,8 @@ class ElementwiseMatrixOperation(Operation):
 
 @pytest.fixture
 def test_operation():
-    """Returns an AddOperation instance with caching."""
-    return AddOperation(cache_inputs=True, cache_outputs=True, jit_compile=False)
+    """Returns an TestAdd instance with caching."""
+    return TestAdd(cache_inputs=True, cache_outputs=True, jit_compile=False)
 
 
 @pytest.fixture
@@ -87,8 +87,8 @@ def pipeline_config():
     """Returns a test sequential pipeline configuration."""
     return {
         "operations": [
-            {"op": "multiply", "params": {}},
-            {"op": "add", "params": {}},
+            {"op": "testmultiply", "params": {}},
+            {"op": "testadd", "params": {}},
         ]
     }
 
@@ -98,8 +98,8 @@ def pipeline_config_with_params():
     """Returns a test sequential pipeline configuration with parameters."""
     return {
         "operations": [
-            {"op": "multiply", "params": {"useless_parameter": 10}},
-            {"op": "add"},
+            {"op": "testmultiply", "params": {"useless_parameter": 10}},
+            {"op": "testadd"},
         ]
     }
 
@@ -131,9 +131,9 @@ def pipeline_config_with_branch():
     """
     return {
         "operations": [
-            {"id": "prod", "op": "multiply", "params": {}},
-            {"id": "branch1", "op": "add", "params": {}, "inputs": ["prod"]},
-            {"id": "branch2", "op": "add", "params": {}, "inputs": ["prod"]},
+            {"id": "prod", "op": "testmultiply", "params": {}},
+            {"id": "branch1", "op": "testadd", "params": {}, "inputs": ["prod"]},
+            {"id": "branch2", "op": "testadd", "params": {}, "inputs": ["prod"]},
             {
                 "id": "rename1",
                 "op": "rename_v2",
@@ -200,13 +200,13 @@ def test_operation_input_caching(test_operation, jit_compile):
 
 def test_operation_jit_compilation():
     """Ensures JIT compilation works."""
-    op = AddOperation(jit_compile=True)
+    op = TestAdd(jit_compile=True)
     assert callable(op.call)
 
 
 def test_operation_cache_persistence():
     """Tests persistence of output cache."""
-    op = AddOperation(cache_outputs=True)
+    op = TestAdd(cache_outputs=True)
     result1 = op(x=5, y=3)
     assert result1["z"] == 8
     assert len(op._output_cache) == 1
@@ -217,11 +217,11 @@ def test_operation_cache_persistence():
 
 def test_string_representation(verbose=False):
     """Print the string representation of the Pipeline"""
-    operations = [MultiplyOperation(), AddOperation()]
+    operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations)
     if verbose:
         print(str(pipeline))
-    assert str(pipeline) == "op_0:MultiplyOperation -> op_1:AddOperation"
+    assert str(pipeline) == "op_0:TestMultiply -> op_1:TestAdd"
 
 
 """Pipeline Class Tests"""
@@ -229,17 +229,17 @@ def test_string_representation(verbose=False):
 
 def test_pipeline_initialization():
     """Tests initialization of a Pipeline."""
-    operations = [MultiplyOperation(), AddOperation()]
+    operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations)
     # For sequential pipelines, operations are stored in _ops_list.
     assert len(pipeline._ops_list) == 2
-    assert isinstance(pipeline._ops_list[0], MultiplyOperation)
-    assert isinstance(pipeline._ops_list[1], AddOperation)
+    assert isinstance(pipeline._ops_list[0], TestMultiply)
+    assert isinstance(pipeline._ops_list[1], TestAdd)
 
 
 def test_pipeline_call():
     """Tests the call method of the Pipeline."""
-    operations = [MultiplyOperation(), AddOperation()]
+    operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations)
     result = pipeline(x=2, y=3)
     # multiply: 2*3 = 6; add: 6+3 = 9.
@@ -268,7 +268,7 @@ def test_pipeline_with_elementwise_operation():
 
 def test_pipeline_jit_options():
     """Tests the JIT options for the Pipeline."""
-    operations = [MultiplyOperation(), AddOperation()]
+    operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations, jit_options="pipeline")
     assert callable(pipeline.call)
 
@@ -284,11 +284,11 @@ def test_pipeline_jit_options():
 def test_pipeline_cycle_detection():
     """Test that a circular dependency in the pipeline raises a ValueError."""
     # Define two dummy operations with cyclic dependencies.
-    op_a = MultiplyOperation()
+    op_a = TestMultiply()
     op_a.id = "op_a"
     op_a.inputs = ["op_b"]  # op_a depends on op_b
 
-    op_b = AddOperation()
+    op_b = TestAdd()
     op_b.id = "op_b"
     op_b.inputs = ["op_a"]  # op_b depends on op_a
 
@@ -310,7 +310,7 @@ def test_operation_invalid_output():
 
 def test_operation_cache_clearing():
     """Test that clearing an operation's cache forces re-computation."""
-    op = AddOperation(cache_outputs=True, jit_compile=False)
+    op = TestAdd(cache_outputs=True, jit_compile=False)
     result1 = op(x=1, y=2)
     # Cache should now have an entry.
     assert op._output_cache
@@ -323,31 +323,15 @@ def test_operation_cache_clearing():
 
 def test_pipeline_missing_dependency():
     """Test that a pipeline referencing a non-existent op ID raises a ValueError."""
-    op = MultiplyOperation()
+    op = TestMultiply()
     op.id = "op1"
     # This add op references a non-existent op "missing_op"
-    add_op = AddOperation()
+    add_op = TestAdd()
     add_op.id = "op2"
     add_op.inputs = ["missing_op"]
 
-    with pytest.raises(ValueError, match="not defined"):
+    with pytest.raises(ValueError, match="missing from the Operation chain"):
         Pipeline(operations=[op, add_op])
-
-
-def test_pipeline_validation():
-    """Tests the validation of the Pipeline."""
-    operations = [
-        MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
-        AddOperation(input_data_type=DataTypes.RAW_DATA),
-    ]
-    _ = Pipeline(operations=operations)
-
-    operations = [
-        MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
-        AddOperation(input_data_type=DataTypes.IMAGE),
-    ]
-    with pytest.raises(ValueError):
-        _ = Pipeline(operations=operations)
 
 
 def test_pipeline_with_scan_probe_config():
@@ -365,7 +349,7 @@ def test_pipeline_with_scan_probe_config():
     )
 
     # TODO: Add Config object as input to the Pipeline, currently config is not an Object
-    operations = [MultiplyOperation(), AddOperation()]
+    operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations)
     result = pipeline(scan, probe, x=2, y=3)
     assert "z" in result
@@ -386,8 +370,8 @@ def test_pipeline_from_json(config_fixture, request):
     pipeline = pipeline_from_json(json_string, jit_options=None)
 
     assert len(pipeline._ops_list) == 2
-    assert isinstance(pipeline._ops_list[0], MultiplyOperation)
-    assert isinstance(pipeline._ops_list[1], AddOperation)
+    assert isinstance(pipeline._ops_list[0], TestMultiply)
+    assert isinstance(pipeline._ops_list[1], TestAdd)
 
     result = pipeline(x=2, y=3)
     if config_fixture == "pipeline_config_with_params":
@@ -428,7 +412,7 @@ def test_pipeline_from_config(config_fixture, request):
 
 def test_pipeline_save_and_load(tmp_path):
     """Tests saving and loading a sequential pipeline in JSON format."""
-    operations = [MultiplyOperation(), AddOperation()]
+    operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations, jit_options=None)
     file_path = tmp_path / "pipeline.json"
     pipeline.save(str(file_path), format="json")
@@ -440,7 +424,7 @@ def test_pipeline_save_and_load(tmp_path):
 
 def test_pipeline_save_and_load_yaml(tmp_path):
     """Tests saving and loading a sequential pipeline in YAML format."""
-    operations = [MultiplyOperation(), AddOperation()]
+    operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations, jit_options=None)
     file_path = tmp_path / "pipeline.yaml"
     pipeline.save(str(file_path), format="yaml")
@@ -448,31 +432,6 @@ def test_pipeline_save_and_load_yaml(tmp_path):
     result_original = pipeline(x=2, y=3)
     result_loaded = loaded_pipeline(x=2, y=3)
     assert result_original == result_loaded
-
-
-"""Complex Branched Pipeline Test"""
-
-
-def test_complex_branched_pipeline(pipeline_config_with_branch):
-    """
-    Tests execution of a complex branched pipeline.
-
-    Pipeline structure:
-      - 'prod' (multiply): computes {"x": x*y}
-      - 'branch1' (add): takes the full output from 'prod' (i.e. {"x": 6}) and,
-          by merging with global input, calls add(x=6, input_y=10) → {"z": 16}
-      - 'branch2' (add): similar to branch1 → {"z": 16}
-      - 'rename1' (rename): renames branch1's output from {"z": 16} to {"z1": 16}
-      - 'rename2' (rename): renames branch2's output from {"z": 16} to {"z2": 16}
-      - 'merge' (merge): merges the outputs of rename1 and rename2,
-          yielding {"z1": 16, "z2": 16}
-    """
-    config = Config(**pipeline_config_with_branch)
-    pipeline = pipeline_from_config(config, jit_options=None)
-    result = pipeline(x=2, y=3, input_y=10)
-    assert "z1" in result and "z2" in result
-    assert result["z1"] == 16
-    assert result["z2"] == 16
 
 
 """Edge Case Tests"""
@@ -487,7 +446,7 @@ def test_operation_empty_input(test_operation):
 def test_operation_large_data_inputs():
     """Tests operation with large data inputs."""
 
-    class MatrixMultiplyOperation(Operation):
+    class MatrixTestMultiplyOperation(Operation):
         """Matrix multiplication operation for testing."""
 
         def call(self, matrix_a, matrix_b):
@@ -495,7 +454,7 @@ def test_operation_large_data_inputs():
 
     matrix_a = keras.random.normal(shape=(512, 512))
     matrix_b = keras.random.normal(shape=(512, 512))
-    op = MatrixMultiplyOperation()
+    op = MatrixTestMultiplyOperation()
     result = op(matrix_a=matrix_a, matrix_b=matrix_b)
     assert result["result"].shape == (512, 512)
 

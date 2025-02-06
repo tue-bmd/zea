@@ -165,7 +165,7 @@ class Operation(keras.Operation):
                 return {**merged_kwargs, **self._output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `call` method
-        if not 'kwargs' in self._valid_keys:
+        if not "kwargs" in self._valid_keys:
             filtered_kwargs = {
                 k: v for k, v in merged_kwargs.items() if k in self._valid_keys
             }
@@ -278,6 +278,7 @@ class Pipeline:
         in_degree = {op_id: len(deps) for op_id, deps in dep_graph.items()}
         zero_in_degree = [op_id for op_id, deg in in_degree.items() if deg == 0]
         sorted_order = []
+
         while zero_in_degree:
             current = zero_in_degree.pop(0)
             sorted_order.append(current)
@@ -288,8 +289,11 @@ class Pipeline:
                     if in_degree[op_id] == 0:
                         zero_in_degree.append(op_id)
 
-        # add check for missing dependencies
-        missing_dependencies = [op_id for op_id, deps in dep_graph.items() if deps]
+        # Find dependencies that are referenced but not present in the dep_graph keys.
+        missing_dependencies = {
+            dep for deps in dep_graph.values() for dep in deps if dep not in dep_graph
+        }
+
         if missing_dependencies:
             raise ValueError(
                 f"Following ops are provided as input, but are missing from the Operation chain: "
@@ -510,8 +514,8 @@ def pipeline_to_dict(pipeline: Pipeline) -> Dict:
     )
     if is_sequential:
         for op in pipeline._ops_list:
-            op_conf = {
-                "op": op.__class__.__name__,
+            op_conf = { # get op name from ops_registry
+                "op": op.__class__.__name__.lower(),
                 "params": op.serialize() if hasattr(op, "serialize") else {},
             }
             op_list.append(op_conf)
