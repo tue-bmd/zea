@@ -44,6 +44,7 @@ class LPIPS(BaseModel):
         self.net = perceptual_model()
         self.lin = linear_model()
         self.disable_checks = disable_checks
+        self.trainable = False  # for keras: makes the weights non-trainable
 
     def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
         """TFSM layer does not support loading weights."""
