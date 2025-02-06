@@ -42,7 +42,7 @@ if __name__ == "__main__":
     model = LPIPS.from_preset("lpips")
 
     batch = next(iter(val_dataset))
-    batch = ops.tile(batch, [1, 1, 1, 3])  # to RGB
+    batch = ops.tile(batch, [1, 1, 1, 3])  # to RGB (only required for torchmetrics)
 
     reference_image = batch[0]
     example_images = batch[1:]
