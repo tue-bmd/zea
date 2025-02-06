@@ -47,4 +47,4 @@ jobs:
         run: poetry install --no-interaction -E opencv-python-headless
 
       - name: Perform tests
-        run: poetry run pytest -s ./tests
+        run: poetry run pytest ./tests

@@ -73,7 +73,7 @@ def test_example_dataset():
             }
         )
         config = check_config(config)
-        dataset = USBMDDataSet(config.data)
+        dataset = USBMDDataSet(config.data, verbose=False)
 
         file_no, frame_no = (0, 0)
         assert dataset[(file_no, frame_no)] is not None, "Dataset not loaded correctly"
