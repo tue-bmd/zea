@@ -6,6 +6,7 @@ import json
 from typing import Any, Dict, List, Set, Union
 
 import keras
+import yaml
 from keras import ops
 
 from usbmd.backend import jit
@@ -229,7 +230,7 @@ class Pipeline:
                 if isinstance(op, str):
                     new_op = get_op(op)()
                 elif isinstance(op, dict):
-                    # Expect dict to contain at least the key "op" and optionally "params", "id", "inputs"
+                    # Expect dict to contain at least "op" and optionally "params", "id", "inputs"
                     params = op.get("params", {})
                     new_op = get_op(op["op"])(**params)
                     if "id" in op:
@@ -326,7 +327,7 @@ class Pipeline:
                         upstream_output = data_store[source_id]
                         if not isinstance(upstream_output, dict):
                             raise TypeError(
-                                f"Expected a dictionary for op '{source_id}', got {type(upstream_output)}"
+                                f"Expected dict for op '{source_id}', got {type(upstream_output)}"
                             )
                         op_inputs.update(upstream_output)
                     else:
@@ -352,18 +353,16 @@ class Pipeline:
             )
         probe, scan, config = {}, {}, {}
         for arg in args:
-            if hasattr(arg, "to_tensor"):
-                tensorized = arg.to_tensor()
-                type_name = type(arg).__name__.lower()
-                if type_name in ["probe", "scan", "config"]:
-                    if type_name == "probe":
-                        probe = tensorized
-                    elif type_name == "scan":
-                        scan = tensorized
-                    elif type_name == "config":
-                        config = tensorized
-            else:
-                raise ValueError(f"Unsupported input type: {type(arg)}")
+            if not hasattr(arg, "to_tensor"):
+                raise ValueError(
+                    "All positional arguments must be Probe, Scan, or Config objects."
+                )
+
+            tensorized = arg.to_tensor()
+            type_name = type(arg).__name__.lower()
+            if type_name in ("probe", "scan", "config"):
+                vars()[type_name] = tensorized
+
         inputs = {**probe, **scan, **config, **kwargs}
         outputs = self._call_pipeline(inputs)
         if return_numpy:
@@ -375,12 +374,14 @@ class Pipeline:
         For each op that defines an "inputs" list, ensure that every referenced op ID exists.
         """
         for op in self._ops_list:
-            if op.inputs:
-                for source_op_id in op.inputs:
-                    if source_op_id not in self._op_dict:
-                        raise ValueError(
-                            f"Operation '{op.id}' expects input from '{source_op_id}', which is not defined."
-                        )
+            if not op.inputs:
+                continue
+
+            for source_id in op.inputs:
+                if source_id not in self._op_dict:
+                    raise ValueError(
+                        f"Operation '{op.id}' expects input from '{source_id}', which is missing."
+                    )
 
     def __str__(self):  # Ensure branches are displayed correctly
         ops_str = []
@@ -514,7 +515,7 @@ def pipeline_to_dict(pipeline: Pipeline) -> Dict:
     )
     if is_sequential:
         for op in pipeline._ops_list:
-            op_conf = { # get op name from ops_registry
+            op_conf = {  # get op name from ops_registry
                 "op": op.__class__.__name__.lower(),
                 "params": op.serialize() if hasattr(op, "serialize") else {},
             }
@@ -545,8 +546,6 @@ def pipeline_to_yaml(pipeline: Pipeline) -> str:
     """
     Serialize the pipeline to a YAML string.
     """
-    import yaml
-
     return yaml.dump(pipeline_to_dict(pipeline))
 
 
