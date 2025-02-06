@@ -6,7 +6,7 @@ import yaml
 from flask import Flask, jsonify, request, send_from_directory
 
 import usbmd.ops_v2 as ops_v2
-from usbmd.registry import ops_v2_registry
+from usbmd.registry import ops_registry
 
 app = Flask(__name__, static_folder="static")
 
@@ -20,12 +20,12 @@ def serve_frontend():
 @app.route("/operations", methods=["GET"])
 def get_operations():
     """Fetch the list of registered operations."""
-    operations = list(ops_v2_registry.registered_names())
+    operations = list(ops_registry.registered_names())
 
     parsed_ops = []
 
     for op in operations:
-        op_class = ops_v2_registry[op]
+        op_class = ops_registry[op]
 
         # Get the input and output types of the operation
         init_keys = set(inspect.signature(op_class.__init__).parameters.keys())

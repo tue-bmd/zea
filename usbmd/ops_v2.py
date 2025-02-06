@@ -34,6 +34,9 @@ log.warning("WARNING: This module is work in progress and may not work as expect
 # ops_registry.clear()
 
 
+MULTIPLE_INPUT_OPS = ["merge_v2", "split_v2", "stack_v2", "concatenate_v2"]
+
+
 def get_op(op_name):
     """Get the operation from the registry."""
     return ops_registry[op_name]
@@ -556,15 +559,6 @@ def pipeline_to_yaml(pipeline: Pipeline) -> str:
     Serialize the pipeline to a YAML string.
     """
     return yaml.dump(pipeline_to_dict(pipeline))
-
-
-@ops_v2_registry("identity")
-class Identity(Operation):
-    """Identity operation."""
-
-    def call(self, *args, **kwargs) -> Dict:
-        """Returns the input dictionary."""
-        return kwargs
 
 
 ## Base Operations
