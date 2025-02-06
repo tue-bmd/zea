@@ -7,7 +7,7 @@ TAESD model from: https://github.com/madebyollin/taesd
 
 import os
 
-# NOTE: should be `tensorflow` for TAESD
+# NOTE: should be `tensorflow` or `jax`
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
 import matplotlib.pyplot as plt
@@ -22,12 +22,11 @@ from usbmd.utils.visualize import plot_image_grid
 if __name__ == "__main__":
     # Set up data paths and device
     data_paths = set_data_paths()
-    data_root = data_paths["data_root"]
-    init_device("tensorflow")
+    init_device()
 
     n_imgs = 10
     val_dataset = h5_dataset_from_directory(
-        data_root / "USBMD_datasets/CAMUS/val",
+        data_paths.data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,
         shuffle=True,
@@ -52,8 +51,8 @@ if __name__ == "__main__":
     output = model(batch[..., 0][..., None])
     # model.save_to_preset("./test_model_savings")
 
-    mse = ops.mean((output - batch) ** 2)
-    print("MSE: ", mse.numpy())
+    mse = ops.convert_to_numpy(ops.mean((output - batch) ** 2))
+    print("MSE: ", mse)
 
     output = (output + 1) / 2
     batch = (batch + 1) / 2

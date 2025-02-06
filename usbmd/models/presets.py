@@ -1,4 +1,4 @@
-"""Model presets"""
+"""Model presets for usbmd.models"""
 
 taesdxl_presets = {
     "taesdxl": {
@@ -44,5 +44,30 @@ echonet_dynamic_presets = {
             "path": "echonet",
         },
         "hf_handle": "hf://usbmd/echonet-dynamic",
+    },
+}
+
+lpips_presets = {
+    "lpips": {
+        "metadata": {
+            "description": "Learned Perceptual Image Patch Similarity (LPIPS) metric.",
+            "params": 14716160,
+            "path": "lpips",
+        },
+        "hf_handle": "hf://usbmd/lpips",
+    },
+}
+
+unet_presets = {
+    "unet-echonet-inpainter": {
+        "metadata": {
+            "description": (
+                "U-Net model used to inpaint skipped lines (columns). "
+                "Trained on 75% masked data (center values)."
+            ),
+            "params": 0,
+            "path": "unet",
+        },
+        "hf_handle": "hf://usbmd/unet-echonet-inpainter",
     },
 }

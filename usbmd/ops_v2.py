@@ -1,40 +1,42 @@
 """ Experimental version of the USBMD ops module"""
 
-import enum
 import hashlib
 import inspect
 import json
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Set, Union
 
 import keras
+import yaml
+from keras import ops
 
 from usbmd.backend import jit
 from usbmd.config.config import Config
+from usbmd.core import DataTypes
+from usbmd.ops import channels_to_complex, upmix
 from usbmd.probes import Probe
-from usbmd.registry import ops_v2_registry
+from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
+from usbmd.utils.checks import _assert_keys_and_axes
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
 
+# pylint: disable=arguments-differ
+
+# make sure to reload all modules that import keras
+# to be able to set backend properly
+# importlib.reload(bmf)
+# importlib.reload(pfield)
+# importlib.reload(lens_correction)
+# importlib.reload(display)
 
 # clear registry upon import
-ops_v2_registry.clear()
+# ops_registry.clear()
 
 
-MULTIPLE_INPUT_OPS = ["merge", "stack", "concatenate"]
-
-
-# TODO: Move this to Core?
-class DataTypes(enum.Enum):
-    """Enum class for USBMD data types."""
-
-    RAW_DATA = "raw_data"
-    ALIGNED_DATA = "aligned_data"
-    BEAMFORMED_DATA = "beamformed_data"
-    ENVELOPE_DATA = "envelope_data"
-    IMAGE = "image"
-    IMAGE_SC = "image_sc"
+def get_op(op_name):
+    """Get the operation from the registry."""
+    return ops_registry[op_name]
 
 
 # TODO: check if inheriting from keras.Operation is better than using the ABC class.
@@ -45,6 +47,7 @@ class Operation(keras.Operation):
 
     def __init__(
         self,
+        uid: str = None,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
         cache_inputs: Union[bool, List[str]] = False,
@@ -53,11 +56,16 @@ class Operation(keras.Operation):
     ):
         """
         Args:
+            input_data_type: The expected data type of the input data
+            output_data_type: The expected data type of the output
             cache_inputs: A list of input keys to cache or True to cache all inputs
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
         """
         super().__init__()
+
+        self.uid = uid
+        self.inputs = None  # List of Operation outputs that are input to this Operation
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
@@ -79,6 +87,11 @@ class Operation(keras.Operation):
 
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
+
+    @property
+    def connected(self):
+        """Check if the operation is connected to another operation."""
+        return self.inputs is not None
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
@@ -159,9 +172,12 @@ class Operation(keras.Operation):
                 return {**merged_kwargs, **self._output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `call` method
-        filtered_kwargs = {
-            k: v for k, v in merged_kwargs.items() if k in self._valid_keys
-        }
+        if not "kwargs" in self._valid_keys:
+            filtered_kwargs = {
+                k: v for k, v in merged_kwargs.items() if k in self._valid_keys
+            }
+        else:
+            filtered_kwargs = merged_kwargs
 
         # Call the processing function
         processed_output = self._call(**filtered_kwargs)
@@ -189,217 +205,357 @@ class Operation(keras.Operation):
 
 
 class Pipeline:
-    """Pipeline class for processing ultrasound data through a series of operations."""
+    """
+    A Pipeline that supports branching. Each operation is assigned a unique ID.
+
+    The configuration for an operation may include an "inputs" attribute—a list of op IDs
+    from which it should receive its input dictionary. Typically, an op receives one input,
+    but for operations like merge the list may contain more than one op ID.
+
+    When executing the pipeline (TODO)
+      ...
+
+    A sequential pipeline is simply one in which no op defines "inputs" (or the ops are provided
+    in a list without "inputs"), and the operations are executed in the order provided.
+    """
 
     def __init__(
         self,
-        operations: List[Operation],
+        operations: List[Any],
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
     ):
-        """Initialize a pipeline
-
-        Args:
-            operations (list): A list of Operation instances representing the operations
-                to be performed.
-            with_batch_dim (bool, optional): Whether to include batch dimension in the operations.
-                Defaults to True.
-            device (str, optional): The device to use for the operations. Defaults to None.
-                Can be `cpu` or `cuda`, `cuda:0`, etc.
-            jit_options (str, optional): The JIT options to use. Must be "pipeline", "ops", or None.
-            - "pipeline" compiles the entire pipeline as a single function. This may be faster but,
-            does not preserve python control flow, such as caching.
-            - "ops" compiles each operation separately. This preserves python control flow and
-            caching functionality, but speeds up the operations.
-            - None disables JIT compilation.
-            Defaults to "ops".
-        """
-
-        # TODO: add the option to load pipeline from e.g. json
-
-        # add functionality here
-        # operations = ...
-
-        self._pipeline_layers = operations
-
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
-        for operation in self.operations:  # We use self.layers from keras.Pipeline here
-            operation.with_batch_dim = with_batch_dim
-            operation.set_jit(jit_options == "ops")
+        # Ensure that each element in the operations list is an Operation instance.
+        # If an element is a string or dict, create the Operation instance.
 
-        self.validate()
+        # TODO: this has shared code with make_operation_chain, refactor to avoid duplication
 
-        # pylint: disable=method-hidden
+        for idx, op in enumerate(operations):
+            if not isinstance(op, Operation):
+                # If op is a string, then use it as the op name with default parameters.
+                if isinstance(op, str):
+                    new_op = get_op(op)()
+                elif isinstance(op, dict):
+                    # Expect dict to contain at least "op" and optionally "params", "id", "inputs"
+                    params = op.get("params", {})
+                    new_op = get_op(op["op"])(**params)
+                    if "id" in op:
+                        new_op.uid = op["id"]
+                    if "inputs" in op:
+                        new_op.inputs = op["inputs"]
+                else:
+                    raise ValueError(f"Unsupported operation type: {type(op)}")
+                operations[idx] = new_op  # Replace with the newly created op.
+
+        self._ops_list = operations
+        for idx, op in enumerate(self._ops_list):
+            if not hasattr(op, "id"):
+                op.uid = f"op_{idx}"
+            if not hasattr(op, "inputs"):
+                op.inputs = None
+            op.with_batch_dim = with_batch_dim
+            op.set_jit(jit_options == "ops")
+
+        # Build mapping from op ID to op instance.
+        self._op_dict: Dict[str, Any] = {op.uid: op for op in self._ops_list}
+        # If no op specifies "inputs", assume sequential order.
+        if not any(op.inputs for op in self._ops_list):
+            self._top_order = [op.uid for op in self._ops_list]
+        else:
+            self._top_order = self._topological_sort(self._ops_list)
+            self.validate()
+
         self._call_pipeline = jit(self.call) if jit_options == "pipeline" else self.call
 
-    @property
-    def operations(self):
-        """Alias for self.layers to match the USBMD naming convention"""
-        return self._pipeline_layers
+    def _build_dependency_graph(self, operations: List[Any]) -> Dict[str, Set[str]]:
+        """
+        Build a dependency graph mapping each op ID to the set of op IDs that
+        must run before it. For an op that defines an "inputs" list, each element
+        of that list is assumed to be an op ID.
+        """
+        dep_graph: Dict[str, Set[str]] = {op.uid: set() for op in operations}
+        for op in operations:
+            if op.inputs:
+                for source_uid in op.inputs:
+                    dep_graph[op.uid].add(source_uid)
+        return dep_graph
 
-    def call(self, inputs):
-        """Process input data through the pipeline."""
-        for operation in self._pipeline_layers:
-            outputs = operation(**inputs)
-            inputs = outputs
+    def _topological_sort(self, operations: List[Any]) -> List[str]:
+        dep_graph = self._build_dependency_graph(operations)
+        in_degree = {uid: len(deps) for uid, deps in dep_graph.items()}
+        zero_in_degree = [uid for uid, deg in in_degree.items() if deg == 0]
+        sorted_order = []
+
+        while zero_in_degree:
+            current = zero_in_degree.pop(0)
+            sorted_order.append(current)
+            for uid in dep_graph:
+                if current in dep_graph[uid]:
+                    dep_graph[uid].remove(current)
+                    in_degree[uid] -= 1
+                    if in_degree[uid] == 0:
+                        zero_in_degree.append(uid)
+
+        # Find dependencies that are referenced but not present in the dep_graph keys.
+        missing_dependencies = {
+            dep for deps in dep_graph.values() for dep in deps if dep not in dep_graph
+        }
+
+        if missing_dependencies:
+            raise ValueError(
+                f"Following ops are provided as input, but are missing from the Operation chain: "
+                f"{missing_dependencies}"
+            )
+
+        if len(sorted_order) != len(operations):
+            # If there is a cycle in the graph, the sorted order will be incomplete because
+            # some ops cannot be added to the sorted order due to their dependencies.
+            raise ValueError("Cycle detected in operation dependencies.")
+
+        return sorted_order
+
+    def call(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the pipeline by iterating over operations in topological order.
+        For an op that defines "inputs", merge the outputs from each specified upstream op
+        (by their IDs) into a single dictionary and pass that as kwargs.
+        If an op does not define "inputs", pass the entire global data dictionary.
+        After execution, store the op's output under its own ID and merge it into the
+        global data dictionary.
+        """
+        data_store = inputs.copy()
+        for uid in self._top_order:
+            op = self._op_dict[uid]
+            if op.inputs:
+                op_inputs = {}
+                for source_id in op.inputs:
+                    if source_id in data_store:
+                        upstream_output = data_store[source_id]
+                        if not isinstance(upstream_output, dict):
+                            raise TypeError(
+                                f"Expected dict for op '{source_id}', got {type(upstream_output)}"
+                            )
+                        op_inputs.update(upstream_output)
+                    else:
+                        raise ValueError(
+                            f"Input op '{source_id}' for operation '{op.uid}' not found."
+                        )
+            else:
+                op_inputs = data_store
+            outputs = op(**op_inputs)
+            data_store[op.uid] = outputs
+            data_store.update(outputs)
         return outputs
 
-    def __call__(self, *args, return_numpy=False, **kwargs):
-        """Process input data through the pipeline."""
-
-        ## PREPARE INPUT
-
-        # Extract from args Probe, Scan and Config objects
+    def __call__(self, *args, return_numpy=False, **kwargs) -> Dict[str, Any]:
+        """
+        Prepares inputs (merging Probe, Scan, and Config if provided as positional args)
+        and then executes the pipeline.
+        """
+        if any(key in kwargs for key in ["probe", "scan", "config"]):
+            raise ValueError(
+                "Probe, Scan and Config objects should be passed as positional arguments. "
+                "e.g. pipeline(probe, scan, config, **kwargs)"
+            )
         probe, scan, config = {}, {}, {}
         for arg in args:
-            if isinstance(arg, Probe):
-                probe = arg.to_tensor()
-            elif isinstance(arg, Scan):
-                scan = arg.to_tensor()
-            elif isinstance(arg, Config):
-                config = arg.to_tensor()
-
-        # combine probe, scan, config and kwargs
-        inputs = {**probe, **scan, **config, **kwargs}
-
-        ## PROCESSING
-        outputs = self._call_pipeline(inputs)
-
-        if return_numpy:
-            outputs = {k: v.numpy() for k, v in outputs.items()}
-
-        ## PREPARE OUTPUT
-
-        # TODO: if we can in-place update the Scan, Probe and Config objects, we can output those.
-
-        # update probe, scan, config with outputs
-        # for arg in args:
-        #     if isinstance(arg, Probe):
-        #         arg.update(outputs)
-        #     elif isinstance(arg, Scan):
-        #         arg.update(outputs)
-        #     elif isinstance(arg, Config):
-        #         arg.update(outputs)
-
-        return outputs
-
-    def prepare_input(self, *args):
-        """Convert input data and parameters to dictionary of tensors following the CCC"""
-        raise NotImplementedError
-
-    def prepare_output(self, kwargs):
-        """Convert output data to dictionary of tensors following the CCC"""
-        raise NotImplementedError
-
-    @property
-    def with_batch_dim(self):
-        """Get the with_batch_dim property of the pipeline."""
-        return self.operations[0].with_batch_dim
-
-    def validate(self):
-        """Validate the pipeline by checking the compatibility of the operations."""
-        operations = self.operations
-        for i in range(len(operations) - 1):
-            if operations[i].output_data_type is None:
-                continue
-            if operations[i + 1].input_data_type is None:
-                continue
-            if operations[i].output_data_type != operations[i + 1].input_data_type:
+            if not isinstance(arg, (Probe, Scan, Config)):
                 raise ValueError(
-                    f"Operation {operations[i].name} output data type is not compatible "
-                    f"with the input data type of operation {operations[i + 1].name}"
+                    f"Expected Probe, Scan, or Config object, got {type(arg).__name__}"
                 )
 
-    def set_params(self, **params):
-        """Set parameters for the operations in the pipeline by adding them to the cache."""
-        for operation in self.operations:
-            operation_params = {
-                key: value
-                for key, value in params.items()
-                if key in operation._valid_keys
-            }
-            if operation_params:
-                operation.set_input_cache(operation_params)
+            tensorized = arg.to_tensor()
+            type_name = type(arg).__name__.lower()
+            if type_name in ("probe", "scan", "config"):
+                vars()[type_name] = tensorized
 
-    def get_params(self, per_operation: bool = False):
-        """Get a snapshot of the current parameters of the operations in the pipeline.
+        inputs = {**probe, **scan, **config, **kwargs}
+        outputs = self._call_pipeline(inputs)
+        if return_numpy:
+            outputs = {k: v.numpy() for k, v in outputs.items()}
+        return outputs
 
-        Args:
-            per_operation (bool): If True, return a list of dictionaries for each operation.
-                                  If False, return a single dictionary with all parameters combined.
+    def validate(self):
         """
-        if per_operation:
-            return [operation._input_cache.copy() for operation in self.operations]
-        else:
-            params = {}
-            for operation in self.operations:
-                params.update(operation._input_cache)
-            return params
-
-    def __str__(self):
-        """String representation of the pipeline.
-
-        Will print on two parallel pipeline lines if it detects a splitting operations
-        (such as multi_bandpass_filter)
-        Will merge the pipeline lines if it detects a stacking operation (such as stack)
+        For each op that defines an "inputs" list, ensure that every referenced op ID exists.
         """
-        split_operations = ["MultiBandPassFilter"]
-        merge_operations = ["Stack"]
+        for op in self._ops_list:
+            if not op.inputs:
+                continue
 
-        operations = [operation.__class__.__name__ for operation in self.operations]
-        string = " -> ".join(operations)
-
-        if any(operation in split_operations for operation in operations):
-            # a second line is needed with same length as the first line
-            split_line = " " * len(string)
-            # find the splitting operation and index and print \-> instead of -> after
-            split_detected = False
-            merge_detected = False
-            split_operation = None
-            for operation in operations:
-                if operation in split_operations:
-                    index = string.index(operation)
-                    index = index + len(operation)
-                    split_line = (
-                        split_line[:index] + "\\->" + split_line[index + len("\\->") :]
+            for source_id in op.inputs:
+                if source_id not in self._op_dict:
+                    raise ValueError(
+                        f"Operation '{op.uid}' expects input from '{source_id}', which is missing."
                     )
-                    split_detected = True
-                    merge_detected = False
-                    split_operation = operation
-                    continue
 
-                if operation in merge_operations:
-                    index = string.index(operation)
-                    index = index - 4
-                    split_line = split_line[:index] + "/" + split_line[index + 1 :]
-                    split_detected = False
-                    merge_detected = True
-                    continue
-
-                if split_detected:
-                    # print all operations in the second line
-                    index = string.index(operation)
-                    split_line = (
-                        split_line[:index]
-                        + operation
-                        + " -> "
-                        + split_line[index + len(operation) + len(" -> ") :]
-                    )
-            assert merge_detected is True, log.error(
-                "Pipeline was never merged back together (with Stack operation), even "
-                f"though it was split with {split_operation}. "
-                "Please properly define your operation chain."
-            )
-            return f"\n{string}\n{split_line}\n"
-
-        return string
+    def __str__(self):  # Ensure branches are displayed correctly
+        ops_str = []
+        for uid in self._top_order:
+            op = self._op_dict[uid]
+            if op.inputs:
+                inputs_str = ", ".join(op.inputs)
+                ops_str.append(f"{inputs_str} -> {uid}:{op.__class__.__name__}")
+            else:
+                ops_str.append(f"{uid}:{op.__class__.__name__}")
+        return " -> ".join(ops_str)
 
     def __repr__(self):
-        """String representation of the pipeline."""
-        operations = [operation.__class__.__name__ for operation in self.operations]
-        return ",".join(operations)
+        return self.__str__()
+
+    @classmethod
+    def load(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Load a pipeline from a JSON or YAML file."""
+        if file_path.endswith(".json"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                json_str = f.read()
+            return pipeline_from_json(json_str, **kwargs)
+        elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
+            return pipeline_from_yaml(file_path, **kwargs)
+        else:
+            raise ValueError("File must have extension .json, .yaml, or .yml")
+
+    def save(self, file_path: str, file_format: str = "json") -> None:
+        """Save the pipeline to a JSON or YAML file."""
+        if file_format.lower() == "json":
+            config_str = pipeline_to_json(self)
+        elif file_format.lower() == "yaml":
+            config_str = pipeline_to_yaml(self)
+        else:
+            raise ValueError("file_format must be either 'json' or 'yaml'.")
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(config_str)
+
+
+########################################################################
+# Pipeline Construction and Serialization Functions
+########################################################################
+
+
+def make_operation_chain(
+    operation_chain: List[Union[str, Dict, Config]]
+) -> List[Operation]:
+    """
+    Build an operation chain from a list of operations.
+
+    For a simple (sequential) pipeline, you can specify each op as a string
+    (which initializes the op with default parameters) or as a dict with keys
+    "op" and "params". For branched pipelines, you may also specify extra keys:
+      • "id": a unique identifier for the op (optional in simple pipelines)
+      • "inputs": a list of strings (e.g. "op1.out1") that indicate which outputs
+                  from previous ops should be passed as inputs.
+
+    Returns:
+        A list of Operation instances.
+    """
+    chain = []
+    for op_def in operation_chain:
+        assert isinstance(
+            op_def, (str, dict, Config)
+        ), f"Operation {op_def} must be a string, dict, or Config object"
+        if isinstance(op_def, str):
+            op_instance = get_op(op_def)()
+        else:
+            if isinstance(op_def, Config):
+                op_def = op_def.serialize()
+            allowed = {"op", "params", "inputs", "id"}
+            assert set(op_def.keys()).issubset(
+                allowed
+            ), f"Operation {op_def} has invalid keys. Allowed keys: {allowed}"
+            if op_def.get("params") is None:
+                op_def["params"] = {}
+            op_instance = get_op(op_def["op"])(**op_def["params"])
+            if "id" in op_def:
+                op_instance.uid = op_def["id"]
+            if "inputs" in op_def:
+                op_instance.input_keys = op_def["inputs"]
+        chain.append(op_instance)
+    return chain
+
+
+def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a JSON string.
+    """
+    pipeline_config = json.loads(json_string)["operations"]
+    return Pipeline(operations=pipeline_config, **kwargs)
+
+
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a YAML file.
+    """
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        pipeline_config = yaml.safe_load(f)
+    pipeline_config = pipeline_config["operations"]
+    return Pipeline(operations=pipeline_config, **kwargs)
+
+
+def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a Config object.
+    """
+    operations = make_operation_chain(config.operations)
+    return Pipeline(operations=operations, **kwargs)
+
+
+########################################################################
+# Pipeline Saving / Serialization Functions (External)
+########################################################################
+
+
+def pipeline_to_dict(pipeline: Pipeline) -> Dict:
+    """
+    Serialize the pipeline configuration to a dictionary.
+
+    For a simple (sequential) pipeline, each operation is represented with just its
+    op name and parameters. For a branched pipeline (i.e. if any op defined input_keys),
+    the extra keys ("id" and "inputs") are included.
+
+    Note: This function assumes that each operation supports a serialize() method.
+    """
+    op_list = []
+    # Determine if any op has explicit input_keys.
+    is_sequential = all(
+        getattr(op, "input_keys", None) is None for op in pipeline._ops_list
+    )
+    if is_sequential:
+        for op in pipeline._ops_list:
+            op_conf = {  # get op name from ops_registry
+                "op": op.__class__.__name__.lower(),
+                "params": op.serialize() if hasattr(op, "serialize") else {},
+            }
+            op_list.append(op_conf)
+    else:
+        # In branched mode include the extra keys.
+        for uid in pipeline._top_order:
+            op = pipeline._op_dict[uid]
+            op_conf = {
+                "id": op.uid,
+                "op": op.__class__.__name__,
+                "params": op.serialize() if hasattr(op, "serialize") else {},
+            }
+            if getattr(op, "input_keys", None) is not None:
+                op_conf["inputs"] = op.input_keys
+            op_list.append(op_conf)
+    return {"operations": op_list}
+
+
+def pipeline_to_json(pipeline: Pipeline, indent: int = 4) -> str:
+    """
+    Serialize the pipeline to a JSON string.
+    """
+    return json.dumps(pipeline_to_dict(pipeline), indent=indent)
+
+
+def pipeline_to_yaml(pipeline: Pipeline) -> str:
+    """
+    Serialize the pipeline to a YAML string.
+    """
+    return yaml.dump(pipeline_to_dict(pipeline))
 
 
 @ops_v2_registry("identity")
@@ -412,7 +568,18 @@ class Identity(Operation):
 
 
 ## Base Operations
-@ops_v2_registry("merge")
+
+
+@ops_registry("identity_v2")
+class Identity(Operation):
+    """Identity operation."""
+
+    def call(self, *args, **kwargs) -> Dict:
+        """Returns the input as is."""
+        return kwargs
+
+
+@ops_registry("merge_v2")
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
@@ -432,7 +599,7 @@ class Merge(Operation):
         return merged
 
 
-@ops_v2_registry("split")
+@ops_registry("split_v2")
 class Split(Operation):
     """Operation that splits an input dictionary  n copies."""
 
@@ -447,7 +614,7 @@ class Split(Operation):
         return [kwargs.copy() for _ in range(self.n)]
 
 
-@ops_v2_registry("stack")
+@ops_registry("stack_v2")
 class Stack(Operation):
     """Stack multiple data arrays along a new axis.
     Useful to merge data from parallel pipelines.
@@ -455,14 +622,13 @@ class Stack(Operation):
 
     def __init__(
         self,
-        keys: Union[str, List[str], None] = None,
-        axis: Union[int, List[int], None] = 0,
+        keys: Union[str, List[str], None],
+        axes: Union[int, List[int], None],
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.keys = keys
-        self.axis = axis
-        self.allow_multiple_inputs = True
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
 
     def call(self, **kwargs) -> Dict:
         """
@@ -473,8 +639,10 @@ class Stack(Operation):
             kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
         return kwargs
 
+        raise NotImplementedError
 
-@ops_v2_registry("concatenate")
+
+@ops_registry("concatenate_v2")
 class Concatenate(Operation):
     """Concatenate multiple data arrays along an existing axis."""
 
@@ -488,13 +656,13 @@ class Concatenate(Operation):
         Concatenates the inputs corresponding to the specified keys along the specified axis.
         """
         for key, axis in zip(self.keys, self.axis):
-            kwargs[key] = keras.ops.concat(
+            kwargs[key] = keras.ops.concat(  # pylint: disable=no-member
                 [kwargs[key] for key in self.keys], axis=axis
             )
         return kwargs
 
 
-@ops_v2_registry("rename")
+@ops_registry("rename_v2")
 class Rename(Operation):
     """Rename keys in the input dictionary."""
 
@@ -510,7 +678,7 @@ class Rename(Operation):
         return renamed
 
 
-@ops_v2_registry("filter")
+@ops_registry("filter_v2")
 class Filter(Operation):
     """Filter keys in the input dictionary."""
 
@@ -525,7 +693,8 @@ class Filter(Operation):
         filtered = {k: v for k, v in kwargs.items() if k in self.keys}
         return filtered
 
-@ops_v2_registry("output")
+
+@ops_registry("output_v2")
 class Output(Operation):
     """Output operation. This operation is used to mark outputs in the pipeline.
     Optionally, keys can be specified to only output a subset of the input dictionary. Otherwise
@@ -541,3 +710,42 @@ class Output(Operation):
         if self.keys:
             return {k: v for k, v in kwargs.items() if k in self.keys}
         return kwargs
+
+
+@ops_registry("mean_v2")
+class Mean(Operation):
+    """Take the mean of the input data along a specific axis."""
+
+    def __init__(self, keys, axes, **kwargs):
+        super().__init__(**kwargs)
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
+
+    def call(self, **kwargs):
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = ops.mean(kwargs[key], axis=axis)
+
+        return kwargs
+
+
+@ops_registry("upmix_v2")
+class UpMix(Operation):
+    """Upmix IQ data to RF data."""
+
+    def __init__(self, key: str, **kwargs):
+        super().__init__(**kwargs)
+        self.key = key
+
+    def call(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
+
+        data = kwargs[self.key]
+
+        if data.shape[-1] == 1:
+            log.warning("Upmixing is not applicable to RF data.")
+            return data
+        elif data.shape[-1] == 2:
+            data = channels_to_complex(data)
+
+        data = upmix(data, fs, fc, upsampling_rate)
+        data = ops.expand_dims(data, axis=-1)
+        return data

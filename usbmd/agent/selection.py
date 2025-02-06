@@ -317,10 +317,8 @@ class CovarianceSamplingLines(LinesActionModel):
                 subsampled_cov_matrix, [batch_size, self.n_actions, self.n_actions]
             )
 
-        subsampled_cov_matrices = ops.vectorized_map(subsample_with_mask, bool_masks)
-
         # [n_masks, batch_size, cols, cols]
-        subsampled_cov_matrices = ops.stack(subsampled_cov_matrices)
+        subsampled_cov_matrices = ops.vectorized_map(subsample_with_mask, bool_masks)
 
         # [n_masks, batch_size, 1]
         entropies = ops.logdet(subsampled_cov_matrices)[..., None]
