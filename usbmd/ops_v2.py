@@ -399,6 +399,7 @@ class Pipeline:
 
     @classmethod
     def load(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Load a pipeline from a JSON or YAML file."""
         if file_path.endswith(".json"):
             with open(file_path, "r") as f:
                 json_str = f.read()
@@ -409,6 +410,7 @@ class Pipeline:
             raise ValueError("File must have extension .json, .yaml, or .yml")
 
     def save(self, file_path: str, format: str = "json") -> None:
+        """Save the pipeline to a JSON or YAML file."""
         if format.lower() == "json":
             config_str = pipeline_to_json(self)
         elif format.lower() == "yaml":
