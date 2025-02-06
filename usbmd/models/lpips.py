@@ -121,7 +121,7 @@ class LPIPS(BaseModel):
     def _valid_img(img) -> bool:
         """Check that input is a valid image to the network."""
         value_check = ops.max(img) <= 1.0 and ops.min(img) >= -1
-        shape_check = ops.ndim(img) in [3, 4] and ops.shape(img)[-1] == 3
+        shape_check = ops.ndim(img) in [3, 4] and ops.shape(img)[-1] in [1, 3]
         return shape_check and value_check
 
     @staticmethod
