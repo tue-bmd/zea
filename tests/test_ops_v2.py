@@ -12,7 +12,6 @@ import keras
 import pytest
 
 from usbmd.config.config import Config
-from usbmd.core import DataTypes
 from usbmd.ops_v2 import Operation, Pipeline, pipeline_from_config, pipeline_from_json
 from usbmd.probes import Dummy
 from usbmd.registry import ops_registry
@@ -300,6 +299,8 @@ def test_operation_invalid_output():
     """Test that an operation returning a non-dict raises a TypeError."""
 
     class BadOperation(Operation):
+        """Operation that returns a list instead of a dict."""
+
         def call(self, **kwargs):
             return [1, 2, 3]  # Not a dict!
 
@@ -315,7 +316,7 @@ def test_operation_cache_clearing():
     # Cache should now have an entry.
     assert op._output_cache
     op.clear_cache()
-    assert op._output_cache == {}
+    assert not op._output_cache
     result2 = op(x=1, y=2)
     # Ensure the recomputed result is equal to the original result.
     assert result1 == result2
@@ -415,7 +416,7 @@ def test_pipeline_save_and_load(tmp_path):
     operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations, jit_options=None)
     file_path = tmp_path / "pipeline.json"
-    pipeline.save(str(file_path), format="json")
+    pipeline.save(str(file_path), file_format="json")
     loaded_pipeline = Pipeline.load(str(file_path))
     result_original = pipeline(x=2, y=3)
     result_loaded = loaded_pipeline(x=2, y=3)
@@ -427,7 +428,7 @@ def test_pipeline_save_and_load_yaml(tmp_path):
     operations = [TestMultiply(), TestAdd()]
     pipeline = Pipeline(operations=operations, jit_options=None)
     file_path = tmp_path / "pipeline.yaml"
-    pipeline.save(str(file_path), format="yaml")
+    pipeline.save(str(file_path), file_format="yaml")
     loaded_pipeline = Pipeline.load(str(file_path))
     result_original = pipeline(x=2, y=3)
     result_loaded = loaded_pipeline(x=2, y=3)
