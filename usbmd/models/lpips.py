@@ -47,7 +47,7 @@ class LPIPS(BaseModel):
         self.trainable = False  # for keras: makes the weights non-trainable
 
     def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
-        """TFSM layer does not support loading weights."""
+        """Load the weights for the VGG and linear models."""
         loader = get_preset_loader(preset)
 
         vgg_file = "vgg/vgg.weights.h5"

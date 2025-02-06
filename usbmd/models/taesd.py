@@ -65,10 +65,7 @@ if backend.backend() == "jax":
 
 @model_registry(name="taesdxl")
 class TinyAutoencoder(BaseModel):
-    """[TAESD](https://github.com/madebyollin/taesd) model in TensorFlow.
-
-    custom_load_weights is implemen
-    """
+    """[TAESD](https://github.com/madebyollin/taesd) model in TensorFlow."""
 
     def __init__(self, **kwargs):
         """
@@ -129,7 +126,7 @@ class TinyAutoencoder(BaseModel):
         return decoded
 
     def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
-        """TFSM layer does not support loading weights."""
+        """Load the weights for the encoder and decoder."""
         self.encoder.custom_load_weights(preset)
         self.decoder.custom_load_weights(preset)
 
@@ -188,7 +185,7 @@ class TinyBase(BaseModel):
             )
 
     def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
-        """TFSM layer does not support loading weights."""
+        """Load the weights for the encoder or decoder."""
         loader = get_preset_loader(preset)
 
         for file in self.download_files:
