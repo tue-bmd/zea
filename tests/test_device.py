@@ -11,4 +11,4 @@ def test_init_device_without_ml_libs(_no_ml_lib_import):
     CUDA_VISIBLE_DEVICES is set.
     """
     # Run the init_device function within the mock_import fixture context
-    init_device(None, "auto:1")
+    init_device(backend=None)

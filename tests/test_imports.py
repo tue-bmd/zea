@@ -53,12 +53,13 @@ def _no_torch_tensorflow():
 
 
 @pytest.mark.parametrize("directory", [Path(__file__).parent.parent])
-def test_check_imports_errors(directory):
+def test_check_imports_errors(directory, verbose=False):
     """Check all Python files in a directory for import errors."""
     python_files = glob.glob(f"{directory}/**/*.py", recursive=True)
 
     for python_file in python_files:
-        print(python_file)
+        if verbose:
+            print(python_file)
 
     success = True
     for python_file in python_files:
