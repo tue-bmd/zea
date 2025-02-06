@@ -9,7 +9,7 @@ As well as the paper: https://arxiv.org/abs/1801.03924
 
 import keras
 from keras import ops
-from keras.api.layers import Conv2D, Dropout, Input, Lambda
+from keras.api.layers import Conv2D, Dropout, Input
 
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
@@ -24,6 +24,7 @@ class LPIPS(BaseModel):
     def __init__(
         self,
         net_type="vgg",
+        disable_checks=False,
         **kwargs,
     ):
         """Initialize the LPIPS model.
@@ -33,6 +34,8 @@ class LPIPS(BaseModel):
 
         Args:
             net_type (str, optional): Type of network to use. Defaults to "vgg".
+            disable_checks (bool, optional): Disable input checks. This is useful to allow
+                tensorflow graph mode. Defaults to False.
         """
         super().__init__(**kwargs)
 
@@ -40,9 +43,11 @@ class LPIPS(BaseModel):
 
         self.net = perceptual_model()
         self.lin = linear_model()
+        self.disable_checks = disable_checks
+        self.trainable = False  # for keras: makes the weights non-trainable
 
     def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
-        """TFSM layer does not support loading weights."""
+        """Load the weights for the VGG and linear models."""
         loader = get_preset_loader(preset)
 
         vgg_file = "vgg/vgg.weights.h5"
@@ -52,6 +57,12 @@ class LPIPS(BaseModel):
 
         self.net.load_weights(vgg_file, **kwargs)
         self.lin.load_weights(lin_file, **kwargs)
+
+    @staticmethod
+    def _normalize_tensor(in_feat, eps: float = 1e-8):
+        """Normalize input tensor."""
+        norm_factor = ops.sqrt(eps + ops.sum(in_feat**2, axis=-1, keepdims=True))
+        return in_feat / norm_factor
 
     def call(self, inputs):  # pylint: disable=arguments-differ
         """Compute the LPIPS metric.
@@ -64,7 +75,9 @@ class LPIPS(BaseModel):
         input1, input2 = inputs
 
         # check input images
-        if not (self._valid_img(input1) and self._valid_img(input2)):
+        if not self.disable_checks and not (
+            self._valid_img(input1) and self._valid_img(input2)
+        ):
             raise ValueError(
                 "Expected both input arguments to be normalized tensors with shape [B, H, W, C]"
                 f" or [H, W, C]. Got input with shape {input1.shape} and {input2.shape} and values"
@@ -74,49 +87,33 @@ class LPIPS(BaseModel):
             )
 
         # preprocess input images
-        net_out1 = Lambda(lambda x: self.preprocess_input(x))(input1)
-        net_out2 = Lambda(lambda x: self.preprocess_input(x))(input2)
+        net_out1 = self.preprocess_input(input1)
+        net_out2 = self.preprocess_input(input2)
 
         # run vgg model first
         net_out1 = self.net(net_out1)
         net_out2 = self.net(net_out2)
 
         # normalize
-        net_out1 = [
-            Lambda(
-                lambda x: x * ops.rsqrt(ops.sum(ops.square(x), axis=-1, keepdims=True))
-            )(t)
-            for t in net_out1
-        ]
-        net_out2 = [
-            Lambda(
-                lambda x: x * ops.rsqrt(ops.sum(ops.square(x), axis=-1, keepdims=True))
-            )(t)
-            for t in net_out2
-        ]
+        net_out1 = [self._normalize_tensor(t) for t in net_out1]
+        net_out2 = [self._normalize_tensor(t) for t in net_out2]
 
         # subtract
-        diffs = [
-            Lambda(lambda x: ops.square(x[0] - x[1]))([t1, t2])
-            for t1, t2 in zip(net_out1, net_out2)
-        ]
+        diffs = [ops.square(t1 - t2) for t1, t2 in zip(net_out1, net_out2)]
 
         # run on learned linear model
         lin_out = self.lin(diffs)
 
         # take spatial average: list([N, 1], [N, 1], [N, 1], [N, 1], [N, 1])
         lin_out = ops.convert_to_tensor(
-            [
-                Lambda(lambda x: ops.mean(x, axis=[1, 2], keepdims=False))(t)
-                for t in lin_out
-            ]
+            [ops.mean(t, axis=[1, 2], keepdims=False) for t in lin_out]
         )
 
         # take sum of all layers: [N, 1]
-        lin_out = Lambda(lambda x: ops.sum(x, axis=0))(lin_out)
+        lin_out = ops.sum(lin_out, axis=0)
 
         # squeeze: [N, ]
-        lin_out = Lambda(lambda x: ops.squeeze(x, axis=-1))(lin_out)
+        lin_out = ops.squeeze(lin_out, axis=-1)
 
         return lin_out
 
@@ -124,7 +121,7 @@ class LPIPS(BaseModel):
     def _valid_img(img) -> bool:
         """Check that input is a valid image to the network."""
         value_check = ops.max(img) <= 1.0 and ops.min(img) >= -1
-        shape_check = ops.ndim(img) in [3, 4] and ops.shape(img)[-1] == 3
+        shape_check = ops.ndim(img) in [3, 4] and ops.shape(img)[-1] in [1, 3]
         return shape_check and value_check
 
     @staticmethod
@@ -154,7 +151,7 @@ def perceptual_model():
         "block4_conv3",
         "block5_conv3",
     ]
-    vgg16 = keras.applications.vgg16.VGG16(include_top=False, weights="imagenet")
+    vgg16 = keras.applications.vgg16.VGG16(include_top=False, weights=None)
 
     vgg16_output_layers = [l.output for l in vgg16.layers if l.name in layers]
     model = keras.Model(vgg16.input, vgg16_output_layers, name="perceptual_model")
