@@ -33,9 +33,9 @@ log.warning("WARNING: This module is work in progress and may not work as expect
 # ops_registry.clear()
 
 
-def get_ops(ops_name):
+def get_op(op_name):
     """Get the operation from the registry."""
-    return ops_registry[ops_name]
+    return ops_registry[op_name]
 
 
 # TODO: check if inheriting from keras.Operation is better than using the ABC class.
@@ -54,6 +54,8 @@ class Operation(keras.Operation):
     ):
         """
         Args:
+            input_data_type: The expected data type of the input data
+            output_data_type: The expected data type of the output
             cache_inputs: A list of input keys to cache or True to cache all inputs
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
@@ -194,62 +196,73 @@ class Operation(keras.Operation):
 
 class Pipeline:
     """
-    A Pipeline that supports both simple sequential definitions and more
-    detailed (branched) pipelines. In a simple pipeline you may define a list
-    of operations as strings or dicts with just "op" and "params". For branched
-    pipelines, you may specify extra keys ("id" and "inputs").
+    A Pipeline that supports branching. Each operation is assigned a unique ID.
 
-    Internally, every op is assigned an ID. If an op does not specify input keys,
-    it will receive the full data dictionary (i.e. the pipeline runs sequentially).
-    If any op defines input keys, then the pipeline builds a dependency graph and
-    executes ops in topologically sorted order.
-    When an input key is specified without a dot (e.g. "prod"), the entire output
-    dictionary from the op with that ID is merged into the op's inputs.
+    The configuration for an operation may include an "inputs" attribute—a list of op IDs
+    from which it should receive its input dictionary. Typically, an op receives one input,
+    but for operations like merge the list may contain more than one op ID.
+
+    When executing the pipeline (TODO)
+      ...
+
+    A sequential pipeline is simply one in which no op defines "inputs" (or the ops are provided
+    in a list without "inputs"), and the operations are executed in the order provided.
     """
 
-    def __init__(
-        self,
-        operations: List[Any],
-        with_batch_dim: bool = True,
-        jit_options: Union[str, None] = "ops",
-    ):
+    def __init__(self, operations: List[Any], with_batch_dim: bool = True, jit_options: Union[str, None] = "ops"):
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
-        # Always work with the complete list of operations.
-        # For any op that lacks an "id", assign one automatically.
-        # For any op that lacks an "input_keys" attribute, leave it as None.
+        # Ensure that each element in the operations list is an Operation instance.
+        # If an element is a string or dict, create the Operation instance.
+        for idx, op in enumerate(operations):
+            if not isinstance(op, Operation):
+                # If op is a string, then use it as the op name with default parameters.
+                if isinstance(op, str):
+                    new_op = get_op(op)()
+                elif isinstance(op, dict):
+                    # Expect dict to contain at least the key "op" and optionally "params", "id", "inputs"
+                    params = op.get("params", {})
+                    new_op = get_op(op["op"])(**params)
+                    if "id" in op:
+                        new_op.id = op["id"]
+                    if "inputs" in op:
+                        new_op.inputs = op["inputs"]
+                else:
+                    raise ValueError(f"Unsupported operation type: {type(op)}")
+                operations[idx] = new_op  # Replace with the newly created op.
+
         self._ops_list = operations
         for idx, op in enumerate(self._ops_list):
             if not hasattr(op, "id"):
                 op.id = f"op_{idx}"
-            if not hasattr(op, "input_keys"):
-                op.input_keys = None
+            if not hasattr(op, "inputs"):
+                op.inputs = None
             op.with_batch_dim = with_batch_dim
             op.set_jit(jit_options == "ops")
 
-        # Determine whether this is a simple sequential pipeline.
-        # A simple pipeline is one where no op defines explicit input_keys.
-        self._sequential = all(op.input_keys is None for op in self._ops_list)
-
-        if not self._sequential:
-            # Build a mapping of op id to op instance and a topological ordering.
-            self._op_dict: Dict[str, Any] = {op.id: op for op in self._ops_list}
+        # Build mapping from op ID to op instance.
+        self._op_dict: Dict[str, Any] = {op.id: op for op in self._ops_list}
+        # If no op specifies "inputs", assume sequential order.
+        if not any(op.inputs for op in self._ops_list):
+            self._top_order = [op.id for op in self._ops_list]
+        else:
             self._top_order = self._topological_sort(self._ops_list)
-            # Validate that all input_keys (if provided) refer to valid op ids.
             self.validate()
 
         self._call_pipeline = jit(self.call) if jit_options == "pipeline" else self.call
 
     def _build_dependency_graph(self, operations: List[Any]) -> Dict[str, Set[str]]:
+        """
+        Build a dependency graph mapping each op ID to the set of op IDs that
+        must run before it. For an op that defines an "inputs" list, each element
+        of that list is assumed to be an op ID.
+        """
         dep_graph: Dict[str, Set[str]] = {op.id: set() for op in operations}
         for op in operations:
-            if op.input_keys:
-                for key in op.input_keys:
-                    if "." in key:
-                        source_op_id = key.split(".")[0]
-                        if source_op_id in dep_graph:
-                            dep_graph[op.id].add(source_op_id)
+            if op.inputs:
+                for source_op_id in op.inputs:
+                    dep_graph[op.id].add(source_op_id)
         return dep_graph
 
     def _topological_sort(self, operations: List[Any]) -> List[str]:
@@ -271,39 +284,39 @@ class Pipeline:
         return sorted_order
 
     def call(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        if self._sequential:
-            data = inputs.copy()
-            for op in self._ops_list:
-                data = op(**data)
-            return data
-        else:
-            data_store = inputs.copy()
-            for op_id in self._top_order:
-                op = self._op_dict[op_id]
-                if op.input_keys:
-                    op_inputs = {}
-                    for key in op.input_keys:
-                        if key in data_store:
-                            # If key does not contain a dot and the corresponding value is a dict,
-                            # merge its content into op_inputs.
-                            if "." not in key and isinstance(data_store[key], dict):
-                                op_inputs.update(data_store[key])
-                            else:
-                                op_inputs[key] = data_store[key]
-                        else:
-                            raise ValueError(
-                                f"Input key '{key}' for operation '{op.id}' not found."
-                            )
-                else:
-                    op_inputs = data_store
-                outputs = op(**op_inputs)
-                # Store the op's full output under its own ID.
-                data_store[op.id] = outputs
-                # Also update the global data store with individual output keys.
-                data_store.update(outputs)
-            return outputs
+        """
+        Execute the pipeline by iterating over operations in topological order.
+        For an op that defines "inputs", merge the outputs from each specified upstream op
+        (by their IDs) into a single dictionary and pass that as kwargs.
+        If an op does not define "inputs", pass the entire global data dictionary.
+        After execution, store the op's output under its own ID and merge it into the
+        global data dictionary.
+        """
+        data_store = inputs.copy()
+        for op_id in self._top_order:
+            op = self._op_dict[op_id]
+            if op.inputs:
+                op_inputs = {}
+                for source_id in op.inputs:
+                    if source_id in data_store:
+                        upstream_output = data_store[source_id]
+                        if not isinstance(upstream_output, dict):
+                            raise TypeError(f"Expected a dictionary for op '{source_id}', got {type(upstream_output)}")
+                        op_inputs.update(upstream_output)
+                    else:
+                        raise ValueError(f"Input op '{source_id}' for operation '{op.id}' not found.")
+            else:
+                op_inputs = data_store
+            outputs = op(**op_inputs)
+            data_store[op.id] = outputs
+            data_store.update(outputs)
+        return outputs
 
     def __call__(self, *args, return_numpy=False, **kwargs) -> Dict[str, Any]:
+        """
+        Prepares inputs (merging Probe, Scan, and Config if provided as positional args)
+        and then executes the pipeline.
+        """
         if any(key in kwargs for key in ["probe", "scan", "config"]):
             raise ValueError(
                 "Probe, Scan and Config objects should be passed as positional arguments. "
@@ -330,26 +343,19 @@ class Pipeline:
         return outputs
 
     def validate(self):
+        """
+        For each op that defines an "inputs" list, ensure that every referenced op ID exists.
+        """
         for op in self._ops_list:
-            if op.input_keys:
-                for key in op.input_keys:
-                    if "." in key:
-                        source_op_id = key.split(".")[0]
-                        if source_op_id not in self._op_dict:
-                            raise ValueError(
-                                f"Operation '{op.id}' expects input from '{source_op_id}', which is not defined."
-                            )
+            if op.inputs:
+                for source_op_id in op.inputs:
+                    if source_op_id not in self._op_dict:
+                        raise ValueError(
+                            f"Operation '{op.id}' expects input from '{source_op_id}', which is not defined."
+                        )
 
     def __str__(self):
-        if self._sequential:
-            ops_str = " -> ".join([op.__class__.__name__ for op in self._ops_list])
-        else:
-            ops_str = " -> ".join(
-                [
-                    f"{op_id}:{self._op_dict[op_id].__class__.__name__}"
-                    for op_id in self._top_order
-                ]
-            )
+        ops_str = " -> ".join([f"{op_id}:{self._op_dict[op_id].__class__.__name__}" for op_id in self._top_order])
         return ops_str
 
     def __repr__(self):
@@ -404,7 +410,7 @@ def make_operation_chain(
             op_def, (str, dict, Config)
         ), f"Operation {op_def} must be a string, dict, or Config object"
         if isinstance(op_def, str):
-            op_instance = get_ops(op_def)()
+            op_instance = get_op(op_def)()
         else:
             if isinstance(op_def, Config):
                 op_def = op_def.serialize()
@@ -414,7 +420,7 @@ def make_operation_chain(
             ), f"Operation {op_def} has invalid keys. Allowed keys: {allowed}"
             if op_def.get("params") is None:
                 op_def["params"] = {}
-            op_instance = get_ops(op_def["op"])(**op_def["params"])
+            op_instance = get_op(op_def["op"])(**op_def["params"])
             if "id" in op_def:
                 op_instance.id = op_def["id"]
             if "inputs" in op_def:
