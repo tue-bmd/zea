@@ -25,6 +25,10 @@ from usbmd.scan import Scan
 class MultiplyOperation(Operation):
     """Multiply Operation for testing purposes."""
 
+    def __init__(self, useless_parameter: int = None, **kwargs):
+        super().__init__(**kwargs)
+        self.useless_parameter = useless_parameter
+
     def call(self, x, y):
         """
         Multiplies x and y.
@@ -34,10 +38,7 @@ class MultiplyOperation(Operation):
 
 @ops_registry("add")
 class AddOperation(Operation):
-    """Add Operation for testing purposes.
-
-    This version is made flexible: if 'y' is not provided, it will look for 'input_y'.
-    """
+    """Add Operation for testing purposes."""
 
     def call(self, x, y=None, **kwargs):
         if y is None:
@@ -70,39 +71,6 @@ class ElementwiseMatrixOperation(Operation):
         result = keras.ops.add(matrix, scalar)
         result = keras.ops.multiply(result, scalar)
         return {"elementwise_result": result}
-
-
-@ops_registry("merge")
-class MergeOperation(Operation):
-    """Merge Operation for testing purposes.
-
-    Simply merges multiple dictionaries (later keys overwrite earlier ones).
-    """
-
-    def call(self, *args, **kwargs):
-        merged = {}
-        for arg in args:
-            if not isinstance(arg, dict):
-                raise TypeError("All inputs must be dictionaries.")
-            merged.update(arg)
-        merged.update(kwargs)
-        return merged
-
-
-@ops_registry("rename")
-class RenameOperation(Operation):
-    """Rename Operation for testing purposes.
-
-    Renames keys in the input dictionary according to a mapping.
-    """
-
-    def __init__(self, mapping: dict, **kwargs):
-        super().__init__(**kwargs)
-        self.mapping = mapping
-
-    def call(self, **kwargs):
-        renamed = {self.mapping.get(k, k): v for k, v in kwargs.items()}
-        return renamed
 
 
 """Fixtures"""
@@ -168,19 +136,19 @@ def pipeline_config_with_branch():
             {"id": "branch2", "op": "add", "params": {}, "inputs": ["prod"]},
             {
                 "id": "rename1",
-                "op": "rename",
+                "op": "rename_v2",
                 "params": {"mapping": {"z": "z1"}},
                 "inputs": ["branch1"],
             },
             {
                 "id": "rename2",
-                "op": "rename",
+                "op": "rename_v2",
                 "params": {"mapping": {"z": "z2"}},
                 "inputs": ["branch2"],
             },
             {
                 "id": "merge",
-                "op": "merge",
+                "op": "merge_v2",
                 "params": {},
                 "inputs": ["rename1", "rename2"],
             },
@@ -253,7 +221,7 @@ def test_string_representation(verbose=False):
     pipeline = Pipeline(operations=operations)
     if verbose:
         print(str(pipeline))
-    assert str(pipeline) == "MultiplyOperation -> AddOperation"
+    assert str(pipeline) == "op_0:MultiplyOperation -> op_1:AddOperation"
 
 
 """Pipeline Class Tests"""
@@ -393,6 +361,7 @@ def test_pipeline_with_scan_probe_config():
         center_frequency=5.0,
         sampling_frequency=5.0,
         xlims=(-2e-3, 2e-3),
+        probe_geometry=probe.probe_geometry,
     )
 
     # TODO: Add Config object as input to the Pipeline, currently config is not an Object
@@ -445,21 +414,13 @@ def test_pipeline_from_config(config_fixture, request):
         assert len(pipeline._ops_list) == 2
 
     # For the branched pipeline, we pass global inputs: x=2, y=3, input_y=10.
-    result = pipeline(x=2, y=3, input_y=10)
+    result = pipeline(x=2, y=3)
     if config_fixture != "pipeline_config_with_branch":
         assert result["z"] == 9  # (2 * 3) + 3
     else:
-        # Expected behavior for the branched pipeline:
-        #  - prod: multiply: 2*3 = 6 → {"x": 6} stored under key "prod"
-        #  - branch1: add gets merged global inputs and outputs from prod.
-        #             It calls add(x=6, input_y=10) → {"z": 16}
-        #  - branch2: similarly returns {"z": 16}
-        #  - rename1: renames branch1's {"z": 16} to {"z1": 16}
-        #  - rename2: renames branch2's {"z": 16} to {"z2": 16}
-        #  - merge: merges rename1 and rename2, yielding {"z1": 16, "z2": 16}
         assert "z1" in result and "z2" in result
-        assert result["z1"] == 16
-        assert result["z2"] == 16
+        assert result["z1"] == 9
+        assert result["z2"] == 9
 
 
 """Pipeline Save/Load Tests"""

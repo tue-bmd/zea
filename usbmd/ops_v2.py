@@ -165,9 +165,12 @@ class Operation(keras.Operation):
                 return {**merged_kwargs, **self._output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `call` method
-        filtered_kwargs = {
-            k: v for k, v in merged_kwargs.items() if k in self._valid_keys
-        }
+        if not 'kwargs' in self._valid_keys:
+            filtered_kwargs = {
+                k: v for k, v in merged_kwargs.items() if k in self._valid_keys
+            }
+        else:
+            filtered_kwargs = merged_kwargs
 
         # Call the processing function
         processed_output = self._call(**filtered_kwargs)
@@ -209,7 +212,12 @@ class Pipeline:
     in a list without "inputs"), and the operations are executed in the order provided.
     """
 
-    def __init__(self, operations: List[Any], with_batch_dim: bool = True, jit_options: Union[str, None] = "ops"):
+    def __init__(
+        self,
+        operations: List[Any],
+        with_batch_dim: bool = True,
+        jit_options: Union[str, None] = "ops",
+    ):
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
@@ -279,8 +287,20 @@ class Pipeline:
                     in_degree[op_id] -= 1
                     if in_degree[op_id] == 0:
                         zero_in_degree.append(op_id)
+
+        # add check for missing dependencies
+        missing_dependencies = [op_id for op_id, deps in dep_graph.items() if deps]
+        if missing_dependencies:
+            raise ValueError(
+                f"Following ops are provided as input, but are missing from the Operation chain: "
+                f"{missing_dependencies}"
+            )
+
         if len(sorted_order) != len(operations):
+            # If there is a cycle in the graph, the sorted order will be incomplete because
+            # some ops cannot be added to the sorted order due to their dependencies.
             raise ValueError("Cycle detected in operation dependencies.")
+
         return sorted_order
 
     def call(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -301,10 +321,14 @@ class Pipeline:
                     if source_id in data_store:
                         upstream_output = data_store[source_id]
                         if not isinstance(upstream_output, dict):
-                            raise TypeError(f"Expected a dictionary for op '{source_id}', got {type(upstream_output)}")
+                            raise TypeError(
+                                f"Expected a dictionary for op '{source_id}', got {type(upstream_output)}"
+                            )
                         op_inputs.update(upstream_output)
                     else:
-                        raise ValueError(f"Input op '{source_id}' for operation '{op.id}' not found.")
+                        raise ValueError(
+                            f"Input op '{source_id}' for operation '{op.id}' not found."
+                        )
             else:
                 op_inputs = data_store
             outputs = op(**op_inputs)
@@ -354,9 +378,16 @@ class Pipeline:
                             f"Operation '{op.id}' expects input from '{source_op_id}', which is not defined."
                         )
 
-    def __str__(self):
-        ops_str = " -> ".join([f"{op_id}:{self._op_dict[op_id].__class__.__name__}" for op_id in self._top_order])
-        return ops_str
+    def __str__(self):  # Ensure branches are displayed correctly
+        ops_str = []
+        for op_id in self._top_order:
+            op = self._op_dict[op_id]
+            if op.inputs:
+                inputs_str = ", ".join(op.inputs)
+                ops_str.append(f"{inputs_str} -> {op_id}:{op.__class__.__name__}")
+            else:
+                ops_str.append(f"{op_id}:{op.__class__.__name__}")
+        return " -> ".join(ops_str)
 
     def __repr__(self):
         return self.__str__()
@@ -433,9 +464,8 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
     """
-    pipeline_config = json.loads(json_string)
-    operations = make_operation_chain(pipeline_config["operations"])
-    return Pipeline(operations=operations, **kwargs)
+    pipeline_config = json.loads(json_string)["operations"]
+    return Pipeline(operations=pipeline_config, **kwargs)
 
 
 def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
@@ -446,8 +476,8 @@ def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
 
     with open(yaml_path, "r") as f:
         pipeline_config = yaml.safe_load(f)
-    operations = make_operation_chain(pipeline_config["operations"])
-    return Pipeline(operations=operations, **kwargs)
+    pipeline_config = pipeline_config["operations"]
+    return Pipeline(operations=pipeline_config, **kwargs)
 
 
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
