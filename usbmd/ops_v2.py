@@ -47,7 +47,7 @@ class Operation(keras.Operation):
 
     def __init__(
         self,
-        id: str = None,
+        uid: str = None,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
         cache_inputs: Union[bool, List[str]] = False,
@@ -64,7 +64,7 @@ class Operation(keras.Operation):
         """
         super().__init__()
 
-        self.id = id  # pylint: disable=redefined-builtin
+        self.uid = uid
         self.inputs = None  # List of Operation outputs that are input to this Operation
 
         self.input_data_type = input_data_type
@@ -239,7 +239,7 @@ class Pipeline:
                     params = op.get("params", {})
                     new_op = get_op(op["op"])(**params)
                     if "id" in op:
-                        new_op.id = op["id"]
+                        new_op.uid = op["id"]
                     if "inputs" in op:
                         new_op.inputs = op["inputs"]
                 else:
@@ -249,17 +249,17 @@ class Pipeline:
         self._ops_list = operations
         for idx, op in enumerate(self._ops_list):
             if not hasattr(op, "id"):
-                op.id = f"op_{idx}"
+                op.uid = f"op_{idx}"
             if not hasattr(op, "inputs"):
                 op.inputs = None
             op.with_batch_dim = with_batch_dim
             op.set_jit(jit_options == "ops")
 
         # Build mapping from op ID to op instance.
-        self._op_dict: Dict[str, Any] = {op.id: op for op in self._ops_list}
+        self._op_dict: Dict[str, Any] = {op.uid: op for op in self._ops_list}
         # If no op specifies "inputs", assume sequential order.
         if not any(op.inputs for op in self._ops_list):
-            self._top_order = [op.id for op in self._ops_list]
+            self._top_order = [op.uid for op in self._ops_list]
         else:
             self._top_order = self._topological_sort(self._ops_list)
             self.validate()
@@ -272,28 +272,28 @@ class Pipeline:
         must run before it. For an op that defines an "inputs" list, each element
         of that list is assumed to be an op ID.
         """
-        dep_graph: Dict[str, Set[str]] = {op.id: set() for op in operations}
+        dep_graph: Dict[str, Set[str]] = {op.uid: set() for op in operations}
         for op in operations:
             if op.inputs:
-                for source_op_id in op.inputs:
-                    dep_graph[op.id].add(source_op_id)
+                for source_uid in op.inputs:
+                    dep_graph[op.uid].add(source_uid)
         return dep_graph
 
     def _topological_sort(self, operations: List[Any]) -> List[str]:
         dep_graph = self._build_dependency_graph(operations)
-        in_degree = {op_id: len(deps) for op_id, deps in dep_graph.items()}
-        zero_in_degree = [op_id for op_id, deg in in_degree.items() if deg == 0]
+        in_degree = {uid: len(deps) for uid, deps in dep_graph.items()}
+        zero_in_degree = [uid for uid, deg in in_degree.items() if deg == 0]
         sorted_order = []
 
         while zero_in_degree:
             current = zero_in_degree.pop(0)
             sorted_order.append(current)
-            for op_id in dep_graph:
-                if current in dep_graph[op_id]:
-                    dep_graph[op_id].remove(current)
-                    in_degree[op_id] -= 1
-                    if in_degree[op_id] == 0:
-                        zero_in_degree.append(op_id)
+            for uid in dep_graph:
+                if current in dep_graph[uid]:
+                    dep_graph[uid].remove(current)
+                    in_degree[uid] -= 1
+                    if in_degree[uid] == 0:
+                        zero_in_degree.append(uid)
 
         # Find dependencies that are referenced but not present in the dep_graph keys.
         missing_dependencies = {
@@ -323,8 +323,8 @@ class Pipeline:
         global data dictionary.
         """
         data_store = inputs.copy()
-        for op_id in self._top_order:
-            op = self._op_dict[op_id]
+        for uid in self._top_order:
+            op = self._op_dict[uid]
             if op.inputs:
                 op_inputs = {}
                 for source_id in op.inputs:
@@ -337,12 +337,12 @@ class Pipeline:
                         op_inputs.update(upstream_output)
                     else:
                         raise ValueError(
-                            f"Input op '{source_id}' for operation '{op.id}' not found."
+                            f"Input op '{source_id}' for operation '{op.uid}' not found."
                         )
             else:
                 op_inputs = data_store
             outputs = op(**op_inputs)
-            data_store[op.id] = outputs
+            data_store[op.uid] = outputs
             data_store.update(outputs)
         return outputs
 
@@ -385,18 +385,18 @@ class Pipeline:
             for source_id in op.inputs:
                 if source_id not in self._op_dict:
                     raise ValueError(
-                        f"Operation '{op.id}' expects input from '{source_id}', which is missing."
+                        f"Operation '{op.uid}' expects input from '{source_id}', which is missing."
                     )
 
     def __str__(self):  # Ensure branches are displayed correctly
         ops_str = []
-        for op_id in self._top_order:
-            op = self._op_dict[op_id]
+        for uid in self._top_order:
+            op = self._op_dict[uid]
             if op.inputs:
                 inputs_str = ", ".join(op.inputs)
-                ops_str.append(f"{inputs_str} -> {op_id}:{op.__class__.__name__}")
+                ops_str.append(f"{inputs_str} -> {uid}:{op.__class__.__name__}")
             else:
-                ops_str.append(f"{op_id}:{op.__class__.__name__}")
+                ops_str.append(f"{uid}:{op.__class__.__name__}")
         return " -> ".join(ops_str)
 
     def __repr__(self):
@@ -465,7 +465,7 @@ def make_operation_chain(
                 op_def["params"] = {}
             op_instance = get_op(op_def["op"])(**op_def["params"])
             if "id" in op_def:
-                op_instance.id = op_def["id"]
+                op_instance.uid = op_def["id"]
             if "inputs" in op_def:
                 op_instance.input_keys = op_def["inputs"]
         chain.append(op_instance)
@@ -527,10 +527,10 @@ def pipeline_to_dict(pipeline: Pipeline) -> Dict:
             op_list.append(op_conf)
     else:
         # In branched mode include the extra keys.
-        for op_id in pipeline._top_order:
-            op = pipeline._op_dict[op_id]
+        for uid in pipeline._top_order:
+            op = pipeline._op_dict[uid]
             op_conf = {
-                "id": op.id,
+                "id": op.uid,
                 "op": op.__class__.__name__,
                 "params": op.serialize() if hasattr(op, "serialize") else {},
             }
