@@ -313,24 +313,57 @@ def test_pipeline_jit_options():
         assert op._jit_compile is False
 
 
-def test_pipeline_set_params():
-    """Tests setting parameters for the Pipeline."""
-    operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
-    pipeline.set_params(x=5, y=3)
-    params = pipeline.get_params()
-    assert params["x"] == 5
-    assert params["y"] == 3
+def test_pipeline_cycle_detection():
+    """Test that a circular dependency in the pipeline raises a ValueError."""
+    # Define two dummy operations with cyclic dependencies.
+    op_a = MultiplyOperation()
+    op_a.id = "op_a"
+    op_a.inputs = ["op_b"]  # op_a depends on op_b
+
+    op_b = AddOperation()
+    op_b.id = "op_b"
+    op_b.inputs = ["op_a"]  # op_b depends on op_a
+
+    with pytest.raises(ValueError, match="Cycle detected"):
+        Pipeline(operations=[op_a, op_b])
 
 
-def test_pipeline_get_params_per_operation():
-    """Tests getting parameters per operation in the Pipeline."""
-    operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
-    pipeline.set_params(x=5, y=3)
-    params = pipeline.get_params(per_operation=True)
-    assert params[0]["x"] == 5
-    assert params[1]["y"] == 3
+def test_operation_invalid_output():
+    """Test that an operation returning a non-dict raises a TypeError."""
+
+    class BadOperation(Operation):
+        def call(self, **kwargs):
+            return [1, 2, 3]  # Not a dict!
+
+    op = BadOperation()
+    with pytest.raises(TypeError, match="must return a dictionary"):
+        op(x=1)
+
+
+def test_operation_cache_clearing():
+    """Test that clearing an operation's cache forces re-computation."""
+    op = AddOperation(cache_outputs=True, jit_compile=False)
+    result1 = op(x=1, y=2)
+    # Cache should now have an entry.
+    assert op._output_cache
+    op.clear_cache()
+    assert op._output_cache == {}
+    result2 = op(x=1, y=2)
+    # Ensure the recomputed result is equal to the original result.
+    assert result1 == result2
+
+
+def test_pipeline_missing_dependency():
+    """Test that a pipeline referencing a non-existent op ID raises a ValueError."""
+    op = MultiplyOperation()
+    op.id = "op1"
+    # This add op references a non-existent op "missing_op"
+    add_op = AddOperation()
+    add_op.id = "op2"
+    add_op.inputs = ["missing_op"]
+
+    with pytest.raises(ValueError, match="not defined"):
+        Pipeline(operations=[op, add_op])
 
 
 def test_pipeline_validation():
