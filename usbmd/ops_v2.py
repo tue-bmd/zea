@@ -64,7 +64,7 @@ class Operation(keras.Operation):
         """
         super().__init__()
 
-        self.id = id  # Unique identifier for the operation # pylint: disable=redefined-builtin
+        self.id = id  # pylint: disable=redefined-builtin
         self.inputs = None  # List of Operation outputs that are input to this Operation
 
         self.input_data_type = input_data_type
