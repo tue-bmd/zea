@@ -283,12 +283,10 @@ def test_pipeline_jit_options():
 def test_pipeline_cycle_detection():
     """Test that a circular dependency in the pipeline raises a ValueError."""
     # Define two dummy operations with cyclic dependencies.
-    op_a = TestMultiply()
-    op_a.id = "op_a"
+    op_a = TestMultiply(uid="op_a")
     op_a.inputs = ["op_b"]  # op_a depends on op_b
 
-    op_b = TestAdd()
-    op_b.id = "op_b"
+    op_b = TestAdd(uid="op_b")
     op_b.inputs = ["op_a"]  # op_b depends on op_a
 
     with pytest.raises(ValueError, match="Cycle detected"):
@@ -324,11 +322,9 @@ def test_operation_cache_clearing():
 
 def test_pipeline_missing_dependency():
     """Test that a pipeline referencing a non-existent op ID raises a ValueError."""
-    op = TestMultiply()
-    op.id = "op1"
+    op = TestMultiply(uid="op1")
     # This add op references a non-existent op "missing_op"
-    add_op = TestAdd()
-    add_op.id = "op2"
+    add_op = TestAdd(uid="op2")
     add_op.inputs = ["missing_op"]
 
     with pytest.raises(ValueError, match="missing from the Operation chain"):
