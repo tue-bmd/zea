@@ -47,6 +47,7 @@ class Operation(keras.Operation):
 
     def __init__(
         self,
+        id: str = None,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
         cache_inputs: Union[bool, List[str]] = False,
@@ -63,6 +64,7 @@ class Operation(keras.Operation):
         """
         super().__init__()
 
+        self.id = id  # Unique identifier for the operation
         self.inputs = None  # List of Operation outputs that are input to this Operation
 
         self.input_data_type = input_data_type
@@ -224,6 +226,9 @@ class Pipeline:
 
         # Ensure that each element in the operations list is an Operation instance.
         # If an element is a string or dict, create the Operation instance.
+
+        # TODO: this has shared code with make_operation_chain, refactor to avoid duplication
+
         for idx, op in enumerate(operations):
             if not isinstance(op, Operation):
                 # If op is a string, then use it as the op name with default parameters.
@@ -353,9 +358,9 @@ class Pipeline:
             )
         probe, scan, config = {}, {}, {}
         for arg in args:
-            if not hasattr(arg, "to_tensor"):
+            if not isinstance(arg, (Probe, Scan, Config)):
                 raise ValueError(
-                    "All positional arguments must be Probe, Scan, or Config objects."
+                    f"Expected Probe, Scan, or Config object, got {type(arg).__name__}"
                 )
 
             tensorized = arg.to_tensor()
@@ -632,7 +637,7 @@ class Concatenate(Operation):
         Concatenates the inputs corresponding to the specified keys along the specified axis.
         """
         for key, axis in zip(self.keys, self.axis):
-            kwargs[key] = keras.ops.concat(
+            kwargs[key] = keras.ops.concat(  # pylint: disable=no-member
                 [kwargs[key] for key in self.keys], axis=axis
             )
         return kwargs
