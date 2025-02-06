@@ -401,7 +401,7 @@ class Pipeline:
     def load(cls, file_path: str, **kwargs) -> "Pipeline":
         """Load a pipeline from a JSON or YAML file."""
         if file_path.endswith(".json"):
-            with open(file_path, "r") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 json_str = f.read()
             return pipeline_from_json(json_str, **kwargs)
         elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
@@ -409,15 +409,15 @@ class Pipeline:
         else:
             raise ValueError("File must have extension .json, .yaml, or .yml")
 
-    def save(self, file_path: str, format: str = "json") -> None:
+    def save(self, file_path: str, file_format: str = "json") -> None:
         """Save the pipeline to a JSON or YAML file."""
-        if format.lower() == "json":
+        if file_format.lower() == "json":
             config_str = pipeline_to_json(self)
-        elif format.lower() == "yaml":
+        elif file_format.lower() == "yaml":
             config_str = pipeline_to_yaml(self)
         else:
-            raise ValueError("Format must be either 'json' or 'yaml'.")
-        with open(file_path, "w") as f:
+            raise ValueError("file_format must be either 'json' or 'yaml'.")
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(config_str)
 
 
@@ -479,9 +479,7 @@ def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a YAML file.
     """
-    import yaml
-
-    with open(yaml_path, "r") as f:
+    with open(yaml_path, "r", encoding="utf-8") as f:
         pipeline_config = yaml.safe_load(f)
     pipeline_config = pipeline_config["operations"]
     return Pipeline(operations=pipeline_config, **kwargs)
