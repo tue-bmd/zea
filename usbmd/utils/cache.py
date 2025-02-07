@@ -6,7 +6,7 @@
 > custom classes will not be recognized as equal if they have the same attributes by the
 > caching mechanism.
 
-- **Author(s)**     : Tristan Stevens
+- **Author(s)**     : Tristan Stevens, Wessel van Nierop
 - **Date**          : October 11th, 2024
 """
 
@@ -20,6 +20,7 @@ import textwrap
 from pathlib import Path
 
 import joblib
+import keras
 
 from usbmd.utils import log
 
@@ -73,6 +74,12 @@ def serialize_elements(key_elements: list):
             serialized_elements.append(str(element.serialized))
         elif isinstance(element, str):
             # If element is a string, use it as is
+            serialized_elements.append(element)
+        elif isinstance(element, keras.random.SeedGenerator):
+            # If element is a SeedGenerator, use the state
+            element = element.state.value
+            element = pickle.dumps(element)
+            element = hashlib.md5(element).hexdigest()
             serialized_elements.append(element)
         else:
             # Otherwise, serialize the element using pickle and hash it
@@ -137,13 +144,13 @@ def generate_cache_key(func, args, kwargs, arg_names):
     key_elements.append(source)  # source code
     if not arg_names:
         key_elements.extend(args)
-        key_elements.extend(f"{k}={v}" for k, v in kwargs.items())
+        key_elements.extend(v for _, v in sorted(kwargs.items()))
     else:
         sig = inspect.signature(func)
         bound_args = sig.bind_partial(*args, **kwargs)
         for name in arg_names:
             if name in bound_args.arguments:
-                key_elements.append(f"{name}={bound_args.arguments[name]}")
+                key_elements.append(bound_args.arguments[name])
 
     key = "_".join(serialize_elements(key_elements))
     return f"{func.__qualname__}_" + hashlib.md5(key.encode()).hexdigest()
