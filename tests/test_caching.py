@@ -2,6 +2,8 @@
 
 import time
 
+import keras
+import numpy as np
 import pytest
 
 from usbmd.core import Object
@@ -48,6 +50,14 @@ def _expensive_operation_obj(obj):
     result = obj.x + obj.y
     time.sleep(EXPECTED_DURATION)
     return result
+
+
+@cache_output("seed_gen")
+def _expensive_operation_seed(seed_gen):
+    # Simulate an expensive operation
+    result = keras.random.uniform([1], seed=seed_gen)
+    time.sleep(EXPECTED_DURATION)
+    return np.squeeze(keras.ops.convert_to_numpy(result))
 
 
 def _some_random_func():
@@ -210,7 +220,7 @@ def test_caching_custom_object():
     ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
-    # If we use kwarg instead of arg should still be cached
+    # If we use kwarg instead of arg should still be cached, see #561
     start_time = time.time()
     result = _expensive_operation_obj(obj=obj1)
     duration = time.time() - start_time
@@ -278,3 +288,49 @@ def test_nested_cache():
         duration2 < EXPECTED_DURATION
     ), f"Expected duration < {EXPECTED_DURATION}, got {duration2}"
     assert result1 == result2, "Results should be equal"
+
+
+def test_caching_seed_generator():
+    """Test caching for expensive_operation with keras.seed.SeedGenerator."""
+    import usbmd
+
+    usbmd.init_device()
+
+    seed_gen = keras.random.SeedGenerator(42)
+
+    # First time should not be cached
+    start_time = time.time()
+    result1 = _expensive_operation_seed(seed_gen)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+
+    # Second time should not be cached unless we reset seed_gen
+
+    start_time = time.time()
+    result2 = _expensive_operation_seed(seed_gen)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert result1 != result2, "Results should not be equal"
+
+    # Reset seed_gen
+    seed_gen = keras.random.SeedGenerator(42)
+    start_time = time.time()
+    result3 = _expensive_operation_seed(seed_gen)
+    duration = time.time() - start_time
+    assert (
+        duration < EXPECTED_DURATION
+    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert result1 == result3, "Results should be equal"
+
+    # Different seed_gen should not be cached
+    seed_gen = keras.random.SeedGenerator(43)
+    start_time = time.time()
+    _expensive_operation_seed(seed_gen)
+    duration = time.time() - start_time
+    assert (
+        duration >= EXPECTED_DURATION
+    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
