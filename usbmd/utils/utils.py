@@ -158,15 +158,20 @@ def save_to_gif(images, filename, fps=20):
         .convert("RGB")
         .quantize(
             colors=256,
-            method=Image.MEDIANCUT,  # Use median cut to generate the palette
-            kmeans=1,  # Use k-means to refine the palette
+            # Use median cut to generate the palette
+            method=Image.MEDIANCUT, # pylint: disable=no-member
+            # Use k-means to refine the palette
+            kmeans=1,
         )
     )
 
     # Apply the same palette to all frames without dithering
     # for consistent color mapping
     pillow_imgs = [
-        img.convert("RGB").quantize(palette=first_frame, dither=Image.NONE)
+        img.convert("RGB").quantize(
+            palette=first_frame,
+            dither=Image.NONE, # pylint: disable=no-member
+        )
         for img in pillow_imgs
     ]
 
