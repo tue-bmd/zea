@@ -210,6 +210,15 @@ def test_caching_custom_object():
     ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
+    # If we use kwarg instead of arg should still be cached
+    start_time = time.time()
+    result = _expensive_operation_obj(obj=obj1)
+    duration = time.time() - start_time
+    assert (
+        duration < EXPECTED_DURATION
+    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert result == 2 + 10, f"Expected 2 + 10, got {result}"
+
     # Another instance with the same values should also be cached
     obj1_identical = CustomObject(2, 10)
     start_time = time.time()
