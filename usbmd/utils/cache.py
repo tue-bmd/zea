@@ -77,7 +77,7 @@ def serialize_elements(key_elements: list):
             serialized_elements.append(element)
         elif isinstance(element, keras.random.SeedGenerator):
             # If element is a SeedGenerator, use the state
-            element = element.state.value
+            element = keras.ops.convert_to_numpy(element.state.value)
             element = pickle.dumps(element)
             element = hashlib.md5(element).hexdigest()
             serialized_elements.append(element)
