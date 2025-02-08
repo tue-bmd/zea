@@ -292,10 +292,6 @@ def test_nested_cache():
 
 def test_caching_seed_generator():
     """Test caching for expensive_operation with keras.seed.SeedGenerator."""
-    import usbmd
-
-    usbmd.init_device()
-
     seed_gen = keras.random.SeedGenerator(42)
 
     # First time should not be cached
