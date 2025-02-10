@@ -1,36 +1,46 @@
 """
 Script to convert the EchoNet database to .npy and USBMD formats.
-Parameters to set:
-PATH_IN = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonet" (input)
-PATH_OUT = "/mnt/z/Ultrasound-BMd/data/....."  (Numpy output)
-PATH_OUT_H5 = "/mnt/z/Ultrasound-BMd/data/....." (Usbmd output)
-
-All proper subfolders are created in the script at these locations.
+Will segment the images and convert them to polar coordinates.
 """
 
 import os
+
+os.environ["KERAS_BACKEND"] = "numpy"
+
+import argparse
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-import h5py
 import numpy as np
 from scipy.interpolate import griddata
 from tqdm import tqdm
 
+from usbmd.config import Config
 from usbmd.data import generate_usbmd_dataset
+from usbmd.utils.io_lib import load_video
+from usbmd.utils.utils import translate
 
 
-def normalize(file):
-    """Normalizes the values from [-60, 0] to [0, 1]
-    Args:
-        file (ndarray): Input images [N, 112, 112]
-    Returns:
-        file (ndarray): Output images [N, 112, 112]
-
-    """
-    # convert from [-60,0] to [0,1]
-    file = (file + 60) / 60
-    return file
+def get_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Convert EchoNet to USBMD format")
+    parser.add_argument(
+        "--source",
+        type=str,
+        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/EchoNet-Dynamic/Videos",
+    )
+    parser.add_argument(
+        "--output", type=str, default="/mnt/z/Ultrasound-BMd/data/Wessel/echonet_v2025"
+    )
+    parser.add_argument(
+        "--splits",
+        type=str,
+        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/EchoNet-Dynamic/splits",
+    )
+    parser.add_argument("--output_numpy", type=str, default=None)
+    parser.add_argument("--no_hyperthreading", action="store_true")
+    args = parser.parse_args()
+    return args
 
 
 def segment(tensor, number_erasing=0, min_clip=0):
@@ -202,21 +212,22 @@ def rotate_coordinates(data_points, degrees):
 def cartesian_to_polar_matrix(
     cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
 ):
-    """Function that converts a timeseries of a cartesian cone to a polar representation
+    """
+    Function that converts a timeseries of a cartesian cone to a polar representation
     that is more compatible with CNN's/action selection.
+
     Args:
-        cartesian_matrix (3d array): (N, 112, 112) matrix containing time sequence
-        of image_sc data.
-        tip (tuple, optional): coordinates (in indices) of the tip of the cone.
-        Defaults to (61, 7).
-        r_max (int, optional): expected radius of the cone. Defaults to 107.
-        angle (float, optional): expected angle of the cone, will be used as
-        (-angle, angle). Defaults to 0.79.
-        interpolation (str, optional): _description_. Defaults to 'nearest'.
-        can be [nearest, linear, cubic]
+        - cartesian_matrix (2d array): (rows, cols) matrix containing time sequence
+            of image_sc data.
+        - tip (tuple, optional): coordinates (in indices) of the tip of the cone.
+            Defaults to (61, 7).
+        - r_max (int, optional): expected radius of the cone. Defaults to 107.
+        - angle (float, optional): expected angle of the cone, will be used as (-angle, angle).
+            Defaults to 0.79.
+        - interpolation (str, optional): can be [nearest, linear, cubic]. Defaults to 'nearest'.
 
     Returns:
-        polar_matrix (3d array): polar conversion of the input.
+        polar_matrix (2d array): polar conversion of the input.
     """
     rows, cols = cartesian_matrix.shape
     center_x, center_y = tip
@@ -249,105 +260,168 @@ def cartesian_to_polar_matrix(
     return polar_matrix
 
 
-if __name__ == "__main__":
+def find_key_for_file(file_dict, target_file):
+    for key, files in file_dict.items():
+        if target_file in files:
+            return key
+    return "rejected"
 
-    class H5Processor:
-        """
-        Stores a few variables and paths to allow for hyperthreading.
-        """
 
-        def __init__(self, path_in, path_out, path_out_h5, num_val=500, num_test=500):
-            self.path_in = Path(path_in)
-            self.path_out = Path(path_out)
-            self.path_out_h5 = Path(path_out_h5)
-            self.num_val = num_val
-            self.num_test = num_test
-            # Ensure train, val, test, rejected paths exist
-            for folder in ["train", "val", "test", "rejected"]:
+class H5Processor:
+    """
+    Stores a few variables and paths to allow for hyperthreading.
+    """
+
+    def __init__(
+        self,
+        path_out_h5,
+        path_out=None,
+        num_val=500,
+        num_test=500,
+        range_from=(0, 255),
+        range_to=(-60, 0),
+        splits=None,
+    ):
+        self.path_out_h5 = Path(path_out_h5)
+        self.path_out = Path(path_out) if path_out else None
+        self.num_val = num_val
+        self.num_test = num_test
+        self.range_from = range_from
+        self.range_to = range_to
+        self.splits = splits
+        self._process_range = (0, 1)
+
+        # Ensure train, val, test, rejected paths exist
+        for folder in ["train", "val", "test", "rejected"]:
+            if self._to_numpy:
                 (self.path_out / folder).mkdir(parents=True, exist_ok=True)
-                (self.path_out_h5 / folder).mkdir(parents=True, exist_ok=True)
+            (self.path_out_h5 / folder).mkdir(parents=True, exist_ok=True)
 
-        def process_h5_file(self, h5file):
-            """
-            Processes a single h5 file using the class variables and the filename given.
-            """
-            file_path = self.path_in / h5file
-            with h5py.File(file_path, "r") as file:
-                tensor = file["data/image_sc"][:]
-                tensor = normalize(tensor)
-                tensor = segment(tensor, number_erasing=0, min_clip=0)
+    @property
+    def _to_numpy(self):
+        return self.path_out is not None
 
-                accepted = accept_shape(tensor[0])
+    def translate(self, tensor):
+        return translate(tensor, self._process_range, self.range_to)
 
-                if accepted:
-                    # This inefficient counter works with hyperthreading
-                    val_counter = len(list((self.path_out / "val").iterdir()))
-                    test_counter = len(list((self.path_out / "test").iterdir()))
-                    if val_counter < self.num_val:
-                        out_dir = self.path_out / "val" / h5file.replace(".hdf5", "")
-                        out_h5 = self.path_out_h5 / "val" / h5file
-                    elif test_counter < self.num_test:
-                        out_dir = self.path_out / "test" / h5file.replace(".hdf5", "")
-                        out_h5 = self.path_out_h5 / "test" / h5file
-                    else:
-                        out_dir = self.path_out / "train" / h5file.replace(".hdf5", "")
-                        out_h5 = self.path_out_h5 / "train" / h5file
-                else:
-                    out_dir = self.path_out / "rejected" / h5file.replace(".hdf5", "")
-                    out_h5 = self.path_out_h5 / "rejected" / h5file
+    def get_split(self, hdf5_file: str, tensor):
+        # Always check acceptance
+        accepted = accept_shape(tensor[0])
 
-                os.makedirs(out_dir, exist_ok=True)
-                polar_im_set = np.zeros((1, 112, 112))
-                for i, im in enumerate(tensor):
-                    np.save(os.path.join(out_dir, f"sc{str(i).zfill(3)}.npy"), im)
-                    if accepted:
-                        polar_im = cartesian_to_polar_matrix(
-                            im, interpolation="cubic"
-                        )  # [nearest, linear, cubic]
-                        np.save(
-                            os.path.join(out_dir, f"polar{str(i).zfill(3)}.npy"),
-                            polar_im,
-                        )
-                        polar_im_set = np.concatenate(
-                            [polar_im_set, np.expand_dims(polar_im, axis=0)], axis=0
-                        )
+        # Previous split
+        if self.splits is not None:
+            split = find_key_for_file(self.splits, hdf5_file)
+            assert accepted == (split != "rejected"), "Rejection mismatch"
+            return split
 
-                if accepted:
-                    generate_usbmd_dataset(
-                        path=out_h5,
-                        image=tensor * 60 - 60,
-                        image_sc=polar_im_set[1:] * 60 - 60,
-                        probe_name="generic",
-                        description="EchoNet dataset converted to USBMD format",
-                    )
-                else:
-                    generate_usbmd_dataset(
-                        path=out_h5,
-                        image=tensor * 60 - 60,
-                        probe_name="generic",
-                        description="EchoNet dataset converted to USBMD format",
-                    )
+        # New split
+        if not accepted:
+            return "rejected"
 
-    PATH_IN = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonet"
-    PATH_OUT = "/mnt/z/Ultrasound-BMd/data/....."  ##########
-    PATH_OUT_H5 = "/mnt/z/Ultrasound-BMd/data/....."
+        # This inefficient counter works with hyperthreading
+        # TODO: but it is not reproducible!
+        val_counter = len(list((self.path_out_h5 / "val").iterdir()))
+        test_counter = len(list((self.path_out_h5 / "test").iterdir()))
+
+        # Determine the split
+        if val_counter < self.num_val:
+            return "val"
+        elif test_counter < self.num_test:
+            return "test"
+        else:
+            return "train"
+
+    def __call__(self, avi_file):
+        """
+        Processes a single h5 file using the class variables and the filename given.
+        """
+        hdf5_file = avi_file.stem + ".hdf5"
+        tensor = load_video(avi_file)
+
+        assert (
+            tensor.min() >= self.range_from[0]
+        ), f"{tensor.min()} < {self.range_from[0]}"
+        assert (
+            tensor.max() <= self.range_from[1]
+        ), f"{tensor.max()} > {self.range_from[1]}"
+
+        # Translate to [0, 1]
+        tensor = translate(tensor, self.range_from, self._process_range)
+
+        tensor = segment(tensor, number_erasing=0, min_clip=0)
+
+        split = self.get_split(hdf5_file, tensor)
+        accepted = split != "rejected"
+
+        out_h5 = self.path_out_h5 / split / hdf5_file
+        if self._to_numpy:
+            out_dir = self.path_out / split / avi_file.stem
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+        polar_im_set = []
+        for i, im in enumerate(tensor):
+            if self._to_numpy:
+                np.save(out_dir / f"sc{str(i).zfill(3)}.npy", im)
+
+            if not accepted:
+                continue
+
+            polar_im = cartesian_to_polar_matrix(im, interpolation="cubic")
+            if self._to_numpy:
+                np.save(
+                    out_dir / f"polar{str(i).zfill(3)}.npy",
+                    polar_im,
+                )
+            polar_im_set.append(polar_im)
+        polar_im_set = np.stack(polar_im_set, axis=0)
+
+        usbmd_dataset = {
+            "path": out_h5,
+            "image": self.translate(tensor),
+            "probe_name": "generic",
+            "description": "EchoNet dataset converted to USBMD format",
+        }
+        if accepted:
+            usbmd_dataset["image_sc"] = self.translate(polar_im_set)
+        return generate_usbmd_dataset(**usbmd_dataset)
+
+
+if __name__ == "__main__":
+    args = get_args()
+
+    if args.splits is not None:
+        # Reproduce a previous split...
+        split_yaml_dir = Path(args.splits)
+        splits = {"train": None, "val": None, "test": None}
+        for split in splits:
+            yaml_file = split_yaml_dir / (split + ".yaml")
+            assert yaml_file.exists(), f"File {yaml_file} does not exist."
+            splits[split] = Config.load_from_yaml(yaml_file)["file_paths"]
+    else:
+        splits = None
 
     # List the files that have an entry in path_out_h5 already
     files_done = []
-    for _, _, filenames in os.walk(PATH_OUT_H5):
+    for _, _, filenames in os.walk(args.output):
         for filename in filenames:
-            files_done.append(filename)
+            files_done.append(filename.replace(".hdf5", ""))
+
     # List all files of echonet and exclude those already processed
-    h5_files = os.listdir(PATH_IN)
-    h5_files = [
-        file for file in h5_files if file.endswith(".hdf5") and file not in files_done
-    ]
+    path_in = Path(args.source)
+    h5_files = path_in.glob("*.avi")
+    h5_files = [file for file in h5_files if file.stem not in files_done]
     print(f"Files left to process: {len(h5_files)}")
 
-    processor = H5Processor(PATH_IN, PATH_OUT, PATH_OUT_H5)
-    with ProcessPoolExecutor() as executor:
-        results = list(
-            tqdm(executor.map(processor.process_h5_file, h5_files), total=len(h5_files))
-        )
+    # Run the processor
+    processor = H5Processor(
+        path_out_h5=args.output, path_out=args.output_numpy, splits=splits
+    )
+
+    if not args.no_hyperthreading:
+        with ProcessPoolExecutor() as executor:
+            results = list(tqdm(executor.map(processor, h5_files), total=len(h5_files)))
+    else:
+        for file in tqdm(h5_files):
+            processor(file)
 
     print("All tasks are completed.")
