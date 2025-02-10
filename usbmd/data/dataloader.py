@@ -384,9 +384,9 @@ class Resizer:
         ndim = self.backend.numpy.ndim(x)
 
         if self.resize_axes is None:
-            assert ndim == 4, (
-                f"`resize_axes` must be specified for when ndim != 4, got {ndim}. "
-                "For ndim == 4, the resize axes are default to (1, 2)."
+            assert ndim in [3, 4], (
+                f"`resize_axes` must be specified for when ndim not in [3, 4], got {ndim}. "
+                "For ndim == 3 or 4, the resize axes are default to (1, 2)."
             )
             x = self.resizer(x)
             return x
