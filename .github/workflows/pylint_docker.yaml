@@ -27,7 +27,6 @@ jobs:
           file: Dockerfile
           build-args: KERAS3=True
           tags: usbmd:latest
-          load: true
           push: false # Do not push the image to Docker Hub
           cache-from: |
             type=local,src=/tmp/.buildx-cache
