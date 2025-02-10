@@ -9,35 +9,25 @@ on:
 
 jobs:
   build-and-push:
-    runs-on: self-hosted # This should always run self-hosted such that we have access to Harbor.
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v2
 
-      - name: Log in to Harbor Registry
+      - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          registry: 131.155.125.142 # TODO set secrets and correct port
-          username: ${{ secrets.HARBOR_USERNAME }}
-          password: ${{ secrets.HARBOR_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile
-          build-args: KERAS3=True
-          # Tag the image for your Harbor registry.
-          tags: 131.155.125.142/usbmd:latest # TODO set correct port, repo and tag
-          # Push the image to the registry.
+          file: Dockerfile.base
           push: true
-          # Use both a local cache and GitHub Actions cache for Docker layers.
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache
-            type=gha
-          cache-to: |
-            type=local,dest=/tmp/.buildx-cache
-            type=gha,mode=max
+          tags: usbmd/base:latest
