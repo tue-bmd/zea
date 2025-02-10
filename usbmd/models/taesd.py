@@ -12,7 +12,6 @@ from pathlib import Path
 import keras
 import tensorflow as tf
 from keras import backend, ops
-
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
 from usbmd.models.presets import (
@@ -21,46 +20,6 @@ from usbmd.models.presets import (
     taesdxl_presets,
 )
 from usbmd.registry import model_registry
-
-# This block of code is used to allow the Jax backend to work with TAESD
-# It overrides the ResizeNearestNeighbor op to allow align_corners=True and half_pixel_centers=True
-# This means outputs of the jax model might not be a 100% match to the tensorflow model
-if backend.backend() == "jax":
-    try:
-        import jax  # pylint: disable=import-outside-toplevel
-        import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
-        import tf2jax  # pylint: disable=import-outside-toplevel
-
-        def _resize_nearest_neighbor(proto):
-            """Parse a ResizeNearestNeighbor op."""
-            tf2jax._src.ops._check_attrs(
-                proto, {"T", "align_corners", "half_pixel_centers"}
-            )
-
-            def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
-                if len(images.shape) != 4:
-                    raise ValueError(
-                        "Expected A 4D tensor with shape [batch, height, width, channels], "
-                        f"found {images.shape}"
-                    )
-
-                inp_batch, _, _, inp_channels = images.shape
-                out_height, out_width = size.tolist()
-
-                return jax.image.resize(
-                    images,
-                    shape=(inp_batch, out_height, out_width, inp_channels),
-                    method=jax.image.ResizeMethod.NEAREST,
-                )
-
-            return _func
-
-        # hack to allow align_corners=True and half_pixel_centers=True
-        tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor
-    except ImportError as exc:
-        raise ImportError(
-            "To use the Jax backend with TAESD, please install the `tf2jax` package."
-        ) from exc
 
 
 @model_registry(name="taesdxl")
@@ -79,6 +38,8 @@ class TinyAutoencoder(BaseModel):
                 "TinyDecoder is only currently supported with the "
                 "TensorFlow or Jax backend."
             )
+
+        _fix_tf_to_jax_resize_nearest_neighbor()
 
         super().__init__(**kwargs)
 
@@ -236,6 +197,48 @@ class TinyDecoder(TinyBase):
             **kwargs: Additional keyword arguments passed to the superclass initializer.
         """
         super().__init__(tiny_type="decoder", **kwargs)
+
+
+def _fix_tf_to_jax_resize_nearest_neighbor():
+    # This block of code is used to allow the Jax backend to work with TAESD
+    # It overrides the ResizeNearestNeighbor op to allow align_corners=True and half_pixel_centers=True
+    # This means outputs of the jax model might not be a 100% match to the tensorflow model
+    if backend.backend() == "jax":
+        try:
+            import jax  # pylint: disable=import-outside-toplevel
+            import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+            import tf2jax  # pylint: disable=import-outside-toplevel
+
+            def _resize_nearest_neighbor(proto):
+                """Parse a ResizeNearestNeighbor op."""
+                tf2jax._src.ops._check_attrs(
+                    proto, {"T", "align_corners", "half_pixel_centers"}
+                )
+
+                def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
+                    if len(images.shape) != 4:
+                        raise ValueError(
+                            "Expected A 4D tensor with shape [batch, height, width, channels], "
+                            f"found {images.shape}"
+                        )
+
+                    inp_batch, _, _, inp_channels = images.shape
+                    out_height, out_width = size.tolist()
+
+                    return jax.image.resize(
+                        images,
+                        shape=(inp_batch, out_height, out_width, inp_channels),
+                        method=jax.image.ResizeMethod.NEAREST,
+                    )
+
+                return _func
+
+            # hack to allow align_corners=True and half_pixel_centers=True
+            tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor
+        except ImportError as exc:
+            raise ImportError(
+                "To use the Jax backend with TAESD, please install the `tf2jax` package."
+            ) from exc
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)
