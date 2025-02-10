@@ -285,7 +285,24 @@ class Resizer:
         **resize_kwargs,
     ):
         """
-        Get a resize layer based on the resize type.
+        Initializes the data loader with the specified parameters.
+
+        Args:
+            image_size (tuple): The target size of the images.
+            resize_type (str): The type of resizing to apply.
+                Supported types are 'center_crop', 'random_crop', 'resize'.
+            resize_axes (tuple | None, optional): The axes along which to resize.
+                Must be of length 2. Defaults to None. In that case, can only process
+                default tensors of shape (batch, height, width, channels), where the
+                resize axes are (1, 2), i.e. height and width. If processing higher
+                dimensional tensors, you must specify the resize axes.
+            seed (int | None, optional): Random seed for reproducibility. Defaults to None.
+            backend (str | None, optional): The backend to use for image processing.
+            **resize_kwargs: Additional keyword arguments for the resizing operation.
+
+        Raises:
+            ValueError: If an unsupported resize type is provided.
+            AssertionError: If resize_axes is not of length 2.
         """
         super().__init__()
         self.image_size = image_size
