@@ -260,10 +260,11 @@ def cartesian_to_polar_matrix(
     return polar_matrix
 
 
-def find_key_for_file(file_dict, target_file):
-    for key, files in file_dict.items():
+def find_split_for_file(file_dict, target_file):
+    """Function that finds the split for a given file in a dictionary."""
+    for split, files in file_dict.items():
         if target_file in files:
-            return key
+            return split
     return "rejected"
 
 
@@ -302,15 +303,17 @@ class H5Processor:
         return self.path_out is not None
 
     def translate(self, tensor):
+        """Translate the tensor from the processing range to final range."""
         return translate(tensor, self._process_range, self.range_to)
 
     def get_split(self, hdf5_file: str, tensor):
+        """Determine the split for a given file."""
         # Always check acceptance
         accepted = accept_shape(tensor[0])
 
         # Previous split
         if self.splits is not None:
-            split = find_key_for_file(self.splits, hdf5_file)
+            split = find_split_for_file(self.splits, hdf5_file)
             assert accepted == (split != "rejected"), "Rejection mismatch"
             return split
 
