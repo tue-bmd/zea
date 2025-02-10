@@ -20,31 +20,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install poetry
+        run: pipx install poetry==1.8.3
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.8.3
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root --with torch,tensorflow,jax -E opencv-python-headless
+          cache: 'poetry'
 
       - name: Install project
-        run: poetry install --no-interaction -E opencv-python-headless
+        run: poetry install --no-interaction --no-root --with torch,tensorflow,jax -E opencv-python-headless
 
       - name: Perform tests
         run: poetry run pytest ./tests
