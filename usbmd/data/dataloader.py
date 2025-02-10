@@ -17,6 +17,7 @@ import keras
 import numpy as np
 from keras import ops
 from keras.src.utils.backend_utils import DynamicBackend
+
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
 
@@ -24,46 +25,6 @@ FILE_TYPES = [".hdf5", ".h5"]
 FILE_HANDLE_CACHE_CAPACITY = 128
 DEFAULT_IMAGE_RANGE = (0, 255)
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
-
-
-class USBMDJSONEncoder(json.JSONEncoder):
-    """Wrapper for json.dumps to encode range and slice objects.
-
-    Example:
-        >>> json.dumps(range(10), cls=USBMDJSONEncoder)
-        '{"__type__": "range", "start": 0, "stop": 10, "step": 1}'
-
-    Note:
-        Probably you would use the `usbmd.data.dataloader.json_dumps()`
-        function instead of using this class directly.
-    """
-
-    def default(self, obj):
-        if isinstance(obj, range):
-            return {
-                "__type__": "range",
-                "start": obj.start,
-                "stop": obj.stop,
-                "step": obj.step,
-            }
-        if isinstance(obj, slice):
-            return {
-                "__type__": "slice",
-                "start": obj.start,
-                "stop": obj.stop,
-                "step": obj.step,
-            }
-        return super().default(obj)
-
-
-def usbmd_datasets_json_decoder(dct):
-    """Wrapper for json.loads to decode range and slice objects."""
-    if "__type__" in dct:
-        if dct["__type__"] == "range":
-            return range(dct["start"], dct["stop"], dct["step"])
-        if dct["__type__"] == "slice":
-            return slice(dct["start"], dct["stop"], dct["step"])
-    return dct
 
 
 def json_dumps(obj):
@@ -83,7 +44,7 @@ def json_loads(obj):
     Returns:
         object: deserialized object (dictionary).
     """
-    return json.loads(obj, object_hook=usbmd_datasets_json_decoder)
+    return json.loads(obj, object_hook=_usbmd_datasets_json_decoder)
 
 
 def decode_file_info(file_info):
@@ -113,6 +74,16 @@ def _map_negative_indices(indices: list, length: int):
         [4, 3]
     """
     return [i if i >= 0 else length + i for i in indices]
+
+
+def _usbmd_datasets_json_decoder(dct):
+    """Wrapper for json.loads to decode range and slice objects."""
+    if "__type__" in dct:
+        if dct["__type__"] == "range":
+            return range(dct["start"], dct["stop"], dct["step"])
+        if dct["__type__"] == "slice":
+            return slice(dct["start"], dct["stop"], dct["step"])
+    return dct
 
 
 def generate_h5_indices(
@@ -706,3 +677,33 @@ class H5Dataloader(H5Generator):
             return images, filenames
         else:
             return images
+
+
+class USBMDJSONEncoder(json.JSONEncoder):
+    """Wrapper for json.dumps to encode range and slice objects.
+
+    Example:
+        >>> json.dumps(range(10), cls=USBMDJSONEncoder)
+        '{"__type__": "range", "start": 0, "stop": 10, "step": 1}'
+
+    Note:
+        Probably you would use the `usbmd.data.dataloader.json_dumps()`
+        function instead of using this class directly.
+    """
+
+    def default(self, obj):
+        if isinstance(obj, range):
+            return {
+                "__type__": "range",
+                "start": obj.start,
+                "stop": obj.stop,
+                "step": obj.step,
+            }
+        if isinstance(obj, slice):
+            return {
+                "__type__": "slice",
+                "start": obj.start,
+                "stop": obj.stop,
+                "step": obj.step,
+            }
+        return super().default(obj)
