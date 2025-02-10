@@ -12,7 +12,6 @@ import functools
 import multiprocessing
 import os
 import sys
-import warnings
 from collections import deque
 from io import BytesIO
 from multiprocessing.pool import ThreadPool
@@ -34,6 +33,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
+
 from usbmd.utils import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
