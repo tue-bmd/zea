@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy.ndimage import zoom
+
 from usbmd.display import frustum_convert_rtp2xyz
 
 
@@ -383,10 +384,14 @@ def plot_frustum_vertices(
         rho_range (tuple): Range of rho values (min, max).
         theta_range (tuple): Range of theta values (min, max).
         phi_range (tuple): Range of phi values (min, max).
-        num_points (int, optional): Number of points to generate along each edge. Defaults to 20.
-        phi_plane (float or list, optional): Value(s) of phi at which to plot plane(s). Defaults to None.
-        theta_plane (float or list, optional): Value(s) of theta at which to plot plane(s). Defaults to None.
-        rho_plane (float or list, optional): Value(s) of rho at which to plot plane(s). Defaults to None.
+        num_points (int, optional): Number of points to generate along each edge.
+            Defaults to 20.
+        phi_plane (float or list, optional): Value(s) of phi at which to plot plane(s).
+            Defaults to None.
+        theta_plane (float or list, optional): Value(s) of theta at which to plot plane(s).
+            Defaults to None.
+        rho_plane (float or list, optional): Value(s) of rho at which to plot plane(s).
+            Defaults to None.
         fig (matplotlib.figure.Figure, optional): Figure object to plot on.
             Defaults to None. Can be used to reuse the figure in a loop.
         ax (matplotlib.axes.Axes3DSubplot, optional): Axes object to plot on.
