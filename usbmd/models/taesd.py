@@ -164,7 +164,8 @@ class TinyBase(BaseModel):
         """
         if self.network is None:
             raise ValueError(
-                f"Please load model using `{self.__class__.__name__}.from_preset()` before calling."
+                f"Please load model using `{self.__class__.__name__}.from_preset()` "
+                "before calling."
             )
 
         out = self.network(inputs)
@@ -204,8 +205,9 @@ class TinyDecoder(TinyBase):
 
 def _fix_tf_to_jax_resize_nearest_neighbor():
     # This block of code is used to allow the Jax backend to work with TAESD
-    # It overrides the ResizeNearestNeighbor op to allow align_corners=True and half_pixel_centers=True
-    # This means outputs of the jax model might not be a 100% match to the tensorflow model
+    # It overrides the ResizeNearestNeighbor op to allow align_corners=True
+    # and half_pixel_centers=True. This means outputs of the jax model might
+    # not be a 100% match to the tensorflow model
     if backend.backend() != "jax":
         return
     try:
