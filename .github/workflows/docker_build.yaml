@@ -38,3 +38,5 @@ jobs:
           file: Dockerfile.base
           push: true
           tags: usbmd/base:latest
+          cache-from: type=registry,ref=usbmd/base:cache
+          cache-to: type=registry,ref=usbmd/base:cache,mode=max
