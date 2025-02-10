@@ -708,19 +708,19 @@ class USBMDJSONEncoder(json.JSONEncoder):
         function instead of using this class directly.
     """
 
-    def default(self, obj):
-        if isinstance(obj, range):
+    def default(self, o):
+        if isinstance(o, range):
             return {
                 "__type__": "range",
-                "start": obj.start,
-                "stop": obj.stop,
-                "step": obj.step,
+                "start": o.start,
+                "stop": o.stop,
+                "step": o.step,
             }
-        if isinstance(obj, slice):
+        if isinstance(o, slice):
             return {
                 "__type__": "slice",
-                "start": obj.start,
-                "stop": obj.stop,
-                "step": obj.step,
+                "start": o.start,
+                "stop": o.stop,
+                "step": o.step,
             }
-        return super().default(obj)
+        return super().default(o)
