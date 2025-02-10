@@ -8,7 +8,7 @@ import os
 os.environ["KERAS_BACKEND"] = "numpy"
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -431,7 +431,9 @@ if __name__ == "__main__":
 
     if not args.no_hyperthreading:
         with ProcessPoolExecutor() as executor:
-            results = list(tqdm(executor.map(processor, h5_files), total=len(h5_files)))
+            futures = {executor.submit(processor, file): file for file in h5_files}
+            for future in tqdm(as_completed(futures), total=len(h5_files)):
+                future.result()
     else:
         for file in tqdm(h5_files):
             processor(file)
