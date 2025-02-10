@@ -302,14 +302,14 @@ class H5Processor:
     def _to_numpy(self):
         return self.path_out is not None
 
-    def translate(self, tensor):
-        """Translate the tensor from the processing range to final range."""
-        return translate(tensor, self._process_range, self.range_to)
+    def translate(self, data):
+        """Translate the data from the processing range to final range."""
+        return translate(data, self._process_range, self.range_to)
 
-    def get_split(self, hdf5_file: str, tensor):
+    def get_split(self, hdf5_file: str, sequence):
         """Determine the split for a given file."""
         # Always check acceptance
-        accepted = accept_shape(tensor[0])
+        accepted = accept_shape(sequence[0])
 
         # Previous split
         if self.splits is not None:
@@ -339,21 +339,21 @@ class H5Processor:
         Processes a single h5 file using the class variables and the filename given.
         """
         hdf5_file = avi_file.stem + ".hdf5"
-        tensor = load_video(avi_file)
+        sequence = load_video(avi_file)
 
         assert (
-            tensor.min() >= self.range_from[0]
-        ), f"{tensor.min()} < {self.range_from[0]}"
+            sequence.min() >= self.range_from[0]
+        ), f"{sequence.min()} < {self.range_from[0]}"
         assert (
-            tensor.max() <= self.range_from[1]
-        ), f"{tensor.max()} > {self.range_from[1]}"
+            sequence.max() <= self.range_from[1]
+        ), f"{sequence.max()} > {self.range_from[1]}"
 
         # Translate to [0, 1]
-        tensor = translate(tensor, self.range_from, self._process_range)
+        sequence = translate(sequence, self.range_from, self._process_range)
 
-        tensor = segment(tensor, number_erasing=0, min_clip=0)
+        sequence = segment(sequence, number_erasing=0, min_clip=0)
 
-        split = self.get_split(hdf5_file, tensor)
+        split = self.get_split(hdf5_file, sequence)
         accepted = split != "rejected"
 
         out_h5 = self.path_out_h5 / split / hdf5_file
@@ -362,7 +362,7 @@ class H5Processor:
             out_dir.mkdir(parents=True, exist_ok=True)
 
         polar_im_set = []
-        for i, im in enumerate(tensor):
+        for i, im in enumerate(sequence):
             if self._to_numpy:
                 np.save(out_dir / f"sc{str(i).zfill(3)}.npy", im)
 
@@ -370,23 +370,24 @@ class H5Processor:
                 continue
 
             polar_im = cartesian_to_polar_matrix(im, interpolation="cubic")
+            polar_im = np.clip(polar_im, *self._process_range)
             if self._to_numpy:
                 np.save(
                     out_dir / f"polar{str(i).zfill(3)}.npy",
                     polar_im,
                 )
             polar_im_set.append(polar_im)
-        polar_im_set = np.stack(polar_im_set, axis=0)
+
+        if accepted:
+            polar_im_set = np.stack(polar_im_set, axis=0)
 
         # Check the ranges
-        assert polar_im_set.min() >= self._process_range[0]
-        assert polar_im_set.max() <= self._process_range[1]
-        assert tensor.min() >= self._process_range[0]
-        assert tensor.max() <= self._process_range[1]
+        assert sequence.min() >= self._process_range[0], sequence.min()
+        assert sequence.max() <= self._process_range[1], sequence.max()
 
         usbmd_dataset = {
             "path": out_h5,
-            "image": self.translate(tensor),
+            "image": self.translate(sequence),
             "probe_name": "generic",
             "description": "EchoNet dataset converted to USBMD format",
         }
@@ -425,6 +426,8 @@ if __name__ == "__main__":
     processor = H5Processor(
         path_out_h5=args.output, path_out=args.output_numpy, splits=splits
     )
+
+    print("Starting the conversion process.")
 
     if not args.no_hyperthreading:
         with ProcessPoolExecutor() as executor:
