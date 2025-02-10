@@ -1,0 +1,43 @@
+name: Pylint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  pylint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # Kill the job if it takes longer than 30 minutes.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image with caching
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          build-args: KERAS3=True
+          # Tag the built image so it can be referenced later.
+          tags: usbmd:latest
+          # Load the image into the runner so we can run it locally.
+          load: true
+          # Use GitHub Actions caching for Docker layers.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Pylint in container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/app" \
+            -w /app \
+            usbmd:latest \
+            poetry run pylint $(git ls-files '*.py') -j 0
