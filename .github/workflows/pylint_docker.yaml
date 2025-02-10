@@ -26,13 +26,15 @@ jobs:
           context: .
           file: Dockerfile
           build-args: KERAS3=True
-          # Tag the built image so it can be referenced later.
           tags: usbmd:latest
-          # Load the image into the runner so we can run it locally.
           load: true
-          # Use GitHub Actions caching for Docker layers.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: false # Do not push the image to Docker Hub
+          cache-from: |
+            type=local,src=/tmp/.buildx-cache
+            type=gha
+          cache-to: |
+            type=local,dest=/tmp/.buildx-cache
+            type=gha,mode=max
 
       - name: Run Pylint in container
         run: |
