@@ -13,7 +13,6 @@ import scipy
 from keras import ops
 from PIL import Image
 from skimage.transform import resize
-
 from usbmd.utils import find_first_nonzero_index, translate
 
 
@@ -56,11 +55,11 @@ def scan_convert_2d(
         image (ndarray): The input 2D ultrasound image in polar coordinates.
             Has dimensions (n_rho, n_theta).
         rho_range (tuple): A tuple specifying the range of rho values
-            (min_rho, max_rho). Defined in meters.
+            (min_rho, max_rho). Defined in mm.
         theta_range (tuple): A tuple specifying the range of theta values
             (min_theta, max_theta). Defined in radians.
         resolution (float, optional): The resolution for the Cartesian grid.
-            If None, it is calculated based on the input image. In meters / pixel.
+            If None, it is calculated based on the input image. In mm / pixel.
         fill_value (float, optional): The value to fill in for coordinates
             outside the input image ranges. Defaults to 0.0.
 
@@ -99,7 +98,7 @@ def scan_convert_2d(
         # arc length along constant phi at 1/4 depth
         sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
         # average of arc lengths and radial step
-        resolution = ops.mean([sRT, d_rho])
+        resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
     x_lim = [ops.min(x_grid), ops.max(x_grid)]
     z_lim = [ops.min(z_grid), ops.max(z_grid)]
@@ -150,13 +149,13 @@ def scan_convert_3d(
         image (ndarray): The input 3D ultrasound image in polar coordinates.
             Has dimensions (n_rho, n_theta, n_phi).
         rho_range (tuple): A tuple specifying the range of rho values
-            (min_rho, max_rho). Defined in meters.
+            (min_rho, max_rho). Defined in mm.
         theta_range (tuple): A tuple specifying the range of theta values
             (min_theta, max_theta). Defined in radians.
         phi_range (tuple): A tuple specifying the range of phi values
             (min_phi, max_phi). Defined in radians.
         resolution (float, optional): The resolution for the Cartesian grid.
-            If None, it is calculated based on the input image. In meters / pixel.
+            If None, it is calculated based on the input image. In mm / pixel.
         fill_value (float, optional): The value to fill in for coordinates
 
     Returns:
@@ -201,7 +200,7 @@ def scan_convert_3d(
         # arc length along constant theta at 1/4 depth
         sRP = 0.25 * (rho[0] + rho[-1]) * d_phi
         # average of arc lengths and radial step
-        resolution = ops.mean([sRT, sRP, d_rho])
+        resolution = ops.mean([sRT, sRP, d_rho])  # mm per pixel
 
     z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
     x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
