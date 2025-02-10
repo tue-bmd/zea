@@ -378,6 +378,12 @@ class H5Processor:
             polar_im_set.append(polar_im)
         polar_im_set = np.stack(polar_im_set, axis=0)
 
+        # Check the ranges
+        assert polar_im_set.min() >= self._process_range[0]
+        assert polar_im_set.max() <= self._process_range[1]
+        assert tensor.min() >= self._process_range[0]
+        assert tensor.max() <= self._process_range[1]
+
         usbmd_dataset = {
             "path": out_h5,
             "image": self.translate(tensor),
