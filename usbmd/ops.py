@@ -138,6 +138,7 @@ from usbmd.scan import Scan
 from usbmd.tensor_ops import patched_map
 from usbmd.utils import lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
+from usbmd.simulator import simulate_rf
 
 # make sure to reload all modules that import keras
 # to be able to set backend properly
@@ -2233,3 +2234,51 @@ def hilbert(x, N: int = None, axis=-1):
     idx.insert(axis, idx.pop(-1))
     x = ops.transpose(x, idx)
     return x
+
+
+@ops_registry("rf_simulator")
+class RFSimulator(Operation):
+    """Simulates RF data from scatterer positions and magnitudes."""
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=None,
+            output_data_type="raw_data",
+            **kwargs,
+        )
+
+    def process_item(self, data):
+        """Simulates RF data from scatterer positions and magnitudes.
+
+        Args:
+            data (tuple): The scatterer positions and magnitudes as a tuple of
+                `(n_scat, 3)` and `(n_scat,)` arrays, respectively.
+
+        Returns:
+            ops.Tensor: The simulated data of shape `(1, n_tx, n_ax, n_el, 1)`
+        """
+        scat_positions = data[..., :3]
+        scat_magnitudes = data[..., -1]
+        raw_data = simulate_rf(
+            scan=self.scan,
+            scat_positions=scat_positions,
+            scat_magnitudes=scat_magnitudes,
+        )[None]
+        return raw_data
+
+    def process(self, data):
+        """Simulates RF data from scatterer positions and magnitudes.
+
+        Args:
+            data (tuple): The scatterer positions and magnitudes as a tuple of
+                `(n_scat, 3)` and `(n_scat,)` arrays, respectively.
+
+        Returns:
+            ops.Tensor: The simulated data of shape `(1, n_tx, n_ax, n_el, 1)`
+        """
+
+        if not self.with_batch_dim:
+            return self.process_item(data)
+        else:
+            # TODO: could be ops.vectorized_map if enough memory
+            return ops.map(self.process_item, data)
