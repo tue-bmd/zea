@@ -435,6 +435,12 @@ class Scan(Object):
         """The number of samples in a receive recording per channel."""
         return self._n_ax
 
+    @n_ax.setter
+    def n_ax(self, value):
+        value = int(value)
+        assert value > 0, "n_ax must be positive"
+        self._n_ax = value
+
     @property
     def n_el(self):
         """The number of elements in the array."""
