@@ -24,8 +24,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: Dockerfile
-          build-args: KERAS3=True
+          file: Dockerfile.private
           tags: usbmd:latest
           push: false # Do not push the image to Docker Hub
           cache-from: |
