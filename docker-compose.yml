@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  base:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    image: usbmd/base:latest
+    container_name: base_container
+    restart: unless-stopped
+
+  private:
+    build:
+      context: .
+      dockerfile: Dockerfile.private
+    container_name: usbmd/private:latest
+    depends_on:
+      - base
+    restart: unless-stopped
