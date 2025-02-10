@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy.ndimage import zoom
-
 from usbmd.display import frustum_convert_rtp2xyz
 
 
@@ -372,6 +371,10 @@ def plot_frustum_vertices(
     rho_plane=None,
     fig=None,
     ax=None,
+    color_frustum="blue",
+    phi_color="yellow",
+    theta_color="green",
+    rho_color="red",
 ):
     """
     Plots the vertices of a frustum in spherical coordinates and highlights specified planes.
@@ -381,9 +384,9 @@ def plot_frustum_vertices(
         theta_range (tuple): Range of theta values (min, max).
         phi_range (tuple): Range of phi values (min, max).
         num_points (int, optional): Number of points to generate along each edge. Defaults to 20.
-        phi_plane (float, optional): Value of phi at which to plot a plane. Defaults to None.
-        theta_plane (float, optional): Value of theta at which to plot a plane. Defaults to None.
-        rho_plane (float, optional): Value of rho at which to plot a plane. Defaults to None.
+        phi_plane (float or list, optional): Value(s) of phi at which to plot plane(s). Defaults to None.
+        theta_plane (float or list, optional): Value(s) of theta at which to plot plane(s). Defaults to None.
+        rho_plane (float or list, optional): Value(s) of rho at which to plot plane(s). Defaults to None.
         fig (matplotlib.figure.Figure, optional): Figure object to plot on.
             Defaults to None. Can be used to reuse the figure in a loop.
         ax (matplotlib.axes.Axes3DSubplot, optional): Axes object to plot on.
@@ -395,9 +398,15 @@ def plot_frustum_vertices(
     Raises:
         ValueError: If no plane is specified (phi_plane, theta_plane, or rho_plane).
     """
-    # Ensure only one plane is specified
-    planes = [phi_plane, theta_plane, rho_plane]
-    if sum(p is not None for p in planes) == 0:
+    # Convert single values to lists
+    phi_plane = [phi_plane] if isinstance(phi_plane, (int, float)) else phi_plane
+    theta_plane = (
+        [theta_plane] if isinstance(theta_plane, (int, float)) else theta_plane
+    )
+    rho_plane = [rho_plane] if isinstance(rho_plane, (int, float)) else rho_plane
+
+    # Ensure at least one plane is specified
+    if all(p is None for p in [phi_plane, theta_plane, rho_plane]):
         raise ValueError("At least one plane must be specified")
 
     # Define edges of the frustum
@@ -426,129 +435,111 @@ def plot_frustum_vertices(
         return rho_points, theta_points, phi_points
 
     # Collect all points to determine axes limits
-    all_rho = []
-    all_theta = []
-    all_phi = []
-
+    all_points = []
     for edge in edges:
         rho_pts, theta_pts, phi_pts = generate_edge_points(edge[0], edge[1], num_points)
-        all_rho.extend(rho_pts)
-        all_theta.extend(theta_pts)
-        all_phi.extend(phi_pts)
+        x, y, z = frustum_convert_rtp2xyz(rho_pts, theta_pts, phi_pts)
+        all_points.extend(zip(x, y, -z))  # Flip z-axis
 
-    # Convert all points to Cartesian coordinates
-    x_all, y_all, z_all = frustum_convert_rtp2xyz(all_rho, all_theta, all_phi)
-    z_all = -z_all  # Flip the z-axis
+    all_points = np.array(all_points)
+    x_min, x_max = np.min(all_points[:, 0]), np.max(all_points[:, 0])
+    y_min, y_max = np.min(all_points[:, 1]), np.max(all_points[:, 1])
+    z_min, z_max = np.min(all_points[:, 2]), np.max(all_points[:, 2])
 
-    # Determine axes limits
-    x_min, x_max = np.min(x_all), np.max(x_all)
-    y_min, y_max = np.min(y_all), np.max(y_all)
-    z_min, z_max = np.min(z_all), np.max(z_all)
-
-    # Plot the edges
     if fig is None:
         fig = plt.figure()
-
     if ax is None:
         ax = fig.add_subplot(111, projection="3d")
 
-    def _plot_edges(edges, color, alpha=1.0, linestyle="-"):
+    def _plot_edges(edges, color, alpha=1.0, linestyle="-", **kwargs):
         for edge in edges:
             rho_pts, theta_pts, phi_pts = generate_edge_points(
                 edge[0], edge[1], num_points
             )
-            x_edge, y_edge, z_edge = frustum_convert_rtp2xyz(
-                rho_pts, theta_pts, phi_pts
-            )
-            z_edge = -z_edge  # Flip the z-axis
-            ax.plot(
-                x_edge,
-                y_edge,
-                z_edge,
-                color=color,
-                alpha=alpha,
-                linestyle=linestyle,
-            )
+            x, y, z = frustum_convert_rtp2xyz(rho_pts, theta_pts, phi_pts)
+            ax.plot(x, y, -z, color=color, alpha=alpha, linestyle=linestyle, **kwargs)
 
     # Plot frustum edges
-    _plot_edges(edges, color=(102 / 255, 153 / 255, 255 / 255), alpha=0.5)
+    _plot_edges(edges, color=color_frustum, alpha=1, lw=2)
+
+    def get_plane_edges(plane_value, plane_type):
+        """Generate edges for a specific plane type (phi, theta, or rho)"""
+        if plane_type == "phi":
+            return [
+                (
+                    (rho_range[0], theta_range[0], plane_value),
+                    (rho_range[1], theta_range[0], plane_value),
+                ),
+                (
+                    (rho_range[0], theta_range[1], plane_value),
+                    (rho_range[1], theta_range[1], plane_value),
+                ),
+                (
+                    (rho_range[0], theta_range[0], plane_value),
+                    (rho_range[0], theta_range[1], plane_value),
+                ),
+                (
+                    (rho_range[1], theta_range[0], plane_value),
+                    (rho_range[1], theta_range[1], plane_value),
+                ),
+            ]
+        elif plane_type == "theta":
+            return [
+                (
+                    (rho_range[0], plane_value, phi_range[0]),
+                    (rho_range[1], plane_value, phi_range[0]),
+                ),
+                (
+                    (rho_range[0], plane_value, phi_range[1]),
+                    (rho_range[1], plane_value, phi_range[1]),
+                ),
+                (
+                    (rho_range[0], plane_value, phi_range[0]),
+                    (rho_range[0], plane_value, phi_range[1]),
+                ),
+                (
+                    (rho_range[1], plane_value, phi_range[0]),
+                    (rho_range[1], plane_value, phi_range[1]),
+                ),
+            ]
+        else:  # rho
+            return [
+                (
+                    (plane_value, theta_range[0], phi_range[0]),
+                    (plane_value, theta_range[1], phi_range[0]),
+                ),
+                (
+                    (plane_value, theta_range[0], phi_range[1]),
+                    (plane_value, theta_range[1], phi_range[1]),
+                ),
+                (
+                    (plane_value, theta_range[0], phi_range[0]),
+                    (plane_value, theta_range[0], phi_range[1]),
+                ),
+                (
+                    (plane_value, theta_range[1], phi_range[0]),
+                    (plane_value, theta_range[1], phi_range[1]),
+                ),
+            ]
 
     # Plot plane edges
-    if phi_plane is not None:
-        # Edges along rho and theta at phi=phi_plane
-        plane_edges = [
-            (
-                (rho_range[0], theta_range[0], phi_plane),
-                (rho_range[1], theta_range[0], phi_plane),
-            ),
-            (
-                (rho_range[0], theta_range[1], phi_plane),
-                (rho_range[1], theta_range[1], phi_plane),
-            ),
-            (
-                (rho_range[0], theta_range[0], phi_plane),
-                (rho_range[0], theta_range[1], phi_plane),
-            ),
-            (
-                (rho_range[1], theta_range[0], phi_plane),
-                (rho_range[1], theta_range[1], phi_plane),
-            ),
-        ]
-        plane_color = "y"
-        _plot_edges(plane_edges, color=plane_color, linestyle="--")
-    if theta_plane is not None:
-        # Edges along rho and phi at theta=theta_plane
-        plane_edges = [
-            (
-                (rho_range[0], theta_plane, phi_range[0]),
-                (rho_range[1], theta_plane, phi_range[0]),
-            ),
-            (
-                (rho_range[0], theta_plane, phi_range[1]),
-                (rho_range[1], theta_plane, phi_range[1]),
-            ),
-            (
-                (rho_range[0], theta_plane, phi_range[0]),
-                (rho_range[0], theta_plane, phi_range[1]),
-            ),
-            (
-                (rho_range[1], theta_plane, phi_range[0]),
-                (rho_range[1], theta_plane, phi_range[1]),
-            ),
-        ]
-        plane_color = "g"
-        _plot_edges(plane_edges, color=plane_color, linestyle="--")
-    if rho_plane is not None:
-        # Edges along theta and phi at rho=rho_plane
-        plane_edges = [
-            (
-                (rho_plane, theta_range[0], phi_range[0]),
-                (rho_plane, theta_range[1], phi_range[0]),
-            ),
-            (
-                (rho_plane, theta_range[0], phi_range[1]),
-                (rho_plane, theta_range[1], phi_range[1]),
-            ),
-            (
-                (rho_plane, theta_range[0], phi_range[0]),
-                (rho_plane, theta_range[0], phi_range[1]),
-            ),
-            (
-                (rho_plane, theta_range[1], phi_range[0]),
-                (rho_plane, theta_range[1], phi_range[1]),
-            ),
-        ]
-        plane_color = "r"
-        _plot_edges(plane_edges, color=plane_color, linestyle="--")
+    plane_configs = [
+        (phi_plane, "phi", phi_color, "-"),
+        (theta_plane, "theta", theta_color, "--"),
+        (rho_plane, "rho", rho_color, "--"),
+    ]
 
-    # Set consistent axes limits
+    for planes, plane_type, color, line in plane_configs:
+        if planes is not None:
+            for plane_value in planes:
+                plane_edges = get_plane_edges(plane_value, plane_type)
+                _plot_edges(plane_edges, color=color, linestyle=line)
+
+    # Set axes properties
     ax.set_xlim([x_min, x_max])
     ax.set_ylim([y_min, y_max])
     ax.set_zlim([z_min, z_max])
-
-    # Remove background and axes
     ax.set_axis_off()
-
     ax.grid(False)
     ax.xaxis.pane.fill = False
     ax.yaxis.pane.fill = False
