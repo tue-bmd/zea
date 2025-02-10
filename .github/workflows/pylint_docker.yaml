@@ -27,6 +27,7 @@ jobs:
           file: Dockerfile.private
           tags: usbmd/private:latest
           push: false # Do not push the image to Docker Hub
+          load: true
           cache-from: |
             type=local,src=/tmp/.buildx-cache
             type=gha
