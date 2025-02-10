@@ -4,6 +4,7 @@ H5 dataloader for loading images from USBMD datasets.
 This module can be used with any backend.
 """
 
+import json
 import math
 import re
 from collections import OrderedDict
@@ -16,7 +17,6 @@ import keras
 import numpy as np
 from keras import ops
 from keras.src.utils.backend_utils import DynamicBackend
-
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
 
@@ -24,6 +24,86 @@ FILE_TYPES = [".hdf5", ".h5"]
 FILE_HANDLE_CACHE_CAPACITY = 128
 DEFAULT_IMAGE_RANGE = (0, 255)
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
+
+
+class USBMDJSONEncoder(json.JSONEncoder):
+    """Wrapper for json.dumps to encode range and slice objects.
+
+    Example:
+        >>> json.dumps(range(10), cls=USBMDJSONEncoder)
+        '{"__type__": "range", "start": 0, "stop": 10, "step": 1}'
+
+    Note:
+        Probably you would use the `usbmd.data.dataloader.json_dumps()`
+        function instead of using this class directly.
+    """
+
+    def default(self, obj):
+        if isinstance(obj, range):
+            return {
+                "__type__": "range",
+                "start": obj.start,
+                "stop": obj.stop,
+                "step": obj.step,
+            }
+        if isinstance(obj, slice):
+            return {
+                "__type__": "slice",
+                "start": obj.start,
+                "stop": obj.stop,
+                "step": obj.step,
+            }
+        return super().default(obj)
+
+
+def usbmd_datasets_json_decoder(dct):
+    """Wrapper for json.loads to decode range and slice objects."""
+    if "__type__" in dct:
+        if dct["__type__"] == "range":
+            return range(dct["start"], dct["stop"], dct["step"])
+        if dct["__type__"] == "slice":
+            return slice(dct["start"], dct["stop"], dct["step"])
+    return dct
+
+
+def json_dumps(obj):
+    """Used to serialize objects that contain range and slice objects.
+    Args:
+        obj: object to serialize (most likely a dictionary).
+    Returns:
+        str: serialized object (json string).
+    """
+    return json.dumps(obj, cls=USBMDJSONEncoder)
+
+
+def json_loads(obj):
+    """Used to deserialize objects that contain range and slice objects.
+    Args:
+        obj: object to deserialize (most likely a json string).
+    Returns:
+        object: deserialized object (dictionary).
+    """
+    return json.loads(obj, object_hook=usbmd_datasets_json_decoder)
+
+
+def decode_file_info(file_info):
+    """Decode file info from a json string.
+    A batch of H5Generator can return a list of file_info that are json strings.
+    This function decodes the json strings and returns a list of dictionaries
+    with the information, namely:
+    - full_path: full path to the file
+    - file_name: file name
+    - indices: indices used to extract the image from the file
+    """
+
+    if file_info.ndim == 0:
+        file_info = [file_info]
+
+    decoded_info = []
+    for info in file_info:
+        info = ops.convert_to_numpy(info)[()].decode("utf-8")
+        decoded_info.append(json_loads(info))
+    return decoded_info
 
 
 def _map_negative_indices(indices: list, length: int):
@@ -315,23 +395,26 @@ class Resizer:
 
         ndim = self.backend.numpy.ndim(x)
 
-        if ndim > 4:
-            assert (
-                self.resize_axes is not None
-            ), "resize_axes must be specified when ndim > 4"
-            resize_axes = _map_negative_indices(self.resize_axes, ndim)
-
-            # Prepare tensor for resizing
-            x, perm, perm_shape = self._permute_before_resize(x, ndim, resize_axes)
-
-            # Apply resize
+        if self.resize_axes is None:
+            assert ndim == 4, (
+                f"`resize_axes` must be specified for when ndim != 4, got {ndim}. "
+                "For ndim == 4, the resize axes are default to (1, 2)."
+            )
             x = self.resizer(x)
+            return x
 
-            # Restore original shape and order
-            x = self._permute_after_resize(x, perm, perm_shape, ndim)
-        else:
-            assert self.resize_axes is None, "resize_axes must be None when ndim <= 4"
-            x = self.resizer(x)
+        assert ndim >= 4, f"We expect at least 4 dimensions for Resizer, got {ndim}."
+
+        resize_axes = _map_negative_indices(self.resize_axes, ndim)
+
+        # Prepare tensor for resizing
+        x, perm, perm_shape = self._permute_before_resize(x, ndim, resize_axes)
+
+        # Apply resize
+        x = self.resizer(x)
+
+        # Restore original shape and order
+        x = self._permute_after_resize(x, perm, perm_shape, ndim)
 
         return x
 
@@ -476,15 +559,22 @@ class H5Generator(keras.utils.PyDataset):
         else:
             images = np.stack(images)
 
-        file_names = [
-            Path(file_name).stem + "_" + "_".join(map(str, indices))
-            for file_name, _, indices in indices_list
+        fileinfo = [
+            json_dumps(
+                {
+                    "fullpath": filename,
+                    "filename": Path(filename).stem,
+                    "indices": indices,
+                }
+            )
+            for filename, _, indices in indices_list
         ]
+
         if self.batch_size == 1:
-            file_names = file_names[0]
+            fileinfo = fileinfo[0]
 
         if self.return_filename:
-            return self.maybe_tensor(images), file_names
+            return self.maybe_tensor(images), fileinfo
         else:
             return self.maybe_tensor(images)
 
