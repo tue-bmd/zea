@@ -26,7 +26,7 @@ CAMUS_DATASET_PATH = (
 @pytest.fixture
 def create_dummy_hdf5():
     """Fixture to create and clean up a dummy hdf5 file."""
-    with h5py.File(DUMMY_DATASET_PATH, "w") as f:
+    with h5py.File(DUMMY_DATASET_PATH, "w", locking=False) as f:
         data = np.random.rand(100, 28, 28)
         f.create_dataset("data", data=data)
     yield
@@ -48,7 +48,7 @@ def create_ndim_hdf5_dataset():
         file.unlink()
 
     for i in range(n_files):
-        with h5py.File(folder / f"dummy_data_{i}.hdf5", "w") as f:
+        with h5py.File(folder / f"dummy_data_{i}.hdf5", "w", locking=False) as f:
             data = np.random.rand(n_samples, *image_shape)
             f.create_dataset("data", data=data)
     yield
@@ -58,7 +58,7 @@ def create_ndim_hdf5_dataset():
 
 
 def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=None):
-    with h5py.File(filename, "r") as f:
+    with h5py.File(filename, "r", locking=False) as f:
         file_shapes = [f[dataset_name].shape]
 
     file_names = [filename]
@@ -147,7 +147,7 @@ def test_h5_dataset_from_directory(
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
-            with h5py.File(tmp_path / f"dummy_data_{i}.hdf5", "w") as f:
+            with h5py.File(tmp_path / f"dummy_data_{i}.hdf5", "w", locking=False) as f:
                 data = np.random.rand(total_samples // num_files, 28, 28)
                 f.create_dataset(key, data=data)
         expected_len_dataset = total_samples // num_files // n_frames * num_files
