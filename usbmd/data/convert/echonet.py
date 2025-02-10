@@ -10,11 +10,13 @@ All proper subfolders are created in the script at these locations.
 
 import os
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 
 import h5py
 import numpy as np
 from scipy.interpolate import griddata
 from tqdm import tqdm
+
 from usbmd.data import generate_usbmd_dataset
 
 
@@ -251,25 +253,26 @@ if __name__ == "__main__":
 
     class H5Processor:
         """
-        Stores a few variables and pathes to allow for hyperthreading.
+        Stores a few variables and paths to allow for hyperthreading.
         """
 
         def __init__(self, path_in, path_out, path_out_h5, num_val=500, num_test=500):
-            self.path_in = path_in
-            self.path_out = path_out
-            self.path_out_h5 = path_out_h5
+            self.path_in = Path(path_in)
+            self.path_out = Path(path_out)
+            self.path_out_h5 = Path(path_out_h5)
             self.num_val = num_val
             self.num_test = num_test
-            # Ensure train, val, rejected paths exist
+            # Ensure train, val, test, rejected paths exist
             for folder in ["train", "val", "test", "rejected"]:
-                os.makedirs(os.path.join(path_out, folder), exist_ok=True)
-                os.makedirs(os.path.join(path_out_h5, folder), exist_ok=True)
+                (self.path_out / folder).mkdir(parents=True, exist_ok=True)
+                (self.path_out_h5 / folder).mkdir(parents=True, exist_ok=True)
 
         def process_h5_file(self, h5file):
             """
-            Processes a single file using the class variables and the filename given.
+            Processes a single h5 file using the class variables and the filename given.
             """
-            with h5py.File(os.path.join(self.path_in, h5file), "r") as file:
+            file_path = self.path_in / h5file
+            with h5py.File(file_path, "r") as file:
                 tensor = file["data/image_sc"][:]
                 tensor = normalize(tensor)
                 tensor = segment(tensor, number_erasing=0, min_clip=0)
@@ -277,29 +280,21 @@ if __name__ == "__main__":
                 accepted = accept_shape(tensor[0])
 
                 if accepted:
-                    # This inefficient val_counter works with hyperthreading
-                    val_counter = len(os.listdir(os.path.join(self.path_out, "val")))
-                    test_counter = len(os.listdir(os.path.join(self.path_out, "test")))
+                    # This inefficient counter works with hyperthreading
+                    val_counter = len(list((self.path_out / "val").iterdir()))
+                    test_counter = len(list((self.path_out / "test").iterdir()))
                     if val_counter < self.num_val:
-                        out_dir = os.path.join(
-                            self.path_out, "val", h5file.replace(".hdf5", "")
-                        )
-                        out_h5 = os.path.join(self.path_out_h5, "val", h5file)
+                        out_dir = self.path_out / "val" / h5file.replace(".hdf5", "")
+                        out_h5 = self.path_out_h5 / "val" / h5file
                     elif test_counter < self.num_test:
-                        out_dir = os.path.join(
-                            self.path_out, "test", h5file.replace(".hdf5", "")
-                        )
-                        out_h5 = os.path.join(self.path_out_h5, "test", h5file)
+                        out_dir = self.path_out / "test" / h5file.replace(".hdf5", "")
+                        out_h5 = self.path_out_h5 / "test" / h5file
                     else:
-                        out_dir = os.path.join(
-                            self.path_out, "train", h5file.replace(".hdf5", "")
-                        )
-                        out_h5 = os.path.join(self.path_out_h5, "train", h5file)
+                        out_dir = self.path_out / "train" / h5file.replace(".hdf5", "")
+                        out_h5 = self.path_out_h5 / "train" / h5file
                 else:
-                    out_dir = os.path.join(
-                        self.path_out, "rejected", h5file.replace(".hdf5", "")
-                    )
-                    out_h5 = os.path.join(self.path_out_h5, "rejected", h5file)
+                    out_dir = self.path_out / "rejected" / h5file.replace(".hdf5", "")
+                    out_h5 = self.path_out_h5 / "rejected" / h5file
 
                 os.makedirs(out_dir, exist_ok=True)
                 polar_im_set = np.zeros((1, 112, 112))
