@@ -7,6 +7,7 @@ import keras
 import numpy as np
 from keras import ops
 
+from usbmd.backend import tf_function
 from usbmd.utils import log
 
 
@@ -271,6 +272,7 @@ def patched_map(f, xs, patches: int):
         return batched_map(f, xs, batch_size)
 
 
+@tf_function()
 def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
     """
     Map a function over leading array axes.
