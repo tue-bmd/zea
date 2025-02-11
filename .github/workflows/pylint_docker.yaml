@@ -16,17 +16,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Remove large packages
+      # Attempt to restore the cached Docker image tar file.
+      - name: Restore Docker image from cache
+        id: docker-cache
+        uses: actions/cache@v3
+        with:
+          path: docker-base-image.tar
+          key: ${{ runner.os }}-usbmd-base-image
+
+      # If the cache was hit, load the image from the tar file.
+      - name: Load Docker image from cache
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: docker load -i docker-base-image.tar
+
+      # If the cache was not hit, pull the image and then save it to a tar file.
+      - name: Pull and cache Docker base image
+        if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
-          chmod +x ./.github/workflows/free_disk_space.sh
-          ./.github/workflows/free_disk_space.sh
+          echo "Image not found in cache. Pulling image..."
+          docker pull usbmd/base:latest
+          echo "Saving image to tar file for caching..."
+          docker save usbmd/base:latest -o docker-base-image.tar
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Pull Docker base image
-        run: docker pull usbmd/base:latest
-
+      # Build the Docker image including the toolbox code
       - name: Build Docker image with caching
         id: docker_build
         uses: docker/build-push-action@v5
@@ -40,7 +52,7 @@ jobs:
       - name: Run Pylint in container
         run: |
           docker run --rm \
-            -v "${{ github.workspace }}:/app" \
-            -w /app \
-            usbmd/private:latest \
+            -v "${{ github.workspace }}:/ultrasound-toolbox" \
+            -w /ultrasound-toolbox \
+            usbmd/base:latest \
             poetry run pylint $(git ls-files '*.py') -j 0
