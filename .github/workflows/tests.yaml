@@ -19,10 +19,10 @@ jobs:
       - name: Pull Docker base image
         run: docker pull usbmd/base:latest
 
-      - name: Run Pylint in container
+      - name: Run Pytest in container
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
             usbmd/base:latest \
-            sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && run pytest ./tests"
+            sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && pytest ./tests"
