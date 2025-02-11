@@ -7,7 +7,6 @@ import keras
 import numpy as np
 from keras import ops
 
-from usbmd.backend import tf_function
 from usbmd.utils import log
 
 
@@ -272,7 +271,6 @@ def patched_map(f, xs, patches: int):
         return batched_map(f, xs, batch_size)
 
 
-@tf_function()
 def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
     """
     Map a function over leading array axes.
@@ -301,7 +299,8 @@ def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
         ), "All batch kwargs must have the same first dimension size as xs."
 
     total = ops.shape(xs)[0]
-    if batch_size is not None and total <= batch_size:
+    # TODO: could be rewritten with ops.cond such that it also works for jit=True.
+    if not jit and batch_size is not None and total <= batch_size:
         return f(xs, **batch_kwargs)
 
     ## Non-jitted version: simply iterate over batches.
@@ -369,7 +368,7 @@ def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
 
     # Calculate how much padding is needed for the specified axis
     remainder = length % N
-    padding = N - remainder if remainder != 0 else 0
+    padding = ops.where(remainder != 0, N - remainder, 0)
 
     # Create a tuple with (before, after) padding for each axis
     pad_width = [(0, 0)] * ops.ndim(arr)  # No padding for other axes
