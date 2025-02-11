@@ -271,36 +271,79 @@ def patched_map(f, xs, patches: int):
         return batched_map(f, xs, batch_size)
 
 
-def batched_map(f, xs, batch_size=None):
+def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
     """
     Map a function over leading array axes.
 
     Args:
         f (callable): Function to apply element-wise over the first axis.
         xs (Tensor): Values over which to map along the leading axis.
-        batch_size (int, optional): Integer specifying the size of the batch for
-            each step to execute in parallel.
+        batch_size (int, optional): Size of the batch for each step.
+        jit (bool, optional): If True, use a jitted version of the function for
+            faster batched mapping. Else, loop over the data with the original function.
+        batch_kwargs (dict, optional): Additional keyword arguments (tensors) to
+            batch along with xs. Must have the same first dimension size as xs.
+
+    Returns:
+        The mapped tensor(s).
 
     Idea taken from: https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.map.html
     """
-    # If the batch size of the data is smaller than the specified batch size,
-    # run the function on the entire input
-    if ops.shape(xs)[0] < batch_size:
-        return f(xs)
+    if batch_kwargs is None:
+        batch_kwargs = {}
 
-    # If the batch size is not specified, map over the leading axis
+    # Ensure all batch kwargs have the same leading dimension as xs.
+    if batch_kwargs:
+        assert all(
+            ops.shape(xs)[0] == ops.shape(v)[0] for v in batch_kwargs.values()
+        ), "All batch kwargs must have the same first dimension size as xs."
+
+    total = ops.shape(xs)[0]
+    if batch_size is not None and total <= batch_size:
+        return f(xs, **batch_kwargs)
+
+    ## Non-jitted version: simply iterate over batches.
+    if not jit:
+        bs = batch_size or 1  # Default batch size to 1 if not specified.
+        outputs = []
+        for i in range(0, total, bs):
+            idx = slice(i, i + bs)
+            current_kwargs = {k: v[idx] for k, v in batch_kwargs.items()}
+            outputs.append(f(xs[idx], **current_kwargs))
+        return ops.concatenate(outputs, axis=0)
+
+    ## Jitted version.
+
+    # Helper to create the batched function for use with ops.map.
+    def create_batched_f(kw_keys):
+        def batched_f(inputs):
+            x, *kw_values = inputs
+            kw = dict(zip(kw_keys, kw_values))
+            return f(x, **kw)
+
+        return batched_f
+
     if batch_size is None:
-        out = ops.map(f, xs)
-    # If the batch size is specified, map over the leading axis in batches
-    else:
-        length = ops.shape(xs)[0]
-        xs = pad_array_to_divisible(xs, batch_size, axis=0)
-        xs = ops.reshape(xs, (-1, batch_size) + ops.shape(xs)[1:])
-        out = ops.map(f, xs)
-        out = ops.reshape(out, (-1,) + ops.shape(out)[2:])
-        out = out[:length]  # remove padding
+        batched_f = create_batched_f(list(batch_kwargs.keys()))
+        return ops.map(batched_f, (xs, *batch_kwargs.values()))
 
-    return out
+    # Pad and reshape primary tensor.
+    xs_padded = pad_array_to_divisible(xs, batch_size, axis=0)
+    new_shape = (-1, batch_size) + ops.shape(xs_padded)[1:]
+    xs_reshaped = ops.reshape(xs_padded, new_shape)
+
+    # Pad and reshape batch_kwargs similarly.
+    reshaped_kwargs = {}
+    for k, v in batch_kwargs.items():
+        v_padded = pad_array_to_divisible(v, batch_size, axis=0)
+        reshaped_kwargs[k] = ops.reshape(
+            v_padded, (-1, batch_size) + ops.shape(v_padded)[1:]
+        )
+
+    batched_f = create_batched_f(list(reshaped_kwargs.keys()))
+    out = ops.map(batched_f, (xs_reshaped, *reshaped_kwargs.values()))
+    out_reshaped = ops.reshape(out, (-1,) + ops.shape(out)[2:])
+    return out_reshaped[:total]  # Remove any padding added.
 
 
 def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):

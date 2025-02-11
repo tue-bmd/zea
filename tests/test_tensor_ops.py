@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 import torch
 from keras import ops
+from usbmd import tensor_ops
 
 from tests.helpers import equality_libs_processing
-from usbmd import tensor_ops
 
 
 @pytest.mark.parametrize(
@@ -191,19 +191,52 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     return restored  # Return for equality_libs_processing decorator
 
 
+@pytest.fixture
+def fake_function():
+    def fake_fn(tensor, extra_tensor=None):
+        if extra_tensor is not None:
+            return tensor + extra_tensor
+        return tensor
+
+    return fake_fn
+
+
 @pytest.mark.parametrize(
-    "array, batch_dims, func",
+    "array, batch_dims, batched_kwargs",
     [
-        [np.random.normal(size=(2, 3, 4, 5)), 2, ops.square],
-        [np.random.normal(size=(3, 4, 5, 6)), 1, lambda x: x * 2],
-        [np.random.normal(size=(2, 2, 3, 4)), 3, ops.abs],
+        [np.random.normal(size=(2, 3, 4, 5)), 2, {}],
+        [
+            np.random.normal(size=(3, 4, 5, 6)),
+            1,
+            {"extra_tensor": np.random.normal(size=(3, 4, 5, 6))},
+        ],
     ],
 )
 @equality_libs_processing()
-def test_batched_map(array, batch_dims, func):
-    """Test the batched_map function against manual batch processing."""
+def test_batched_map(fake_function, array, batch_dims, batched_kwargs):
+    """Test the batched_map function using fake_function fixture."""
+
     array = ops.convert_to_tensor(array)
-    out = tensor_ops.batched_map(func, array, batch_dims)
+    # Convert any numpy arrays in batched_kwargs to tensors.
+    batched_kwargs = {
+        k: ops.convert_to_tensor(v) if isinstance(v, np.ndarray) else v
+        for k, v in batched_kwargs.items()
+    }
+
+    out_jit = tensor_ops.batched_map(
+        fake_function,
+        array,
+        batch_dims,
+        jit=True,
+        batch_kwargs=batched_kwargs,
+    )
+    out_no_jit = tensor_ops.batched_map(
+        fake_function,
+        array,
+        batch_dims,
+        jit=False,
+        batch_kwargs=batched_kwargs,
+    )
 
     # Compute expected result manually
     expected = []
@@ -212,13 +245,20 @@ def test_batched_map(array, batch_dims, func):
         slicing = tuple(
             slice(None) if i >= len(idx) else idx[i] for i in range(array.ndim)
         )
-        expected.append(func(array[slicing]))
+        if batched_kwargs:
+            # For each keyword, extract the corresponding slice.
+            kw_slicing = {k: v[idx] for k, v in batched_kwargs.items()}
+            expected.append(fake_function(array[slicing], **kw_slicing))
+        else:
+            expected.append(fake_function(array[slicing]))
 
     expected = ops.stack(expected, axis=0)
     expected = ops.reshape(expected, batch_shape + array.shape[batch_dims:])
 
-    np.testing.assert_allclose(out, expected, rtol=1e-5, atol=1e-5)
-    return out
+    np.testing.assert_allclose(out_jit, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(out_no_jit, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(out_jit, out_no_jit, rtol=1e-5, atol=1e-5)
+    return out_jit
 
 
 @pytest.mark.parametrize(
