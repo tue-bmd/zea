@@ -768,8 +768,8 @@ class Simulate(Operation):
     ):
         return {
             "raw_data": simulate_rf(
-                scatterer_positions,
-                scatterer_magnitudes,
+                ops.convert_to_tensor(scatterer_positions),
+                ops.convert_to_tensor(scatterer_magnitudes),
                 probe_geometry=probe_geometry,
                 apply_lens_correction=self.apply_lens_correction,
                 lens_thickness=lens_thickness,
