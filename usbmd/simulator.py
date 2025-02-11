@@ -1,7 +1,9 @@
+"""Frequency domain ultrasound simulator based on linear scattering."""
+
 from keras import ops
 from usbmd.utils.lens_correction import compute_lens_corrected_travel_times
 
-pi = 3.14159265359
+PI = 3.14159265359
 
 
 def simulate_rf(
@@ -25,8 +27,10 @@ def simulate_rf(
     Simulates RF data for a given set of scatterers.
 
     Args:
-    scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
-    scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape (n_scat,).
+    scatterer_positions (array-like): The positions of the scatterers [m] of shape
+        (n_scat, 3).
+    scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape
+        (n_scat,).
     probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
     apply_lens_correction (bool): Whether to apply lens correction.
     lens_thickness (float): The thickness of the lens [m].
@@ -35,11 +39,14 @@ def simulate_rf(
     n_ax (int): The number of samples in the RF data.
     center_frequency (float): The center frequency of the pulse [Hz].
     sampling_frequency (float): The sampling frequency of the RF data [Hz].
-    t0_delays (array-like): The delays of the transmitting elements [s] of shape (n_tx, n_el).
-    initial_times (array-like): The initial times of the transmitting elements [s] of shape (n_tx,).
+    t0_delays (array-like): The delays of the transmitting elements [s] of shape
+        (n_tx, n_el).
+    initial_times (array-like): The initial times of the transmitting elements [s] of
+        shape (n_tx,).
     element_width (float): The width of the elements [m].
     attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
-    tx_apodizations (array-like): The apodizations of the transmitting elements of shape (n_tx, n_el).
+    tx_apodizations (array-like): The apodizations of the transmitting elements of
+        shape (n_tx, n_el).
 
     Returns:
     rf_data (array-like): The simulated RF data of shape (1, n_ax, n_tx, n_el, 1).
@@ -154,10 +161,6 @@ def simulate_rf(
     return rf_data[None, ..., None]
 
 
-def travel(distance, sound_speed, frequency):
-    return ops.exp(-1j * distance / sound_speed * frequency)
-
-
 def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
     """Computes the directivity of a single element.
 
@@ -194,7 +197,7 @@ def delay2(f, tau, n_fft, fs):
     Returns:
         array-like: The spectrum of the delay.
     """
-    arg = ops.array(-1j, dtype="complex64") * ops.cast(2 * pi * tau * f, "complex64")
+    arg = ops.array(-1j, dtype="complex64") * ops.cast(2 * PI * tau * f, "complex64")
     return ops.where(tau < n_fft / fs, ops.exp(arg), ops.array(0.0, dtype="complex64"))
 
 
@@ -242,7 +245,7 @@ def hann_unnormalized(x, width):
     Returns:
     hann_vals (array-like): The values of the Hann window function.
     """
-    return ops.where(ops.abs(x) < width / 2, ops.cos(pi * x / width) ** 2, 0)
+    return ops.where(ops.abs(x) < width / 2, ops.cos(PI * x / width) ** 2, 0)
 
 
 def get_pulse_spectrum_fn(fc, n_period=3.0):
@@ -286,5 +289,5 @@ def get_transducer_bandwidth_fn(fc, bandwidth):
 
 def sinc(x):
     """The normalized sinc function with a small offset to precent division by zero."""
-    x = ops.abs(pi * x) + 1e-9
+    x = ops.abs(PI * x) + 1e-9
     return ops.sin(x) / x
