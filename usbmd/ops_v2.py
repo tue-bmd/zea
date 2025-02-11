@@ -783,5 +783,7 @@ class Simulate(Operation):
                 element_width=element_width,
                 attenuation_coef=attenuation_coef,
                 tx_apodizations=tx_apodizations,
-            )
+            ),
+            "n_ax": self.n_ax,
+            "apply_lens_correction": self.apply_lens_correction,
         }
