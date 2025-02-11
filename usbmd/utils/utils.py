@@ -129,7 +129,6 @@ def preprocess_for_saving(images):
 
     return images
 
-
 def save_to_gif(images, filename, fps=20):
     """Saves a sequence of images to .gif file.
     Args:
@@ -151,7 +150,32 @@ def save_to_gif(images, filename, fps=20):
 
     duration = 1 / (fps) * 1000  # milliseconds per frame
 
-    pillow_img, *pillow_imgs = [Image.fromarray(img) for img in images]
+    pillow_imgs = [Image.fromarray(img) for img in images]
+
+    # Get global palette from first image with improved settings
+    first_frame = (
+        pillow_imgs[0]
+        .convert("RGB")
+        .quantize(
+            colors=256,
+            # Use median cut to generate the palette
+            method=Image.MEDIANCUT, # pylint: disable=no-member
+            # Use k-means to refine the palette
+            kmeans=1,
+        )
+    )
+
+    # Apply the same palette to all frames without dithering
+    # for consistent color mapping
+    pillow_imgs = [
+        img.convert("RGB").quantize(
+            palette=first_frame,
+            dither=Image.NONE, # pylint: disable=no-member
+        )
+        for img in pillow_imgs
+    ]
+
+    pillow_img, *pillow_imgs = pillow_imgs
 
     pillow_img.save(
         fp=filename,
