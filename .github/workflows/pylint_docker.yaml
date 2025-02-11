@@ -25,4 +25,4 @@ jobs:
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
             usbmd/base:latest \
-            sh -c "pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
+            sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
