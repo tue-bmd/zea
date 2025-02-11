@@ -18,6 +18,7 @@ from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_keys_and_axes
+from usbmd.simulator import simulate_rf
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
 
@@ -356,19 +357,23 @@ class Pipeline:
                 "Probe, Scan and Config objects should be passed as positional arguments. "
                 "e.g. pipeline(probe, scan, config, **kwargs)"
             )
-        probe, scan, config = {}, {}, {}
+        dicts = {
+            "probe": {},
+            "scan": {},
+            "config": {},
+        }
         for arg in args:
             if not isinstance(arg, (Probe, Scan, Config)):
                 raise ValueError(
                     f"Expected Probe, Scan, or Config object, got {type(arg).__name__}"
                 )
-
             tensorized = arg.to_tensor()
+
             type_name = type(arg).__name__.lower()
             if type_name in ("probe", "scan", "config"):
-                vars()[type_name] = tensorized
+                dicts[type_name] = tensorized
 
-        inputs = {**probe, **scan, **config, **kwargs}
+        inputs = {**dicts["probe"], **dicts["scan"], **dicts["config"], **kwargs}
         outputs = self._call_pipeline(inputs)
         if return_numpy:
             outputs = {k: v.numpy() for k, v in outputs.items()}
@@ -730,3 +735,53 @@ class UpMix(Operation):
         data = upmix(data, fs, fc, upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return data
+
+
+@ops_registry("simulate_rf_v2")
+class Simulate(Operation):
+    """Simulate RF data."""
+
+    def __init__(self, n_ax, apply_lens_correction=True, **kwargs):
+        super().__init__(
+            output_data_type=DataTypes.RAW_DATA,
+            jit_compile=False,
+            **kwargs,
+        )
+        self.apply_lens_correction = apply_lens_correction
+        self.n_ax = n_ax
+
+    def call(
+        self,
+        scatterer_positions,
+        scatterer_magnitudes,
+        probe_geometry,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        center_frequency,
+        sampling_frequency,
+        t0_delays,
+        initial_times,
+        element_width,
+        attenuation_coef,
+        tx_apodizations,
+    ):
+        return {
+            "raw_data": simulate_rf(
+                scatterer_positions,
+                scatterer_magnitudes,
+                probe_geometry=probe_geometry,
+                apply_lens_correction=self.apply_lens_correction,
+                lens_thickness=lens_thickness,
+                lens_sound_speed=lens_sound_speed,
+                sound_speed=sound_speed,
+                n_ax=self.n_ax,
+                center_frequency=center_frequency,
+                sampling_frequency=sampling_frequency,
+                t0_delays=t0_delays,
+                initial_times=initial_times,
+                element_width=element_width,
+                attenuation_coef=attenuation_coef,
+                tx_apodizations=tx_apodizations,
+            )
+        }

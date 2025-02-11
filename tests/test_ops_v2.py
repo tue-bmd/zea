@@ -10,12 +10,20 @@ import json
 
 import keras
 import pytest
+import numpy as np
 
 from usbmd.config.config import Config
-from usbmd.ops_v2 import Operation, Pipeline, pipeline_from_config, pipeline_from_json
-from usbmd.probes import Dummy
+from usbmd.ops_v2 import (
+    Operation,
+    Pipeline,
+    pipeline_from_config,
+    pipeline_from_json,
+    Simulate,
+)
+from usbmd.probes import Dummy, Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
+
 
 """Some operations for testing"""
 
@@ -454,6 +462,88 @@ def test_operation_large_data_inputs():
     op = MatrixTestMultiplyOperation()
     result = op(matrix_a=matrix_a, matrix_b=matrix_b)
     assert result["result"].shape == (512, 512)
+
+
+def test_simulator():
+    """Tests the simulator operation."""
+    n_el = 128
+    n_scat = 3
+    n_tx = 2
+    n_ax = 512
+
+    aperture = 30e-3
+
+    tx_apodizations = np.ones((n_tx, n_el))
+    probe_geometry = np.stack(
+        [
+            np.linspace(-aperture / 2, aperture / 2, n_el),
+            np.zeros(n_el),
+            np.zeros(n_el),
+        ],
+        axis=1,
+    )
+
+    t0_delays = np.stack(
+        [
+            np.linspace(0, 1e-6, n_el),
+            np.linspace(1e-6, 0, n_el),
+        ]
+    )
+
+    scan = Scan(
+        n_tx=n_tx,
+        n_ax=n_ax,
+        n_el=n_el,
+        center_frequency=3.125e6,
+        sampling_frequency=12.5e6,
+        probe_geometry=probe_geometry,
+        t0_delays=t0_delays,
+        tx_apodizations=tx_apodizations,
+        element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
+        apply_lens_correction=True,
+        lens_sound_speed=1440.0,
+        lens_thickness=1e-3,
+        initial_times=np.zeros((n_tx,)),
+        attenuation_coef=0.7,
+        n_ch=1,
+        selected_transmits="all",
+    )
+
+    # Define scatterers
+    scat_x, scat_z = np.meshgrid(
+        np.linspace(-10e-3, 10e-3, 5),
+        np.linspace(5e-3, 30e-3, 5),
+        indexing="ij",
+    )
+    scat_x, scat_z = np.ravel(scat_x), np.ravel(scat_z)
+    n_scat = len(scat_x)
+    scat_positions = np.stack(
+        [
+            scat_x,
+            np.zeros_like(scat_x),
+            scat_z,
+        ],
+        axis=1,
+    )
+
+    probe = Probe(
+        probe_geometry=probe_geometry,
+        center_frequency=3.125e6,
+        sampling_frequency=12.5e6,
+    )
+
+    pipeline = Pipeline(
+        [Simulate(apply_lens_correction=scan.apply_lens_correction, n_ax=n_ax)]
+    )
+
+    output = pipeline(
+        scan,
+        probe,
+        scatterer_positions=scat_positions.astype(np.float32),
+        scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
+    )
+
+    assert output["raw_data"].shape == (1, n_tx, n_ax, n_el, 1)
 
 
 if __name__ == "__main__":
