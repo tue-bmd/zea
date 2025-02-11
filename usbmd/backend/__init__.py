@@ -13,9 +13,13 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
     """
     Applies JIT compilation to the given function based on the current Keras backend.
     Can be used as a decorator or as a function.
+
     Args:
         func (callable): The function to be JIT compiled.
+        jax (bool): Whether to enable JIT compilation in the JAX backend.
+        tensorflow (bool): Whether to enable JIT compilation in the TensorFlow backend.
         **kwargs: Keyword arguments to be passed to the JIT compiler.
+
     Returns:
         callable: The JIT-compiled function.
     """
