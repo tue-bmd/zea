@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 import torch
 from keras import ops
-from usbmd import tensor_ops
 
 from tests.helpers import equality_libs_processing
+from usbmd import tensor_ops
 
 
 @pytest.mark.parametrize(
@@ -192,13 +192,15 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
 
 
 @pytest.fixture
-def fake_function():
-    def fake_fn(tensor, extra_tensor=None):
+def _test_function():
+    """Fixture for testing batched_map function."""
+
+    def _test(tensor, extra_tensor=None):
         if extra_tensor is not None:
             return tensor + extra_tensor
         return tensor
 
-    return fake_fn
+    return _test
 
 
 @pytest.mark.parametrize(
@@ -213,8 +215,8 @@ def fake_function():
     ],
 )
 @equality_libs_processing()
-def test_batched_map(fake_function, array, batch_dims, batched_kwargs):
-    """Test the batched_map function using fake_function fixture."""
+def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
+    """Test the batched_map function using _test_function fixture."""
 
     array = ops.convert_to_tensor(array)
     # Convert any numpy arrays in batched_kwargs to tensors.
@@ -224,14 +226,14 @@ def test_batched_map(fake_function, array, batch_dims, batched_kwargs):
     }
 
     out_jit = tensor_ops.batched_map(
-        fake_function,
+        _test_function,
         array,
         batch_dims,
         jit=True,
         batch_kwargs=batched_kwargs,
     )
     out_no_jit = tensor_ops.batched_map(
-        fake_function,
+        _test_function,
         array,
         batch_dims,
         jit=False,
@@ -248,9 +250,9 @@ def test_batched_map(fake_function, array, batch_dims, batched_kwargs):
         if batched_kwargs:
             # For each keyword, extract the corresponding slice.
             kw_slicing = {k: v[idx] for k, v in batched_kwargs.items()}
-            expected.append(fake_function(array[slicing], **kw_slicing))
+            expected.append(_test_function(array[slicing], **kw_slicing))
         else:
-            expected.append(fake_function(array[slicing]))
+            expected.append(_test_function(array[slicing]))
 
     expected = ops.stack(expected, axis=0)
     expected = ops.reshape(expected, batch_shape + array.shape[batch_dims:])
