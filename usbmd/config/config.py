@@ -127,6 +127,37 @@ class Config(dict):
         for key, value in dictionary.items():
             self[key] = value
 
+    def update_recursive(self, dictionary: dict | None = None, **kwargs):
+        """
+        Update the config with the provided dictionary and keyword arguments.
+        If a key corresponds to another Config object, the update_recursive
+        method is called recursively on that object. This makes it possible
+        to update nested Config objects without replacing them.
+
+        Example:
+        ```python
+        config = Config({"a": 1, "b": {"c": 2, "d": 3}})
+        config.update_recursive({"a": 4, "b": {"c": 5}})
+        print(config)  # Output: <Config {'a': 4, 'b': {'c': 5, 'd': 3}}>
+        ```
+        Notice how "d" is kept and only "c" is updated.
+        """
+
+        if dictionary is None:
+            dictionary = {}
+        dictionary.update(kwargs)
+        for key, value in dictionary.items():
+            if key in self and isinstance(self[key], Config):
+                self[key].update_recursive(value)
+            elif key in self and isinstance(value, list):
+                for i, v in enumerate(value):
+                    if isinstance(v, Config):
+                        self[key][i].update_recursive(v)
+                    else:
+                        self[key][i] = v
+            else:
+                self[key] = value
+
     def values(self):
         """Returns a list of all the values in the config"""
         # Use __getitem__ to get values
@@ -179,12 +210,17 @@ class Config(dict):
         # If overriding an existing attribute, mark it as unaccessed
         self._mark_unaccessed(name)
 
+        # Convert tuple to list to allow for item assignment
+        if isinstance(value, tuple):
+            value = list(value)
+
         # Ensures lists and tuples of dictionaries are converted to Config objects as well
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list):
             value = [
                 self.__class__(x, __parent__=self) if isinstance(x, dict) else x
                 for x in value
             ]
+        # Ensures dictionaries are converted to Config objects as well
         elif isinstance(value, dict):
             value = self.__class__(value, __parent__=self)
 
@@ -237,7 +273,7 @@ class Config(dict):
         if self.__parent__ is None:
             return self, key_trace
         for key, value in self.__parent__._dict_items():
-            if isinstance(value, (list, tuple)):
+            if isinstance(value, list):
                 for i, v in enumerate(value):
                     if v == self:
                         return self.__parent__._trace_through_ancestors(
@@ -316,7 +352,7 @@ class Config(dict):
         for key, value in self._dict_items():
             if isinstance(value, Config):
                 value = value.as_dict(func_on_leaves)
-            elif isinstance(value, (list, tuple)):
+            elif isinstance(value, list):
                 value = [
                     v.as_dict(func_on_leaves) if isinstance(v, Config) else v
                     for v in value
@@ -367,7 +403,7 @@ class Config(dict):
         for _, value in self._dict_items():
             if isinstance(value, Config):
                 value._recursive_setattr(set_key, set_value)
-            elif isinstance(value, (list, tuple)):
+            elif isinstance(value, list):
                 for v in value:
                     if isinstance(v, Config):
                         v._recursive_setattr(set_key, set_value)
