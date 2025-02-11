@@ -168,14 +168,16 @@ class Scan(Object):
                 of integers, then the transmits with those indices are selected. If set
                 to None, then all transmits are used. Defaults to None.
             probe_geometry (np.ndarray, optional): (n_el, 3) array with element positions
-                in meters. Necessary for automatic xlim calculation if not set. Defaults to None.
+                in meters. Necessary for automatic xlim calculation if not set.
+                Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
             pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
                 pressure field of shape (Nx, Nz, 1) with to perform automatic weighting.
-                Defaults to None. In that case default arguments are used. If pfield can be used
-                by the beamformer with option config.model.beamformer.auto_pressure_weighting.
-                If set to True, the pfield is used, if False, beamformer will compound all
+                Defaults to None. In that case default arguments are used. If pfield
+                can be used by the beamformer with option
+                config.model.beamformer.auto_pressure_weighting. If set to True, the
+                pfield is used, if False, beamformer will compound all
                 transmit data coherently without pfield weighting.
             apply_lens_correction (bool, optional): Whether to apply lens correction to the
                 delay computation. Defaults to False.
@@ -185,7 +187,8 @@ class Scan(Object):
                 Defaults to None.
             element_width (float, optional): The width of the transducer_elements in meters.
                 Defaults to 0.2e-3.
-            attenuation_coef (float, optional): The attenuation coefficient in dB/cm/MHz. Defaults to 0.0.
+            attenuation_coef (float, optional): The attenuation coefficient in
+                dB/cm/MHz. Defaults to 0.0.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -618,6 +621,7 @@ class Scan(Object):
 
     @property
     def element_width(self):
+        """The width of a single transducer elemen in meters."""
         return self._element_width
 
     @element_width.setter
@@ -629,6 +633,7 @@ class Scan(Object):
 
     @property
     def attenuation_coef(self):
+        """The attenuation coefficient in dB/cm/MHz."""
         return self._attenuation_coef
 
     @attenuation_coef.setter
