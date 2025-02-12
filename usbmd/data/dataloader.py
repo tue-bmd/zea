@@ -659,6 +659,7 @@ class H5Dataloader(H5Generator):
         image_size: tuple | None = None,
         image_range: tuple = DEFAULT_IMAGE_RANGE,
         normalization_range: tuple = DEFAULT_NORMALIZATION_RANGE,
+        resize_kwargs: dict = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -666,10 +667,12 @@ class H5Dataloader(H5Generator):
         self.image_size = image_size
         self.image_range = image_range
         self.normalization_range = normalization_range
+        self.resize_kwargs = resize_kwargs or {}
         self.resizer = Resizer(
             resize_type=resize_type,
             image_size=image_size,
             seed=self.seed,
+            **resize_kwargs,
         )
 
     def __getitem__(self, index):
