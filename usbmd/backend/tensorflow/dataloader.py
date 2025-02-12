@@ -142,6 +142,7 @@ def h5_dataset_from_directory(
     cache: bool | str = False,
     prefetch: bool = True,
     wrap_in_keras: bool = True,
+    **kwargs,
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -251,6 +252,7 @@ def h5_dataset_from_directory(
         seed=seed,
         as_tensor=False,
         search_file_tree_kwargs=search_file_tree_kwargs,
+        **kwargs,
     )
 
     # Create dataset
