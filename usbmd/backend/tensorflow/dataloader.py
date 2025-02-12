@@ -123,6 +123,7 @@ def h5_dataset_from_directory(
     limit_n_samples: int | None = None,
     resize_type: str = "center_crop",
     resize_axes: tuple | None = None,
+    resize_kwargs: dict | None = None,
     image_range: tuple = (0, 255),
     normalization_range: tuple = (0, 1),
     augmentation: keras.Sequential | None = None,
@@ -306,8 +307,14 @@ def h5_dataset_from_directory(
             len(image_size) == 2
         ), f"image_size must be of length 2 (height, width), got {image_size}"
 
+        resize_kwargs = resize_kwargs or {}
         resizer = Resizer(
-            image_size, resize_type, resize_axes, seed=seed, backend="tensorflow"
+            image_size,
+            resize_type,
+            resize_axes,
+            seed=seed,
+            backend="tensorflow",
+            **resize_kwargs,
         )
         dataset = dataset_map(dataset, resizer)
 
