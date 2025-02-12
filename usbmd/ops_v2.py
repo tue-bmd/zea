@@ -377,7 +377,7 @@ class Pipeline:
                 config.update(tensorized)
             else:
                 raise ValueError(
-                    f"Expected object to be an instance of Probe, Scan, or Config, got {type(arg).__name__}"
+                    f"Expected object of type Probe, Scan, or Config, got {type(arg).__name__}"
                 )
         inputs = {**probe, **scan, **config, **kwargs}
         outputs = self._call_pipeline(inputs)
@@ -633,11 +633,9 @@ class Stack(Operation):
         Stacks the inputs corresponding to the specified keys along the specified axis.
         If a list of axes is provided, the length must match the number of keys.
         """
-        for key, axis in zip(self.keys, self.axis):
+        for key, axis in zip(self.keys, self.axes):
             kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
         return kwargs
-
-        raise NotImplementedError
 
 
 @ops_registry("concatenate_v2")
