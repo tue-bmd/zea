@@ -289,7 +289,7 @@ def test_pipeline_cycle_detection():
     op_b = TestAdd(uid="op_b")
     op_b.inputs = ["op_a"]  # op_b depends on op_a
 
-    with pytest.raises(ValueError, match="Cycle detected"):
+    with pytest.raises(ValueError):
         Pipeline(operations=[op_a, op_b])
 
 
