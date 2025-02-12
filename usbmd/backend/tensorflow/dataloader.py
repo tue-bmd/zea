@@ -311,12 +311,7 @@ def h5_dataset_from_directory(
 
         resize_kwargs = resize_kwargs or {}
         resizer = Resizer(
-            image_size,
-            resize_type,
-            resize_axes,
-            seed=seed,
-            backend="tensorflow",
-            **resize_kwargs,
+            image_size, resize_type, resize_axes, seed=seed, **resize_kwargs
         )
         dataset = dataset_map(dataset, resizer)
 
