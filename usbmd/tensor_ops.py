@@ -1,13 +1,13 @@
 """Basic tensor operations implemented with the multi-backend `keras.ops`."""
 
 import os
-from typing import List, Tuple, Union
+from typing import Tuple, Union
 
 import keras
 import numpy as np
 from keras import ops
 
-from usbmd.utils import log, map_negative_indices
+from usbmd.utils import log
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
