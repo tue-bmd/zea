@@ -7,7 +7,6 @@ from typing import List, Union
 
 import keras
 import numpy as np
-from keras import ops
 from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
 from usbmd.utils.utils import map_negative_indices
@@ -108,7 +107,7 @@ class PadUntilShape(PadToShape):
         This function will pad `z` until it reaches the shape specified by `pad_until_shape`.
         If it already is bigger, it will not be padded. Uses pad_to_shape internally.
         """
-        shape_array = ops.shape(z)
+        shape_array = self.backend.shape(z)
 
         pad_until_shape = _prep_to_shape(shape_array, pad_until_shape, axis)
         pad_until_shape = [
