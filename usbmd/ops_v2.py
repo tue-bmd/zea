@@ -365,16 +365,19 @@ class Pipeline:
             )
         probe, scan, config = {}, {}, {}
         for arg in args:
-            if not isinstance(arg, (Probe, Scan, Config)):
+            if isinstance(arg, Probe):
+                tensorized = arg.to_tensor()
+                probe.update(tensorized)
+            elif isinstance(arg, Scan):
+                tensorized = arg.to_tensor()
+                scan.update(tensorized)
+            elif isinstance(arg, Config):
+                tensorized = arg.to_tensor()
+                config.update(tensorized)
+            else:
                 raise ValueError(
-                    f"Expected Probe, Scan, or Config object, got {type(arg).__name__}"
+                    f"Expected object to be an instance of Probe, Scan, or Config, got {type(arg).__name__}"
                 )
-
-            tensorized = arg.to_tensor()
-            type_name = type(arg).__name__.lower()
-            if type_name in ("probe", "scan", "config"):
-                vars()[type_name] = tensorized
-
         inputs = {**probe, **scan, **config, **kwargs}
         outputs = self._call_pipeline(inputs)
         if return_numpy:
