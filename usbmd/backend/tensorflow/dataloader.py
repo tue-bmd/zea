@@ -187,6 +187,7 @@ def h5_dataset_from_directory(
         resize_axes (tuple, optional): axes to resize along. Should be of length 2
             (height, width) as resizing function only supports 2D resizing / cropping. Should only
             be set when your data is more than (h, w, c). Defaults to None.
+        resize_kwargs (dict, optional): kwargs for the resize function.
         image_range (tuple, optional): image range. Defaults to (0, 255).
             will always normalize from specified image range to normalization range.
             if image_range is set to None, no normalization will be done.
