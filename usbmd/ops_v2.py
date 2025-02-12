@@ -310,7 +310,8 @@ class Pipeline:
         if missing_dependencies:
             raise ValueError(
                 f"Following ops are provided as input, but are missing from the Operation chain: "
-                f"{missing_dependencies}"
+                f"{missing_dependencies}. Please check if they are defined in the Operation chain,"
+                f"or if there are cyclic dependencies."
             )
 
         if len(sorted_order) != len(operations):
