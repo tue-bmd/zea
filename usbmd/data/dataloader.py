@@ -18,7 +18,7 @@ import numpy as np
 from keras import ops
 from keras.src.utils.backend_utils import DynamicBackend
 
-from usbmd.utils import log, translate
+from usbmd.utils import log, translate, map_negative_indices
 from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
 
 FILE_TYPES = [".hdf5", ".h5"]
@@ -65,15 +65,6 @@ def decode_file_info(file_info):
         info = ops.convert_to_numpy(info)[()].decode("utf-8")
         decoded_info.append(json_loads(info))
     return decoded_info
-
-
-def _map_negative_indices(indices: list, length: int):
-    """Maps negative indices for array indexing to positive indices.
-    Example:
-        >>> _map_negative_indices([-1, -2], 5)
-        [4, 3]
-    """
-    return [i if i >= 0 else length + i for i in indices]
 
 
 def _usbmd_datasets_json_decoder(dct):
@@ -393,7 +384,7 @@ class Resizer:
 
         assert ndim >= 4, f"We expect at least 4 dimensions for Resizer, got {ndim}."
 
-        resize_axes = _map_negative_indices(self.resize_axes, ndim)
+        resize_axes = map_negative_indices(self.resize_axes, ndim)
 
         # Prepare tensor for resizing
         x, perm, perm_shape = self._permute_before_resize(x, ndim, resize_axes)
@@ -497,7 +488,7 @@ class H5Generator(keras.utils.PyDataset):
             self.shape = np.array(image_shapes[0])
 
         if insert_frame_axis:
-            _frame_axis = _map_negative_indices([frame_axis], len(self.shape) + 1)
+            _frame_axis = map_negative_indices([frame_axis], len(self.shape) + 1)
             self.shape = np.insert(self.shape, _frame_axis, 1)
         self.shape[frame_axis] = self.shape[frame_axis] * n_frames
 
