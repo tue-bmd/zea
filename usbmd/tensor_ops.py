@@ -1,13 +1,70 @@
 """Basic tensor operations implemented with the multi-backend `keras.ops`."""
 
 import os
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 import keras
 import numpy as np
 from keras import ops
 
-from usbmd.utils import log
+from usbmd.utils import log, map_negative_indices
+
+
+def pad_to_shape(
+    z,
+    pad_to_shape: list | tuple,
+    uniform: bool = False,
+    axis: Union[int, List[int]] = None,
+    **kwargs,
+):
+    """
+    Pads the input tensor `z` to the specified shape `pad_to_shape`.
+
+    Parameters:
+        z (tensor): The input tensor to be padded.
+        pad_to_shape (list or tuple): The target shape to pad the tensor to.
+        uniform (bool, optional): If True, ensures that padding is uniform (even on both sides).
+            Default is False.
+        axis (int or list of int, optional): The axis or axes along which `pad_to_shape` was
+            specified. If None, `len(pad_to_shape) == `len(ops.shape(z))` must hold.
+            Default is None.
+        kwargs: Additional keyword arguments to pass to the padding function.
+
+    Returns:
+        tensor: The padded tensor with the specified shape.
+    """
+    shape_array = ops.shape(z)
+
+    # When axis is provided, convert pad_to_shape
+    if axis is not None:
+        if isinstance(axis, int):
+            axis = [axis]
+        assert len(axis) == len(
+            pad_to_shape
+        ), "The length of axis must be equal to the length of pad_to_shape."
+        axis = map_negative_indices(axis, len(shape_array))
+
+        pad_to_shape = [
+            pad_to_shape[axis.index(i)] if i in axis else shape_array[i]
+            for i in range(ops.ndim(z))
+        ]
+
+    # Compute the padding required for each dimension
+    pad_shape = np.array(pad_to_shape) - shape_array
+
+    # Assert that padding is even for uniform padding
+    if uniform:
+        assert all(
+            p % 2 == 0 for p in pad_shape
+        ), "Uniform padding requires even padding."
+
+    # Create the paddings array
+    if uniform:
+        paddings = np.stack([pad_shape // 2, pad_shape // 2], axis=1)
+    else:
+        paddings = np.stack([np.zeros_like(pad_shape), pad_shape], axis=1)
+
+    return ops.pad(z, paddings, **kwargs)
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
