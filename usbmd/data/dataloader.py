@@ -280,8 +280,10 @@ class Resizer:
 
         Args:
             image_size (tuple): The target size of the images.
-            resize_type (str): The type of resizing to apply.
-                Supported types are 'center_crop', 'random_crop', 'resize'.
+            resize_type (str): The type of resizing to apply. Supported types are
+                ['center_crop'](https://keras.io/api/layers/preprocessing_layers/image_preprocessing/center_crop/), # pylint: disable=line-too-long
+                ['random_crop'](https://keras.io/api/layers/preprocessing_layers/image_augmentation/random_crop/), # pylint: disable=line-too-long
+                ['resize'](https://keras.io/api/layers/preprocessing_layers/image_preprocessing/resizing/). # pylint: disable=line-too-long
             resize_axes (tuple | None, optional): The axes along which to resize.
                 Must be of length 2. Defaults to None. In that case, can only process
                 default tensors of shape (batch, height, width, channels), where the
