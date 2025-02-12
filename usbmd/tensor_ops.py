@@ -10,6 +10,22 @@ from keras import ops
 from usbmd.utils import log, map_negative_indices
 
 
+def _prep_to_shape(shape_array, pad_to_shape, axis):
+    if axis is not None:
+        if isinstance(axis, int):
+            axis = [axis]
+        assert len(axis) == len(
+            pad_to_shape
+        ), "The length of axis must be equal to the length of pad_to_shape."
+        axis = map_negative_indices(axis, len(shape_array))
+
+        pad_to_shape = [
+            pad_to_shape[axis.index(i)] if i in axis else shape_array[i]
+            for i in range(len(shape_array))
+        ]
+    return pad_to_shape
+
+
 def pad_to_shape(
     z,
     pad_to_shape: list | tuple,
@@ -36,18 +52,7 @@ def pad_to_shape(
     shape_array = ops.shape(z)
 
     # When axis is provided, convert pad_to_shape
-    if axis is not None:
-        if isinstance(axis, int):
-            axis = [axis]
-        assert len(axis) == len(
-            pad_to_shape
-        ), "The length of axis must be equal to the length of pad_to_shape."
-        axis = map_negative_indices(axis, len(shape_array))
-
-        pad_to_shape = [
-            pad_to_shape[axis.index(i)] if i in axis else shape_array[i]
-            for i in range(ops.ndim(z))
-        ]
+    pad_to_shape = _prep_to_shape(shape_array, pad_to_shape, axis)
 
     # Compute the padding required for each dimension
     pad_shape = np.array(pad_to_shape) - shape_array
@@ -65,6 +70,20 @@ def pad_to_shape(
         paddings = np.stack([np.zeros_like(pad_shape), pad_shape], axis=1)
 
     return ops.pad(z, paddings, **kwargs)
+
+
+def pad_until_shape(z, pad_until_shape, axis=None, **kwargs):
+    """
+    This function will pad `z` until it reaches the shape specified by `pad_until_shape`.
+    If it already is bigger, it will not be padded. Uses pad_to_shape internally.
+    """
+    shape_array = ops.shape(z)
+
+    pad_until_shape = _prep_to_shape(shape_array, pad_until_shape, axis)
+    pad_until_shape = [
+        max(pad_until_shape[i], shape_array[i]) for i in range(len(shape_array))
+    ]
+    return pad_to_shape(z, pad_until_shape, axis=None, **kwargs)
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
