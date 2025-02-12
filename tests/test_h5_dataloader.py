@@ -7,10 +7,13 @@ from copy import deepcopy
 from pathlib import Path
 
 import h5py
+import keras
 import numpy as np
 import pytest
+from keras import ops
 
 from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
+from usbmd.data.layers import Resizer
 
 DUMMY_DATASET_PATH = "dummy_data.hdf5"
 NDIM_DUMMY_DATASET_FOLDER = "./temp/ndim_dummy_dataset"
@@ -21,13 +24,14 @@ CAMUS_DATASET_PATH = (
     else "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/"
     "train/patient0001/patient0001_2CH_half_sequence.hdf5"
 )
+DUMMY_IMAGE_SHAPE = (28, 28)
 
 
 @pytest.fixture
 def create_dummy_hdf5():
     """Fixture to create and clean up a dummy hdf5 file."""
     with h5py.File(DUMMY_DATASET_PATH, "w", locking=False) as f:
-        data = np.random.rand(100, 28, 28)
+        data = np.random.rand(100, *DUMMY_IMAGE_SHAPE)
         f.create_dataset("data", data=data)
     yield
     Path(DUMMY_DATASET_PATH).unlink()
@@ -288,6 +292,7 @@ def test_h5_dataset_return_filename(
             "random_crop",
         ),
         (DUMMY_DATASET_PATH, "data", (20, 23), "random_crop"),
+        (DUMMY_DATASET_PATH, "data", (32, 32), "center_crop_pad"),
     ],
 )
 def test_h5_dataset_resize_types(
@@ -302,7 +307,7 @@ def test_h5_dataset_resize_types(
 
     if directory == Path(CAMUS_DATASET_PATH).parent:
         if not directory.exists():
-            return
+            pytest.skip("The CAMUS dataset directory is unavailable")
 
     dataset = h5_dataset_from_directory(
         directory,
@@ -321,6 +326,18 @@ def test_h5_dataset_resize_types(
     assert (
         images.shape[:-1] == image_size
     ), f"The images should be resized to {image_size}, but got {images.shape[:-1]}"
+
+
+def test_center_crop_pad():
+    """Test the resize_type="center_crop_pad" for to behave as expected"""
+    resizer = Resizer(np.array(DUMMY_IMAGE_SHAPE) * 2, resize_type="center_crop_pad")
+
+    inp = np.random.rand(1, *DUMMY_IMAGE_SHAPE, 1)
+    out = resizer(inp)
+
+    assert (
+        ops.sum(keras.layers.CenterCrop(*DUMMY_IMAGE_SHAPE)(out) - inp) == 0.0
+    ), "The center crop pad layer did not work as expected, probably a one-off padding issue"
 
 
 @pytest.mark.parametrize(
