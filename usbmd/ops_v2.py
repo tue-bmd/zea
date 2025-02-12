@@ -16,9 +16,9 @@ from usbmd.ops import channels_to_complex, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
+from usbmd.simulator import simulate_rf
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_keys_and_axes
-from usbmd.simulator import simulate_rf
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
 
@@ -33,6 +33,9 @@ log.warning("WARNING: This module is work in progress and may not work as expect
 
 # clear registry upon import
 # ops_registry.clear()
+
+
+MULTIPLE_INPUT_OPS = ["merge_v2", "split_v2", "stack_v2", "concatenate_v2"]
 
 
 def get_op(op_name):
@@ -70,6 +73,10 @@ class Operation(keras.Operation):
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
+
+        self.inputs = []  # Source(s) of input data (name of a previous operation)
+        self.allow_multiple_inputs = False  # Only single input allowed by default
+
         self.cache_inputs = cache_inputs
         self.cache_outputs = cache_outputs
 
@@ -304,7 +311,8 @@ class Pipeline:
         if missing_dependencies:
             raise ValueError(
                 f"Following ops are provided as input, but are missing from the Operation chain: "
-                f"{missing_dependencies}"
+                f"{missing_dependencies}. Please check if they are defined in the Operation chain,"
+                f"or if there are cyclic dependencies."
             )
 
         if len(sorted_order) != len(operations):
@@ -357,23 +365,22 @@ class Pipeline:
                 "Probe, Scan and Config objects should be passed as positional arguments. "
                 "e.g. pipeline(probe, scan, config, **kwargs)"
             )
-        dicts = {
-            "probe": {},
-            "scan": {},
-            "config": {},
-        }
+        probe, scan, config = {}, {}, {}
         for arg in args:
-            if not isinstance(arg, (Probe, Scan, Config)):
+            if isinstance(arg, Probe):
+                tensorized = arg.to_tensor()
+                probe.update(tensorized)
+            elif isinstance(arg, Scan):
+                tensorized = arg.to_tensor()
+                scan.update(tensorized)
+            elif isinstance(arg, Config):
+                tensorized = arg.to_tensor()
+                config.update(tensorized)
+            else:
                 raise ValueError(
-                    f"Expected Probe, Scan, or Config object, got {type(arg).__name__}"
+                    f"Expected object of type Probe, Scan, or Config, got {type(arg).__name__}"
                 )
-            tensorized = arg.to_tensor()
-
-            type_name = type(arg).__name__.lower()
-            if type_name in ("probe", "scan", "config"):
-                dicts[type_name] = tensorized
-
-        inputs = {**dicts["probe"], **dicts["scan"], **dicts["config"], **kwargs}
+        inputs = {**probe, **scan, **config, **kwargs}
         outputs = self._call_pipeline(inputs)
         if return_numpy:
             outputs = {k: v.numpy() for k, v in outputs.items()}
@@ -575,6 +582,10 @@ class Identity(Operation):
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.allow_multiple_inputs = True
+
     def call(self, *args, **kwargs) -> Dict:
         """
         Merges the input dictionaries. Priority is given to the last input.
@@ -595,7 +606,7 @@ class Split(Operation):
         super().__init__(**kwargs)
         self.n = n
 
-    def call(self, *args, **kwargs) -> List[Dict]:
+    def call(self, **kwargs) -> List[Dict]:
         """
         Splits the input dictionary into n copies.
         """
@@ -618,14 +629,14 @@ class Stack(Operation):
 
         self.keys, self.axes = _assert_keys_and_axes(keys, axes)
 
-    def call(self, *args, **kwargs) -> Dict:
+    def call(self, **kwargs) -> Dict:
         """
         Stacks the inputs corresponding to the specified keys along the specified axis.
         If a list of axes is provided, the length must match the number of keys.
-        If an integer axis is provided, all inputs are stacked along the same axis.
         """
-
-        raise NotImplementedError
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
+        return kwargs
 
 
 @ops_registry("concatenate_v2")
