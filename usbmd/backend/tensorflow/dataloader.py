@@ -30,7 +30,8 @@ import keras
 import tensorflow as tf
 from keras.src.trainers.data_adapters import TFDatasetAdapter
 
-from usbmd.data.dataloader import H5Generator, Resizer
+from usbmd.data.dataloader import H5Generator
+from usbmd.data.layers import Resizer
 from usbmd.utils import find_methods_with_return_type, log, translate
 
 METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
