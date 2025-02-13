@@ -53,6 +53,8 @@ jobs:
             -w /ultrasound-toolbox \
             -u $(id -u):$(id -g) \
             -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
             usbmd/base:latest \
             sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
 
@@ -75,5 +77,7 @@ jobs:
             -w /ultrasound-toolbox \
             -u $(id -u):$(id -g) \
             -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
             usbmd/base:latest \
             sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && pytest -p no:cacheprovider ./tests"
