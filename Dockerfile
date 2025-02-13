@@ -61,24 +61,26 @@ RUN poetry install -E opencv-python-headless --no-root
 # Set the default backend; override this when building if desired.
 ARG BACKEND=all
 
-# Use the cache for pip downloads.
+# Use the cache for pip downloads and install Keras, keras-cv, and wandb.
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    # Always install Keras, keras-cv, and wandb
-    pip install --upgrade 'keras>=3.6' keras-cv wandb && \
-    \
-    # Conditionally install TensorFlow if BACKEND is "tensorflow" or "all"
-    if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
-        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
-    fi && \
-    \
-    # Conditionally install JAX if BACKEND is "jax" or "all"
-    if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
-        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
-    fi && \
-    \
-    # Conditionally install PyTorch and related packages if BACKEND is "torch" or "all"
-    if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
-        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
+    pip install --upgrade 'keras>=3.6' keras-cv wandb
+
+# Conditionally install TensorFlow if BACKEND is "tensorflow" or "all".
+RUN if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
+      --mount=type=cache,target=$PIP_CACHE_DIR \
+      pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
+    fi
+
+# Conditionally install JAX if BACKEND is "jax" or "all".
+RUN if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
+      --mount=type=cache,target=$PIP_CACHE_DIR \
+      pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
+    fi
+
+# Conditionally install PyTorch and related packages if BACKEND is "torch" or "all".
+RUN if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
+      --mount=type=cache,target=$PIP_CACHE_DIR \
+      pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
     fi
 
 # Source working/installation directory and add motd (message of the day)
