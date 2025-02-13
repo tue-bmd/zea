@@ -51,6 +51,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
+            -u $(id -u):$(id -g) \
             usbmd/base:latest \
             sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
 
@@ -71,5 +72,6 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
+            -u $(id -u):$(id -g) \
             usbmd/base:latest \
             sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && pytest -p no:cacheprovider ./tests"
