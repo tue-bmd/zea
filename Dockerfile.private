@@ -1,5 +1,5 @@
 # Inherit from usbmd base image
-FROM usbmd/base:latest
+FROM usbmd/all:latest
 
 # Set working directory
 WORKDIR /ultrasound-toolbox
