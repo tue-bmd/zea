@@ -176,7 +176,7 @@ class Resizer(TFDataLayer):
             elif resize_type == "center_crop_pad":
                 self.resizer = keras.layers.Pipeline(
                     [
-                        PadUntilShape(image_size, axis=(-2, 1), uniform=True),
+                        PadUntilShape(image_size, axis=(-3, -2), uniform=True),
                         keras.layers.CenterCrop(*image_size, **resize_kwargs),
                     ]
                 )
@@ -191,15 +191,6 @@ class Resizer(TFDataLayer):
         self.resize_axes = resize_axes
         if resize_axes is not None:
             assert len(resize_axes) == 2, "resize_axes must be of length 2"
-
-        # Update set_backend method to also set backend for resizer
-        self.backend.set_backend = self.set_backend
-
-    def set_backend(self, new_backend):
-        """Set the backend for the layer and its resizer."""
-        self.backend._backend = new_backend
-        if self.resizer is not None:
-            self.resizer.backend.set_backend(new_backend)
 
     def _permute_before_resize(self, x, ndim, resize_axes):
         """Permutes tensor to put resize axes in correct position before resizing."""
