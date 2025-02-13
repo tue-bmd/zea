@@ -9,8 +9,6 @@ import numpy as np
 
 from usbmd.setup_usbmd import set_backend
 
-from . import DEFAULT_TEST_BACKEND
-
 
 def run_test_in_process(test_func, *args, seed=42, _keras_backend=None, **kwargs):
     """Run a test function in a separate process for a specific backend."""
@@ -43,7 +41,9 @@ def equality_libs_processing(
     """Test the processing functions of different libraries
 
     Check if numpy, tensorflow, torch and jax processing funcs produce equal output.
-    It requires you to reload the modules that use keras inside the test function.
+
+    > [!WARNING]
+    > It requires you to reload the modules that use `keras` inside the test function.
 
     Example:
         ```python
@@ -54,12 +54,13 @@ def equality_libs_processing(
 
                 # Do some processing
                 output = my_processing_func(some_arguments)
-                return output
+                return output # <-- return the output!
         ```
     """
     gt_backend = "numpy"
     if backends is None:
         backends = ["tensorflow", "torch", "jax"]
+    assert gt_backend not in backends, "numpy is already tested."
     if verbose:
         print(f"Running tests with backends: {backends}")
 
@@ -87,7 +88,5 @@ def equality_libs_processing(
             )
             if verbose:
                 print(f"Function {func_name} passed with {backend} output.")
-
-        set_backend(DEFAULT_TEST_BACKEND)  # Reset backend
 
     return decorator.decorator(wrapper)

@@ -2,6 +2,9 @@
 Tests for the `tensor_ops` module.
 """
 
+# pylint: disable=import-outside-toplevel
+# pylint: disable=reimported
+
 import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -27,6 +30,8 @@ from usbmd import tensor_ops
 @equality_libs_processing()
 def test_flatten(array, start_dim, end_dim):
     """Test the `flatten` function to `torch.flatten`."""
+    from usbmd import tensor_ops
+
     out = tensor_ops.flatten(array, start_dim, end_dim)
     torch_out = torch.flatten(
         torch.from_numpy(array), start_dim=start_dim, end_dim=end_dim
@@ -35,7 +40,7 @@ def test_flatten(array, start_dim, end_dim):
     # Test if the output is equal to the torch.flatten implementation
     np.testing.assert_almost_equal(torch_out, out)
 
-    return out  # Return the output for the equality_libs_processing decorator
+    return out
 
 
 def recursive_cov(data, *args, **kwargs):
@@ -68,6 +73,8 @@ def test_batch_cov(data, rowvar, bias, ddof):
     Args:
         data (np.array): [*batch_dims, num_obs, num_features]
     """
+    from usbmd import tensor_ops
+
     out = tensor_ops.batch_cov(data, rowvar=rowvar, bias=bias, ddof=ddof)
 
     # Assert that is is equal to the numpy implementation
@@ -76,7 +83,7 @@ def test_batch_cov(data, rowvar, bias, ddof):
         recursive_cov(data, rowvar=rowvar, bias=bias, ddof=ddof),
     )
 
-    return out  # Return the output for the equality_libs_processing decorator
+    return out
 
 
 def test_add_salt_and_pepper_noise():
@@ -103,13 +110,14 @@ def test_extend_n_dims():
 @equality_libs_processing()
 def test_matrix_power(array, n):
     """Test matrix_power to np.linalg.matrix_power."""
+    from usbmd import tensor_ops
 
     out = tensor_ops.matrix_power(array, n)
 
     # Test if the output is equal to the np.linalg.matrix_power implementation
     np.testing.assert_almost_equal(np.linalg.matrix_power(array, n), out)
 
-    return out  # Return the output for the equality_libs_processing decorator
+    return out
 
 
 @pytest.mark.parametrize(
@@ -122,9 +130,13 @@ def test_matrix_power(array, n):
 @equality_libs_processing()
 def test_boolean_mask(array, mask):
     """Tests if boolean_mask runs."""
+    from keras import ops
+
+    from usbmd import tensor_ops
+
     out = tensor_ops.boolean_mask(array, mask)
     assert ops.prod(ops.shape(out)) == ops.sum(mask), "Output shape is incorrect."
-    return out  # Return the output for the equality_libs_processing decorator
+    return out
 
 
 @pytest.mark.parametrize(
@@ -142,9 +154,13 @@ def test_boolean_mask(array, mask):
 def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
     """Tests if func_with_one_batch_dim runs."""
 
+    from keras import ops
+
+    from usbmd import tensor_ops
+
     out = tensor_ops.func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis)
     assert ops.shape(out) == (*tensor.shape[:-1], 1), "Output shape is incorrect."
-    return out  # Return the output for the equality_libs_processing decorator
+    return out
 
 
 @pytest.mark.parametrize(
@@ -161,6 +177,8 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     """Test that stack_volume_data_along_axis and split_volume_data_from_axis
     are inverse operations.
     """
+    from usbmd import tensor_ops
+
     # Create random test data (gradient)
     data = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
 
@@ -188,20 +206,24 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     # Verify contents match
     np.testing.assert_allclose(restored, data, rtol=1e-5, atol=1e-5)
 
-    return restored  # Return for equality_libs_processing decorator
+    return restored
 
 
 @pytest.mark.parametrize(
     "array, batch_dims, func",
     [
-        [np.random.normal(size=(2, 3, 4, 5)), 2, ops.square],
+        [np.random.normal(size=(2, 3, 4, 5)), 2, lambda x: x**2],
         [np.random.normal(size=(3, 4, 5, 6)), 1, lambda x: x * 2],
-        [np.random.normal(size=(2, 2, 3, 4)), 3, ops.abs],
+        [np.random.normal(size=(2, 2, 3, 4)), 3, lambda x: (x**2) ** -1],
     ],
 )
 @equality_libs_processing()
 def test_batched_map(array, batch_dims, func):
     """Test the batched_map function against manual batch processing."""
+    from keras import ops
+
+    from usbmd import tensor_ops
+
     array = ops.convert_to_tensor(array)
     out = tensor_ops.batched_map(func, array, batch_dims)
 
@@ -232,6 +254,8 @@ def test_batched_map(array, batch_dims, func):
 @equality_libs_processing()
 def test_pad_array_to_divisible(array, divisor, axis):
     """Test the pad_array_to_divisible function."""
+    from usbmd import tensor_ops
+
     padded = tensor_ops.pad_array_to_divisible(array, divisor, axis=axis)
 
     # Check that output shape is divisible by divisor only on specified axis
@@ -275,6 +299,8 @@ def test_pad_array_to_divisible(array, divisor, axis):
 @equality_libs_processing()
 def test_images_to_patches(image, patch_size, overlap):
     """Test the images_to_patches function."""
+    from usbmd import tensor_ops
+
     patches = tensor_ops.images_to_patches(image, patch_size, overlap)
     assert patches.shape[0] == image.shape[0]
     assert patches.shape[3] == patch_size[0]
@@ -294,6 +320,8 @@ def test_images_to_patches(image, patch_size, overlap):
 @equality_libs_processing()
 def test_patches_to_images(patches, image_shape, overlap, window_type):
     """Test the patches_to_images function."""
+    from usbmd import tensor_ops
+
     image = tensor_ops.patches_to_images(patches, image_shape, overlap, window_type)
     assert image.shape[1:] == image_shape
     return image
@@ -310,6 +338,8 @@ def test_patches_to_images(patches, image_shape, overlap, window_type):
 @equality_libs_processing()
 def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
     """Test images_to_patches and patches_to_images together."""
+    from usbmd import tensor_ops
+
     patches = tensor_ops.images_to_patches(image, patch_size, overlap)
     reconstructed_image = tensor_ops.patches_to_images(
         patches,
