@@ -1,5 +1,8 @@
 """Tests for the processing module."""
 
+# pylint: disable=import-outside-toplevel
+# pylint: disable=reimported
+
 import math
 
 import numpy as np
@@ -9,7 +12,6 @@ from scipy.signal import hilbert
 
 from usbmd import ops
 from usbmd.probes import get_probe
-from usbmd.processing import Process
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
@@ -28,6 +30,8 @@ from .helpers import equality_libs_processing
 @equality_libs_processing(decimal=4)
 def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
+
+    from usbmd import ops
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
@@ -64,6 +68,9 @@ def test_companding(comp_type, size, parameter_value_range):
 @equality_libs_processing(decimal=4)
 def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
+
+    from usbmd import ops
+
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
     else:
@@ -101,6 +108,9 @@ def test_converting_to_image(size, dynamic_range, input_range):
 @equality_libs_processing(decimal=4)
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
+
+    from usbmd import ops
+
     normalize = ops.Normalize(output_range, input_range)
 
     _input_range = output_range
@@ -215,6 +225,9 @@ def test_up_and_down_conversion(factor, batch_size):
 @equality_libs_processing(decimal=4)
 def test_hilbert_transform():
     """Test hilbert transform"""
+
+    from usbmd import ops
+
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
     data = np.sin(np.linspace(0, 2 * math.e * np.pi, 500))
@@ -244,6 +257,9 @@ def test_hilbert_transform():
 @equality_libs_processing(decimal=4)
 def test_processing_class():
     """Test the processing class"""
+
+    from usbmd import Process
+
     operation_chain = [
         {
             "name": "multi_bandpass_filter",
