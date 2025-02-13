@@ -174,9 +174,16 @@ class Resizer(TFDataLayer):
                     *image_size, seed=seed, **resize_kwargs
                 )
             elif resize_type == "center_crop_pad":
+                pad_kwargs = {}
+                if "constant_values" in resize_kwargs:
+                    pad_kwargs["constant_values"] = resize_kwargs.pop("constant_values")
+                if "mode" in resize_kwargs:
+                    pad_kwargs["mode"] = resize_kwargs.pop("mode")
                 self.resizer = keras.layers.Pipeline(
                     [
-                        PadUntilShape(image_size, axis=(-3, -2), uniform=True),
+                        PadUntilShape(
+                            image_size, axis=(-3, -2), uniform=True, **pad_kwargs
+                        ),
                         keras.layers.CenterCrop(*image_size, **resize_kwargs),
                     ]
                 )
