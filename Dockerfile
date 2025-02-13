@@ -61,39 +61,22 @@ RUN poetry install -E opencv-python-headless --no-root
 # Set the default backend; override this when building if desired.
 ARG BACKEND=all
 
-# Use the cache for pip downloads and install Keras, keras-cv, and wandb.
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    pip install --upgrade 'keras>=3.6' keras-cv wandb
-
-# Conditionally install TensorFlow if BACKEND is "tensorflow" or "all".
-RUN if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
-      --mount=type=cache,target=$PIP_CACHE_DIR \
-      pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
+RUN \
+    # Always install Keras, keras-cv, and wandb
+    pip install --upgrade 'keras>=3.6' keras-cv wandb && \
+    \
+    # Conditionally install TensorFlow if BACKEND is "tensorflow" or "all"
+    if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
+        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
+    fi && \
+    \
+    # Conditionally install JAX if BACKEND is "jax" or "all"
+    if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
+        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
+    fi && \
+    \
+    # Conditionally install PyTorch and related packages if BACKEND is "torch" or "all"
+    if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
+        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
     fi
 
-# Conditionally install JAX if BACKEND is "jax" or "all".
-RUN if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
-      --mount=type=cache,target=$PIP_CACHE_DIR \
-      pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
-    fi
-
-# Conditionally install PyTorch and related packages if BACKEND is "torch" or "all".
-RUN if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
-      --mount=type=cache,target=$PIP_CACHE_DIR \
-      pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
-    fi
-
-# Source working/installation directory and add motd (message of the day)
-ENV INSTALL /usr/local/src
-RUN echo '[ ! -z "$TERM" -a -r /etc/motd ] && cat /etc/motd' \
-    >> /etc/bash.bashrc \
-    ; echo "\
-================================================================\n\
-    UU   UU   SSSSS   BBBBB    MMM MMM   DDDD     \e[31mv$(pip show usbmd | grep Version | cut -d ' ' -f 2)\e[0m\n\
-    UU   UU  SS       BB   BB  MMMMMMM   DD  D\n\
-    UU   UU   SSSS    BBBBB    MM M MM   DD   D\n\
-    UU   UU      SS   BB   BB  MM   MM   DD  D\n\
-     UUUUU   SSSSS    BBBBB    MM   MM   DDDD     (c) \e[31mTU/e 2021\e[0m\n\
-================================================================\n\
-"\
-    > /etc/motd
