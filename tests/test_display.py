@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from usbmd import display
-from usbmd.setup_usbmd import set_backend
 
 from .helpers import equality_libs_processing
 
@@ -78,7 +77,6 @@ def test_scan_conversion_and_inverse(size, random_data_type):
     For gaussian data, the mean squared error is around 0.09.
     For radial data, the mean squared error is around 0.0002.
     """
-    set_backend("tensorflow")
     from keras import ops  # pylint: disable=reimported,import-outside-toplevel
 
     from usbmd import display  # pylint: disable=reimported,import-outside-toplevel
