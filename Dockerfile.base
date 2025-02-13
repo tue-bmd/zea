@@ -58,7 +58,7 @@ COPY pyproject.toml poetry.lock ./
 # Install usbmd (with headless opencv)
 RUN poetry install -E opencv-python-headless --no-root
 
-# Instsall Keras3 by default
+# Install Keras3 by default
 ARG KERAS3=True
 # Install additional packages if KERAS3=True
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$KERAS3" = "True" ]; then \
