@@ -30,7 +30,7 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          tags: usbmd/full:latest
+          tags: usbmd/all:latest
           cache-from: type=registry,ref=usbmd/all:cache
           cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
