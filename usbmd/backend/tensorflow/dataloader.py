@@ -29,7 +29,6 @@ Allows for flexible indexing and stacking of dimensions. There are a few importa
 import keras
 import tensorflow as tf
 from keras.src.trainers.data_adapters import TFDatasetAdapter
-
 from usbmd.data.dataloader import H5Generator
 from usbmd.data.layers import Resizer
 from usbmd.utils import find_methods_with_return_type, log, translate
@@ -190,9 +189,12 @@ def h5_dataset_from_directory(
             be set when your data is more than (h, w, c). Defaults to None.
         resize_kwargs (dict, optional): kwargs for the resize function.
         image_range (tuple, optional): image range. Defaults to (0, 255).
-            will always normalize from specified image range to normalization range.
-            if image_range is set to None, no normalization will be done.
+            will always translate from specified image range to normalization range.
+            if image_range is set to None, no normalization will be done. Note that it does not
+            clip to the image range, so values outside the image range will be outside the
+            normalization range!
         normalization_range (tuple, optional): normalization range. Defaults to (0, 1).
+            See image_range for more info!
         augmentation (keras.Sequential, optional): keras augmentation layer.
         dataset_repetitions (int, optional): repeat dataset. Note that this happens
             after sharding, so the shard will be repeated. Defaults to None.
