@@ -24,13 +24,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image (base)
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
           push: true
           tags: usbmd/base:latest
+          cache-from: type=registry,ref=usbmd/base:cache
+          cache-to: type=registry,ref=usbmd/base:cache,mode=max
+
+      - name: Build and push Docker image (numpy)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: usbmd/numpy:latest
+          build-args: numpy
           cache-from: type=registry,ref=usbmd/base:cache
           cache-to: type=registry,ref=usbmd/base:cache,mode=max
 
