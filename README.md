@@ -17,21 +17,40 @@ Currently usbmd offers:
 
 ## Installation
 
-### Editable install
+### Preferred Install Method via Docker
 
-This package can be installed like any open-source python package from PyPI.
-Run the following commands from terminal to checkout the toolbox and install:
+The recommended way to install and run usbmd is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in [#file:Install.md](#file:Install.md-context).
+
+To get started with Docker, follow these steps:
 
 ```shell
-# checkout and move into directory
+# Pull the latest docker image with all backends pre-installed
+docker pull usbmd/all:latest
+
+# Run a container, mounting your local repository (replace {CONTAINER-NAME} and {IMAGE-TAG} as needed)
+docker run --name {CONTAINER-NAME} --gpus 'all' \
+    -v ~/ultrasound-toolbox:/ultrasound-toolbox \
+    -d -it -m 100g --cpus 7 --user "$(id -u):$(id -g)" \
+    usbmd/all:latest
+```
+
+> [!TIP]
+> Using Docker avoids any dependency or environment conflicts. For further Docker setup and management instructions, please refer to [Install.md](#file:Install.md-context).
+
+### Alternative - Editable Install using Git
+
+If you prefer not to use Docker, you can install usbmd in editable mode from PyPI by checking out the repository and running:
+
+```shell
+# Checkout and move into the directory
 git clone git@github.com:tue-bmd/ultrasound-toolbox.git
 cd ultrasound-toolbox
-# editable install
+# Editable install without conflicts via headless OpenCV
 pip install -e .[opencv-python-headless]
 ```
 
 > [!TIP]
-> Other install options can be found in the [Install.md](Install.md) file.
+> Other installation options are available in the [Install.md](#file:Install.md-context) file.
 
 
 > [!IMPORTANT]
