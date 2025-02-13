@@ -72,4 +72,4 @@ jobs:
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
             usbmd/base:latest \
-            sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && pytest ./tests"
+            sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && pytest -p no:cacheprovider ./tests"
