@@ -47,6 +47,7 @@ def scan_convert_2d(
     theta_range: Tuple,
     resolution: Union[float, None] = None,
     fill_value: float = 0.0,
+    order: int = 1,
 ):
     """
     Perform scan conversion on a 2D ultrasound image from polar coordinates
@@ -63,6 +64,7 @@ def scan_convert_2d(
             If None, it is calculated based on the input image. In meters / pixel.
         fill_value (float, optional): The value to fill in for coordinates
             outside the input image ranges. Defaults to 0.0.
+        order (int, optional): The order of the spline interpolation. Defaults to 1.
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -126,7 +128,7 @@ def scan_convert_2d(
     # Stack coordinates as required for map_coordinates
     coordinates = ops.stack([rho_idx, theta_idx], axis=0)
 
-    images_sc = _interpolate_batch(image, coordinates, fill_value)
+    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order)
 
     # swap axis to match z, x
     images_sc = ops.swapaxes(images_sc, -1, -2)
@@ -141,6 +143,7 @@ def scan_convert_3d(
     phi_range: Tuple[float, float],
     resolution: Union[float, None] = None,
     fill_value: float = 0.0,
+    order: int = 1,
 ):
     """
     Perform scan conversion on a 3D ultrasound image from polar coordinates
@@ -158,6 +161,7 @@ def scan_convert_3d(
         resolution (float, optional): The resolution for the Cartesian grid.
             If None, it is calculated based on the input image. In meters / pixel.
         fill_value (float, optional): The value to fill in for coordinates
+        order (int, optional): The order of the spline interpolation. Defaults to 1.
 
     Returns:
         ndarray: The scan-converted 3D ultrasound image in Cartesian coordinates.
@@ -232,7 +236,7 @@ def scan_convert_3d(
     # Stack coordinates as required for map_coordinates
     coordinates = ops.stack([rho_idx, theta_idx, phi_idx], axis=0)
 
-    volume = _interpolate_batch(image, coordinates, fill_value)
+    volume = _interpolate_batch(image, coordinates, fill_value, order=order)
 
     # swap axis to match z, x, y
     volume = ops.swapaxes(volume, -3, -2)
@@ -240,7 +244,21 @@ def scan_convert_3d(
     return volume
 
 
-def _interpolate_batch(images, coordinates, fill_value=0.0):
+def map_coordinates(input, coordinates, order, fill_mode="constant", fill_value=0):
+    """map_coordinates using keras.ops or scipy.ndimage when order > 1."""
+    if order > 1:
+        input = ops.convert_to_numpy(input)
+        out = scipy.ndimage.map_coordinates(
+            input, coordinates, order=order, mode=fill_mode, cval=fill_value
+        )
+        return ops.convert_to_tensor(out)
+    else:
+        return ops.image.map_coordinates(
+            input, coordinates, order=order, fill_mode=fill_mode, fill_value=fill_value
+        )
+
+
+def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
     """Interpolate a batch of images."""
     image_shape = images.shape
     num_image_dims = len(coordinates)
@@ -251,8 +269,8 @@ def _interpolate_batch(images, coordinates, fill_value=0.0):
 
     images_sc = []
     for image in images:
-        image_sc = ops.image.map_coordinates(
-            image, coordinates, order=1, fill_mode="constant", fill_value=np.nan
+        image_sc = map_coordinates(
+            image, coordinates, order=order, fill_mode="constant", fill_value=np.nan
         )
         images_sc.append(image_sc)
 
