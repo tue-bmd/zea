@@ -24,26 +24,59 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Build and push Docker image (all)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: usbmd/full:latest
+          cache-from: type=registry,ref=usbmd/all:cache
+          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+
+      - name: Build and push Docker image (tensorflow)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: usbmd/tensorflow:latest
+          build-args: tensorflow
+          cache-from: type=registry,ref=usbmd/all:cache
+          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+
+      - name: Build and push Docker image (torch)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: usbmd/torch:latest
+          build-args: torch
+          cache-from: type=registry,ref=usbmd/all:cache
+          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+
+      - name: Build and push Docker image (jax)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: usbmd/jax:latest
+          build-args: jax
+          cache-from: type=registry,ref=usbmd/all:cache
+          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+
       - name: Build and push Docker image (base)
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile.base
+          file: Dockerfile
           push: true
           tags: usbmd/base:latest
-          cache-from: type=registry,ref=usbmd/base:cache
-          cache-to: type=registry,ref=usbmd/base:cache,mode=max
-
-      - name: Build and push Docker image (numpy)
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: usbmd/numpy:latest
           build-args: numpy
-          cache-from: type=registry,ref=usbmd/base:cache
-          cache-to: type=registry,ref=usbmd/base:cache,mode=max
+          cache-from: type=registry,ref=usbmd/all:cache
+          cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
   pylint:
     needs: build-and-push
@@ -55,7 +88,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Pull Docker base image
-        run: docker pull usbmd/base:latest
+        run: docker pull usbmd/all:latest
 
       - name: Run Pylint in container
         run: |
@@ -79,7 +112,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Pull Docker base image
-        run: docker pull usbmd/base:latest
+        run: docker pull usbmd/all:latest
 
       - name: Run Pytest in container
         run: |
