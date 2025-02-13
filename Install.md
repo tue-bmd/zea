@@ -1,7 +1,6 @@
 # Install usbmd
 
-This document describes how to install the usbmd package and how to use it in a docker container.
-Make sure you always use a virtual environment such as `miniconda` or `venv` to avoid conflicts with other packages!
+This document describes how to install the usbmd package and how to use it in a docker container. Make sure you always use a virtual environment such as `miniconda` or `venv` to avoid conflicts with other packages!
 
 - [Install usbmd](#install-usbmd)
   - [Backend installation](#backend-installation)
@@ -28,24 +27,24 @@ First, install one machine learning backend of choice. Note that usbmd can run w
 - [Install PyTorch](https://pytorch.org/get-started/locally/)
 - [Install TensorFlow](https://www.tensorflow.org/install)
 
-
 ## Editable install
 
-This package can be installed like any open-source python package from PyPI.
-Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from terminal:
+This package can be installed like any open-source python package from PyPI. Make sure you are in the root folder (`ultrasound-toolbox`) where the [`pyproject.toml`](pyproject.toml) file is located and run the following command from the terminal:
 
 ```bash
 pip install -e .[opencv-python-headless,dev]
 ```
 
-This installes the dev dependencies and opencv without the GUI backend. This means it [does not conflict with matplotlib](https://github.com/tue-bmd/ultrasound-toolbox/issues/410).
-In case you need the opencv GUI backend, you can install it with `pip install -e .[opencv-python]`.
+This installs the dev dependencies and opencv without the GUI backend. This means it [does not conflict with matplotlib](https://github.com/tue-bmd/ultrasound-toolbox/issues/410).
+In case you need the opencv GUI backend, you can install it with:
+
+```bash
+pip install -e .[opencv-python]
+```
 
 ## Install from github
 
-You can also directly install the package from github. This is useful if you want to install a specific release or branch and keep it fixed in your environment.
-Note that this is supported from usbmd v1.2.6 onward.
-You can install from Github using either a Github Personal Access Token or and SSH key.
+You can also directly install the package from github. This is useful if you want to install a specific release or branch and keep it fixed in your environment. Note that this is supported from usbmd v1.2.6 onward. You can install from Github using either a Github Personal Access Token or an SSH key.
 
 ### Using a Personal Access Token
 
@@ -56,23 +55,41 @@ Prepare: [Setup personal access tokens for organisation](https://docs.github.com
     - **Only select repositories**: _ultrasound-toolbox_
     - **Repository permissions**: Contents = _Read-only_
 2. Find the release you want to install, e.g. [the latest](https://github.com/tue-bmd/ultrasound-toolbox/releases/latest)
-3. `pip install git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}`
-    - e.g. `RELEASE`=v1.2.7
-    - e.g. `RELEASE`=main
+3. Run:
+
+```bash
+pip install git+https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}
+```
+
+For example:
+
+- `RELEASE` = v1.2.7
+- `RELEASE` = main
 
 ### Using an SSH key
 
-Alternatively you could use ssh access to the repository and install using:
-`pip install git+ssh://git@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}`
+Alternatively, use ssh access to the repository and install using:
 
-SSH might be a bit harder to setup, but is more convenient in the end.
+```bash
+pip install git+ssh://git@github.com/tue-bmd/ultrasound-toolbox.git@{RELEASE}
+```
 
-For this you have to make sure that git is using the correct SSH provider. On windows multiple may exist.
+SSH might be a bit harder to set up, but is more convenient in the end. For this you have to make sure that git is using the correct SSH provider. On Windows multiple providers may exist.
 I have set the environment variable GIT_SSH=C:\windows\System32\OpenSSH\ssh.exe
 
-If your ssh key has a passphrase to protect it, you must use an ssh-agent because [pip does not prompt for the passphrase](https://github.com/pypa/pip/issues/7308). Also here, Git for Windows comes with the command `start-ssh-agent`, which should **NOT** be used if you use OpenSSH from windows. Then you should start it with `ssh-agent -s`. And add your key with `ssh-add`.
+If your ssh key has a passphrase, you must use an ssh-agent because [pip does not prompt for the passphrase](https://github.com/pypa/pip/issues/7308). With Git for Windows the command `start-ssh-agent` is available, but it should **NOT** be used with OpenSSH from Windows. Instead, start with:
 
-If you get host key errors, you may need to update your known host for Github, see https://github.blog/2023-03-23-we-updated-our-rsa-ssh-host-key/.
+```bash
+ssh-agent -s
+```
+
+and add your key with:
+
+```bash
+ssh-add
+```
+
+If you get host key errors, update your known hosts for Github. See https://github.blog/2023-03-23-we-updated-our-rsa-ssh-host-key/.
 
 ### Resources
 
@@ -84,87 +101,119 @@ If you get host key errors, you may need to update your known host for Github, s
 
 ## Docker
 
-### Build
+This repository provides multiple Docker images built and tested in our CI pipeline.
 
-We provide two Docker images in this repository. The first is a base image that includes only the necessary packages and dependencies for usbmd to run. However it comes without any machine learning backends. The second image includes the base image and also installs compatible versions of `torch`, `tensorflow` and `jax`.
+Public images:
+- usbmd/base: Built from [Dockerfile](#file:Dockerfile-context). This image contains all necessary system dependencies and a Keras installed with only the Numpy backend.
+- usbmd/all: This image includes support for all machine learning backends (TensorFlow, PyTorch, and JAX).
+  The [ci-pipeline.yaml](#file:ci-pipeline.yaml-context) builds and pushes several specialized images with specific backends:
+  - usbmd/tensorflow
+  - usbmd/torch
+  - usbmd/jax
 
-#### Base
-
-You can build a docker image from the dockerfile in this repository.
-This will include all the necessary packages and dependencies.
+These images are uploaded to Docker Hub and can be used directly in your projects via:
 
 ```shell
-cd ~/
-git clone git@github.com:tue-bmd/ultrasound-toolbox.git
-cd ultrasound-toolbox
+docker pull usbmd/all:latest
+```
+
+Private images:
+- usbmd/private: Built from [Dockerfile.private](#file:Dockerfile.private-context). This image inherits from usbmd/all, copies your repository, performs an editable installation of usbmd, and adds a Message of the Day showing the usbmd version. This image is also used for development with VSCode, as described below.
+
+### Build
+
+To manually build the base image from the Dockerfile:
+
+```shell
 docker build . -t usbmd/base:latest
 ```
 
-This will build the image `usbmd/base:latest`.
-
-#### Keras 3
-
-Additionally, the dockerfile also includes the build-arg `KERAS3` which can be set to `true` to install keras 3 with `torch`, `tensorflow` and `jax`.
+To build the full image with all backends (the default is BACKEND=all):
 
 ```shell
-docker build --build-arg KERAS3=True . -t usbmd/keras3:latest
+docker build --build-arg BACKEND=all . -t usbmd/all:latest
 ```
 
-This will build the image `usbmd/keras3:latest`.
-
-### Run
-Here is an example of how to run the docker container with the image you just built. Note that there exist [many flags](https://docs.docker.com/reference/cli/docker/container/run/) you may use.
+To build the image with a specific backend, run one of the following:
 
 ```shell
-docker run --name {CONTAINER-NAME} --gpus 'all' -v ~/{NAS-MOUNT}:/mnt/z/ -v ~/ultrasound-toolbox:/ultrasound-toolbox -d -it -m 100g --cpus 7 --user "$(id -u):$(id -g)" {IMAGE-NAME}:{IMAGE-TAG}
+docker build --build-arg BACKEND=jax . -t usbmd/jax:latest
+```
+
+```shell
+docker build --build-arg BACKEND=torch . -t usbmd/torch:latest
+```
+
+```shell
+docker build --build-arg BACKEND=tensorflow . -t usbmd/tensorflow:latest
+```
+
+### Run
+
+Run a container with one of the built images. Ensure you mount your repository at `/ultrasound-toolbox` so that changes are reflected inside the container, and use your user and group IDs to avoid permission issues.
+
+```shell
+docker run --name {CONTAINER-NAME} --gpus 'all' \
+  -v ~/ultrasound-toolbox:/ultrasound-toolbox \
+  -d -it -m 100g --cpus 7 --user "$(id -u):$(id -g)" \
+  {IMAGE-NAME}:{IMAGE-TAG}
 ```
 
 Which means:
 - `docker run`: create and run a new container from an image
 - `--name`: name the container
 - `--gpus`: GPU devices to add to the container ('all' to pass all GPUs)
-- `-v` = `--volume`: Bind mount a volume
-- `-d`=`--detach`: starts a container as a background process that doesn't occupy your terminal window
-- `-it`: makes the container start look like a terminal connection session
-	- `--interactive`: Keep STDIN open even if not attached
-	- `--tty`: Allocate a pseudo-TTY
-- `-m` = `--memory`: Memory limit (use g for gigabytes)
-- `--cpus`: Number of cores to use
-- `--user`: Run as a specific user
+- `-v` = `--volume`: bind mount a volume
+- `-d` = `--detach`: starts the container as a background process
+- `-it`: makes the container start as an interactive terminal session
+   - `--interactive`: keep STDIN open
+   - `--tty`: allocate a pseudo-TTY
+- `-m` = `--memory`: memory limit (use g for gigabytes)
+- `--cpus`: number of cores to use
+- `--user`: run as a specific user
+
+The container uses `/bin/bash` as its entrypoint, allowing you to interactively use shell commands.
 
 > [!IMPORTANT]
-> Note that it is important to mount your `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container, so that the changes you make are reflected in the usbmd installation inside the container. Additionally, you should use your user id and group id with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
+> Mount your `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container so that changes are reflected in the usbmd installation inside the container. Additionally, use your user ID and group ID with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
 
 > [!TIP]
-> The docker container sets a random hostname by default. You can set a hostname with the `--hostname` flag. This is useful for the `users.yaml` file. Alternatively, you can use the `hostname` wildcard in the `users.yaml` file.
+> The docker container sets a random hostname by default. You can set a hostname with the `--hostname` flag. This is useful for the `users.yaml` file. Alternatively, you can use the hostname wildcard in the `users.yaml` file.
 
 Alternative flags:
-- `-w` = `--workdir`: Working directory inside the container
-- `--rm`: Automatically remove the container when it *exits*
-- `--env-file`: Load environment variables from a .env file
+- `-w` = `--workdir`: set the working directory inside the container
+- `--rm`: automatically remove the container when it *exits*
+- `--env-file`: load environment variables from a .env file
 
 ### Attach / start / stop
-Now you can attach to the container with:
+
+To attach to the container:
 
 ```shell
 docker attach {CONTAINER-NAME}
 ```
 
-Starting and stopping with `docker start {CONTAINER-NAME}` and `docker stop {CONTAINER-NAME}`.
+Start and stop the container with:
 
-### Development in the container using vscode
+```shell
+docker start {CONTAINER-NAME}
+```
 
-You can use vscode to attach to the running container and develop in it.
-You can install your vscode extensions in the container.
-The easiest is to keep re-using this container so do not delete it after use.
+```shell
+docker stop {CONTAINER-NAME}
+```
 
-#### Using git
+### Development in the Container using VSCode
 
-Make sure that the the ssh-agent is running and your ssh key is added to it. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found [here](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials).
+You can use the VSCode Remote Containers extension to attach to the running container for development. A `.devcontainer.json` file is provided which specifies the Docker image to use, the volumes to mount, and the extensions to install. To use it, ensure the Remote Containers extension is installed in VSCode, then click the devcontainer icon in the bottom left corner and select "Reopen in Container". To revert to the host environment, click the devcontainer icon again and select "Reopen Locally".
 
-#### Installing more packages
+### Using git
 
-If you want to install some packages after the image has been build and you are in the container as your user, make sure to use `sudo`.
+Ensure that the ssh-agent is running and your ssh key is added. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found [here](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials).
+
+### Installing more packages
+
+If you need to install additional packages after the image has been built and you are in the container as your user, use `sudo`:
 
 ```shell
 sudo pip install {PACKAGE}
