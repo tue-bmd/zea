@@ -387,12 +387,12 @@ class H5Processor:
 
         usbmd_dataset = {
             "path": out_h5,
-            "image": self.translate(sequence),
+            "image_sc": self.translate(sequence),
             "probe_name": "generic",
             "description": "EchoNet dataset converted to USBMD format",
         }
         if accepted:
-            usbmd_dataset["image_sc"] = self.translate(polar_im_set)
+            usbmd_dataset["image"] = self.translate(polar_im_set)
         return generate_usbmd_dataset(**usbmd_dataset)
 
 
