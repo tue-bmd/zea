@@ -3,7 +3,7 @@
 {
 	"name": "usbmd",
 	"build": {
-		"dockerfile": "Dockerfile",
+		"dockerfile": "../Dockerfile",
 		"context": "."
 	},
 	"runArgs": [
