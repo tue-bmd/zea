@@ -59,18 +59,27 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry install -E opencv-python-headless --no-root
 
 # Set the default backend; override this when building if desired.
-ARG BACKEND all
+ARG BACKEND=all
 
 RUN if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
-    pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
+    echo "Installing tensorflow..."; \
+    pip install --extra-index-url https://pypi.nvidia.com "tensorflow[and-cuda]==2.15.0"; \
+    else \
+    echo "Skipping tensorflow..."; \
     fi
 
 RUN if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
-    pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
+    echo "Installing jax..."; \
+    pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html "jax[cuda12_pip]==0.4.26"; \
+    else \
+    echo "Skipping jax..."; \
     fi
 
 RUN if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
+    echo "Installing torch..."; \
     pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
+    else \
+    echo "Skipping torch..."; \
     fi
 
 # Install Keras last to ensure its version 3.x
