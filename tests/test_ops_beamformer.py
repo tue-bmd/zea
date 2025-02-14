@@ -8,9 +8,9 @@ from tests.test_processing import equality_libs_processing
 from usbmd import beamformer
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
+from usbmd.ops_v2 import Pipeline, Simulate
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
-from usbmd.utils.simulator import UltrasoundSimulator
 
 
 def _get(reconstruction_mode):
@@ -26,7 +26,7 @@ def _get(reconstruction_mode):
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        n_ax=2047,
+        n_ax=2046,  # TODO: vincent 2047 doesn't work here
         sampling_frequency=probe_parameters["sampling_frequency"],
         center_frequency=probe_parameters["center_frequency"],
         polar_angles=np.array([0.0]),
@@ -43,13 +43,37 @@ def _get(reconstruction_mode):
     scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
     scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
 
-    simulator = UltrasoundSimulator(probe, scan)
+    # use pipeline here so it is easy to propagate the scan parameters
+    simulator = Pipeline(
+        [Simulate(apply_lens_correction=scan.apply_lens_correction, n_ax=scan.n_ax)]
+    )
 
     # Generate pseudorandom input tensor
-    data = simulator.generate(200)
+    # Define scatterers
+    scat_x, scat_z = np.meshgrid(
+        np.linspace(-10e-3, 10e-3, 5),
+        np.linspace(5e-3, 30e-3, 5),
+        indexing="ij",
+    )
+    scat_x, scat_z = np.ravel(scat_x), np.ravel(scat_z)
+    n_scat = len(scat_x)
+    scat_positions = np.stack(
+        [
+            scat_x,
+            np.zeros_like(scat_x),
+            scat_z,
+        ],
+        axis=1,
+    )
+    output = simulator(
+        scan,
+        probe,
+        scatterer_positions=scat_positions.astype(np.float32),
+        scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
+    )
+    data = output["raw_data"]
 
-    inputs = np.expand_dims(data[0], axis=(1, -1))
-    return config, probe, scan, data, inputs
+    return config, probe, scan, data
 
 
 @equality_libs_processing()
@@ -59,7 +83,7 @@ def test_tof_correction(reconstruction_mode="generic"):
 
     from keras import ops  # pylint: disable=import-outside-toplevel
 
-    _, probe, scan, _, inputs = _get(reconstruction_mode)
+    _, probe, scan, inputs = _get(reconstruction_mode)
 
     # round inputs a bit to avoid numerical issues
     inputs = np.round(inputs, 2)
