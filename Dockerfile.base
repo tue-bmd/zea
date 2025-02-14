@@ -59,7 +59,7 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry install -E opencv-python-headless --no-root
 
 # Set the default backend; override this when building if desired.
-ARG BACKEND=all
+ARG BACKEND all
 
 RUN if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
     pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
