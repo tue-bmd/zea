@@ -27,7 +27,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile
+          file: Dockerfile.base
           push: true
           tags: usbmd/all:latest
           cache-from: type=registry,ref=usbmd/all:cache
