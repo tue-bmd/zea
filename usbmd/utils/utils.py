@@ -14,7 +14,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
-
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_uint8_images
 
@@ -129,6 +128,7 @@ def preprocess_for_saving(images):
 
     return images
 
+
 def save_to_gif(images, filename, fps=20):
     """Saves a sequence of images to .gif file.
     Args:
@@ -159,7 +159,7 @@ def save_to_gif(images, filename, fps=20):
         .quantize(
             colors=256,
             # Use median cut to generate the palette
-            method=Image.MEDIANCUT, # pylint: disable=no-member
+            method=Image.MEDIANCUT,  # pylint: disable=no-member
             # Use k-means to refine the palette
             kmeans=1,
         )
@@ -167,10 +167,24 @@ def save_to_gif(images, filename, fps=20):
 
     # Apply the same palette to all frames without dithering
     # for consistent color mapping
+    # Convert all images to RGB and combine their colors for palette generation
+    all_colors = np.vstack(
+        [np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs]
+    )
+    combined_image = Image.fromarray(all_colors.reshape(-1, 1, 3))
+
+    # Generate palette from all frames
+    global_palette = combined_image.quantize(
+        colors=256,
+        method=Image.MEDIANCUT,  # pylint: disable=no-member
+        kmeans=1,
+    )
+
+    # Apply the same palette to all frames without dithering
     pillow_imgs = [
         img.convert("RGB").quantize(
-            palette=first_frame,
-            dither=Image.NONE, # pylint: disable=no-member
+            palette=global_palette,
+            dither=Image.NONE,  # pylint: disable=no-member
         )
         for img in pillow_imgs
     ]
