@@ -53,7 +53,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile
+          file: Dockerfile.base
           push: true
           tags: usbmd/tensorflow:latest
           build-args: tensorflow
@@ -64,7 +64,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile
+          file: Dockerfile.base
           push: true
           tags: usbmd/torch:latest
           build-args: torch
@@ -75,7 +75,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile
+          file: Dockerfile.base
           push: true
           tags: usbmd/jax:latest
           build-args: jax
@@ -86,7 +86,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile
+          file: Dockerfile.base
           push: true
           tags: usbmd/base:latest
           build-args: numpy
