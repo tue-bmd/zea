@@ -61,22 +61,17 @@ RUN poetry install -E opencv-python-headless --no-root
 # Set the default backend; override this when building if desired.
 ARG BACKEND=all
 
-RUN \
-    # Always install Keras, keras-cv, and wandb
-    pip install --upgrade 'keras>=3.6' keras-cv wandb && \
-    \
-    # Conditionally install TensorFlow if BACKEND is "tensorflow" or "all"
-    if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
-        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
-    fi && \
-    \
-    # Conditionally install JAX if BACKEND is "jax" or "all"
-    if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
-        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
-    fi && \
-    \
-    # Conditionally install PyTorch and related packages if BACKEND is "torch" or "all"
-    if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
-        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
+RUN if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
+    pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0; \
     fi
 
+RUN if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
+    pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
+    fi
+
+RUN if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
+    pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
+    fi
+
+# Install Keras last to ensure its version 3.x
+RUN pip install --upgrade 'keras>=3.6' keras-cv wandb
