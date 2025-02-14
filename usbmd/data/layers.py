@@ -15,29 +15,29 @@ from usbmd.utils.utils import map_negative_indices
 
 
 def _prep_to_shape(shape_array, pad_to_shape, axis):
-    if axis is not None:
-        if isinstance(axis, int):
-            axis = [axis]
-        assert len(axis) == len(
-            pad_to_shape
-        ), "The length of axis must be equal to the length of pad_to_shape."
-        axis = map_negative_indices(axis, len(shape_array))
+    if isinstance(axis, int):
+        axis = [axis]
+    assert len(axis) == len(
+        pad_to_shape
+    ), "The length of axis must be equal to the length of pad_to_shape."
+    axis = map_negative_indices(axis, len(shape_array))
 
-        pad_to_shape = [
-            pad_to_shape[axis.index(i)] if i in axis else shape_array[i]
-            for i in range(len(shape_array))
-        ]
+    pad_to_shape = [
+        pad_to_shape[axis.index(i)] if i in axis else shape_array[i]
+        for i in range(len(shape_array))
+    ]
     return pad_to_shape
 
 
-class PadToShape(TFDataLayer):
+class Pad(TFDataLayer):
     """Pad layer for padding tensors to a specified shape."""
 
     def __init__(
         self,
         pad_to_shape: list | tuple,
-        uniform: bool = False,
+        uniform: bool = True,
         axis: Union[int, List[int]] = None,
+        fail_on_bigger_shape: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -45,17 +45,19 @@ class PadToShape(TFDataLayer):
         self.uniform = uniform
         self.axis = axis
         self.kwargs = kwargs
+        self.fail_on_bigger_shape = fail_on_bigger_shape
 
     def pad_to_shape(
         self,
         z,
         pad_to_shape: list | tuple,
-        uniform: bool = False,
+        uniform: bool = True,
         axis: Union[int, List[int]] = None,
+        fail_on_bigger_shape: bool = True,
         **kwargs,
     ):
         """
-        Pads the input tensor `z` to the specified shape `pad_to_shape`.
+        Pads the input tensor `z` to the specified shape.
 
         Parameters:
             z (tensor): The input tensor to be padded.
@@ -65,6 +67,9 @@ class PadToShape(TFDataLayer):
             axis (int or list of int, optional): The axis or axes along which `pad_to_shape` was
                 specified. If None, `len(pad_to_shape) == `len(ops.shape(z))` must hold.
                 Default is None.
+            fail_on_bigger_shape (bool, optional): If True, raises an error if the target shape is
+                bigger than the input shape. If False, will pad to match the target shape wherever
+                needed. Default is True.
             kwargs: Additional keyword arguments to pass to the padding function.
 
         Returns:
@@ -73,7 +78,13 @@ class PadToShape(TFDataLayer):
         shape_array = self.backend.shape(z)
 
         # When axis is provided, convert pad_to_shape
-        pad_to_shape = _prep_to_shape(shape_array, pad_to_shape, axis)
+        if axis is not None:
+            pad_to_shape = _prep_to_shape(shape_array, pad_to_shape, axis)
+
+        if not fail_on_bigger_shape:
+            pad_to_shape = [
+                max(pad_to_shape[i], shape_array[i]) for i in range(len(shape_array))
+            ]
 
         # Compute the padding required for each dimension
         pad_shape = np.array(pad_to_shape) - shape_array
@@ -92,32 +103,12 @@ class PadToShape(TFDataLayer):
 
     def call(self, inputs):
         return self.pad_to_shape(
-            inputs, self._pad_to_shape, self.uniform, self.axis, **self.kwargs
-        )
-
-
-class PadUntilShape(PadToShape):
-    """Pad layer for padding tensors until a specified shape."""
-
-    def __init__(self, pad_until_shape, **kwargs):
-        super().__init__(pad_to_shape=pad_until_shape, **kwargs)
-
-    def pad_until_shape(self, z, pad_until_shape, axis=None, **kwargs):
-        """
-        This function will pad `z` until it reaches the shape specified by `pad_until_shape`.
-        If it already is bigger, it will not be padded. Uses pad_to_shape internally.
-        """
-        shape_array = self.backend.shape(z)
-
-        pad_until_shape = _prep_to_shape(shape_array, pad_until_shape, axis)
-        pad_until_shape = [
-            max(pad_until_shape[i], shape_array[i]) for i in range(len(shape_array))
-        ]
-        return self.pad_to_shape(z, pad_until_shape, axis=None, **kwargs)
-
-    def call(self, inputs):
-        return self.pad_until_shape(
-            inputs, self._pad_to_shape, self.axis, uniform=self.uniform, **self.kwargs
+            inputs,
+            self._pad_to_shape,
+            self.uniform,
+            self.axis,
+            self.fail_on_bigger_shape,
+            **self.kwargs,
         )
 
 
@@ -147,7 +138,8 @@ class Resizer(TFDataLayer):
                 ['center_crop'](https://keras.io/api/layers/preprocessing_layers/image_preprocessing/center_crop/),
                 ['random_crop'](https://keras.io/api/layers/preprocessing_layers/image_augmentation/random_crop/),
                 ['resize'](https://keras.io/api/layers/preprocessing_layers/image_preprocessing/resizing/),
-                'center_crop_pad' (pad_until_shape followed by center_crop).
+                'crop_or_pad': resizes an image to a target width and height by either centrally
+                    cropping the image, padding it evenly with zeros or a combination of both.
             resize_axes (tuple | None, optional): The axes along which to resize.
                 Must be of length 2. Defaults to None. In that case, can only process
                 default tensors of shape (batch, height, width, channels), where the
@@ -173,7 +165,7 @@ class Resizer(TFDataLayer):
                 self.resizer = keras.layers.RandomCrop(
                     *image_size, seed=seed, **resize_kwargs
                 )
-            elif resize_type == "center_crop_pad":
+            elif resize_type == "crop_or_pad":
                 pad_kwargs = {}
                 if "constant_values" in resize_kwargs:
                     pad_kwargs["constant_values"] = resize_kwargs.pop("constant_values")
@@ -181,8 +173,12 @@ class Resizer(TFDataLayer):
                     pad_kwargs["mode"] = resize_kwargs.pop("mode")
                 self.resizer = keras.layers.Pipeline(
                     [
-                        PadUntilShape(
-                            image_size, axis=(-3, -2), uniform=True, **pad_kwargs
+                        Pad(
+                            image_size,
+                            axis=(-3, -2),
+                            uniform=True,
+                            fail_on_bigger_shape=False,
+                            **pad_kwargs,
                         ),
                         keras.layers.CenterCrop(*image_size, **resize_kwargs),
                     ]
