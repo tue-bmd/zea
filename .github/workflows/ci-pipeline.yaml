@@ -101,6 +101,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
       - name: Pull full Docker image
         run: docker pull usbmd/all:latest
 
@@ -114,7 +117,7 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all:latest \
-            sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
+            sh -c "pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
 
   tests:
     needs: build-full-image
@@ -123,6 +126,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
 
       - name: Pull full Docker image
         run: docker pull usbmd/all:latest
@@ -137,4 +143,4 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all:latest \
-            sh -c "git config --global --add safe.directory /ultrasound-toolbox && pip install -e . && pytest -p no:cacheprovider ./tests"
+            sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
