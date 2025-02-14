@@ -138,7 +138,6 @@ from usbmd.scan import Scan
 from usbmd.tensor_ops import patched_map
 from usbmd.utils import lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
-from usbmd.simulator import simulate_rf
 
 # make sure to reload all modules that import keras
 # to be able to set backend properly
