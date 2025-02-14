@@ -35,7 +35,7 @@
 				"ms-python.black-formatter",
 				"ms-python.isort",
 				"sleistner.vscode-fileutils",
-				"gihub.copilot",
+				"github.copilot",
 				"adpyke.codesnap",
 				"eamodio.gitlens",
 				"h5web.vscode-h5web",
