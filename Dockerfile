@@ -22,6 +22,3 @@ RUN echo '[ ! -z "$TERM" -a -r /etc/motd ] && cat /etc/motd' \
 ================================================================\n\
 "\
     > /etc/motd
-
-# Set entrypoint
-ENTRYPOINT ["/bin/bash"]
