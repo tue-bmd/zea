@@ -402,6 +402,20 @@ def plot_frustum_vertices(
 
     Raises:
         ValueError: If no plane is specified (phi_plane, theta_plane, or rho_plane).
+
+    Example:
+        >>> rho_range = [0.1, 10]  # in mm
+        >>> theta_range = [-0.6, 0.6]  # in rad
+        >>> phi_range = [-0.6, 0.6]  # in rad
+        >>> fig, ax = plot_frustum_vertices(
+        ...     rho_range,
+        ...     theta_range=theta_range,
+        ...     phi_range=phi_range,
+        ...     phi_plane=0,
+        ...     phi_color="red",
+        ...     theta_plane=0.2,
+        ...     color_frustum="blue",
+        ... )
     """
     # Convert single values to lists
     phi_plane = [phi_plane] if isinstance(phi_plane, (int, float)) else phi_plane
