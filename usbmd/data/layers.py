@@ -14,43 +14,43 @@ from usbmd.utils.utils import map_negative_indices
 # pylint: disable=arguments-differ
 
 
-def _prep_to_shape(shape_array, pad_to_shape, axis):
-    if isinstance(axis, int):
-        axis = [axis]
-    assert len(axis) == len(
-        pad_to_shape
-    ), "The length of axis must be equal to the length of pad_to_shape."
-    axis = map_negative_indices(axis, len(shape_array))
-
-    pad_to_shape = [
-        pad_to_shape[axis.index(i)] if i in axis else shape_array[i]
-        for i in range(len(shape_array))
-    ]
-    return pad_to_shape
-
-
 class Pad(TFDataLayer):
     """Pad layer for padding tensors to a specified shape."""
 
     def __init__(
         self,
-        pad_to_shape: list | tuple,
+        target_shape: list | tuple,
         uniform: bool = True,
         axis: Union[int, List[int]] = None,
         fail_on_bigger_shape: bool = True,
         **kwargs,
     ):
         super().__init__()
-        self._pad_to_shape = pad_to_shape
+        self.target_shape = target_shape
         self.uniform = uniform
         self.axis = axis
         self.kwargs = kwargs
         self.fail_on_bigger_shape = fail_on_bigger_shape
 
-    def pad_to_shape(
+    @staticmethod
+    def _format_target_shape(shape_array, target_shape, axis):
+        if isinstance(axis, int):
+            axis = [axis]
+        assert len(axis) == len(
+            target_shape
+        ), "The length of axis must be equal to the length of target_shape."
+        axis = map_negative_indices(axis, len(shape_array))
+
+        target_shape = [
+            target_shape[axis.index(i)] if i in axis else shape_array[i]
+            for i in range(len(shape_array))
+        ]
+        return target_shape
+
+    def pad(
         self,
         z,
-        pad_to_shape: list | tuple,
+        target_shape: list | tuple,
         uniform: bool = True,
         axis: Union[int, List[int]] = None,
         fail_on_bigger_shape: bool = True,
@@ -61,11 +61,11 @@ class Pad(TFDataLayer):
 
         Parameters:
             z (tensor): The input tensor to be padded.
-            pad_to_shape (list or tuple): The target shape to pad the tensor to.
+            target_shape (list or tuple): The target shape to pad the tensor to.
             uniform (bool, optional): If True, ensures that padding is uniform (even on both sides).
                 Default is False.
-            axis (int or list of int, optional): The axis or axes along which `pad_to_shape` was
-                specified. If None, `len(pad_to_shape) == `len(ops.shape(z))` must hold.
+            axis (int or list of int, optional): The axis or axes along which `target_shape` was
+                specified. If None, `len(target_shape) == `len(ops.shape(z))` must hold.
                 Default is None.
             fail_on_bigger_shape (bool, optional): If True, raises an error if the target shape is
                 bigger than the input shape. If False, will pad to match the target shape wherever
@@ -77,17 +77,17 @@ class Pad(TFDataLayer):
         """
         shape_array = self.backend.shape(z)
 
-        # When axis is provided, convert pad_to_shape
+        # When axis is provided, convert target_shape
         if axis is not None:
-            pad_to_shape = _prep_to_shape(shape_array, pad_to_shape, axis)
+            target_shape = self._format_target_shape(shape_array, target_shape, axis)
 
         if not fail_on_bigger_shape:
-            pad_to_shape = [
-                max(pad_to_shape[i], shape_array[i]) for i in range(len(shape_array))
+            target_shape = [
+                max(target_shape[i], shape_array[i]) for i in range(len(shape_array))
             ]
 
         # Compute the padding required for each dimension
-        pad_shape = np.array(pad_to_shape) - shape_array
+        pad_shape = np.array(target_shape) - shape_array
 
         # Create the paddings array
         if uniform:
@@ -102,9 +102,9 @@ class Pad(TFDataLayer):
         return self.backend.numpy.pad(z, paddings, **kwargs)
 
     def call(self, inputs):
-        return self.pad_to_shape(
+        return self.target_shape(
             inputs,
-            self._pad_to_shape,
+            self.target_shape,
             self.uniform,
             self.axis,
             self.fail_on_bigger_shape,
