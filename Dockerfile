@@ -5,7 +5,7 @@ FROM usbmd/all:latest
 WORKDIR /ultrasound-toolbox
 COPY . /ultrasound-toolbox/
 
-# Install usbmd (with headless opencv)
+# Install usbmd
 RUN pip install -e .
 
 # Source working/installation directory and add motd (message of the day)
