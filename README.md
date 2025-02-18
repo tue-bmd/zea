@@ -33,10 +33,6 @@ cd ultrasound-toolbox
 pip install -e .[opencv-python-headless]
 ```
 
-> [!TIP]
-> Other installation options are available in the [Install.md](#file:Install.md-context) file.
-
-
 > [!IMPORTANT]
 > You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the [Jax installation guide](https://jax.readthedocs.io/en/latest/installation.html). The easiest way to set up your environment is through the provided docker image (see [Install.md](Install.md#docker)), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running `pip install usbmd[jax]` although this is not extensively tested (yet).
 
