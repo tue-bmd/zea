@@ -167,12 +167,8 @@ dmypy.json
 .pyre/
 
 ################ DOCKER SPECIFIC ################
-/Dockerfile
 /.devcontainer/
 /.github/
-/configs/
-/docs/
-/examples/
 /.git/
 /.gitattributes
 /.gitignore
