@@ -17,22 +17,21 @@ Currently usbmd offers:
 
 ## Installation
 
-### Editable install
+### Preferred Install Method via Docker
 
-This package can be installed like any open-source python package from PyPI.
-Run the following commands from terminal to checkout the toolbox and install:
+The recommended way to install and run usbmd is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in [Install.md](Install.md)
+
+### Alternative - Editable Install using Git
+
+If you prefer not to use Docker, you can install usbmd in editable mode from PyPI by checking out the repository and running:
 
 ```shell
-# checkout and move into directory
+# Checkout and move into the directory
 git clone git@github.com:tue-bmd/ultrasound-toolbox.git
 cd ultrasound-toolbox
-# editable install
+# Editable install without conflicts via headless OpenCV
 pip install -e .[opencv-python-headless]
 ```
-
-> [!TIP]
-> Other install options can be found in the [Install.md](Install.md) file.
-
 
 > [!IMPORTANT]
 > You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the [Jax installation guide](https://jax.readthedocs.io/en/latest/installation.html). The easiest way to set up your environment is through the provided docker image (see [Install.md](Install.md#docker)), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running `pip install usbmd[jax]` although this is not extensively tested (yet).
