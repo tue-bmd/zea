@@ -19,7 +19,7 @@ Currently usbmd offers:
 
 ### Preferred Install Method via Docker
 
-The recommended way to install and run usbmd is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in [#file:Install.md](#file:Install.md-context).
+The recommended way to install and run usbmd is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in [Install.md](Install.md)
 
 ### Alternative - Editable Install using Git
 
