@@ -10,9 +10,6 @@ Make sure you always use a virtual environment such as `miniconda` or `venv` to 
     - [Using a Personal Access Token](#using-a-personal-access-token)
     - [Using an SSH key](#using-an-ssh-key)
     - [Resources](#resources)
-    - [Using git](#using-git)
-  - [Installing More Packages](#installing-more-packages)
-
 - [Docker](#docker)
   - [Pre-built images](#pre-built-images)
     - [Public images](#public-images)
@@ -21,6 +18,8 @@ Make sure you always use a virtual environment such as `miniconda` or `venv` to 
   - [Run](#run)
   - [Attach / Start / Stop](#attach--start--stop)
   - [Development in the Container using VSCode](#development-in-the-container-using-vscode)
+    - [Using git](#using-git)
+    - [Installing More Packages](#installing-more-packages)
 
 ## Backend installation
 
@@ -76,18 +75,6 @@ If your ssh key has a passphrase to protect it, you must use an ssh-agent becaus
 
 If you get host key errors, you may need to update your known host for Github, see https://github.blog/2023-03-23-we-updated-our-rsa-ssh-host-key/.
 
-### Using git
-
-Ensure that the ssh-agent is running and your SSH key is added. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found [here](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials).
-
-## Installing More Packages
-
-If you need to install additional packages after the image has been built and you are in the container as your user, use `sudo`:
-
-```shell
-sudo pip install {PACKAGE}
-```
-
 ### Resources
 
 - https://docs.readthedocs.io/en/stable/guides/private-python-packages.html
@@ -102,7 +89,9 @@ This repository provides multiple Docker images built and tested in our CI pipel
 
 ## Pre-built images
 
-### Public images Built from [Dockerfile.base](#file:Dockerfile.base-context):
+### Public images
+
+These images are all build on top of [Dockerfile.base](#file:Dockerfile.base-context):
 - usbmd/all: This image includes support for all machine learning backends (TensorFlow, PyTorch, and JAX).
 - usbmd/tensorflow: This image includes support for TensorFlow.
 - usbmd/torch: This image includes support for PyTorch.
@@ -114,7 +103,7 @@ These images are uploaded to Docker Hub via the CI pipeline and can be used dire
 docker pull usbmd/all:latest
 ```
 
-### Private images:
+### Private images
 - usbmd/private: Built from [Dockerfile](#file:Dockerfile-context). This image inherits from usbmd/all, copies your repository, performs an editable installation of usbmd, and adds a Message of the Day displaying the usbmd version. This image is also used for development with VSCode, as described below.
 
 The private image is not uploaded to Docker Hub and must be built manually to prevent pushing private code to a public repository. If you use VSCode, you can use the provided `.devcontainer.json` file to attach to the private image for development, see [Development in the Container using VSCode](#development-in-the-container-using-vscode).
@@ -197,3 +186,15 @@ docker stop {CONTAINER-NAME}
 ## Development in the Container using VSCode
 
 You can use the VSCode Remote Containers extension to attach to the running container for development. A `.devcontainer.json` file is provided which specifies the Docker image to use, the volumes to mount, and the extensions to install. To use it, ensure the Remote Containers extension is installed in VSCode, then click the devcontainer icon in the bottom left corner and select "Reopen in Container". To revert to the host environment, click the devcontainer icon again and select "Reopen Locally".
+
+### Using git
+
+Ensure that the ssh-agent is running and your SSH key is added. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found [here](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials).
+
+### Installing More Packages
+
+If you need to install additional packages after the image has been built and you are in the container as your user, use `sudo`:
+
+```shell
+sudo pip install {PACKAGE}
+```
