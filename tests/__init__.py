@@ -2,11 +2,11 @@
 
 import os
 
-DEFAULT_TEST_BACKEND = "tensorflow"
+# Running tests on cpu for now...
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["JAX_PLATFORMS"] = "cpu"
 
+# Set default backend for tests
+DEFAULT_TEST_BACKEND = "tensorflow"
 os.environ["KERAS_BACKEND"] = DEFAULT_TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
-
-from usbmd import init_device
-
-init_device(backend=None)
