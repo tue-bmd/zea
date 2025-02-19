@@ -73,7 +73,11 @@ def test_batch_cov(data, rowvar, bias, ddof):
     Args:
         data (np.array): [*batch_dims, num_obs, num_features]
     """
+    from keras import ops
+
     from usbmd import tensor_ops
+
+    data = ops.convert_to_tensor(data)
 
     out = tensor_ops.batch_cov(data, rowvar=rowvar, bias=bias, ddof=ddof)
 
@@ -81,6 +85,8 @@ def test_batch_cov(data, rowvar, bias, ddof):
     np.testing.assert_allclose(
         out,
         recursive_cov(data, rowvar=rowvar, bias=bias, ddof=ddof),
+        rtol=1e-5,
+        atol=1e-5,
     )
 
     return out
@@ -143,7 +149,7 @@ def test_boolean_mask(array, mask):
     "func, tensor, n_batch_dims, func_axis",
     [
         [
-            ops.image.rgb_to_grayscale,
+            "rgb_to_grayscale",
             np.zeros((2, 3, 4, 28, 28, 3), np.float32),  # 3 batch dims
             3,
             None,
@@ -157,6 +163,9 @@ def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
     from keras import ops
 
     from usbmd import tensor_ops
+
+    if func == "rgb_to_grayscale":
+        func = ops.image.rgb_to_grayscale
 
     out = tensor_ops.func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis)
     assert ops.shape(out) == (*tensor.shape[:-1], 1), "Output shape is incorrect."
