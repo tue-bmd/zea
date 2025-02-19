@@ -226,6 +226,8 @@ def test_up_and_down_conversion(factor, batch_size):
 def test_hilbert_transform():
     """Test hilbert transform"""
 
+    from keras import ops as kops
+
     from usbmd import ops
 
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
