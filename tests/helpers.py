@@ -1,6 +1,7 @@
 """Helper functions for testing"""
 
 import multiprocessing
+import os
 import pickle
 
 import decorator
@@ -13,7 +14,8 @@ from usbmd.setup_usbmd import set_backend
 def run_test_in_process(test_func, *args, seed=42, _keras_backend=None, **kwargs):
     """Run a test function in a separate process for a specific backend."""
 
-    def func_wrapper(queue):
+    def func_wrapper(queue, env):
+        os.environ.update(env)
         try:
             set_backend(_keras_backend)
             import keras  # pylint: disable=import-outside-toplevel
@@ -26,10 +28,20 @@ def run_test_in_process(test_func, *args, seed=42, _keras_backend=None, **kwargs
             queue.put(e)
 
     queue = multiprocessing.Queue()
-    process = multiprocessing.Process(target=func_wrapper, args=(queue,))
+    process = multiprocessing.Process(
+        target=func_wrapper,
+        args=(
+            queue,
+            os.environ.copy(),
+        ),
+    )
     process.start()
+    try:
+        output = queue.get(timeout=60)
+    except Exception as e:
+        process.terminate()
+        raise RuntimeError("Test function timed out") from e
     process.join()
-    output = queue.get()
     if isinstance(output, Exception):
         raise output
     return pickle.loads(output)
