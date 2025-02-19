@@ -5,7 +5,7 @@ import pytest
 
 from usbmd import display
 
-from .helpers import equality_libs_processing
+from .helpers import equality_libs_processing, run_in_backend
 
 
 @pytest.mark.parametrize(
@@ -71,6 +71,7 @@ def test_scan_conversion(size, resolution):
         ((100, 333), "radial"),
     ],
 )
+@run_in_backend("numpy")
 def test_scan_conversion_and_inverse(size, random_data_type):
     """Tests the scan_conversion function with random data and
     invert the data with transform_sc_image_to_polar.

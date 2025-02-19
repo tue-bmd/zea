@@ -1,5 +1,6 @@
 """Helper functions for testing"""
 
+import functools
 import multiprocessing
 import os
 import pickle
@@ -11,7 +12,28 @@ import numpy as np
 from usbmd.setup_usbmd import set_backend
 
 
-def run_test_in_process(test_func, *args, seed=42, _keras_backend=None, **kwargs):
+def run_in_backend(backend, seed=42):
+    """
+    Decorator to run a test function in one specific backend.
+
+    Args:
+        backend (str): Backend to run the test in.
+        seed (int): Seed to set for the backend. Defaults to 42.
+    """
+
+    def decorator(test_func):
+        @functools.wraps(test_func)
+        def wrapper(*args, **kwargs):
+            return run_test_in_process(
+                test_func, *args, _seed=seed, _keras_backend=backend, **kwargs
+            )
+
+        return wrapper
+
+    return decorator
+
+
+def run_test_in_process(test_func, *args, _seed=42, _keras_backend=None, **kwargs):
     """Run a test function in a separate process for a specific backend."""
 
     def func_wrapper(queue, env):
@@ -20,9 +42,11 @@ def run_test_in_process(test_func, *args, seed=42, _keras_backend=None, **kwargs
             set_backend(_keras_backend)
             import keras  # pylint: disable=import-outside-toplevel
 
-            keras.utils.set_random_seed(seed)
+            keras.utils.set_random_seed(_seed)
             with jax.disable_jit():
-                result = np.array(test_func(*args, **kwargs))
+                result = test_func(*args, **kwargs)
+            if result is not None:
+                result = np.array(result)
             queue.put(pickle.dumps(result))
         except Exception as e:
             queue.put(e)
