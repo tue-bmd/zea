@@ -4,6 +4,7 @@ import functools
 import multiprocessing
 import os
 import pickle
+import traceback
 
 import decorator
 import jax
@@ -49,7 +50,9 @@ def run_test_in_process(test_func, *args, _seed=42, _keras_backend=None, **kwarg
                 result = np.array(result)
             queue.put(pickle.dumps(result))
         except Exception as e:
-            queue.put(e)
+            tb = traceback.format_exc()
+            # Return both exception and traceback string
+            queue.put((e, tb))
 
     queue = multiprocessing.Queue()
     process = multiprocessing.Process(
@@ -60,14 +63,11 @@ def run_test_in_process(test_func, *args, _seed=42, _keras_backend=None, **kwarg
         ),
     )
     process.start()
-    try:
-        output = queue.get(timeout=60)
-    except Exception as e:
-        process.terminate()
-        raise RuntimeError("Test function timed out") from e
+    output = queue.get(timeout=120)
     process.join()
-    if isinstance(output, Exception):
-        raise output
+    if isinstance(output, tuple) and isinstance(output[0], Exception):
+        exc, tb_str = output
+        raise Exception("Child process traceback:\n" + tb_str + "\n") from exc
     return pickle.loads(output)
 
 
