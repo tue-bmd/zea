@@ -292,7 +292,7 @@ def test_h5_dataset_return_filename(
             "random_crop",
         ),
         (DUMMY_DATASET_PATH, "data", (20, 23), "random_crop"),
-        (DUMMY_DATASET_PATH, "data", (32, 32), "center_crop_pad"),
+        (DUMMY_DATASET_PATH, "data", (32, 32), "crop_or_pad"),
     ],
 )
 def test_h5_dataset_resize_types(
@@ -328,9 +328,9 @@ def test_h5_dataset_resize_types(
     ), f"The images should be resized to {image_size}, but got {images.shape[:-1]}"
 
 
-def test_center_crop_pad():
-    """Test the resize_type="center_crop_pad" for to behave as expected"""
-    resizer = Resizer(np.array(DUMMY_IMAGE_SHAPE) * 2, resize_type="center_crop_pad")
+def test_crop_or_pad():
+    """Test the resize_type="crop_or_pad" for to behave as expected"""
+    resizer = Resizer(np.array(DUMMY_IMAGE_SHAPE) * 2, resize_type="crop_or_pad")
 
     inp = np.random.rand(1, *DUMMY_IMAGE_SHAPE, 1)
     out = resizer(inp)

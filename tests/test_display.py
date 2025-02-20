@@ -5,7 +5,6 @@ import pytest
 
 from usbmd import display
 
-from . import run_once_after_all_tests  # pylint: disable=unused-import
 from . import equality_libs_processing, run_in_backend
 
 

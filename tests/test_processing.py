@@ -14,7 +14,6 @@ from usbmd.probes import get_probe
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
-from . import run_once_after_all_tests  # pylint: disable=unused-import
 from . import equality_libs_processing
 
 
