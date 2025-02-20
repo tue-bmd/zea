@@ -8,6 +8,7 @@ import cloudpickle as pickle
 import decorator
 import jax
 import numpy as np
+import pytest
 
 from usbmd.setup_usbmd import set_backend
 
@@ -164,16 +165,23 @@ def run_in_backend(backend):
 
     Args:
         backend (str): Backend to run the test in.
-        seed (int): Seed to set for the backend. Defaults to 42.
     """
 
     def decorator(test_func):
         @functools.wraps(test_func)
         def wrapper(*args, **kwargs):
-            start_func_in_backend(test_func, args, kwargs, backend)
+            job_id = get_job_id(test_func.__name__)
+            start_func_in_backend(test_func, args, kwargs, backend, job_id)
             result_queue = {backend: result_queues[backend]}
             return collect_results(result_queue)
 
         return wrapper
 
     return decorator
+
+
+@pytest.fixture(scope="session", autouse=True)
+def run_once_after_all_tests():
+    yield
+    print("Stopping workers")
+    stop_workers()
