@@ -3,6 +3,8 @@
 import functools
 import multiprocessing
 import os
+import traceback
+from queue import Empty
 
 import cloudpickle as pickle
 import decorator
@@ -18,7 +20,7 @@ job_queues = {}
 job_ids = {}
 
 
-def worker(job_queue, result_queues, env, backend, seed):
+def worker(job_queue, result_queue, env, backend, seed):
     # setup worker
     os.environ.update(env)
     set_backend(backend)
@@ -41,12 +43,14 @@ def worker(job_queue, result_queues, env, backend, seed):
                 result = func(*args, **kwargs)
                 if result is not None:
                     result = np.array(result)
-                result_queues.put((job_id, result))
+                result_queue.put((job_id, result))
             except Exception as e:
-                result_queues.put((job_id, e))
+                tb = traceback.format_exc()
+                result_queue.put((job_id, (e, tb)))
 
 
 def start_workers(backends, seed=42):
+    global result_queues, processes, job_queues
     env = os.environ.copy()
     for backend in backends:
         result_queues[backend] = multiprocessing.Queue()
@@ -59,6 +63,7 @@ def start_workers(backends, seed=42):
 
 
 def start_func_in_backend(func, args, kwargs, backend, job_id):
+    global job_queues
     if backend not in job_queues:
         start_workers([backend])
     job_queue = job_queues[backend]
@@ -71,24 +76,36 @@ def collect_results(result_queues, timeout: int = 30):
     results = {}
     job_ids = []
     for backend, result_queue in result_queues.items():
-        job_id, result = result_queue.get(timeout=timeout)
-        job_ids.append(job_id)
-        results[backend] = result
+        try:
+            job_id, result = result_queue.get(timeout=timeout)
+            job_ids.append(job_id)
+            results[backend] = result
+        except Empty:
+            raise TimeoutError(
+                f"Timeout occurred while waiting for results from backend {backend}"
+            )
     assert len(set(job_ids)) in [
         0,
         1,
     ], f"Job IDs do not match across backends: {job_ids}"
-    for result in results.values():
-        if isinstance(result, Exception):
-            raise result
+    for backend, result in results.items():
+        if isinstance(result, tuple) and isinstance(result[0], Exception):
+            raise Exception(
+                f"Child process traceback for backend {backend}:\n" + result[1] + "\n"
+            ) from result[0]
     return results
 
 
 def stop_workers():
+    global result_queues, processes, job_queues, job_ids
     for job_queue in job_queues.values():
         job_queue.put(None)
     for process in processes.values():
         process.join()
+    result_queues = {}
+    processes = {}
+    job_queues = {}
+    job_ids = {}
 
 
 def get_job_id(name):
@@ -122,6 +139,7 @@ def equality_libs_processing(
                 return output # <-- return the output!
         ```
     """
+    global result_queues
     gt_backend = "numpy"
     if backends is None:
         backends = ["tensorflow", "torch", "jax"]
@@ -166,6 +184,7 @@ def run_in_backend(backend):
     Args:
         backend (str): Backend to run the test in.
     """
+    global result_queues
 
     def decorator(test_func):
         @functools.wraps(test_func)
