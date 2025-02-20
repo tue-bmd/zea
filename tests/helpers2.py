@@ -30,12 +30,17 @@ def worker(job_queue, result_queues, env, backend, seed):
             if job is None:  # Signal to exit
                 break
 
-            job_id, func_blob, args, kwargs = job
-            func = pickle.loads(func_blob)
-            result = func(*args, **kwargs)
-            if result is not None:
-                result = np.array(result)
-            result_queues.put((job_id, result))
+            try:
+                job_id, func_blob, args_blob, kwargs_blob = job
+                func = pickle.loads(func_blob)
+                args = pickle.loads(args_blob)
+                kwargs = pickle.loads(kwargs_blob)
+                result = func(*args, **kwargs)
+                if result is not None:
+                    result = np.array(result)
+                result_queues.put((job_id, result))
+            except Exception as e:
+                result_queues.put((job_id, e))
 
 
 def start_workers(backends, seed=42):
@@ -54,22 +59,29 @@ def start_workers(backends, seed=42):
 # job_queues, result_queues, processes = start_workers(backends)
 
 
-def start_func_in_backend(func, args, kwargs, backend):
+def start_func_in_backend(func, args, kwargs, backend, job_id):
     if backend not in job_queues:
         start_workers([backend])
     job_queue = job_queues[backend]
-    job_id = hashlib.md5(str((func.__name__, args, kwargs)).encode()).hexdigest()
-    job_queue.put((job_id, pickle.dumps(func), args, kwargs))
+    job_queue.put(
+        (job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs))
+    )
 
 
-def collect_results(result_queues):
+def collect_results(result_queues, timeout: int = 30):
     results = {}
     job_ids = []
     for backend, result_queue in result_queues.items():
-        job_id, result = result_queue.get(timeout=60)
+        job_id, result = result_queue.get(timeout=timeout)
         job_ids.append(job_id)
-        results[backend] = result
-    assert len(set(job_ids)) == 1, "Job IDs do not match across backends."
+        if isinstance(result, Exception):
+            raise result
+        else:
+            results[backend] = result
+    assert len(set(job_ids)) in [
+        0,
+        1,
+    ], f"Job IDs do not match across backends: {job_ids}"
     return results
 
 
@@ -81,7 +93,7 @@ def stop_workers():
 
 
 def equality_libs_processing(
-    decimal=4, backends: list | None = None, verbose: bool = False
+    decimal=4, backends: list | None = None, verbose: bool = False, timeout: int = 30
 ):
     """Test the processing functions of different libraries
 
@@ -115,10 +127,14 @@ def equality_libs_processing(
 
         # Use process-based isolation for test_func
         for backend in [gt_backend, *backends]:
-            start_func_in_backend(test_func, args, kwargs, backend)
+            job_id = str((test_func.__name__, args, kwargs))
+            start_func_in_backend(test_func, args, kwargs, backend, job_id)
 
         # Collect results before signaling the worker to stop
-        output = collect_results(result_queues)
+        result_queues_local = {
+            backend: result_queues[backend] for backend in [gt_backend, *backends]
+        }
+        output = collect_results(result_queues_local, timeout=timeout)
 
         # Check if the outputs from the individual test functions are equal
         for backend in backends:
