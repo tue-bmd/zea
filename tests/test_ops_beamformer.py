@@ -5,12 +5,14 @@
 
 import numpy as np
 
-from tests.test_processing import equality_libs_processing
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
+
+from . import run_once_after_all_tests  # pylint: disable=unused-import
+from . import equality_libs_processing
 
 
 def _get(reconstruction_mode):
@@ -52,7 +54,7 @@ def _get(reconstruction_mode):
     return config, probe, scan, data, inputs
 
 
-@equality_libs_processing()
+@equality_libs_processing(timeout=60)
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends.
     Also ensures that the output is the same when it is split into patches"""
@@ -80,7 +82,7 @@ def test_tof_correction(reconstruction_mode="generic"):
         fdemod=scan.fdemod,
         fnum=scan.f_number,
         angles=scan.polar_angles,
-        vfocus=scan.focus_distances,
+        vfocus=float(scan.focus_distances),
     )
     for key, item in kwargs.items():
         # If item is a floating point numpy array, convert to float32
