@@ -67,15 +67,10 @@ class EqualityLibsProcessing:
     def start_func_in_backend(self, func, args, kwargs, backend, job_id):
         if backend not in self.job_queues:
             self.start_workers([backend])
-        try:
-            job_queue = self.job_queues[backend]
-            job_queue.put(
-                (job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs))
-            )
-        except:
-            raise Exception(
-                f"Failed to start function {func.__name__} in backend {backend}"
-            )
+        job_queue = self.job_queues[backend]
+        job_queue.put(
+            (job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs))
+        )
 
     @staticmethod
     def collect_results(result_queues, timeout: int = 30):
@@ -125,6 +120,7 @@ class EqualityLibsProcessing:
         self,
         decimal=4,
         backends: list | None = None,
+        gt_backend: str = "numpy",
         verbose: bool = False,
         timeout: int = 30,
     ):
@@ -147,10 +143,11 @@ class EqualityLibsProcessing:
                     return output # <-- return the output!
             ```
         """
-        gt_backend = "numpy"
         if backends is None:
             backends = ["tensorflow", "torch", "jax"]
-        assert gt_backend not in backends, "numpy is already tested."
+        assert (
+            gt_backend not in backends
+        ), f"gt_backend: {gt_backend} is already tested."
         all_backends = [gt_backend, *backends]
         if verbose:
             print(f"Running tests with backends: {backends}")
