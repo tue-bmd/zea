@@ -14,8 +14,10 @@ import pytest
 import torch
 from keras import ops
 
-from tests.helpers2 import equality_libs_processing, stop_workers
 from usbmd import tensor_ops
+
+from . import run_once_after_all_tests  # pylint: disable=unused-import
+from . import equality_libs_processing
 
 
 @pytest.mark.parametrize(
@@ -215,7 +217,7 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     # Verify contents match
     np.testing.assert_allclose(restored, data, rtol=1e-5, atol=1e-5)
 
-    return restored  # Return for equality_libs_processing decorator
+    return restored
 
 
 @pytest.fixture
@@ -399,9 +401,3 @@ def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
     )
     np.testing.assert_allclose(image, reconstructed_image, rtol=1e-5, atol=1e-5)
     return reconstructed_image
-
-
-@pytest.fixture(scope="module", autouse=True)
-def run_once_after_all_tests():
-    yield
-    stop_workers()
