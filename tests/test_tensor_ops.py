@@ -14,7 +14,7 @@ import pytest
 import torch
 from keras import ops
 
-from tests.helpers import equality_libs_processing
+from tests.helpers2 import equality_libs_processing, stop_workers
 from usbmd import tensor_ops
 
 
@@ -399,3 +399,9 @@ def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
     )
     np.testing.assert_allclose(image, reconstructed_image, rtol=1e-5, atol=1e-5)
     return reconstructed_image
+
+
+@pytest.fixture(scope="module", autouse=True)
+def run_once_after_all_tests():
+    yield
+    stop_workers()
