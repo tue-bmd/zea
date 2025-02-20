@@ -11,7 +11,6 @@ from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
-from . import run_once_after_all_tests  # pylint: disable=unused-import
 from . import equality_libs_processing
 
 
@@ -34,7 +33,7 @@ def _get(reconstruction_mode):
         polar_angles=np.array([0.0]),
     )
     scan._focus_distances = (
-        np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
+        np.array([0.0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
     # Set scan grid parameters
@@ -82,7 +81,7 @@ def test_tof_correction(reconstruction_mode="generic"):
         fdemod=scan.fdemod,
         fnum=scan.f_number,
         angles=scan.polar_angles,
-        vfocus=float(scan.focus_distances),
+        vfocus=scan.focus_distances,
     )
     for key, item in kwargs.items():
         # If item is a floating point numpy array, convert to float32
@@ -106,7 +105,3 @@ def test_tof_correction(reconstruction_mode="generic"):
 
     keras.utils.clear_session(free_memory=True)  # Free memory
     return outputs[0]
-
-
-if __name__ == "__main__":
-    test_tof_correction()
