@@ -4,6 +4,7 @@ import functools
 import multiprocessing
 import os
 import pickle
+import time
 import traceback
 
 import decorator
@@ -34,13 +35,15 @@ def run_in_backend(backend, seed=42):
     return decorator
 
 
-def run_test_in_process(test_func, *args, _seed=42, _keras_backend=None, **kwargs):
+def run_test_in_process(test_func, *args, _seed=42, _keras_backends=None, **kwargs):
     """Run a test function in a separate process for a specific backend."""
 
-    def func_wrapper(queue, env):
+    def func_wrapper(queue, env, backend):
+        print(f"Running {test_func.__name__} in {backend}")
+        start_time = time.perf_counter()
         os.environ.update(env)
         try:
-            set_backend(_keras_backend)
+            set_backend(backend)
             import keras  # pylint: disable=import-outside-toplevel
 
             keras.utils.set_random_seed(_seed)
@@ -49,26 +52,38 @@ def run_test_in_process(test_func, *args, _seed=42, _keras_backend=None, **kwarg
             if result is not None:
                 result = np.array(result)
             queue.put(pickle.dumps(result))
+            func_time = time.perf_counter() - start_time
+            print(f"{test_func.__name__} in {backend} took {func_time} seconds")
         except Exception as e:
             tb = traceback.format_exc()
             # Return both exception and traceback string
             queue.put((e, tb))
 
-    queue = multiprocessing.Queue()
-    process = multiprocessing.Process(
-        target=func_wrapper,
-        args=(
-            queue,
-            os.environ.copy(),
-        ),
-    )
-    process.start()
-    output = queue.get(timeout=120)
-    process.join()
-    if isinstance(output, tuple) and isinstance(output[0], Exception):
-        exc, tb_str = output
-        raise Exception("Child process traceback:\n" + tb_str + "\n") from exc
-    return pickle.loads(output)
+    if not _keras_backends:
+        raise ValueError("No backends provided to run the test in.")
+
+    processes = {}
+    queues = {}
+    outputs = {}
+    for backend in _keras_backends:
+        queue = multiprocessing.Queue()
+        p = multiprocessing.Process(
+            target=func_wrapper,
+            args=(queue, os.environ.copy(), backend),
+        )
+        processes[backend] = p
+        queues[backend] = queue
+        p.start()
+    for backend, p in processes.items():
+        output = queues[backend].get(timeout=120)
+        p.join()
+        if isinstance(output, tuple) and isinstance(output[0], Exception):
+            exc, tb_str = output
+            raise Exception(
+                f"Child process traceback for backend {backend}:\n" + tb_str + "\n"
+            ) from exc
+        outputs[backend] = pickle.loads(output)
+    return outputs
 
 
 def equality_libs_processing(
@@ -104,15 +119,10 @@ def equality_libs_processing(
         # Extract function name from test function
         func_name = test_func.__name__.split("test_", 1)[-1]
 
-        output = {}
-        for backend in [gt_backend, *backends]:
-            if verbose:
-                print(f"Running {func_name} in {backend}")
-
-            # Use process-based isolation for test_func
-            output[backend] = run_test_in_process(
-                test_func, *args, **kwargs, _keras_backend=backend
-            )
+        # Use process-based isolation for test_func
+        output = run_test_in_process(
+            test_func, *args, **kwargs, _keras_backends=[gt_backend, *backends]
+        )
 
         # Check if the outputs from the individual test functions are equal
         for backend in backends:
