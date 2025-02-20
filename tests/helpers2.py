@@ -1,5 +1,6 @@
+"""Helper functions for testing"""
+
 import functools
-import hashlib
 import multiprocessing
 import os
 
@@ -13,6 +14,7 @@ from usbmd.setup_usbmd import set_backend
 result_queues = {}
 processes = {}
 job_queues = {}
+job_ids = {}
 
 
 def worker(job_queue, result_queues, env, backend, seed):
@@ -55,10 +57,6 @@ def start_workers(backends, seed=42):
         processes[backend].start()
 
 
-# backends = ["tensorflow", "torch", "jax", "numpy"]
-# job_queues, result_queues, processes = start_workers(backends)
-
-
 def start_func_in_backend(func, args, kwargs, backend, job_id):
     if backend not in job_queues:
         start_workers([backend])
@@ -74,14 +72,14 @@ def collect_results(result_queues, timeout: int = 30):
     for backend, result_queue in result_queues.items():
         job_id, result = result_queue.get(timeout=timeout)
         job_ids.append(job_id)
-        if isinstance(result, Exception):
-            raise result
-        else:
-            results[backend] = result
+        results[backend] = result
     assert len(set(job_ids)) in [
         0,
         1,
     ], f"Job IDs do not match across backends: {job_ids}"
+    for result in results.values():
+        if isinstance(result, Exception):
+            raise result
     return results
 
 
@@ -90,6 +88,15 @@ def stop_workers():
         job_queue.put(None)
     for process in processes.values():
         process.join()
+
+
+def get_job_id(name):
+    name = str(name)
+    if name not in job_ids:
+        job_ids[name] = 0
+    else:
+        job_ids[name] += 1
+    return name + "_" + str(job_ids[name])
 
 
 def equality_libs_processing(
@@ -118,6 +125,7 @@ def equality_libs_processing(
     if backends is None:
         backends = ["tensorflow", "torch", "jax"]
     assert gt_backend not in backends, "numpy is already tested."
+    all_backends = [gt_backend, *backends]
     if verbose:
         print(f"Running tests with backends: {backends}")
 
@@ -126,13 +134,13 @@ def equality_libs_processing(
         func_name = test_func.__name__.split("test_", 1)[-1]
 
         # Use process-based isolation for test_func
-        for backend in [gt_backend, *backends]:
-            job_id = str((test_func.__name__, args, kwargs))
+        job_id = get_job_id(test_func.__name__)
+        for backend in all_backends:
             start_func_in_backend(test_func, args, kwargs, backend, job_id)
 
         # Collect results before signaling the worker to stop
         result_queues_local = {
-            backend: result_queues[backend] for backend in [gt_backend, *backends]
+            backend: result_queues[backend] for backend in all_backends
         }
         output = collect_results(result_queues_local, timeout=timeout)
 
