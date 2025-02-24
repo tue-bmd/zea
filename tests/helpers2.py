@@ -10,6 +10,7 @@ import cloudpickle as pickle
 import decorator
 import jax
 import numpy as np
+import pytest
 
 
 class EqualityLibsProcessing:
@@ -82,8 +83,13 @@ class EqualityLibsProcessing:
 
     @staticmethod
     def collect_results(result_queues, timeout: int = 30):
-        """Collect results from the result queues of the workers.
-        Will wait for all backends to return a result or raise a TimeoutError."""
+        """
+        Collect results from the result queues of the workers.
+        Will wait for all backends to return a result or raise a TimeoutError.
+
+        Returns:
+            dict: Results for each backend in `result_queues.keys()`.
+        """
         results = {}
         job_ids = []
         for backend, result_queue in result_queues.items():
@@ -92,9 +98,12 @@ class EqualityLibsProcessing:
                 job_ids.append(job_id)
                 results[backend] = result
             except Empty as exc:
-                raise TimeoutError(
-                    f"Timeout occurred while waiting for results from backend {backend}"
-                ) from exc
+                msg = (
+                    f"Timeout occurred while waiting for results from backend {backend}, "
+                    + "possibly also from other backends."
+                )
+                pytest.fail(msg)
+                raise TimeoutError(msg) from exc
         assert len(set(job_ids)) in [
             0,
             1,
@@ -108,11 +117,13 @@ class EqualityLibsProcessing:
                 ) from result[0]
         return results
 
-    def stop_workers(self):
+    def stop_workers(self, force=True):
         """Stop all workers. This should be called at the end of the test session."""
         for job_queue in self.job_queues.values():
             job_queue.put(None)
         for process in self.processes.values():
+            if force:
+                process.terminate()
             process.join()
         self.result_queues = {}
         self.processes = {}
@@ -186,15 +197,23 @@ class EqualityLibsProcessing:
             output = self.collect_results(result_queues_local, timeout=timeout)
 
             # Check if the outputs from the individual test functions are equal
+            errors = []
             for i, backend in enumerate(backends):
-                np.testing.assert_almost_equal(
-                    output[gt_backend],
-                    output[backend],
-                    decimal=decimal[i],
-                    err_msg=f"Function {func_name} failed with {backend} processing.",
+                try:
+                    np.testing.assert_almost_equal(
+                        output[gt_backend],
+                        output[backend],
+                        decimal=decimal[i],
+                        err_msg=f"Function {func_name} failed with {backend} processing.",
+                    )
+                    if verbose:
+                        print(f"Function {func_name} passed with {backend} output.")
+                except AssertionError as e:
+                    errors.append(str(e))
+            if errors:
+                raise AssertionError(
+                    "Errors occurred in backends:\n" + "\n".join(errors)
                 )
-                if verbose:
-                    print(f"Function {func_name} passed with {backend} output.")
 
         return decorator.decorator(wrapper)
 
@@ -212,7 +231,7 @@ class EqualityLibsProcessing:
                 job_id = self.get_job_id(test_func.__name__)
                 self.start_func_in_backend(test_func, args, kwargs, backend, job_id)
                 result_queue = {backend: self.result_queues[backend]}
-                return self.collect_results(result_queue)
+                return self.collect_results(result_queue)[backend]
 
             return wrapper
 
