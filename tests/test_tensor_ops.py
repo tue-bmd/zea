@@ -16,7 +16,7 @@ from keras import ops
 
 from usbmd import tensor_ops
 
-from . import equality_libs_processing
+from . import backend_equality_check
 
 
 @pytest.mark.parametrize(
@@ -28,7 +28,7 @@ from . import equality_libs_processing
         [np.random.normal(size=(5, 10, 15, 20, 25)), 0, 2],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_flatten(array, start_dim, end_dim):
     """Test the `flatten` function to `torch.flatten`."""
     from usbmd import tensor_ops
@@ -66,7 +66,7 @@ _DEFAULT_BATCH_COV_KWARGS = {"rowvar": True, "bias": False, "ddof": None}
         [np.random.normal(size=(1, 4, 3, 3)), False, True, 1],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_batch_cov(data, rowvar, bias, ddof):
     """
     Test the `batch_cov` function to `np.cov` with multiple batch dimensions.
@@ -114,7 +114,7 @@ def test_extend_n_dims():
         [np.random.normal(size=(3, 5, 5)), 5],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_matrix_power(array, n):
     """Test matrix_power to np.linalg.matrix_power."""
     from usbmd import tensor_ops
@@ -139,7 +139,7 @@ def test_matrix_power(array, n):
         [np.random.normal(size=(2, 28, 28)), np.random.uniform(size=(2, 28, 28)) > 0.5],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_boolean_mask(array, mask):
     """Tests if boolean_mask runs."""
     from keras import ops
@@ -164,7 +164,7 @@ def test_boolean_mask(array, mask):
         ],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
     """Tests if func_with_one_batch_dim runs."""
 
@@ -189,7 +189,7 @@ def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
         [(10, 20, 30), 0, 2, 1],
     ],
 )
-@equality_libs_processing(backends=["tensorflow", "jax"])
+@backend_equality_check(backends=["tensorflow", "jax"])
 def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     """Test that stack_volume_data_along_axis and split_volume_data_from_axis
     are inverse operations.
@@ -251,7 +251,7 @@ def _test_function():
         ],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
     """Test the batched_map function using _test_function fixture."""
     from keras import ops
@@ -311,7 +311,7 @@ def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
         [np.random.normal(size=(5, 6, 7, 8)), 2, 0],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_pad_array_to_divisible(array, divisor, axis):
     """Test the pad_array_to_divisible function."""
     from keras import ops
@@ -360,7 +360,7 @@ def test_pad_array_to_divisible(array, divisor, axis):
         [np.random.normal(size=(1, 28, 28, 3)), (6, 6), (2, 2)],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_images_to_patches(image, patch_size, overlap):
     """Test the images_to_patches function."""
     from usbmd import tensor_ops
@@ -381,7 +381,7 @@ def test_images_to_patches(image, patch_size, overlap):
         [np.random.normal(size=(1, 7, 7, 4, 4, 1)), (28, 28, 1), (2, 2), "average"],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_patches_to_images(patches, image_shape, overlap, window_type):
     """Test the patches_to_images function."""
     from usbmd import tensor_ops
@@ -399,7 +399,7 @@ def test_patches_to_images(patches, image_shape, overlap, window_type):
         [np.random.normal(size=(1, 28, 28, 1)), (4, 4), (2, 2), "average"],
     ],
 )
-@equality_libs_processing()
+@backend_equality_check()
 def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
     """Test images_to_patches and patches_to_images together."""
     from usbmd import tensor_ops
