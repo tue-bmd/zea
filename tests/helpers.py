@@ -79,7 +79,7 @@ def run_test_in_process(test_func, *args, _seed=42, _keras_backends=None, **kwar
         p.join()
         if isinstance(output, tuple) and isinstance(output[0], Exception):
             exc, tb_str = output
-            raise Exception(
+            raise RuntimeError(
                 f"Child process traceback for backend {backend}:\n" + tb_str + "\n"
             ) from exc
         outputs[backend] = pickle.loads(output)
