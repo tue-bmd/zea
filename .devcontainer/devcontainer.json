@@ -1,8 +1,11 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-dockerfile
 {
-	"name": "usbmd keras3",
-	"image": "usbmd/keras3:latest",
+	"name": "usbmd",
+	"build": {
+		"dockerfile": "../Dockerfile",
+		"context": "."
+	},
 	"runArgs": [
 		"--gpus", "all",
 		"-m",
@@ -32,7 +35,7 @@
 				"ms-python.black-formatter",
 				"ms-python.isort",
 				"sleistner.vscode-fileutils",
-				"gihub.copilot",
+				"github.copilot",
 				"adpyke.codesnap",
 				"eamodio.gitlens",
 				"h5web.vscode-h5web",
