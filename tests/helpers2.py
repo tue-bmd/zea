@@ -81,8 +81,7 @@ class EqualityLibsProcessing:
             (job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs))
         )
 
-    @staticmethod
-    def collect_results(result_queues, timeout: int = 30):
+    def collect_results(self, result_queues, timeout: int = 30):
         """
         Collect results from the result queues of the workers.
         Will wait for all backends to return a result or raise a TimeoutError.
@@ -98,6 +97,9 @@ class EqualityLibsProcessing:
                 job_ids.append(job_id)
                 results[backend] = result
             except Empty as exc:
+                # stop all the workers
+                # this can be done in a more elegant way, e.g. only stopping the backend that fails
+                self.stop_workers()
                 msg = (
                     f"Timeout occurred while waiting for results from backend {backend}, "
                     + "possibly also from other backends."
