@@ -14,7 +14,7 @@ from usbmd.probes import get_probe
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
-from . import equality_libs_processing
+from . import backend_equality_check
 
 
 @pytest.mark.parametrize(
@@ -26,7 +26,7 @@ from . import equality_libs_processing
         ("mu", (512, 512), (50, 300)),
     ],
 )
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
 
@@ -64,7 +64,7 @@ def test_companding(comp_type, size, parameter_value_range):
         ((1, 128, 32), None, None),
     ],
 )
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
 
@@ -104,7 +104,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
         ((1, 128, 32), (50, 51), (-2.2, 3.0)),
     ],
 )
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
 
@@ -221,7 +221,7 @@ def test_up_and_down_conversion(factor, batch_size):
     ), "Data is not equal after up and down conversion."
 
 
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_hilbert_transform():
     """Test hilbert transform"""
 
@@ -255,7 +255,7 @@ def test_hilbert_transform():
     return data_iq
 
 
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_processing_class():
     """Test the processing class"""
 
