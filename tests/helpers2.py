@@ -130,7 +130,7 @@ class EqualityLibsProcessing:
 
     def equality_libs_processing(
         self,
-        decimal=4,
+        decimal: int | list = 4,
         backends: list | None = None,
         gt_backend: str = "numpy",
         verbose: bool = False,
@@ -157,6 +157,12 @@ class EqualityLibsProcessing:
         """
         if backends is None:
             backends = ["tensorflow", "torch", "jax"]
+        if isinstance(decimal, int):
+            decimal = [decimal] * len(backends)
+        else:
+            assert len(decimal) == len(
+                backends
+            ), "decimal must be an integer or a list."
         assert (
             gt_backend not in backends
         ), f"gt_backend: {gt_backend} is already tested."
@@ -180,11 +186,11 @@ class EqualityLibsProcessing:
             output = self.collect_results(result_queues_local, timeout=timeout)
 
             # Check if the outputs from the individual test functions are equal
-            for backend in backends:
+            for i, backend in enumerate(backends):
                 np.testing.assert_almost_equal(
                     output[gt_backend],
                     output[backend],
-                    decimal=decimal,
+                    decimal=decimal[i],
                     err_msg=f"Function {func_name} failed with {backend} processing.",
                 )
                 if verbose:
