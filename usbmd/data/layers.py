@@ -102,7 +102,7 @@ class Pad(TFDataLayer):
         return self.backend.numpy.pad(z, paddings, **kwargs)
 
     def call(self, inputs):
-        return self.target_shape(
+        return self.pad(
             inputs,
             self.target_shape,
             self.uniform,
