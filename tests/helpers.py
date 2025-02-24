@@ -3,6 +3,7 @@
 import functools
 import multiprocessing
 import os
+import sys
 import traceback
 from queue import Empty
 
@@ -11,6 +12,8 @@ import decorator
 import jax
 import numpy as np
 import pytest
+
+debugging = sys.gettrace() is not None
 
 
 class BackendEqualityCheck:
@@ -32,8 +35,6 @@ class BackendEqualityCheck:
         os.environ["KERAS_BACKEND"] = backend
         import keras  # pylint: disable=import-outside-toplevel
 
-        keras.utils.set_random_seed(seed)
-
         # start worker
         while True:
             job = job_queue.get()
@@ -46,6 +47,7 @@ class BackendEqualityCheck:
                 args = pickle.loads(args_blob)
                 kwargs = pickle.loads(kwargs_blob)
                 with jax.disable_jit():
+                    keras.utils.set_random_seed(seed)
                     result = func(*args, **kwargs)
                 if result is not None:
                     result = np.array(result)
@@ -89,6 +91,7 @@ class BackendEqualityCheck:
         Returns:
             dict: Results for each backend in `result_queues.keys()`.
         """
+        timeout = timeout if not debugging else None
         results = {}
         job_ids = []
         for backend, result_queue in result_queues.items():
@@ -155,6 +158,11 @@ class BackendEqualityCheck:
 
         > [!WARNING]
         > It requires you to reload the modules that use `keras` inside the test function.
+
+        > [!TIP]
+        > Will set the random seed before every function evaluation. But it is better to get a
+        > random number generator inside the function,
+        > e.g. `rng = np.random.default_rng(seed=42)`
 
         Example:
             ```python
