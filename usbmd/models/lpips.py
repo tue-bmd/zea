@@ -10,7 +10,6 @@ As well as the paper: https://arxiv.org/abs/1801.03924
 import keras
 from keras import ops
 from keras.api.layers import Conv2D, Dropout, Input
-
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
 from usbmd.models.presets import lpips_presets
@@ -121,6 +120,7 @@ class LPIPS(BaseModel):
     def _valid_img(img) -> bool:
         """Check that input is a valid image to the network."""
         value_check = ops.max(img) <= 1.0 and ops.min(img) >= -1
+        # singleton dim gets broadcasted to 3 RGB channels
         shape_check = ops.ndim(img) in [3, 4] and ops.shape(img)[-1] in [1, 3]
         return shape_check and value_check
 
