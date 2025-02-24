@@ -5,7 +5,7 @@ import pytest
 
 from usbmd import display
 
-from . import equality_libs_processing, run_in_backend
+from . import backend_equality_check, run_in_backend
 
 
 @pytest.mark.parametrize(
@@ -17,7 +17,7 @@ from . import equality_libs_processing, run_in_backend
         ((40, 20, 20), 0.5),
     ],
 )
-@equality_libs_processing(decimal=[0, 2], backends=["torch", "jax"])
+@backend_equality_check(decimal=[0, 2], backends=["torch", "jax"])
 def test_scan_conversion(size, resolution):
     """
     Tests the scan_conversion function with random data.

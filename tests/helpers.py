@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 
-class EqualityLibsProcessing:
+class BackendEqualityCheck:
     """This class is used to run a test function in multiple backends and compare the results.
     It starts workers for each backend and runs the test function in each worker.
     The workers are generally started once per test session in the __init__ file."""
@@ -141,7 +141,7 @@ class EqualityLibsProcessing:
             self.job_ids[name] += 1
         return name + "_" + str(self.job_ids[name])
 
-    def equality_libs_processing(
+    def backend_equality_check(
         self,
         decimal: int | list = 4,
         backends: list | None = None,
@@ -159,7 +159,7 @@ class EqualityLibsProcessing:
         Example:
             ```python
                 @pytest.mark.parametrize('some_keys', [some_values])
-                @equality_libs_processing(decimal=4) # <-- add as inner most decorator
+                @backend_equality_check(decimal=4) # <-- add as inner most decorator
                 def test_my_processing_func(some_arguments):
                     from usbmd import my_processing_func # <-- reload the function(s)
 

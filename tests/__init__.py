@@ -11,8 +11,8 @@ DEFAULT_TEST_BACKEND = "tensorflow"
 os.environ["KERAS_BACKEND"] = DEFAULT_TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
-from .helpers import EqualityLibsProcessing
+from .helpers import BackendEqualityCheck
 
-elp = EqualityLibsProcessing()
-equality_libs_processing = elp.equality_libs_processing
+elp = BackendEqualityCheck()
+backend_equality_check = elp.backend_equality_check
 run_in_backend = elp.run_in_backend

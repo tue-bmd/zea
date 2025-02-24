@@ -11,7 +11,7 @@ from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
 
-from . import equality_libs_processing
+from . import backend_equality_check
 
 
 def _get(reconstruction_mode):
@@ -53,7 +53,7 @@ def _get(reconstruction_mode):
     return config, probe, scan, data, inputs
 
 
-@equality_libs_processing(timeout=90)
+@backend_equality_check(timeout=90)
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends.
     Also ensures that the output is the same when it is split into patches"""
