@@ -11,7 +11,7 @@ DEFAULT_TEST_BACKEND = "tensorflow"
 os.environ["KERAS_BACKEND"] = DEFAULT_TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
-from .helpers2 import EqualityLibsProcessing
+from .helpers import EqualityLibsProcessing
 
 elp = EqualityLibsProcessing()
 equality_libs_processing = elp.equality_libs_processing
