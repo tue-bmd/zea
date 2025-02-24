@@ -35,6 +35,7 @@ def plot_image_grid(
     cmap: Optional[Union[str, List[str]]] = "gray",
     vmin: Optional[Union[float, List[float]]] = None,
     vmax: Optional[Union[float, List[float]]] = None,
+    interpolation: Optional[str] = "auto",
     titles: Optional[List[str]] = None,
     suptitle: Optional[str] = None,
     aspect: Optional[str] = None,
@@ -57,6 +58,7 @@ def plot_image_grid(
             if list vmin must be of same length as images and is set for each axis.
         vmax (float or list , optional): Maximum plot value. Defaults to None.
              if list vmax must be of same length as images and is set for each axis.
+        interpolation (str, optional): Interpolation method that mpl uses. Defaults to 'auto'.
         titles (list, optional): List of titles for subplots. Defaults to None.
         suptitle (str, optional): Title for the plot. Defaults to None.
         aspect (optional): Aspect ratio for imshow.
@@ -132,7 +134,12 @@ def plot_image_grid(
         image = images[i]
         if fig_contents[i] is None:
             im = ax.imshow(
-                image, cmap=cmap[i], vmin=vmin[i], vmax=vmax[i], aspect=aspect
+                image,
+                cmap=cmap[i],
+                vmin=vmin[i],
+                vmax=vmax[i],
+                aspect=aspect,
+                interpolation=interpolation,
             )
             fig_contents[i] = im
         else:
