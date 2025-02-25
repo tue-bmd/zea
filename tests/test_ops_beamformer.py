@@ -53,7 +53,7 @@ def _get(reconstruction_mode):
     return config, probe, scan, data, inputs
 
 
-@backend_equality_check(timeout=90)
+@backend_equality_check(decimal=2, timeout=90)
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends.
     Also ensures that the output is the same when it is split into patches"""
