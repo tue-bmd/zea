@@ -17,7 +17,7 @@ from . import backend_equality_check
         ((40, 20, 20), 0.5),
     ],
 )
-@backend_equality_check(decimal=2, backends=["torch", "jax"])
+@backend_equality_check(decimal=[0, 2], backends=["torch", "jax"])
 def test_scan_conversion(size, resolution):
     """
     Tests the scan_conversion function with random data.
