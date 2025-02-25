@@ -162,24 +162,24 @@ def save_to_gif(images, filename, fps=20):
 
     pillow_imgs = [Image.fromarray(img) for img in images]
 
-    # Get global palette from first image with improved settings
-    first_frame = (
-        pillow_imgs[0]
-        .convert("RGB")
-        .quantize(
-            colors=256,
-            # Use median cut to generate the palette
-            method=Image.MEDIANCUT,  # pylint: disable=no-member
-            # Use k-means to refine the palette
-            kmeans=1,
-        )
+    # Apply the same palette to all frames without dithering for consistent color mapping
+    # Convert all images to RGB and combine their colors for palette generation
+    all_colors = np.vstack(
+        [np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs]
+    )
+    combined_image = Image.fromarray(all_colors.reshape(-1, 1, 3))
+
+    # Generate palette from all frames
+    global_palette = combined_image.quantize(
+        colors=256,
+        method=Image.MEDIANCUT,  # pylint: disable=no-member
+        kmeans=1,
     )
 
     # Apply the same palette to all frames without dithering
-    # for consistent color mapping
     pillow_imgs = [
         img.convert("RGB").quantize(
-            palette=first_frame,
+            palette=global_palette,
             dither=Image.NONE,  # pylint: disable=no-member
         )
         for img in pillow_imgs
