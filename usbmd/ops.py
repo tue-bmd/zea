@@ -1539,6 +1539,7 @@ class ScanConvert(Operation):
         phi_range=None,
         resolution=None,
         fill_value=None,
+        order=1,
         **kwargs,
     ):
         """Initialize the ScanConvert operation.
@@ -1567,6 +1568,7 @@ class ScanConvert(Operation):
         self.phi_range = phi_range
         self.resolution = resolution
         self.fill_value = fill_value
+        self.order = order
 
     @property
     def _ready(self):
@@ -1581,6 +1583,7 @@ class ScanConvert(Operation):
                 self.phi_range,
                 self.resolution,
                 self.fill_value,
+                order=self.order,
             )
         else:
             data_out = display.scan_convert_2d(
@@ -1589,6 +1592,7 @@ class ScanConvert(Operation):
                 self.theta_range,
                 self.resolution,
                 self.fill_value,
+                order=self.order,
             )
         return data_out
 

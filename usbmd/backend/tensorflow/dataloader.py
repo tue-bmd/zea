@@ -29,8 +29,8 @@ Allows for flexible indexing and stacking of dimensions. There are a few importa
 import keras
 import tensorflow as tf
 from keras.src.trainers.data_adapters import TFDatasetAdapter
-
-from usbmd.data.dataloader import H5Generator, Resizer
+from usbmd.data.dataloader import H5Generator
+from usbmd.data.layers import Resizer
 from usbmd.utils import find_methods_with_return_type, log, translate
 
 METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
@@ -123,6 +123,7 @@ def h5_dataset_from_directory(
     limit_n_samples: int | None = None,
     resize_type: str = "center_crop",
     resize_axes: tuple | None = None,
+    resize_kwargs: dict | None = None,
     image_range: tuple = (0, 255),
     normalization_range: tuple = (0, 1),
     augmentation: keras.Sequential | None = None,
@@ -142,6 +143,7 @@ def h5_dataset_from_directory(
     cache: bool | str = False,
     prefetch: bool = True,
     wrap_in_keras: bool = True,
+    **kwargs,
 ):
     """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
 
@@ -185,10 +187,14 @@ def h5_dataset_from_directory(
         resize_axes (tuple, optional): axes to resize along. Should be of length 2
             (height, width) as resizing function only supports 2D resizing / cropping. Should only
             be set when your data is more than (h, w, c). Defaults to None.
+        resize_kwargs (dict, optional): kwargs for the resize function.
         image_range (tuple, optional): image range. Defaults to (0, 255).
-            will always normalize from specified image range to normalization range.
-            if image_range is set to None, no normalization will be done.
+            will always translate from specified image range to normalization range.
+            if image_range is set to None, no normalization will be done. Note that it does not
+            clip to the image range, so values outside the image range will be outside the
+            normalization range!
         normalization_range (tuple, optional): normalization range. Defaults to (0, 1).
+            See image_range for more info!
         augmentation (keras.Sequential, optional): keras augmentation layer.
         dataset_repetitions (int, optional): repeat dataset. Note that this happens
             after sharding, so the shard will be repeated. Defaults to None.
@@ -251,6 +257,7 @@ def h5_dataset_from_directory(
         seed=seed,
         as_tensor=False,
         search_file_tree_kwargs=search_file_tree_kwargs,
+        **kwargs,
     )
 
     # Create dataset
@@ -304,8 +311,9 @@ def h5_dataset_from_directory(
             len(image_size) == 2
         ), f"image_size must be of length 2 (height, width), got {image_size}"
 
+        resize_kwargs = resize_kwargs or {}
         resizer = Resizer(
-            image_size, resize_type, resize_axes, seed=seed, backend="tensorflow"
+            image_size, resize_type, resize_axes, seed=seed, **resize_kwargs
         )
         dataset = dataset_map(dataset, resizer)
 
