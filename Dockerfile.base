@@ -65,23 +65,17 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "tensorflow" ]; t
     echo "Installing tensorflow..."; \
     pip install --extra-index-url https://pypi.nvidia.com "tensorflow[and-cuda]==2.15.0"; \
     # Install Keras last to ensure its version 3.x
-    pip install --upgrade 'keras>=3.6' keras-cv \
-    else \
-    echo "Skipping tensorflow..."; \
+    pip install --upgrade 'keras>=3.6' keras-cv; \
     fi
 
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "jax" ]; then \
     echo "Installing jax..."; \
     pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html "jax[cuda12_pip]==0.4.26"; \
-    else \
-    echo "Skipping jax..."; \
     fi
 
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ]; then \
     echo "Installing torch..."; \
     pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
-    else \
-    echo "Skipping torch..."; \
     fi
 
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "all" ]; then \
