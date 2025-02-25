@@ -55,7 +55,7 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# Install usbmd (with headless opencv)
+# Install dependencies for usbmd (with headless opencv)
 RUN poetry install -E opencv-python-headless --no-root
 
 # Set the default backend; override this when building if desired.
@@ -82,5 +82,5 @@ RUN if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
     echo "Skipping torch..."; \
     fi
 
-# Install Keras last to ensure its version 3.x
-RUN pip install --upgrade 'keras>=3.6' keras-cv wandb
+# Reinstalling Keras last to ensure its version 3.x
+RUN pip install --upgrade 'keras>=3.6' keras-cv
