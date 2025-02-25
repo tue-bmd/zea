@@ -22,7 +22,6 @@ from scipy.interpolate import interp1d
 from skimage import measure
 from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
-
 from usbmd.utils import log, translate
 from usbmd.utils.io_lib import (
     _SUPPORTED_VID_TYPES,
@@ -399,7 +398,7 @@ def interpolate_rectangles(rectangles, x_indices, y_indices):
     return new_rectangles
 
 
-def extract_polygon_from_mask(mask, tolerance: float = 0.01):
+def extract_polygon_from_mask(mask, tolerance: float = 0.01, verbose: bool = True):
     """Find largest contour in a binary mask and fit polygon.
 
     Polygon approximation will reduce contour points, unless tolerance is 0.
@@ -415,9 +414,13 @@ def extract_polygon_from_mask(mask, tolerance: float = 0.01):
     if len(contours) > 1:
         contour_lengths = [len(contour) for contour in contours]
         contour = contours[np.argmax(contour_lengths)]
-        log.warning("Warning: multiple contours found. Returning the largest contour.")
+        if verbose:
+            log.warning(
+                "Warning: multiple contours found. Returning the largest contour."
+            )
     elif len(contours) == 0:
-        log.warning("Warning: no contours found. Returning None.")
+        if verbose:
+            log.warning("Warning: no contours found. Returning None.")
         return None
     else:
         contour = contours[0]

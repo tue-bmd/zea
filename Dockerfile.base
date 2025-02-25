@@ -55,7 +55,7 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# Install usbmd dependencies (with headless opencv)
+# Install dependencies for usbmd (with headless opencv)
 RUN poetry install -E opencv-python-headless --no-root
 
 # Set the default backend; override this when building if desired.

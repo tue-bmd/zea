@@ -1,16 +1,17 @@
 """Tests for the ops beamformer.
 """
 
-import keras
+# pylint: disable=import-outside-toplevel
+
 import numpy as np
 
-from tests.test_processing import equality_libs_processing
-from usbmd import beamformer
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 from usbmd.utils.simulator import UltrasoundSimulator
+
+from . import backend_equality_check
 
 
 def _get(reconstruction_mode):
@@ -32,7 +33,7 @@ def _get(reconstruction_mode):
         polar_angles=np.array([0.0]),
     )
     scan._focus_distances = (
-        np.array([0]) if reconstruction_mode == "generic" else np.array([np.inf])
+        np.array([0.0]) if reconstruction_mode == "generic" else np.array([np.inf])
     )
 
     # Set scan grid parameters
@@ -52,12 +53,15 @@ def _get(reconstruction_mode):
     return config, probe, scan, data, inputs
 
 
-@equality_libs_processing()
+@backend_equality_check(decimal=2, timeout=90)
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends.
     Also ensures that the output is the same when it is split into patches"""
 
-    from keras import ops  # pylint: disable=import-outside-toplevel
+    import keras
+    from keras import ops
+
+    from usbmd import beamformer
 
     _, probe, scan, _, inputs = _get(reconstruction_mode)
 
@@ -101,7 +105,3 @@ def test_tof_correction(reconstruction_mode="generic"):
 
     keras.utils.clear_session(free_memory=True)  # Free memory
     return outputs[0]
-
-
-if __name__ == "__main__":
-    test_tof_correction()
