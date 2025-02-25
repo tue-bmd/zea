@@ -13,6 +13,6 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
 from .helpers import BackendEqualityCheck
 
-elp = BackendEqualityCheck()
-backend_equality_check = elp.backend_equality_check
-run_in_backend = elp.run_in_backend
+backend_workers = BackendEqualityCheck()
+backend_equality_check = backend_workers.backend_equality_check
+run_in_backend = backend_workers.run_in_backend
