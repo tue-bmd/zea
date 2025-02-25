@@ -14,6 +14,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
+
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_uint8_images
 
@@ -37,6 +38,15 @@ def translate(array, range_from, range_to):
 
     # Convert the 0-1 range into a value in the right range.
     return right_min + (value_scaled * (right_max - right_min))
+
+
+def map_negative_indices(indices: list, length: int):
+    """Maps negative indices for array indexing to positive indices.
+    Example:
+        >>> map_negative_indices([-1, -2], 5)
+        [4, 3]
+    """
+    return [i if i >= 0 else length + i for i in indices]
 
 
 def find_key(dictionary, contains, case_sensitive=False):

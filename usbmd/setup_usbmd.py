@@ -28,22 +28,22 @@ from usbmd.utils.git_info import get_git_summary
 from usbmd.utils.io_lib import filename_from_window_dialog
 
 
-def reload_usbmd():
-    """Reloads usbmd. This is useful when changing the backend.
+def reload_module(name):
+    """Reloads module. This is useful when changing the backend.
     Taken from `keras.config.set_backend`"""
 
     # Clear module cache.
-    loaded_modules = [key for key in sys.modules if key.startswith("usbmd")]
+    loaded_modules = [key for key in sys.modules if key.startswith(name)]
     for key in loaded_modules:
         del sys.modules[key]
 
-    from usbmd import __class__  # pylint: disable=import-outside-toplevel,cyclic-import
+    __class__ = importlib.import_module(name).__class__
 
-    # Finally: refresh all imported usbmd submodules.
+    # Finally: refresh all imported submodules.
     globs = copy.copy(globals())
     for key, value in globs.items():
         if value.__class__ == __class__:
-            if str(value).startswith("<module 'usbmd."):
+            if str(value).startswith(f"<module '{name}."):
                 module_name = str(value)
                 module_name = module_name[module_name.find("'") + 1 :]
                 module_name = module_name[: module_name.find("'")]
@@ -61,7 +61,7 @@ def set_backend(backend: str):
     # set keras backend
     if keras.config.backend() != backend:
         keras.config.set_backend(backend)
-        reload_usbmd()
+        reload_module("usbmd")
 
 
 def setup(
