@@ -1,13 +1,18 @@
-""" Coherence factor beamformer implementation in tensorflow
+"""
+LEGACY CODE. NOT SUPPORTED SINCE TF BEAMFORMER IS REMOVED.
+SEE `usbmd.beamformer` instead.
+
+Coherence factor beamformer implementation in tensorflow
 Based on the following paper: https://doi.org/10.1109/TUFFC.2010.1553
 """
+
+# pylint: skip-file
+# pylint: disable=arguments-differ
 
 import tensorflow as tf
 
 from usbmd.backend.tensorflow.layers.beamformers import BeamSumming
 from usbmd.registry import tf_beamformer_registry
-
-# pylint: disable=arguments-differ
 
 
 @tf_beamformer_registry(name="cf", framework="tensorflow")

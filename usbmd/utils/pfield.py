@@ -1,7 +1,7 @@
 """Automatic pressure field computation used for compounding multiple Tx events
 
 - **Author(s)**     : Ruud van Sloun (initial code), Tristan Stevens (transferred to keras)
-- **Date**          : 2024-07-24, 20240-10-09
+- **Date**          : 2024-07-24, 2024-10-09
 """
 
 import keras
@@ -232,7 +232,7 @@ def compute_pfield(
 
         # Render pressure field for all relevant frequencies and sum them up
         RP = 0
-        RP = pfield_freqloop_torch(
+        RP = pfield_freq_loop(
             f,
             c,
             delaysTX,
@@ -299,11 +299,11 @@ def normalize(P_arr, alpha=1, perc=10):
     return P_norm
 
 
-def pfield_freqloop_torch(
+def pfield_freq_loop(
     f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling
 ):
     """
-    Calculates the pressure field using frequency loop method in PyTorch.
+    Calculates the pressure field using frequency loop method.
 
     Args:
         f (list): List of frequencies.
