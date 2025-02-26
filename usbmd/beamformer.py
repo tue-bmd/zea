@@ -1,4 +1,8 @@
-"""Beamformer functions with general ops."""
+"""Beamformer functions with general ops.
+
+- **Author(s)**     : Ben Luijten, Vincent van de Schaft, Ruud van Sloun
+- **Date**          : Thu Feb 16 2023
+"""
 
 import numpy as np
 from keras import ops
@@ -203,27 +207,27 @@ def calculate_delays(
     element.
 
     Args:
-        grid (torch.Tensor): The pixel coordinates to beamform to of shape `(n_pix,
+        grid (Tensor): The pixel coordinates to beamform to of shape `(n_pix,
             3)`.
-        t0_delays (torch.Tensor): The transmit delays in seconds of shape
+        t0_delays (Tensor): The transmit delays in seconds of shape
             `(n_tx, n_el)`, shifted such that the smallest delay is 0. Defaults to
             None.
-        tx_apodizations (torch.Tensor): The transmit apodizations of shape
+        tx_apodizations (Tensor): The transmit apodizations of shape
             `(n_tx, n_el)`.
-        probe_geometry (torch.Tensor): The positions of the transducer elements of shape
+        probe_geometry (Tensor): The positions of the transducer elements of shape
             `(n_el, 3)`.
-        initial_times (torch.Tensor): The probe transmit time offsets of shape
+        initial_times (Tensor): The probe transmit time offsets of shape
             `(n_tx,)`.
         sampling_frequency (float): The sampling frequency of the probe in Hz.
         sound_speed (float): The assumed speed of sound in m/s.
-        focus_distances (torch.Tensor): The focus distances of shape `(n_tx,)`.
+        focus_distances (Tensor): The focus distances of shape `(n_tx,)`.
             If the focus distance is set to infinity, the beamformer will
             assume plane wave transmission.
-        polar_angles (torch.Tensor): The polar angles of the plane waves in radians
+        polar_angles (Tensor): The polar angles of the plane waves in radians
             of shape `(n_tx,)`.
 
     Returns:
-        torch.Tensor, torch.Tensor: transmit_delays, receive_delays
+        Tensor, Tensor: transmit_delays, receive_delays
 
         The tensor transmit delays to every pixel has shape
         `(n_pix, n_tx)`
