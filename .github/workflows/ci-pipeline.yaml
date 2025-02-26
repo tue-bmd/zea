@@ -30,7 +30,8 @@ jobs:
           file: Dockerfile.base
           push: true
           tags: usbmd/all:latest
-          build-args: all
+          build-args: |
+            BACKEND=all
           cache-from: type=registry,ref=usbmd/all:cache
           cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
@@ -57,7 +58,8 @@ jobs:
           file: Dockerfile.base
           push: true
           tags: usbmd/tensorflow:latest
-          build-args: tensorflow
+          build-args: |
+            BACKEND=tensorflow
           cache-from: type=registry,ref=usbmd/all:cache
           cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
@@ -68,7 +70,8 @@ jobs:
           file: Dockerfile.base
           push: true
           tags: usbmd/torch:latest
-          build-args: torch
+          build-args: |
+            BACKEND=torch
           cache-from: type=registry,ref=usbmd/all:cache
           cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
@@ -79,7 +82,8 @@ jobs:
           file: Dockerfile.base
           push: true
           tags: usbmd/jax:latest
-          build-args: jax
+          build-args: |
+            BACKEND=jax
           cache-from: type=registry,ref=usbmd/all:cache
           cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
@@ -90,7 +94,8 @@ jobs:
           file: Dockerfile.base
           push: true
           tags: usbmd/base:latest
-          build-args: numpy
+          build-args: |
+            BACKEND=numpy
           cache-from: type=registry,ref=usbmd/all:cache
           cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
