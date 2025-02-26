@@ -232,7 +232,7 @@ def compute_pfield(
 
         # Render pressure field for all relevant frequencies and sum them up
         RP = 0
-        RP = compute_pfield(
+        RP = pfield_freq_loop(
             f,
             c,
             delaysTX,
@@ -299,7 +299,7 @@ def normalize(P_arr, alpha=1, perc=10):
     return P_norm
 
 
-def compute_pfield(
+def pfield_freq_loop(
     f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling
 ):
     """
