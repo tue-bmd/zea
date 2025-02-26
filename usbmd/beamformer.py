@@ -488,9 +488,9 @@ def distance_Tx_generic(
     # largest distance over all the elements when the pixel is behind the virtual
     # source and the smallest distance otherwise.
     dist = ops.where(
-        float(ops.sign(focus_distance)) * (grid[:, 2] - focal_z) < 0.0,
-        ops.min(dist - offset[None], 1),
-        ops.max(dist + offset[None], 1),
+        float(ops.sign(focus_distance)) * (grid[:, 2] - focal_z) <= 0.0,
+        ops.min(dist + offset[None], 1),
+        ops.max(dist - offset[None], 1),
     )
 
     return dist
