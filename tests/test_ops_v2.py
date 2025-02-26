@@ -373,7 +373,7 @@ def test_simulator():
     n_el = 128
     n_scat = 3
     n_tx = 2
-    n_ax = 512
+    n_ax = 513
 
     aperture = 30e-3
 
