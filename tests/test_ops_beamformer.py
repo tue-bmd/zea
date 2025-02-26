@@ -27,7 +27,7 @@ def _get_params(reconstruction_mode):
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
-        n_ax=2046,  # TODO: vincent 2047 doesn't work here
+        n_ax=2047,
         sampling_frequency=probe_parameters["sampling_frequency"],
         center_frequency=probe_parameters["center_frequency"],
         polar_angles=np.array([0.0]),
