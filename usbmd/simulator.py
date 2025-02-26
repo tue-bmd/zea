@@ -73,8 +73,12 @@ def simulate_rf(
             * sound_speed
         )
 
+    n_ax_rounded = _round_up_to_power_of_two(n_ax)
+
     freqs = (
-        ops.cast(ops.arange(n_ax // 2 + 1) / n_ax, "float32") * sampling_frequency + 1
+        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax, "float32")
+        * sampling_frequency
+        + 1
     )
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
@@ -158,7 +162,9 @@ def simulate_rf(
 
     rf_data = ops.stack(parts, axis=0)
     rf_data = ops.transpose(rf_data, (0, 2, 1))
-    return rf_data[None, ..., None]
+    rf_data = rf_data[None, ..., None]
+    rf_data = rf_data[:, :, :n_ax, :, :]
+    return rf_data
 
 
 def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
@@ -291,3 +297,8 @@ def sinc(x):
     """The normalized sinc function with a small offset to precent division by zero."""
     x = ops.abs(PI * x) + 1e-9
     return ops.sin(x) / x
+
+
+def _round_up_to_power_of_two(x):
+    """Rounds up to the next power of two."""
+    return 2 ** (x - 1).bit_length()
