@@ -6,9 +6,6 @@ Initialize modules for registries.
 import numpy as np
 import torch
 
-# pylint: disable=unused-import
-from usbmd.backend.torch.layers import beamformers
-
 
 def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
     """Compute func on device.
