@@ -113,13 +113,13 @@ The private image is not uploaded to Docker Hub and must be built manually to pr
 To manually build the base image from its dedicated Dockerfile:
 
 ```shell
-docker build -f Dockerfile.base . -t usbmd/base:latest
+docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t usbmd/base:latest
 ```
 
 To build the full image with all backends (the default is BACKEND=all):
 
 ```shell
-docker build --build-arg BACKEND=all . -t usbmd/all:latest
+docker build -f Dockerfile.base --build-arg BACKEND=all . -t usbmd/all:latest
 ```
 
 To build the private (development) image:
