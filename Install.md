@@ -10,15 +10,16 @@ Make sure you always use a virtual environment such as `miniconda` or `venv` to 
     - [Using a Personal Access Token](#using-a-personal-access-token)
     - [Using an SSH key](#using-an-ssh-key)
     - [Resources](#resources)
-  - [Docker](#docker)
-    - [Build](#build)
-      - [Base](#base)
-      - [Keras 3](#keras-3)
-    - [Run](#run)
-    - [Attach / start / stop](#attach--start--stop)
-    - [Development in the container using vscode](#development-in-the-container-using-vscode)
-      - [Using git](#using-git)
-      - [Installing more packages](#installing-more-packages)
+- [Docker](#docker)
+  - [Pre-built images](#pre-built-images)
+    - [Public images](#public-images)
+    - [Private images](#private-images)
+  - [Build](#build)
+  - [Run](#run)
+  - [Attach / Start / Stop](#attach--start--stop)
+  - [Development in the Container using VSCode](#development-in-the-container-using-vscode)
+    - [Using git](#using-git)
+    - [Installing More Packages](#installing-more-packages)
 
 ## Backend installation
 
@@ -82,89 +83,117 @@ If you get host key errors, you may need to update your known host for Github, s
 - https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement
 - https://stackoverflow.com/questions/19548957/can-i-force-pip-to-reinstall-the-current-version
 
-## Docker
+# Docker
 
-### Build
+This repository provides multiple Docker images built and tested in our CI pipeline.
 
-We provide two Docker images in this repository. The first is a base image that includes only the necessary packages and dependencies for usbmd to run. However it comes without any machine learning backends. The second image includes the base image and also installs compatible versions of `torch`, `tensorflow` and `jax`.
+## Pre-built images
 
-#### Base
+### Public images
 
-You can build a docker image from the dockerfile in this repository.
-This will include all the necessary packages and dependencies.
+These images are all build on top of [Dockerfile.base](#file:Dockerfile.base-context):
+- usbmd/all: This image includes support for all machine learning backends (TensorFlow, PyTorch, and JAX).
+- usbmd/tensorflow: This image includes support for TensorFlow.
+- usbmd/torch: This image includes support for PyTorch.
+- usbmd/jax: This image includes support for JAX.
+
+These images are uploaded to Docker Hub via the CI pipeline and can be used directly in your projects via:
 
 ```shell
-cd ~/
-git clone git@github.com:tue-bmd/ultrasound-toolbox.git
-cd ultrasound-toolbox
-docker build . -t usbmd/base:latest
+docker pull usbmd/all:latest
 ```
 
-This will build the image `usbmd/base:latest`.
+### Private images
+- usbmd/private: Built from [Dockerfile](#file:Dockerfile-context). This image inherits from usbmd/all, copies your repository, performs an editable installation of usbmd, and adds a Message of the Day displaying the usbmd version. This image is also used for development with VSCode, as described below.
 
-#### Keras 3
+The private image is not uploaded to Docker Hub and must be built manually to prevent pushing private code to a public repository. If you use VSCode, you can use the provided `.devcontainer.json` file to attach to the private image for development, see [Development in the Container using VSCode](#development-in-the-container-using-vscode).
 
-Additionally, the dockerfile also includes the build-arg `KERAS3` which can be set to `true` to install keras 3 with `torch`, `tensorflow` and `jax`.
+## Build
+
+To manually build the base image from its dedicated Dockerfile:
 
 ```shell
-docker build --build-arg KERAS3=True . -t usbmd/keras3:latest
+docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t usbmd/base:latest
 ```
 
-This will build the image `usbmd/keras3:latest`.
-
-### Run
-Here is an example of how to run the docker container with the image you just built. Note that there exist [many flags](https://docs.docker.com/reference/cli/docker/container/run/) you may use.
+To build the full image with all backends (the default is BACKEND=all):
 
 ```shell
-docker run --name {CONTAINER-NAME} --gpus 'all' -v ~/{NAS-MOUNT}:/mnt/z/ -v ~/ultrasound-toolbox:/ultrasound-toolbox -d -it -m 100g --cpus 7 --user "$(id -u):$(id -g)" {IMAGE-NAME}:{IMAGE-TAG}
+docker build -f Dockerfile.base --build-arg BACKEND=all . -t usbmd/all:latest
+```
+
+To build the private (development) image:
+
+```shell
+docker build . -t usbmd/private:latest
+```
+
+## Run
+
+Run a container with one of the built images. Ensure you mount your repository at `/ultrasound-toolbox` so that changes are reflected inside the container, and use your user and group IDs to avoid permission issues.
+
+```shell
+docker run --name {CONTAINER-NAME} --gpus 'all' \
+  -v ~/ultrasound-toolbox:/ultrasound-toolbox \
+  -d -it -m 100g --cpus 7 --user "$(id -u):$(id -g)" \
+  {IMAGE-NAME}:{IMAGE-TAG}
 ```
 
 Which means:
-- `docker run`: create and run a new container from an image
-- `--name`: name the container
-- `--gpus`: GPU devices to add to the container ('all' to pass all GPUs)
-- `-v` = `--volume`: Bind mount a volume
-- `-d`=`--detach`: starts a container as a background process that doesn't occupy your terminal window
-- `-it`: makes the container start look like a terminal connection session
-	- `--interactive`: Keep STDIN open even if not attached
-	- `--tty`: Allocate a pseudo-TTY
-- `-m` = `--memory`: Memory limit (use g for gigabytes)
-- `--cpus`: Number of cores to use
-- `--user`: Run as a specific user
+- `docker run`: create and run a new container from an image.
+- `--name`: name the container.
+- `--gpus`: specify GPU devices to add to the container ('all' to pass all GPUs).
+- `-v` or `--volume`: bind mount a volume.
+- `-d` or `--detach`: start the container as a background process.
+- `-it`: start an interactive terminal session.
+   - `--interactive`: keep STDIN open.
+   - `--tty`: allocate a pseudo-TTY.
+- `-m` or `--memory`: set a memory limit (use g for gigabytes).
+- `--cpus`: specify the number of CPU cores to use.
+- `--user`: run as a specific user.
+
+The container uses `/bin/bash` as its entrypoint, allowing you to interactively execute shell commands.
 
 > [!IMPORTANT]
-> Note that it is important to mount your `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container, so that the changes you make are reflected in the usbmd installation inside the container. Additionally, you should use your user id and group id with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to a mounted volume.
+> Mount your `ultrasound-toolbox` repository to `/ultrasound-toolbox` inside the container so that changes are reflected in the usbmd installation inside the container. Additionally, use your user ID and group ID with `--user "$(id -u):$(id -g)"` to avoid permission issues when writing to mounted volumes.
 
 > [!TIP]
-> The docker container sets a random hostname by default. You can set a hostname with the `--hostname` flag. This is useful for the `users.yaml` file. Alternatively, you can use the `hostname` wildcard in the `users.yaml` file.
+> The Docker container sets a random hostname by default. You can set a hostname with the `--hostname` flag. This is useful for the `users.yaml` file. Alternatively, you can use the hostname wildcard in the `users.yaml` file.
 
 Alternative flags:
-- `-w` = `--workdir`: Working directory inside the container
-- `--rm`: Automatically remove the container when it *exits*
-- `--env-file`: Load environment variables from a .env file
+- `-w` or `--workdir`: set the working directory inside the container.
+- `--rm`: automatically remove the container when it *exits*.
+- `--env-file`: load environment variables from a .env file.
 
-### Attach / start / stop
-Now you can attach to the container with:
+## Attach / Start / Stop
+
+To attach to the container:
 
 ```shell
 docker attach {CONTAINER-NAME}
 ```
 
-Starting and stopping with `docker start {CONTAINER-NAME}` and `docker stop {CONTAINER-NAME}`.
+Start and stop the container with:
 
-### Development in the container using vscode
+```shell
+docker start {CONTAINER-NAME}
+```
 
-You can use vscode to attach to the running container and develop in it.
-You can install your vscode extensions in the container.
-The easiest is to keep re-using this container so do not delete it after use.
+```shell
+docker stop {CONTAINER-NAME}
+```
 
-#### Using git
+## Development in the Container using VSCode
 
-Make sure that the the ssh-agent is running and your ssh key is added to it. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found [here](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials).
+You can use the VSCode Remote Containers extension to attach to the running container for development. A `.devcontainer.json` file is provided which specifies the Docker image to use, the volumes to mount, and the extensions to install. To use it, ensure the Remote Containers extension is installed in VSCode, then click the devcontainer icon in the bottom left corner and select "Reopen in Container". To revert to the host environment, click the devcontainer icon again and select "Reopen Locally".
 
-#### Installing more packages
+### Using git
 
-If you want to install some packages after the image has been build and you are in the container as your user, make sure to use `sudo`.
+Ensure that the ssh-agent is running and your SSH key is added. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found [here](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials).
+
+### Installing More Packages
+
+If you need to install additional packages after the image has been built and you are in the container as your user, use `sudo`:
 
 ```shell
 sudo pip install {PACKAGE}
