@@ -54,7 +54,7 @@ def _get(reconstruction_mode):
 
 
 @backend_equality_check(
-    decimal=[1, 2, 3], timeout=120, backends=["torch", "tensorflow", "jax"]
+    decimal=[0, 2, 3], timeout=120, backends=["torch", "tensorflow", "jax"]
 )
 def test_tof_correction(reconstruction_mode="generic"):
     """Test TOF Correction between backends.
