@@ -15,13 +15,6 @@ sys.path = [str(p) if isinstance(p, PosixPath) else p for p in sys.path]
 import tensorflow as tf
 
 # pylint: disable=unused-import
-from usbmd.backend.tensorflow.layers import (
-    beamformers,
-    coherence_factor,
-    minimum_variance,
-    random_minimum,
-    unfolded_bf,
-)
 from usbmd.backend.tensorflow.models.lista import UnfoldingModel
 
 
