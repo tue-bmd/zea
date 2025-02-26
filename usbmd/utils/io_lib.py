@@ -12,7 +12,6 @@ import functools
 import multiprocessing
 import os
 import sys
-import warnings
 from collections import deque
 from io import BytesIO
 from multiprocessing.pool import ThreadPool
@@ -30,9 +29,6 @@ import numpy as np
 import pydicom
 import tqdm
 import yaml
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
@@ -444,34 +440,13 @@ def matplotlib_figure_to_numpy(fig):
         np.ndarray: numpy array of figure.
 
     """
-    try:
-        if matplotlib.get_backend() == "Qt5Agg":
-            canvas = FigureCanvasQTAgg(fig)
-        elif matplotlib.get_backend() == "TkAgg":
-            canvas = FigureCanvasTkAgg(fig)
-        elif matplotlib.get_backend() == "agg":
-            canvas = FigureCanvasAgg(fig)
-        else:
-            buf = BytesIO()
-            fig.savefig(buf, format="png")
-            buf.seek(0)
-            image = Image.open(buf).convert("RGB")
-            image = np.array(image)[..., :3]
-            buf.close()
-            return image
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            canvas.draw()
-
-        image = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
-
-        width, height = fig.canvas.get_width_height()
-        image = image.reshape((height, width, 3))
-        return image
-    except:
-        log.warning("Could not convert figure to numpy array.")
-        return np.array([])
+    buf = BytesIO()
+    fig.savefig(buf, format="png")
+    buf.seek(0)
+    image = Image.open(buf).convert("RGB")
+    image = np.array(image)[..., :3]
+    buf.close()
+    return image
 
 
 class DummyTask:
