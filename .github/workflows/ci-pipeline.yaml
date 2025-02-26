@@ -60,8 +60,8 @@ jobs:
           tags: usbmd/base:latest
           build-args: |
             BACKEND=numpy
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+          cache-from: type=registry,ref=usbmd/base:cache
+          cache-to: type=registry,ref=usbmd/base:cache,mode=max
 
   pylint:
     needs: build-full-image
