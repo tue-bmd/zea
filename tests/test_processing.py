@@ -1,19 +1,20 @@
 """Tests for the processing module."""
 
+# pylint: disable=import-outside-toplevel
+# pylint: disable=reimported
+
 import math
 
 import numpy as np
 import pytest
-from keras import ops as kops
 from scipy.signal import hilbert
 
 from usbmd import ops
 from usbmd.ops_v2 import Pipeline, Simulate
 from usbmd.probes import Probe
-from usbmd.processing import Process
 from usbmd.scan import Scan
 
-from .helpers import equality_libs_processing
+from . import backend_equality_check
 
 
 @pytest.mark.parametrize(
@@ -25,9 +26,11 @@ from .helpers import equality_libs_processing
         ("mu", (512, 512), (50, 300)),
     ],
 )
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
+
+    from usbmd import ops
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
@@ -61,9 +64,12 @@ def test_companding(comp_type, size, parameter_value_range):
         ((1, 128, 32), None, None),
     ],
 )
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
+
+    from usbmd import ops
+
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
     else:
@@ -98,9 +104,12 @@ def test_converting_to_image(size, dynamic_range, input_range):
         ((1, 128, 32), (50, 51), (-2.2, 3.0)),
     ],
 )
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
+
+    from usbmd import ops
+
     normalize = ops.Normalize(output_range, input_range)
 
     _input_range = output_range
@@ -276,9 +285,14 @@ def test_up_and_down_conversion(factor, batch_size):
     ), "Data is not equal after up and down conversion."
 
 
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_hilbert_transform():
     """Test hilbert transform"""
+
+    from keras import ops as kops
+
+    from usbmd import ops
+
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
     data = np.sin(np.linspace(0, 2 * math.e * np.pi, 500))
@@ -305,9 +319,12 @@ def test_hilbert_transform():
     return data_iq
 
 
-@equality_libs_processing(decimal=4)
+@backend_equality_check(decimal=4)
 def test_processing_class():
     """Test the processing class"""
+
+    from usbmd import Process
+
     operation_chain = [
         {
             "name": "multi_bandpass_filter",

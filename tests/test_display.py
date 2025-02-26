@@ -4,9 +4,8 @@ import numpy as np
 import pytest
 
 from usbmd import display
-from usbmd.setup_usbmd import set_backend
 
-from .helpers import equality_libs_processing
+from . import backend_equality_check
 
 
 @pytest.mark.parametrize(
@@ -18,7 +17,7 @@ from .helpers import equality_libs_processing
         ((40, 20, 20), 0.5),
     ],
 )
-@equality_libs_processing(decimal=2, backends=["torch", "jax"])
+@backend_equality_check(decimal=[0, 2], backends=["torch", "jax"])
 def test_scan_conversion(size, resolution):
     """
     Tests the scan_conversion function with random data.
@@ -63,41 +62,55 @@ def test_scan_conversion(size, resolution):
     return out
 
 
+def create_radial_pattern(size):
+    """Creates a radial pattern for testing scan conversion."""
+    x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
+    r = np.sqrt(x**2 + y**2)
+    return np.exp(-(r**2))
+
+
+def create_concentric_rings(size):
+    """Creates a ring pattern for testing scan conversion."""
+    x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
+    r = np.sqrt(x**2 + y**2)
+    return np.sin(10 * r) ** 2
+
+
 @pytest.mark.parametrize(
-    "size, random_data_type",
+    "size, pattern_creator, allowed_error",
     [
-        ((200, 200), "gaussian"),
-        ((100, 333), "gaussian"),
-        ((200, 200), "radial"),
-        ((100, 333), "radial"),
+        ((200, 200), "create_radial_pattern", 0.001),
+        ((100, 333), "create_radial_pattern", 0.001),
+        ((200, 200), "create_concentric_rings", 0.1),
+        ((100, 333), "create_concentric_rings", 0.1),
     ],
 )
-def test_scan_conversion_and_inverse(size, random_data_type):
-    """Tests the scan_conversion function with random data and
-    invert the data with transform_sc_image_to_polar.
-    For gaussian data, the mean squared error is around 0.09.
-    For radial data, the mean squared error is around 0.0002.
+@backend_equality_check(decimal=2, backends=["torch", "jax"])
+def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
+    """Tests the scan_conversion function with structured test patterns and
+    inverts the data with transform_sc_image_to_polar.
+
+    TODO: This test fails for tensorflow on cpu because of `keras.ops.image.map_coordinates`.
+    Therefore tensorflow is not included in the backends. Maybe in the future we can check
+    if the error is fixed with a new keras or tensorflow version.
+
+    Note:
+        The allowed_error is set to 0.1 for concentric rings because the MSE is
+        expected to be higher due to the nature of the pattern.
     """
-    set_backend("numpy")
     from keras import ops  # pylint: disable=reimported,import-outside-toplevel
 
     from usbmd import display  # pylint: disable=reimported,import-outside-toplevel
 
-    if random_data_type == "gaussian":
-        polar_data = np.random.random(size)
-        # random data allow large error since interpolation is hard
-        allowed_error = 0.2
-    elif random_data_type == "radial":
-        x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
-        r = np.sqrt(x**2 + y**2)
-        polar_data = np.exp(-(r**2))
-        allowed_error = 0.001
+    if pattern_creator == "create_radial_pattern":
+        polar_data = create_radial_pattern(size)
+    elif pattern_creator == "create_concentric_rings":
+        polar_data = create_concentric_rings(size)
     else:
-        raise NotImplementedError
+        raise ValueError("Unknown pattern creator")
 
     rho_range = (0, 100)
-    theta_range = (-45, 45)
-    theta_range = np.deg2rad(theta_range)
+    theta_range = np.deg2rad((-45, 45))
 
     cartesian_data = display.scan_convert_2d(
         polar_data,
@@ -113,7 +126,8 @@ def test_scan_conversion_and_inverse(size, random_data_type):
 
     assert (
         mean_squared_error < allowed_error
-    ), f"MSE is too high: {mean_squared_error:.4f} > {allowed_error:.4f}"
+    ), f"MSE is too high: {mean_squared_error:.4f}"
+    return cartesian_data_inv
 
 
 @pytest.mark.parametrize(
