@@ -1,4 +1,8 @@
-"""Experimental implementation of random minimum beamforming in tensorflow.
+"""
+LEGACY CODE. NOT SUPPORTED SINCE TF BEAMFORMER IS REMOVED.
+SEE `usbmd.beamformer` instead.
+
+Experimental implementation of random minimum beamforming in tensorflow.
 
 This layer is based on the patent:
 https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/20200138412
@@ -10,6 +14,7 @@ and selects the one with the lowest output power.
 Author(s): Ben Luijten
 """
 
+# pylint: skip-file
 # It is TF convention to define layers in the build method
 # pylint: disable=attribute-defined-outside-init
 # pylint: disable=arguments-differ
