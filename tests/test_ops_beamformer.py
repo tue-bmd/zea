@@ -95,7 +95,8 @@ def test_tof_correction(reconstruction_mode="generic"):
 
     from usbmd import beamformer
 
-    _, probe, scan, inputs = _get_params(reconstruction_mode)
+    # pylint: disable=unused-variable
+    config, probe, scan, inputs = _get_params(reconstruction_mode)
 
     # round inputs a bit to avoid numerical issues
     inputs = np.round(inputs, 2)
