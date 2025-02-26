@@ -1,10 +1,12 @@
 """
-WARNNING: This code is not fully tested yet. It is only a draft.
+LEGACY CODE. NOT SUPPORTED SINCE TF BEAMFORMER IS REMOVED.
+SEE `usbmd.beamformer` instead.
 
 - **Author(s)**     : Ben Luijten
 - **Date**          : Thu Apr 20 2023
 """
 
+# pylint: skip-file
 # It is TF convention to define layers in the build method
 # pylint: disable=attribute-defined-outside-init
 

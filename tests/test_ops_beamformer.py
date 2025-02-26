@@ -14,8 +14,8 @@ from usbmd.scan import PlaneWaveScan
 from . import backend_equality_check
 
 
-def _get(reconstruction_mode):
-    """Mostly copied from tests/test_pytorch_beamforming.py"""
+def _get_params(reconstruction_mode):
+    """Get the necessary objects for the test"""
     # probe = get_probe(config)
     config = load_config_from_yaml(r"./tests/config_test.yaml")
     config = check_config(config)
@@ -95,7 +95,7 @@ def test_tof_correction(reconstruction_mode="generic"):
 
     from usbmd import beamformer
 
-    _, probe, scan, inputs = _get(reconstruction_mode)
+    _, probe, scan, _, inputs = _get_params(reconstruction_mode)
 
     # round inputs a bit to avoid numerical issues
     inputs = np.round(inputs, 2)
