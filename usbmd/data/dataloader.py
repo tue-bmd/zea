@@ -261,7 +261,12 @@ def _find_h5_files_from_directory(
     return file_names, file_shapes
 
 
-def _h5_reopen_on_io_error(dataloader_obj, indices, exception, retry_count):
+def _h5_reopen_on_io_error(
+    dataloader_obj,
+    indices,
+    exception,  # pylint: disable=unused-argument
+    retry_count,
+):
     """Reopen the file if an I/O error occurs.
     Also removes the file from the cache and try to close file.
     """
@@ -270,7 +275,7 @@ def _h5_reopen_on_io_error(dataloader_obj, indices, exception, retry_count):
         file = dataloader_obj._file_handle_cache.pop(file_name, None)
         if file is not None:
             file.close()
-    except Exception as exc:
+    except Exception:
         pass
 
     log.warning(

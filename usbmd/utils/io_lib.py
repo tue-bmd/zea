@@ -769,7 +769,6 @@ def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
         def wrapper(*args, **kwargs):
             delay = initial_delay
             last_exception = None
-
             retry_count = 0
 
             for attempt in range(max_retries):
@@ -778,7 +777,7 @@ def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
                 except (OSError, IOError) as e:
                     last_exception = e
 
-                    if attempt < max_retries:
+                    if attempt < max_retries - 1:
                         # Execute custom retry action if provided
                         if retry_action:
                             # Pass all original arguments to retry_action
@@ -793,8 +792,8 @@ def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
 
                         retry_count += 1
 
-                        # if first arg is a class update retry count of that method
-                        if hasattr(args[0], "retry_count"):
+                        # if args exist and first arg is a class, update retry count of that method
+                        if args and hasattr(args[0], "retry_count"):
                             args[0].retry_count = retry_count
 
                     else:
