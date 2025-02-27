@@ -1,6 +1,5 @@
 """Test the IO library functionality."""
 
-from multiprocessing.pool import INIT
 from unittest.mock import Mock
 
 import pytest
