@@ -29,7 +29,7 @@ class ReadH5:
     def open(self):
         """Open the .hdf5 HDF5 file for reading."""
         try:
-            self.file = h5py.File(self.file_path, "r")
+            self.file = h5py.File(self.file_path, "r", locking=False)
         except Exception as e:
             if "Unable to open file" in str(e):
                 log.error(
