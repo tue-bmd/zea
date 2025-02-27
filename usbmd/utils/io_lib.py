@@ -777,7 +777,7 @@ def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
                 except (OSError, IOError) as e:
                     last_exception = e
 
-                    if attempt < max_retries - 1:
+                    if attempt < max_retries:
                         # Execute custom retry action if provided
                         if retry_action:
                             # Pass all original arguments to retry_action
