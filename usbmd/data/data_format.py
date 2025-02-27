@@ -15,8 +15,8 @@ from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import (
     first_not_none_item,
     log,
-    update_dictionary,
     safe_initialize_class,
+    update_dictionary,
 )
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
 
@@ -771,7 +771,7 @@ def load_usbmd_file(
         data_type in _DATA_TYPES
     ), f"Data type {data_type} does not exist, should be in {_DATA_TYPES}"
 
-    with h5py.File(path, "r") as hdf5_file:
+    with h5py.File(path, "r", locking=False) as hdf5_file:
         # Define the probe
         probe_name = hdf5_file.attrs["probe"]
         file_scan_parameters = recursively_load_dict_contents_from_group(
