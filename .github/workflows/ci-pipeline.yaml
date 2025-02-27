@@ -51,6 +51,42 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Build and push Docker image (tensorflow)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: usbmd/tensorflow:latest
+          build-args: |
+            BACKEND=tensorflow
+          cache-from: type=registry,ref=usbmd/tensorflow:cache
+          cache-to: type=registry,ref=usbmd/tensorflow:cache,mode=max
+
+      - name: Build and push Docker image (torch)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: usbmd/torch:latest
+          build-args: |
+            BACKEND=torch
+          cache-from: type=registry,ref=usbmd/torch:cache
+          cache-to: type=registry,ref=usbmd/torch:cache,mode=max
+
+      - name: Build and push Docker image (jax)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: usbmd/jax:latest
+          build-args: |
+            BACKEND=jax
+          cache-from: type=registry,ref=usbmd/jax:cache
+          cache-to: type=registry,ref=usbmd/jax:cache,mode=max
+
       - name: Build and push Docker image (base)
         uses: docker/build-push-action@v3
         with:
