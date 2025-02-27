@@ -4,6 +4,7 @@ H5 dataloader for loading images from USBMD datasets.
 This module can be used with any backend.
 """
 
+import copy
 import json
 import math
 import re
@@ -427,12 +428,20 @@ class H5Generator(keras.utils.PyDataset):
     def __call__(self):
         return iter(self)
 
+    def _check_if_open(self, file):
+        """Check if a file is open."""
+        return bool(file.id.valid)
+
     def _get_file(self, file_name):
         """Open an HDF5 file and cache it."""
         # If file is already in cache, return it and move it to the end
         if file_name in self._file_handle_cache:
             self._file_handle_cache.move_to_end(file_name)
-            return self._file_handle_cache[file_name]
+            file = self._file_handle_cache[file_name]
+            # if file was closed, reopen:
+            if not self._check_if_open(file):
+                file = h5py.File(file_name, "r")
+                self._file_handle_cache[file_name] = file
         # If file is not in cache, open it and add it to the cache
         else:
             # If cache is full, close the least recently used file
@@ -441,7 +450,8 @@ class H5Generator(keras.utils.PyDataset):
                 close_file.close()
             file = h5py.File(file_name, "r", locking=False)
             self._file_handle_cache[file_name] = file
-            return file
+
+        return self._file_handle_cache[file_name]
 
     def extract_image(self, indices):
         """Extract image from hdf5 file.
@@ -511,6 +521,8 @@ class H5Dataloader(H5Generator):
         image_range: tuple = DEFAULT_IMAGE_RANGE,
         normalization_range: tuple = DEFAULT_NORMALIZATION_RANGE,
         resize_kwargs: dict = None,
+        map_fns: list = None,
+        augmentation: callable = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -523,8 +535,18 @@ class H5Dataloader(H5Generator):
             resize_type=resize_type,
             image_size=image_size,
             seed=self.seed,
-            **resize_kwargs,
+            **self.resize_kwargs,
         )
+        self.map_fns = map_fns or []
+        if augmentation is not None:
+            self.map_fns.append(augmentation)
+
+    def map(self, fn):
+        """Add a mapping function to the dataloader.
+        Example usage: dataloader = dataloader.map(lambda x: x / 255)"""
+        dl = copy.copy(self)
+        dl.map_fns.append(fn)
+        return dl
 
     def __getitem__(self, index):
         out = super().__getitem__(index)
@@ -543,6 +565,9 @@ class H5Dataloader(H5Generator):
         # resize
         if self.image_size is not None:
             images = self.resizer(images)
+
+        for map_fn in self.map_fns:
+            images = map_fn(images)
 
         if self.return_filename:
             return images, filenames
