@@ -100,6 +100,7 @@ def object_to_tensor(obj: Object):
 
         value = getattr(obj, key)
         if not isinstance(value, CONVERT_TO_KERAS_TYPES):
+            snapshot[key] = value
             continue
 
         dtype = None
