@@ -104,6 +104,8 @@ class Scan(Object):
         lens_thickness: float = None,
         lens_sound_speed: float = None,
         f_number: float = 1.0,
+        element_width: float = 0.2e-3,
+        attenuation_coef: float = 0.0,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -166,14 +168,16 @@ class Scan(Object):
                 of integers, then the transmits with those indices are selected. If set
                 to None, then all transmits are used. Defaults to None.
             probe_geometry (np.ndarray, optional): (n_el, 3) array with element positions
-                in meters. Necessary for automatic xlim calculation if not set. Defaults to None.
+                in meters. Necessary for automatic xlim calculation if not set.
+                Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
             pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
                 pressure field of shape (Nx, Nz, 1) with to perform automatic weighting.
-                Defaults to None. In that case default arguments are used. If pfield can be used
-                by the beamformer with option config.model.beamformer.auto_pressure_weighting.
-                If set to True, the pfield is used, if False, beamformer will compound all
+                Defaults to None. In that case default arguments are used. If pfield
+                can be used by the beamformer with option
+                config.model.beamformer.auto_pressure_weighting. If set to True, the
+                pfield is used, if False, beamformer will compound all
                 transmit data coherently without pfield weighting.
             apply_lens_correction (bool, optional): Whether to apply lens correction to the
                 delay computation. Defaults to False.
@@ -181,6 +185,10 @@ class Scan(Object):
                 Defaults to None.
             lens_sound_speed (float, optional): The speed of sound in the lens in m/s.
                 Defaults to None.
+            element_width (float, optional): The width of the transducer_elements in meters.
+                Defaults to 0.2e-3.
+            attenuation_coef (float, optional): The attenuation coefficient in
+                dB/cm/MHz. Defaults to 0.0.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -328,6 +336,8 @@ class Scan(Object):
         self._focus_distances = focus_distances
         self._initial_times = initial_times
         self._pfield = None
+        self.element_width = element_width
+        self.attenuation_coef = attenuation_coef
 
         self.selected_transmits = selected_transmits
 
@@ -427,6 +437,12 @@ class Scan(Object):
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
         return self._n_ax
+
+    @n_ax.setter
+    def n_ax(self, value):
+        value = int(value)
+        assert value > 0, "n_ax must be positive"
+        self._n_ax = value
 
     @property
     def n_el(self):
@@ -602,6 +618,30 @@ class Scan(Object):
             f"pfield must have shape (Nx, Nz, 1) = {self.Nx, self.Nz, 1}. "
             f"Got shape {self._pfield.shape}."
         )
+
+    @property
+    def element_width(self):
+        """The width of a single transducer elemen in meters."""
+        return self._element_width
+
+    @element_width.setter
+    def element_width(self, value):
+        """Set the element width in meters."""
+        value = float(value)
+        assert value > 0.0, "Element width must be positive"
+        self._element_width = value
+
+    @property
+    def attenuation_coef(self):
+        """The attenuation coefficient in dB/cm/MHz."""
+        return self._attenuation_coef
+
+    @attenuation_coef.setter
+    def attenuation_coef(self, value):
+        """Set the attenuation coefficient in dB/cm/MHz."""
+        value = float(value)
+        assert value >= 0.0, "Attenuation coefficient must be non-negative"
+        self._attenuation_coef = value
 
     def get_scan_parameters(self):
         """Returns a dictionary with all the parameters of the scan.
