@@ -10,9 +10,9 @@ import pytest
 from scipy.signal import hilbert
 
 from usbmd import ops
-from usbmd.probes import get_probe
-from usbmd.scan import PlaneWaveScan
-from usbmd.utils.simulator import UltrasoundSimulator
+from usbmd.ops_v2 import Pipeline, Simulate
+from usbmd.probes import Probe
+from usbmd.scan import Scan
 
 from . import backend_equality_check
 
@@ -174,42 +174,106 @@ def test_channels_to_complex(size, axis):
 )
 def test_up_and_down_conversion(factor, batch_size):
     """Test rf2iq and iq2rf in sequence"""
-    probe = get_probe("verasonics_l11_4v")
-    probe_parameters = probe.get_parameters()
-    fs = probe_parameters["sampling_frequency"]
-    fc = probe_parameters["center_frequency"]
-    scan = PlaneWaveScan(
-        probe.probe_geometry,
-        n_tx=1,
-        xlims=(-19e-3, 19e-3),
-        zlims=(0, 63e-3),
-        n_ax=2094,
-        sampling_frequency=fs,
-        center_frequency=fc,
-        angles=np.array(
-            [
-                0,
-            ]
-        ),
+    n_el = 128
+    n_scat = 3
+    n_tx = 2
+    n_ax = 512
+
+    aperture = 30e-3
+
+    tx_apodizations = np.ones((n_tx, n_el))
+    probe_geometry = np.stack(
+        [
+            np.linspace(-aperture / 2, aperture / 2, n_el),
+            np.zeros(n_el),
+            np.zeros(n_el),
+        ],
+        axis=1,
     )
 
-    simulator = UltrasoundSimulator(probe, scan, batch_size=batch_size)
+    t0_delays = np.stack(
+        [
+            np.linspace(0, 1e-6, n_el),
+            np.linspace(1e-6, 0, n_el),
+        ]
+    )
 
-    # Generate pseudorandom input tensor
-    data = simulator.generate(points=200)
-    data = np.expand_dims(data[0], axis=-1)
+    scan = Scan(
+        n_tx=n_tx,
+        n_ax=n_ax,
+        n_el=n_el,
+        center_frequency=3.125e6,
+        sampling_frequency=12.5e6,
+        probe_geometry=probe_geometry,
+        t0_delays=t0_delays,
+        tx_apodizations=tx_apodizations,
+        element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
+        apply_lens_correction=True,
+        lens_sound_speed=1440.0,
+        lens_thickness=1e-3,
+        initial_times=np.zeros((n_tx,)),
+        attenuation_coef=0.7,
+        n_ch=1,
+        selected_transmits="all",
+    )
+    probe = Probe(
+        probe_geometry=probe_geometry,
+        center_frequency=3.125e6,
+        sampling_frequency=12.5e6,
+    )
+
+    # use pipeline here so it is easy to propagate the scan parameters
+    simulator_pipeline = Pipeline(
+        [Simulate(apply_lens_correction=scan.apply_lens_correction, n_ax=n_ax)]
+    )
+
+    data = []
+    for _ in range(batch_size):
+
+        # Define scatterers with random variation
+        scat_x_base, scat_z_base = np.meshgrid(
+            np.linspace(-10e-3, 10e-3, 5),
+            np.linspace(5e-3, 30e-3, 5),
+            indexing="ij",
+        )
+        # Add random perturbations
+        scat_x = np.ravel(scat_x_base) + np.random.uniform(-1e-3, 1e-3, 25)
+        scat_z = np.ravel(scat_z_base) + np.random.uniform(-1e-3, 1e-3, 25)
+        n_scat = len(scat_x)
+        # Select random subset of scatterers
+        idx = np.random.choice(n_scat, n_scat, replace=False)[:n_scat]
+        scat_positions = np.stack(
+            [
+                scat_x[idx],
+                np.zeros_like(scat_x[idx]),
+                scat_z[idx],
+            ],
+            axis=1,
+        )
+
+        output = simulator_pipeline(
+            scan,
+            probe,
+            scatterer_positions=scat_positions.astype(np.float32),
+            scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
+        )
+
+        data.append(output["raw_data"])
+    data = np.concatenate(data)
 
     # slice data such that decimation fits exactly
-    idx = data.shape[-2] % factor
+    idx = data.shape[-3] % factor
     if idx > 0:
-        data = data[..., :-idx, :]
+        data = data[..., :-idx, :, :]
 
     downsample = ops.Downsample(factor=factor, axis=-3)
-    demodulate = ops.Demodulate(fs=fs, fc=fc, bandwidth=None, filter_coeff=None)
-    upmix = ops.UpMix(fs=fs, fc=fc, upsampling_rate=factor)
+    demodulate = ops.Demodulate(
+        fs=scan.fs, fc=scan.fc, bandwidth=None, filter_coeff=None
+    )
+    upmix = ops.UpMix(fs=scan.fs, fc=scan.fc, upsampling_rate=factor)
 
     # cut n_ax data so it is divisible by factor
-    data = data[:, : (data.shape[1] // factor) * factor]
+    data = data[:, :, : (data.shape[2] // factor) * factor]
 
     _data = demodulate(data)
     _data = downsample(_data)
