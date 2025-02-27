@@ -60,8 +60,8 @@ jobs:
           tags: usbmd/tensorflow:latest
           build-args: |
             BACKEND=tensorflow
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+          cache-from: type=registry,ref=usbmd/tensorflow:cache
+          cache-to: type=registry,ref=usbmd/tensorflow:cache,mode=max
 
       - name: Build and push Docker image (torch)
         uses: docker/build-push-action@v3
@@ -72,8 +72,8 @@ jobs:
           tags: usbmd/torch:latest
           build-args: |
             BACKEND=torch
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+          cache-from: type=registry,ref=usbmd/torch:cache
+          cache-to: type=registry,ref=usbmd/torch:cache,mode=max
 
       - name: Build and push Docker image (jax)
         uses: docker/build-push-action@v3
@@ -84,8 +84,8 @@ jobs:
           tags: usbmd/jax:latest
           build-args: |
             BACKEND=jax
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+          cache-from: type=registry,ref=usbmd/jax:cache
+          cache-to: type=registry,ref=usbmd/jax:cache,mode=max
 
       - name: Build and push Docker image (base)
         uses: docker/build-push-action@v3
@@ -96,8 +96,8 @@ jobs:
           tags: usbmd/base:latest
           build-args: |
             BACKEND=numpy
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+          cache-from: type=registry,ref=usbmd/base:cache
+          cache-to: type=registry,ref=usbmd/base:cache,mode=max
 
   pylint:
     needs: build-full-image
