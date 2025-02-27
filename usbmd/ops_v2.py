@@ -15,6 +15,7 @@ from usbmd.ops import channels_to_complex, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
+from usbmd.simulator import simulate_rf
 from usbmd.utils import log
 from usbmd.utils.checks import _assert_keys_and_axes
 
@@ -62,6 +63,10 @@ class Operation(keras.Operation):
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
+
+        self.inputs = []  # Source(s) of input data (name of a previous operation)
+        self.allow_multiple_inputs = False  # Only single input allowed by default
+
         self.cache_inputs = cache_inputs
         self.cache_outputs = cache_outputs
 
@@ -484,6 +489,10 @@ class Identity(Operation):
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.allow_multiple_inputs = True
+
     def call(self, *args, **kwargs) -> Dict:
         """
         Merges the input dictionaries. Priority is given to the last input.
@@ -504,7 +513,7 @@ class Split(Operation):
         super().__init__(**kwargs)
         self.n = n
 
-    def call(self, *args, **kwargs) -> List[Dict]:
+    def call(self, **kwargs) -> List[Dict]:
         """
         Splits the input dictionary into n copies.
         """
@@ -527,14 +536,14 @@ class Stack(Operation):
 
         self.keys, self.axes = _assert_keys_and_axes(keys, axes)
 
-    def call(self, *args, **kwargs) -> Dict:
+    def call(self, **kwargs) -> Dict:
         """
         Stacks the inputs corresponding to the specified keys along the specified axis.
         If a list of axes is provided, the length must match the number of keys.
-        If an integer axis is provided, all inputs are stacked along the same axis.
         """
-
-        raise NotImplementedError
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
+        return kwargs
 
 
 @ops_registry("mean_v2")
@@ -574,3 +583,55 @@ class UpMix(Operation):
         data = upmix(data, fs, fc, upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return data
+
+
+@ops_registry("simulate_rf_v2")
+class Simulate(Operation):
+    """Simulate RF data."""
+
+    def __init__(self, n_ax, apply_lens_correction=True, **kwargs):
+        super().__init__(
+            output_data_type=DataTypes.RAW_DATA,
+            jit_compile=False,
+            **kwargs,
+        )
+        self.apply_lens_correction = apply_lens_correction
+        self.n_ax = n_ax
+
+    def call(
+        self,
+        scatterer_positions,
+        scatterer_magnitudes,
+        probe_geometry,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        center_frequency,
+        sampling_frequency,
+        t0_delays,
+        initial_times,
+        element_width,
+        attenuation_coef,
+        tx_apodizations,
+    ):
+        return {
+            "raw_data": simulate_rf(
+                ops.convert_to_tensor(scatterer_positions),
+                ops.convert_to_tensor(scatterer_magnitudes),
+                probe_geometry=probe_geometry,
+                apply_lens_correction=self.apply_lens_correction,
+                lens_thickness=lens_thickness,
+                lens_sound_speed=lens_sound_speed,
+                sound_speed=sound_speed,
+                n_ax=self.n_ax,
+                center_frequency=center_frequency,
+                sampling_frequency=sampling_frequency,
+                t0_delays=t0_delays,
+                initial_times=initial_times,
+                element_width=element_width,
+                attenuation_coef=attenuation_coef,
+                tx_apodizations=tx_apodizations,
+            ),
+            "n_ax": self.n_ax,
+            "apply_lens_correction": self.apply_lens_correction,
+        }
