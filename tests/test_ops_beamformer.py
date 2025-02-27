@@ -39,8 +39,8 @@ def _get_params(reconstruction_mode):
     # Set scan grid parameters
     # The grid is updated automatically when it is accessed after the scan parameters
     # have been changed.
-    dx = scan.wvln / 4
-    dz = scan.wvln / 4
+    dx = scan.wvln
+    dz = scan.wvln
     scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
     scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
 
