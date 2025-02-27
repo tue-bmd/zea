@@ -376,7 +376,8 @@ class H5Generator(keras.utils.PyDataset):
         if insert_frame_axis:
             _frame_axis = map_negative_indices([frame_axis], len(self.shape) + 1)
             self.shape = np.insert(self.shape, _frame_axis, 1)
-        self.shape[frame_axis] = self.shape[frame_axis] * n_frames
+        if self.shape[frame_axis]:
+            self.shape[frame_axis] = self.shape[frame_axis] * n_frames
 
         # Set random number generator
         self.rng = np.random.default_rng(self.seed)
@@ -647,4 +648,6 @@ class USBMDJSONEncoder(json.JSONEncoder):
                 "stop": o.stop,
                 "step": o.step,
             }
+        if isinstance(o, Path):
+            return str(o)
         return super().default(o)
