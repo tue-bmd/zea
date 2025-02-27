@@ -13,6 +13,7 @@ import pytest
 from keras import ops
 
 from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
+from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS
 from usbmd.data.layers import Resizer
 
 DUMMY_DATASET_PATH = "dummy_data.hdf5"
@@ -419,3 +420,101 @@ def test_ndim_hdf5_dataset(
     )
 
     next(iter(dataset))
+
+
+def _mock_h5_file_handler(mock_error_count):
+    """Helper to simulate temporary file access issues."""
+    error_count = [0]  # Use list to allow modification in closure
+    original_h5py_file = h5py.File
+
+    def _handler(*args, **kwargs):
+        if error_count[0] < mock_error_count:
+            error_count[0] += 1
+            raise OSError("Temporary file access error")
+        # Call the original h5py.File instead of recursively calling the mock
+        return original_h5py_file(*args, **kwargs)
+
+    return _handler
+
+
+@pytest.mark.parametrize(
+    "mock_error_count, should_succeed",
+    [
+        (1, True),  # One error, should succeed on retry
+        (2, True),  # Two errors, should succeed on third try
+        (4, False),  # Too many errors, should fail
+    ],
+)
+def test_h5_file_retry(
+    mock_error_count,
+    should_succeed,
+    create_dummy_hdf5,  # pytest fixture
+    monkeypatch,
+):
+    """Test that the H5Generator retries opening files when they're temporarily unavailable."""
+
+    # Setup mock for h5py.File that preserves the original implementation
+    mock_handler = _mock_h5_file_handler(mock_error_count)
+
+    generator = _get_h5_generator(DUMMY_DATASET_PATH, "data", 1, True)
+
+    monkeypatch.setattr(h5py, "File", mock_handler)
+
+    if should_succeed:
+        # Should succeed after retries
+        batch = next(iter(generator))
+        batch = ops.convert_to_numpy(batch)
+        assert isinstance(batch, np.ndarray), "Failed to get valid data after retries"
+    else:
+        # Should fail after max retries
+        with pytest.raises(ValueError) as exc_info:
+            next(iter(generator))
+        assert "Failed to complete operation" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "mock_error_count, expected_retries, should_succeed",
+    [
+        (1, 1, True),  # One error, should succeed on retry
+        (
+            MAX_RETRY_ATTEMPTS - 1,
+            MAX_RETRY_ATTEMPTS - 1,
+            True,
+        ),  # Two errors, should succeed on third try
+        (
+            MAX_RETRY_ATTEMPTS + 1,
+            MAX_RETRY_ATTEMPTS,
+            False,
+        ),  # Too many errors, should fail after max retries
+    ],
+)
+def test_h5_file_retry_count(
+    mock_error_count,
+    expected_retries,
+    should_succeed,
+    create_dummy_hdf5,  # pytest fixture
+    monkeypatch,
+):
+    """Test that the H5Generator correctly counts retries when files are temporarily unavailable."""
+
+    # Setup mock for h5py.File that preserves the original implementation
+    mock_handler = _mock_h5_file_handler(mock_error_count)
+
+    generator = _get_h5_generator(DUMMY_DATASET_PATH, "data", 1, True)
+
+    monkeypatch.setattr(h5py, "File", mock_handler)
+
+    if should_succeed:
+        # Should succeed after retries
+        batch = next(iter(generator))
+        batch = ops.convert_to_numpy(batch)
+        assert isinstance(batch, np.ndarray), "Failed to get valid data after retries"
+    else:
+        # Should fail after max retries
+        with pytest.raises(ValueError) as exc_info:
+            next(iter(generator))
+        assert "Failed to complete operation" in str(exc_info.value)
+
+    assert (
+        generator.retry_count == expected_retries
+    ), f"Expected {expected_retries} retries but got {generator.retry_count}"

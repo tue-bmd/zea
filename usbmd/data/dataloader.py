@@ -20,12 +20,14 @@ from keras import ops
 
 from usbmd.data.layers import Resizer
 from usbmd.utils import log, map_negative_indices, translate
-from usbmd.utils.io_lib import _get_shape_hdf5_file, search_file_tree
+from usbmd.utils.io_lib import _get_shape_hdf5_file, retry_on_io_error, search_file_tree
 
 FILE_TYPES = [".hdf5", ".h5"]
 FILE_HANDLE_CACHE_CAPACITY = 128
 DEFAULT_IMAGE_RANGE = (0, 255)
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
+MAX_RETRY_ATTEMPTS = 3
+INITIAL_RETRY_DELAY = 0.1
 
 
 def json_dumps(obj):
@@ -259,6 +261,24 @@ def _find_h5_files_from_directory(
     return file_names, file_shapes
 
 
+def _h5_reopen_on_io_error(dataloader_obj, indices, exception, retry_count):
+    """Reopen the file if an I/O error occurs.
+    Also removes the file from the cache and try to close file.
+    """
+    file_name = indices[0]
+    try:
+        file = dataloader_obj._file_handle_cache.pop(file_name, None)
+        if file is not None:
+            file.close()
+    except Exception as exc:
+        pass
+
+    log.warning(
+        f"H5Generator: I/O error occurred while reading file {file_name}. "
+        f"Retry opening file. Retry count: {retry_count}."
+    )
+
+
 class H5Generator(keras.utils.PyDataset):
     """Generator from h5 file using provided indices."""
 
@@ -382,6 +402,9 @@ class H5Generator(keras.utils.PyDataset):
         self._file_handle_cache = OrderedDict()
         self.file_handle_cache_capacity = file_handle_cache_capacity
 
+        # Retry count for I/O errors
+        self.retry_count = 0
+
     def __getitem__(self, index):
         if index == 0 and self.shuffle:
             self._shuffle()
@@ -453,6 +476,11 @@ class H5Generator(keras.utils.PyDataset):
 
         return self._file_handle_cache[file_name]
 
+    @retry_on_io_error(
+        max_retries=MAX_RETRY_ATTEMPTS,
+        initial_delay=INITIAL_RETRY_DELAY,
+        retry_action=_h5_reopen_on_io_error,
+    )
     def extract_image(self, indices):
         """Extract image from hdf5 file.
         Args:
@@ -468,9 +496,14 @@ class H5Generator(keras.utils.PyDataset):
         processed_indices = tuple(
             list(idx) if isinstance(idx, range) else idx for idx in indices
         )
+
         try:
             images = file[key][processed_indices]
+        except (OSError, IOError):
+            # Let the decorator handle I/O errors
+            raise
         except Exception as exc:
+            # For non-I/O errors, provide detailed context
             raise ValueError(
                 f"Could not load image at index {processed_indices} "
                 f"and file {file_name} of shape {file[key].shape}"
@@ -543,7 +576,14 @@ class H5Dataloader(H5Generator):
 
     def map(self, fn):
         """Add a mapping function to the dataloader.
-        Example usage: dataloader = dataloader.map(lambda x: x / 255)"""
+
+        Args:
+            fn (callable): Function to map over the images.
+
+        Example usage:
+            dataloader = dataloader.map(lambda x: x / 255)
+
+        """
         dl = copy.copy(self)
         dl.map_fns.append(fn)
         return dl
