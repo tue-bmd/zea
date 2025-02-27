@@ -12,8 +12,8 @@ import h5py
 import numpy as np
 import scipy.io as sio
 
-from usbmd.utils.io_lib import filename_from_window_dialog
 from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
+from usbmd.utils.io_lib import filename_from_window_dialog
 
 
 def load_mat(filename):
@@ -109,7 +109,7 @@ def load_dict_from_file(filename, squeeze=True):
             v_7_3 = True
 
     if (filetype == ".hdf5") or (v_7_3 is True):
-        with h5py.File(filename, "r") as h5file:
+        with h5py.File(filename, "r", locking=False) as h5file:
             return recursively_load_dict_contents_from_group(h5file, "/", squeeze)
 
 

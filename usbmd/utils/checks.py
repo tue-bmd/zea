@@ -318,7 +318,7 @@ def validate_dataset(path: str = None, dataset: h5py.File = None):
 
     if path is not None:
         path = Path(path)
-        with h5py.File(path, "r") as _dataset:
+        with h5py.File(path, "r", locking=False) as _dataset:
             event_structure, num_events = _validate_hdf5_dataset(_dataset)
     else:
         event_structure, num_events = _validate_hdf5_dataset(dataset)
