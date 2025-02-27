@@ -118,10 +118,10 @@ def test_tof_correction(reconstruction_mode="generic"):
     )
     for key, item in kwargs.items():
         # If item is a floating point numpy array, convert to float32
-        if hasattr(item, "dtype") and np.issubdtype(item.dtype, np.floating):
-            item = item.astype(np.float32)
-        # Convert to tensor if numpy array
         if isinstance(item, np.ndarray):
+            if hasattr(item, "dtype") and np.issubdtype(item.dtype, np.floating):
+                item = item.astype(np.float32)
+            # Convert to tensor if numpy array
             kwargs[key] = ops.convert_to_tensor(item)
 
     outputs = []
