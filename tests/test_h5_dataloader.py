@@ -16,50 +16,55 @@ from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_dir
 from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS
 from usbmd.data.layers import Resizer
 
-DUMMY_DATASET_PATH = "dummy_data.hdf5"
-NDIM_DUMMY_DATASET_FOLDER = "./temp/ndim_dummy_dataset"
 CAMUS_DATASET_PATH = (
-    "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/"
-    "train/patient0001/patient0001_2CH_half_sequence.hdf5"
+    "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/train/patient0001"
     if os.name == "nt"
-    else "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/"
-    "train/patient0001/patient0001_2CH_half_sequence.hdf5"
+    else "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/train/patient0001"
 )
+CAMUS_FILE = CAMUS_DATASET_PATH + "/patient0001_2CH_half_sequence.hdf5"
 DUMMY_IMAGE_SHAPE = (28, 28)
 
 
 @pytest.fixture
-def create_dummy_hdf5():
+def dummy_hdf5(tmp_path):
     """Fixture to create and clean up a dummy hdf5 file."""
-    with h5py.File(DUMMY_DATASET_PATH, "w", locking=False) as f:
+    file_path = tmp_path / "dummy_data.hdf5"
+    with h5py.File(file_path, "w") as f:
         data = np.random.rand(100, *DUMMY_IMAGE_SHAPE)
         f.create_dataset("data", data=data)
-    yield
-    Path(DUMMY_DATASET_PATH).unlink()
+    return file_path
 
 
 @pytest.fixture
-def create_ndim_hdf5_dataset():
+def ndim_hdf5_dataset_path(tmp_path):
     """Fixture to create and clean up a dummy hdf5 dataset with
     files having data with n dimensions."""
     n_dims = 5
     n_files = 3
     n_samples = 10
     image_shape = [i + 20 for i in range(1, n_dims + 1)] + [1]
-    folder = Path(NDIM_DUMMY_DATASET_FOLDER)
-    folder.mkdir(parents=True, exist_ok=True)
-
-    for file in folder.iterdir():
-        file.unlink()
 
     for i in range(n_files):
-        with h5py.File(folder / f"dummy_data_{i}.hdf5", "w", locking=False) as f:
+        with h5py.File(tmp_path / f"dummy_data_{i}.hdf5", "w") as f:
             data = np.random.rand(n_samples, *image_shape)
             f.create_dataset("data", data=data)
-    yield
-    for file in folder.iterdir():
-        file.unlink()
-    folder.rmdir()
+    return tmp_path
+
+
+@pytest.fixture
+def camus_dataset():
+    """Fixture to return the path to the CAMUS dataset."""
+    if not Path(CAMUS_DATASET_PATH).exists():
+        pytest.skip("The CAMUS dataset directory is unavailable")
+    return CAMUS_DATASET_PATH
+
+
+@pytest.fixture
+def camus_file():
+    """Fixture to return the path to the CAMUS dataset."""
+    if not Path(CAMUS_FILE).exists():
+        pytest.skip("The CAMUS dataset directory is unavailable")
+    return CAMUS_FILE
 
 
 def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=None):
@@ -82,29 +87,21 @@ def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=
 @pytest.mark.parametrize(
     "filename, dataset_name, n_frames, insert_frame_axis",
     [
-        (DUMMY_DATASET_PATH, "data", 1, True),
-        (DUMMY_DATASET_PATH, "data", 3, True),
-        (DUMMY_DATASET_PATH, "data", 1, False),
-        (DUMMY_DATASET_PATH, "data", 3, False),
-        (CAMUS_DATASET_PATH, "data/image_sc", 1, True),
-        (CAMUS_DATASET_PATH, "data/image_sc", 3, True),
-        (CAMUS_DATASET_PATH, "data/image_sc", 1, False),
-        (CAMUS_DATASET_PATH, "data/image_sc", 3, False),
-        (CAMUS_DATASET_PATH, "data/image_sc", 15, False),
+        ("dummy_hdf5", "data", 1, True),
+        ("dummy_hdf5", "data", 3, True),
+        ("dummy_hdf5", "data", 1, False),
+        ("dummy_hdf5", "data", 3, False),
+        ("camus_file", "data/image_sc", 1, True),
+        ("camus_file", "data/image_sc", 3, True),
+        ("camus_file", "data/image_sc", 1, False),
+        ("camus_file", "data/image_sc", 3, False),
+        ("camus_file", "data/image_sc", 15, False),
     ],
 )
-def test_h5_generator(
-    filename,
-    dataset_name,
-    n_frames,
-    insert_frame_axis,
-    create_dummy_hdf5,  # pytest fixture
-):  # pylint: disable=unused-argument
+def test_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, request):
     """Test the H5Generator class"""
 
-    if filename == CAMUS_DATASET_PATH:
-        if not Path(filename).exists():
-            return
+    filename = request.getfixturevalue(filename)
 
     generator = _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis)
 
@@ -121,12 +118,10 @@ def test_h5_generator(
         )
 
 
-def test_h5_generator_shuffle(
-    create_dummy_hdf5,  # pytest fixture
-):  # pylint: disable=unused-argument
+def test_h5_generator_shuffle(dummy_hdf5):
     """Test the H5Generator class"""
 
-    generator = _get_h5_generator(DUMMY_DATASET_PATH, "data", 10, False, seed=42)
+    generator = _get_h5_generator(dummy_hdf5, "data", 10, False, seed=42)
 
     # Test shuffle
     indices = deepcopy(generator.indices)
@@ -137,14 +132,21 @@ def test_h5_generator_shuffle(
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
     [
-        (Path(CAMUS_DATASET_PATH).parent, "data/image_sc", 1, True, 2, 18 + 20),
+        ("camus_dataset", "data/image_sc", 1, True, 2, 18 + 20),
         ("fake_directory", "data", 1, True, 3, 9 * 3),
-        (Path(CAMUS_DATASET_PATH).parent, "data/image_sc", 5, False, 2, 18 + 20),
+        ("camus_dataset", "data/image_sc", 5, False, 2, 18 + 20),
         ("fake_directory", "data", 5, False, 3, 9 * 3),
     ],
 )
 def test_h5_dataset_from_directory(
-    tmp_path, directory, key, n_frames, insert_frame_axis, num_files, total_samples
+    tmp_path,
+    directory,
+    key,
+    n_frames,
+    insert_frame_axis,
+    num_files,
+    total_samples,
+    request,
 ):
     """Test the h5_dataset_from_directory function.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
@@ -157,10 +159,9 @@ def test_h5_dataset_from_directory(
                 f.create_dataset(key, data=data)
         expected_len_dataset = total_samples // num_files // n_frames * num_files
         directory = tmp_path
-    elif directory == Path(CAMUS_DATASET_PATH).parent:
+    elif directory == "camus_dataset":
+        directory = request.getfixturevalue(directory)
         expected_len_dataset = 18 // n_frames + 20 // n_frames
-        if not Path(directory).exists():
-            return
     else:
         raise ValueError("Invalid directory for testing")
 
@@ -208,26 +209,18 @@ def test_h5_dataset_from_directory(
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, image_size",
     [
-        (Path(CAMUS_DATASET_PATH).parent, "data/image_sc", 1, True, (20, 20)),
-        (DUMMY_DATASET_PATH, "data", 1, True, (20, 20)),
-        (Path(CAMUS_DATASET_PATH).parent, "data/image_sc", 5, False, (20, 20)),
-        (DUMMY_DATASET_PATH, "data", 5, False, (20, 20)),
+        ("camus_dataset", "data/image_sc", 1, True, (20, 20)),
+        ("dummy_hdf5", "data", 1, True, (20, 20)),
+        ("camus_dataset", "data/image_sc", 5, False, (20, 20)),
+        ("dummy_hdf5", "data", 5, False, (20, 20)),
     ],
 )
 def test_h5_dataset_return_filename(
-    directory,
-    key,
-    n_frames,
-    insert_frame_axis,
-    image_size,
-    create_dummy_hdf5,  # pylint: disable=unused-argument
+    directory, key, n_frames, insert_frame_axis, image_size, request
 ):
-    """Test the h5_dataset_from_directory function with return_filename=True.
-    Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
+    """Test the h5_dataset_from_directory function with return_filename=True."""
 
-    if directory == Path(CAMUS_DATASET_PATH).parent:
-        if not directory.exists():
-            return
+    directory = request.getfixturevalue(directory)
 
     dataset = h5_dataset_from_directory(
         directory,
@@ -256,59 +249,50 @@ def test_h5_dataset_return_filename(
 @pytest.mark.parametrize(
     "directory, key, image_size, resize_type",
     [
-        (Path(CAMUS_DATASET_PATH).parent, "data/image_sc", (20, 23), "resize"),
-        (DUMMY_DATASET_PATH, "data", (20, 23), "resize"),
+        ("camus_dataset", "data/image_sc", (20, 23), "resize"),
+        ("dummy_hdf5", "data", (20, 23), "resize"),
         (
-            Path(CAMUS_DATASET_PATH).parent,
+            "camus_dataset",
             "data/image_sc",
             (20, 23),
             "resize",
         ),
-        (DUMMY_DATASET_PATH, "data", (20, 23), "resize"),
+        ("dummy_hdf5", "data", (20, 23), "resize"),
         (
-            Path(CAMUS_DATASET_PATH).parent,
+            "camus_dataset",
             "data/image_sc",
             (20, 23),
             "center_crop",
         ),
-        (DUMMY_DATASET_PATH, "data", (20, 23), "center_crop"),
+        ("dummy_hdf5", "data", (20, 23), "center_crop"),
         (
-            Path(CAMUS_DATASET_PATH).parent,
+            "camus_dataset",
             "data/image_sc",
             (20, 23),
             "center_crop",
         ),
-        (DUMMY_DATASET_PATH, "data", (20, 23), "center_crop"),
+        ("dummy_hdf5", "data", (20, 23), "center_crop"),
         (
-            Path(CAMUS_DATASET_PATH).parent,
+            "camus_dataset",
             "data/image_sc",
             (20, 23),
             "random_crop",
         ),
-        (DUMMY_DATASET_PATH, "data", (20, 23), "random_crop"),
+        ("dummy_hdf5", "data", (20, 23), "random_crop"),
         (
-            Path(CAMUS_DATASET_PATH).parent,
+            "camus_dataset",
             "data/image_sc",
             (20, 23),
             "random_crop",
         ),
-        (DUMMY_DATASET_PATH, "data", (20, 23), "random_crop"),
-        (DUMMY_DATASET_PATH, "data", (32, 32), "crop_or_pad"),
+        ("dummy_hdf5", "data", (20, 23), "random_crop"),
+        ("dummy_hdf5", "data", (32, 32), "crop_or_pad"),
     ],
 )
-def test_h5_dataset_resize_types(
-    directory,
-    key,
-    image_size,
-    resize_type,
-    create_dummy_hdf5,  # pylint: disable=unused-argument
-):
-    """Test the h5_dataset_from_directory function with different resize types.
-    Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
+def test_h5_dataset_resize_types(directory, key, image_size, resize_type, request):
+    """Test the h5_dataset_from_directory function with different resize types."""
 
-    if directory == Path(CAMUS_DATASET_PATH).parent:
-        if not directory.exists():
-            pytest.skip("The CAMUS dataset directory is unavailable")
+    directory = request.getfixturevalue(directory)
 
     dataset = h5_dataset_from_directory(
         directory,
@@ -343,12 +327,11 @@ def test_crop_or_pad():
 
 @pytest.mark.parametrize(
     (
-        "directory, key, n_frames, insert_frame_axis, additional_axes_iter, "
+        "key, n_frames, insert_frame_axis, additional_axes_iter, "
         "frame_axis, initial_frame_axis, frame_index_stride, resize_type, image_size"
     ),
     [
         (
-            NDIM_DUMMY_DATASET_FOLDER,
             "data",
             1,
             True,
@@ -360,7 +343,6 @@ def test_crop_or_pad():
             (20, 20),
         ),
         (
-            NDIM_DUMMY_DATASET_FOLDER,
             "data",
             3,
             False,
@@ -372,7 +354,6 @@ def test_crop_or_pad():
             (20, 20),
         ),
         (
-            NDIM_DUMMY_DATASET_FOLDER,
             "data",
             5,
             True,
@@ -386,7 +367,7 @@ def test_crop_or_pad():
     ],
 )
 def test_ndim_hdf5_dataset(
-    directory,
+    ndim_hdf5_dataset_path,  # pytest fixture
     key,
     n_frames,
     insert_frame_axis,
@@ -396,13 +377,11 @@ def test_ndim_hdf5_dataset(
     frame_index_stride,
     resize_type,
     image_size,
-    create_ndim_hdf5_dataset,  # pylint: disable=unused-argument
 ):
-    """Test the h5_dataset_from_directory function with an n-dimensional HDF5 dataset.
-    Uses the create_ndim_hdf5_dataset fixture."""
+    """Test the h5_dataset_from_directory function with an n-dimensional HDF5 dataset."""
 
     dataset = h5_dataset_from_directory(
-        directory,
+        ndim_hdf5_dataset_path,
         key,
         image_size=image_size,
         n_frames=n_frames,
@@ -454,18 +433,14 @@ def _mock_h5_file_handler(mock_error_count):
     ],
 )
 def test_h5_file_retry_count(
-    mock_error_count,
-    expected_retries,
-    should_succeed,
-    create_dummy_hdf5,  # pylint: disable=unused-argument
-    monkeypatch,
+    mock_error_count, expected_retries, should_succeed, dummy_hdf5, monkeypatch
 ):
     """Test that the H5Generator correctly counts retries when files are temporarily unavailable."""
 
     # Setup mock for h5py.File that preserves the original implementation
     mock_handler = _mock_h5_file_handler(mock_error_count)
 
-    generator = _get_h5_generator(DUMMY_DATASET_PATH, "data", 1, True)
+    generator = _get_h5_generator(dummy_hdf5, "data", 1, True)
 
     monkeypatch.setattr(h5py, "File", mock_handler)
 
