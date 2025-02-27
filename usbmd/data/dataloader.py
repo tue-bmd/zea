@@ -440,7 +440,7 @@ class H5Generator(keras.utils.PyDataset):
             file = self._file_handle_cache[file_name]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                file = h5py.File(file_name, "r")
+                file = h5py.File(file_name, "r", locking=False)
                 self._file_handle_cache[file_name] = file
         # If file is not in cache, open it and add it to the cache
         else:

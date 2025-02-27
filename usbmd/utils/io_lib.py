@@ -176,7 +176,7 @@ def load_image(filename, grayscale=True, color_order="RGB"):
 
 def _get_shape_hdf5_file(filepath, key):
     """Retrieve the length of a dataset in an hdf5 file."""
-    with h5py.File(filepath, "r") as f:
+    with h5py.File(filepath, "r", locking=False) as f:
         return list(f[key].shape)
 
 
