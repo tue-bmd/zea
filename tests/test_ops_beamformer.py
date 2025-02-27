@@ -7,9 +7,9 @@ import numpy as np
 
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
+from usbmd.ops_v2 import Pipeline, Simulate
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
-from usbmd.utils.simulator import UltrasoundSimulator
 
 from . import backend_equality_check
 
@@ -39,18 +39,42 @@ def _get_params(reconstruction_mode):
     # Set scan grid parameters
     # The grid is updated automatically when it is accessed after the scan parameters
     # have been changed.
-    dx = scan.wvln / 4
-    dz = scan.wvln / 4
+    dx = scan.wvln
+    dz = scan.wvln
     scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
     scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
 
-    simulator = UltrasoundSimulator(probe, scan)
+    # use pipeline here so it is easy to propagate the scan parameters
+    simulator = Pipeline(
+        [Simulate(apply_lens_correction=scan.apply_lens_correction, n_ax=scan.n_ax)]
+    )
 
     # Generate pseudorandom input tensor
-    data = simulator.generate(200)
+    # Define scatterers
+    scat_x, scat_z = np.meshgrid(
+        np.linspace(-10e-3, 10e-3, 5),
+        np.linspace(5e-3, 30e-3, 5),
+        indexing="ij",
+    )
+    scat_x, scat_z = np.ravel(scat_x), np.ravel(scat_z)
+    n_scat = len(scat_x)
+    scat_positions = np.stack(
+        [
+            scat_x,
+            np.zeros_like(scat_x),
+            scat_z,
+        ],
+        axis=1,
+    )
+    output = simulator(
+        scan,
+        probe,
+        scatterer_positions=scat_positions.astype(np.float32),
+        scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
+    )
+    data = output["raw_data"]
 
-    inputs = np.expand_dims(data[0], axis=(1, -1))
-    return config, probe, scan, data, inputs
+    return config, probe, scan, data
 
 
 @backend_equality_check(
@@ -71,7 +95,8 @@ def test_tof_correction(reconstruction_mode="generic"):
 
     from usbmd import beamformer
 
-    _, probe, scan, _, inputs = _get_params(reconstruction_mode)
+    # pylint: disable=unused-variable
+    config, probe, scan, inputs = _get_params(reconstruction_mode)
 
     # round inputs a bit to avoid numerical issues
     inputs = np.round(inputs, 2)
@@ -93,10 +118,10 @@ def test_tof_correction(reconstruction_mode="generic"):
     )
     for key, item in kwargs.items():
         # If item is a floating point numpy array, convert to float32
-        if hasattr(item, "dtype") and np.issubdtype(item.dtype, np.floating):
-            item = item.astype(np.float32)
-        # Convert to tensor if numpy array
         if isinstance(item, np.ndarray):
+            if hasattr(item, "dtype") and np.issubdtype(item.dtype, np.floating):
+                item = item.astype(np.float32)
+            # Convert to tensor if numpy array
             kwargs[key] = ops.convert_to_tensor(item)
 
     outputs = []
