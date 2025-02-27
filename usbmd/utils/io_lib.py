@@ -12,6 +12,7 @@ import functools
 import multiprocessing
 import os
 import sys
+import time
 from collections import deque
 from io import BytesIO
 from multiprocessing.pool import ThreadPool
@@ -746,3 +747,66 @@ async def start_async_app(app: Tk, *args, **kwargs):
     """
     my_app = app(asyncio.get_event_loop(), *args, **kwargs)
     await my_app.show()
+
+
+def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
+    """Decorator to retry functions on I/O errors with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        initial_delay: Initial delay between retries in seconds
+        retry_action: Optional function to call before each retry attempt
+            If decorating a method: retry_action(self, exception, attempt, *args, **kwargs)
+            If decorating a function: retry_action(exception, attempt, *args, **kwargs)
+
+    Returns:
+        Decorated function with retry logic
+
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            last_exception = None
+
+            retry_count = 0
+
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (OSError, IOError) as e:
+                    last_exception = e
+
+                    if attempt < max_retries:
+                        # Execute custom retry action if provided
+                        if retry_action:
+                            # Pass all original arguments to retry_action
+                            retry_action(
+                                *args,
+                                exception=e,
+                                retry_count=attempt,
+                                **kwargs,
+                            )
+
+                        time.sleep(delay)
+
+                        retry_count += 1
+
+                        # if first arg is a class update retry count of that method
+                        if hasattr(args[0], "retry_count"):
+                            args[0].retry_count = retry_count
+
+                    else:
+                        # Last attempt failed
+                        log.error(f"Failed after {max_retries} attempts: {e}")
+
+            # If we've exhausted all retries
+            raise ValueError(
+                f"Failed to complete operation after {max_retries} attempts. "
+                f"Last error: {last_exception}"
+            )
+
+        return wrapper
+
+    return decorator
