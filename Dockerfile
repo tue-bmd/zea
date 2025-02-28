@@ -9,7 +9,7 @@ COPY . /ultrasound-toolbox/
 RUN pip install -e .
 
 # Source working/installation directory and add motd (message of the day)
-ENV INSTALL /usr/local/src
+ENV INSTALL=/usr/local/src
 RUN echo '[ ! -z "$TERM" -a -r /etc/motd ] && cat /etc/motd' \
     >> /etc/bash.bashrc \
     ; echo "\
