@@ -73,15 +73,20 @@ fi
 
 # Build images
 precho "Building docker images..."
-docker build . -t usbmd/base:$VERSION
-docker build --build-arg KERAS3=True . -t usbmd/keras3:$VERSION
+docker build -f Dockerfile.base --build-arg BACKEND=all . -t usbmd/all:latest
+docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t usbmd/base:latest
 
 # Tag images
-docker tag usbmd/base:$VERSION usbmd/base:latest
-docker tag usbmd/keras3:$VERSION usbmd/keras3:latest
+docker tag usbmd/all:latest usbmd/all:$VERSION # tag latest image with version
+docker tag usbmd/base:latest usbmd/base:$VERSION # tag latest image with version
+
+# Build private image
+precho "Building private docker image..."
+docker build . -t usbmd/private:$VERSION
+docker tag usbmd/private:$VERSION usbmd/private:latest
 
 # Update image on snellius
 precho "Updating images on snellius..."
-docker save -o $TMP_USBMD_IMAGE_TAR usbmd/keras3:latest # save docker image to file.
+docker save -o $TMP_USBMD_IMAGE_TAR usbmd/private:latest # save docker image to file.
 apptainer build $TMP_USBMD_IMAGE_SIF docker-archive://$TMP_USBMD_IMAGE_TAR # convert docker image to apptainer image
-scp $TMP_USBMD_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/usbmd-keras3-$VERSION.sif # copy apptainer image to snellius
+scp $TMP_USBMD_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/usbmd-private-$VERSION.sif # copy apptainer image to snellius
