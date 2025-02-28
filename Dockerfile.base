@@ -22,8 +22,8 @@ ENV POETRY_VERSION=1.8.3 \
 RUN apt-get update && apt-get install -y sudo
 
 # Add non-root users
-ARG BASE_UID 1000
-ARG NUM_USERS 51
+ARG BASE_UID=1000
+ARG NUM_USERS=51
 
 # Create users in a loop
 RUN for i in $(seq 0 $NUM_USERS); do \
