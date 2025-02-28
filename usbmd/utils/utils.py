@@ -139,7 +139,7 @@ def preprocess_for_saving(images):
     return images
 
 
-def save_to_gif(images, filename, fps=20):
+def save_to_gif(images, filename, fps=20, colors_from_first_k=None):
     """Saves a sequence of images to .gif file.
     Args:
         images: list of images (numpy arrays). Must have shape
@@ -148,6 +148,10 @@ def save_to_gif(images, filename, fps=20):
             which is then converted to RGB. Images should be uint8.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
+        colors_from_first_k (optional int): creates the global 
+            color palette using only the first k images in the sequence.
+            This can speed up saving if your gif is particularly long 
+            but the colours don't significantly change across the images.
     """
     assert isinstance(
         filename, (str, Path)
@@ -165,7 +169,7 @@ def save_to_gif(images, filename, fps=20):
     # Apply the same palette to all frames without dithering for consistent color mapping
     # Convert all images to RGB and combine their colors for palette generation
     all_colors = np.vstack(
-        [np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs]
+        [np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs[:colors_from_first_k]]
     )
     combined_image = Image.fromarray(all_colors.reshape(-1, 1, 3))
 
