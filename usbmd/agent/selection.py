@@ -226,6 +226,48 @@ class GreedyEntropy(LinesActionModel):
         return ops.vectorized_map(selected_lines_to_line_mask, all_selected_lines)
 
 
+class EquispacedLines(LinesActionModel):
+    def __init__(
+        self,
+        n_actions: int,
+        n_possible_actions: int,
+        img_width: int,
+        img_height: int,
+        seed: int = 42,
+    ):
+        """
+        Args:
+            n_actions (int): The number of actions the agent can take.
+            n_possible_actions (int): The number of possible actions.
+            img_width (int): The width of the input image.
+            img_height (int): The height of the input image.
+            seed (int, optional): The seed for random number generation. Defaults to 42.
+
+        Raises:
+            AssertionError: If image width is not divisible by n_possible_actions.
+        """
+        super().__init__(n_actions, n_possible_actions, img_width, img_height)
+        self.seed = keras.random.SeedGenerator(seed)
+        self.current_lines = None
+
+    def sample(self, particles):
+        """
+        Args:
+            particles are taken as input to match the API of the other LineActionModels
+            but are not used in decision making for line selection.
+
+        Returns:
+            Tensor: The mask of shape (1, img_size, img_size)
+        """
+        new_lines = masks.equispaced_lines(
+            self.n_actions,
+            self.n_possible_actions,
+            self.current_lines
+        )
+        self.current_lines = new_lines
+        masks.lines_to_im_size(self.current_lines[None, ...], (self.img_height, self.img_width))
+
+
 class CovarianceSamplingLines(LinesActionModel):
     """
     This class models the line-to-line correlation to select the mask with the highest entropy.
