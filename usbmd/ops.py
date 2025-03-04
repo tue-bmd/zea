@@ -875,7 +875,9 @@ class PfieldWeighting(Operation):
         self.pfield = pfield
 
     def _assign_scan_params(self, scan: Scan):
-        self.pfield = scan.pfield
+        return {
+            "pfield": scan.pfield,
+        }
 
     @property
     def _ready(self):
