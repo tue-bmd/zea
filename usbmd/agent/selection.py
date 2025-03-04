@@ -265,7 +265,7 @@ class EquispacedLines(LinesActionModel):
             self.current_lines
         )
         self.current_lines = new_lines
-        masks.lines_to_im_size(self.current_lines[None, ...], (self.img_height, self.img_width))
+        return masks.lines_to_im_size(self.current_lines[None, ...], (self.img_height, self.img_width))
 
 
 class CovarianceSamplingLines(LinesActionModel):
