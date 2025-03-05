@@ -73,6 +73,7 @@ class GreedyEntropy(LinesActionModel):
         mean: float = 0,
         std_dev: float = 1,
         num_lines_to_update: int = 5,
+        seed=42,
     ):
         """
         Args:
@@ -86,6 +87,7 @@ class GreedyEntropy(LinesActionModel):
                 to update. Must be odd.
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
+        self.seed = keras.random.SeedGenerator(seed)
 
         # Number of samples must be odd so that the entropy
         # of the selected line is set to 0 once it's been selected.
@@ -153,7 +155,7 @@ class GreedyEntropy(LinesActionModel):
         entropy_per_line = ops.sum(entropy_per_line_i, axis=0)
         return entropy_per_line
 
-    def sample(self, particles):
+    def sample(self, particles, seed=None):
         """
         Args:
             particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
@@ -250,7 +252,7 @@ class EquispacedLines(LinesActionModel):
         self.seed = keras.random.SeedGenerator(seed)
         self.current_lines = None
 
-    def sample(self, particles):
+    def sample(self, particles, seed=None):
         """
         Args:
             particles are taken as input to match the API of the other LineActionModels
@@ -260,12 +262,12 @@ class EquispacedLines(LinesActionModel):
             Tensor: The mask of shape (1, img_size, img_size)
         """
         new_lines = masks.equispaced_lines(
-            self.n_actions,
-            self.n_possible_actions,
-            self.current_lines
+            self.n_actions, self.n_possible_actions, self.current_lines
         )
         self.current_lines = new_lines
-        return masks.lines_to_im_size(self.current_lines[None, ...], (self.img_height, self.img_width))
+        return masks.lines_to_im_size(
+            self.current_lines[None, ...], (self.img_height, self.img_width)
+        )
 
 
 class CovarianceSamplingLines(LinesActionModel):
