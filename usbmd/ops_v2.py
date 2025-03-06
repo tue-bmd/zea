@@ -58,6 +58,7 @@ class Operation(keras.Operation):
         cache_outputs: bool = False,
         jit_compile: bool = True,
         with_batch_dim: bool = True,
+        jit_kwargs: dict | None = None,
     ):
         """
         Args:
@@ -86,6 +87,13 @@ class Operation(keras.Operation):
         self._valid_keys = None  # Keys valid for the `call` method
         self._trace_signatures()
 
+        if jit_kwargs is None:
+            # TODO: set static_argnames only for operations that require it
+            jit_kwargs = {
+                "static_argnames": ["probe_type", "fdemod", "apply_lens_correction"]
+            }
+        self.jit_kwargs = jit_kwargs
+
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
 
@@ -94,7 +102,9 @@ class Operation(keras.Operation):
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile
-        self._call = jit(self.call) if self._jit_compile else self.call
+        self._call = (
+            jit(self.call, **self.jit_kwargs) if self._jit_compile else self.call
+        )
 
     def _trace_signatures(self):
         """
@@ -212,6 +222,7 @@ class Pipeline:
         operations: List[Operation],
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
+        jit_kwargs: dict | None = None,
     ):
         """Initialize a pipeline
 
@@ -245,7 +256,13 @@ class Pipeline:
         self.validate()
 
         # pylint: disable=method-hidden
-        self._call_pipeline = jit(self.call) if jit_options == "pipeline" else self.call
+        if jit_kwargs is None:
+            jit_kwargs = {}
+        self._call_pipeline = (
+            jit(self.call, **self.jit_kwargs)
+            if jit_options == "pipeline"
+            else self.call
+        )
 
     @property
     def operations(self):
