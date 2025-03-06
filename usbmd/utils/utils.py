@@ -139,7 +139,7 @@ def preprocess_for_saving(images):
     return images
 
 
-def save_to_gif(images, filename, fps=20, shared_color_palette=True):
+def save_to_gif(images, filename, fps=20, shared_color_palette=False):
     """Saves a sequence of images to .gif file.
     Args:
         images: list of images (numpy arrays). Must have shape
@@ -148,10 +148,11 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True):
             which is then converted to RGB. Images should be uint8.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
-        shared_color_palette (optional bool): if true, creates a global
+        shared_color_palette (bool, optional): if True, creates a global
             color palette across all frames, ensuring consistent colors
-            throughout the GIF.
-            Note: This can cause slow saving for longer sequences.
+            throughout the GIF. Defaults to False, which is default behavior
+            of PIL.Image.save.
+            Note: `True` can cause slow saving for longer sequences.
     """
     assert isinstance(
         filename, (str, Path)
