@@ -341,6 +341,8 @@ class Scan(Object):
 
         self.selected_transmits = selected_transmits
 
+        self._static_attrs = ["f_number", "fdemod", "apply_lens_correction"]
+
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
         indices.

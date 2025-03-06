@@ -693,8 +693,6 @@ class Simulate(Operation):
                 attenuation_coef=attenuation_coef,
                 tx_apodizations=tx_apodizations,
             ),
-            "n_ax": self.n_ax,
-            "apply_lens_correction": self.apply_lens_correction,
         }
 
 
@@ -770,7 +768,7 @@ class TOFCorrection(Operation):
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
             "probe_geometry": probe_geometry,
-            "apply_lens_correction": bool(apply_lens_correction),
+            "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
         }
