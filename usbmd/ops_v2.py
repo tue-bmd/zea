@@ -1,4 +1,4 @@
-""" Experimental version of the USBMD ops module"""
+"""Experimental version of the USBMD ops module"""
 
 import hashlib
 import inspect
@@ -6,20 +6,25 @@ import json
 from typing import Any, Dict, List, Union
 
 import keras
+import numpy as np
 from keras import ops
 
+import usbmd
 from usbmd.backend import jit
 from usbmd.config.config import Config
 from usbmd.core import DataTypes
-from usbmd.ops import channels_to_complex, upmix
+from usbmd.ops import channels_to_complex, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
-from usbmd.utils import log
+from usbmd.tensor_ops import patched_map, take
+from usbmd.utils import log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
+
+DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
 # pylint: disable=arguments-differ
 
@@ -52,12 +57,14 @@ class Operation(keras.Operation):
         cache_inputs: Union[bool, List[str]] = False,
         cache_outputs: bool = False,
         jit_compile: bool = True,
+        with_batch_dim: bool = True,
     ):
         """
         Args:
             cache_inputs: A list of input keys to cache or True to cache all inputs
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
+            with_batch_dim: Whether operations should expect a batch dimension in the input
         """
         super().__init__()
 
@@ -81,6 +88,8 @@ class Operation(keras.Operation):
 
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
+
+        self.with_batch_dim = with_batch_dim
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
@@ -204,7 +213,7 @@ class Pipeline:
         Args:
             operations (list): A list of Operation instances representing the operations
                 to be performed.
-            with_batch_dim (bool, optional): Whether to include batch dimension in the operations.
+            with_batch_dim (bool, optional): Whether operations should expect a batch dimension.
                 Defaults to True.
             device (str, optional): The device to use for the operations. Defaults to None.
                 Can be `cpu` or `cuda`, `cuda:0`, etc.
@@ -635,3 +644,386 @@ class Simulate(Operation):
             "n_ax": self.n_ax,
             "apply_lens_correction": self.apply_lens_correction,
         }
+
+
+@ops_registry("tof_correction_v2")
+class TOFCorrection(Operation):
+    """Time-of-flight correction operation for ultrasound data."""
+
+    def __init__(
+        self, key="raw_data", output_key="aligned_data", num_patches=1, **kwargs
+    ):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+        self.num_patches = num_patches
+        self.key = key
+        self.output_key = output_key
+
+    def call(
+        self,
+        grid=None,
+        sound_speed=None,
+        polar_angles=None,
+        focus_distances=None,
+        sampling_frequency=None,
+        f_number=None,
+        fdemod=None,
+        t0_delays=None,
+        tx_apodizations=None,
+        initial_times=None,
+        probe_geometry=None,
+        apply_lens_correction=None,
+        lens_thickness=None,
+        lens_sound_speed=None,
+        **kwargs,
+    ):
+        """Perform time-of-flight correction on raw RF data.
+
+        Args:
+            raw_data (ops.Tensor): Raw RF data to correct
+            grid (ops.Tensor): Grid points at which to evaluate the time-of-flight
+            sound_speed (float): Sound speed in the medium
+            polar_angles (ops.Tensor): Polar angles for scan lines
+            focus_distances (ops.Tensor): Focus distances for scan lines
+            sampling_frequency (float): Sampling frequency
+            f_number (float): F-number for apodization
+            fdemod (float): Demodulation frequency
+            t0_delays (ops.Tensor): T0 delays
+            tx_apodizations (ops.Tensor): Transmit apodizations
+            initial_times (ops.Tensor): Initial times
+            probe_geometry (ops.Tensor): Probe element positions
+            apply_lens_correction (bool): Whether to apply lens correction
+            lens_thickness (float): Lens thickness
+            lens_sound_speed (float): Sound speed in the lens
+
+        Returns:
+            dict: Dictionary containing tof_corrected_data
+        """
+
+        raw_data = kwargs[self.key]
+
+        kwargs = {
+            "grid": grid,
+            "sound_speed": sound_speed,
+            "polar_angles": polar_angles,
+            "focus_distances": focus_distances,
+            "sampling_frequency": sampling_frequency,
+            "f_number": f_number,
+            "fdemod": fdemod,
+            "apply_phase_rotation": bool(fdemod),
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "initial_times": initial_times,
+            "probe_geometry": probe_geometry,
+            "apply_lens_correction": bool(apply_lens_correction),
+            "lens_thickness": lens_thickness,
+            "lens_sound_speed": lens_sound_speed,
+        }
+
+        if not self.with_batch_dim:
+            tof_corrected = usbmd.beamformer.tof_correction(
+                raw_data,
+                patches=self.num_patches,
+                **kwargs,
+            )
+        else:
+            tof_corrected = ops.map(
+                lambda data: usbmd.beamformer.tof_correction(
+                    data,
+                    patches=self.num_patches,
+                    **kwargs,
+                ),
+                raw_data,
+            )
+
+        return {self.output_key: tof_corrected}
+
+
+@ops_registry("pfield_weighting_v2")
+class PfieldWeighting(Operation):
+    """Weighting aligned data with the pressure field."""
+
+    def __init__(self, key="aligned_data", output_key="aligned_data", **kwargs):
+        """Initialize the PfieldWeighting operation.
+
+        Args:
+            key (str, optional): Key for input data. Defaults to "aligned_data".
+            output_key (str, optional): Key for output data. Defaults to "aligned_data".
+        """
+        super().__init__(**kwargs)
+        self.key = key
+        self.output_key = output_key
+
+    def call(self, pfield=None, **kwargs):
+        """Weight data with pressure field.
+
+        Args:
+            pfield (ops.Tensor): Pressure field weight mask
+
+        Returns:
+            dict: Dictionary containing weighted data
+        """
+        data = kwargs[self.key]
+
+        if pfield is None:
+            return {self.output_key: data}
+
+        # Perform element-wise multiplication with the pressure weight mask
+        # Also add the required dimensions for broadcasting
+        if self.with_batch_dim:
+            pfield_expanded = ops.expand_dims(pfield, axis=0)
+        else:
+            pfield_expanded = pfield
+
+        pfield_expanded = pfield_expanded[..., None, None]
+        weighted_data = data * pfield_expanded
+
+        return {self.output_key: weighted_data}
+
+
+@ops_registry("delay_and_sum_v2")
+class DelayAndSum(Operation):
+    """Sums time-delayed signals along channels and transmits."""
+
+    def __init__(
+        self, key="aligned_data", output_key="beamformed_data", patches=1, **kwargs
+    ):
+        """
+        Args:
+            patches (int, optional): Number of patches to split the data into. Defaults to 1.
+        """
+        super().__init__(
+            input_data_type=None,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+        self.patches = patches
+        self.key = key
+        self.output_key = output_key
+
+    def process_patch(self, patch, rx_apo):
+        """Patch wise DAS on tof-corrected input (aligned data).
+
+        Args:
+            patch (ops.Tensor): The TOF corrected input of shape `(n_pix, n_tx, n_el, n_ch)`
+            rx_apo (ops.Tensor): Receive apodization window
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
+        """
+        # Sum over the channels, i.e. DAS
+        data = ops.sum(rx_apo * patch, -2)
+
+        # Sum over transmits, i.e. Compounding
+        data = ops.sum(data, 1)
+        return data
+
+    def process_image(self, data, rx_apo, tx_apo):
+        """Performs DAS beamforming on tof-corrected input. Optionally splits the data into patches.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
+        """
+        n_tx, n_z, n_x, n_el, n_ch = data.shape
+
+        # Flatten grid and move n_pix=(n_z * n_x) to the front
+        flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
+        flat_data = ops.moveaxis(flat_data, 1, 0)
+
+        # Apply tx_apo
+        flat_data = tx_apo * flat_data
+
+        flat_data = patched_map(
+            lambda p: self.process_patch(p, rx_apo), flat_data, self.patches
+        )
+
+        # Reshape data back to original shape
+        data = ops.reshape(flat_data, (n_z, n_x, n_ch))
+
+        return data
+
+    def call(
+        self,
+        rx_apo=None,
+        tx_apo=None,
+        **kwargs,
+    ):
+        """Performs DAS beamforming on tof-corrected input.
+
+        Args:
+            tof_corrected_data (ops.Tensor): The TOF corrected input of shape
+                `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
+            rx_apo (ops.Tensor, optional): Receive apodization window. Defaults to 1.0.
+            tx_apo (ops.Tensor, optional): Transmit apodization window. Defaults to 1.0.
+
+        Returns:
+            dict: Dictionary containing beamformed_data of shape `(n_z, n_x, n_ch)`
+                with optional batch dimension.
+        """
+        if rx_apo is None:
+            rx_apo = 1.0
+
+        if tx_apo is None:
+            tx_apo = 1.0
+
+        data = kwargs[self.key]
+
+        if not self.with_batch_dim:
+            beamformed_data = self.process_image(data, rx_apo, tx_apo)
+        else:
+            # Apply process_image to each item in the batch
+            beamformed_data = ops.map(
+                lambda d: self.process_image(d, rx_apo, tx_apo), data
+            )
+
+        return {self.output_key: beamformed_data}
+
+
+@ops_registry("envelope_detect_v2")
+class EnvelopeDetect(Operation):
+    """Envelope detection of RF signals."""
+
+    def __init__(
+        self,
+        key: str = "beamformed_data",
+        output_key: str = "envelope_data",
+        axis=-3,
+        **kwargs,
+    ):
+        super().__init__(
+            input_data_type=DataTypes.BEAMFORMED_DATA,
+            output_data_type=DataTypes.ENVELOPE_DATA,
+            **kwargs,
+        )
+        self.axis = axis
+        self.key = key
+        self.output_key = output_key
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+
+        if data.shape[-1] == 2:
+            data = channels_to_complex(data)
+        else:
+            n_ax = data.shape[self.axis]
+            M = 2 ** int(np.ceil(np.log2(n_ax)))
+            # data = scipy.signal.hilbert(data, N=M, axis=self.axis)
+            data = hilbert(data, N=M, axis=self.axis)
+            indices = ops.arange(n_ax)
+
+            data = take(data, indices, axis=self.axis)
+            data = ops.squeeze(data, axis=-1)
+
+        # data = ops.abs(data)
+        real = ops.real(data)
+        imag = ops.imag(data)
+        data = ops.sqrt(real**2 + imag**2)
+        data = ops.cast(data, "float32")
+
+        return {self.output_key: data}
+
+
+@ops_registry("log_compress_v2")
+class LogCompress(Operation):
+    """Logarithmic compression of data."""
+
+    def __init__(
+        self,
+        key: str = "envelope_data",
+        output_key: str = "image",
+        **kwargs,
+    ):
+        """Initialize the LogCompress operation.
+
+        Args:
+            key (str, optional): Key for input data. Defaults to "envelope_data".
+            output_key (str, optional): Key for output data. Defaults to "image".
+        """
+        super().__init__(
+            input_data_type=DataTypes.ENVELOPE_DATA,
+            output_data_type=DataTypes.IMAGE,
+            **kwargs,
+        )
+        self.key = key
+        self.output_key = output_key
+
+    def call(self, dynamic_range=None, **kwargs):
+        """Apply logarithmic compression to data.
+
+        Args:
+            dynamic_range (tuple, optional): Dynamic range in dB. Defaults to (-60, 0).
+
+        Returns:
+            dict: Dictionary containing log-compressed data
+        """
+        data = kwargs[self.key]
+
+        if dynamic_range is None:
+            dynamic_range = DEFAULT_DYNAMIC_RANGE
+
+        small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
+        data = ops.where(data == 0, small_number, data)
+        compressed_data = 20 * ops.log10(data)
+        compressed_data = ops.clip(compressed_data, *dynamic_range)
+
+        return {self.output_key: compressed_data}
+
+
+@ops_registry("normalize_v2")
+class Normalize(Operation):
+    """Normalize data to a given range."""
+
+    def __init__(
+        self,
+        key: str = "image",
+        output_key: str = "image",
+        **kwargs,
+    ):
+        """Initialize the Normalize operation.
+
+        Args:
+            key (str, optional): Key for input data. Defaults to "image".
+            output_key (str, optional): Key for output data. Defaults to "image".
+        """
+        super().__init__(
+            input_data_type=DataTypes.IMAGE,
+            output_data_type=DataTypes.IMAGE,
+            **kwargs,
+        )
+        self.key = key
+        self.output_key = output_key
+
+    def call(self, output_range=None, input_range=None, **kwargs):
+        """Normalize data to a given range.
+
+        Args:
+            output_range (tuple, optional): Range to which data should be mapped.
+                Defaults to (0, 1).
+            input_range (tuple, optional): Range of input data. If None, the range
+                of the input data will be computed. Defaults to None.
+
+        Returns:
+            dict: Dictionary containing normalized data
+        """
+        data = kwargs[self.key]
+
+        if output_range is None:
+            output_range = (0, 1)
+
+        if input_range is None:
+            minimum = ops.min(data)
+            maximum = ops.max(data)
+            input_range = (minimum, maximum)
+        else:
+            a_min, a_max = input_range
+            data = ops.clip(data, a_min, a_max)
+
+        normalized_data = translate(data, input_range, output_range)
+
+        return {self.output_key: normalized_data}
