@@ -98,7 +98,15 @@ def object_to_tensor(obj: Object):
         if key.startswith("_") or key in except_tensors:
             continue
 
+        # Skip methods
         value = getattr(obj, key)
+        if callable(value):
+            continue
+
+        # Skip byte strings
+        if isinstance(value, bytes):
+            continue
+
         if not isinstance(value, CONVERT_TO_KERAS_TYPES):
             snapshot[key] = value
             continue
