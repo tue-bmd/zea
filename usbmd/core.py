@@ -93,6 +93,12 @@ def object_to_tensor(obj: Object):
     else:
         except_tensors = []
 
+    # Check if the object has static attributes, we will not convert them to tensors
+    if hasattr(obj, "_static_attrs"):
+        static_attrs = obj._static_attrs
+    else:
+        static_attrs = []
+
     for key in dir(obj):
         # Skip dunder/hidden methods and excepted tensors
         if key.startswith("_") or key in except_tensors:
@@ -107,7 +113,7 @@ def object_to_tensor(obj: Object):
         if isinstance(value, bytes):
             continue
 
-        if not isinstance(value, CONVERT_TO_KERAS_TYPES):
+        if key in static_attrs or not isinstance(value, CONVERT_TO_KERAS_TYPES):
             snapshot[key] = value
             continue
 
