@@ -238,7 +238,6 @@ class EquispacedLines(LinesActionModel):
         img_width: int,
         img_height: int,
         batch_size: int,
-        seed: int = 42,
     ):
         """
         Args:
@@ -252,18 +251,17 @@ class EquispacedLines(LinesActionModel):
             AssertionError: If image width is not divisible by n_possible_actions.
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
-        self.seed = keras.random.SeedGenerator(seed)
         self.current_lines = None
         self.batch_size = batch_size
 
     def sample(self, particles, seed=None):
         """
         Args:
-            particles are taken as input to match the API of the other LineActionModels
+            particles and seed are taken as input to match the API of the other LineActionModels
             but are not used in decision making for line selection.
 
         Returns:
-            Tensor: The mask of shape (1, img_size, img_size)
+            Tensor: The mask of shape (batch_size, img_size, img_size)
         """
         # If no lines have been generated yet, then create a batch
         # of initial equispaced masks

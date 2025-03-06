@@ -163,7 +163,6 @@ def test_non_divisible_actions():
 
 def test_equispaced_lines_class():
     """Test EquispacedLines class."""
-    np.random.seed(2)
     b, h, w = 3, 8, 8  # batch_size=3
     particles = np.random.rand(2, b, h, w).astype(np.float32)
 
@@ -208,5 +207,4 @@ def test_equispaced_lines_class():
 
 
 if __name__ == "__main__":
-    test_equispaced_lines_class()
     pytest.main()
