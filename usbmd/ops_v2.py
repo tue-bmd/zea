@@ -15,7 +15,7 @@ from usbmd.config.config import Config
 from usbmd.core import DataTypes
 from usbmd.ops import channels_to_complex, hilbert, upmix
 from usbmd.probes import Probe
-from usbmd.registry import ops_registry
+from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, take
@@ -170,11 +170,16 @@ class Operation(keras.Operation):
                 return {**merged_kwargs, **self._output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `call` method
-        filtered_kwargs = {
-            k: v for k, v in merged_kwargs.items() if k in self._valid_keys
-        }
+        if not "kwargs" in self._valid_keys:
+            filtered_kwargs = {
+                k: v for k, v in merged_kwargs.items() if k in self._valid_keys
+            }
+        else:
+            filtered_kwargs = merged_kwargs
 
         # Call the processing function
+        # If you want to jump in with debugger please set `jit_compile=False`
+        # when initializing the pipeline.
         processed_output = self._call(**filtered_kwargs)
 
         # Ensure the output is always a dictionary
@@ -485,7 +490,7 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
 ## Base Operations
 
 
-@ops_registry("identity_v2")
+@ops_registry("identity")
 class Identity(Operation):
     """Identity operation."""
 
@@ -494,7 +499,7 @@ class Identity(Operation):
         return kwargs
 
 
-@ops_registry("merge_v2")
+@ops_registry("merge")
 class Merge(Operation):
     """Operation that merges sets of input dictionaries."""
 
@@ -514,7 +519,7 @@ class Merge(Operation):
         return merged
 
 
-@ops_registry("split_v2")
+@ops_registry("split")
 class Split(Operation):
     """Operation that splits an input dictionary  n copies."""
 
@@ -529,7 +534,7 @@ class Split(Operation):
         return [kwargs.copy() for _ in range(self.n)]
 
 
-@ops_registry("stack_v2")
+@ops_registry("stack")
 class Stack(Operation):
     """Stack multiple data arrays along a new axis.
     Useful to merge data from parallel pipelines.
@@ -555,7 +560,7 @@ class Stack(Operation):
         return kwargs
 
 
-@ops_registry("mean_v2")
+@ops_registry("mean")
 class Mean(Operation):
     """Take the mean of the input data along a specific axis."""
 
@@ -571,7 +576,7 @@ class Mean(Operation):
         return kwargs
 
 
-@ops_registry("upmix_v2")
+@ops_registry("upmix")
 class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
@@ -594,7 +599,7 @@ class UpMix(Operation):
         return data
 
 
-@ops_registry("simulate_rf_v2")
+@ops_registry("simulate_rf")
 class Simulate(Operation):
     """Simulate RF data."""
 
@@ -646,7 +651,7 @@ class Simulate(Operation):
         }
 
 
-@ops_registry("tof_correction_v2")
+@ops_registry("tof_correction")
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
@@ -708,10 +713,10 @@ class TOFCorrection(Operation):
         kwargs = {
             "grid": grid,
             "sound_speed": sound_speed,
-            "polar_angles": polar_angles,
-            "focus_distances": focus_distances,
+            "angles": polar_angles,
+            "vfocus": focus_distances,
             "sampling_frequency": sampling_frequency,
-            "f_number": f_number,
+            "fnum": f_number,
             "fdemod": fdemod,
             "apply_phase_rotation": bool(fdemod),
             "t0_delays": t0_delays,
@@ -742,7 +747,7 @@ class TOFCorrection(Operation):
         return {self.output_key: tof_corrected}
 
 
-@ops_registry("pfield_weighting_v2")
+@ops_registry("pfield_weighting")
 class PfieldWeighting(Operation):
     """Weighting aligned data with the pressure field."""
 
@@ -784,23 +789,23 @@ class PfieldWeighting(Operation):
         return {self.output_key: weighted_data}
 
 
-@ops_registry("delay_and_sum_v2")
+@ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
     def __init__(
-        self, key="aligned_data", output_key="beamformed_data", patches=1, **kwargs
+        self, key="aligned_data", output_key="beamformed_data", num_patches=1, **kwargs
     ):
         """
         Args:
-            patches (int, optional): Number of patches to split the data into. Defaults to 1.
+            num_patches (int, optional): Number of patches to split the data into. Defaults to 1.
         """
         super().__init__(
             input_data_type=None,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
-        self.patches = patches
+        self.num_patches = num_patches
         self.key = key
         self.output_key = output_key
 
@@ -840,7 +845,9 @@ class DelayAndSum(Operation):
         flat_data = tx_apo * flat_data
 
         flat_data = patched_map(
-            lambda p: self.process_patch(p, rx_apo), flat_data, self.patches
+            lambda patch: self.process_patch(patch, rx_apo),
+            flat_data,
+            self.num_patches,
         )
 
         # Reshape data back to original shape
@@ -879,13 +886,13 @@ class DelayAndSum(Operation):
         else:
             # Apply process_image to each item in the batch
             beamformed_data = ops.map(
-                lambda d: self.process_image(d, rx_apo, tx_apo), data
+                lambda data: self.process_image(data, rx_apo, tx_apo), data
             )
 
         return {self.output_key: beamformed_data}
 
 
-@ops_registry("envelope_detect_v2")
+@ops_registry("envelope_detect")
 class EnvelopeDetect(Operation):
     """Envelope detection of RF signals."""
 
@@ -929,7 +936,7 @@ class EnvelopeDetect(Operation):
         return {self.output_key: data}
 
 
-@ops_registry("log_compress_v2")
+@ops_registry("log_compress")
 class LogCompress(Operation):
     """Logarithmic compression of data."""
 
@@ -975,7 +982,7 @@ class LogCompress(Operation):
         return {self.output_key: compressed_data}
 
 
-@ops_registry("normalize_v2")
+@ops_registry("normalize")
 class Normalize(Operation):
     """Normalize data to a given range."""
 
