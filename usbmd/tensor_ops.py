@@ -948,3 +948,19 @@ def patches_to_images(
         images = keras.ops.where(mask > 0, images / mask, images)
 
     return images
+
+
+def take(data, indices, axis=-1):
+    """Take values from data along axis.
+
+    Args:
+        data (ndarray): input data.
+        indices (ndarray): indices to take from data.
+        axis (int, optional): axis to take from. Defaults to -1.
+    """
+
+    # make indices broadcastable by adding singleton dimensions around axis
+    if axis < 0:
+        axis = data.ndim + axis
+    indices = ops.reshape(indices, [1] * axis + [-1] + [1] * (data.ndim - axis - 1))
+    return ops.take_along_axis(data, indices, axis=axis)

@@ -135,7 +135,7 @@ from usbmd.config import Config
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.tensor_ops import patched_map
+from usbmd.tensor_ops import patched_map, take
 from usbmd.utils import lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
 
@@ -2135,22 +2135,6 @@ def channels_to_complex(data):
     assert data.shape[-1] == 2, "Data must have two channels."
     data = ops.cast(data, "complex64")
     return data[..., 0] + 1j * data[..., 1]
-
-
-def take(data, indices, axis=-1):
-    """Take values from data along axis.
-
-    Args:
-        data (ndarray): input data.
-        indices (ndarray): indices to take from data.
-        axis (int, optional): axis to take from. Defaults to -1.
-    """
-
-    # make indices broadcastable by adding singleton dimensions around axis
-    if axis < 0:
-        axis = data.ndim + axis
-    indices = ops.reshape(indices, [1] * axis + [-1] + [1] * (data.ndim - axis - 1))
-    return ops.take_along_axis(data, indices, axis=axis)
 
 
 def hilbert(x, N: int = None, axis=-1):
