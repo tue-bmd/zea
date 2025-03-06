@@ -35,6 +35,16 @@ def random_uniform_lines(
     return masks
 
 
+def get_initial_equispaced_lines(n_actions, n_possible_actions):
+    selected_indices = ops.arange(
+        0, n_possible_actions, n_possible_actions // n_actions
+    )
+    masks = ops.zeros(n_possible_actions)
+    return ops.scatter_update(
+        masks, ops.expand_dims(selected_indices, axis=1), ops.ones(n_actions)
+    )
+
+
 def equispaced_lines(
     n_actions: int,
     n_possible_actions: int,
@@ -57,13 +67,7 @@ def equispaced_lines(
         n_possible_actions % n_actions == 0
     ), "Number of actions must divide evenly into possible actions to use equispaced sampling."
     if previous_mask is None:
-        selected_indices = ops.arange(
-            0, n_possible_actions - 1, n_possible_actions // n_actions
-        )
-        masks = ops.zeros(n_possible_actions)
-        return ops.scatter_update(
-            masks, ops.expand_dims(selected_indices, axis=1), ops.ones(n_actions)
-        )
+        return get_initial_equispaced_lines(n_actions, n_possible_actions)
     else:
         return ops.roll(previous_mask, shift=1)
 
@@ -81,13 +85,15 @@ def lines_to_im_size(lines, img_size: tuple):
     """
     height, width = img_size
 
-    remainder = width % ops.shape(lines)[1]
+    n_masks = 1 if len(ops.shape(lines)) == 1 else ops.shape(lines)[1]
+
+    remainder = width % n_masks
     assert (
         remainder == 0
     ), f"Width must be divisible by number of actions. Got remainder: {remainder}."
 
     # Repeat till width of image
-    masks = ops.repeat(lines, width // ops.shape(lines)[1], axis=1)
+    masks = ops.repeat(lines, width // n_masks, axis=1)
 
     # Repeat till height of image
     masks = ops.repeat(masks[:, None], height, axis=1)
