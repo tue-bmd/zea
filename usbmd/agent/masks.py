@@ -99,15 +99,13 @@ def lines_to_im_size(lines, img_size: tuple):
     """
     height, width = img_size
 
-    n_masks = 1 if len(ops.shape(lines)) == 1 else ops.shape(lines)[1]
-
-    remainder = width % n_masks
+    remainder = width % ops.shape(lines)[1]
     assert (
         remainder == 0
     ), f"Width must be divisible by number of actions. Got remainder: {remainder}."
 
     # Repeat till width of image
-    masks = ops.repeat(lines, width // n_masks, axis=1)
+    masks = ops.repeat(lines, width // ops.shape(lines)[1], axis=1)
 
     # Repeat till height of image
     masks = ops.repeat(masks[:, None], height, axis=1)
