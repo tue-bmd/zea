@@ -466,15 +466,22 @@ def test_default_ultrasound_pipeline(
 ):
     """Tests the default ultrasound pipeline."""
 
+    beamforming = Pipeline(
+        operations=[
+            TOFCorrection(),
+            PfieldWeighting(),
+            DelayAndSum(),
+        ],
+        jit_options=None,
+    )
+
     # all static parameters are set in the __init__ method of the operations
     operations = [
         Simulate(
             apply_lens_correction=ultrasound_scan.apply_lens_correction,
             n_ax=ultrasound_scan.n_ax,
         ),
-        TOFCorrection(),
-        PfieldWeighting(),
-        DelayAndSum(),
+        beamforming,
         EnvelopeDetect(),
         LogCompress(),
         Normalize(),
