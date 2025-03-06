@@ -239,9 +239,8 @@ class Pipeline:
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
-        for operation in self.operations:  # We use self.layers from keras.Pipeline here
-            operation.with_batch_dim = with_batch_dim
-            operation.set_jit(jit_options == "ops")
+        self.with_batch_dim = with_batch_dim
+        self.jit_options = jit_options
 
         self.validate()
 
@@ -320,9 +319,40 @@ class Pipeline:
         raise NotImplementedError
 
     @property
+    def jit_options(self):
+        """Get the jit_options property of the pipeline."""
+        return self._jit_options
+
+    @jit_options.setter
+    def jit_options(self, value):
+        """Set the jit_options property of the pipeline."""
+        self._jit_options = value
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                operation.jit_options = value
+            else:
+                operation.set_jit(value == "ops")
+
+    @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
         return self.operations[0].with_batch_dim
+
+    @with_batch_dim.setter
+    def with_batch_dim(self, value):
+        """Set the with_batch_dim property of the pipeline."""
+        for operation in self.operations:
+            operation.with_batch_dim = value
+
+    @property
+    def input_data_type(self):
+        """Get the input_data_type property of the pipeline."""
+        return self.operations[0].input_data_type
+
+    @property
+    def output_data_type(self):
+        """Get the output_data_type property of the pipeline."""
+        return self.operations[-1].output_data_type
 
     def validate(self):
         """Validate the pipeline by checking the compatibility of the operations."""
