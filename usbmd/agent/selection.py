@@ -2,6 +2,8 @@
 Module for action selection strategies.
 """
 
+from functools import partial
+
 import keras
 from keras import ops
 
@@ -235,6 +237,7 @@ class EquispacedLines(LinesActionModel):
         n_possible_actions: int,
         img_width: int,
         img_height: int,
+        batch_size: int,
         seed: int = 42,
     ):
         """
@@ -251,6 +254,7 @@ class EquispacedLines(LinesActionModel):
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
         self.seed = keras.random.SeedGenerator(seed)
         self.current_lines = None
+        self.batch_size = batch_size
 
     def sample(self, particles, seed=None):
         """
@@ -261,12 +265,23 @@ class EquispacedLines(LinesActionModel):
         Returns:
             Tensor: The mask of shape (1, img_size, img_size)
         """
-        new_lines = masks.equispaced_lines(
-            self.n_actions, self.n_possible_actions, self.current_lines
-        )
-        self.current_lines = new_lines
+        # If no lines have been generated yet, then create a batch
+        # of initial equispaced masks
+        if self.current_lines is None:
+            initial_lines = masks.get_initial_equispaced_lines(
+                self.n_actions, self.n_possible_actions
+            )
+            self.current_lines = ops.tile(initial_lines, (self.batch_size, 1))
+        # otherwise, roll each of the masks' lines forward by one
+        else:
+            self.current_lines = ops.vectorized_map(
+                lambda lines: masks.equispaced_lines(
+                    self.n_actions, self.n_possible_actions, lines
+                ),
+                self.current_lines,
+            )
         return masks.lines_to_im_size(
-            self.current_lines[None, ...], (self.img_height, self.img_width)
+            self.current_lines, (self.img_height, self.img_width)
         )
 
 
