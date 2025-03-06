@@ -90,6 +90,7 @@ def generate_h5_indices(
     additional_axes_iter: List[int] | None = None,
     sort_files: bool = True,
     overlapping_blocks: bool = False,
+    limit_n_frames: int | None = None,
 ):
     """Generate indices for h5 files.
 
@@ -106,6 +107,11 @@ def generate_h5_indices(
         additional_axes_iter (list, optional): additional axes to iterate over in the dataset.
             Defaults to None.
         sort_files (bool, optional): sort files by number. Defaults to True.
+        overlapping_blocks (bool, optional): will take n_frames from sequence, then move by 1.
+            Defaults to False.
+        limit_n_frames (int, optional): limit the number of frames to load from each file. This
+            means n_frames per data file will be used. These will be the first frames in the file.
+            Defaults to None
 
     Returns:
         list: list of tuples with indices to extract images from hdf5 files.
@@ -117,6 +123,8 @@ def generate_h5_indices(
             ]
 
     """
+    if not limit_n_frames:
+        limit_n_frames = np.inf
 
     assert len(file_names) == len(
         file_shapes
@@ -143,6 +151,7 @@ def generate_h5_indices(
         except:
             log.warning("H5Generator: Could not sort file_names by number.")
 
+    # block size with stride included
     block_size = n_frames * frame_index_stride
 
     if not overlapping_blocks:
@@ -151,21 +160,23 @@ def generate_h5_indices(
         # now blocks overlap by n_frames - 1
         block_step_size = 1
 
-    axis_indices_files = [
-        [
-            [
+    def axis_indices_files():
+        # For every file
+        for shape in file_shapes:
+            n_frames_in_file = shape[initial_frame_axis]
+            # Optionally limit frames to load from each file
+            n_frames_in_file = min(n_frames_in_file, limit_n_frames)
+            indices = [
                 range(i, i + block_size, frame_index_stride)
-                for i in range(
-                    0, shape[initial_frame_axis] - block_size + 1, block_step_size
-                )
+                for i in range(0, n_frames_in_file - block_size + 1, block_step_size)
             ]
-        ]
-        for shape in file_shapes
-    ]
+            yield [indices]
 
     indices = []
     skipped_files = 0
-    for file, shape, axis_indices in zip(file_names, file_shapes, axis_indices_files):
+    for file, shape, axis_indices in zip(
+        file_names, file_shapes, list(axis_indices_files())
+    ):
         # remove all the files that have empty list at initial_frame_axis
         # this can happen if the file is too small to fit a block
         if not axis_indices[0]:  # initial_frame_axis is the first entry in axis_indices
@@ -304,6 +315,7 @@ class H5Generator(keras.utils.PyDataset):
         sort_files: bool = True,
         overlapping_blocks: bool = False,
         limit_n_samples: int | None = None,
+        limit_n_frames: int | None = None,
         seed: int | None = None,
         batch_size: int = 1,
         as_tensor: bool = True,
@@ -332,6 +344,7 @@ class H5Generator(keras.utils.PyDataset):
         self.sort_files = sort_files
         self.overlapping_blocks = overlapping_blocks
         self.limit_n_samples = limit_n_samples
+        self.limit_n_frames = limit_n_frames
         self.seed = seed
         self.batch_size = batch_size
         self.as_tensor = as_tensor
@@ -392,6 +405,7 @@ class H5Generator(keras.utils.PyDataset):
             additional_axes_iter=self.additional_axes_iter,
             sort_files=self.sort_files,
             overlapping_blocks=self.overlapping_blocks,
+            limit_n_frames=self.limit_n_frames,
         )
 
         if not self.shuffle:
