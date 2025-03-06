@@ -143,7 +143,12 @@ def tof_correction_flatgrid(
         lens_sound_speed=lens_sound_speed,
     )
 
-    mask = apod_mask(flatgrid, probe_geometry, fnum)
+    n_pix = ops.shape(flatgrid)[0]
+    mask = ops.cond(
+        fnum == 0,
+        lambda: ops.ones((n_pix, n_el, 1)),
+        lambda: apod_mask(flatgrid, probe_geometry, fnum),
+    )
 
     # Apply delays
     bf_tx = []
@@ -519,11 +524,6 @@ def apod_mask(grid, probe_geometry, f_number):
     Returns:
         Tensor: Mask of shape `(n_pix, n_el, 1)`
     """
-    # If the f-number is set to 0, return 1
-    if f_number == 0:
-        mask = ops.ones((1))
-        return mask
-
     n_pix = ops.shape(grid)[0]
     n_el = ops.shape(probe_geometry)[0]
 
