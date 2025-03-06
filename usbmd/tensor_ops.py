@@ -347,6 +347,17 @@ def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
     return out_reshaped[:total]  # Remove any padding added.
 
 
+if keras.backend.backend() == "jax":
+    # For jit purposes
+    def _get_padding(N, remainder):
+        return N - remainder if remainder != 0 else 0
+
+else:
+
+    def _get_padding(N, remainder):
+        return ops.where(remainder != 0, N - remainder, 0)
+
+
 def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
     """Pad an array to be divisible by N along the specified axis.
     Args:
@@ -368,7 +379,7 @@ def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
 
     # Calculate how much padding is needed for the specified axis
     remainder = length % N
-    padding = ops.where(remainder != 0, N - remainder, 0)
+    padding = _get_padding(N, remainder)
 
     # Create a tuple with (before, after) padding for each axis
     pad_width = [(0, 0)] * ops.ndim(arr)  # No padding for other axes
