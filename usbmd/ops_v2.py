@@ -295,11 +295,11 @@ class Pipeline:
 
         ## PREPARE OUTPUT
         if return_numpy:
+            # Convert tensors to numpy arrays but preserve None values
             outputs = {
-                k: ops.convert_to_numpy(v) for k, v in outputs.items() if v is not None
+                k: ops.convert_to_numpy(v) if v is ops.is_tensor(v) else v
+                for k, v in outputs.items()
             }
-        else:
-            outputs = {k: v for k, v in outputs.items() if v is not None}
 
         # TODO: if we can in-place update the Scan, Probe and Config objects, we can output those.
 

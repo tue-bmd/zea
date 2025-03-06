@@ -8,7 +8,6 @@ import numpy as np
 from keras import ops
 
 from usbmd.tensor_ops import patched_map
-from usbmd.utils.cache import cache_output
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
