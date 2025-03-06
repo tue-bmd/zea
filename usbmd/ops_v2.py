@@ -256,8 +256,11 @@ class Pipeline:
         self.validate()
 
         # pylint: disable=method-hidden
-        if jit_kwargs is None:
-            jit_kwargs = {}
+        self.jit_kwargs = jit_kwargs
+        if self.jit_kwargs is None:
+            self.jit_kwargs = {
+                "static_argnames": ["probe_type", "fdemod", "apply_lens_correction"]
+            }
         self._call_pipeline = (
             jit(self.call, **self.jit_kwargs)
             if jit_options == "pipeline"
@@ -269,7 +272,7 @@ class Pipeline:
         """Alias for self.layers to match the USBMD naming convention"""
         return self._pipeline_layers
 
-    def call(self, inputs):
+    def call(self, **inputs):
         """Process input data through the pipeline."""
         for operation in self._pipeline_layers:
             outputs = operation(**inputs)
@@ -305,9 +308,10 @@ class Pipeline:
         # explicitly so we know which keys overwrite which
         # kwargs > config > scan > probe
         inputs = {**probe, **scan, **config, **kwargs}
+        inputs.pop("probe_type")
 
         ## PROCESSING
-        outputs = self._call_pipeline(inputs)
+        outputs = self._call_pipeline(**inputs)
 
         if return_numpy:
             outputs = {k: v.numpy() for k, v in outputs.items()}
