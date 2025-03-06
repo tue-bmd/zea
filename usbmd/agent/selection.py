@@ -263,23 +263,46 @@ class EquispacedLines(LinesActionModel):
         Returns:
             Tensor: The mask of shape (batch_size, img_size, img_size)
         """
-        # If no lines have been generated yet, then create a batch
-        # of initial equispaced masks
         if self.current_lines is None:
-            initial_lines = masks.get_initial_equispaced_lines(
-                self.n_actions, self.n_possible_actions
-            )
-            self.current_lines = ops.tile(initial_lines, (self.batch_size, 1))
-        # otherwise, roll each of the masks' lines forward by one
+            self.current_lines, masks = self.initial_sample_stateless()
         else:
-            self.current_lines = ops.vectorized_map(
-                lambda lines: masks.equispaced_lines(
-                    self.n_actions, self.n_possible_actions, lines
-                ),
-                self.current_lines,
+            self.current_lines, masks = self.sample_stateless(
+                particles, self.current_lines
             )
-        return masks.lines_to_im_size(
-            self.current_lines, (self.img_height, self.img_width)
+        return masks
+
+    def initial_sample_stateless(self, particles=None, current_lines=None, seed=None):
+        """Returns an initial equispaced line mask."""
+        initial_lines = masks.get_initial_equispaced_lines(
+            self.n_actions, self.n_possible_actions
+        )
+        initial_lines = ops.tile(
+            initial_lines, (self.batch_size, 1)
+        )  # (batch_size, n_actions)
+        return initial_lines, masks.lines_to_im_size(
+            initial_lines, (self.img_height, self.img_width)
+        )
+
+    def sample_stateless(self, particles, current_lines, seed=None):
+        """
+        Updates current_lines using equispaced line selection.
+
+        Args:
+            particles: Unused, included for API consistency.
+            current_lines: Tensor of shape (batch_size, n_actions).
+            seed: Unused, included for API consistency.
+
+        Returns:
+            A mask of shape (batch_size, img_size, img_size).
+        """
+        current_lines = ops.vectorized_map(
+            lambda lines: masks.equispaced_lines(
+                self.n_actions, self.n_possible_actions, lines
+            ),
+            current_lines,
+        )
+        return current_lines, masks.lines_to_im_size(
+            current_lines, (self.img_height, self.img_width)
         )
 
 
