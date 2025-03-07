@@ -1,4 +1,4 @@
-""" Base classes for the toolbox """
+"""Base classes for the toolbox"""
 
 import enum
 import pickle
@@ -9,6 +9,9 @@ import numpy as np
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, bool)
 BASE_PRECISION = "float32"
+
+# TODO: make static more neat
+STATIC = ["f_number", "fdemod", "apply_lens_correction", "Nx", "Nz"]
 
 
 class DataTypes(enum.Enum):
