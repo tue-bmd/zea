@@ -2,8 +2,6 @@
 Module for action selection strategies.
 """
 
-from functools import partial
-
 import keras
 from keras import ops
 
@@ -157,7 +155,7 @@ class GreedyEntropy(LinesActionModel):
         entropy_per_line = ops.sum(entropy_per_line_i, axis=0)
         return entropy_per_line
 
-    def sample(self, particles, seed=None):
+    def sample(self, particles):
         """
         Args:
             particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
@@ -231,6 +229,11 @@ class GreedyEntropy(LinesActionModel):
 
 
 class EquispacedLines(LinesActionModel):
+    """
+    Creates masks with equispaced lines that sweep across
+    the image.
+    """
+
     def __init__(
         self,
         n_actions: int,
@@ -294,7 +297,8 @@ class EquispacedLines(LinesActionModel):
         Updates an existing equispaced mask to sweep rightwards by one step across the image.
 
         Args:
-            current_lines: Currently selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+            current_lines: Currently selected lines as k-hot vectors,
+                shaped (batch_size, n_possible_actions)
 
         Returns:
             Tuple[Tensor, Tensor]:
