@@ -1081,6 +1081,9 @@ class DelayAndSum(Operation):
         # Sum over transmits, i.e. Compounding
         data = ops.sum(data, 0)
 
+        # TODO: When not used in the PatchedGrid pipeline
+        # this should be reshaped to (n_z, n_x, n_ch)
+
         return data
 
     def call(
