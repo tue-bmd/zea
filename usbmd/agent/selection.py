@@ -245,7 +245,7 @@ class EquispacedLines(LinesActionModel):
             n_possible_actions (int): The number of possible actions.
             img_width (int): The width of the input image.
             img_height (int): The height of the input image.
-            seed (int, optional): The seed for random number generation. Defaults to 42.
+            batch_size (int): Number of masks to generate in parallel
 
         Raises:
             AssertionError: If image width is not divisible by n_possible_actions.
@@ -272,7 +272,14 @@ class EquispacedLines(LinesActionModel):
         return masks
 
     def initial_sample_stateless(self):
-        """Returns an initial equispaced line mask."""
+        """
+        Generates a batch of initial equispaced line masks.
+
+        Returns:
+            Tuple[Tensor, Tensor]:
+                - Selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
+        """
         initial_lines = masks.get_initial_equispaced_lines(
             self.n_actions, self.n_possible_actions
         )
@@ -288,15 +295,15 @@ class EquispacedLines(LinesActionModel):
         current_lines,
     ):
         """
-        Updates current_lines using equispaced line selection.
+        Updates an existing equispaced mask to sweep rightwards by one step across the image.
 
         Args:
-            particles: Unused, included for API consistency.
-            current_lines: Tensor of shape (batch_size, n_actions).
-            seed: Unused, included for API consistency.
+            current_lines: Currently selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
 
         Returns:
-            A mask of shape (batch_size, img_size, img_size).
+            Tuple[Tensor, Tensor]:
+                - Newly selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
         """
         current_lines = ops.vectorized_map(
             lambda lines: masks.equispaced_lines(
