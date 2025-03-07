@@ -254,7 +254,7 @@ class EquispacedLines(LinesActionModel):
         self.current_lines = None
         self.batch_size = batch_size
 
-    def sample(self, particles, seed=None):
+    def sample(self, particles):
         """
         Args:
             particles and seed are taken as input to match the API of the other LineActionModels
@@ -271,7 +271,7 @@ class EquispacedLines(LinesActionModel):
             )
         return masks
 
-    def initial_sample_stateless(self, particles=None, current_lines=None, seed=None):
+    def initial_sample_stateless(self):
         """Returns an initial equispaced line mask."""
         initial_lines = masks.get_initial_equispaced_lines(
             self.n_actions, self.n_possible_actions
@@ -283,7 +283,10 @@ class EquispacedLines(LinesActionModel):
             initial_lines, (self.img_height, self.img_width)
         )
 
-    def sample_stateless(self, particles, current_lines, seed=None):
+    def sample_stateless(
+        self,
+        current_lines,
+    ):
         """
         Updates current_lines using equispaced line selection.
 
