@@ -150,6 +150,7 @@ def tof_correction_flatgrid(
         lambda: apod_mask(flatgrid, probe_geometry, fnum),
     )
 
+    # TODO: maybe use fori_loop or vectorized_map for jit / speedup
     # Apply delays
     bf_tx = []
     for tx in range(n_tx):

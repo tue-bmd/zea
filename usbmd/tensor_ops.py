@@ -256,7 +256,7 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     return cov_matrices
 
 
-def patched_map(f, xs, patches: int):
+def patched_map(f, xs, patches: int, jit=True, **batch_kwargs):
     """
     Wrapper around `batched_map` which allows you to specify the number of patches rather than
     the batch size.
@@ -268,10 +268,10 @@ def patched_map(f, xs, patches: int):
     else:
         length = ops.shape(xs)[0]
         batch_size = np.ceil(length / patches).astype(int)
-        return batched_map(f, xs, batch_size)
+        return batched_map(f, xs, batch_size, jit, **batch_kwargs)
 
 
-def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
+def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
     """
     Map a function over leading array axes.
 

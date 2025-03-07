@@ -10,7 +10,7 @@ from typing import Union
 import matplotlib.pyplot as plt
 import numpy as np
 
-from usbmd.core import Object
+from usbmd.core import STATIC, Object
 from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -341,7 +341,7 @@ class Scan(Object):
 
         self.selected_transmits = selected_transmits
 
-        self._static_attrs = ["f_number", "fdemod", "apply_lens_correction"]
+        self._static_attrs = STATIC
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -581,7 +581,7 @@ class Scan(Object):
 
     @property
     def grid(self):
-        """The beamforming grid of shape (Nx, Nz, 3)."""
+        """The beamforming grid of shape (Nz, Nx, 3)."""
         if self._grid is None:
             self._grid = get_grid(self)
             self._Nz, self._Nx, _ = self._grid.shape
@@ -590,8 +590,13 @@ class Scan(Object):
         return self._grid
 
     @property
+    def flatgrid(self):
+        """The beamforming grid of shape (Nz*Nx, 3)."""
+        return self.grid.reshape(-1, 3)
+
+    @property
     def pfield(self):
-        """The pfield grid of shape (Nx, Nz, 1)."""
+        """The pfield grid of shape (n_tx, Nz, Nx)."""
         if self._pfield is not None:
             return self._pfield
 
@@ -610,6 +615,11 @@ class Scan(Object):
             self._pfield = compute_pfield(self, **pfield_kwargs)
 
         return self._pfield
+
+    @property
+    def flat_pfield(self):
+        """The pfield grid of shape (Nz*Nx, n_tx)."""
+        return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
     @pfield.setter
     def pfield(self, value):
