@@ -254,11 +254,9 @@ class EquispacedLines(LinesActionModel):
         self.current_lines = None
         self.batch_size = batch_size
 
-    def sample(self, particles):
+    def sample(self):
         """
-        Args:
-            particles and seed are taken as input to match the API of the other LineActionModels
-            but are not used in decision making for line selection.
+        Generates or updates an equispaced mask to sweep rightwards by one step across the image.
 
         Returns:
             Tensor: The mask of shape (batch_size, img_size, img_size)
@@ -266,9 +264,7 @@ class EquispacedLines(LinesActionModel):
         if self.current_lines is None:
             self.current_lines, masks = self.initial_sample_stateless()
         else:
-            self.current_lines, masks = self.sample_stateless(
-                particles, self.current_lines
-            )
+            self.current_lines, masks = self.sample_stateless(self.current_lines)
         return masks
 
     def initial_sample_stateless(self):

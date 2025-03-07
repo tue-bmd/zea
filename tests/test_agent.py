@@ -164,12 +164,11 @@ def test_non_divisible_actions():
 def test_equispaced_lines_class():
     """Test EquispacedLines class."""
     b, h, w = 3, 8, 8  # batch_size=3
-    particles = np.random.rand(2, b, h, w).astype(np.float32)
 
     # Test with 2 actions
     n_actions = 2
     agent = selection.EquispacedLines(n_actions, w, w, h, batch_size=b)
-    mask = agent.sample(particles)
+    mask = agent.sample()
 
     # Check mask shape (should include batch dimension)
     assert mask.shape == (b, h, w)
@@ -180,8 +179,8 @@ def test_equispaced_lines_class():
         assert np.count_nonzero(first_row) == n_actions
 
     # Test successive calls return different but valid patterns
-    mask1 = agent.sample(particles)
-    mask2 = agent.sample(particles)
+    mask1 = agent.sample()
+    mask2 = agent.sample()
 
     # Masks should be different (alternating pattern) for each batch
     assert not np.array_equal(mask1, mask2)
@@ -197,7 +196,7 @@ def test_equispaced_lines_class():
 
     # Test with maximum number of actions
     agent = selection.EquispacedLines(w, w, h, w, batch_size=b)
-    mask = agent.sample(particles)
+    mask = agent.sample()
     for batch_idx in range(b):
         assert np.count_nonzero(mask[batch_idx, 0]) == w
 
@@ -207,4 +206,5 @@ def test_equispaced_lines_class():
 
 
 if __name__ == "__main__":
+    test_equispaced_lines_class()
     pytest.main()
