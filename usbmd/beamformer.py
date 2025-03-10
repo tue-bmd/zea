@@ -7,7 +7,7 @@
 import numpy as np
 from keras import ops
 
-from usbmd.tensor_ops import patched_map
+from usbmd.tensor_ops import patched_map, safe_vectorize
 from usbmd.utils.cache import cache_output
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 from usbmd.utils.utils import deprecated
@@ -181,7 +181,7 @@ def tof_correction_flatgrid(
     txdel = ops.moveaxis(txdel, 1, 0)
     txdel = txdel[..., None]
 
-    return ops.vectorize(
+    return safe_vectorize(
         _apply_delays,
         signature="(n_samples,n_el,n_ch),(n_pix,1)->(n_pix,n_el,n_ch)",
     )(data, txdel)
@@ -265,7 +265,7 @@ def calculate_delays(
             ),
         )
 
-    tx_distances = ops.vectorize(
+    tx_distances = safe_vectorize(
         _tx_distances,
         signature="(),(),(n_el),(n_el),()->(n_pix)",
     )(inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances)
@@ -276,7 +276,7 @@ def calculate_delays(
     def _rx_distances(probe_geometry):
         return distance_Rx(grid, probe_geometry)
 
-    rx_distances = ops.vectorize(_rx_distances, signature="(3)->(n_pix)")(
+    rx_distances = safe_vectorize(_rx_distances, signature="(3)->(n_pix)")(
         probe_geometry
     )
     rx_distances = ops.transpose(rx_distances, (1, 0))

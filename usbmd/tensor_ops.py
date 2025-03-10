@@ -998,3 +998,26 @@ def reshape_axis(data, newshape: tuple, axis: int):
     shape = list(ops.shape(data))  # list
     shape = shape[:axis] + list(newshape) + shape[axis + 1 :]
     return ops.reshape(data, shape)
+
+
+if keras.backend.backend() == "tensorflow":
+
+    def safe_vectorize(
+        pyfunc, excluded=None, signature=None  # pylint: disable=unused-argument
+    ):
+        """Because tensorflow does not support multiple arguments to ops.vectorize(func)(...)
+        We will just map the function manually."""
+
+        def _map(*args):
+            outputs = []
+            for i in range(ops.shape(args[0])[0]):
+                outputs.append(pyfunc(*[arg[i] for arg in args]))
+            return ops.stack(outputs)
+
+        return _map
+
+else:
+
+    def safe_vectorize(pyfunc, excluded=None, signature=None):
+        """Just a wrapper around ops.vectorize."""
+        return ops.vectorize(pyfunc, excluded=excluded, signature=signature)
