@@ -5,6 +5,10 @@ the results in a GUI.
 - **Date**          : November 18th, 2021
 """
 
+import os
+
+os.environ["KERAS_BACKEND"] = "tensorflow"
+
 import asyncio
 import time
 from pathlib import Path
