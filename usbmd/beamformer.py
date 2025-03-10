@@ -7,41 +7,11 @@
 import numpy as np
 from keras import ops
 
-from usbmd.tensor_ops import patched_map
 from usbmd.utils.cache import cache_output
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
-def tof_correction(data, grid, *args, patches=1, **kwargs):
-    """
-    Time-of-flight correction. The grid can be split into patches to reduce memory.
-    """
-    # Flatten grid to simplify calculations
-    gridshape = ops.shape(grid)
-    flatgrid = ops.reshape(grid, (-1, 3))
-    n_tx = ops.shape(data)[0]
-
-    def tof_correction_patch(grid_patch):
-        tof_corrected = tof_correction_flatgrid(data, grid_patch, *args, **kwargs)
-        tof_corrected = ops.moveaxis(
-            tof_corrected, 1, 0
-        )  # move n_pix to the first dimension
-        return tof_corrected
-
-    tof_corrected = patched_map(tof_correction_patch, flatgrid, patches)
-
-    tof_corrected = ops.moveaxis(
-        tof_corrected, 1, 0
-    )  # move n_tx to the first dimension
-
-    # Reshape to reintroduce the x- and z-dimensions
-    return ops.reshape(
-        tof_corrected,
-        (n_tx, gridshape[0], gridshape[1], *ops.shape(tof_corrected)[-2:]),
-    )
-
-
-def tof_correction_flatgrid(
+def tof_correction(
     data,
     flatgrid,
     t0_delays,
