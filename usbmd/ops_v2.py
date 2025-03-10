@@ -927,13 +927,12 @@ class PatchedGrid(Pipeline):
 
     def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
-        input_data = inputs[self.input_data_type.value]
+        input_data = inputs.pop(self.input_data_type.value)
         if self.pipeline_batched:
-            output = []
-            for input_data_item in input_data:
-                inputs[self.input_data_type.value] = input_data_item
-                output.append(self.call_item(inputs))
-            output = ops.stack(output)
+            output = ops.map(
+                lambda x: self.call_item({self.input_data_type.value: x, **inputs}),
+                input_data,
+            )
         else:
             output = self.call_item(inputs)
 
