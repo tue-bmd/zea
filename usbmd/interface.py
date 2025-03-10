@@ -8,7 +8,6 @@ the results in a GUI.
 import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
-
 import asyncio
 import time
 from pathlib import Path
@@ -23,6 +22,7 @@ from PIL import Image
 from usbmd.config import Config
 from usbmd.data import get_dataset
 from usbmd.display import to_8bit
+from usbmd.ops_v2 import Pipeline
 from usbmd.probes import get_probe
 from usbmd.processing import Process
 from usbmd.utils import (
@@ -92,8 +92,14 @@ class Interface:
         else:
             self.probe = get_probe(probe_name)
 
-        # intialize process class
-        self.process = Process(self.config, self.scan, self.probe)
+        # initialize Pipeline
+        assert (
+            "pipeline" in self.config
+        ), "Pipeline not found in config, please specify pipeline in config."
+
+        self.process = Pipeline.from_config(
+            self.config, with_batch_dim=False, jit_options=None
+        )
 
         # initialize attributes for UI class
         self.data = None
@@ -226,22 +232,22 @@ class Interface:
         # get data from dataset
         data = self.dataset[(file_idx, frame_no)]
 
-        ## Update scan class (probably a cleaner way to do this)
-        # check if event data by checking self.dataset.file keys start with event
-        if self.dataset.event_structure:
-            # this is still under development
-            scan_params = self.dataset.get_scan_parameters_from_file(
-                file_idx=self.dataset.file, event=self.dataset.frame_no
-            )
-            scan_class = self.dataset.get_scan_class()
+        # ## Update scan class (probably a cleaner way to do this)
+        # # check if event data by checking self.dataset.file keys start with event
+        # if self.dataset.event_structure:
+        #     # this is still under development
+        #     scan_params = self.dataset.get_scan_parameters_from_file(
+        #         file_idx=self.dataset.file, event=self.dataset.frame_no
+        #     )
+        #     scan_class = self.dataset.get_scan_class()
 
-            scan_params = update_dictionary(scan_params, self.config_scan_params)
-            self.scan_params = update_dictionary(self.scan_params, scan_params)
-            self.scan = scan_class(**self.scan_params)
+        #     scan_params = update_dictionary(scan_params, self.config_scan_params)
+        #     self.scan_params = update_dictionary(self.scan_params, scan_params)
+        #     self.scan = scan_class(**self.scan_params)
 
-            # TODO: use adaptive beamformer processing instead of reinit
-            self.process = Process(self.config, self.scan, self.probe)
-            # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
+        #     # TODO: use adaptive beamformer processing instead of reinit
+        #     self.process = Process(self.config, self.scan, self.probe)
+        #     # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
 
         return data
 
@@ -259,20 +265,27 @@ class Interface:
             )
             self.to_dtype = "image_sc"
 
-        if self.process.pipeline is None:
-            if self.config.preprocess.operation_chain is None:
-                self.process.set_pipeline(
-                    dtype=self.dtype,
-                    to_dtype=self.to_dtype,
-                    verbose=self.verbose,
-                )
-            else:
-                self.process.set_pipeline(
-                    operation_chain=self.config.preprocess.operation_chain,
-                    verbose=self.verbose,
-                )
+        first_op = self.process.operations[0]
+        input_key = "data"
+        if hasattr(first_op, "key"):
+            input_key = first_op.key
 
-        self.image = self.process.run(self.data)
+        inputs = {input_key: self.data}
+
+        args = []
+
+        for arg in [self.config, self.probe, self.scan]:
+            if arg is not None:
+                args.append(arg)
+
+        outputs = self.process(*args, **inputs)
+
+        last_op = self.process.operations[-1]
+        output_key = input_key
+        if hasattr(last_op, "key"):
+            output_key = last_op.key
+
+        self.image = outputs[output_key]
 
         # match orientation if necessary
         if self.config.plot.fliplr:

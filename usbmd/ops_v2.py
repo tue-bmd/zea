@@ -1,5 +1,6 @@
 """Experimental version of the USBMD ops module"""
 
+import copy
 import hashlib
 import inspect
 import json
@@ -7,6 +8,7 @@ from typing import Any, Dict, List, Union
 
 import keras
 import numpy as np
+import yaml
 from keras import ops
 
 import usbmd
@@ -403,8 +405,10 @@ class Pipeline:
                 continue
             if operations[i].output_data_type != operations[i + 1].input_data_type:
                 raise ValueError(
-                    f"Operation {operations[i].name} output data type is not compatible "
-                    f"with the input data type of operation {operations[i + 1].name}"
+                    f"Operation {operations[i].__class__.__name__} output data type "
+                    f"({operations[i].output_data_type}) is not compatible "
+                    f"with the input data type ({operations[i + 1].input_data_type}) "
+                    f"of operation {operations[i + 1].__class__.__name__}"
                 )
 
     def set_params(self, **params):
@@ -496,6 +500,23 @@ class Pipeline:
         operations = [operation.__class__.__name__ for operation in self.operations]
         return ",".join(operations)
 
+    @classmethod
+    def load(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Load a pipeline from a JSON or YAML file."""
+        if file_path.endswith(".json"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                json_str = f.read()
+            return pipeline_from_json(json_str, **kwargs)
+        elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
+            return pipeline_from_yaml(file_path, **kwargs)
+        else:
+            raise ValueError("File must have extension .json, .yaml, or .yml")
+
+    @classmethod
+    def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
+        """Create a pipeline from a dictionary or `usbmd.Config` object."""
+        return pipeline_from_config(Config(config), **kwargs)
+
 
 def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
@@ -537,22 +558,34 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
 
 
 def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
-    """Create a pipeline from a json string."""
-    pipeline_config = json.loads(json_string)
-    operations = make_operation_chain(pipeline_config["operations"])
-    return Pipeline(operations=operations, **kwargs)
+    """
+    Create a Pipeline instance from a JSON string.
+    """
+    pipeline_config = json.loads(json_string)["operations"]
+    return Pipeline(operations=pipeline_config, **kwargs)
 
 
 def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
-    """Create a pipeline from a yaml file."""
-    config = Config.load_from_yaml(yaml_path)
-    operations = make_operation_chain(config.operations)
-    return Pipeline(operations=operations, **kwargs)
+    """
+    Create a Pipeline instance from a YAML file.
+    """
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        pipeline_config = yaml.safe_load(f)
+    pipeline_config = pipeline_config["operations"]
+    return Pipeline(operations=pipeline_config, **kwargs)
 
 
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
-    """Create a pipeline from a Config / dict kobject."""
-    operations = make_operation_chain(config.operations)
+    """
+    Create a Pipeline instance from a Config object.
+    """
+    operations = make_operation_chain(config.pipeline.operations)
+
+    # merge pipeline config without operations with kwargs
+    pipeline_config = copy.deepcopy(config.pipeline)
+    pipeline_config.pop("operations")
+
+    kwargs = {**pipeline_config, **kwargs}
     return Pipeline(operations=operations, **kwargs)
 
 
@@ -1136,8 +1169,8 @@ class Normalize(Operation):
             output_key (str, optional): Key for output data. Defaults to "image".
         """
         super().__init__(
-            input_data_type=DataTypes.IMAGE,
-            output_data_type=DataTypes.IMAGE,
+            input_data_type=None,
+            output_data_type=None,
             **kwargs,
         )
         self.key = key
