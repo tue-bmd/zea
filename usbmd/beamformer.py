@@ -152,18 +152,14 @@ def tof_correction_flatgrid(
         lambda: apod_mask(flatgrid, probe_geometry, fnum),
     )
 
-    # TODO: maybe use fori_loop or vectorized_map for jit / speedup
-    # Apply delays
-    bf_tx = []
-    for tx in range(n_tx):
-        # Get the raw data for this transmit
+    def _apply_delays(data_tx, txdel):
         # data_tx is of shape (num_elements, num_samples, 1 or 2)
-        data_tx = data[tx]
+
         # Take receive delays and add the transmit delays for this transmit
         # The txdel tensor has one fewer dimensions because the transmit
         # delays are the same for all dimensions
         # delays is of shape (n_pix, n_el)
-        delays = rxdel + txdel[:, tx, None]
+        delays = rxdel + txdel
 
         # Compute the time-of-flight corrected samples for each element
         # from each pixel of shape (n_pix, n_el, n_ch)
@@ -179,10 +175,16 @@ def tof_correction_flatgrid(
             tdemod = flatgrid[:, None, 2] * 2 / sound_speed
             theta = 2 * np.pi * fdemod * (tshift - tdemod)
             tof_tx = _complex_rotate(tof_tx, theta)
+        return tof_tx
 
-        bf_tx.append(tof_tx)
+    # Reshape to (n_tx, n_pix, 1)
+    txdel = ops.moveaxis(txdel, 1, 0)
+    txdel = txdel[..., None]
 
-    return ops.stack(bf_tx, 0)
+    return ops.vectorize(
+        _apply_delays,
+        signature="(n_samples,n_el,n_ch),(n_pix,1)->(n_pix,n_el,n_ch)",
+    )(data, txdel)
 
 
 @cache_output()
