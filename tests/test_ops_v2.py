@@ -109,7 +109,47 @@ def pipeline_config_with_params():
     }
 
 
-"""Operation Class Tests"""
+@pytest.fixture
+def default_pipeline(ultrasound_scan):
+    """Returns a default pipeline for ultrasound simulation."""
+    operations = [
+        ops.Simulate(
+            apply_lens_correction=ultrasound_scan.apply_lens_correction,
+            n_ax=ultrasound_scan.n_ax,
+        ),
+        ops.TOFCorrection(),
+        ops.PfieldWeighting(),
+        ops.DelayAndSum(),
+        ops.EnvelopeDetect(),
+        ops.LogCompress(),
+        ops.Normalize(),
+    ]
+    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    return pipeline
+
+
+@pytest.fixture
+def patched_pipeline(ultrasound_scan):
+    patched_beamforming = ops.PatchedGrid(
+        operations=[
+            ops.TOFCorrection(),
+            ops.PfieldWeighting(),
+            ops.DelayAndSum(),
+        ],
+        num_patches=2,
+    )
+    operations = [
+        ops.Simulate(
+            apply_lens_correction=ultrasound_scan.apply_lens_correction,
+            n_ax=ultrasound_scan.n_ax,
+        ),
+        patched_beamforming,
+        ops.EnvelopeDetect(),
+        ops.LogCompress(),
+        ops.Normalize(),
+    ]
+    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    return pipeline
 
 
 def test_operation_initialization(test_operation):
@@ -170,7 +210,7 @@ def test_operation_cache_persistence():
 def test_string_representation(verbose=False):
     """Print the string representation of the Pipeline"""
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = ops.ops.Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     if verbose:
         print(str(pipeline))
     assert str(pipeline) == "MultiplyOperation -> AddOperation"
@@ -377,6 +417,8 @@ def ultrasound_scan(ultrasound_probe):
     )
 
     return Scan(
+        Nx=100,
+        Nz=100,
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
@@ -450,27 +492,16 @@ def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
 
 
 def test_default_ultrasound_pipeline(
-    ultrasound_probe, ultrasound_scan, ultrasound_scatterers
+    default_pipeline,
+    patched_pipeline,
+    ultrasound_probe,
+    ultrasound_scan,
+    ultrasound_scatterers,
 ):
     """Tests the default ultrasound pipeline."""
-    # all static parameters are set in the __init__ method of the operations
-    operations = [
-        ops.Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        ops.TOFCorrection(),
-        ops.PfieldWeighting(),
-        ops.DelayAndSum(),
-        ops.EnvelopeDetect(),
-        ops.LogCompress(),
-        ops.Normalize(),
-    ]
-    pipeline = ops.Pipeline(operations=operations, jit_options=None)
-
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
-    output = pipeline(
+    output_default = default_pipeline(
         ultrasound_scan,
         ultrasound_probe,
         scatterer_positions=ultrasound_scatterers["positions"],
@@ -480,9 +511,24 @@ def test_default_ultrasound_pipeline(
         output_range=(0, 255),
     )
 
-    # Check that the pipeline produced the expected outputs
-    assert "image" in output
-    assert output["image"].shape[0] == 1  # Batch dimension
-    # Verify the normalized image has values between 0 and 255
-    assert np.nanmin(output["image"]) >= 0.0
-    assert np.nanmax(output["image"]) <= 255.0
+    output_patched = patched_pipeline(
+        ultrasound_scan,
+        ultrasound_probe,
+        scatterer_positions=ultrasound_scatterers["positions"],
+        scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
+        dynamic_range=(-30, 0),
+        input_range=(-30, 0),
+        output_range=(0, 255),
+    )
+
+    for output in [output_default, output_patched]:
+        # Check that the pipeline produced the expected outputs
+        assert "image" in output
+        assert output["image"].shape[0] == 1  # Batch dimension
+        # Verify the normalized image has values between 0 and 255
+        assert np.nanmin(output["image"]) >= 0.0
+        assert np.nanmax(output["image"]) <= 255.0
+
+    np.testing.assert_allclose(
+        output_default["image"], output_patched["image"], rtol=1e-5, atol=1e-5
+    )
