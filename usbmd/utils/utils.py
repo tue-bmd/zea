@@ -521,6 +521,17 @@ def safe_initialize_class(cls, **kwargs):
 
 
 class FunctionTimer:
+    """
+    A decorator class for timing the execution of functions.
+
+    Example:
+        >>> timer = FunctionTimer()
+        >>> my_function = timer(my_function)
+        ...
+        >>> my_function()
+        >>> print(timer.get_stats("my_function"))
+    """
+
     def __init__(self):
         self.timings = {}
         self.last_append = 0
@@ -567,7 +578,7 @@ class FunctionTimer:
 
     def export_to_yaml(self, filename):
         """Export the timing data to a YAML file."""
-        with open(filename, "w") as f:
+        with open(filename, "w", encoding="utf-8") as f:
             yaml.dump(self.timings, f, default_flow_style=False)
         print(f"Timing data exported to '{filename}'.")
 
@@ -575,7 +586,7 @@ class FunctionTimer:
         """Append the timing data to a YAML file."""
         cropped_timings = self.timings[func_name][self.last_append :]
 
-        with open(filename, "a") as f:
+        with open(filename, "a", encoding="utf-8") as f:
             yaml.dump(cropped_timings, f, default_flow_style=False)
 
         self.last_append = len(self.timings[func_name])
