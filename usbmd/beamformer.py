@@ -246,40 +246,41 @@ def calculate_delays(
         transducer element has shape of shape `(n_pix, n_tx)`
     """
 
-    # Initialize delay variables
-    tx_distances = []
-    rx_distances = []
-
     inf_distances = ops.isinf(focus_distances)
 
-    for tx in range(n_tx):
-        tx_distance = ops.where(
-            inf_distances[tx],
-            distance_Tx_planewave(grid, polar_angles[tx]),
+    def _tx_distances(
+        inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances
+    ):
+        return ops.where(
+            inf_distances,
+            distance_Tx_planewave(grid, polar_angles),
             distance_Tx_generic(
                 grid,
-                t0_delays[tx],
-                tx_apodizations[tx],
+                t0_delays,
+                tx_apodizations,
                 probe_geometry,
-                focus_distances[tx],
-                polar_angles[tx],
+                focus_distances,
+                polar_angles,
                 sound_speed,
             ),
         )
-        tx_distances.append(tx_distance[..., None])
+
+    tx_distances = ops.vectorize(
+        _tx_distances,
+        signature="(),(),(n_el),(n_el),()->(n_pix)",
+    )(inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances)
+    tx_distances = ops.transpose(tx_distances, (1, 0))
+    # tx_distances shape is now (n_pix, n_tx)
 
     # Compute receive distances
-    for el in range(n_el):
-        distances = distance_Rx(grid, probe_geometry[el])
-        # Add transducer element dimension
-        distances = distances[..., None]
-        rx_distances.append(distances)
+    def _rx_distances(probe_geometry):
+        return distance_Rx(grid, probe_geometry)
 
-    # Concatenate all values into one long tensor
-    # The shape is now (n_pix, n_tx)
-    tx_distances = ops.hstack(tx_distances)
-    # The shape is now (n_pix, n_el)
-    rx_distances = ops.hstack(rx_distances)
+    rx_distances = ops.vectorize(_rx_distances, signature="(3)->(n_pix)")(
+        probe_geometry
+    )
+    rx_distances = ops.transpose(rx_distances, (1, 0))
+    # rx_distances shape is now (n_pix, n_el)
 
     # Compute the delays [in samples] from the distances
     # The units here are ([m]/[m/s]-[s])*[1/s] resulting in a unitless quantity
@@ -502,7 +503,7 @@ def distance_Tx_generic(
     # largest distance over all the elements when the pixel is behind the virtual
     # source and the smallest distance otherwise.
     dist = ops.where(
-        float(ops.sign(focus_distance)) * (grid[:, 2] - focal_z) <= 0.0,
+        ops.cast(ops.sign(focus_distance), "float32") * (grid[:, 2] - focal_z) <= 0.0,
         ops.min(dist + offset[None], 1),
         ops.max(dist - offset[None], 1),
     )
