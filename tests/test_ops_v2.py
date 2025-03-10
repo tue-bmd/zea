@@ -130,6 +130,7 @@ def default_pipeline(ultrasound_scan):
 
 @pytest.fixture
 def patched_pipeline(ultrasound_scan):
+    """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     patched_beamforming = ops.PatchedGrid(
         operations=[
             ops.TOFCorrection(),
