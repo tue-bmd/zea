@@ -174,7 +174,7 @@ class Scan(Object):
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
             pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
-                pressure field of shape (Nx, Nz, 1) with to perform automatic weighting.
+                pressure field of shape (n_tx, Nz, Nx, 1) with to perform automatic weighting.
                 Defaults to None. In that case default arguments are used. If pfield
                 can be used by the beamformer with option
                 config.model.beamformer.auto_pressure_weighting. If set to True, the
@@ -269,7 +269,7 @@ class Scan(Object):
 
         self.z_axis = np.linspace(*self.zlims, self.n_ax)
 
-        #: The beamforming grid of shape (Nx, Nz, 3)
+        #: The beamforming grid of shape (Nz, Nx, 3)
         self._grid = self.grid
 
         if initial_times is None:
@@ -627,8 +627,8 @@ class Scan(Object):
         """Manually set the pfield."""
         self.pfield_kwargs = None
         self._pfield = value
-        assert self._pfield.shape == (self.Nx, self.Nz, 1), (
-            f"pfield must have shape (Nx, Nz, 1) = {self.Nx, self.Nz, 1}. "
+        assert self._pfield.shape == (self.n_tx, self.Nz, self.Nx), (
+            f"pfield must have shape (n_tx, Nz, Nx) = {self.n_tx, self.Nz, self.Nx}. "
             f"Got shape {self._pfield.shape}."
         )
 
