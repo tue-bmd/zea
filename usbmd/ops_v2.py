@@ -793,10 +793,10 @@ class TOFCorrection(Operation):
         }
 
         if not self.with_batch_dim:
-            tof_corrected = usbmd.beamformer.tof_correction_flatgrid(raw_data, **kwargs)
+            tof_corrected = usbmd.beamformer.tof_correction(raw_data, **kwargs)
         else:
             tof_corrected = ops.map(
-                lambda data: usbmd.beamformer.tof_correction_flatgrid(data, **kwargs),
+                lambda data: usbmd.beamformer.tof_correction(data, **kwargs),
                 raw_data,
             )
 
