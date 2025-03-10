@@ -9,6 +9,7 @@ from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from keras import ops
 
 from usbmd.core import STATIC, Object
 from usbmd.utils import log
@@ -605,14 +606,14 @@ class Scan(Object):
                 "scan.probe_geometry not set. Cannot compute pfield."
                 "Defaulting to uniform weights."
             )
-            self._pfield = 1
+            self._pfield = np.ones((self.n_tx, self.Nz, self.Nx))
         else:
             if self.pfield_kwargs is None:
                 pfield_kwargs = {}
             else:
                 pfield_kwargs = self.pfield_kwargs
 
-            self._pfield = compute_pfield(self, **pfield_kwargs)
+            self._pfield = ops.convert_to_numpy(compute_pfield(self, **pfield_kwargs))
 
         return self._pfield
 

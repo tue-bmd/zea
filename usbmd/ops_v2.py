@@ -89,7 +89,10 @@ class Operation(keras.Operation):
 
         if jit_kwargs is None:
             # TODO: set static_argnames only for operations that require it
-            jit_kwargs = {"static_argnames": STATIC}
+            if keras.backend.backend() == "jax":
+                jit_kwargs = {"static_argnames": STATIC}
+            else:
+                jit_kwargs = {}
         self.jit_kwargs = jit_kwargs
 
         # Set the jit compilation flag and compile the `call` method
@@ -255,7 +258,10 @@ class Pipeline:
 
         # pylint: disable=method-hidden
         if jit_kwargs is None:
-            jit_kwargs = {"static_argnames": STATIC}
+            if keras.backend.backend() == "jax":
+                jit_kwargs = {"static_argnames": STATIC}
+            else:
+                jit_kwargs = {}
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
