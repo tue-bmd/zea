@@ -18,7 +18,7 @@ from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
-from usbmd.tensor_ops import patched_map, take
+from usbmd.tensor_ops import patched_map, reshape_axis, take
 from usbmd.utils import log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
@@ -259,14 +259,6 @@ class Pipeline:
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
-    def jit(self):
-        """JIT compile the pipeline."""
-        self._call_pipeline = jit(self.call, **self.jit_kwargs)
-
-    def unjit(self):
-        """Un-JIT compile the pipeline."""
-        self._call_pipeline = self.call
-
     @property
     def operations(self):
         """Alias for self.layers to match the USBMD naming convention"""
@@ -365,6 +357,14 @@ class Pipeline:
                 operation.jit_options = value
             else:
                 operation.set_jit(value == "ops")
+
+    def jit(self):
+        """JIT compile the pipeline."""
+        self._call_pipeline = jit(self.call, **self.jit_kwargs)
+
+    def unjit(self):
+        """Un-JIT compile the pipeline."""
+        self._call_pipeline = self.call
 
     @property
     def with_batch_dim(self):
@@ -980,7 +980,7 @@ class PatchedBeamforming(Operation):
 class PatchedGrid(Pipeline):
     """
     NOTE: Changing anything other than `self.output_data_type` in the dict will not be propagated!
-    NOTE: Will be jitted as a pipeline, not as individual operations.
+    NOTE: Will be jitted as a single operation, not the individual operations.
 
     TODO: maybe make a GroupedOps class which is a more basic pipeline?
     TODO: fix jitting of PatchedGrid as operation, as part of full pipeline works.
@@ -989,6 +989,10 @@ class PatchedGrid(Pipeline):
     def __init__(self, *args, num_patches=10, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_patches = num_patches
+
+        for operation in self.operations:
+            if isinstance(operation, DelayAndSum):
+                operation.reshape_grid = False
 
     @property
     def jit_options(self):
@@ -1003,6 +1007,15 @@ class PatchedGrid(Pipeline):
             self.jit()
         else:
             self.unjit()
+
+    def jit(self):
+        """JIT compile the pipeline."""
+        self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
+
+    def unjit(self):
+        """Un-JIT compile the pipeline."""
+        self._jittable_call = self.jittable_call
+        self._call_pipeline = self.call
 
     @property
     def with_batch_dim(self):
@@ -1033,28 +1046,38 @@ class PatchedGrid(Pipeline):
         )
         return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
 
-    def call(self, **inputs):
+    def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
         input_data = inputs[self.input_data_type.value]
         if self.pipeline_batched:
             output = []
-            for _input_data in input_data:
-                inputs[self.input_data_type.value] = _input_data
+            for input_data_item in input_data:
+                inputs[self.input_data_type.value] = input_data_item
                 output.append(self.call_item(inputs))
             output = ops.stack(output)
         else:
             output = self.call_item(inputs)
 
-        outputs = inputs
-        outputs.update({self.output_data_type.value: output})
-        return outputs
+        return {self.output_data_type.value: output}
+
+    def call(self, **inputs):
+        """Process input data through the pipeline."""
+        output = self._jittable_call(**inputs)
+        inputs.update(output)
+        return inputs
 
 
 @ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
-    def __init__(self, key="aligned_data", output_key="beamformed_data", **kwargs):
+    def __init__(
+        self,
+        key="aligned_data",
+        output_key="beamformed_data",
+        reshape_grid=True,
+        **kwargs,
+    ):
         super().__init__(
             input_data_type=None,
             output_data_type=DataTypes.BEAMFORMED_DATA,
@@ -1062,6 +1085,7 @@ class DelayAndSum(Operation):
         )
         self.key = key
         self.output_key = output_key
+        self.reshape_grid = reshape_grid
 
     def process_image(self, data, rx_apo, tx_apo):
         """Performs DAS beamforming on tof-corrected input.
@@ -1081,15 +1105,14 @@ class DelayAndSum(Operation):
         # Sum over transmits, i.e. Compounding
         data = ops.sum(data, 0)
 
-        # TODO: When not used in the PatchedGrid pipeline
-        # this should be reshaped to (n_z, n_x, n_ch)
-
         return data
 
     def call(
         self,
         rx_apo=None,
         tx_apo=None,
+        Nz=None,
+        Nx=None,
         **kwargs,
     ):
         """Performs DAS beamforming on tof-corrected input.
@@ -1118,6 +1141,11 @@ class DelayAndSum(Operation):
             # Apply process_image to each item in the batch
             beamformed_data = ops.map(
                 lambda data: self.process_image(data, rx_apo, tx_apo), data
+            )
+
+        if self.reshape_grid:
+            beamformed_data = reshape_axis(
+                beamformed_data, (Nz, Nx), axis=int(self.with_batch_dim)
             )
 
         return {self.output_key: beamformed_data}

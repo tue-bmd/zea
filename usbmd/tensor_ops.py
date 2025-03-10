@@ -8,6 +8,7 @@ import numpy as np
 from keras import ops
 
 from usbmd.utils import log
+from usbmd.utils.utils import map_negative_indices
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
@@ -961,6 +962,7 @@ def patches_to_images(
     return images
 
 
+# TODO: why not ops.take? @tristan-deep
 def take(data, indices, axis=-1):
     """Take values from data along axis.
 
@@ -975,3 +977,24 @@ def take(data, indices, axis=-1):
         axis = data.ndim + axis
     indices = ops.reshape(indices, [1] * axis + [-1] + [1] * (data.ndim - axis - 1))
     return ops.take_along_axis(data, indices, axis=axis)
+
+
+def reshape_axis(data, newshape: tuple, axis: int):
+    """Reshape data along axis.
+
+    Args:
+        data (tensor): input data.
+        newshape (tuple): new shape of data along axis.
+        axis (int): axis to reshape.
+
+    Example:
+        >>> data = keras.random.uniform((3, 4, 5))
+        >>> newshape = (2, 2)
+        >>> reshaped_data = reshape_axis(data, newshape, axis=1)
+        >>> reshaped_data.shape
+        (3, 2, 2, 5)
+    """
+    axis = map_negative_indices([axis], data.ndim)[0]
+    shape = list(ops.shape(data))  # list
+    shape = shape[:axis] + list(newshape) + shape[axis + 1 :]
+    return ops.reshape(data, shape)
