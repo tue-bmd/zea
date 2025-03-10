@@ -270,14 +270,14 @@ def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
         array,
         batch_dims,
         jit=True,
-        batch_kwargs=batched_kwargs,
+        **batched_kwargs,
     )
     out_no_jit = tensor_ops.batched_map(
         _test_function,
         array,
         batch_dims,
         jit=False,
-        batch_kwargs=batched_kwargs,
+        **batched_kwargs,
     )
 
     # Compute expected result manually
