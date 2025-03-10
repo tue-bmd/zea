@@ -239,7 +239,7 @@ class Pipeline:
             - None disables JIT compilation.
             Defaults to "ops".
         """
-        self.unjit()
+        self._call_pipeline = self.call
 
         # add functionality here
         # operations = ...
@@ -842,148 +842,17 @@ class PfieldWeighting(Operation):
         return {self.output_key: weighted_data}
 
 
-@ops_registry("patched_beamforming")
-class PatchedBeamforming(Operation):
-    def __init__(
-        self, key="raw_data", output_key="beamformed_data", num_patches=10, **kwargs
-    ):
-        super().__init__(
-            input_data_type=DataTypes.RAW_DATA,
-            output_data_type=DataTypes.BEAMFORMED_DATA,
-            **kwargs,
-        )
-        self.num_patches = num_patches
-        self.key = key
-        self.output_key = output_key
-
-    def call(
-        self,
-        grid=None,
-        flatgrid=None,
-        sound_speed=None,
-        polar_angles=None,
-        focus_distances=None,
-        sampling_frequency=None,
-        f_number=None,
-        fdemod=None,
-        t0_delays=None,
-        tx_apodizations=None,
-        initial_times=None,
-        probe_geometry=None,
-        apply_lens_correction=None,
-        lens_thickness=None,
-        lens_sound_speed=None,
-        rx_apo=None,
-        tx_apo=None,
-        flat_pfield=None,
-        **kwargs,
-    ):
-        """Perform time-of-flight correction on raw RF data.
-
-        Args:
-            raw_data (ops.Tensor): Raw RF data to correct
-            grid (ops.Tensor): Grid points at which to evaluate the time-of-flight
-            sound_speed (float): Sound speed in the medium
-            polar_angles (ops.Tensor): Polar angles for scan lines
-            focus_distances (ops.Tensor): Focus distances for scan lines
-            sampling_frequency (float): Sampling frequency
-            f_number (float): F-number for apodization
-            fdemod (float): Demodulation frequency
-            t0_delays (ops.Tensor): T0 delays
-            tx_apodizations (ops.Tensor): Transmit apodizations
-            initial_times (ops.Tensor): Initial times
-            probe_geometry (ops.Tensor): Probe element positions
-            apply_lens_correction (bool): Whether to apply lens correction
-            lens_thickness (float): Lens thickness
-            lens_sound_speed (float): Sound speed in the lens
-
-        Returns:
-            dict: Dictionary containing tof_corrected_data
-        """
-
-        raw_data = kwargs[self.key]
-        n_tx, n_ax, n_el, n_ch = raw_data.shape[-4:]
-
-        kwargs = {
-            # "grid": grid,
-            "sound_speed": sound_speed,
-            "angles": polar_angles,
-            "vfocus": focus_distances,
-            "sampling_frequency": sampling_frequency,
-            "fnum": f_number,
-            "fdemod": fdemod,
-            "apply_phase_rotation": bool(fdemod),
-            "t0_delays": t0_delays,
-            "tx_apodizations": tx_apodizations,
-            "initial_times": initial_times,
-            "probe_geometry": probe_geometry,
-            "apply_lens_correction": bool(apply_lens_correction),
-            "lens_thickness": lens_thickness,
-            "lens_sound_speed": lens_sound_speed,
-        }
-
-        # Flatten grid to simplify calculations
-        gridshape = ops.shape(grid)
-
-        if rx_apo is None:
-            rx_apo = 1.0
-
-        if tx_apo is None:
-            tx_apo = 1.0
-
-        def beamform_patch(grid_patch, flat_pfield, raw_data):
-            N_EL_AXIS = -2
-            N_TX_AXIS = 0
-            patch = usbmd.beamformer.tof_correction_flatgrid(
-                raw_data, grid_patch, **kwargs
-            )  # (n_tx, n_pix, n_el, num_rf_iq_channels)
-
-            # Apply pressure field weighting
-            # (n_pix, n_tx) -> (n_tx, n_pix, 1, 1)
-            flat_pfield = ops.swapaxes(flat_pfield, 0, 1)[..., None, None]
-            patch = patch * flat_pfield
-
-            # TODO: check shapes apodizations
-            patch = tx_apo * patch
-
-            # Sum over the channels, i.e. DAS
-            data = ops.sum(rx_apo * patch, N_EL_AXIS)
-
-            # Sum over transmits, i.e. Compounding
-            data = ops.sum(data, N_TX_AXIS)
-            return data  # (n_pix, n_ch)
-
-        if not self.with_batch_dim:
-            _beamform_patch = lambda patch, flat_pfield: beamform_patch(
-                patch, flat_pfield, raw_data
-            )
-            data = patched_map(
-                _beamform_patch, flatgrid, self.num_patches, flat_pfield=flat_pfield
-            )
-        else:
-            beamformed_data = []
-            for _raw_data in raw_data:
-                _beamform_patch = lambda patch, flat_pfield: beamform_patch(
-                    patch, flat_pfield, _raw_data
-                )
-                data = patched_map(
-                    _beamform_patch, flatgrid, self.num_patches, flat_pfield=flat_pfield
-                )
-                beamformed_data.append(data)
-            data = ops.stack(beamformed_data)
-
-        data = ops.reshape(data, (-1, gridshape[0], gridshape[1], n_ch))
-
-        return {self.output_key: data}
-
-
+@ops_registry("patched_grid")
 class PatchedGrid(Pipeline):
     """
-    NOTE: Changing anything other than `self.output_data_type` in the dict will not be propagated!
-    NOTE: Will be jitted as a single operation, not the individual operations.
+    With this class you can form a pipeline that will be applied to patches of the grid.
+    This is useful to avoid OOM errors when processing large grids.
 
-    TODO: maybe make a GroupedOps class which is a more basic pipeline?
-    TODO: fix jitting of PatchedGrid as operation, as part of full pipeline works.
+    Somethings to NOTE about this class:
+        - The ops have to use flatgrid and flat_pfield as inputs, these will be patched.
+        - Changing anything other than `self.output_data_type` in the dict will not be propagated!
+        - Will be jitted as a single operation, not the individual operations.
+        - This class handles the batching.
     """
 
     def __init__(self, *args, num_patches=10, **kwargs):
@@ -993,6 +862,8 @@ class PatchedGrid(Pipeline):
         for operation in self.operations:
             if isinstance(operation, DelayAndSum):
                 operation.reshape_grid = False
+
+        self._jittable_call = self.jittable_call
 
     @property
     def jit_options(self):
@@ -1024,19 +895,21 @@ class PatchedGrid(Pipeline):
 
     @with_batch_dim.setter
     def with_batch_dim(self, value):
-        """Set the with_batch_dim property of the pipeline."""
+        """Set the with_batch_dim property of the pipeline.
+        The class handles the batching so the operations have to be set to False."""
         self.pipeline_batched = value
         for operation in self.operations:
             operation.with_batch_dim = False
 
     def call_item(self, inputs):
+        """Process data in patches."""
         Nx = inputs["Nx"]
         Nz = inputs["Nz"]
         flatgrid = inputs.pop("flatgrid")
         flat_pfield = inputs.pop("flat_pfield")
 
         def patched_call(flatgrid, flat_pfield):
-            out = super(PatchedGrid, self).call(
+            out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
                 flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
             )
             return out[self.output_data_type.value]
