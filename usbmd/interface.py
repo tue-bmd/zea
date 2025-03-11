@@ -21,7 +21,6 @@ from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
 from usbmd.probes import get_probe
-from usbmd.processing import Process
 from usbmd.utils import (
     log,
     safe_initialize_class,

@@ -230,7 +230,7 @@ class Scan(Object):
         #: The number of pixels in the axial direction in the beamforming grid
         self._Nz = Nz
         #: The beamforming grid of shape (Nz, Nx, 3)
-        self._grid = self.grid
+        self._grid = None  # will be initialized lazily
 
         #: The number of pixels per wavelength in the beamforming grid
         self.pixels_per_wavelength = float(pixels_per_wvln)
@@ -566,7 +566,11 @@ class Scan(Object):
     @selected_transmits.setter
     def selected_transmits(self, value):
         self._selected_transmits = self._select_transmits(value)
-        check_for_aliasing(self)
+        try:
+            check_for_aliasing(self)
+        except ValueError as e:
+            log.warning(f"Error checking for aliasing: {e}")
+
         self._pfield = None  # also trigger update of the pressure fields
 
     @property
@@ -577,6 +581,8 @@ class Scan(Object):
     @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
+        if self._n_ax is None:
+            raise ValueError("Please set scan.n_ax.")
         return int(self._n_ax)
 
     @n_ax.setter
@@ -588,11 +594,21 @@ class Scan(Object):
     @property
     def n_el(self):
         """The number of elements in the array."""
+        if self._n_el is None:
+            raise ValueError("Please set scan.n_el.")
         return int(self._n_el)
+
+    @n_el.setter
+    def n_el(self, value):
+        value = int(value)
+        assert value > 0, "n_el must be positive"
+        self._n_el = value
 
     @property
     def n_ch(self):
         """The number of channels."""
+        if self._n_ch is None:
+            raise ValueError("Please set scan.n_ch.")
         return int(self._n_ch)
 
     @n_ch.setter
@@ -603,22 +619,48 @@ class Scan(Object):
     @property
     def fc(self):
         """The modulation carrier frequency."""
+        if self._fc is None:
+            raise ValueError("Please set scan.center_frequency.")
         return float(self._fc)
+
+    @fc.setter
+    def fc(self, value):
+        self._fc = value
+        self._grid = None
 
     @property
     def fs(self):
         """The sampling rate."""
+        if self._fs is None:
+            raise ValueError("Please set scan.sampling_rate.")
         return float(self._fs)
+
+    @fs.setter
+    def fs(self, value):
+        self._fs = value
 
     @property
     def bandwidth_percent(self):
         """The percent bandwidth."""
+        if self._bandwidth_percent is None:
+            raise ValueError("Please set scan.bandwidth_percent.")
         return float(self._bandwidth_percent)
+
+    @bandwidth_percent.setter
+    def bandwidth_percent(self, value):
+        self._bandwidth_percent = value
 
     @property
     def sound_speed(self):
         """The speed of sound."""
+        if self._sound_speed is None:
+            raise ValueError("Please set scan.sound_speed.")
         return float(self._sound_speed)
+
+    @sound_speed.setter
+    def sound_speed(self, value):
+        self._sound_speed = value
+        self._grid = None
 
     @property
     def fdemod(self):
