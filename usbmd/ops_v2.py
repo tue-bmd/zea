@@ -632,6 +632,9 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     operations = make_operation_chain(config.pipeline.operations)
 
     # merge pipeline config without operations with kwargs
+    assert (
+        "pipeline" in config
+    ), "Config object must have a 'pipeline' key for pipeline creation."
     pipeline_config = copy.deepcopy(config.pipeline)
     pipeline_config.pop("operations")
 
