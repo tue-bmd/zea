@@ -107,6 +107,11 @@ def object_to_tensor(obj: Object):
         if key.startswith("_") or key in except_tensors:
             continue
 
+        # Some objects have a _set_params dict that stores if parameters have
+        # been (lazily) set. We don't want to convert these attributes to tensors
+        if hasattr(obj, "_set_params") and key not in obj._set_params:
+            continue
+
         # Skip methods
         value = getattr(obj, key)
         if callable(value):
