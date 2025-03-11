@@ -11,10 +11,11 @@ import numpy as np
 import yaml
 from keras import ops
 
-import usbmd
 from usbmd.backend import jit
+from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
+from usbmd.display import scan_convert_2d, scan_convert_3d
 from usbmd.ops import channels_to_complex, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
@@ -855,10 +856,10 @@ class TOFCorrection(Operation):
         }
 
         if not self.with_batch_dim:
-            tof_corrected = usbmd.beamformer.tof_correction_flatgrid(raw_data, **kwargs)
+            tof_corrected = tof_correction_flatgrid(raw_data, **kwargs)
         else:
             tof_corrected = ops.map(
-                lambda data: usbmd.beamformer.tof_correction_flatgrid(data, **kwargs),
+                lambda data: tof_correction_flatgrid(data, **kwargs),
                 raw_data,
             )
 
@@ -1237,3 +1238,80 @@ class Normalize(Operation):
         normalized_data = translate(data, input_range, output_range)
 
         return {self.output_key: normalized_data}
+
+
+@ops_registry("scan_convert")
+class ScanConvert(Operation):
+    """Scan convert images to cartesian coordinates."""
+
+    def __init__(
+        self,
+        key: str = "image",
+        output_key: str = "image_sc",
+        order=1,
+        **kwargs,
+    ):
+        """Initialize the ScanConvert operation.
+
+        Args:
+            key (str, optional): Key for input data. Defaults to "image".
+            output_key (str, optional): Key for output data. Defaults to "image_sc".
+            order (int, optional): Interpolation order. Defaults to 1. Currently only
+                GPU support for order=1.
+        """
+        super().__init__(
+            input_data_type=DataTypes.IMAGE,
+            output_data_type=DataTypes.IMAGE_SC,
+            key=key,
+            output_key=output_key,
+            **kwargs,
+        )
+        self.order = order
+
+    def call(
+        self,
+        rho_range=None,
+        theta_range=None,
+        phi_range=None,
+        resolution=None,
+        fill_value=None,
+        **kwargs,
+    ):
+        """Scan convert images to cartesian coordinates.
+
+        Args:
+            rho_range (Tuple): Range of the rho axis in the polar coordinate system.
+                Defined in meters.
+            theta_range (Tuple): Range of the theta axis in the polar coordinate system.
+                Defined in radians.
+            phi_range (Tuple): Range of the phi axis in the polar coordinate system.
+                Defined in radians.
+            resolution (float): Resolution of the output image in meters per pixel.
+                if None, the resolution is computed based on the input data.
+            fill_value (float): Value to fill the image with outside the defined region.
+
+        """
+
+        data = kwargs[self.key]
+
+        if phi_range is not None:
+            data_out = scan_convert_3d(
+                data,
+                rho_range,
+                theta_range,
+                phi_range,
+                resolution,
+                fill_value,
+                order=self.order,
+            )
+        else:
+            data_out = scan_convert_2d(
+                data,
+                rho_range,
+                theta_range,
+                resolution,
+                fill_value,
+                order=self.order,
+            )
+
+        return {self.output_key: data_out}

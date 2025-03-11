@@ -140,6 +140,11 @@ scan_schema = Schema(
         Optional("lens_sound_speed", default=1000): Or(
             positive_float, positive_integer
         ),
+        Optional("theta_range", default=None): Or(None, list_of_size_two),
+        Optional("phi_range", default=None): Or(None, list_of_size_two),
+        Optional("rho_range", default=None): Or(None, list_of_size_two),
+        Optional("fill_value", default=0.0): any_number,
+        Optional("resolution", default=None): Or(None, positive_float),
     }
 )
 
