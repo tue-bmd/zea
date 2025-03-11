@@ -75,18 +75,18 @@ class Scan(Object):
 
     def __init__(
         self,
-        n_tx: int,
-        n_ax: int,
-        n_el: int,
-        center_frequency: float,
-        sampling_frequency: float,
+        n_tx: int = None,
+        n_ax: int = None,
+        n_el: int = None,
+        n_ch: int = None,
+        center_frequency: float = None,
+        sampling_frequency: float = None,
         demodulation_frequency: float = None,
         xlims=None,
         ylims=None,
         zlims=None,
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
-        n_ch: int = None,
         Nx: int = None,
         Nz: int = None,
         pixels_per_wvln: int = 4,
@@ -100,6 +100,7 @@ class Scan(Object):
         selected_transmits: Union[int, list] = None,
         probe_geometry: Union[np.ndarray, None] = None,
         time_to_next_transmit: Union[np.ndarray, None] = None,
+        pfield: Union[np.ndarray, None] = None,
         pfield_kwargs: Union[dict, None] = None,
         apply_lens_correction: bool = False,
         lens_thickness: float = None,
@@ -120,6 +121,8 @@ class Scan(Object):
             n_ax (int, optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             n_el (int, optional): The number of elements in the array.
+            n_ch (int): The number of channels. This will determine the modulation type.
+                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
@@ -136,8 +139,6 @@ class Scan(Object):
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
-            n_ch (int): The number of channels. This will determine the modulation type.
-                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
@@ -173,6 +174,9 @@ class Scan(Object):
                 Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
+            pfield (np.ndarray, float, optional): The estimated pressure field of shape
+                (n_tx, Nz, Nx, 1) to perform automatic weighting. Defaults to None. In that
+                case pfield is computed with pfield_kwargs options when called.
             pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
                 pressure field of shape (n_tx, Nz, Nx, 1) with to perform automatic weighting.
                 Defaults to None. In that case default arguments are used. If pfield
@@ -197,25 +201,36 @@ class Scan(Object):
         super().__init__()
 
         # Attributes concerning channel data : The number of transmissions in a frame
-        self._n_tx = int(n_tx)
+        self._n_tx = n_tx
         #: The number of samples per channel per acquisition
         self._n_ax = n_ax
         #: The number of elements in the array
-        self._n_el = int(n_el)
-        #: The modulation carrier frequency [Hz]
-        self.fc = float(center_frequency)
-        #: The sampling rate [Hz]
-        self.fs = float(sampling_frequency)
-        #: The percent bandwidth []
-        self.bandwidth_percent = float(bandwidth_percent)
-        #: The speed of sound [m/s]
-        self.sound_speed = float(sound_speed)
+        self._n_el = n_el
         #: The number of rf/iq channels (1 for rf, 2 for iq)
         self._n_ch = n_ch
+        #: The modulation carrier frequency [Hz]
+        self._fc = center_frequency
+        #: The sampling rate [Hz]
+        self._fs = sampling_frequency
+        #: The percent bandwidth []
+        self._bandwidth_percent = bandwidth_percent
+        #: The speed of sound [m/s]
+        self._sound_speed = sound_speed
         #: The demodulation frequency [Hz]
         self._fdemod = demodulation_frequency
-        #: The wavelength of the modulation carrier [m]
-        self.wvln = self.sound_speed / self.fc
+        #: The x-limits of the beamforming grid [m]
+        self._xlims = xlims
+        #: The y-limits of the beamforming grid [m]
+        self._ylims = ylims
+        #: The z-limits of the beamforming grid [m]
+        self._zlims = zlims
+        #: The number of pixels in the lateral direction in the beamforming grid
+        self._Nx = Nx
+        #: The number of pixels in the axial direction in the beamforming grid
+        self._Nz = Nz
+        #: The beamforming grid of shape (Nz, Nx, 3)
+        self._grid = self.grid
+
         #: The number of pixels per wavelength in the beamforming grid
         self.pixels_per_wavelength = float(pixels_per_wvln)
         #: The decimation factor applied after downconverting data to baseband (RF to IQ)
@@ -228,49 +243,12 @@ class Scan(Object):
         self.f_number = f_number
         #: The arguments to calculate the estimated pressure field with
         self.pfield_kwargs = pfield_kwargs
-
+        #: Whether to apply lens correction to the delay computation
         self.apply_lens_correction = apply_lens_correction
+        #: The thickness of the lens in meters
         self.lens_thickness = lens_thickness
+        #: The speed of sound in the lens in m/s
         self.lens_sound_speed = lens_sound_speed
-
-        # Beamforming grid related attributes
-        # ---------------------------------------------------------------------
-        #: The x-limits of the beamforming grid [m]
-        self._xlims = xlims
-        #: The y-limits of the beamforming grid [m]
-        self._ylims = ylims
-        #: The z-limits of the beamforming grid [m]
-        self._zlims = zlims
-
-        #: The number of pixels in the lateral direction in the beamforming grid
-        self._Nx = int(Nx) if Nx is not None else None
-        #: The number of pixels in the axial direction in the beamforming grid
-        self._Nz = int(Nz) if Nz is not None else None
-
-        # Compute the zlims from the other values if not supplied
-        if zlims:
-            self.zlims = zlims
-        else:
-            # Compute the depth of the scan from the number of axial samples
-            self.zlims = [0, self.sound_speed * self.n_ax / self.fs / 2]
-        if ylims:
-            self.ylims = ylims
-        else:
-            self.ylims = [0, 0]
-        if xlims:
-            self.xlims = xlims
-        else:
-            # Set the scan limits to the limits of the probe and
-            if self.probe_geometry is None:
-                raise ValueError(
-                    "Please provide probe_geometry or xlims, currently neither is set."
-                )
-            self.xlims = self.probe_geometry[0, 0], self.probe_geometry[-1, 0]
-
-        self.z_axis = np.linspace(*self.zlims, self.n_ax)
-
-        #: The beamforming grid of shape (Nz, Nx, 3)
-        self._grid = self.grid
 
         if initial_times is None:
             log.warning("No initial times provided. Assuming all zeros.")
@@ -332,11 +310,10 @@ class Scan(Object):
         self._t0_delays = t0_delays
         self._tx_apodizations = tx_apodizations
         self._polar_angles = polar_angles
-        self._angles = polar_angles  # deprecated
         self._azimuth_angles = azimuth_angles
         self._focus_distances = focus_distances
         self._initial_times = initial_times
-        self._pfield = None
+        self._pfield = pfield
         self.element_width = element_width
         self.attenuation_coef = attenuation_coef
 
@@ -439,7 +416,7 @@ class Scan(Object):
     @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
-        return self._n_ax
+        return int(self._n_ax)
 
     @n_ax.setter
     def n_ax(self, value):
@@ -450,17 +427,37 @@ class Scan(Object):
     @property
     def n_el(self):
         """The number of elements in the array."""
-        return self._n_el
+        return int(self._n_el)
 
     @property
     def n_ch(self):
         """The number of channels."""
-        return self._n_ch
+        return int(self._n_ch)
 
     @n_ch.setter
     def n_ch(self, value):
         self._n_ch = value
         self._fdemod = None  # Reset fdemod
+
+    @property
+    def fc(self):
+        """The modulation carrier frequency."""
+        return float(self._fc)
+
+    @property
+    def fs(self):
+        """The sampling rate."""
+        return float(self._fs)
+
+    @property
+    def bandwidth_percent(self):
+        """The percent bandwidth."""
+        return float(self._bandwidth_percent)
+
+    @property
+    def sound_speed(self):
+        """The speed of sound."""
+        return float(self._sound_speed)
 
     @property
     def fdemod(self):
@@ -502,13 +499,6 @@ class Scan(Object):
         angles usually used in 2D imaging."""
         return self._polar_angles[self.selected_transmits]
 
-    # @deprecated("Scan.polar_angles")
-    # @property
-    # def angles(self):
-    #     """Identical to `Scan.polar_angles`. This attribute is added for backward
-    #     compatibility."""
-    #     return self.polar_angles
-
     @property
     def azimuth_angles(self):
         """The azimuth angles of the transmits in radians of shape (n_tx,). These are
@@ -533,26 +523,37 @@ class Scan(Object):
     def Nx(self):
         """The number of pixels in the lateral direction in the beamforming
         grid."""
-        return self._Nx
+        return int(self._Nx)
 
     @Nx.setter
     def Nx(self, value):
-        self._Nx = value
+        self._Nx = int(value)
         self._grid = None
 
     @property
     def Nz(self):
         """The number of pixels in the axial direction in the beamforming grid."""
-        return self._Nz
+        return int(self._Nz)
 
     @Nz.setter
     def Nz(self, value):
-        self._Nz = value
+        self._Nz = int(value)
         self._grid = None
+
+    @property
+    def wvln(self):
+        """The wavelength of the modulation carrier [m]."""
+        return self.sound_speed / self.fc
 
     @property
     def xlims(self):
         """The x-limits of the beamforming grid [m]."""
+        if self._xlims is None:
+            if self.probe_geometry is None:
+                raise ValueError(
+                    "Please provide probe_geometry or xlims, currently neither is set."
+                )
+            self.xlims = [self.probe_geometry[0, 0], self.probe_geometry[-1, 0]]
         return self._xlims
 
     @xlims.setter
@@ -563,6 +564,8 @@ class Scan(Object):
     @property
     def ylims(self):
         """The y-limits of the beamforming grid [m]."""
+        if self._ylims is None:
+            self.ylims = [0, 0]
         return self._ylims
 
     @ylims.setter
@@ -573,12 +576,19 @@ class Scan(Object):
     @property
     def zlims(self):
         """The z-limits of the beamforming grid [m]."""
+        if self._zlims is None:
+            self.zlims = [0, self.sound_speed * self.n_ax / self.fs / 2]
         return self._zlims
 
     @zlims.setter
     def zlims(self, value):
         self._zlims = value
         self._grid = None
+
+    @property
+    def z_axis(self):
+        """The z-axis of the beamforming grid [m]."""
+        return np.linspace(*self.zlims, self.n_ax)
 
     @property
     def grid(self):
