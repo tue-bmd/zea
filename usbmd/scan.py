@@ -75,39 +75,40 @@ class Scan(Object):
 
     def __init__(
         self,
-        n_tx: int = None,
-        n_ax: int = None,
-        n_el: int = None,
-        n_ch: int = None,
-        center_frequency: float = None,
-        sampling_frequency: float = None,
-        demodulation_frequency: float = None,
-        xlims=None,
-        ylims=None,
-        zlims=None,
+        n_tx: Union[int, None] = None,
+        n_ax: Union[int, None] = None,
+        n_el: Union[int, None] = None,
+        n_ch: Union[int, None] = None,
+        center_frequency: Union[float, None] = None,
+        sampling_frequency: Union[float, None] = None,
+        demodulation_frequency: Union[float, None] = None,
+        xlims: Union[tuple[float, float], None] = None,
+        ylims: Union[tuple[float, float], None] = None,
+        zlims: Union[tuple[float, float], None] = None,
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
-        Nx: int = None,
-        Nz: int = None,
+        Nx: Union[int, None] = None,
+        Nz: Union[int, None] = None,
         pixels_per_wvln: int = 4,
         downsample: int = 1,
+        pfield: Union[np.ndarray, None] = None,
+        pfield_kwargs: Union[dict, None] = None,
+        apply_lens_correction: bool = False,
+        lens_thickness: Union[float, None] = None,
+        lens_sound_speed: Union[float, None] = None,
+        f_number: float = 1.0,
+        element_width: float = 0.2e-3,
+        attenuation_coef: float = 0.0,
+        # arrays that can be set manually or lazily initialized
         polar_angles: Union[np.ndarray, None] = None,
         azimuth_angles: Union[np.ndarray, None] = None,
         t0_delays: Union[np.ndarray, None] = None,
         tx_apodizations: Union[np.ndarray, None] = None,
         focus_distances: Union[np.ndarray, None] = None,
         initial_times: Union[np.ndarray, None] = None,
-        selected_transmits: Union[int, list] = None,
+        selected_transmits: Union[int, list[int], str, None] = None,
         probe_geometry: Union[np.ndarray, None] = None,
         time_to_next_transmit: Union[np.ndarray, None] = None,
-        pfield: Union[np.ndarray, None] = None,
-        pfield_kwargs: Union[dict, None] = None,
-        apply_lens_correction: bool = False,
-        lens_thickness: float = None,
-        lens_sound_speed: float = None,
-        f_number: float = 1.0,
-        element_width: float = 0.2e-3,
-        attenuation_coef: float = 0.0,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -148,6 +149,26 @@ class Scan(Object):
                 defined. Defaults to 3.
             downsample (int, optional): Decimation factor applied after downconverting
                 data to baseband (RF to IQ). Defaults to 1.
+            pfield (np.ndarray, float, optional): The estimated pressure field of shape
+                (n_tx, Nz, Nx, 1) to perform automatic weighting. Defaults to None. In that
+                case pfield is computed with pfield_kwargs options when called.
+            pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
+                pressure field of shape (n_tx, Nz, Nx, 1) with to perform automatic weighting.
+                Defaults to None. In that case default arguments are used. If pfield
+                can be used by the beamformer with option
+                config.model.beamformer.auto_pressure_weighting. If set to True, the
+                pfield is used, if False, beamformer will compound all
+                transmit data coherently without pfield weighting.
+            apply_lens_correction (bool, optional): Whether to apply lens correction to the
+                delay computation. Defaults to False.
+            lens_thickness (float, optional): The thickness of the lens in meters.
+                Defaults to None.
+            lens_sound_speed (float, optional): The speed of sound in the lens in m/s.
+                Defaults to None.
+            selected_transmits (int, list[int], str, optional): Used to select a subset of the meters.
+                Defaults to 0.2e-3.
+            attenuation_coef (float, optional): The attenuation coefficient in
+                dB/cm/MHz. Defaults to 0.0.
             polar_angles (np.ndarray, optional): The polar angles of the
                 transmits in radians of shape (n_tx,). These are the angles usually used
                 in 2D imaging. Defaults to None.
@@ -174,26 +195,6 @@ class Scan(Object):
                 Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
-            pfield (np.ndarray, float, optional): The estimated pressure field of shape
-                (n_tx, Nz, Nx, 1) to perform automatic weighting. Defaults to None. In that
-                case pfield is computed with pfield_kwargs options when called.
-            pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
-                pressure field of shape (n_tx, Nz, Nx, 1) with to perform automatic weighting.
-                Defaults to None. In that case default arguments are used. If pfield
-                can be used by the beamformer with option
-                config.model.beamformer.auto_pressure_weighting. If set to True, the
-                pfield is used, if False, beamformer will compound all
-                transmit data coherently without pfield weighting.
-            apply_lens_correction (bool, optional): Whether to apply lens correction to the
-                delay computation. Defaults to False.
-            lens_thickness (float, optional): The thickness of the lens in meters.
-                Defaults to None.
-            lens_sound_speed (float, optional): The speed of sound in the lens in m/s.
-                Defaults to None.
-            element_width (float, optional): The width of the transducer_elements in meters.
-                Defaults to 0.2e-3.
-            attenuation_coef (float, optional): The attenuation coefficient in
-                dB/cm/MHz. Defaults to 0.0.
 
         Raises:
             NotImplementedError: Initializing from probe not yet implemented.
@@ -250,69 +251,41 @@ class Scan(Object):
         #: The speed of sound in the lens in m/s
         self.lens_sound_speed = lens_sound_speed
 
-        if initial_times is None:
-            log.warning("No initial times provided. Assuming all zeros.")
-            initial_times = np.zeros(self._n_tx)
+        # Initialize flags to track if arrays have been manually set
+        self._t0_delays_set = False
+        self._tx_apodizations_set = False
+        self._polar_angles_set = False
+        self._azimuth_angles_set = False
+        self._focus_distances_set = False
+        self._initial_times_set = False
 
-        if t0_delays is None:
-            log.warning(
-                "No t0_delays provided. Assuming all zeros and 128 element probe."
-            )
-            t0_delays = np.zeros((self._n_tx, self._n_el))
-        else:
-            assert t0_delays.shape == (self._n_tx, self._n_el), (
-                f"t0_delays must have shape (n_tx, n_el): {self._n_tx, self._n_el}. "
-                f"Got shape {t0_delays.shape}. Please set t0_delays either to None in which "
-                f"case all zeros are assumed, or set the n_tx and n_el params to match the "
-                "t0_delays shape."
-            )
+        # Store provided values (could be None)
+        self._t0_delays_value = t0_delays
+        self._tx_apodizations_value = tx_apodizations
+        self._polar_angles_value = polar_angles
+        self._azimuth_angles_value = azimuth_angles
+        self._focus_distances_value = focus_distances
+        self._initial_times_value = initial_times
 
-        if tx_apodizations is None:
-            log.warning(
-                "No tx_apodizations provided. Assuming all ones and "
-                "128 element probe."
-            )
-            tx_apodizations = np.ones((self._n_tx, self._n_el))
-        else:
-            assert tx_apodizations.shape == (self._n_tx, self._n_el), (
-                f"tx_apodizations must have shape (n_tx, n_el) = "
-                f"{self._n_tx, self._n_el}. "
-                f"Got shape {tx_apodizations.shape}."
-            )
+        # Process manually provided values if they're not None
+        if initial_times is not None:
+            self.initial_times = initial_times
 
-        if polar_angles is None:
-            log.warning("No polar_angles provided. Assuming all zeros.")
-            polar_angles = np.zeros(self._n_tx)
-        else:
-            assert len(polar_angles) == self._n_tx, (
-                f"polar_angles must have length n_tx = {self._n_tx}. "
-                f"Got length {len(polar_angles)}."
-            )
+        if t0_delays is not None:
+            self.t0_delays = t0_delays
 
-        if azimuth_angles is None:
-            log.warning("No azimuth_angles provided. Assuming all zeros.")
-            azimuth_angles = np.zeros(self._n_tx)
-        else:
-            assert len(azimuth_angles) == self._n_tx, (
-                f"azimuth_angles must have length n_tx = {self._n_tx}. "
-                f"Got length {len(azimuth_angles)}."
-            )
+        if tx_apodizations is not None:
+            self.tx_apodizations = tx_apodizations
 
-        if focus_distances is None:
-            log.warning("No focus_distances provided. Assuming all zeros.")
-            focus_distances = np.zeros(self._n_tx)
-        else:
-            assert len(focus_distances) == self._n_tx, (
-                f"focus_distances must have length n_tx = {self._n_tx}. "
-                f"Got length {len(focus_distances)}."
-            )
+        if polar_angles is not None:
+            self.polar_angles = polar_angles
 
-        self._t0_delays = t0_delays
-        self._tx_apodizations = tx_apodizations
-        self._polar_angles = polar_angles
-        self._azimuth_angles = azimuth_angles
-        self._focus_distances = focus_distances
-        self._initial_times = initial_times
+        if azimuth_angles is not None:
+            self.azimuth_angles = azimuth_angles
+
+        if focus_distances is not None:
+            self.focus_distances = focus_distances
+
         self._pfield = pfield
         self.element_width = element_width
         self.attenuation_coef = attenuation_coef
@@ -320,6 +293,194 @@ class Scan(Object):
         self.selected_transmits = selected_transmits
 
         self._static_attrs = STATIC
+
+    # Add property getters and setters for each array that needs lazy initialization
+    @property
+    def t0_delays(self):
+        """The transmit delays in seconds of shape (n_tx, n_el), shifted such that the
+        smallest delay is 0. For instance for a straight planewave transmit all delays
+        are zero."""
+        if not self._t0_delays_set:
+            if self._n_tx is None or self._n_el is None:
+                raise ValueError(
+                    "Cannot initialize t0_delays: n_tx or n_el is not set. "
+                    "Please set scan.n_tx and scan.n_el first."
+                )
+            log.warning(
+                "No t0_delays provided. Assuming all zeros and "
+                f"{self._n_el} element probe."
+            )
+            self._t0_delays_value = np.zeros((self._n_tx, self._n_el))
+            self._t0_delays_set = True
+        return self._t0_delays_value[self.selected_transmits]
+
+    @t0_delays.setter
+    def t0_delays(self, value):
+        if value is not None:
+            if self._n_tx is None or self._n_el is None:
+                # Store for later validation once n_tx and n_el are set
+                self._t0_delays_value = value
+            else:
+                assert value.shape == (self._n_tx, self._n_el), (
+                    f"t0_delays must have shape (n_tx, n_el): {self._n_tx, self._n_el}. "
+                    f"Got shape {value.shape}. Please set t0_delays either to None in which "
+                    f"case all zeros are assumed, or set the n_tx and n_el params to match the "
+                    "t0_delays shape."
+                )
+                self._t0_delays_value = value
+            self._t0_delays_set = True
+
+    @property
+    def tx_apodizations(self):
+        """The transmit apodizations of shape (n_tx, n_el) or a single float to use for
+        all apodizations. These values indicate both windowing (apodization) over the
+        aperture and the subaperture that is used during transmit."""
+        if not self._tx_apodizations_set:
+            if self._n_tx is None or self._n_el is None:
+                raise ValueError(
+                    "Cannot initialize tx_apodizations: n_tx or n_el is not set. "
+                    "Please set scan.n_tx and scan.n_el first."
+                )
+            log.warning(
+                "No tx_apodizations provided. Assuming all ones and "
+                f"{self._n_el} element probe."
+            )
+            self._tx_apodizations_value = np.ones((self._n_tx, self._n_el))
+            self._tx_apodizations_set = True
+        return self._tx_apodizations_value[self.selected_transmits]
+
+    @tx_apodizations.setter
+    def tx_apodizations(self, value):
+        if value is not None:
+            if self._n_tx is None or self._n_el is None:
+                # Store for later validation once n_tx and n_el are set
+                self._tx_apodizations_value = value
+            else:
+                assert value.shape == (self._n_tx, self._n_el), (
+                    f"tx_apodizations must have shape (n_tx, n_el) = "
+                    f"{self._n_tx, self._n_el}. "
+                    f"Got shape {value.shape}."
+                )
+                self._tx_apodizations_value = value
+            self._tx_apodizations_set = True
+
+    @property
+    def polar_angles(self):
+        """The polar angles of the transmits in radians of shape (n_tx,). These are the
+        angles usually used in 2D imaging."""
+        if not self._polar_angles_set:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize polar_angles: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No polar_angles provided. Assuming all zeros.")
+            self._polar_angles_value = np.zeros(self._n_tx)
+            self._polar_angles_set = True
+        return self._polar_angles_value[self.selected_transmits]
+
+    @polar_angles.setter
+    def polar_angles(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._polar_angles_value = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"polar_angles must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._polar_angles_value = value
+            self._polar_angles_set = True
+
+    @property
+    def azimuth_angles(self):
+        """The azimuth angles of the transmits in radians of shape (n_tx,). These are
+        the angles usually used in 3D imaging."""
+        if not self._azimuth_angles_set:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize azimuth_angles: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No azimuth_angles provided. Assuming all zeros.")
+            self._azimuth_angles_value = np.zeros(self._n_tx)
+            self._azimuth_angles_set = True
+        return self._azimuth_angles_value[self.selected_transmits]
+
+    @azimuth_angles.setter
+    def azimuth_angles(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._azimuth_angles_value = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"azimuth_angles must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._azimuth_angles_value = value
+            self._azimuth_angles_set = True
+
+    @property
+    def focus_distances(self):
+        """The focus distances of the transmits in meters of shape (n_tx,). These are
+        the distances of the virtual focus points from the origin. For a planewave
+        these should be set to Inf."""
+        if not self._focus_distances_set:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize focus_distances: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No focus_distances provided. Assuming all zeros.")
+            self._focus_distances_value = np.zeros(self._n_tx)
+            self._focus_distances_set = True
+        return self._focus_distances_value[self.selected_transmits]
+
+    @focus_distances.setter
+    def focus_distances(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._focus_distances_value = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"focus_distances must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._focus_distances_value = value
+            self._focus_distances_set = True
+
+    @property
+    def initial_times(self):
+        """The initial times of the transmits in seconds of shape (n_tx,). These are the
+        time intervals between the first element firing and the first sample in the
+        receive recording."""
+        if not self._initial_times_set:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize initial_times: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No initial times provided. Assuming all zeros.")
+            self._initial_times_value = np.zeros(self._n_tx)
+            self._initial_times_set = True
+        return self._initial_times_value[self.selected_transmits]
+
+    @initial_times.setter
+    def initial_times(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._initial_times_value = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"initial_times must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._initial_times_value = value
+            self._initial_times_set = True
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -478,46 +639,6 @@ class Scan(Object):
     @fdemod.setter
     def fdemod(self, value):
         self._fdemod = value
-
-    @property
-    def t0_delays(self):
-        """The transmit delays in seconds of shape (n_tx, n_el), shifted such that the
-        smallest delay is 0. For instance for a straight planewave transmit all delays
-        are zero."""
-        return self._t0_delays[self.selected_transmits]
-
-    @property
-    def tx_apodizations(self):
-        """The transmit apodizations of shape (n_tx, n_el) or a single float to use for
-        all apodizations. These values indicate both windowing (apodization) over the
-        aperture and the subaperture that is used during transmit."""
-        return self._tx_apodizations[self.selected_transmits]
-
-    @property
-    def polar_angles(self):
-        """The polar angles of the transmits in radians of shape (n_tx,). These are the
-        angles usually used in 2D imaging."""
-        return self._polar_angles[self.selected_transmits]
-
-    @property
-    def azimuth_angles(self):
-        """The azimuth angles of the transmits in radians of shape (n_tx,). These are
-        the angles usually used in 3D imaging."""
-        return self._azimuth_angles[self.selected_transmits]
-
-    @property
-    def focus_distances(self):
-        """The focus distances of the transmits in meters of shape (n_tx,). These are
-        the distances of the virtual focus points from the origin. For a planewave
-        these should be set to Inf."""
-        return self._focus_distances[self.selected_transmits]
-
-    @property
-    def initial_times(self):
-        """The initial times of the transmits in seconds of shape (n_tx,). These are the
-        time intervals between the first element firing and the first sample in the
-        receive recording."""
-        return self._initial_times[self.selected_transmits]
 
     @property
     def Nx(self):
