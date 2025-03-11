@@ -226,6 +226,7 @@ class Pipeline:
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
         jit_kwargs: dict | None = None,
+        name="pipeline",
     ):
         """Initialize a pipeline
 
@@ -245,6 +246,7 @@ class Pipeline:
             Defaults to "ops".
         """
         self._call_pipeline = self.call
+        self.name = name
 
         # add functionality here
         # operations = ...
@@ -497,8 +499,13 @@ class Pipeline:
 
     def __repr__(self):
         """String representation of the pipeline."""
-        operations = [operation.__class__.__name__ for operation in self.operations]
-        return ",".join(operations)
+        operations = []
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                operations.append(repr(operation))
+            else:
+                operations.append(operation.__class__.__name__)
+        return f"<Pipeline {self.name}=({', '.join(operations)})>"
 
     @classmethod
     def load(cls, file_path: str, **kwargs) -> "Pipeline":
@@ -517,6 +524,16 @@ class Pipeline:
         """Create a pipeline from a dictionary or `usbmd.Config` object."""
         return pipeline_from_config(Config(config), **kwargs)
 
+    @property
+    def key(self) -> str:
+        """Input key of the pipeline."""
+        return self.operations[0].key
+
+    @property
+    def output_key(self) -> str:
+        """Output key of the pipeline."""
+        return self.operations[-1].output_key
+
 
 def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
@@ -530,8 +547,6 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
 
     Returns:
         list: List of operations to be performed.
-
-    TODO: add support for nested operations such that parallel pipelines can be defined.
 
     """
     chain = []
@@ -551,6 +566,13 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
             )
             if operation.get("params") is None:
                 operation["params"] = {}
+
+            # this allows for nested operations
+            if operation["params"].get("operations") is not None:
+                operation["params"]["operations"] = make_operation_chain(
+                    operation["params"]["operations"]
+                )
+
             operation = get_ops(operation["name"])(**operation["params"])
         chain.append(operation)
 
@@ -895,7 +917,7 @@ class PatchedGrid(Pipeline):
     """
 
     def __init__(self, *args, num_patches=10, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, name="patched_grid", **kwargs)
         self.num_patches = num_patches
 
         for operation in self.operations:
@@ -954,14 +976,18 @@ class PatchedGrid(Pipeline):
             return out[self.output_data_type.value]
 
         out = patched_map(
-            patched_call, flatgrid, self.num_patches, flat_pfield=flat_pfield
+            patched_call,
+            flatgrid,
+            self.num_patches,
+            flat_pfield=flat_pfield,
+            jit=bool(self.jit_options),
         )
         return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
 
     def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
-        input_data = inputs.pop(self.input_data_type.value)
         if self.pipeline_batched:
+            input_data = inputs.pop(self.input_data_type.value)
             output = ops.map(
                 lambda x: self.call_item({self.input_data_type.value: x, **inputs}),
                 input_data,
@@ -1158,15 +1184,15 @@ class Normalize(Operation):
 
     def __init__(
         self,
-        key: str = "image",
-        output_key: str = "image",
+        key: str = "envelope_data",
+        output_key: str = "envelope_data",
         **kwargs,
     ):
         """Initialize the Normalize operation.
 
         Args:
-            key (str, optional): Key for input data. Defaults to "image".
-            output_key (str, optional): Key for output data. Defaults to "image".
+            key (str, optional): Key for input data. Defaults to "envelope_data".
+            output_key (str, optional): Key for output data. Defaults to "envelope_data".
         """
         super().__init__(
             input_data_type=None,
