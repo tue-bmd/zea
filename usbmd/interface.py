@@ -5,9 +5,6 @@ the results in a GUI.
 - **Date**          : November 18th, 2021
 """
 
-import os
-
-os.environ["KERAS_BACKEND"] = "tensorflow"
 import asyncio
 import time
 from pathlib import Path
@@ -98,7 +95,8 @@ class Interface:
         ), "Pipeline not found in config, please specify pipeline in config."
 
         self.process = Pipeline.from_config(
-            self.config, with_batch_dim=False, jit_options=None
+            self.config,
+            with_batch_dim=False,
         )
 
         # initialize attributes for UI class
@@ -265,12 +263,7 @@ class Interface:
             )
             self.to_dtype = "image_sc"
 
-        first_op = self.process.operations[0]
-        input_key = "data"
-        if hasattr(first_op, "key"):
-            input_key = first_op.key
-
-        inputs = {input_key: self.data}
+        inputs = {self.process.key: self.data}
 
         args = []
 
@@ -280,12 +273,7 @@ class Interface:
 
         outputs = self.process(*args, **inputs)
 
-        last_op = self.process.operations[-1]
-        output_key = input_key
-        if hasattr(last_op, "key"):
-            output_key = last_op.key
-
-        self.image = outputs[output_key]
+        self.image = outputs[self.process.output_key]
 
         # match orientation if necessary
         if self.config.plot.fliplr:
@@ -325,7 +313,7 @@ class Interface:
         """Plot image using matplotlib or opencv.
 
         Args:
-            save (bool): whether to save the image to disk.
+        save (bool): whether to save the image to disk.
             block (bool): whether to block the UI while plotting.
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
