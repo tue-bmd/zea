@@ -263,7 +263,9 @@ class Interface:
             )
             self.to_dtype = "image_sc"
 
-        inputs = {self.process.key: self.data}
+        input_key = self.process.key if self.process.key is not None else "data"
+
+        inputs = {input_key: self.data}
 
         args = []
 
@@ -273,7 +275,10 @@ class Interface:
 
         outputs = self.process(*args, **inputs)
 
-        self.image = outputs[self.process.output_key]
+        output_key = (
+            self.process.output_key if self.process.output_key is not None else "data"
+        )
+        self.image = outputs[output_key]
 
         # match orientation if necessary
         if self.config.plot.fliplr:
