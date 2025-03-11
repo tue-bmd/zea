@@ -96,6 +96,7 @@ class Interface:
         self.process = Pipeline.from_config(
             self.config,
             with_batch_dim=False,
+            jit_options=None,
         )
 
         # initialize attributes for UI class
