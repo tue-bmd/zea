@@ -64,6 +64,7 @@ class Operation(keras.Operation):
         jit_compile: bool = True,
         with_batch_dim: bool = True,
         jit_kwargs: dict | None = None,
+        jittable: bool = True,
     ):
         """
         Args:
@@ -71,6 +72,8 @@ class Operation(keras.Operation):
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
             with_batch_dim: Whether operations should expect a batch dimension in the input
+            jit_kwargs: Additional keyword arguments for the JIT compiler
+            jittable: Whether the operation can be JIT compiled
         """
         super().__init__()
 
@@ -105,17 +108,19 @@ class Operation(keras.Operation):
                 jit_kwargs = {}
         self.jit_kwargs = jit_kwargs
 
+        self.with_batch_dim = with_batch_dim
+        self._jittable = jittable
+
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
-
-        self.with_batch_dim = with_batch_dim
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile
-        self._call = (
-            jit(self.call, **self.jit_kwargs) if self._jit_compile else self.call
-        )
+        if self._jit_compile and self.jittable:
+            self._call = jit(self.call, **self.jit_kwargs)
+        else:
+            self._call = self.call
 
     def _trace_signatures(self):
         """
@@ -123,6 +128,11 @@ class Operation(keras.Operation):
         """
         self._input_signature = inspect.signature(self.call)
         self._valid_keys = set(self._input_signature.parameters.keys())
+
+    @property
+    def jittable(self):
+        """Check if the operation can be JIT compiled."""
+        return self._jittable
 
     def call(self, *args, **kwargs):
         """
@@ -365,6 +375,10 @@ class Pipeline:
         """Set the jit_options property of the pipeline."""
         self._jit_options = value
         if value == "pipeline":
+            assert self.jittable, log.error(
+                "jit_options 'pipeline' cannot be used as the entire pipeline is not jittable. "
+                "Try setting jit_options to 'ops' or None."
+            )
             self.jit()
             return
         else:
@@ -374,7 +388,8 @@ class Pipeline:
             if isinstance(operation, Pipeline):
                 operation.jit_options = value
             else:
-                operation.set_jit(value == "ops")
+                if operation.jittable:
+                    operation.set_jit(value == "ops")
 
     def jit(self):
         """JIT compile the pipeline."""
@@ -383,6 +398,11 @@ class Pipeline:
     def unjit(self):
         """Un-JIT compile the pipeline."""
         self._call_pipeline = self.call
+
+    @property
+    def jittable(self):
+        """Check if all operations in the pipeline are jittable."""
+        return all(operation.jittable for operation in self.operations)
 
     @property
     def with_batch_dim(self):
@@ -1264,6 +1284,7 @@ class ScanConvert(Operation):
             output_data_type=DataTypes.IMAGE_SC,
             key=key,
             output_key=output_key,
+            jittable=False,  # currently not jittable due to variable size
             **kwargs,
         )
         self.order = order

@@ -238,11 +238,21 @@ class Scan(Object):
         self._set_param("azimuth_angles", azimuth_angles)
         self._set_param("focus_distances", focus_distances)
         self._set_param("initial_times", initial_times)
+        self._set_param("pfield", pfield)
+
+        if pfield is None:
+            self._set_params["flat_pfield"] = False
+
+        self._set_param("grid", None)
+        self._set_params["flatgrid"] = False
+
+        if not (self._set_params["sound_speed"] and self._set_params["fc"]):
+            self._set_params["wvln"] = False
+
+        if not (self._set_params["zlims"] and self._set_params["n_ax"]):
+            self._set_params["z_axis"] = False
 
         # Additional properties that don't need lazy initialization
-        self._grid = None  # will be initialized lazily
-        self._pfield = pfield
-
         self._set_param("pixels_per_wavelength", float(pixels_per_wvln), dunder=False)
         self._set_param("downsample", downsample, dunder=False)
         self._set_param("probe_geometry", probe_geometry, dunder=False)
@@ -275,7 +285,9 @@ class Scan(Object):
         else:
             setattr(self, name, value)
 
-        if value is not None:
+        if value is None:
+            self._set_params[name] = False
+        else:
             self._set_params[name] = True
 
     # Add property getters and setters for each array that needs lazy initialization
@@ -284,7 +296,7 @@ class Scan(Object):
         """The transmit delays in seconds of shape (n_tx, n_el), shifted such that the
         smallest delay is 0. For instance for a straight planewave transmit all delays
         are zero."""
-        if "t0_delays" not in self._set_params:
+        if self._set_params["t0_delays"] is False:
             if self._n_tx is None or self._n_el is None:
                 raise ValueError(
                     "Cannot initialize t0_delays: n_tx or n_el is not set. "
@@ -319,7 +331,7 @@ class Scan(Object):
         """The transmit apodizations of shape (n_tx, n_el) or a single float to use for
         all apodizations. These values indicate both windowing (apodization) over the
         aperture and the subaperture that is used during transmit."""
-        if "tx_apodizations" not in self._set_params:
+        if self._set_params["tx_apodizations"] is False:
             if self._n_tx is None or self._n_el is None:
                 raise ValueError(
                     "Cannot initialize tx_apodizations: n_tx or n_el is not set. "
@@ -352,7 +364,7 @@ class Scan(Object):
     def polar_angles(self):
         """The polar angles of the transmits in radians of shape (n_tx,). These are the
         angles usually used in 2D imaging."""
-        if "polar_angles" not in self._set_params:
+        if self._set_params["polar_angles"] is False:
             if self._n_tx is None:
                 raise ValueError(
                     "Cannot initialize polar_angles: n_tx is not set. "
@@ -381,7 +393,7 @@ class Scan(Object):
     def azimuth_angles(self):
         """The azimuth angles of the transmits in radians of shape (n_tx,). These are
         the angles usually used in 3D imaging."""
-        if "azimuth_angles" not in self._set_params:
+        if self._set_params["azimuth_angles"] is False:
             if self._n_tx is None:
                 raise ValueError(
                     "Cannot initialize azimuth_angles: n_tx is not set. "
@@ -411,7 +423,7 @@ class Scan(Object):
         """The focus distances of the transmits in meters of shape (n_tx,). These are
         the distances of the virtual focus points from the origin. For a planewave
         these should be set to Inf."""
-        if "focus_distances" not in self._set_params:
+        if self._set_params["focus_distances"] is False:
             if self._n_tx is None:
                 raise ValueError(
                     "Cannot initialize focus_distances: n_tx is not set. "
@@ -441,7 +453,7 @@ class Scan(Object):
         """The initial times of the transmits in seconds of shape (n_tx,). These are the
         time intervals between the first element firing and the first sample in the
         receive recording."""
-        if "initial_times" not in self._set_params:
+        if self._set_params["initial_times"] is False:
             if self._n_tx is None:
                 raise ValueError(
                     "Cannot initialize initial_times: n_tx is not set. "
@@ -678,6 +690,8 @@ class Scan(Object):
         """The number of pixels in the lateral direction in the
         beamforming grid.
         """
+        if self._Nx is None:
+            raise ValueError("Please set scan.Nx.")
         return int(self._Nx)
 
     @Nx.setter
@@ -690,6 +704,8 @@ class Scan(Object):
         """The number of pixels in the axial direction in the
         beamforming grid.
         """
+        if self._Nz is None:
+            raise ValueError("Please set scan.Nz.")
         return int(self._Nz)
 
     @Nz.setter
