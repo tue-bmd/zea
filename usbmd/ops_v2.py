@@ -56,6 +56,8 @@ class Operation(keras.Operation):
         self,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
+        key: Union[str, None] = None,
+        output_key: Union[str, None] = None,
         cache_inputs: Union[bool, List[str]] = False,
         cache_outputs: bool = False,
         jit_compile: bool = True,
@@ -73,6 +75,11 @@ class Operation(keras.Operation):
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
+
+        self.key = key  # Key for input data
+        self.output_key = output_key  # Key for output data
+        if self.output_key is None:
+            self.output_key = self.key
 
         self.inputs = []  # Source(s) of input data (name of a previous operation)
         self.allow_multiple_inputs = False  # Only single input allowed by default
@@ -1151,10 +1158,10 @@ class LogCompress(Operation):
         super().__init__(
             input_data_type=DataTypes.ENVELOPE_DATA,
             output_data_type=DataTypes.IMAGE,
+            key=key,
+            output_key=output_key,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
 
     def call(self, dynamic_range=None, **kwargs):
         """Apply logarithmic compression to data.
@@ -1197,10 +1204,10 @@ class Normalize(Operation):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
+            key=key,
+            output_key=output_key,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
 
     def call(self, output_range=None, input_range=None, **kwargs):
         """Normalize data to a given range.
