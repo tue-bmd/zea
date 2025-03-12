@@ -13,6 +13,7 @@ import scipy
 from keras import ops
 from PIL import Image
 from skimage.transform import resize
+
 from usbmd.utils import find_first_nonzero_index, translate
 
 

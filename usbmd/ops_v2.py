@@ -1,5 +1,6 @@
 """Experimental version of the USBMD ops module"""
 
+import copy
 import hashlib
 import inspect
 import json
@@ -7,12 +8,14 @@ from typing import Any, Dict, List, Union
 
 import keras
 import numpy as np
+import yaml
 from keras import ops
 
-import usbmd
 from usbmd.backend import jit
+from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
+from usbmd.display import scan_convert_2d, scan_convert_3d
 from usbmd.ops import channels_to_complex, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
@@ -54,11 +57,14 @@ class Operation(keras.Operation):
         self,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
+        key: Union[str, None] = None,
+        output_key: Union[str, None] = None,
         cache_inputs: Union[bool, List[str]] = False,
         cache_outputs: bool = False,
         jit_compile: bool = True,
         with_batch_dim: bool = True,
         jit_kwargs: dict | None = None,
+        jittable: bool = True,
     ):
         """
         Args:
@@ -66,11 +72,18 @@ class Operation(keras.Operation):
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
             with_batch_dim: Whether operations should expect a batch dimension in the input
+            jit_kwargs: Additional keyword arguments for the JIT compiler
+            jittable: Whether the operation can be JIT compiled
         """
         super().__init__()
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
+
+        self.key = key  # Key for input data
+        self.output_key = output_key  # Key for output data
+        if self.output_key is None:
+            self.output_key = self.key
 
         self.inputs = []  # Source(s) of input data (name of a previous operation)
         self.allow_multiple_inputs = False  # Only single input allowed by default
@@ -95,17 +108,19 @@ class Operation(keras.Operation):
                 jit_kwargs = {}
         self.jit_kwargs = jit_kwargs
 
+        self.with_batch_dim = with_batch_dim
+        self._jittable = jittable
+
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
-
-        self.with_batch_dim = with_batch_dim
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile
-        self._call = (
-            jit(self.call, **self.jit_kwargs) if self._jit_compile else self.call
-        )
+        if self._jit_compile and self.jittable:
+            self._call = jit(self.call, **self.jit_kwargs)
+        else:
+            self._call = self.call
 
     def _trace_signatures(self):
         """
@@ -113,6 +128,11 @@ class Operation(keras.Operation):
         """
         self._input_signature = inspect.signature(self.call)
         self._valid_keys = set(self._input_signature.parameters.keys())
+
+    @property
+    def jittable(self):
+        """Check if the operation can be JIT compiled."""
+        return self._jittable
 
     def call(self, *args, **kwargs):
         """
@@ -224,6 +244,7 @@ class Pipeline:
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
         jit_kwargs: dict | None = None,
+        name="pipeline",
     ):
         """Initialize a pipeline
 
@@ -243,6 +264,7 @@ class Pipeline:
             Defaults to "ops".
         """
         self._call_pipeline = self.call
+        self.name = name
 
         # add functionality here
         # operations = ...
@@ -356,6 +378,10 @@ class Pipeline:
         """Set the jit_options property of the pipeline."""
         self._jit_options = value
         if value == "pipeline":
+            assert self.jittable, log.error(
+                "jit_options 'pipeline' cannot be used as the entire pipeline is not jittable. "
+                "Try setting jit_options to 'ops' or None."
+            )
             self.jit()
             return
         else:
@@ -365,7 +391,8 @@ class Pipeline:
             if isinstance(operation, Pipeline):
                 operation.jit_options = value
             else:
-                operation.set_jit(value == "ops")
+                if operation.jittable:
+                    operation.set_jit(value == "ops")
 
     def jit(self):
         """JIT compile the pipeline."""
@@ -374,6 +401,11 @@ class Pipeline:
     def unjit(self):
         """Un-JIT compile the pipeline."""
         self._call_pipeline = self.call
+
+    @property
+    def jittable(self):
+        """Check if all operations in the pipeline are jittable."""
+        return all(operation.jittable for operation in self.operations)
 
     @property
     def with_batch_dim(self):
@@ -406,8 +438,10 @@ class Pipeline:
                 continue
             if operations[i].output_data_type != operations[i + 1].input_data_type:
                 raise ValueError(
-                    f"Operation {operations[i].name} output data type is not compatible "
-                    f"with the input data type of operation {operations[i + 1].name}"
+                    f"Operation {operations[i].__class__.__name__} output data type "
+                    f"({operations[i].output_data_type}) is not compatible "
+                    f"with the input data type ({operations[i + 1].input_data_type}) "
+                    f"of operation {operations[i + 1].__class__.__name__}"
                 )
 
     def set_params(self, **params):
@@ -496,8 +530,52 @@ class Pipeline:
 
     def __repr__(self):
         """String representation of the pipeline."""
-        operations = [operation.__class__.__name__ for operation in self.operations]
-        return ",".join(operations)
+        operations = []
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                operations.append(repr(operation))
+            else:
+                operations.append(operation.__class__.__name__)
+        return f"<Pipeline {self.name}=({', '.join(operations)})>"
+
+    @classmethod
+    def load(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Load a pipeline from a JSON or YAML file."""
+        if file_path.endswith(".json"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                json_str = f.read()
+            return pipeline_from_json(json_str, **kwargs)
+        elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
+            return pipeline_from_yaml(file_path, **kwargs)
+        else:
+            raise ValueError("File must have extension .json, .yaml, or .yml")
+
+    @classmethod
+    def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
+        """Create a pipeline from a dictionary or `usbmd.Config` object.
+
+        Must have an 'operations' key with a list of operations.
+
+        Example:
+        ```python
+        config = Config({
+            "operations": [
+                "identity",
+            ],
+        })
+        pipeline = Pipeline.from_config(config)
+        """
+        return pipeline_from_config(Config(config), **kwargs)
+
+    @property
+    def key(self) -> str:
+        """Input key of the pipeline."""
+        return self.operations[0].key
+
+    @property
+    def output_key(self) -> str:
+        """Output key of the pipeline."""
+        return self.operations[-1].output_key
 
 
 def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
@@ -512,8 +590,6 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
 
     Returns:
         list: List of operations to be performed.
-
-    TODO: add support for nested operations such that parallel pipelines can be defined.
 
     """
     chain = []
@@ -533,6 +609,13 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
             )
             if operation.get("params") is None:
                 operation["params"] = {}
+
+            # this allows for nested operations
+            if operation["params"].get("operations") is not None:
+                operation["params"]["operations"] = make_operation_chain(
+                    operation["params"]["operations"]
+                )
+
             operation = get_ops(operation["name"])(**operation["params"])
         chain.append(operation)
 
@@ -540,22 +623,41 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
 
 
 def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
-    """Create a pipeline from a json string."""
-    pipeline_config = json.loads(json_string)
-    operations = make_operation_chain(pipeline_config["operations"])
-    return Pipeline(operations=operations, **kwargs)
+    """
+    Create a Pipeline instance from a JSON string.
+    """
+    pipeline_config = Config(json.loads(json_string))
+    return pipeline_from_config(pipeline_config, **kwargs)
 
 
 def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
-    """Create a pipeline from a yaml file."""
-    config = Config.load_from_yaml(yaml_path)
-    operations = make_operation_chain(config.operations)
-    return Pipeline(operations=operations, **kwargs)
+    """
+    Create a Pipeline instance from a YAML file.
+    """
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        pipeline_config = yaml.safe_load(f)
+    operations = pipeline_config["operations"]
+    return pipeline_from_config(Config({"operations": operations}), **kwargs)
 
 
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
-    """Create a pipeline from a Config / dict kobject."""
+    """
+    Create a Pipeline instance from a Config object.
+    """
+    assert (
+        "operations" in config
+    ), "Config object must have an 'operations' key for pipeline creation."
+    assert isinstance(
+        config.operations, list
+    ), "Config object must have a list of operations for pipeline creation."
+
     operations = make_operation_chain(config.operations)
+
+    # merge pipeline config without operations with kwargs
+    pipeline_config = copy.deepcopy(config)
+    pipeline_config.pop("operations")
+
+    kwargs = {**pipeline_config, **kwargs}
     return Pipeline(operations=operations, **kwargs)
 
 
@@ -785,22 +887,22 @@ class TOFCorrection(Operation):
             "sampling_frequency": sampling_frequency,
             "fnum": f_number,
             "fdemod": fdemod,
-            "apply_phase_rotation": ops.cast(fdemod, bool),
+            "apply_phase_rotation": fdemod,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
             "probe_geometry": probe_geometry,
             # Not sure why we need this cast here, the pipeline should convert it to Tensor already
-            "apply_lens_correction": ops.cast(apply_lens_correction, bool),
+            "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
         }
 
         if not self.with_batch_dim:
-            tof_corrected = usbmd.beamformer.tof_correction_flatgrid(raw_data, **kwargs)
+            tof_corrected = tof_correction_flatgrid(raw_data, **kwargs)
         else:
             tof_corrected = ops.map(
-                lambda data: usbmd.beamformer.tof_correction_flatgrid(data, **kwargs),
+                lambda data: tof_correction_flatgrid(data, **kwargs),
                 raw_data,
             )
 
@@ -866,7 +968,7 @@ class PatchedGrid(Pipeline):
     """
 
     def __init__(self, *args, num_patches=10, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, name="patched_grid", **kwargs)
         self.num_patches = num_patches
 
         for operation in self.operations:
@@ -925,7 +1027,11 @@ class PatchedGrid(Pipeline):
             return out[self.output_data_type.value]
 
         out = patched_map(
-            patched_call, flatgrid, self.num_patches, flat_pfield=flat_pfield
+            patched_call,
+            flatgrid,
+            self.num_patches,
+            flat_pfield=flat_pfield,
+            jit=bool(self.jit_options),
         )
         return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
 
@@ -1096,10 +1202,10 @@ class LogCompress(Operation):
         super().__init__(
             input_data_type=DataTypes.ENVELOPE_DATA,
             output_data_type=DataTypes.IMAGE,
+            key=key,
+            output_key=output_key,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
 
     def call(self, dynamic_range=None, **kwargs):
         """Apply logarithmic compression to data.
@@ -1129,23 +1235,23 @@ class Normalize(Operation):
 
     def __init__(
         self,
-        key: str = "image",
-        output_key: str = "image",
+        key: str = "envelope_data",
+        output_key: str = "envelope_data",
         **kwargs,
     ):
         """Initialize the Normalize operation.
 
         Args:
-            key (str, optional): Key for input data. Defaults to "image".
-            output_key (str, optional): Key for output data. Defaults to "image".
+            key (str, optional): Key for input data. Defaults to "envelope_data".
+            output_key (str, optional): Key for output data. Defaults to "envelope_data".
         """
         super().__init__(
-            input_data_type=DataTypes.IMAGE,
-            output_data_type=DataTypes.IMAGE,
+            input_data_type=None,
+            output_data_type=None,
+            key=key,
+            output_key=output_key,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
 
     def call(self, output_range=None, input_range=None, **kwargs):
         """Normalize data to a given range.
@@ -1175,3 +1281,81 @@ class Normalize(Operation):
         normalized_data = translate(data, input_range, output_range)
 
         return {self.output_key: normalized_data}
+
+
+@ops_registry("scan_convert")
+class ScanConvert(Operation):
+    """Scan convert images to cartesian coordinates."""
+
+    def __init__(
+        self,
+        key: str = "image",
+        output_key: str = "image_sc",
+        order=1,
+        **kwargs,
+    ):
+        """Initialize the ScanConvert operation.
+
+        Args:
+            key (str, optional): Key for input data. Defaults to "image".
+            output_key (str, optional): Key for output data. Defaults to "image_sc".
+            order (int, optional): Interpolation order. Defaults to 1. Currently only
+                GPU support for order=1.
+        """
+        super().__init__(
+            input_data_type=DataTypes.IMAGE,
+            output_data_type=DataTypes.IMAGE_SC,
+            key=key,
+            output_key=output_key,
+            jittable=False,  # currently not jittable due to variable size
+            **kwargs,
+        )
+        self.order = order
+
+    def call(
+        self,
+        rho_range=None,
+        theta_range=None,
+        phi_range=None,
+        resolution=None,
+        fill_value=None,
+        **kwargs,
+    ):
+        """Scan convert images to cartesian coordinates.
+
+        Args:
+            rho_range (Tuple): Range of the rho axis in the polar coordinate system.
+                Defined in meters.
+            theta_range (Tuple): Range of the theta axis in the polar coordinate system.
+                Defined in radians.
+            phi_range (Tuple): Range of the phi axis in the polar coordinate system.
+                Defined in radians.
+            resolution (float): Resolution of the output image in meters per pixel.
+                if None, the resolution is computed based on the input data.
+            fill_value (float): Value to fill the image with outside the defined region.
+
+        """
+
+        data = kwargs[self.key]
+
+        if phi_range is not None:
+            data_out = scan_convert_3d(
+                data,
+                rho_range,
+                theta_range,
+                phi_range,
+                resolution,
+                fill_value,
+                order=self.order,
+            )
+        else:
+            data_out = scan_convert_2d(
+                data,
+                rho_range,
+                theta_range,
+                resolution,
+                fill_value,
+                order=self.order,
+            )
+
+        return {self.output_key: data_out}
