@@ -5,6 +5,8 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 
+# pylint: disable=no-member
+
 from typing import Union
 
 import matplotlib.pyplot as plt
@@ -175,8 +177,8 @@ class Scan(Object):
                 Defaults to None.
             rho_range (tuple, optional): The range of rho values in meters.
                 Defaults to None.
-            selected_transmits (int, list[int], str, optional): Used to select a subset of the meters.
-                Defaults to 0.2e-3.
+            selected_transmits (int, list[int], str, optional): Used to select a subset
+                of the transmits. Defaults to 0.2e-3.
             attenuation_coef (float, optional): The attenuation coefficient in
                 dB/cm/MHz. Defaults to 0.0.
             polar_angles (np.ndarray, optional): The polar angles of the
@@ -206,8 +208,6 @@ class Scan(Object):
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
 
-        Raises:
-            NotImplementedError: Initializing from probe not yet implemented.
         """
         super().__init__()
 

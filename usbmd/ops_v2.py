@@ -549,7 +549,19 @@ class Pipeline:
 
     @classmethod
     def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
-        """Create a pipeline from a dictionary or `usbmd.Config` object."""
+        """Create a pipeline from a dictionary or `usbmd.Config` object.
+
+        Must have an 'operations' key with a list of operations.
+
+        Example:
+        ```python
+        config = Config({
+            "operations": [
+                "identity",
+            ],
+        })
+        pipeline = Pipeline.from_config(config)
+        """
         return pipeline_from_config(Config(config), **kwargs)
 
     @property
@@ -611,8 +623,8 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
     """
-    pipeline_config = json.loads(json_string)["operations"]
-    return Pipeline(operations=pipeline_config, **kwargs)
+    pipeline_config = Config(json.loads(json_string))
+    return pipeline_from_config(pipeline_config, **kwargs)
 
 
 def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
@@ -621,21 +633,25 @@ def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
     """
     with open(yaml_path, "r", encoding="utf-8") as f:
         pipeline_config = yaml.safe_load(f)
-    pipeline_config = pipeline_config["operations"]
-    return Pipeline(operations=pipeline_config, **kwargs)
+    operations = pipeline_config["operations"]
+    return pipeline_from_config(Config({"operations": operations}), **kwargs)
 
 
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a Config object.
     """
-    operations = make_operation_chain(config.pipeline.operations)
+    assert (
+        "operations" in config
+    ), "Config object must have an 'operations' key for pipeline creation."
+    assert isinstance(
+        config.operations, list
+    ), "Config object must have a list of operations for pipeline creation."
+
+    operations = make_operation_chain(config.operations)
 
     # merge pipeline config without operations with kwargs
-    assert (
-        "pipeline" in config
-    ), "Config object must have a 'pipeline' key for pipeline creation."
-    pipeline_config = copy.deepcopy(config.pipeline)
+    pipeline_config = copy.deepcopy(config)
     pipeline_config.pop("operations")
 
     kwargs = {**pipeline_config, **kwargs}

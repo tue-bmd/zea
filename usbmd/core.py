@@ -115,7 +115,7 @@ def object_to_tensor(obj: Object):
         # Skip methods
         try:
             value = getattr(obj, key)
-        except ValueError as e:
+        except ValueError:
             continue
 
         if callable(value):
