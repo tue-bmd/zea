@@ -5,6 +5,8 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 
+# pylint: disable=no-member
+
 from typing import Union
 
 import matplotlib.pyplot as plt
@@ -75,38 +77,44 @@ class Scan(Object):
 
     def __init__(
         self,
-        n_tx: int,
-        n_ax: int,
-        n_el: int,
-        center_frequency: float,
-        sampling_frequency: float,
-        demodulation_frequency: float = None,
-        xlims=None,
-        ylims=None,
-        zlims=None,
+        n_tx: Union[int, None] = None,
+        n_ax: Union[int, None] = None,
+        n_el: Union[int, None] = None,
+        n_ch: Union[int, None] = None,
+        center_frequency: Union[float, None] = None,
+        sampling_frequency: Union[float, None] = None,
+        demodulation_frequency: Union[float, None] = None,
+        xlims: Union[tuple[float, float], None] = None,
+        ylims: Union[tuple[float, float], None] = None,
+        zlims: Union[tuple[float, float], None] = None,
         bandwidth_percent: int = 200,
         sound_speed: float = 1540,
-        n_ch: int = None,
-        Nx: int = None,
-        Nz: int = None,
+        Nx: Union[int, None] = None,
+        Nz: Union[int, None] = None,
         pixels_per_wvln: int = 4,
         downsample: int = 1,
+        pfield: Union[np.ndarray, None] = None,
+        pfield_kwargs: Union[dict, None] = None,
+        apply_lens_correction: bool = False,
+        lens_thickness: Union[float, None] = None,
+        lens_sound_speed: Union[float, None] = None,
+        f_number: float = 1.0,
+        element_width: float = 0.2e-3,
+        attenuation_coef: float = 0.0,
+        theta_range: Union[tuple[float, float], None] = None,
+        phi_range: Union[tuple[float, float], None] = None,
+        rho_range: Union[tuple[float, float], None] = None,
+        fill_value: float = 0.0,
+        # arrays that can be set manually or lazily initialized
         polar_angles: Union[np.ndarray, None] = None,
         azimuth_angles: Union[np.ndarray, None] = None,
         t0_delays: Union[np.ndarray, None] = None,
         tx_apodizations: Union[np.ndarray, None] = None,
         focus_distances: Union[np.ndarray, None] = None,
         initial_times: Union[np.ndarray, None] = None,
-        selected_transmits: Union[int, list] = None,
+        selected_transmits: Union[int, list[int], str, None] = None,
         probe_geometry: Union[np.ndarray, None] = None,
         time_to_next_transmit: Union[np.ndarray, None] = None,
-        pfield_kwargs: Union[dict, None] = None,
-        apply_lens_correction: bool = False,
-        lens_thickness: float = None,
-        lens_sound_speed: float = None,
-        f_number: float = 1.0,
-        element_width: float = 0.2e-3,
-        attenuation_coef: float = 0.0,
     ):
         """Initializes a Scan object representing the number and type of
         transmits, and the target pixels to beamform to.
@@ -120,6 +128,8 @@ class Scan(Object):
             n_ax (int, optional): The number of samples per in a receive
                 recording per channel. Defaults to None.
             n_el (int, optional): The number of elements in the array.
+            n_ch (int): The number of channels. This will determine the modulation type.
+                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
             center_frequency (float): The modulation carrier frequency.
             sampling_frequency (float): The sampling rate to sample rf- or
                 iq-signals with.
@@ -136,8 +146,6 @@ class Scan(Object):
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
-            n_ch (int): The number of channels. This will determine the modulation type.
-                Can be either RF (when `n_ch = 1`) or IQ (when `n_ch=2`).
             Nx (int, optional): The number of pixels in the lateral direction
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
@@ -147,6 +155,32 @@ class Scan(Object):
                 defined. Defaults to 3.
             downsample (int, optional): Decimation factor applied after downconverting
                 data to baseband (RF to IQ). Defaults to 1.
+            pfield (np.ndarray, float, optional): The estimated pressure field of shape
+                (n_tx, Nz, Nx, 1) to perform automatic weighting. Defaults to None. In that
+                case pfield is computed with pfield_kwargs options when called.
+            pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
+                pressure field of shape (n_tx, Nz, Nx, 1) with to perform automatic weighting.
+                Defaults to None. In that case default arguments are used. If pfield
+                can be used by the beamformer with option
+                config.model.beamformer.auto_pressure_weighting. If set to True, the
+                pfield is used, if False, beamformer will compound all
+                transmit data coherently without pfield weighting.
+            apply_lens_correction (bool, optional): Whether to apply lens correction to the
+                delay computation. Defaults to False.
+            lens_thickness (float, optional): The thickness of the lens in meters.
+                Defaults to None.
+            lens_sound_speed (float, optional): The speed of sound in the lens in m/s.
+                Defaults to None.
+            theta_range (tuple, optional): The range of theta values in radians.
+                Defaults to None.
+            phi_range (tuple, optional): The range of phi values in radians.
+                Defaults to None.
+            rho_range (tuple, optional): The range of rho values in meters.
+                Defaults to None.
+            selected_transmits (int, list[int], str, optional): Used to select a subset
+                of the transmits. Defaults to 0.2e-3.
+            attenuation_coef (float, optional): The attenuation coefficient in
+                dB/cm/MHz. Defaults to 0.0.
             polar_angles (np.ndarray, optional): The polar angles of the
                 transmits in radians of shape (n_tx,). These are the angles usually used
                 in 2D imaging. Defaults to None.
@@ -173,188 +207,278 @@ class Scan(Object):
                 Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
-            pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
-                pressure field of shape (n_tx, Nz, Nx, 1) with to perform automatic weighting.
-                Defaults to None. In that case default arguments are used. If pfield
-                can be used by the beamformer with option
-                config.model.beamformer.auto_pressure_weighting. If set to True, the
-                pfield is used, if False, beamformer will compound all
-                transmit data coherently without pfield weighting.
-            apply_lens_correction (bool, optional): Whether to apply lens correction to the
-                delay computation. Defaults to False.
-            lens_thickness (float, optional): The thickness of the lens in meters.
-                Defaults to None.
-            lens_sound_speed (float, optional): The speed of sound in the lens in m/s.
-                Defaults to None.
-            element_width (float, optional): The width of the transducer_elements in meters.
-                Defaults to 0.2e-3.
-            attenuation_coef (float, optional): The attenuation coefficient in
-                dB/cm/MHz. Defaults to 0.0.
 
-        Raises:
-            NotImplementedError: Initializing from probe not yet implemented.
         """
         super().__init__()
 
-        # Attributes concerning channel data : The number of transmissions in a frame
-        self._n_tx = int(n_tx)
-        #: The number of samples per channel per acquisition
-        self._n_ax = n_ax
-        #: The number of elements in the array
-        self._n_el = int(n_el)
-        #: The modulation carrier frequency [Hz]
-        self.center_frequency = float(center_frequency)
-        #: The sampling rate [Hz]
-        self.sampling_frequency = float(sampling_frequency)
-        #: The percent bandwidth []
-        self.bandwidth_percent = float(bandwidth_percent)
-        #: The speed of sound [m/s]
-        self.sound_speed = float(sound_speed)
-        #: The number of rf/iq channels (1 for rf, 2 for iq)
-        self._n_ch = n_ch
-        #: The demodulation frequency [Hz]
-        self._demodulation_frequency = demodulation_frequency
-        #: The wavelength of the modulation carrier [m]
-        self.wvln = self.sound_speed / self.center_frequency
-        #: The number of pixels per wavelength in the beamforming grid
-        self.pixels_per_wavelength = float(pixels_per_wvln)
-        #: The decimation factor applied after downconverting data to baseband (RF to IQ)
-        self.downsample = downsample
-        #: The probe geometry of shape (n_el, 3)
-        self.probe_geometry = probe_geometry
-        #: The time between subsequent transmit events of shape (n_tx*n_frames,)
-        self.time_to_next_transmit = time_to_next_transmit
-        #: The f-number, e.g. dynamic aperture, used for receive beamforming
-        self.f_number = f_number
-        #: The arguments to calculate the estimated pressure field with
-        self.pfield_kwargs = pfield_kwargs
+        # Dictionary to track which parameters have been set
+        self._set_params = {}
 
-        self.apply_lens_correction = apply_lens_correction
-        self.lens_thickness = lens_thickness
-        self.lens_sound_speed = lens_sound_speed
+        # Store values and mark as set if not None
+        # Basic parameters
+        self._set_param("n_tx", n_tx)
+        self._set_param("n_ax", n_ax)
+        self._set_param("n_el", n_el)
+        self._set_param("n_ch", n_ch)
+        self._set_param("center_frequency", center_frequency)
+        self._set_param("sampling_frequency", sampling_frequency)
+        self._set_param("bandwidth_percent", bandwidth_percent)
+        self._set_param("sound_speed", sound_speed)
+        self._set_param("demodulation_frequency", demodulation_frequency)
+        self._set_param("xlims", xlims)
+        self._set_param("ylims", ylims)
+        self._set_param("zlims", zlims)
+        self._set_param("Nx", Nx)
+        self._set_param("Nz", Nz)
 
-        # Beamforming grid related attributes
-        # ---------------------------------------------------------------------
-        #: The x-limits of the beamforming grid [m]
-        self._xlims = xlims
-        #: The y-limits of the beamforming grid [m]
-        self._ylims = ylims
-        #: The z-limits of the beamforming grid [m]
-        self._zlims = zlims
+        # Store array values and mark as set if not None
+        self._set_param("t0_delays", t0_delays)
+        self._set_param("tx_apodizations", tx_apodizations)
+        self._set_param("polar_angles", polar_angles)
+        self._set_param("azimuth_angles", azimuth_angles)
+        self._set_param("focus_distances", focus_distances)
+        self._set_param("initial_times", initial_times)
+        self._set_param("pfield", pfield)
 
-        #: The number of pixels in the lateral direction in the beamforming grid
-        self._Nx = int(Nx) if Nx is not None else None
-        #: The number of pixels in the axial direction in the beamforming grid
-        self._Nz = int(Nz) if Nz is not None else None
+        if pfield is None:
+            self._set_params["flat_pfield"] = False
 
-        # Compute the zlims from the other values if not supplied
-        if zlims:
-            self.zlims = zlims
-        else:
-            # Compute the depth of the scan from the number of axial samples
-            self.zlims = [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
-        if ylims:
-            self.ylims = ylims
-        else:
-            self.ylims = [0, 0]
-        if xlims:
-            self.xlims = xlims
-        else:
-            # Set the scan limits to the limits of the probe and
-            if self.probe_geometry is None:
-                raise ValueError(
-                    "Please provide probe_geometry or xlims, currently neither is set."
-                )
-            self.xlims = self.probe_geometry[0, 0], self.probe_geometry[-1, 0]
+        self._set_param("grid", None)
+        self._set_params["flatgrid"] = False
 
-        self.z_axis = np.linspace(*self.zlims, self.n_ax)
-
-        #: The beamforming grid of shape (Nz, Nx, 3)
-        self._grid = self.grid
-
-        if initial_times is None:
-            log.warning("No initial times provided. Assuming all zeros.")
-            initial_times = np.zeros(self._n_tx)
-
-        if t0_delays is None:
-            log.warning(
-                "No t0_delays provided. Assuming all zeros and 128 element probe."
-            )
-            t0_delays = np.zeros((self._n_tx, self._n_el))
-        else:
-            assert t0_delays.shape == (self._n_tx, self._n_el), (
-                f"t0_delays must have shape (n_tx, n_el): {self._n_tx, self._n_el}. "
-                f"Got shape {t0_delays.shape}. Please set t0_delays either to None in which "
-                f"case all zeros are assumed, or set the n_tx and n_el params to match the "
-                "t0_delays shape."
-            )
-
-        if tx_apodizations is None:
-            log.warning(
-                "No tx_apodizations provided. Assuming all ones and "
-                "128 element probe."
-            )
-            tx_apodizations = np.ones((self._n_tx, self._n_el))
-        else:
-            assert tx_apodizations.shape == (self._n_tx, self._n_el), (
-                f"tx_apodizations must have shape (n_tx, n_el) = "
-                f"{self._n_tx, self._n_el}. "
-                f"Got shape {tx_apodizations.shape}."
-            )
-
-        if polar_angles is None:
-            log.warning("No polar_angles provided. Assuming all zeros.")
-            polar_angles = np.zeros(self._n_tx)
-        else:
-            assert len(polar_angles) == self._n_tx, (
-                f"polar_angles must have length n_tx = {self._n_tx}. "
-                f"Got length {len(polar_angles)}."
-            )
-
-        if azimuth_angles is None:
-            log.warning("No azimuth_angles provided. Assuming all zeros.")
-            azimuth_angles = np.zeros(self._n_tx)
-        else:
-            assert len(azimuth_angles) == self._n_tx, (
-                f"azimuth_angles must have length n_tx = {self._n_tx}. "
-                f"Got length {len(azimuth_angles)}."
-            )
-
-        if focus_distances is None:
-            log.warning("No focus_distances provided. Assuming all zeros.")
-            focus_distances = np.zeros(self._n_tx)
-        else:
-            assert len(focus_distances) == self._n_tx, (
-                f"focus_distances must have length n_tx = {self._n_tx}. "
-                f"Got length {len(focus_distances)}."
-            )
-
-        if (
-            np.abs(np.max(focus_distances)) > 1
-            and np.abs(np.max(focus_distances)) < 1000
+        if not (
+            self._set_params["sound_speed"] and self._set_params["center_frequency"]
         ):
-            # check if focus distance is not in wavelengths...
-            log.warning(
-                "Focal distance in range 1-1000 m. "
-                "Assuming wavelenghts instead of meters."
-            )
-            lambda0 = self.sound_speed / self.center_frequency
-            focus_distances = focus_distances * lambda0
+            self._set_params["wvln"] = False
 
-        self._t0_delays = t0_delays
-        self._tx_apodizations = tx_apodizations
-        self._polar_angles = polar_angles
-        self._angles = polar_angles  # deprecated
-        self._azimuth_angles = azimuth_angles
-        self._focus_distances = focus_distances
-        self._initial_times = initial_times
-        self._pfield = None
-        self.element_width = element_width
-        self.attenuation_coef = attenuation_coef
+        if not (self._set_params["zlims"] and self._set_params["n_ax"]):
+            self._set_params["z_axis"] = False
+
+        # Additional properties that don't need lazy initialization
+        self._set_param("pixels_per_wavelength", float(pixels_per_wvln), dunder=False)
+        self._set_param("downsample", downsample, dunder=False)
+        self._set_param("probe_geometry", probe_geometry, dunder=False)
+        self._set_param("time_to_next_transmit", time_to_next_transmit, dunder=False)
+        self._set_param("f_number", f_number, dunder=False)
+        self._set_param("pfield_kwargs", pfield_kwargs, dunder=False)
+        self._set_param("apply_lens_correction", apply_lens_correction, dunder=False)
+        self._set_param("lens_thickness", lens_thickness, dunder=False)
+        self._set_param("lens_sound_speed", lens_sound_speed, dunder=False)
+        self._set_param("element_width", element_width, dunder=False)
+        self._set_param("attenuation_coef", attenuation_coef, dunder=False)
+        self._set_param("fill_value", fill_value, dunder=False)
+        self._set_param("theta_range", theta_range, dunder=False)
+        self._set_param("phi_range", phi_range, dunder=False)
+        self._set_param("rho_range", rho_range, dunder=False)
 
         self.selected_transmits = selected_transmits
-
         self._static_attrs = STATIC
+
+    def _set_param(self, name, value, dunder=True):
+        """Set a parameter value and mark it as set in _set_params if not None.
+
+        Args:
+            name (str): The parameter name
+            value: The parameter value
+            dunder (bool, optional): Whether to set the parameter as a dunder attribute.
+        """
+        if dunder:
+            setattr(self, f"_{name}", value)
+        else:
+            setattr(self, name, value)
+
+        if value is None:
+            self._set_params[name] = False
+        else:
+            self._set_params[name] = True
+
+    # Add property getters and setters for each array that needs lazy initialization
+    @property
+    def t0_delays(self):
+        """The transmit delays in seconds of shape (n_tx, n_el), shifted such that the
+        smallest delay is 0. For instance for a straight planewave transmit all delays
+        are zero."""
+        if self._set_params["t0_delays"] is False:
+            if self._n_tx is None or self._n_el is None:
+                raise ValueError(
+                    "Cannot initialize t0_delays: n_tx or n_el is not set. "
+                    "Please set scan.n_tx and scan.n_el first."
+                )
+            log.warning(
+                "No t0_delays provided. Assuming all zeros and "
+                f"{self._n_el} element probe."
+            )
+            self._t0_delays = np.zeros((self._n_tx, self._n_el))
+            self._set_params["t0_delays"] = True
+        return self._t0_delays[self.selected_transmits]
+
+    @t0_delays.setter
+    def t0_delays(self, value):
+        if value is not None:
+            if self._n_tx is None or self._n_el is None:
+                # Store for later validation once n_tx and n_el are set
+                self._t0_delays = value
+            else:
+                assert value.shape == (self._n_tx, self._n_el), (
+                    f"t0_delays must have shape (n_tx, n_el): {self._n_tx, self._n_el}. "
+                    f"Got shape {value.shape}. Please set t0_delays either to None in which "
+                    f"case all zeros are assumed, or set the n_tx and n_el params to match the "
+                    "t0_delays shape."
+                )
+                self._t0_delays = value
+            self._set_params["t0_delays"] = True
+
+    @property
+    def tx_apodizations(self):
+        """The transmit apodizations of shape (n_tx, n_el) or a single float to use for
+        all apodizations. These values indicate both windowing (apodization) over the
+        aperture and the subaperture that is used during transmit."""
+        if self._set_params["tx_apodizations"] is False:
+            if self._n_tx is None or self._n_el is None:
+                raise ValueError(
+                    "Cannot initialize tx_apodizations: n_tx or n_el is not set. "
+                    "Please set scan.n_tx and scan.n_el first."
+                )
+            log.warning(
+                "No tx_apodizations provided. Assuming all ones and "
+                f"{self._n_el} element probe."
+            )
+            self._tx_apodizations = np.ones((self._n_tx, self._n_el))
+            self._set_params["tx_apodizations"] = True
+        return self._tx_apodizations[self.selected_transmits]
+
+    @tx_apodizations.setter
+    def tx_apodizations(self, value):
+        if value is not None:
+            if self._n_tx is None or self._n_el is None:
+                # Store for later validation once n_tx and n_el are set
+                self._tx_apodizations = value
+            else:
+                assert value.shape == (self._n_tx, self._n_el), (
+                    f"tx_apodizations must have shape (n_tx, n_el) = "
+                    f"{self._n_tx, self._n_el}. "
+                    f"Got shape {value.shape}."
+                )
+                self._tx_apodizations = value
+            self._set_params["tx_apodizations"] = True
+
+    @property
+    def polar_angles(self):
+        """The polar angles of the transmits in radians of shape (n_tx,). These are the
+        angles usually used in 2D imaging."""
+        if self._set_params["polar_angles"] is False:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize polar_angles: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No polar_angles provided. Assuming all zeros.")
+            self._polar_angles = np.zeros(self._n_tx)
+            self._set_params["polar_angles"] = True
+        return self._polar_angles[self.selected_transmits]
+
+    @polar_angles.setter
+    def polar_angles(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._polar_angles = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"polar_angles must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._polar_angles = value
+            self._set_params["polar_angles"] = True
+
+    @property
+    def azimuth_angles(self):
+        """The azimuth angles of the transmits in radians of shape (n_tx,). These are
+        the angles usually used in 3D imaging."""
+        if self._set_params["azimuth_angles"] is False:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize azimuth_angles: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No azimuth_angles provided. Assuming all zeros.")
+            self._azimuth_angles = np.zeros(self._n_tx)
+            self._set_params["azimuth_angles"] = True
+        return self._azimuth_angles[self.selected_transmits]
+
+    @azimuth_angles.setter
+    def azimuth_angles(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._azimuth_angles = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"azimuth_angles must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._azimuth_angles = value
+            self._set_params["azimuth_angles"] = True
+
+    @property
+    def focus_distances(self):
+        """The focus distances of the transmits in meters of shape (n_tx,). These are
+        the distances of the virtual focus points from the origin. For a planewave
+        these should be set to Inf."""
+        if self._set_params["focus_distances"] is False:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize focus_distances: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No focus_distances provided. Assuming all zeros.")
+            self._focus_distances = np.zeros(self._n_tx)
+            self._set_params["focus_distances"] = True
+        return self._focus_distances[self.selected_transmits]
+
+    @focus_distances.setter
+    def focus_distances(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._focus_distances = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"focus_distances must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._focus_distances = value
+            self._set_params["focus_distances"] = True
+
+    @property
+    def initial_times(self):
+        """The initial times of the transmits in seconds of shape (n_tx,). These are the
+        time intervals between the first element firing and the first sample in the
+        receive recording."""
+        if self._set_params["initial_times"] is False:
+            if self._n_tx is None:
+                raise ValueError(
+                    "Cannot initialize initial_times: n_tx is not set. "
+                    "Please set scan.n_tx first."
+                )
+            log.warning("No initial times provided. Assuming all zeros.")
+            self._initial_times = np.zeros(self._n_tx)
+            self._set_params["initial_times"] = True
+        return self._initial_times[self.selected_transmits]
+
+    @initial_times.setter
+    def initial_times(self, value):
+        if value is not None:
+            if self._n_tx is None:
+                # Store for later validation once n_tx is set
+                self._initial_times = value
+            else:
+                assert len(value) == self._n_tx, (
+                    f"initial_times must have length n_tx = {self._n_tx}. "
+                    f"Got length {len(value)}."
+                )
+                self._initial_times = value
+            self._set_params["initial_times"] = True
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -440,7 +564,11 @@ class Scan(Object):
     @selected_transmits.setter
     def selected_transmits(self, value):
         self._selected_transmits = self._select_transmits(value)
-        check_for_aliasing(self)
+        try:
+            check_for_aliasing(self)
+        except ValueError as e:
+            log.warning(f"Error checking for aliasing: {e}")
+
         self._pfield = None  # also trigger update of the pressure fields
 
     @property
@@ -451,28 +579,93 @@ class Scan(Object):
     @property
     def n_ax(self):
         """The number of samples in a receive recording per channel."""
-        return self._n_ax
+        if self._n_ax is None:
+            raise ValueError("Please set scan.n_ax.")
+        return int(self._n_ax)
 
     @n_ax.setter
     def n_ax(self, value):
         value = int(value)
         assert value > 0, "n_ax must be positive"
         self._n_ax = value
+        self._set_params["n_ax"] = True
 
     @property
     def n_el(self):
         """The number of elements in the array."""
-        return self._n_el
+        if self._n_el is None:
+            raise ValueError("Please set scan.n_el.")
+        return int(self._n_el)
+
+    @n_el.setter
+    def n_el(self, value):
+        value = int(value)
+        assert value > 0, "n_el must be positive"
+        self._n_el = value
+        self._set_params["n_el"] = True
 
     @property
     def n_ch(self):
         """The number of channels."""
-        return self._n_ch
+        if self._n_ch is None:
+            raise ValueError("Please set scan.n_ch.")
+        return int(self._n_ch)
 
     @n_ch.setter
     def n_ch(self, value):
         self._n_ch = value
         self._demodulation_frequency = None  # Reset demodulation_frequency
+        self._set_params["n_ch"] = True
+
+    @property
+    def center_frequency(self):
+        """The modulation carrier frequency."""
+        if self._center_frequency is None:
+            raise ValueError("Please set scan.center_frequency.")
+        return float(self._center_frequency)
+
+    @center_frequency.setter
+    def center_frequency(self, value):
+        self._center_frequency = value
+        self._grid = None
+        self._set_params["center_frequency"] = True
+
+    @property
+    def sampling_frequency(self):
+        """The sampling rate."""
+        if self._sampling_frequency is None:
+            raise ValueError("Please set scan.sampling_rate.")
+        return float(self._sampling_frequency)
+
+    @sampling_frequency.setter
+    def sampling_frequency(self, value):
+        self._sampling_frequency = value
+        self._set_params["sampling_frequency"] = True
+
+    @property
+    def bandwidth_percent(self):
+        """The percent bandwidth."""
+        if self._bandwidth_percent is None:
+            raise ValueError("Please set scan.bandwidth_percent.")
+        return float(self._bandwidth_percent)
+
+    @bandwidth_percent.setter
+    def bandwidth_percent(self, value):
+        self._bandwidth_percent = value
+        self._set_params["bandwidth_percent"] = True
+
+    @property
+    def sound_speed(self):
+        """The speed of sound."""
+        if self._sound_speed is None:
+            raise ValueError("Please set scan.sound_speed.")
+        return float(self._sound_speed)
+
+    @sound_speed.setter
+    def sound_speed(self, value):
+        self._sound_speed = value
+        self._grid = None
+        self._set_params["sound_speed"] = True
 
     @property
     def demodulation_frequency(self):
@@ -495,76 +688,49 @@ class Scan(Object):
         self._demodulation_frequency = value
 
     @property
-    def t0_delays(self):
-        """The transmit delays in seconds of shape (n_tx, n_el), shifted such that the
-        smallest delay is 0. For instance for a straight planewave transmit all delays
-        are zero."""
-        return self._t0_delays[self.selected_transmits]
-
-    @property
-    def tx_apodizations(self):
-        """The transmit apodizations of shape (n_tx, n_el) or a single float to use for
-        all apodizations. These values indicate both windowing (apodization) over the
-        aperture and the subaperture that is used during transmit."""
-        return self._tx_apodizations[self.selected_transmits]
-
-    @property
-    def polar_angles(self):
-        """The polar angles of the transmits in radians of shape (n_tx,). These are the
-        angles usually used in 2D imaging."""
-        return self._polar_angles[self.selected_transmits]
-
-    # @deprecated("Scan.polar_angles")
-    # @property
-    # def angles(self):
-    #     """Identical to `Scan.polar_angles`. This attribute is added for backward
-    #     compatibility."""
-    #     return self.polar_angles
-
-    @property
-    def azimuth_angles(self):
-        """The azimuth angles of the transmits in radians of shape (n_tx,). These are
-        the angles usually used in 3D imaging."""
-        return self._azimuth_angles[self.selected_transmits]
-
-    @property
-    def focus_distances(self):
-        """The focus distances of the transmits in meters of shape (n_tx,). These are
-        the distances of the virtual focus points from the origin. For a planewave
-        these should be set to Inf."""
-        return self._focus_distances[self.selected_transmits]
-
-    @property
-    def initial_times(self):
-        """The initial times of the transmits in seconds of shape (n_tx,). These are the
-        time intervals between the first element firing and the first sample in the
-        receive recording."""
-        return self._initial_times[self.selected_transmits]
-
-    @property
     def Nx(self):
-        """The number of pixels in the lateral direction in the beamforming
-        grid."""
-        return self._Nx
+        """The number of pixels in the lateral direction in the
+        beamforming grid.
+
+        If None, the number of pixels is calculated based on the
+        `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
+        """
+        return int(self._Nx) if self._Nx is not None else None
 
     @Nx.setter
     def Nx(self, value):
-        self._Nx = value
+        self._Nx = int(value)
         self._grid = None
 
     @property
     def Nz(self):
-        """The number of pixels in the axial direction in the beamforming grid."""
-        return self._Nz
+        """The number of pixels in the axial direction in the
+        beamforming grid.
+
+        If None, the number of pixels is calculated based on the
+        `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
+        """
+        return int(self._Nz) if self._Nz is not None else None
 
     @Nz.setter
     def Nz(self, value):
-        self._Nz = value
+        self._Nz = int(value)
         self._grid = None
+
+    @property
+    def wvln(self):
+        """The wavelength of the modulation carrier [m]."""
+        return self.sound_speed / self.center_frequency
 
     @property
     def xlims(self):
         """The x-limits of the beamforming grid [m]."""
+        if self._xlims is None:
+            if self.probe_geometry is None:
+                raise ValueError(
+                    "Please provide probe_geometry or xlims, currently neither is set."
+                )
+            self.xlims = [self.probe_geometry[0, 0], self.probe_geometry[-1, 0]]
         return self._xlims
 
     @xlims.setter
@@ -575,6 +741,8 @@ class Scan(Object):
     @property
     def ylims(self):
         """The y-limits of the beamforming grid [m]."""
+        if self._ylims is None:
+            self.ylims = [0, 0]
         return self._ylims
 
     @ylims.setter
@@ -585,12 +753,19 @@ class Scan(Object):
     @property
     def zlims(self):
         """The z-limits of the beamforming grid [m]."""
+        if self._zlims is None:
+            self.zlims = [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
         return self._zlims
 
     @zlims.setter
     def zlims(self, value):
         self._zlims = value
         self._grid = None
+
+    @property
+    def z_axis(self):
+        """The z-axis of the beamforming grid [m]."""
+        return np.linspace(*self.zlims, self.n_ax)
 
     @property
     def grid(self):
@@ -604,7 +779,7 @@ class Scan(Object):
 
     @grid.setter
     def grid(self, value):
-        """Manually set the pfield."""
+        """Manually set the grid."""
         self._grid = value
 
     @property
@@ -703,6 +878,10 @@ class Scan(Object):
             "probe_geometry": self.probe_geometry,
             "time_to_next_transmit": self.time_to_next_transmit,
             "pfield": self.pfield,
+            "theta_range": self.theta_range,
+            "phi_range": self.phi_range,
+            "rho_range": self.rho_range,
+            "fill_value": self.fill_value,
         }
 
 
