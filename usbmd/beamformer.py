@@ -53,7 +53,7 @@ def tof_correction_flatgrid(
     probe_geometry,
     initial_times,
     sampling_frequency,
-    fdemod,
+    demodulation_frequency,
     fnum,
     angles,
     vfocus,
@@ -76,7 +76,7 @@ def tof_correction_flatgrid(
         initial_times (ops.Tensor): Time-ofsampling_frequencyet per transmission of shape
             `(n_tx,)`.
         sampling_frequency (float): Sampling frequency.
-        fdemod (float): Demodulation frequency.
+        demodulation_frequency (float): Demodulation frequency.
         fnum (int, optional): Focus number. Defaults to 1.
         angles (ops.Tensor): The angles of the plane waves in radians of shape
             `(n_tx,)`
@@ -187,7 +187,7 @@ def tof_correction_flatgrid(
         if apply_phase_rotation:
             tshift = delays[:, :] / sampling_frequency
             tdemod = flatgrid[:, None, 2] * 2 / sound_speed
-            theta = 2 * np.pi * fdemod * (tshift - tdemod)
+            theta = 2 * np.pi * demodulation_frequency * (tshift - tdemod)
             tof_tx = _complex_rotate(tof_tx, theta)
         return tof_tx
 

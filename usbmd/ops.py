@@ -899,11 +899,11 @@ class TOFCorrection(Operation):
             probe_geometry=self.probe_geometry,
             initial_times=self.initial_times,
             sampling_frequency=self.sampling_frequency,
-            fdemod=self.fdemod,
+            demodulation_frequency=self.demodulation_frequency,
             fnum=self.f_number,
             angles=self.polar_angles,
             vfocus=self.focus_distances,
-            apply_phase_rotation=bool(self.fdemod),
+            apply_phase_rotation=bool(self.demodulation_frequency),
             apply_lens_correction=bool(self.apply_lens_correction),
             lens_thickness=self.lens_thickness,
             lens_sound_speed=self.lens_sound_speed,
@@ -929,7 +929,7 @@ class TOFCorrection(Operation):
             "polar_angles": scan.polar_angles,
             "sampling_frequency": scan.sampling_frequency,
             "f_number": scan.f_number,
-            "fdemod": scan.fdemod,
+            "demodulation_frequency": scan.demodulation_frequency,
             "apply_lens_correction": scan.apply_lens_correction,
             "lens_thickness": scan.lens_thickness,
             "lens_sound_speed": scan.lens_sound_speed,
@@ -949,7 +949,7 @@ class TOFCorrection(Operation):
                 self.polar_angles is not None,
                 self.sampling_frequency is not None,
                 self.f_number is not None,
-                self.fdemod is not None,
+                self.demodulation_frequency is not None,
                 self.apply_lens_correction is not None,
                 self.lens_thickness is not None or self.apply_lens_correction is False,
                 self.lens_sound_speed is not None
@@ -1359,7 +1359,13 @@ class Demodulate(Operation):
         elif data.shape[-1] == 1:
             data = ops.squeeze(data, axis=-1)
 
-        data = demodulate(data, self.sampling_frequency, self.center_frequency, self.bandwidth, self.filter_coeff)
+        data = demodulate(
+            data,
+            self.sampling_frequency,
+            self.center_frequency,
+            self.bandwidth,
+            self.filter_coeff,
+        )
         data = ops.convert_to_tensor(data)
         return complex_to_channels(data, axis=-1)
 
@@ -1379,7 +1385,7 @@ class Demodulate(Operation):
     # pylint: disable=unused-argument
     def _assign_update_params(self, scan):
         return {
-            "fdemod": self.center_frequency,
+            "demodulation_frequency": self.center_frequency,
             "n_ch": 2,
         }
 
@@ -1388,7 +1394,13 @@ class Demodulate(Operation):
 class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
-    def __init__(self, sampling_frequency=None, center_frequency=None, upsampling_rate=6, **kwargs):
+    def __init__(
+        self,
+        sampling_frequency=None,
+        center_frequency=None,
+        upsampling_rate=6,
+        **kwargs,
+    ):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
@@ -1404,7 +1416,9 @@ class UpMix(Operation):
             return data
         elif data.shape[-1] == 2:
             data = channels_to_complex(data)
-        data = upmix(data, self.sampling_frequency, self.center_frequency, self.upsampling_rate)
+        data = upmix(
+            data, self.sampling_frequency, self.center_frequency, self.upsampling_rate
+        )
         data = ops.expand_dims(data, axis=-1)
         return data
 
@@ -1426,7 +1440,14 @@ class BandPassFilter(Operation):
     """Band pass filter data."""
 
     def __init__(
-        self, num_taps=None, sampling_frequency=None, center_frequency=None, f1=None, f2=None, axis=-3, **kwargs
+        self,
+        num_taps=None,
+        sampling_frequency=None,
+        center_frequency=None,
+        f1=None,
+        f2=None,
+        axis=-3,
+        **kwargs,
     ):
         super().__init__(
             input_data_type=None,
@@ -1446,7 +1467,9 @@ class BandPassFilter(Operation):
     def initialize(self):
         super().initialize()
 
-        self.filter = get_band_pass_filter(self.num_taps, self.sampling_frequency, self.f1, self.f2)
+        self.filter = get_band_pass_filter(
+            self.num_taps, self.sampling_frequency, self.f1, self.f2
+        )
 
     @property
     def _ready(self):
@@ -1521,7 +1544,15 @@ class MultiBandPassFilter(Operation):
         >>> filtered_data = mbpf(beamformed_data)
     """
 
-    def __init__(self, params=None, modtype=None, sampling_frequency=None, center_frequency=None, axis=-3, **kwargs):
+    def __init__(
+        self,
+        params=None,
+        modtype=None,
+        sampling_frequency=None,
+        center_frequency=None,
+        axis=-3,
+        **kwargs,
+    ):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
@@ -1555,12 +1586,19 @@ class MultiBandPassFilter(Operation):
         num_taps = self.params["num_taps"]
         # make sure sampling_frequency is correct for IQ (downsampled)
         sampling_frequency = self.sampling_frequency * unit_factor
-        center_frequency = self.center_frequency * unit_factor  # center_frequency is only used when RF
+        center_frequency = (
+            self.center_frequency * unit_factor
+        )  # center_frequency is only used when RF
 
         if self.modtype == "iq":
             center_frequency = 0  # center_frequency is automatically set to zero if IQ
             self.filter_params = [
-                {"num_taps": num_taps, "sampling_frequency": sampling_frequency, "f": center_frequency - offset, "bw": bw}
+                {
+                    "num_taps": num_taps,
+                    "sampling_frequency": sampling_frequency,
+                    "f": center_frequency - offset,
+                    "bw": bw,
+                }
                 for offset, bw in zip(offsets, bandwidths)
             ]
         elif self.modtype == "rf":
@@ -1984,7 +2022,13 @@ class LeeFilter(Operation):
         return img_output
 
 
-def demodulate(rf_data, sampling_frequency=None, center_frequency=None, bandwidth=None, filter_coeff=None):
+def demodulate(
+    rf_data,
+    sampling_frequency=None,
+    center_frequency=None,
+    bandwidth=None,
+    filter_coeff=None,
+):
     """Demodulates an RF signal to complex base-band (IQ).
 
     Demodulates the radiofrequency (RF) bandpass signals and returns the
@@ -2031,7 +2075,9 @@ def demodulate(rf_data, sampling_frequency=None, center_frequency=None, bandwidt
         n_ax, n_el = input_shape
 
     if filter_coeff is None:
-        assert sampling_frequency is not None, "provide sampling_frequency when no filter is given."
+        assert (
+            sampling_frequency is not None
+        ), "provide sampling_frequency when no filter is given."
         # Time vector
         t = np.arange(n_ax) / sampling_frequency
         t0 = 0
@@ -2093,7 +2139,8 @@ def demodulate(rf_data, sampling_frequency=None, center_frequency=None, bandwidt
             fH = center_frequency + bandwidth / 2
             n = fH // (fH - fL)
             harmless_aliasing = any(
-                (2 * fH / np.arange(1, n) <= sampling_frequency) & (sampling_frequency <= 2 * fL / np.arange(1, n))
+                (2 * fH / np.arange(1, n) <= sampling_frequency)
+                & (sampling_frequency <= 2 * fL / np.arange(1, n))
             )
             if not harmless_aliasing:
                 log.warning(
@@ -2167,7 +2214,9 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
     Returns:
         ndarray: band pass filter
     """
-    bpf = signal.firwin(num_taps, [f1, f2], pass_zero=False, sampling_frequency=sampling_frequency)
+    bpf = signal.firwin(
+        num_taps, [f1, f2], pass_zero=False, sampling_frequency=sampling_frequency
+    )
     return bpf
 
 
@@ -2192,9 +2241,9 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
         f"got {bw / 2} Hz, must be within (0, {sampling_frequency / 2}) Hz"
     )
     t_qbp = np.arange(num_taps) / sampling_frequency
-    lpf = signal.firwin(num_taps, bw / 2, pass_zero=True, sampling_frequency=sampling_frequency) * np.exp(
-        1j * 2 * np.pi * f * t_qbp
-    )
+    lpf = signal.firwin(
+        num_taps, bw / 2, pass_zero=True, sampling_frequency=sampling_frequency
+    ) * np.exp(1j * 2 * np.pi * f * t_qbp)
     return lpf
 
 
