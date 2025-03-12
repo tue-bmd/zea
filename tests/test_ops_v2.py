@@ -507,8 +507,8 @@ def test_default_ultrasound_pipeline(
         ultrasound_probe,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
-        dynamic_range=(-30, 0),
-        input_range=(-30, 0),
+        dynamic_range=(-50, 0),
+        input_range=(-50, 0),
         output_range=(0, 255),
     )
 
@@ -517,8 +517,8 @@ def test_default_ultrasound_pipeline(
         ultrasound_probe,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
-        dynamic_range=(-30, 0),
-        input_range=(-30, 0),
+        dynamic_range=(-50, 0),
+        input_range=(-50, 0),
         output_range=(0, 255),
     )
 

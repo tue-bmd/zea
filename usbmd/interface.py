@@ -94,7 +94,7 @@ class Interface:
         ), "Pipeline not found in config, please specify pipeline in config."
 
         self.process = Pipeline.from_config(
-            self.config,
+            self.config.pipeline,
             with_batch_dim=False,
         )
 
