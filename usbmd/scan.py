@@ -596,7 +596,7 @@ class Scan(Object):
     @grid.setter
     def grid(self, value):
         """Manually set the pfield."""
-        self._grid = value        
+        self._grid = value
 
     @property
     def pfield(self):
