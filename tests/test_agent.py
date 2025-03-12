@@ -161,5 +161,50 @@ def test_non_divisible_actions():
         selection.CovarianceSamplingLines(3, 10, 8, 8, n_masks=200)
 
 
+def test_equispaced_lines_class():
+    """Test EquispacedLines class."""
+    b, h, w = 3, 8, 8  # batch_size=3
+
+    # Test with 2 actions
+    n_actions = 2
+    agent = selection.EquispacedLines(n_actions, w, w, h, batch_size=b)
+    mask = agent.sample()
+
+    # Check mask shape (should include batch dimension)
+    assert mask.shape == (b, h, w)
+
+    # Check first row has correct number of ones for each batch
+    for batch_idx in range(b):
+        first_row = mask[batch_idx, 0]
+        assert np.count_nonzero(first_row) == n_actions
+
+    # Test successive calls return different but valid patterns
+    mask1 = agent.sample()
+    mask2 = agent.sample()
+
+    # Masks should be different (alternating pattern) for each batch
+    assert not np.array_equal(mask1, mask2)
+
+    # Both should have correct number of actions for each batch
+    for batch_idx in range(b):
+        assert np.count_nonzero(mask1[batch_idx, 0]) == n_actions
+        assert np.count_nonzero(mask2[batch_idx, 0]) == n_actions
+
+        # Check that batch elements have the same pattern within a single call
+        assert np.array_equal(mask1[0], mask1[batch_idx])
+        assert np.array_equal(mask2[0], mask2[batch_idx])
+
+    # Test with maximum number of actions
+    agent = selection.EquispacedLines(w, w, h, w, batch_size=b)
+    mask = agent.sample()
+    for batch_idx in range(b):
+        assert np.count_nonzero(mask[batch_idx, 0]) == w
+
+    # Test with non-divisible actions (should raise AssertionError)
+    with pytest.raises(AssertionError):
+        selection.EquispacedLines(3, 10, h, w, batch_size=b)
+
+
 if __name__ == "__main__":
+    test_equispaced_lines_class()
     pytest.main()
