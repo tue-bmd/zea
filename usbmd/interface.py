@@ -17,6 +17,7 @@ import numpy as np
 from PIL import Image
 
 from usbmd.config import Config
+from usbmd.core import DataTypes
 from usbmd.data import get_dataset
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
@@ -263,6 +264,16 @@ class Interface:
             self.to_dtype = "image_sc"
 
         input_key = self.process.key if self.process.key is not None else "data"
+
+        # select transmits if raw or aligned data
+        data_type = self.process.operations[0].input_data_type
+        if data_type in [DataTypes.RAW_DATA, DataTypes.ALIGNED_DATA]:
+            n_tx = self.data.shape[0]
+            assert len(self.scan.selected_transmits) <= n_tx, (
+                f"Number of selected transmits {len(self.scan.selected_transmits)} "
+                f"exceeds number of transmits in raw data {n_tx}"
+            )
+            self.data = np.take(self.data, self.scan.selected_transmits, axis=0)
 
         inputs = {input_key: self.data}
 
