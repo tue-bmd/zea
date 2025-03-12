@@ -677,12 +677,106 @@ class DelayAndSum(Operation):
         Returns:
             ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
         """
+
         # Sum over the channels, i.e. DAS
         data = ops.sum(self.rx_apo * patch, -2)
 
         # Sum over transmits, i.e. Compounding
         data = self.tx_apo * data
         data = ops.sum(data, 1)
+
+        return data
+
+    def process_item(self, data):
+        """Performs DAS beamforming on tof-corrected input. Optionally splits the data into patches.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
+
+        Returns:
+            list[ops.Tensor]: The beamformed data of shape `(n_z, n_x, n_ch)`
+        """
+        n_tx, n_z, n_x, n_el, n_ch = data.shape
+
+        # Flatten grid and move n_pix=(n_z * n_x) to the front
+        flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
+        flat_data = ops.moveaxis(flat_data, 1, 0)
+
+        flat_data = patched_map(self.process_patch, flat_data, self.patches)
+
+        # Reshape data back to original shape
+        data = ops.reshape(flat_data, (n_z, n_x, n_ch))
+
+        return data
+
+    def process(self, data):
+        """Performs DAS beamforming on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape
+                `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
+                with optional batch dimension.
+        """
+
+        if not self.with_batch_dim:
+            return self.process_item(data)
+        else:
+            # TODO: could be ops.vectorized_map if enough memory
+            return ops.map(self.process_item, data)
+
+
+@ops_registry("delay_and_sum_multi")
+class DelayAndSumMulti(Operation):
+    """
+    Sums time-delayed signals along channels and transmits for a list of receive apodizations.
+    Each receive apodization in the list will generate a separate output in a list
+    """
+
+    def __init__(self, rx_apo=None, tx_apo=None, patches=1, **kwargs):
+        """
+        Args:
+            rx_apo (list, optional):  Receive apodization windows. Defaults to None.
+            tx_apo (array, optional): Transmit apodization window. Defaults to None.
+            patches (int, optional): Number of patches to split the data into. Defaults to 1.
+        """
+        super().__init__(
+            input_data_type=None,
+            output_data_type="beamformed_data",
+            **kwargs,
+        )
+        self.rx_apo = rx_apo
+        self.tx_apo = tx_apo
+        self.patches = patches
+        self.rx_apo_ind = 0
+
+    def initialize(self):
+        if self.rx_apo is None:
+            self.rx_apo = [
+                1.0,
+            ]  # single branch - standard das
+
+        if self.tx_apo is None:
+            self.tx_apo = 1.0
+
+    def process_patch(self, patch):
+        """Performs DAS beamforming on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_pix, n_tx, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
+        """
+        # Sum over the channels, i.e. DAS
+        data = ops.sum(self.rx_apo[self.rx_apo_ind] * patch, -2)
+
+        # Sum over transmits, i.e. Compounding
+        data = self.tx_apo * data
+        data = ops.sum(data, 1)
+
         return data
 
     def process_item(self, data):
@@ -700,10 +794,13 @@ class DelayAndSum(Operation):
         flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
         flat_data = ops.moveaxis(flat_data, 1, 0)
 
-        flat_data = patched_map(self.process_patch, flat_data, self.patches)
+        data = []
+        for i in range(0, len(self.rx_apo)):
+            self.rx_apo_ind = i
+            temp = patched_map(self.process_patch, flat_data, self.patches)
 
-        # Reshape data back to original shape
-        data = ops.reshape(flat_data, (n_z, n_x, n_ch))
+            # Reshape data back to original shape
+            data.append(ops.reshape(temp, (n_z, n_x, n_ch)))
 
         return data
 
@@ -875,7 +972,9 @@ class PfieldWeighting(Operation):
         self.pfield = pfield
 
     def _assign_scan_params(self, scan: Scan):
-        self.pfield = scan.pfield
+        return {
+            "pfield": scan.pfield,
+        }
 
     @property
     def _ready(self):
