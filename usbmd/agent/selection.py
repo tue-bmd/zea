@@ -73,6 +73,7 @@ class GreedyEntropy(LinesActionModel):
         mean: float = 0,
         std_dev: float = 1,
         num_lines_to_update: int = 5,
+        seed=42,
     ):
         """
         Args:
@@ -86,6 +87,7 @@ class GreedyEntropy(LinesActionModel):
                 to update. Must be odd.
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
+        self.seed = keras.random.SeedGenerator(seed)
 
         # Number of samples must be odd so that the entropy
         # of the selected line is set to 0 once it's been selected.
@@ -224,6 +226,94 @@ class GreedyEntropy(LinesActionModel):
             return ops.squeeze(mask, axis=-1)
 
         return ops.vectorized_map(selected_lines_to_line_mask, all_selected_lines)
+
+
+class EquispacedLines(LinesActionModel):
+    """
+    Creates masks with equispaced lines that sweep across
+    the image.
+    """
+
+    def __init__(
+        self,
+        n_actions: int,
+        n_possible_actions: int,
+        img_width: int,
+        img_height: int,
+        batch_size: int,
+    ):
+        """
+        Args:
+            n_actions (int): The number of actions the agent can take.
+            n_possible_actions (int): The number of possible actions.
+            img_width (int): The width of the input image.
+            img_height (int): The height of the input image.
+            batch_size (int): Number of masks to generate in parallel
+
+        Raises:
+            AssertionError: If image width is not divisible by n_possible_actions.
+        """
+        super().__init__(n_actions, n_possible_actions, img_width, img_height)
+        self.current_lines = None
+        self.batch_size = batch_size
+
+    def sample(self):
+        """
+        Generates or updates an equispaced mask to sweep rightwards by one step across the image.
+
+        Returns:
+            Tensor: The mask of shape (batch_size, img_size, img_size)
+        """
+        if self.current_lines is None:
+            self.current_lines, masks = self.initial_sample_stateless()
+        else:
+            self.current_lines, masks = self.sample_stateless(self.current_lines)
+        return masks
+
+    def initial_sample_stateless(self):
+        """
+        Generates a batch of initial equispaced line masks.
+
+        Returns:
+            Tuple[Tensor, Tensor]:
+                - Selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
+        """
+        initial_lines = masks.get_initial_equispaced_lines(
+            self.n_actions, self.n_possible_actions
+        )
+        initial_lines = ops.tile(
+            initial_lines, (self.batch_size, 1)
+        )  # (batch_size, n_actions)
+        return initial_lines, masks.lines_to_im_size(
+            initial_lines, (self.img_height, self.img_width)
+        )
+
+    def sample_stateless(
+        self,
+        current_lines,
+    ):
+        """
+        Updates an existing equispaced mask to sweep rightwards by one step across the image.
+
+        Args:
+            current_lines: Currently selected lines as k-hot vectors,
+                shaped (batch_size, n_possible_actions)
+
+        Returns:
+            Tuple[Tensor, Tensor]:
+                - Newly selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
+        """
+        current_lines = ops.vectorized_map(
+            lambda lines: masks.equispaced_lines(
+                self.n_actions, self.n_possible_actions, lines
+            ),
+            current_lines,
+        )
+        return current_lines, masks.lines_to_im_size(
+            current_lines, (self.img_height, self.img_width)
+        )
 
 
 class CovarianceSamplingLines(LinesActionModel):

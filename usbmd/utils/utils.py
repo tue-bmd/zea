@@ -139,7 +139,7 @@ def preprocess_for_saving(images):
     return images
 
 
-def save_to_gif(images, filename, fps=20):
+def save_to_gif(images, filename, fps=20, shared_color_palette=False):
     """Saves a sequence of images to .gif file.
     Args:
         images: list of images (numpy arrays). Must have shape
@@ -148,6 +148,11 @@ def save_to_gif(images, filename, fps=20):
             which is then converted to RGB. Images should be uint8.
         filename: string containing filename to which data should be written.
         fps: frames per second of rendered format.
+        shared_color_palette (bool, optional): if True, creates a global
+            color palette across all frames, ensuring consistent colors
+            throughout the GIF. Defaults to False, which is default behavior
+            of PIL.Image.save.
+            Note: `True` can cause slow saving for longer sequences.
     """
     assert isinstance(
         filename, (str, Path)
@@ -162,28 +167,29 @@ def save_to_gif(images, filename, fps=20):
 
     pillow_imgs = [Image.fromarray(img) for img in images]
 
-    # Apply the same palette to all frames without dithering for consistent color mapping
-    # Convert all images to RGB and combine their colors for palette generation
-    all_colors = np.vstack(
-        [np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs]
-    )
-    combined_image = Image.fromarray(all_colors.reshape(-1, 1, 3))
-
-    # Generate palette from all frames
-    global_palette = combined_image.quantize(
-        colors=256,
-        method=Image.MEDIANCUT,  # pylint: disable=no-member
-        kmeans=1,
-    )
-
-    # Apply the same palette to all frames without dithering
-    pillow_imgs = [
-        img.convert("RGB").quantize(
-            palette=global_palette,
-            dither=Image.NONE,  # pylint: disable=no-member
+    if shared_color_palette:
+        # Apply the same palette to all frames without dithering for consistent color mapping
+        # Convert all images to RGB and combine their colors for palette generation
+        all_colors = np.vstack(
+            [np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs]
         )
-        for img in pillow_imgs
-    ]
+        combined_image = Image.fromarray(all_colors.reshape(-1, 1, 3))
+
+        # Generate palette from all frames
+        global_palette = combined_image.quantize(
+            colors=256,
+            method=Image.MEDIANCUT,  # pylint: disable=no-member
+            kmeans=1,
+        )
+
+        # Apply the same palette to all frames without dithering
+        pillow_imgs = [
+            img.convert("RGB").quantize(
+                palette=global_palette,
+                dither=Image.NONE,  # pylint: disable=no-member
+            )
+            for img in pillow_imgs
+        ]
 
     pillow_img, *pillow_imgs = pillow_imgs
 
