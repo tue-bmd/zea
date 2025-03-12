@@ -110,8 +110,8 @@ def test_tof_correction(reconstruction_mode="generic"):
         sound_speed=scan.sound_speed,
         probe_geometry=probe.probe_geometry,
         initial_times=scan.initial_times,
-        sampling_frequency=scan.fs,
-        fdemod=scan.fdemod,
+        sampling_frequency=scan.sampling_frequency,
+        demodulation_frequency=scan.demodulation_frequency,
         fnum=scan.f_number,
         angles=scan.polar_angles,
         vfocus=scan.focus_distances,
@@ -128,7 +128,7 @@ def test_tof_correction(reconstruction_mode="generic"):
     for patches in [1, 10]:
         output = beamformer.tof_correction(
             **kwargs,
-            apply_phase_rotation=bool(scan.fdemod),
+            apply_phase_rotation=bool(scan.demodulation_frequency),
             patches=patches,
         )
         outputs.append(ops.convert_to_numpy(output))
