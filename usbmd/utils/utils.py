@@ -9,10 +9,14 @@ import functools
 import hashlib
 import inspect
 import platform
+import time
+from functools import wraps
 from pathlib import Path
+from statistics import mean, median, stdev
 
 import cv2
 import numpy as np
+import yaml
 from PIL import Image
 
 from usbmd.utils import log
@@ -514,3 +518,75 @@ def safe_initialize_class(cls, **kwargs):
     reduced_params = {key: kwargs[key] for key in sig.parameters if key in kwargs}
 
     return cls(**reduced_params)
+
+
+class FunctionTimer:
+    """
+    A decorator class for timing the execution of functions.
+
+    Example:
+        >>> timer = FunctionTimer()
+        >>> my_function = timer(my_function)
+        ...
+        >>> my_function()
+        >>> print(timer.get_stats("my_function"))
+    """
+
+    def __init__(self):
+        self.timings = {}
+        self.last_append = 0
+
+    def __call__(self, func, name=None):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.perf_counter()
+            result = func(*args, **kwargs)
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+
+            # Store the timing result
+            _name = name if name is not None else func.__name__
+            if _name not in self.timings:
+                self.timings[_name] = []
+            self.timings[_name].append(elapsed_time)
+
+            return result
+
+        return wrapper
+
+    def get_stats(self, func_name, drop_first: bool | int = False):
+        """Calculate statistics for the given function."""
+        if func_name not in self.timings:
+            raise ValueError(f"No timings recorded for function '{func_name}'.")
+
+        if isinstance(drop_first, bool):
+            idx = 1 if drop_first else 0
+        elif isinstance(drop_first, int):
+            idx = drop_first
+        else:
+            raise ValueError("drop_first must be a boolean or an integer.")
+
+        times = self.timings[func_name][idx:]
+        return {
+            "mean": mean(times),
+            "median": median(times),
+            "std_dev": stdev(times) if len(times) > 1 else 0,
+            "min": min(times),
+            "max": max(times),
+            "count": len(times),
+        }
+
+    def export_to_yaml(self, filename):
+        """Export the timing data to a YAML file."""
+        with open(filename, "w", encoding="utf-8") as f:
+            yaml.dump(self.timings, f, default_flow_style=False)
+        print(f"Timing data exported to '{filename}'.")
+
+    def append_to_yaml(self, filename, func_name):
+        """Append the timing data to a YAML file."""
+        cropped_timings = self.timings[func_name][self.last_append :]
+
+        with open(filename, "a", encoding="utf-8") as f:
+            yaml.dump(cropped_timings, f, default_flow_style=False)
+
+        self.last_append = len(self.timings[func_name])

@@ -12,21 +12,9 @@ import keras
 import numpy as np
 import pytest
 
+from usbmd import ops_v2 as ops
 from usbmd.config.config import Config
 from usbmd.core import DataTypes
-from usbmd.ops_v2 import (
-    DelayAndSum,
-    EnvelopeDetect,
-    LogCompress,
-    Normalize,
-    Operation,
-    PfieldWeighting,
-    Pipeline,
-    Simulate,
-    TOFCorrection,
-    pipeline_from_config,
-    pipeline_from_json,
-)
 from usbmd.probes import Dummy, Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
@@ -35,7 +23,7 @@ from usbmd.scan import Scan
 
 
 @ops_registry("multiply")
-class MultiplyOperation(Operation):
+class MultiplyOperation(ops.Operation):
     """Multiply Operation for testing purposes."""
 
     def __init__(self, useless_parameter: int = None, **kwargs):
@@ -51,7 +39,7 @@ class MultiplyOperation(Operation):
 
 
 @ops_registry("add")
-class AddOperation(Operation):
+class AddOperation(ops.Operation):
     """Add Operation for testing purposes."""
 
     def call(self, x, y):
@@ -63,7 +51,7 @@ class AddOperation(Operation):
 
 
 @ops_registry("large_matrix_multiplication")
-class LargeMatrixMultiplicationOperation(Operation):
+class LargeMatrixMultiplicationOperation(ops.Operation):
     """Large Matrix Multiplication Operation for testing purposes."""
 
     def call(self, matrix_a, matrix_b):
@@ -79,7 +67,7 @@ class LargeMatrixMultiplicationOperation(Operation):
 
 
 @ops_registry("elementwise_matrix_operation")
-class ElementwiseMatrixOperation(Operation):
+class ElementwiseMatrixOperation(ops.Operation):
     """Elementwise Matrix Operation for testing purposes."""
 
     def call(self, matrix, scalar):
@@ -121,7 +109,48 @@ def pipeline_config_with_params():
     }
 
 
-"""Operation Class Tests"""
+@pytest.fixture
+def default_pipeline(ultrasound_scan):
+    """Returns a default pipeline for ultrasound simulation."""
+    operations = [
+        ops.Simulate(
+            apply_lens_correction=ultrasound_scan.apply_lens_correction,
+            n_ax=ultrasound_scan.n_ax,
+        ),
+        ops.TOFCorrection(),
+        ops.PfieldWeighting(),
+        ops.DelayAndSum(),
+        ops.EnvelopeDetect(),
+        ops.LogCompress(),
+        ops.Normalize(),
+    ]
+    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    return pipeline
+
+
+@pytest.fixture
+def patched_pipeline(ultrasound_scan):
+    """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
+    patched_beamforming = ops.PatchedGrid(
+        operations=[
+            ops.TOFCorrection(),
+            ops.PfieldWeighting(),
+            ops.DelayAndSum(),
+        ],
+        num_patches=2,
+    )
+    operations = [
+        ops.Simulate(
+            apply_lens_correction=ultrasound_scan.apply_lens_correction,
+            n_ax=ultrasound_scan.n_ax,
+        ),
+        patched_beamforming,
+        ops.EnvelopeDetect(),
+        ops.LogCompress(),
+        ops.Normalize(),
+    ]
+    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    return pipeline
 
 
 def test_operation_initialization(test_operation):
@@ -182,7 +211,7 @@ def test_operation_cache_persistence():
 def test_string_representation(verbose=False):
     """Print the string representation of the Pipeline"""
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     if verbose:
         print(str(pipeline))
     assert str(pipeline) == "MultiplyOperation -> AddOperation"
@@ -194,7 +223,7 @@ def test_string_representation(verbose=False):
 def test_pipeline_initialization():
     """Tests initialization of a Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     assert len(pipeline.operations) == 2
     assert isinstance(pipeline.operations[0], MultiplyOperation)
     assert isinstance(pipeline.operations[1], AddOperation)
@@ -203,7 +232,7 @@ def test_pipeline_initialization():
 def test_pipeline_call():
     """Tests the call method of the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     result = pipeline(x=2, y=3)
     assert result["z"] == 9  # (2 * 3) + 3
 
@@ -211,7 +240,7 @@ def test_pipeline_call():
 def test_pipeline_with_large_matrix_multiplication():
     """Tests the Pipeline with a large matrix multiplication operation."""
     operations = [LargeMatrixMultiplicationOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     matrix_a = keras.random.normal(shape=(512, 512))
     matrix_b = keras.random.normal(shape=(512, 512))
     result = pipeline(matrix_a=matrix_a, matrix_b=matrix_b)
@@ -221,7 +250,7 @@ def test_pipeline_with_large_matrix_multiplication():
 def test_pipeline_with_elementwise_operation():
     """Tests the Pipeline with an elementwise matrix operation."""
     operations = [ElementwiseMatrixOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     matrix = keras.random.normal(shape=(512, 512))
     scalar = 2
     result = pipeline(matrix=matrix, scalar=scalar)
@@ -231,14 +260,14 @@ def test_pipeline_with_elementwise_operation():
 def test_pipeline_jit_options():
     """Tests the JIT options for the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations, jit_options="pipeline")
+    pipeline = ops.Pipeline(operations=operations, jit_options="pipeline")
     assert callable(pipeline.call)
 
-    pipeline = Pipeline(operations=operations, jit_options="ops")
+    pipeline = ops.Pipeline(operations=operations, jit_options="ops")
     for operation in pipeline.operations:
         assert operation._jit_compile is True
 
-    pipeline = Pipeline(operations=operations, jit_options=None)
+    pipeline = ops.Pipeline(operations=operations, jit_options=None)
     for operation in pipeline.operations:
         assert operation._jit_compile is False
 
@@ -246,7 +275,7 @@ def test_pipeline_jit_options():
 def test_pipeline_set_params():
     """Tests setting parameters for the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     pipeline.set_params(x=5, y=3)
     params = pipeline.get_params()
     assert params["x"] == 5
@@ -256,7 +285,7 @@ def test_pipeline_set_params():
 def test_pipeline_get_params_per_operation():
     """Tests getting parameters per operation in the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
     pipeline.set_params(x=5, y=3)
     params = pipeline.get_params(per_operation=True)
     assert params[0]["x"] == 5
@@ -269,14 +298,14 @@ def test_pipeline_validation():
         MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
         AddOperation(input_data_type=DataTypes.RAW_DATA),
     ]
-    _ = Pipeline(operations=operations)
+    _ = ops.Pipeline(operations=operations)
 
     operations = [
         MultiplyOperation(output_data_type=DataTypes.RAW_DATA),
         AddOperation(input_data_type=DataTypes.IMAGE),
     ]
     with pytest.raises(ValueError):
-        _ = Pipeline(operations=operations)
+        _ = ops.Pipeline(operations=operations)
 
 
 def test_pipeline_with_scan_probe_config():
@@ -296,7 +325,7 @@ def test_pipeline_with_scan_probe_config():
     # TODO: Add Config object as input to the Pipeline, currently config is not an Object
 
     operations = [MultiplyOperation(), AddOperation()]
-    pipeline = Pipeline(operations=operations)
+    pipeline = ops.Pipeline(operations=operations)
 
     result = pipeline(scan, probe, x=2, y=3)
     assert "z" in result
@@ -314,7 +343,7 @@ def test_pipeline_from_json(config_fixture, request):
     """Tests creating a pipeline from a JSON string."""
     config = request.getfixturevalue(config_fixture)
     json_string = json.dumps(config)
-    pipeline = pipeline_from_json(json_string, jit_options=None)
+    pipeline = ops.pipeline_from_json(json_string, jit_options=None)
 
     assert len(pipeline.operations) == 2
     assert isinstance(pipeline.operations[0], MultiplyOperation)
@@ -334,7 +363,7 @@ def test_pipeline_from_config(config_fixture, request):
     """Tests creating a pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = pipeline_from_config(config, jit_options=None)
+    pipeline = ops.pipeline_from_config(config, jit_options=None)
 
     assert len(pipeline.operations) == 2
     assert isinstance(pipeline.operations[0], MultiplyOperation)
@@ -389,6 +418,8 @@ def ultrasound_scan(ultrasound_probe):
     )
 
     return Scan(
+        Nx=100,
+        Nz=100,
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
@@ -436,9 +467,9 @@ def ultrasound_scatterers():
 
 def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
     """Tests the simulator operation."""
-    pipeline = Pipeline(
+    pipeline = ops.Pipeline(
         [
-            Simulate(
+            ops.Simulate(
                 apply_lens_correction=ultrasound_scan.apply_lens_correction,
                 n_ax=ultrasound_scan.n_ax,
             )
@@ -462,28 +493,16 @@ def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
 
 
 def test_default_ultrasound_pipeline(
-    ultrasound_probe, ultrasound_scan, ultrasound_scatterers
+    default_pipeline,
+    patched_pipeline,
+    ultrasound_probe,
+    ultrasound_scan,
+    ultrasound_scatterers,
 ):
     """Tests the default ultrasound pipeline."""
-
-    # all static parameters are set in the __init__ method of the operations
-    operations = [
-        Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        TOFCorrection(),
-        PfieldWeighting(),
-        DelayAndSum(),
-        EnvelopeDetect(),
-        LogCompress(),
-        Normalize(),
-    ]
-    pipeline = Pipeline(operations=operations, jit_options=None)
-
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
-    output = pipeline(
+    output_default = default_pipeline(
         ultrasound_scan,
         ultrasound_probe,
         scatterer_positions=ultrasound_scatterers["positions"],
@@ -493,9 +512,24 @@ def test_default_ultrasound_pipeline(
         output_range=(0, 255),
     )
 
-    # Check that the pipeline produced the expected outputs
-    assert "image" in output
-    assert output["image"].shape[0] == 1  # Batch dimension
-    # Verify the normalized image has values between 0 and 255
-    assert np.nanmin(output["image"]) >= 0.0
-    assert np.nanmax(output["image"]) <= 255.0
+    output_patched = patched_pipeline(
+        ultrasound_scan,
+        ultrasound_probe,
+        scatterer_positions=ultrasound_scatterers["positions"],
+        scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
+        dynamic_range=(-30, 0),
+        input_range=(-30, 0),
+        output_range=(0, 255),
+    )
+
+    for output in [output_default, output_patched]:
+        # Check that the pipeline produced the expected outputs
+        assert "image" in output
+        assert output["image"].shape[0] == 1  # Batch dimension
+        # Verify the normalized image has values between 0 and 255
+        assert np.nanmin(output["image"]) >= 0.0
+        assert np.nanmax(output["image"]) <= 255.0
+
+    np.testing.assert_allclose(
+        output_default["image"], output_patched["image"], rtol=1e-5, atol=1e-5
+    )

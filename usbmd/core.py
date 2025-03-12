@@ -1,4 +1,4 @@
-""" Base classes for the toolbox """
+"""Base classes for the toolbox"""
 
 import enum
 import pickle
@@ -9,6 +9,9 @@ import numpy as np
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, bool)
 BASE_PRECISION = "float32"
+
+# TODO: make static more neat
+STATIC = ["f_number", "fdemod", "apply_lens_correction", "Nx", "Nz"]
 
 
 class DataTypes(enum.Enum):
@@ -93,13 +96,27 @@ def object_to_tensor(obj: Object):
     else:
         except_tensors = []
 
+    # Check if the object has static attributes, we will not convert them to tensors
+    if hasattr(obj, "_static_attrs"):
+        static_attrs = obj._static_attrs
+    else:
+        static_attrs = []
+
     for key in dir(obj):
         # Skip dunder/hidden methods and excepted tensors
         if key.startswith("_") or key in except_tensors:
             continue
 
+        # Skip methods
         value = getattr(obj, key)
-        if not isinstance(value, CONVERT_TO_KERAS_TYPES):
+        if callable(value):
+            continue
+
+        # Skip byte strings
+        if isinstance(value, bytes):
+            continue
+
+        if key in static_attrs or not isinstance(value, CONVERT_TO_KERAS_TYPES):
             snapshot[key] = value
             continue
 
