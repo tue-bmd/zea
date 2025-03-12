@@ -10,11 +10,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from usbmd.core import DataTypes
+from usbmd.core import DataTypes, ModTypes
 from usbmd.registry import checks_registry
 from usbmd.utils import log
 
 _DATA_TYPES = [member.value for member in DataTypes]
+_MOD_TYPES = [member.value for member in ModTypes]
 
 _BACKENDS = [None, "torch", "tensorflow", "keras", "jax", "numpy"]
 
