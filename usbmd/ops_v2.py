@@ -570,7 +570,7 @@ class UpMix(Operation):
         super().__init__(**kwargs)
         self.key = key
 
-    def call(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
+    def call(self, sampling_frequency=None, center_frequency=None, upsampling_rate=6, **kwargs):
 
         data = kwargs[self.key]
 
@@ -580,7 +580,7 @@ class UpMix(Operation):
         elif data.shape[-1] == 2:
             data = channels_to_complex(data)
 
-        data = upmix(data, fs, fc, upsampling_rate)
+        data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return data
 

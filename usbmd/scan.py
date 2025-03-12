@@ -131,7 +131,7 @@ class Scan(Object):
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
-                Defaults to (0, n_ax * sound_speed / fs / 2).
+                Defaults to (0, n_ax * sound_speed / sampling_frequency / 2).
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
@@ -202,9 +202,9 @@ class Scan(Object):
         #: The number of elements in the array
         self._n_el = int(n_el)
         #: The modulation carrier frequency [Hz]
-        self.fc = float(center_frequency)
+        self.center_frequency = float(center_frequency)
         #: The sampling rate [Hz]
-        self.fs = float(sampling_frequency)
+        self.sampling_frequency = float(sampling_frequency)
         #: The percent bandwidth []
         self.bandwidth_percent = float(bandwidth_percent)
         #: The speed of sound [m/s]
@@ -212,9 +212,9 @@ class Scan(Object):
         #: The number of rf/iq channels (1 for rf, 2 for iq)
         self._n_ch = n_ch
         #: The demodulation frequency [Hz]
-        self._fdemod = demodulation_frequency
+        self._demodulation_frequency = demodulation_frequency
         #: The wavelength of the modulation carrier [m]
-        self.wvln = self.sound_speed / self.fc
+        self.wvln = self.sound_speed / self.center_frequency
         #: The number of pixels per wavelength in the beamforming grid
         self.pixels_per_wavelength = float(pixels_per_wvln)
         #: The decimation factor applied after downconverting data to baseband (RF to IQ)
@@ -251,7 +251,7 @@ class Scan(Object):
             self.zlims = zlims
         else:
             # Compute the depth of the scan from the number of axial samples
-            self.zlims = [0, self.sound_speed * self.n_ax / self.fs / 2]
+            self.zlims = [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
         if ylims:
             self.ylims = ylims
         else:
@@ -337,7 +337,7 @@ class Scan(Object):
                 "Focal distance in range 1-1000 m. "
                 "Assuming wavelenghts instead of meters."
             )
-            lambda0 = self.sound_speed / self.fc
+            lambda0 = self.sound_speed / self.center_frequency
             focus_distances = focus_distances * lambda0
 
         self._t0_delays = t0_delays
@@ -469,27 +469,27 @@ class Scan(Object):
     @n_ch.setter
     def n_ch(self, value):
         self._n_ch = value
-        self._fdemod = None  # Reset fdemod
+        self._demodulation_frequency = None  # Reset demodulation_frequency
 
     @property
-    def fdemod(self):
+    def demodulation_frequency(self):
         """The demodulation frequency."""
-        if self._fdemod is not None:
-            return self._fdemod
+        if self._demodulation_frequency is not None:
+            return self._demodulation_frequency
 
         if self.n_ch is None:
             raise ValueError(
-                "Please set scan.n_ch or scan.fdemod. Currently neither is set.\n"
-                "\tif n_ch is set to 1 (RF), then fdemod is set to 0.0.\n"
-                "\tif n_ch is set to 2 (IQ), then fdemod is set to fc.\n"
-                "\tfdemod can be set to any other value manually."
+                "Please set scan.n_ch or scan.demodulation_frequency. Currently neither is set.\n"
+                "\tif n_ch is set to 1 (RF), demodulation_frequency is set to 0.0.\n"
+                "\tif n_ch is set to 2 (IQ), demodulation_frequency is set to center_frequency.\n"
+                "\tdemodulation_frequency can be set to any other value manually."
             )
 
-        return self.fc if self.n_ch == 2 else 0.0
+        return self.center_frequency if self.n_ch == 2 else 0.0
 
-    @fdemod.setter
-    def fdemod(self, value):
-        self._fdemod = value
+    @demodulation_frequency.setter
+    def demodulation_frequency(self, value):
+        self._demodulation_frequency = value
 
     @property
     def t0_delays(self):
@@ -668,9 +668,9 @@ class Scan(Object):
             "n_tx": self.n_tx,
             "n_ax": self.n_ax,
             "n_el": self.n_el,
-            "center_frequency": self.fc,
-            "sampling_frequency": self.fs,
-            "demodulation_frequency": self.fdemod,
+            "center_frequency": self.center_frequency,
+            "sampling_frequency": self.sampling_frequency,
+            "demodulation_frequency": self.demodulation_frequency,
             "xlims": self.xlims,
             "ylims": self.ylims,
             "zlims": self.zlims,
