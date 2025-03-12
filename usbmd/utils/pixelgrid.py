@@ -84,7 +84,7 @@ def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
         ValueError: Either Nx and Nz or dx and dz must be defined.
 
     Returns:
-        grid (np.ndarray): Pixel grid of size (nx, nz, 3) in
+        grid (np.ndarray): Pixel grid of size (nz, nx, 3) in
             Cartesian coordinates (x, y, z)
     """
     assert (bool(Nx) and bool(Nz)) ^ (

@@ -9,8 +9,9 @@ from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from keras import ops
 
-from usbmd.core import Object
+from usbmd.core import STATIC, Object
 from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -173,7 +174,7 @@ class Scan(Object):
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
             pfield_kwargs (np.ndarray, float, optional): Arguments to calculate the estimated
-                pressure field of shape (Nx, Nz, 1) with to perform automatic weighting.
+                pressure field of shape (n_tx, Nz, Nx, 1) with to perform automatic weighting.
                 Defaults to None. In that case default arguments are used. If pfield
                 can be used by the beamformer with option
                 config.model.beamformer.auto_pressure_weighting. If set to True, the
@@ -268,7 +269,7 @@ class Scan(Object):
 
         self.z_axis = np.linspace(*self.zlims, self.n_ax)
 
-        #: The beamforming grid of shape (Nx, Nz, 3)
+        #: The beamforming grid of shape (Nz, Nx, 3)
         self._grid = self.grid
 
         if initial_times is None:
@@ -352,6 +353,8 @@ class Scan(Object):
         self.attenuation_coef = attenuation_coef
 
         self.selected_transmits = selected_transmits
+
+        self._static_attrs = STATIC
 
     def _select_transmits(self, selected_transmits):
         """Interprets the selected transmits argument and returns an array of transmit
@@ -591,7 +594,7 @@ class Scan(Object):
 
     @property
     def grid(self):
-        """The beamforming grid of shape (Nx, Nz, 3)."""
+        """The beamforming grid of shape (Nz, Nx, 3)."""
         if self._grid is None:
             self._grid = get_grid(self)
             self._Nz, self._Nx, _ = self._grid.shape
@@ -605,8 +608,13 @@ class Scan(Object):
         self._grid = value
 
     @property
+    def flatgrid(self):
+        """The beamforming grid of shape (Nz*Nx, 3)."""
+        return self.grid.reshape(-1, 3)
+
+    @property
     def pfield(self):
-        """The pfield grid of shape (Nx, Nz, 1)."""
+        """The pfield grid of shape (n_tx, Nz, Nx)."""
         if self._pfield is not None:
             return self._pfield
 
@@ -615,24 +623,29 @@ class Scan(Object):
                 "scan.probe_geometry not set. Cannot compute pfield."
                 "Defaulting to uniform weights."
             )
-            self._pfield = 1
+            self._pfield = np.ones((self.n_tx, self.Nz, self.Nx))
         else:
             if self.pfield_kwargs is None:
                 pfield_kwargs = {}
             else:
                 pfield_kwargs = self.pfield_kwargs
 
-            self._pfield = compute_pfield(self, **pfield_kwargs)
+            self._pfield = ops.convert_to_numpy(compute_pfield(self, **pfield_kwargs))
 
         return self._pfield
+
+    @property
+    def flat_pfield(self):
+        """The pfield grid of shape (Nz*Nx, n_tx)."""
+        return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
     @pfield.setter
     def pfield(self, value):
         """Manually set the pfield."""
         self.pfield_kwargs = None
         self._pfield = value
-        assert self._pfield.shape == (self.Nx, self.Nz, 1), (
-            f"pfield must have shape (Nx, Nz, 1) = {self.Nx, self.Nz, 1}. "
+        assert self._pfield.shape == (self.n_tx, self.Nz, self.Nx), (
+            f"pfield must have shape (n_tx, Nz, Nx) = {self.n_tx, self.Nz, self.Nx}. "
             f"Got shape {self._pfield.shape}."
         )
 
