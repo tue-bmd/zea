@@ -29,6 +29,7 @@ Allows for flexible indexing and stacking of dimensions. There are a few importa
 import keras
 import tensorflow as tf
 from keras.src.trainers.data_adapters import TFDatasetAdapter
+
 from usbmd.data.dataloader import H5Generator
 from usbmd.data.layers import Resizer
 from usbmd.utils import find_methods_with_return_type, log, translate
@@ -121,6 +122,7 @@ def h5_dataset_from_directory(
     shuffle: bool = None,
     seed: int | None = None,
     limit_n_samples: int | None = None,
+    limit_n_frames: int | None = None,
     resize_type: str = "center_crop",
     resize_axes: tuple | None = None,
     resize_kwargs: dict | None = None,
@@ -182,6 +184,9 @@ def h5_dataset_from_directory(
         seed (int, optional): random seed of shuffle.
         limit_n_samples (int, optional): take only a subset of samples.
             Useful for debuging. Defaults to None.
+        limit_n_frames (int, optional): limit the number of frames to load from each file. This
+            means n_frames per data file will be used. These will be the first frames in the file.
+            Defaults to None
         resize_type (str, optional): resize type. Defaults to 'center_crop'.
             can be 'center_crop', 'random_crop' or 'resize'.
         resize_axes (tuple, optional): axes to resize along. Should be of length 2
@@ -230,6 +235,7 @@ def h5_dataset_from_directory(
         prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
         wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
             If True, will convert the dataset that returns backend tensors.
+        **kwargs: additional kwargs for H5Generator.
 
     Returns:
         tf.data.Dataset: dataset
@@ -252,6 +258,7 @@ def h5_dataset_from_directory(
         additional_axes_iter=additional_axes_iter,
         overlapping_blocks=overlapping_blocks,
         limit_n_samples=limit_n_samples,
+        limit_n_frames=limit_n_frames,
         sort_files=True,
         shuffle=generator_shuffle,
         seed=seed,
