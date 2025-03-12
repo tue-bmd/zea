@@ -2216,7 +2216,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
         ndarray: band pass filter
     """
     bpf = signal.firwin(
-        num_taps, [f1, f2], pass_zero=False, sampling_frequency=sampling_frequency
+        num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency
     )
     return bpf
 
@@ -2243,7 +2243,7 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
     )
     t_qbp = np.arange(num_taps) / sampling_frequency
     lpf = signal.firwin(
-        num_taps, bw / 2, pass_zero=True, sampling_frequency=sampling_frequency
+        num_taps, bw / 2, pass_zero=True, fs=sampling_frequency
     ) * np.exp(1j * 2 * np.pi * f * t_qbp)
     return lpf
 
