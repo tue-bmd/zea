@@ -12,13 +12,13 @@ from keras import ops
 import usbmd
 from usbmd.backend import jit
 from usbmd.config.config import Config
-from usbmd.core import DataTypes
+from usbmd.core import STATIC, DataTypes
 from usbmd.ops import channels_to_complex, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
-from usbmd.tensor_ops import patched_map, take
+from usbmd.tensor_ops import patched_map, reshape_axis, take
 from usbmd.utils import log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
@@ -58,6 +58,7 @@ class Operation(keras.Operation):
         cache_outputs: bool = False,
         jit_compile: bool = True,
         with_batch_dim: bool = True,
+        jit_kwargs: dict | None = None,
     ):
         """
         Args:
@@ -86,6 +87,14 @@ class Operation(keras.Operation):
         self._valid_keys = None  # Keys valid for the `call` method
         self._trace_signatures()
 
+        if jit_kwargs is None:
+            # TODO: set static_argnames only for operations that require it
+            if keras.backend.backend() == "jax":
+                jit_kwargs = {"static_argnames": STATIC}
+            else:
+                jit_kwargs = {}
+        self.jit_kwargs = jit_kwargs
+
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
 
@@ -94,7 +103,9 @@ class Operation(keras.Operation):
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile
-        self._call = jit(self.call) if self._jit_compile else self.call
+        self._call = (
+            jit(self.call, **self.jit_kwargs) if self._jit_compile else self.call
+        )
 
     def _trace_signatures(self):
         """
@@ -212,6 +223,7 @@ class Pipeline:
         operations: List[Operation],
         with_batch_dim: bool = True,
         jit_options: Union[str, None] = "ops",
+        jit_kwargs: dict | None = None,
     ):
         """Initialize a pipeline
 
@@ -230,6 +242,7 @@ class Pipeline:
             - None disables JIT compilation.
             Defaults to "ops".
         """
+        self._call_pipeline = self.call
 
         # add functionality here
         # operations = ...
@@ -239,27 +252,34 @@ class Pipeline:
         if jit_options not in ["pipeline", "ops", None]:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
-        for operation in self.operations:  # We use self.layers from keras.Pipeline here
-            operation.with_batch_dim = with_batch_dim
-            operation.set_jit(jit_options == "ops")
+        self.with_batch_dim = with_batch_dim
 
         self.validate()
 
         # pylint: disable=method-hidden
-        self._call_pipeline = jit(self.call) if jit_options == "pipeline" else self.call
+        if jit_kwargs is None:
+            if keras.backend.backend() == "jax":
+                jit_kwargs = {"static_argnames": STATIC}
+            else:
+                jit_kwargs = {}
+        self.jit_kwargs = jit_kwargs
+        self.jit_options = jit_options  # will handle the jit compilation
 
     @property
     def operations(self):
         """Alias for self.layers to match the USBMD naming convention"""
         return self._pipeline_layers
 
-    def call(self, inputs):
+    def call(self, **inputs):
         """Process input data through the pipeline."""
         for operation in self._pipeline_layers:
             outputs = operation(**inputs)
             inputs = outputs
         return outputs
 
+    # TODO: a lot of time is spent on converting scan etc... to_tensor every call
+    # If you want to call pipeline on every frame in a for loop (e.g. real time applications where
+    # data is coming in on the fly), this will make it twice as slow
     def __call__(self, *args, return_numpy=False, **kwargs):
         """Process input data through the pipeline."""
 
@@ -290,8 +310,12 @@ class Pipeline:
         # kwargs > config > scan > probe
         inputs = {**probe, **scan, **config, **kwargs}
 
+        # Dropping str inputs as they are not supported in jax.jit
+        # TODO: will this break any operations?
+        inputs.pop("probe_type", None)
+
         ## PROCESSING
-        outputs = self._call_pipeline(inputs)
+        outputs = self._call_pipeline(**inputs)
 
         ## PREPARE OUTPUT
         if return_numpy:
@@ -323,9 +347,54 @@ class Pipeline:
         raise NotImplementedError
 
     @property
+    def jit_options(self):
+        """Get the jit_options property of the pipeline."""
+        return self._jit_options
+
+    @jit_options.setter
+    def jit_options(self, value: Union[str, None]):
+        """Set the jit_options property of the pipeline."""
+        self._jit_options = value
+        if value == "pipeline":
+            self.jit()
+            return
+        else:
+            self.unjit()
+
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                operation.jit_options = value
+            else:
+                operation.set_jit(value == "ops")
+
+    def jit(self):
+        """JIT compile the pipeline."""
+        self._call_pipeline = jit(self.call, **self.jit_kwargs)
+
+    def unjit(self):
+        """Un-JIT compile the pipeline."""
+        self._call_pipeline = self.call
+
+    @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
         return self.operations[0].with_batch_dim
+
+    @with_batch_dim.setter
+    def with_batch_dim(self, value):
+        """Set the with_batch_dim property of the pipeline."""
+        for operation in self.operations:
+            operation.with_batch_dim = value
+
+    @property
+    def input_data_type(self):
+        """Get the input_data_type property of the pipeline."""
+        return self.operations[0].input_data_type
+
+    @property
+    def output_data_type(self):
+        """Get the output_data_type property of the pipeline."""
+        return self.operations[-1].output_data_type
 
     def validate(self):
         """Validate the pipeline by checking the compatibility of the operations."""
@@ -649,8 +718,6 @@ class Simulate(Operation):
                 attenuation_coef=attenuation_coef,
                 tx_apodizations=tx_apodizations,
             ),
-            "n_ax": self.n_ax,
-            "apply_lens_correction": self.apply_lens_correction,
         }
 
 
@@ -658,21 +725,18 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(
-        self, key="raw_data", output_key="aligned_data", num_patches=1, **kwargs
-    ):
+    def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
-        self.num_patches = num_patches
         self.key = key
         self.output_key = output_key
 
     def call(
         self,
-        grid=None,
+        flatgrid=None,
         sound_speed=None,
         polar_angles=None,
         focus_distances=None,
@@ -692,7 +756,7 @@ class TOFCorrection(Operation):
 
         Args:
             raw_data (ops.Tensor): Raw RF data to correct
-            grid (ops.Tensor): Grid points at which to evaluate the time-of-flight
+            flatgrid (ops.Tensor): Grid points at which to evaluate the time-of-flight
             sound_speed (float): Sound speed in the medium
             polar_angles (ops.Tensor): Polar angles for scan lines
             focus_distances (ops.Tensor): Focus distances for scan lines
@@ -714,7 +778,7 @@ class TOFCorrection(Operation):
         raw_data = kwargs[self.key]
 
         kwargs = {
-            "grid": grid,
+            "flatgrid": flatgrid,
             "sound_speed": sound_speed,
             "angles": polar_angles,
             "vfocus": focus_distances,
@@ -733,18 +797,10 @@ class TOFCorrection(Operation):
         }
 
         if not self.with_batch_dim:
-            tof_corrected = usbmd.beamformer.tof_correction(
-                raw_data,
-                patches=self.num_patches,
-                **kwargs,
-            )
+            tof_corrected = usbmd.beamformer.tof_correction_flatgrid(raw_data, **kwargs)
         else:
             tof_corrected = ops.map(
-                lambda data: usbmd.beamformer.tof_correction(
-                    data,
-                    patches=self.num_patches,
-                    **kwargs,
-                ),
+                lambda data: usbmd.beamformer.tof_correction_flatgrid(data, **kwargs),
                 raw_data,
             )
 
@@ -766,26 +822,29 @@ class PfieldWeighting(Operation):
         self.key = key
         self.output_key = output_key
 
-    def call(self, pfield=None, **kwargs):
+    def call(self, flat_pfield=None, **kwargs):
         """Weight data with pressure field.
 
         Args:
-            pfield (ops.Tensor): Pressure field weight mask
+            flat_pfield (ops.Tensor): Pressure field weight mask of shape (n_pix, n_tx)
 
         Returns:
             dict: Dictionary containing weighted data
         """
         data = kwargs[self.key]
 
-        if pfield is None:
+        if flat_pfield is None:
             return {self.output_key: data}
+
+        # Swap (n_pix, n_tx) to (n_tx, n_pix)
+        flat_pfield = ops.swapaxes(flat_pfield, 0, 1)
 
         # Perform element-wise multiplication with the pressure weight mask
         # Also add the required dimensions for broadcasting
         if self.with_batch_dim:
-            pfield_expanded = ops.expand_dims(pfield, axis=0)
+            pfield_expanded = ops.expand_dims(flat_pfield, axis=0)
         else:
-            pfield_expanded = pfield
+            pfield_expanded = flat_pfield
 
         pfield_expanded = pfield_expanded[..., None, None]
         weighted_data = data * pfield_expanded
@@ -793,69 +852,140 @@ class PfieldWeighting(Operation):
         return {self.output_key: weighted_data}
 
 
+@ops_registry("patched_grid")
+class PatchedGrid(Pipeline):
+    """
+    With this class you can form a pipeline that will be applied to patches of the grid.
+    This is useful to avoid OOM errors when processing large grids.
+
+    Somethings to NOTE about this class:
+        - The ops have to use flatgrid and flat_pfield as inputs, these will be patched.
+        - Changing anything other than `self.output_data_type` in the dict will not be propagated!
+        - Will be jitted as a single operation, not the individual operations.
+        - This class handles the batching.
+    """
+
+    def __init__(self, *args, num_patches=10, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_patches = num_patches
+
+        for operation in self.operations:
+            if isinstance(operation, DelayAndSum):
+                operation.reshape_grid = False
+
+        self._jittable_call = self.jittable_call
+
+    @property
+    def jit_options(self):
+        """Get the jit_options property of the pipeline."""
+        return self._jit_options
+
+    @jit_options.setter
+    def jit_options(self, value):
+        """Set the jit_options property of the pipeline."""
+        self._jit_options = value
+        if value in ["pipeline", "ops"]:
+            self.jit()
+        else:
+            self.unjit()
+
+    def jit(self):
+        """JIT compile the pipeline."""
+        self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
+
+    def unjit(self):
+        """Un-JIT compile the pipeline."""
+        self._jittable_call = self.jittable_call
+        self._call_pipeline = self.call
+
+    @property
+    def with_batch_dim(self):
+        """Get the with_batch_dim property of the pipeline."""
+        return self.pipeline_batched
+
+    @with_batch_dim.setter
+    def with_batch_dim(self, value):
+        """Set the with_batch_dim property of the pipeline.
+        The class handles the batching so the operations have to be set to False."""
+        self.pipeline_batched = value
+        for operation in self.operations:
+            operation.with_batch_dim = False
+
+    def call_item(self, inputs):
+        """Process data in patches."""
+        Nx = inputs["Nx"]
+        Nz = inputs["Nz"]
+        flatgrid = inputs.pop("flatgrid")
+        flat_pfield = inputs.pop("flat_pfield")
+
+        def patched_call(flatgrid, flat_pfield):
+            out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
+                flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
+            )
+            return out[self.output_data_type.value]
+
+        out = patched_map(
+            patched_call, flatgrid, self.num_patches, flat_pfield=flat_pfield
+        )
+        return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
+
+    def jittable_call(self, **inputs):
+        """Process input data through the pipeline."""
+        if self.pipeline_batched:
+            input_data = inputs.pop(self.input_data_type.value)
+            output = ops.map(
+                lambda x: self.call_item({self.input_data_type.value: x, **inputs}),
+                input_data,
+            )
+        else:
+            output = self.call_item(inputs)
+
+        return {self.output_data_type.value: output}
+
+    def call(self, **inputs):
+        """Process input data through the pipeline."""
+        output = self._jittable_call(**inputs)
+        inputs.update(output)
+        return inputs
+
+
 @ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
     def __init__(
-        self, key="aligned_data", output_key="beamformed_data", num_patches=1, **kwargs
+        self,
+        key="aligned_data",
+        output_key="beamformed_data",
+        reshape_grid=True,
+        **kwargs,
     ):
-        """
-        Args:
-            num_patches (int, optional): Number of patches to split the data into. Defaults to 1.
-        """
         super().__init__(
             input_data_type=None,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
-        self.num_patches = num_patches
         self.key = key
         self.output_key = output_key
+        self.reshape_grid = reshape_grid
 
-    def process_patch(self, patch, rx_apo):
-        """Patch wise DAS on tof-corrected input (aligned data).
+    def process_image(self, data, rx_apo, tx_apo):
+        """Performs DAS beamforming on tof-corrected input.
 
         Args:
-            patch (ops.Tensor): The TOF corrected input of shape `(n_pix, n_tx, n_el, n_ch)`
-            rx_apo (ops.Tensor): Receive apodization window
+            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_pix, n_el, n_ch)`
 
         Returns:
             ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
         """
+        # Apply tx_apo
+        data = tx_apo * data
+
         # Sum over the channels, i.e. DAS
-        data = ops.sum(rx_apo * patch, -2)
+        data = ops.sum(rx_apo * data, -2)
 
         # Sum over transmits, i.e. Compounding
-        data = ops.sum(data, 1)
-        return data
-
-    def process_image(self, data, rx_apo, tx_apo):
-        """Performs DAS beamforming on tof-corrected input. Optionally splits the data into patches.
-
-        Args:
-            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
-
-        Returns:
-            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
-        """
-        n_tx, n_z, n_x, n_el, n_ch = data.shape
-
-        # Flatten grid and move n_pix=(n_z * n_x) to the front
-        flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
-        flat_data = ops.moveaxis(flat_data, 1, 0)
-
-        # Apply tx_apo
-        flat_data = tx_apo * flat_data
-
-        flat_data = patched_map(
-            lambda patch: self.process_patch(patch, rx_apo),
-            flat_data,
-            self.num_patches,
-        )
-
-        # Reshape data back to original shape
-        data = ops.reshape(flat_data, (n_z, n_x, n_ch))
+        data = ops.sum(data, 0)
 
         return data
 
@@ -863,18 +993,20 @@ class DelayAndSum(Operation):
         self,
         rx_apo=None,
         tx_apo=None,
+        Nz=None,
+        Nx=None,
         **kwargs,
     ):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
             tof_corrected_data (ops.Tensor): The TOF corrected input of shape
-                `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
+                `(n_tx, n_z*n_x, n_el, n_ch)` with optional batch dimension.
             rx_apo (ops.Tensor, optional): Receive apodization window. Defaults to 1.0.
             tx_apo (ops.Tensor, optional): Transmit apodization window. Defaults to 1.0.
 
         Returns:
-            dict: Dictionary containing beamformed_data of shape `(n_z, n_x, n_ch)`
+            dict: Dictionary containing beamformed_data of shape `(n_z*n_x, n_ch)`
                 with optional batch dimension.
         """
         if rx_apo is None:
@@ -891,6 +1023,11 @@ class DelayAndSum(Operation):
             # Apply process_image to each item in the batch
             beamformed_data = ops.map(
                 lambda data: self.process_image(data, rx_apo, tx_apo), data
+            )
+
+        if self.reshape_grid:
+            beamformed_data = reshape_axis(
+                beamformed_data, (Nz, Nx), axis=int(self.with_batch_dim)
             )
 
         return {self.output_key: beamformed_data}

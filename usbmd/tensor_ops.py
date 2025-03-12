@@ -8,6 +8,7 @@ import numpy as np
 from keras import ops
 
 from usbmd.utils import log
+from usbmd.utils.utils import map_negative_indices
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
@@ -256,7 +257,7 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     return cov_matrices
 
 
-def patched_map(f, xs, patches: int):
+def patched_map(f, xs, patches: int, jit=True, **batch_kwargs):
     """
     Wrapper around `batched_map` which allows you to specify the number of patches rather than
     the batch size.
@@ -268,10 +269,10 @@ def patched_map(f, xs, patches: int):
     else:
         length = ops.shape(xs)[0]
         batch_size = np.ceil(length / patches).astype(int)
-        return batched_map(f, xs, batch_size)
+        return batched_map(f, xs, batch_size, jit, **batch_kwargs)
 
 
-def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
+def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
     """
     Map a function over leading array axes.
 
@@ -347,6 +348,17 @@ def batched_map(f, xs, batch_size=None, jit=True, batch_kwargs=None):
     return out_reshaped[:total]  # Remove any padding added.
 
 
+if keras.backend.backend() == "jax":
+    # For jit purposes
+    def _get_padding(N, remainder):
+        return N - remainder if remainder != 0 else 0
+
+else:
+
+    def _get_padding(N, remainder):
+        return ops.where(remainder != 0, N - remainder, 0)
+
+
 def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
     """Pad an array to be divisible by N along the specified axis.
     Args:
@@ -368,7 +380,7 @@ def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
 
     # Calculate how much padding is needed for the specified axis
     remainder = length % N
-    padding = ops.where(remainder != 0, N - remainder, 0)
+    padding = _get_padding(N, remainder)
 
     # Create a tuple with (before, after) padding for each axis
     pad_width = [(0, 0)] * ops.ndim(arr)  # No padding for other axes
@@ -950,6 +962,7 @@ def patches_to_images(
     return images
 
 
+# TODO: why not ops.take? @tristan-deep
 def take(data, indices, axis=-1):
     """Take values from data along axis.
 
@@ -964,3 +977,47 @@ def take(data, indices, axis=-1):
         axis = data.ndim + axis
     indices = ops.reshape(indices, [1] * axis + [-1] + [1] * (data.ndim - axis - 1))
     return ops.take_along_axis(data, indices, axis=axis)
+
+
+def reshape_axis(data, newshape: tuple, axis: int):
+    """Reshape data along axis.
+
+    Args:
+        data (tensor): input data.
+        newshape (tuple): new shape of data along axis.
+        axis (int): axis to reshape.
+
+    Example:
+        >>> data = keras.random.uniform((3, 4, 5))
+        >>> newshape = (2, 2)
+        >>> reshaped_data = reshape_axis(data, newshape, axis=1)
+        >>> reshaped_data.shape
+        (3, 2, 2, 5)
+    """
+    axis = map_negative_indices([axis], data.ndim)[0]
+    shape = list(ops.shape(data))  # list
+    shape = shape[:axis] + list(newshape) + shape[axis + 1 :]
+    return ops.reshape(data, shape)
+
+
+if keras.backend.backend() == "tensorflow":
+
+    def safe_vectorize(
+        pyfunc, excluded=None, signature=None  # pylint: disable=unused-argument
+    ):
+        """Because tensorflow does not support multiple arguments to ops.vectorize(func)(...)
+        We will just map the function manually."""
+
+        def _map(*args):
+            outputs = []
+            for i in range(ops.shape(args[0])[0]):
+                outputs.append(pyfunc(*[arg[i] for arg in args]))
+            return ops.stack(outputs)
+
+        return _map
+
+else:
+
+    def safe_vectorize(pyfunc, excluded=None, signature=None):
+        """Just a wrapper around ops.vectorize."""
+        return ops.vectorize(pyfunc, excluded=excluded, signature=signature)
