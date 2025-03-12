@@ -8,7 +8,6 @@ import numpy as np
 from keras import ops
 
 from usbmd.tensor_ops import patched_map
-from usbmd.utils.cache import cache_output
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
@@ -23,21 +22,23 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
 
     def tof_correction_patch(grid_patch):
         tof_corrected = tof_correction_flatgrid(data, grid_patch, *args, **kwargs)
-        tof_corrected = ops.moveaxis(
+        tof_corrected = ops.swapaxes(
             tof_corrected, 1, 0
-        )  # move n_pix to the first dimension
+        )  # move n_pix to the first dimension for patched_map
         return tof_corrected
 
     tof_corrected = patched_map(tof_correction_patch, flatgrid, patches)
 
-    tof_corrected = ops.moveaxis(
+    tof_corrected = ops.swapaxes(
         tof_corrected, 1, 0
-    )  # move n_tx to the first dimension
+    )  # move n_tx to the first dimension to undo the swapaxes above
 
     # Reshape to reintroduce the x- and z-dimensions
+    shape = ops.shape(data)[-2:]
+
     return ops.reshape(
         tof_corrected,
-        (n_tx, gridshape[0], gridshape[1], *ops.shape(tof_corrected)[-2:]),
+        (n_tx, gridshape[0], gridshape[1], *shape),
     )
 
 
@@ -124,24 +125,37 @@ def tof_correction_flatgrid(
     # reaching the transducer element.
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
-    delay_fn = (
-        calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
-    )
-    txdel, rxdel = delay_fn(
-        flatgrid,
-        t0_delays,
-        tx_apodizations,
-        probe_geometry,
-        initial_times,
-        sampling_frequency,
-        sound_speed,
-        n_tx,
-        n_el,
-        vfocus,
-        angles,
-        lens_thickness=lens_thickness,
-        lens_sound_speed=lens_sound_speed,
-    )
+
+    if apply_lens_correction:
+        txdel, rxdel = calculate_lens_corrected_delays(
+            flatgrid,
+            t0_delays,
+            tx_apodizations,
+            probe_geometry,
+            initial_times,
+            sampling_frequency,
+            sound_speed,
+            n_tx,
+            n_el,
+            vfocus,
+            angles,
+            lens_thickness=lens_thickness,
+            lens_sound_speed=lens_sound_speed,
+        )
+    else:
+        txdel, rxdel = calculate_delays(
+            flatgrid,
+            t0_delays,
+            tx_apodizations,
+            probe_geometry,
+            initial_times,
+            sampling_frequency,
+            sound_speed,
+            n_tx,
+            n_el,
+            vfocus,
+            angles,
+        )
 
     mask = apod_mask(flatgrid, probe_geometry, fnum)
 
@@ -177,7 +191,6 @@ def tof_correction_flatgrid(
     return ops.stack(bf_tx, 0)
 
 
-@cache_output()
 def calculate_delays(
     grid,
     t0_delays,
@@ -366,10 +379,10 @@ def _complex_rotate(iq, theta):
     Returns:
         Tensor: The rotated tensor of shape `(..., 2)`.
     """
-    assert iq.shape[-1] == 2, (
-        "The last dimension of the input tensor should be 2, "
-        f"got {iq.shape[-1]} dimensions."
-    )
+    # assert iq.shape[-1] == 2, (
+    #     "The last dimension of the input tensor should be 2, "
+    #     f"got {iq.shape[-1]} dimensions and shape {iq.shape}."
+    # )
     # Select i and q channels
     i = iq[..., 0]
     q = iq[..., 1]
