@@ -166,7 +166,16 @@ def cache_output(*arg_names, verbose=False):
 
     def decorator(func):
         def wrapper(*args, **kwargs):
-            cache_key = generate_cache_key(func, args, kwargs, arg_names)
+            try:
+                cache_key = generate_cache_key(func, args, kwargs, arg_names)
+            except Exception as e:
+                if verbose:
+                    log.warning(
+                        f"Could not cache result for {func.__qualname__}: {e}. "
+                        "Running the function without caching. "
+                        "Often happens for a function wrapped with jax.jit or tf.function."
+                    )
+                return func(*args, **kwargs)
             if cache_key is None:
                 return func(*args, **kwargs)  # Run function without caching
             cache_file = _CACHE_DIR / f"{cache_key}.pkl"

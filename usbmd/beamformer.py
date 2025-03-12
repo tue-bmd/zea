@@ -7,11 +7,12 @@
 import numpy as np
 from keras import ops
 
-from usbmd.tensor_ops import patched_map
-from usbmd.utils.cache import cache_output
+from usbmd.tensor_ops import patched_map, safe_vectorize
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
+from usbmd.utils.utils import deprecated
 
 
+@deprecated(replacement="usbmd.beamformers.tof_correction_flatgrid")
 def tof_correction(data, grid, *args, patches=1, **kwargs):
     """
     Time-of-flight correction. The grid can be split into patches to reduce memory.
@@ -23,21 +24,23 @@ def tof_correction(data, grid, *args, patches=1, **kwargs):
 
     def tof_correction_patch(grid_patch):
         tof_corrected = tof_correction_flatgrid(data, grid_patch, *args, **kwargs)
-        tof_corrected = ops.moveaxis(
+        tof_corrected = ops.swapaxes(
             tof_corrected, 1, 0
-        )  # move n_pix to the first dimension
+        )  # move n_pix to the first dimension for patched_map
         return tof_corrected
 
     tof_corrected = patched_map(tof_correction_patch, flatgrid, patches)
 
-    tof_corrected = ops.moveaxis(
+    tof_corrected = ops.swapaxes(
         tof_corrected, 1, 0
-    )  # move n_tx to the first dimension
+    )  # move n_tx to the first dimension to undo the swapaxes above
 
     # Reshape to reintroduce the x- and z-dimensions
+    shape = ops.shape(data)[-2:]
+
     return ops.reshape(
         tof_corrected,
-        (n_tx, gridshape[0], gridshape[1], *ops.shape(tof_corrected)[-2:]),
+        (n_tx, gridshape[0], gridshape[1], *shape),
     )
 
 
@@ -124,38 +127,53 @@ def tof_correction_flatgrid(
     # reaching the transducer element.
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
-    delay_fn = (
-        calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
-    )
-    txdel, rxdel = delay_fn(
-        flatgrid,
-        t0_delays,
-        tx_apodizations,
-        probe_geometry,
-        initial_times,
-        sampling_frequency,
-        sound_speed,
-        n_tx,
-        n_el,
-        vfocus,
-        angles,
-        lens_thickness=lens_thickness,
-        lens_sound_speed=lens_sound_speed,
+
+    if apply_lens_correction:
+        txdel, rxdel = calculate_lens_corrected_delays(
+            flatgrid,
+            t0_delays,
+            tx_apodizations,
+            probe_geometry,
+            initial_times,
+            sampling_frequency,
+            sound_speed,
+            n_tx,
+            n_el,
+            vfocus,
+            angles,
+            lens_thickness=lens_thickness,
+            lens_sound_speed=lens_sound_speed,
+        )
+    else:
+        txdel, rxdel = calculate_delays(
+            flatgrid,
+            t0_delays,
+            tx_apodizations,
+            probe_geometry,
+            initial_times,
+            sampling_frequency,
+            sound_speed,
+            n_tx,
+            n_el,
+            vfocus,
+            angles,
+        )
+
+    n_pix = ops.shape(flatgrid)[0]
+    mask = ops.cond(
+        fnum == 0,
+        lambda: ops.ones((n_pix, n_el, 1)),
+        lambda: apod_mask(flatgrid, probe_geometry, fnum),
     )
 
-    mask = apod_mask(flatgrid, probe_geometry, fnum)
-
-    # Apply delays
-    bf_tx = []
-    for tx in range(n_tx):
-        # Get the raw data for this transmit
+    def _apply_delays(data_tx, txdel):
         # data_tx is of shape (num_elements, num_samples, 1 or 2)
-        data_tx = data[tx]
+
         # Take receive delays and add the transmit delays for this transmit
         # The txdel tensor has one fewer dimensions because the transmit
         # delays are the same for all dimensions
         # delays is of shape (n_pix, n_el)
-        delays = rxdel + txdel[:, tx, None]
+        delays = rxdel + txdel
 
         # Compute the time-of-flight corrected samples for each element
         # from each pixel of shape (n_pix, n_el, n_ch)
@@ -171,13 +189,18 @@ def tof_correction_flatgrid(
             tdemod = flatgrid[:, None, 2] * 2 / sound_speed
             theta = 2 * np.pi * fdemod * (tshift - tdemod)
             tof_tx = _complex_rotate(tof_tx, theta)
+        return tof_tx
 
-        bf_tx.append(tof_tx)
+    # Reshape to (n_tx, n_pix, 1)
+    txdel = ops.moveaxis(txdel, 1, 0)
+    txdel = txdel[..., None]
 
-    return ops.stack(bf_tx, 0)
+    return safe_vectorize(
+        _apply_delays,
+        signature="(n_samples,n_el,n_ch),(n_pix,1)->(n_pix,n_el,n_ch)",
+    )(data, txdel)
 
 
-@cache_output()
 def calculate_delays(
     grid,
     t0_delays,
@@ -236,40 +259,41 @@ def calculate_delays(
         transducer element has shape of shape `(n_pix, n_tx)`
     """
 
-    # Initialize delay variables
-    tx_distances = []
-    rx_distances = []
-
     inf_distances = ops.isinf(focus_distances)
 
-    for tx in range(n_tx):
-        tx_distance = ops.where(
-            inf_distances[tx],
-            distance_Tx_planewave(grid, polar_angles[tx]),
+    def _tx_distances(
+        inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances
+    ):
+        return ops.where(
+            inf_distances,
+            distance_Tx_planewave(grid, polar_angles),
             distance_Tx_generic(
                 grid,
-                t0_delays[tx],
-                tx_apodizations[tx],
+                t0_delays,
+                tx_apodizations,
                 probe_geometry,
-                focus_distances[tx],
-                polar_angles[tx],
+                focus_distances,
+                polar_angles,
                 sound_speed,
             ),
         )
-        tx_distances.append(tx_distance[..., None])
+
+    tx_distances = safe_vectorize(
+        _tx_distances,
+        signature="(),(),(n_el),(n_el),()->(n_pix)",
+    )(inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances)
+    tx_distances = ops.transpose(tx_distances, (1, 0))
+    # tx_distances shape is now (n_pix, n_tx)
 
     # Compute receive distances
-    for el in range(n_el):
-        distances = distance_Rx(grid, probe_geometry[el])
-        # Add transducer element dimension
-        distances = distances[..., None]
-        rx_distances.append(distances)
+    def _rx_distances(probe_geometry):
+        return distance_Rx(grid, probe_geometry)
 
-    # Concatenate all values into one long tensor
-    # The shape is now (n_pix, n_tx)
-    tx_distances = ops.hstack(tx_distances)
-    # The shape is now (n_pix, n_el)
-    rx_distances = ops.hstack(rx_distances)
+    rx_distances = safe_vectorize(_rx_distances, signature="(3)->(n_pix)")(
+        probe_geometry
+    )
+    rx_distances = ops.transpose(rx_distances, (1, 0))
+    # rx_distances shape is now (n_pix, n_el)
 
     # Compute the delays [in samples] from the distances
     # The units here are ([m]/[m/s]-[s])*[1/s] resulting in a unitless quantity
@@ -366,10 +390,10 @@ def _complex_rotate(iq, theta):
     Returns:
         Tensor: The rotated tensor of shape `(..., 2)`.
     """
-    assert iq.shape[-1] == 2, (
-        "The last dimension of the input tensor should be 2, "
-        f"got {iq.shape[-1]} dimensions."
-    )
+    # assert iq.shape[-1] == 2, (
+    #     "The last dimension of the input tensor should be 2, "
+    #     f"got {iq.shape[-1]} dimensions and shape {iq.shape}."
+    # )
     # Select i and q channels
     i = iq[..., 0]
     q = iq[..., 1]
@@ -492,7 +516,7 @@ def distance_Tx_generic(
     # largest distance over all the elements when the pixel is behind the virtual
     # source and the smallest distance otherwise.
     dist = ops.where(
-        float(ops.sign(focus_distance)) * (grid[:, 2] - focal_z) <= 0.0,
+        ops.cast(ops.sign(focus_distance), "float32") * (grid[:, 2] - focal_z) <= 0.0,
         ops.min(dist + offset[None], 1),
         ops.max(dist - offset[None], 1),
     )
@@ -519,11 +543,6 @@ def apod_mask(grid, probe_geometry, f_number):
     Returns:
         Tensor: Mask of shape `(n_pix, n_el, 1)`
     """
-    # If the f-number is set to 0, return 1
-    if f_number == 0:
-        mask = ops.ones((1))
-        return mask
-
     n_pix = ops.shape(grid)[0]
     n_el = ops.shape(probe_geometry)[0]
 
