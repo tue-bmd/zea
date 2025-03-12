@@ -16,14 +16,14 @@ scan:
   xlims: [-0.019, 0.019]
   zlims: [0, 0.063]
   selected_transmits: 1
+  Nx: 100
+  Nz: 100
 
-preprocess:
-  operation_chain:
+pipeline:
+  operations:
     - name: tof_correction
     - name: delay_and_sum
-    - name: demodulate
     - name: envelope_detect
-    - name: downsample
     - name: normalize
     - name: log_compress
 
