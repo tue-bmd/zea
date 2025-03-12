@@ -140,7 +140,7 @@ def simulate_rf(
                 freqs[None, None, None],
                 tau_total[..., None],
                 n_fft=n_ax,
-                fs=sampling_frequency,
+                sampling_frequency=sampling_frequency,
             )
             * ops.cast(
                 scatterer_magnitudes[:, None, None, None]
@@ -190,7 +190,7 @@ def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
     return response
 
 
-def delay2(f, tau, n_fft, fs):
+def delay2(f, tau, n_fft, sampling_frequency):
     """
     Applies a delay in the frequency domain without phase wrapping.
 
@@ -198,13 +198,13 @@ def delay2(f, tau, n_fft, fs):
         f (array-like): The input frequencies.
         tau (float): The delay to apply.
         n_fft (int): The number of samples in the FFT.
-        fs (float): The sampling frequency.
+        sampling_frequency (float): The sampling frequency.
 
     Returns:
         array-like: The spectrum of the delay.
     """
     arg = ops.array(-1j, dtype="complex64") * ops.cast(2 * PI * tau * f, "complex64")
-    return ops.where(tau < n_fft / fs, ops.exp(arg), ops.array(0.0, dtype="complex64"))
+    return ops.where(tau < n_fft / sampling_frequency, ops.exp(arg), ops.array(0.0, dtype="complex64"))
 
 
 def attenuate(f, attenuation_coef, dist):
