@@ -833,12 +833,12 @@ class TOFCorrection(Operation):
         sound_speed=None,
         polar_angles=None,
         focus_distances=None,
-        fs=None,
+        sampling_frequency=None,
         f_number=None,
         n_el=None,
         n_tx=None,
         n_ax=None,
-        fdemod=None,
+        demodulation_frequency=None,
         t0_delays=None,
         tx_apodizations=None,
         initial_times=None,
@@ -856,12 +856,12 @@ class TOFCorrection(Operation):
         self.sound_speed = sound_speed
         self.polar_angles = polar_angles
         self.focus_distances = focus_distances
-        self.fs = fs
+        self.sampling_frequency = sampling_frequency
         self.f_number = f_number
         self.n_el = n_el
         self.n_tx = n_tx
         self.n_ax = n_ax
-        self.fdemod = fdemod
+        self.demodulation_frequency = demodulation_frequency
         self.t0_delays = t0_delays
         self.tx_apodizations = tx_apodizations
         self.initial_times = initial_times
@@ -898,7 +898,7 @@ class TOFCorrection(Operation):
             sound_speed=self.sound_speed,
             probe_geometry=self.probe_geometry,
             initial_times=self.initial_times,
-            sampling_frequency=self.fs,
+            sampling_frequency=self.sampling_frequency,
             fdemod=self.fdemod,
             fnum=self.f_number,
             angles=self.polar_angles,
@@ -927,7 +927,7 @@ class TOFCorrection(Operation):
             "probe_geometry": scan.probe_geometry,
             "sound_speed": scan.sound_speed,
             "polar_angles": scan.polar_angles,
-            "fs": scan.fs,
+            "sampling_frequency": scan.sampling_frequency,
             "f_number": scan.f_number,
             "fdemod": scan.fdemod,
             "apply_lens_correction": scan.apply_lens_correction,
@@ -1343,7 +1343,7 @@ class Demodulate(Operation):
             output_data_type=None,
             **kwargs,
         )
-        self.fs = fs
+        self.sampling_frequency = sampling_frequency
         self.fc = fc
         self.bandwidth = bandwidth
         self.filter_coeff = filter_coeff
