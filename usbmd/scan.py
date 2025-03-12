@@ -328,6 +328,18 @@ class Scan(Object):
                 f"Got length {len(focus_distances)}."
             )
 
+        if (
+            np.abs(np.max(focus_distances)) > 1
+            and np.abs(np.max(focus_distances)) < 1000
+        ):
+            # check if focus distance is not in wavelengths...
+            log.warning(
+                "Focal distance in range 1-1000 m. "
+                "Assuming wavelenghts instead of meters."
+            )
+            lambda0 = self.sound_speed / self.fc
+            focus_distances = focus_distances * lambda0
+
         self._t0_delays = t0_delays
         self._tx_apodizations = tx_apodizations
         self._polar_angles = polar_angles
@@ -586,6 +598,11 @@ class Scan(Object):
             self._pfield = None  # also trigger update of the pressure fields
 
         return self._grid
+
+    @grid.setter
+    def grid(self, value):
+        """Manually set the pfield."""
+        self._grid = value
 
     @property
     def pfield(self):
