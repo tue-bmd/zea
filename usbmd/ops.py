@@ -730,8 +730,12 @@ class DelayAndSum(Operation):
 
 
 @ops_registry("delay_and_sum_multi")
-class delay_and_sum_multi(Operation):
-    """Sums time-delayed signals along channels and transmits."""
+class DelayAndSumMult(Operation):
+    """
+    Sums time-delayed signals along channels and transmits for a list of receive apodizations.
+    Each receive apodization in the list will generate a separate output in a list
+    """
+    
 
     def __init__(self, rx_apo=None, tx_apo=None, patches=1, **kwargs):
         """
