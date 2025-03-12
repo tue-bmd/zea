@@ -1,5 +1,4 @@
-"""Tests for the Scan class.
-"""
+"""Tests for the Scan class."""
 
 import numpy as np
 
@@ -76,9 +75,9 @@ def test_initialization():
     assert scan.xlims == scan_args["xlims"]
     assert scan.ylims == scan_args["ylims"]
     assert scan.zlims == scan_args["zlims"]
-    assert scan.fc == scan_args["center_frequency"]
-    assert scan.fs == scan_args["sampling_frequency"]
-    assert scan.fdemod == scan_args["demodulation_frequency"]
+    assert scan.center_frequency == scan_args["center_frequency"]
+    assert scan.sampling_frequency == scan_args["sampling_frequency"]
+    assert scan.demodulation_frequency == scan_args["demodulation_frequency"]
     assert scan.sound_speed == scan_args["sound_speed"]
     assert scan.n_ax == scan_args["n_ax"]
     assert scan.Nx == scan_args["Nx"]
@@ -102,9 +101,9 @@ def test_planewave_scan():
     assert scan.xlims == planewave_scan_args["xlims"]
     assert scan.ylims == planewave_scan_args["ylims"]
     assert scan.zlims == planewave_scan_args["zlims"]
-    assert scan.fc == planewave_scan_args["center_frequency"]
-    assert scan.fs == planewave_scan_args["sampling_frequency"]
-    assert scan.fdemod == scan_args["demodulation_frequency"]
+    assert scan.center_frequency == planewave_scan_args["center_frequency"]
+    assert scan.sampling_frequency == planewave_scan_args["sampling_frequency"]
+    assert scan.demodulation_frequency == scan_args["demodulation_frequency"]
     assert scan.sound_speed == planewave_scan_args["sound_speed"]
     assert scan.n_ax == planewave_scan_args["n_ax"]
     assert scan.Nx == planewave_scan_args["Nx"]
