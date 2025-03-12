@@ -1521,10 +1521,10 @@ class MultiBandPassFilter(Operation):
         beamformed_data (ndarray): input data, RF / IQ with shape [..., n_ax, n_el, n_ch].
             filtering is always applied over the n_ax axis.
         params (dict): dict with parameters for filter.
-            Should include `num_taps`, `sampling_frequency`, `center_frequency` and two lists: `freqs` and `bandwidths`
-            which define the filter characteristics. Lengths of those lists should
-            be the same and is equal to the number of filters applied. Optionally the
-            `units` can be specified, which is for instance `Hz` or `MHz`. Defaults to `Hz`.
+            Should include `num_taps`, `sampling_frequency`, `center_frequency` and two lists:
+            `freqs` and `bandwidths` which define the filter characteristics. Lengths of those lists
+            should be the same and is equal to the number of filters applied. Optionally the `units`
+            can be specified, which is for instance `Hz` or `MHz`. Defaults to `Hz`.
 
     Returns:
         beamformed_data (list): list of filtered data, each element is filtered data
@@ -2055,7 +2055,8 @@ def demodulate(
         filter_coeff (list, optional): (b, a), numerator and denominator coefficients
             of FIR filter for quadratic band pass filter. All other parameters are ignored
             if filter_coeff are provided. Instead the given filter_coeff is directly used.
-            If not provided, a filter is derived from the other params (sampling_frequency, center_frequency, bandwidth).
+            If not provided, a filter is derived from the other params (sampling_frequency,
+            center_frequency, bandwidth).
             see https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.lfilter.html
 
     Returns:
