@@ -766,7 +766,6 @@ class delay_and_sum_multi(Operation):
         Returns:
             ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
         """
-        
         # Sum over the channels, i.e. DAS
         data = ops.sum(self.rx_apo[self.rx_apo_ind] * patch, -2)
 
@@ -794,7 +793,6 @@ class delay_and_sum_multi(Operation):
         data = []
         for i in range(0,len(self.rx_apo)):
             self.rx_apo_ind = i
-            
             temp = patched_map(self.process_patch, flat_data, self.patches)
 
             # Reshape data back to original shape
