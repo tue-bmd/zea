@@ -694,7 +694,7 @@ class DelayAndSum(Operation):
             data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
 
         Returns:
-            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
+            list[ops.Tensor]: The beamformed data of shape `(n_z, n_x, n_ch)`
         """
         n_tx, n_z, n_x, n_el, n_ch = data.shape
 
@@ -728,7 +728,6 @@ class DelayAndSum(Operation):
             return ops.map(self.process_item, data)
 
 
-
 @ops_registry("delay_and_sum_multi")
 class DelayAndSumMulti(Operation):
     """
@@ -755,7 +754,9 @@ class DelayAndSumMulti(Operation):
 
     def initialize(self):
         if self.rx_apo is None:
-            self.rx_apo = [1.0,] # single branch - standard das
+            self.rx_apo = [
+                1.0,
+            ]  # single branch - standard das
 
         if self.tx_apo is None:
             self.tx_apo = 1.0
@@ -794,7 +795,7 @@ class DelayAndSumMulti(Operation):
         flat_data = ops.moveaxis(flat_data, 1, 0)
 
         data = []
-        for i in range(0,len(self.rx_apo)):
+        for i in range(0, len(self.rx_apo)):
             self.rx_apo_ind = i
             temp = patched_map(self.process_patch, flat_data, self.patches)
 
@@ -820,6 +821,7 @@ class DelayAndSumMulti(Operation):
         else:
             # TODO: could be ops.vectorized_map if enough memory
             return ops.map(self.process_item, data)
+
 
 @ops_registry("tof_correction")
 class TOFCorrection(Operation):
