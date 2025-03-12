@@ -967,8 +967,8 @@ def take(data, indices, axis=-1):
     """Take values from data along axis.
 
     Args:
-        data (ndarray): input data.
-        indices (ndarray): indices to take from data.
+        data (Tensor): input data.
+        indices (Tensor): indices to take from data.
         axis (int, optional): axis to take from. Defaults to -1.
     """
 
