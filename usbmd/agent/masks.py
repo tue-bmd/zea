@@ -35,6 +35,30 @@ def random_uniform_lines(
     return masks
 
 
+def get_initial_equispaced_lines(n_actions, n_possible_actions):
+    """
+    Generates and initial equispaced k-hot line mask.
+    e.g.
+        if n_actions=2, n_possible_actions=6
+        then initial_mask=[1, 0, 0, 1, 0, 0]
+
+    Args:
+        n_actions (int): Number of actions to be selected.
+        n_possible_actions (int): Number of possible actions.
+
+    Returns:
+        Tensor: k-hot-encoded line vector of shape (n_possible_actions).
+                Needs to be converted to image size.
+    """
+    selected_indices = ops.arange(
+        0, n_possible_actions, n_possible_actions // n_actions
+    )
+    masks = ops.zeros(n_possible_actions)
+    return ops.scatter_update(
+        masks, ops.expand_dims(selected_indices, axis=1), ops.ones(n_actions)
+    )
+
+
 def equispaced_lines(
     n_actions: int,
     n_possible_actions: int,
@@ -57,13 +81,7 @@ def equispaced_lines(
         n_possible_actions % n_actions == 0
     ), "Number of actions must divide evenly into possible actions to use equispaced sampling."
     if previous_mask is None:
-        selected_indices = ops.arange(
-            0, n_possible_actions - 1, n_possible_actions // n_actions
-        )
-        masks = ops.zeros(n_possible_actions)
-        return ops.scatter_update(
-            masks, ops.expand_dims(selected_indices, axis=1), ops.ones(n_actions)
-        )
+        return get_initial_equispaced_lines(n_actions, n_possible_actions)
     else:
         return ops.roll(previous_mask, shift=1)
 

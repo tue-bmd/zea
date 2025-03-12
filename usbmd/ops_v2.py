@@ -339,10 +339,13 @@ class Pipeline:
         ## PROCESSING
         outputs = self._call_pipeline(**inputs)
 
-        if return_numpy:
-            outputs = {k: v.numpy() for k, v in outputs.items()}
-
         ## PREPARE OUTPUT
+        if return_numpy:
+            # Convert tensors to numpy arrays but preserve None values
+            outputs = {
+                k: ops.convert_to_numpy(v) if v is ops.is_tensor(v) else v
+                for k, v in outputs.items()
+            }
 
         # TODO: if we can in-place update the Scan, Probe and Config objects, we can output those.
 
@@ -884,12 +887,13 @@ class TOFCorrection(Operation):
             "sampling_frequency": sampling_frequency,
             "fnum": f_number,
             "fdemod": fdemod,
-            "apply_phase_rotation": bool(fdemod),
+            "apply_phase_rotation": ops.cast(fdemod, bool),
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
             "probe_geometry": probe_geometry,
-            "apply_lens_correction": apply_lens_correction,
+            # Not sure why we need this cast here, the pipeline should convert it to Tensor already
+            "apply_lens_correction": ops.cast(apply_lens_correction, bool),
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
         }
