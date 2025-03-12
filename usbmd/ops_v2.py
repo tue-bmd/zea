@@ -887,13 +887,13 @@ class TOFCorrection(Operation):
             "sampling_frequency": sampling_frequency,
             "fnum": f_number,
             "fdemod": fdemod,
-            "apply_phase_rotation": ops.cast(fdemod, bool),
+            "apply_phase_rotation": fdemod,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
             "probe_geometry": probe_geometry,
             # Not sure why we need this cast here, the pipeline should convert it to Tensor already
-            "apply_lens_correction": ops.cast(apply_lens_correction, bool),
+            "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
         }
