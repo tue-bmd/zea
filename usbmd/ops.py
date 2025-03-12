@@ -60,7 +60,7 @@ process.set_pipeline(
     operation_chain=[
         {"name": "tof_correction"},
         {"name": "delay_and_sum"},
-        {"name": "demodulate", "params": {"sampling_frequency": 50e6, "fc": 5e6}},
+        {"name": "demodulate", "params": {"sampling_frequency": 50e6, "center_frequency": 5e6}},
         {"name": "envelope_detect"},
         {"name": "downsample"},
         {"name": "normalize"},
@@ -1333,7 +1333,7 @@ class Demodulate(Operation):
     def __init__(
         self,
         sampling_frequency=None,
-        fc=None,
+        center_frequency=None,
         bandwidth=None,
         filter_coeff=None,
         **kwargs,
@@ -1344,7 +1344,7 @@ class Demodulate(Operation):
             **kwargs,
         )
         self.sampling_frequency = sampling_frequency
-        self.fc = fc
+        self.center_frequency = center_frequency
         self.bandwidth = bandwidth
         self.filter_coeff = filter_coeff
         self.warning_produced = False
@@ -1359,27 +1359,27 @@ class Demodulate(Operation):
         elif data.shape[-1] == 1:
             data = ops.squeeze(data, axis=-1)
 
-        data = demodulate(data, self.sampling_frequency, self.fc, self.bandwidth, self.filter_coeff)
+        data = demodulate(data, self.sampling_frequency, self.center_frequency, self.bandwidth, self.filter_coeff)
         data = ops.convert_to_tensor(data)
         return complex_to_channels(data, axis=-1)
 
     def _assign_scan_params(self, scan):
         return {
             "sampling_frequency": scan.sampling_frequency,
-            "fc": scan.fc,
+            "center_frequency": scan.center_frequency,
             "bandwidth": scan.bandwidth_percent,
         }
 
     def _assign_config_params(self, config):
         return {
             "sampling_frequency": config.scan.sampling_frequency,
-            "fc": config.scan.center_frequency,
+            "center_frequency": config.scan.center_frequency,
         }
 
     # pylint: disable=unused-argument
     def _assign_update_params(self, scan):
         return {
-            "fdemod": self.fc,
+            "fdemod": self.center_frequency,
             "n_ch": 2,
         }
 
@@ -1388,14 +1388,14 @@ class Demodulate(Operation):
 class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
-    def __init__(self, sampling_frequency=None, fc=None, upsampling_rate=6, **kwargs):
+    def __init__(self, sampling_frequency=None, center_frequency=None, upsampling_rate=6, **kwargs):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
             **kwargs,
         )
         self.sampling_frequency = sampling_frequency
-        self.fc = fc
+        self.center_frequency = center_frequency
         self.upsampling_rate = upsampling_rate
 
     def process(self, data):
@@ -1404,20 +1404,20 @@ class UpMix(Operation):
             return data
         elif data.shape[-1] == 2:
             data = channels_to_complex(data)
-        data = upmix(data, self.sampling_frequency, self.fc, self.upsampling_rate)
+        data = upmix(data, self.sampling_frequency, self.center_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return data
 
     def _assign_scan_params(self, scan):
         return {
             "sampling_frequency": scan.sampling_frequency,
-            "fc": scan.fc,
+            "center_frequency": scan.center_frequency,
         }
 
     def _assign_config_params(self, config):
         return {
             "sampling_frequency": config.scan.sampling_frequency,
-            "fc": config.scan.center_frequency,
+            "center_frequency": config.scan.center_frequency,
         }
 
 
@@ -1426,7 +1426,7 @@ class BandPassFilter(Operation):
     """Band pass filter data."""
 
     def __init__(
-        self, num_taps=None, sampling_frequency=None, fc=None, f1=None, f2=None, axis=-3, **kwargs
+        self, num_taps=None, sampling_frequency=None, center_frequency=None, f1=None, f2=None, axis=-3, **kwargs
     ):
         super().__init__(
             input_data_type=None,
@@ -1435,7 +1435,7 @@ class BandPassFilter(Operation):
         )
         self.num_taps = num_taps
         self.sampling_frequency = sampling_frequency
-        self.fc = fc
+        self.center_frequency = center_frequency
         self.f1 = f1
         self.f2 = f2
         self.axis = axis
@@ -1476,13 +1476,13 @@ class BandPassFilter(Operation):
     def _assign_scan_params(self, scan):
         return {
             "sampling_frequency": scan.sampling_frequency,
-            "fc": scan.fc,
+            "center_frequency": scan.center_frequency,
         }
 
     def _assign_config_params(self, config):
         return {
             "sampling_frequency": config.scan.sampling_frequency,
-            "fc": config.scan.center_frequency,
+            "center_frequency": config.scan.center_frequency,
         }
 
 
@@ -1498,7 +1498,7 @@ class MultiBandPassFilter(Operation):
         beamformed_data (ndarray): input data, RF / IQ with shape [..., n_ax, n_el, n_ch].
             filtering is always applied over the n_ax axis.
         params (dict): dict with parameters for filter.
-            Should include `num_taps`, `sampling_frequency`, `fc` and two lists: `freqs` and `bandwidths`
+            Should include `num_taps`, `sampling_frequency`, `center_frequency` and two lists: `freqs` and `bandwidths`
             which define the filter characteristics. Lengths of those lists should
             be the same and is equal to the number of filters applied. Optionally the
             `units` can be specified, which is for instance `Hz` or `MHz`. Defaults to `Hz`.
@@ -1511,17 +1511,17 @@ class MultiBandPassFilter(Operation):
         >>> params = {
         >>>     'num_taps': 128,
         >>>     'sampling_frequency': 50e6,
-        >>>     'fc': 5e6,
+        >>>     'center_frequency': 5e6,
         >>>     'freqs': [-2.5, 0, 2.5],
         >>>     'bandwidths': [1, 1, 1],
         >>>     'units': 'MHz'
         >>> }
         >>> mbpf = usbmd.ops.MultiBandPassFilter(
-        >>>     params=params, modtype='iq', sampling_frequency=50e6, fc=5e6, axis=-3)
+        >>>     params=params, modtype='iq', sampling_frequency=50e6, center_frequency=5e6, axis=-3)
         >>> filtered_data = mbpf(beamformed_data)
     """
 
-    def __init__(self, params=None, modtype=None, sampling_frequency=None, fc=None, axis=-3, **kwargs):
+    def __init__(self, params=None, modtype=None, sampling_frequency=None, center_frequency=None, axis=-3, **kwargs):
         super().__init__(
             input_data_type=None,
             output_data_type=None,
@@ -1531,7 +1531,7 @@ class MultiBandPassFilter(Operation):
         self.modtype = modtype
         self.axis = axis
         self.sampling_frequency = sampling_frequency
-        self.fc = fc
+        self.center_frequency = center_frequency
 
         assert self.axis != -1, (
             "Axis of multibandpass filter cannot be the last axis "
@@ -1555,12 +1555,12 @@ class MultiBandPassFilter(Operation):
         num_taps = self.params["num_taps"]
         # make sure sampling_frequency is correct for IQ (downsampled)
         sampling_frequency = self.sampling_frequency * unit_factor
-        fc = self.fc * unit_factor  # fc is only used when RF
+        center_frequency = self.center_frequency * unit_factor  # center_frequency is only used when RF
 
         if self.modtype == "iq":
-            fc = 0  # fc is automatically set to zero if IQ
+            center_frequency = 0  # center_frequency is automatically set to zero if IQ
             self.filter_params = [
-                {"num_taps": num_taps, "sampling_frequency": sampling_frequency, "f": fc - offset, "bw": bw}
+                {"num_taps": num_taps, "sampling_frequency": sampling_frequency, "f": center_frequency - offset, "bw": bw}
                 for offset, bw in zip(offsets, bandwidths)
             ]
         elif self.modtype == "rf":
@@ -1568,8 +1568,8 @@ class MultiBandPassFilter(Operation):
                 {
                     "num_taps": num_taps,
                     "sampling_frequency": sampling_frequency,
-                    "f1": fc - offset - bw / 2,
-                    "f2": fc - offset + bw / 2,
+                    "f1": center_frequency - offset - bw / 2,
+                    "f2": center_frequency - offset + bw / 2,
                 }
                 for offset, bw in zip(offsets, bandwidths)
             ]
@@ -1593,7 +1593,7 @@ class MultiBandPassFilter(Operation):
             and self.modtype is not None
             and self.params is not None
             and self.sampling_frequency is not None
-            and self.fc is not None
+            and self.center_frequency is not None
         )
 
     def process(self, data):
@@ -1617,13 +1617,13 @@ class MultiBandPassFilter(Operation):
     def _assign_scan_params(self, scan):
         return {
             "sampling_frequency": scan.sampling_frequency,
-            "fc": scan.fc,
+            "center_frequency": scan.center_frequency,
         }
 
     def _assign_config_params(self, config):
         return {
             "sampling_frequency": config.scan.sampling_frequency,
-            "fc": config.scan.center_frequency,
+            "center_frequency": config.scan.center_frequency,
         }
 
 
@@ -1733,7 +1733,7 @@ class Doppler(Operation):
         self,
         PRF: float = None,
         sampling_frequency: float = None,
-        fc: float = None,
+        center_frequency: float = None,
         c: float = None,
         M: int = None,
         lag: int = 1,
@@ -1742,7 +1742,7 @@ class Doppler(Operation):
     ) -> None:
         """
         Args:
-            fc (float): Center frequency in Hz.
+            center_frequency (float): Center frequency in Hz.
             c (float): Longitudinal velocity in m/s.
             PRF (float): Pulse repetition frequency in Hz.
             M (int, optional): Size of the hamming filter for spatial weighted average.
@@ -1762,7 +1762,7 @@ class Doppler(Operation):
         )
         self.PRF = PRF
         self.sampling_frequency = sampling_frequency
-        self.fc = fc
+        self.center_frequency = center_frequency
         self.c = c
         self.M = M
         self.lag = lag
@@ -1811,8 +1811,8 @@ class Doppler(Operation):
             isinstance(self.lag, int) and self.lag >= 0
         ), "Lag must be a positive integer"
 
-        if self.fc is None:
-            raise ValueError("A center frequency (fc) must be specified")
+        if self.center_frequency is None:
+            raise ValueError("A center frequency (center_frequency) must be specified")
         if self.PRF is None:
             raise ValueError("A pulse repetition frequency or period must be specified")
 
@@ -1824,7 +1824,7 @@ class Doppler(Operation):
         # TODO: add spatial weighted average
 
         # Doppler velocity
-        nyquist_velocities = self.c * self.PRF / (4 * self.fc * self.lag)
+        nyquist_velocities = self.c * self.PRF / (4 * self.center_frequency * self.lag)
         doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
 
         return doppler_velocities
@@ -1832,7 +1832,7 @@ class Doppler(Operation):
     def _assign_scan_params(self, scan):
         return {
             "sampling_frequency": scan.sampling_frequency,
-            "fc": scan.fc,
+            "center_frequency": scan.center_frequency,
             "c": scan.sound_speed,
             "PRF": 1 / sum(scan.time_to_next_transmit[0]),
         }
@@ -1840,7 +1840,7 @@ class Doppler(Operation):
     def _assign_config_params(self, config):
         return {
             "sampling_frequency": config.scan.sampling_frequency,
-            "fc": config.scan.center_frequency,
+            "center_frequency": config.scan.center_frequency,
         }
 
 
@@ -1984,7 +1984,7 @@ class LeeFilter(Operation):
         return img_output
 
 
-def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter_coeff=None):
+def demodulate(rf_data, sampling_frequency=None, center_frequency=None, bandwidth=None, filter_coeff=None):
     """Demodulates an RF signal to complex base-band (IQ).
 
     Demodulates the radiofrequency (RF) bandpass signals and returns the
@@ -1999,19 +1999,19 @@ def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter
             second to last axis is fast-time axis.
         sampling_frequency (float): the sampling frequency of the RF signals (in Hz).
             Only not necessary when filter_coeff is provided.
-        fc (float, optional): represents the center frequency (in Hz).
+        center_frequency (float, optional): represents the center frequency (in Hz).
             Defaults to None.
         bandwidth (float, optional): Bandwidth of RF signal in % of center
             frequency. Defaults to None.
             The bandwidth in % is defined by:
-            B = Bandwidth_in_% = Bandwidth_in_Hz*(100/fc).
+            B = Bandwidth_in_% = Bandwidth_in_Hz*(100/center_frequency).
             The cutoff frequency:
             Wn = Bandwidth_in_Hz/sampling_frequency, i.e:
-            Wn = B*(Fc/100)/sampling_frequency.
+            Wn = B*(center_frequency/100)/sampling_frequency.
         filter_coeff (list, optional): (b, a), numerator and denominator coefficients
             of FIR filter for quadratic band pass filter. All other parameters are ignored
             if filter_coeff are provided. Instead the given filter_coeff is directly used.
-            If not provided, a filter is derived from the other params (sampling_frequency, fc, bandwidth).
+            If not provided, a filter is derived from the other params (sampling_frequency, center_frequency, bandwidth).
             see https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.lfilter.html
 
     Returns:
@@ -2038,7 +2038,7 @@ def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter
         t = t + t0
 
         # Estimate center frequency
-        if fc is None:
+        if center_frequency is None:
             # Keep a maximum of 100 randomly selected scanlines
             idx = np.arange(n_el)
             if n_el > 100:
@@ -2051,12 +2051,12 @@ def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter
             P = P[: n_ax // 2]
             # Carrier frequency
             idx = np.sum(np.arange(n_ax // 2) * P) / np.sum(P)
-            fc = idx * sampling_frequency / n_ax
+            center_frequency = idx * sampling_frequency / n_ax
 
         # Normalized cut-off frequency
         if bandwidth is None:
-            Wn = min(2 * fc / sampling_frequency, 0.5)
-            bandwidth = fc * Wn
+            Wn = min(2 * center_frequency / sampling_frequency, 0.5)
+            bandwidth = center_frequency * Wn
         else:
             assert np.isscalar(
                 bandwidth
@@ -2065,7 +2065,7 @@ def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter
                 bandwidth <= 200
             ), "The signal bandwidth (in %) must be within the interval of ]0,200]."
             # bandwidth in Hz
-            bandwidth = fc * bandwidth / 100
+            bandwidth = center_frequency * bandwidth / 100
             Wn = bandwidth / sampling_frequency
         assert (Wn > 0) & (Wn <= 1), (
             "The normalized cutoff frequency is not within the interval of (0,1). "
@@ -2073,7 +2073,7 @@ def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter
         )
 
         # Down-mixing of the RF signals
-        carrier = np.exp(-1j * 2 * np.pi * fc * t)
+        carrier = np.exp(-1j * 2 * np.pi * center_frequency * t)
         # add the singleton dimensions
         carrier = np.reshape(carrier, (*[1] * (n_dim - 2), n_ax, 1))
         iq_data = rf_data * carrier
@@ -2087,10 +2087,10 @@ def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter
 
         # Display a warning message if harmful aliasing is suspected
         # the RF signal is undersampled
-        if sampling_frequency < (2 * fc + bandwidth):
+        if sampling_frequency < (2 * center_frequency + bandwidth):
             # lower and higher frequencies of the bandpass signal
-            fL = fc - bandwidth / 2
-            fH = fc + bandwidth / 2
+            fL = center_frequency - bandwidth / 2
+            fH = center_frequency + bandwidth / 2
             n = fH // (fH - fL)
             harmless_aliasing = any(
                 (2 * fH / np.arange(1, n) <= sampling_frequency) & (sampling_frequency <= 2 * fL / np.arange(1, n))
@@ -2107,7 +2107,7 @@ def demodulate(rf_data, sampling_frequency=None, fc=None, bandwidth=None, filter
     return iq_data
 
 
-def upmix(iq_data, sampling_frequency, fc, upsampling_rate=6):
+def upmix(iq_data, sampling_frequency, center_frequency, upsampling_rate=6):
     """Upsamples and upmixes complex base-band signals (IQ) to RF.
 
     Args:
@@ -2115,7 +2115,7 @@ def upmix(iq_data, sampling_frequency, fc, upsampling_rate=6):
             to last axis is fast-time axis.
         sampling_frequency (float): the sampling frequency of the input IQ signal (in Hz).
             resulting sampling_frequency of RF data is upsampling_rate times higher.
-        fc (float, optional): represents the center frequency (in Hz).
+        center_frequency (float, optional): represents the center frequency (in Hz).
 
     Returns:
         rf_data (ndarray): output real valued rf data.
@@ -2145,7 +2145,7 @@ def upmix(iq_data, sampling_frequency, fc, upsampling_rate=6):
     iq_data_upsampled = signal.resample(iq_data, num=n_ax, axis=-2)
 
     # Up-mixing of the IQ signals
-    carrier = np.exp(1j * 2 * np.pi * fc * t)
+    carrier = np.exp(1j * 2 * np.pi * center_frequency * t)
     # add the singleton dimensions
     carrier = np.reshape(carrier, (*[1] * (n_dim - 2), n_ax, 1))
 
