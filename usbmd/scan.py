@@ -689,10 +689,11 @@ class Scan(Object):
     def Nx(self):
         """The number of pixels in the lateral direction in the
         beamforming grid.
+
+        If None, the number of pixels is calculated based on the
+        `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
         """
-        if self._Nx is None:
-            raise ValueError("Please set scan.Nx.")
-        return int(self._Nx)
+        return int(self._Nx) if self._Nx is not None else None
 
     @Nx.setter
     def Nx(self, value):
@@ -703,10 +704,11 @@ class Scan(Object):
     def Nz(self):
         """The number of pixels in the axial direction in the
         beamforming grid.
+
+        If None, the number of pixels is calculated based on the
+        `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
         """
-        if self._Nz is None:
-            raise ValueError("Please set scan.Nz.")
-        return int(self._Nz)
+        return int(self._Nz) if self._Nz is not None else None
 
     @Nz.setter
     def Nz(self, value):

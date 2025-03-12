@@ -25,6 +25,14 @@ class DataTypes(enum.Enum):
     IMAGE_SC = "image_sc"
 
 
+class ModTypes(enum.Enum):
+    """Enum class for USBMD modulation types."""
+
+    NONE = "none"
+    RF = "rf"
+    IQ = "iq"
+
+
 class classproperty(property):
     """Define a class level property."""
 

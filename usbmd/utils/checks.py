@@ -10,17 +10,11 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from usbmd.core import DataTypes
 from usbmd.registry import checks_registry
 from usbmd.utils import log
 
-_DATA_TYPES = [
-    "raw_data",
-    "aligned_data",
-    "beamformed_data",
-    "envelope_data",
-    "image",
-    "image_sc",
-]
+_DATA_TYPES = [member.value for member in DataTypes]
 
 _BACKENDS = [None, "torch", "tensorflow", "keras", "jax", "numpy"]
 
@@ -31,8 +25,6 @@ for lib in _BACKENDS:
             _ML_LIB_AVAILABLE = True
         if lib == "tensorflow":
             _ML_LIB_AVAILABLE = True
-
-_MOD_TYPES = [None, "rf", "iq"]
 
 _REQUIRED_SCAN_KEYS = [
     "n_ax",
