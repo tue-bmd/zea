@@ -775,6 +775,11 @@ class Scan(Object):
 
         return self._grid
 
+    @grid.setter
+    def grid(self, value):
+        """Manually set the grid."""
+        self._grid = value
+
     @property
     def flatgrid(self):
         """The beamforming grid of shape (Nz*Nx, 3)."""
