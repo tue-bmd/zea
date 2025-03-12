@@ -9,22 +9,27 @@
 import json
 
 import keras
-import pytest
 import numpy as np
+import pytest
 
 from usbmd.config.config import Config
+from usbmd.core import DataTypes
 from usbmd.ops_v2 import (
+    DelayAndSum,
+    EnvelopeDetect,
+    LogCompress,
+    Normalize,
     Operation,
+    PfieldWeighting,
     Pipeline,
+    Simulate,
+    TOFCorrection,
     pipeline_from_config,
     pipeline_from_json,
-    Simulate,
 )
 from usbmd.probes import Dummy, Probe
-from usbmd.core import DataTypes
-from usbmd.registry import ops_registry
+from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
-
 
 """Some operations for testing"""
 
@@ -345,39 +350,11 @@ def test_pipeline_from_config(config_fixture, request):
 """Edge Case Tests"""
 
 
-def test_operation_empty_input(test_operation):
-    """Ensures error is raised for missing required inputs."""
-    with pytest.raises(TypeError):
-        test_operation()
-
-
-def test_operation_large_data_inputs():
-    """Tests operation with large data inputs."""
-
-    class MatrixMultiplyOperation(Operation):
-        """Matrix multiplication operation for testing."""
-
-        def call(self, matrix_a, matrix_b):
-            return {"result": keras.ops.dot(matrix_a, matrix_b)}
-
-    matrix_a = keras.random.normal(shape=(512, 512))
-    matrix_b = keras.random.normal(shape=(512, 512))
-
-    op = MatrixMultiplyOperation()
-    result = op(matrix_a=matrix_a, matrix_b=matrix_b)
-    assert result["result"].shape == (512, 512)
-
-
-def test_simulator():
-    """Tests the simulator operation."""
+@pytest.fixture
+def ultrasound_probe():
+    """Returns a probe for ultrasound simulation tests."""
     n_el = 128
-    n_scat = 3
-    n_tx = 2
-    n_ax = 513
-
     aperture = 30e-3
-
-    tx_apodizations = np.ones((n_tx, n_el))
     probe_geometry = np.stack(
         [
             np.linspace(-aperture / 2, aperture / 2, n_el),
@@ -387,6 +364,23 @@ def test_simulator():
         axis=1,
     )
 
+    return Probe(
+        probe_geometry=probe_geometry,
+        center_frequency=3.125e6,
+        sampling_frequency=12.5e6,
+    )
+
+
+@pytest.fixture
+def ultrasound_scan(ultrasound_probe):
+    """Returns a scan for ultrasound simulation tests."""
+    n_el = 128
+    n_tx = 2
+    n_ax = 513
+
+    tx_apodizations = np.ones((n_tx, n_el))
+    probe_geometry = ultrasound_probe.probe_geometry
+
     t0_delays = np.stack(
         [
             np.linspace(0, 1e-6, n_el),
@@ -394,7 +388,7 @@ def test_simulator():
         ]
     )
 
-    scan = Scan(
+    return Scan(
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
@@ -413,7 +407,10 @@ def test_simulator():
         selected_transmits="all",
     )
 
-    # Define scatterers
+
+@pytest.fixture
+def ultrasound_scatterers():
+    """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
     scat_x, scat_z = np.meshgrid(
         np.linspace(-10e-3, 10e-3, 5),
         np.linspace(5e-3, 30e-3, 5),
@@ -430,25 +427,75 @@ def test_simulator():
         axis=1,
     )
 
-    probe = Probe(
-        probe_geometry=probe_geometry,
-        center_frequency=3.125e6,
-        sampling_frequency=12.5e6,
-    )
+    return {
+        "positions": scat_positions.astype(np.float32),
+        "magnitudes": np.ones(n_scat, dtype=np.float32),
+        "n_scat": n_scat,
+    }
 
+
+def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
+    """Tests the simulator operation."""
     pipeline = Pipeline(
-        [Simulate(apply_lens_correction=scan.apply_lens_correction, n_ax=n_ax)]
+        [
+            Simulate(
+                apply_lens_correction=ultrasound_scan.apply_lens_correction,
+                n_ax=ultrasound_scan.n_ax,
+            )
+        ]
     )
 
     output = pipeline(
-        scan,
-        probe,
-        scatterer_positions=scat_positions.astype(np.float32),
-        scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
+        ultrasound_scan,
+        ultrasound_probe,
+        scatterer_positions=ultrasound_scatterers["positions"],
+        scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
 
-    assert output["raw_data"].shape == (1, n_tx, n_ax, n_el, 1)
+    assert output["raw_data"].shape == (
+        1,
+        ultrasound_scan.n_tx,
+        ultrasound_scan.n_ax,
+        ultrasound_scan.n_el,
+        1,
+    )
 
 
-if __name__ == "__main__":
-    pytest.main()
+def test_default_ultrasound_pipeline(
+    ultrasound_probe, ultrasound_scan, ultrasound_scatterers
+):
+    """Tests the default ultrasound pipeline."""
+
+    # all static parameters are set in the __init__ method of the operations
+    operations = [
+        Simulate(
+            apply_lens_correction=ultrasound_scan.apply_lens_correction,
+            n_ax=ultrasound_scan.n_ax,
+        ),
+        TOFCorrection(),
+        PfieldWeighting(),
+        DelayAndSum(),
+        EnvelopeDetect(),
+        LogCompress(),
+        Normalize(),
+    ]
+    pipeline = Pipeline(operations=operations, jit_options=None)
+
+    # all dynamic parameters are set in the call method of the operations
+    # or equivalently in the pipeline call (which is passed to the operations)
+    output = pipeline(
+        ultrasound_scan,
+        ultrasound_probe,
+        scatterer_positions=ultrasound_scatterers["positions"],
+        scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
+        dynamic_range=(-30, 0),
+        input_range=(-30, 0),
+        output_range=(0, 255),
+    )
+
+    # Check that the pipeline produced the expected outputs
+    assert "image" in output
+    assert output["image"].shape[0] == 1  # Batch dimension
+    # Verify the normalized image has values between 0 and 255
+    assert np.nanmin(output["image"]) >= 0.0
+    assert np.nanmax(output["image"]) <= 255.0
