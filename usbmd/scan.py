@@ -91,7 +91,7 @@ class Scan(Object):
         sound_speed: float = 1540,
         Nx: Union[int, None] = None,
         Nz: Union[int, None] = None,
-        pixels_per_wvln: int = 4,
+        pixels_per_wavelength: int = 4,
         downsample: int = 1,
         pfield: Union[np.ndarray, None] = None,
         pfield_kwargs: Union[dict, None] = None,
@@ -150,7 +150,7 @@ class Scan(Object):
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
-            pixels_per_wvln (int, optional): The number of pixels per wavelength
+            pixels_per_wavelength (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
             downsample (int, optional): Decimation factor applied after downconverting
@@ -255,7 +255,9 @@ class Scan(Object):
             self._set_params["z_axis"] = False
 
         # Additional properties that don't need lazy initialization
-        self._set_param("pixels_per_wavelength", float(pixels_per_wvln), dunder=False)
+        self._set_param(
+            "pixels_per_wavelength", float(pixels_per_wavelength), dunder=False
+        )
         self._set_param("downsample", downsample, dunder=False)
         self._set_param("probe_geometry", probe_geometry, dunder=False)
         self._set_param("time_to_next_transmit", time_to_next_transmit, dunder=False)
@@ -867,7 +869,7 @@ class Scan(Object):
             "n_ch": self.n_ch,
             "Nx": self.Nx,
             "Nz": self.Nz,
-            "pixels_per_wvln": self.pixels_per_wavelength,
+            "pixels_per_wavelength": self.pixels_per_wavelength,
             "polar_angles": self.polar_angles,
             "azimuth_angles": self.azimuth_angles,
             "t0_delays": self.t0_delays,
@@ -915,7 +917,7 @@ class PlaneWaveScan(Scan):
         n_ax=3328,
         Nx=None,
         Nz=None,
-        pixels_per_wvln=4,
+        pixels_per_wavelength=4,
         polar_angles=None,
         azimuth_angles=None,
         tx_apodizations=None,
@@ -964,7 +966,7 @@ class PlaneWaveScan(Scan):
             tx_apodizations (np.ndarray, float, optional): The transmit
                 apodizations of shape (n_tx, n_el) or a single float to use for all
                 apodizations. Defaults to None.
-            pixels_per_wvln (int, optional): The number of pixels per wavelength
+            pixels_per_wavelength (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
             focus_distances (np.ndarray, optional): The focus distances of the
@@ -1024,7 +1026,7 @@ class PlaneWaveScan(Scan):
             n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
-            pixels_per_wvln=pixels_per_wvln,
+            pixels_per_wavelength=pixels_per_wavelength,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             t0_delays=t0_delays,
