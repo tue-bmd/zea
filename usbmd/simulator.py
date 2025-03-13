@@ -76,7 +76,7 @@ def simulate_rf(
     n_ax_rounded = _round_up_to_power_of_two(n_ax)
 
     freqs = (
-        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax, "float32")
+        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax_rounded, "float32")
         * sampling_frequency
         + 1
     )
