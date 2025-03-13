@@ -264,18 +264,14 @@ def calculate_delays(
     def _tx_distances(
         inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances
     ):
-        return ops.where(
-            inf_distances,
-            distance_Tx_planewave(grid, polar_angles),
-            distance_Tx_generic(
-                grid,
-                t0_delays,
-                tx_apodizations,
-                probe_geometry,
-                focus_distances,
-                polar_angles,
-                sound_speed,
-            ),
+        return distance_Tx_generic(
+            grid,
+            t0_delays,
+            tx_apodizations,
+            probe_geometry,
+            focus_distances,
+            polar_angles,
+            sound_speed,
         )
 
     tx_distances = safe_vectorize(
