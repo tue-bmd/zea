@@ -133,7 +133,9 @@ def patched_pipeline(ultrasound_scan):
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     patched_beamforming = ops.PatchedGrid(
         operations=[
-            ops.TOFCorrection(),
+            ops.TOFCorrection(
+                apply_lens_correction=ultrasound_scan.apply_lens_correction,
+            ),
             ops.PfieldWeighting(),
             ops.DelayAndSum(),
         ],
@@ -145,7 +147,7 @@ def patched_pipeline(ultrasound_scan):
             n_ax=ultrasound_scan.n_ax,
         ),
         patched_beamforming,
-        ops.EnvelopeDetect(),
+        ops.EnvelopeDetect(axis=-2),
         ops.LogCompress(),
         ops.Normalize(),
     ]
