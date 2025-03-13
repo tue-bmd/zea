@@ -78,7 +78,6 @@ def simulate_rf(
     freqs = (
         ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax_rounded, "float32")
         * sampling_frequency
-        + 1
     )
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
@@ -91,7 +90,11 @@ def simulate_rf(
         dist_total = dist[:, None] + dist[:, :, None]
 
         # [n_scat, n_txel, n_rxel]
-        tau_total = dist_total / sound_speed + t0_delays[tx_idx] + initial_times[tx_idx]
+        tau_total = (
+            (dist_total / sound_speed)
+            + t0_delays[tx_idx][None, :, None]
+            - initial_times[tx_idx]
+        )
 
         scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
 
