@@ -271,8 +271,8 @@ def get_pulse_spectrum_fn(fc, n_period=3.0):
     period = n_period / fc
 
     def spectrum_fn(f):
-        return ops.array(1 / 1j, "complex64") * ops.cast(
-            (hann_fd(f - fc, period) - hann_fd(f + fc, period)), "complex64"
+        return ops.array(1 / 2, "complex64") * ops.cast(
+            (hann_fd(f - fc, period) + hann_fd(f + fc, period)), "complex64"
         )
 
     return spectrum_fn

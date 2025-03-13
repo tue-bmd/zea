@@ -725,7 +725,13 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
+    def __init__(
+        self,
+        key="raw_data",
+        output_key="aligned_data",
+        apply_lens_correction=False,
+        **kwargs,
+    ):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
@@ -733,6 +739,7 @@ class TOFCorrection(Operation):
         )
         self.key = key
         self.output_key = output_key
+        self.apply_lens_correction = apply_lens_correction
 
     def call(
         self,
@@ -747,7 +754,6 @@ class TOFCorrection(Operation):
         tx_apodizations=None,
         initial_times=None,
         probe_geometry=None,
-        apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
         **kwargs,
@@ -791,7 +797,7 @@ class TOFCorrection(Operation):
             "initial_times": initial_times,
             "probe_geometry": probe_geometry,
             # Not sure why we need this cast here, the pipeline should convert it to Tensor already
-            "apply_lens_correction": ops.cast(apply_lens_correction, bool),
+            "apply_lens_correction": self.apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
         }
