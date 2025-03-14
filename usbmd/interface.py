@@ -230,23 +230,6 @@ class Interface:
         # get data from dataset
         data = self.dataset[(file_idx, frame_no)]
 
-        # ## Update scan class (probably a cleaner way to do this)
-        # # check if event data by checking self.dataset.file keys start with event
-        # if self.dataset.event_structure:
-        #     # this is still under development
-        #     scan_params = self.dataset.get_scan_parameters_from_file(
-        #         file_idx=self.dataset.file, event=self.dataset.frame_no
-        #     )
-        #     scan_class = self.dataset.get_scan_class()
-
-        #     scan_params = update_dictionary(scan_params, self.config_scan_params)
-        #     self.scan_params = update_dictionary(self.scan_params, scan_params)
-        #     self.scan = scan_class(**self.scan_params)
-
-        #     # TODO: use adaptive beamformer processing instead of reinit
-        #     self.process = Process(self.config, self.scan, self.probe)
-        #     # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
-
         return data
 
     def data_to_display(self, data=None):
