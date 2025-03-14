@@ -1152,7 +1152,7 @@ def compute_t0_delays_planewave(
 
 def compute_t0_delays_focused(
     origin,
-    focus_distance,
+    focus_distances,
     probe_geometry,
     polar_angles,
     azimuth_angles=0,
@@ -1193,13 +1193,13 @@ def compute_t0_delays_focused(
 
     # Compute the location of the virtual source by adding the focus distance
     # to the origin along the wave vectors.
-    virtual_sources = origin + focus_distance * v
+    virtual_sources = origin[None, None] + focus_distances[:, None, None] * v
 
     # Compute the distances between the virtual sources and each element
     dist = np.linalg.norm(virtual_sources - probe_geometry, axis=-1)
 
     # Adjust distances based on the direction of focus
-    dist *= -np.sign(focus_distance)
+    dist *= -np.sign(focus_distances[:, None])
 
     # Convert from distance to time to compute the
     # transmit delays/travel times.
@@ -1212,7 +1212,7 @@ def compute_t0_delays_focused(
     # Shift the transmit delays such that the first element fires at t=0.
     t0_delays = travel_times - t_first_fire[:, None]
 
-    return t0_delays.T
+    return t0_delays
 
 
 def plot_t0_delays(t0_delays):
