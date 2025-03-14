@@ -121,8 +121,8 @@ def default_pipeline(ultrasound_scan):
         ops.PfieldWeighting(),
         ops.DelayAndSum(),
         ops.EnvelopeDetect(axis=-2),
-        ops.Normalize(),
         ops.LogCompress(),
+        ops.Normalize(),
     ]
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
     return pipeline
@@ -148,8 +148,8 @@ def patched_pipeline(ultrasound_scan):
         ),
         patched_beamforming,
         ops.EnvelopeDetect(axis=-2),
-        ops.Normalize(),
         ops.LogCompress(),
+        ops.Normalize(),
     ]
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
     return pipeline
