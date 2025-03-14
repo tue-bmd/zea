@@ -5,8 +5,6 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 
-# pylint: disable=no-member
-
 from typing import Union
 
 import matplotlib.pyplot as plt
@@ -217,8 +215,14 @@ class Scan(Object):
         self.attenuation_coef = None
         self.f_number = None
         self.probe_geometry = None
-        self.pixels_per_wvln = None
+        self.pixels_per_wavelength = None
         self.downsample = None
+        self.time_to_next_transmit = None
+        self.theta_range = None
+        self.phi_range = None
+        self.rho_range = None
+        self.fill_value = None
+        self._n_tx = None
 
         # Dictionary to track which parameters have been set
         self._set_params = {}
