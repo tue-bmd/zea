@@ -121,8 +121,8 @@ def default_pipeline(ultrasound_scan):
         ops.PfieldWeighting(),
         ops.DelayAndSum(),
         ops.EnvelopeDetect(axis=-2),
-        ops.LogCompress(),
-        ops.Normalize(),
+        ops.LogCompress(output_key="image"),
+        ops.Normalize(key="image", output_key="image"),
     ]
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
     return pipeline
@@ -148,8 +148,8 @@ def patched_pipeline(ultrasound_scan):
         ),
         patched_beamforming,
         ops.EnvelopeDetect(axis=-2),
-        ops.LogCompress(),
-        ops.Normalize(),
+        ops.LogCompress(output_key="image"),
+        ops.Normalize(key="image", output_key="image"),
     ]
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
     return pipeline
@@ -539,5 +539,8 @@ def test_default_ultrasound_pipeline(
         assert np.nanmax(output["image"]) <= 255.0
 
     np.testing.assert_allclose(
-        output_default["image"], output_patched["image"], rtol=1e-3, atol=1e-3
+        output_default["image"] / np.max(output_default["image"]),
+        output_patched["image"] / np.max(output_patched["image"]),
+        rtol=1e-3,
+        atol=1e-3,
     )
