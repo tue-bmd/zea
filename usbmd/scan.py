@@ -212,7 +212,6 @@ class Scan(Object):
         # explicitely set parameters to None for linter to recognize them
         # only necessary for parameters that don't have @property decorators
         self.apply_lens_correction = None
-        self.attenuation_coef = None
         self.f_number = None
         self.probe_geometry = None
         self.pixels_per_wavelength = None
