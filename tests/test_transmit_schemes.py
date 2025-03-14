@@ -185,7 +185,7 @@ def _get_diverging_scan(ultrasound_probe):
     sound_speed = constant_scan_kwargs["sound_speed"]
     focus_distances = np.ones(n_tx) * -15e-3
     t0_delays = compute_t0_delays_focused(
-        origin=np.array([0, 0, 0]),
+        origins=np.zeros((n_tx, 3)),
         focus_distances=focus_distances,
         probe_geometry=ultrasound_probe.probe_geometry,
         polar_angles=angles,
@@ -226,7 +226,58 @@ def _get_focused_scan(ultrasound_probe):
     sound_speed = constant_scan_kwargs["sound_speed"]
     focus_distances = np.ones(n_tx) * 15e-3
     t0_delays = compute_t0_delays_focused(
-        origin=np.array([0, 0, 0]),
+        origins=np.zeros((n_tx, 3)),
+        focus_distances=focus_distances,
+        probe_geometry=ultrasound_probe.probe_geometry,
+        polar_angles=angles,
+        sound_speed=sound_speed,
+    )
+    element_width = np.linalg.norm(
+        ultrasound_probe.probe_geometry[1] - ultrasound_probe.probe_geometry[0]
+    )
+
+    return Scan(
+        n_tx=n_tx,
+        n_el=n_el,
+        center_frequency=ultrasound_probe.center_frequency,
+        sampling_frequency=ultrasound_probe.sampling_frequency,
+        probe_geometry=ultrasound_probe.probe_geometry,
+        t0_delays=t0_delays,
+        tx_apodizations=tx_apodizations,
+        element_width=element_width,
+        focus_distances=focus_distances,
+        polar_angles=angles,
+        initial_times=np.ones(n_tx) * 1e-6,
+        xlims=(-15e-3, 15e-3),
+        zlims=(0, 35e-3),
+        **constant_scan_kwargs,
+    )
+
+
+def _get_linescan_scan(ultrasound_probe):
+    """Returns a scan for ultrasound simulation tests."""
+    constant_scan_kwargs = _get_constant_scan_kwargs()
+    n_el = ultrasound_probe.n_el
+    n_tx = 5
+
+    center_elements = np.linspace(0, n_el + 1, n_tx, dtype=int)
+    center_elements = center_elements[1:-1]
+    tx_apodizations = np.zeros((n_tx, n_el))
+    aperture_size_elements = 24
+    origins = []
+    for n, idx in enumerate(center_elements):
+        el0 = np.clip(idx - aperture_size_elements // 2, 0, n_el)
+        el1 = np.clip(idx + aperture_size_elements // 2, 0, n_el)
+        tx_apodizations[n, el0:el1] = np.hanning(el1 - el0)[None]
+        origins.append(ultrasound_probe.probe_geometry[idx])
+    origins = np.stack(origins, axis=0)
+
+    angles = np.zeros(n_tx)
+
+    sound_speed = constant_scan_kwargs["sound_speed"]
+    focus_distances = np.ones(n_tx) * 15e-3
+    t0_delays = compute_t0_delays_focused(
+        origins=origins,
         focus_distances=focus_distances,
         probe_geometry=ultrasound_probe.probe_geometry,
         polar_angles=angles,
@@ -263,6 +314,8 @@ def _get_scan(ultrasound_probe, kind):
         return _get_diverging_scan(ultrasound_probe)
     elif kind == "focused":
         return _get_focused_scan(ultrasound_probe)
+    elif kind == "linescan":
+        return _get_linescan_scan(ultrasound_probe)
     else:
         raise ValueError(f"Unknown scan kind: {kind}")
 
@@ -305,6 +358,7 @@ def ultrasound_scatterers():
         ("phased_array", "diverging"),
         ("linear", "focused"),
         ("phased_array", "focused"),
+        ("linear", "linescan"),
     ],
 )
 def test_default_ultrasound_pipeline(
@@ -339,6 +393,9 @@ def test_default_ultrasound_pipeline(
         ultrasound_scan.zlims[0] * 1e3,
     ]
     plt.imshow(image, cmap="gray", aspect="auto", extent=extent)
+    plt.xlabel("x [mm]")
+    plt.ylabel("z [mm]")
+    plt.title(f"{probe_kind} {scan_kind}")
     plt.savefig(f"{probe_kind}_{scan_kind}.png")
     plt.close()
     # Check that the pipeline produced the expected outputs
