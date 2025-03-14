@@ -12,6 +12,7 @@ from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 from usbmd.utils.utils import deprecated
 
 
+# TODO: can be removed when ops_v1 is removed
 @deprecated(replacement="usbmd.beamformers.tof_correction_flatgrid")
 def tof_correction(data, grid, *args, patches=1, **kwargs):
     """
@@ -104,19 +105,6 @@ def tof_correction_flatgrid(
     )
 
     n_tx, n_ax, n_el, _ = ops.shape(data)
-
-    # assert data.shape[0] == n_tx, (
-    #     "The first dimension of the input data should be the number of "
-    #     f"transmits {n_tx}, got {data.shape[0]} instead."
-    # )
-    # assert data.shape[1] == n_ax, (
-    #     "The third dimension of the input data should be the number of "
-    #     f"axial samples {n_ax}, got {data.shape[1]} instead."
-    # )
-    # assert data.shape[2] == n_el, (
-    #     "The second dimension of the input data should be the number of "
-    #     f"elements {n_el}, got {data.shape[2]} instead."
-    # )
 
     # Calculate delays
     # --------------------------------------------------------------------
@@ -230,11 +218,9 @@ def calculate_delays(
     element.
 
     Args:
-        grid (Tensor): The pixel coordinates to beamform to of shape `(n_pix,
-            3)`.
+        grid (Tensor): The pixel coordinates to beamform to of shape `(n_pix, 3)`.
         t0_delays (Tensor): The transmit delays in seconds of shape
-            `(n_tx, n_el)`, shifted such that the smallest delay is 0. Defaults to
-            None.
+            `(n_tx, n_el)`, shifted such that the smallest delay is 0. Defaults to None.
         tx_apodizations (Tensor): The transmit apodizations of shape
             `(n_tx, n_el)`.
         probe_geometry (Tensor): The positions of the transducer elements of shape
@@ -250,13 +236,10 @@ def calculate_delays(
             of shape `(n_tx,)`.
 
     Returns:
-        Tensor, Tensor: transmit_delays, receive_delays
-
-        The tensor transmit delays to every pixel has shape
-        `(n_pix, n_tx)`
-
-        the tensor of receive delays from every pixel back to the
-        transducer element has shape of shape `(n_pix, n_tx)`
+        - transmit_delays (Tensor): The tensor transmit delays to every pixel has shape
+            `(n_pix, n_tx)`.
+        - receive_delays (Tensor): The tensor of receive delays from every pixel back to
+            the transducer element has shape of shape `(n_pix, n_el)`.
     """
 
     inf_distances = ops.isinf(focus_distances)
@@ -300,15 +283,6 @@ def calculate_delays(
     # TODO: Add pulse width to transmit delays
     tx_delays = (tx_distances / sound_speed - initial_times[None]) * sampling_frequency
     rx_delays = (rx_distances / sound_speed) * sampling_frequency
-
-    # assert tuple(tx_delays.shape) == (n_x * n_z, n_tx), (
-    #     "The output shape of tx_delays is incorrect!"
-    #     f"Expected {(n_x * n_z, n_tx)}, got {tx_delays.shape}"
-    # )
-    # assert tuple(rx_delays.shape) == (n_x * n_z, n_el), (
-    #     "The output shape of rx_delays is incorrect!"
-    #     f"Expected {(n_x * n_z, n_el)}, got {rx_delays.shape}"
-    # )
 
     return tx_delays, rx_delays
 
@@ -423,9 +397,7 @@ def distance_Rx(grid, probe_geometry):
             `(n_pix, n_el)`.
     """
     # Get norm of distance vector between elements and pixels via broadcasting
-    # dist = ops.norm(grid - probe_geometry[None, ...].float(), dim=-1)
-    # alternative we can compute norm manually
-    dist = ops.sqrt(ops.sum((grid - probe_geometry[None, ...]) ** 2, -1))
+    dist = ops.linalg.norm(grid - probe_geometry[None, ...], axis=-1)
     return dist
 
 

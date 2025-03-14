@@ -17,10 +17,11 @@ import numpy as np
 from PIL import Image
 
 from usbmd.config import Config
+from usbmd.core import DataTypes
 from usbmd.data import get_dataset
 from usbmd.display import to_8bit
+from usbmd.ops_v2 import Pipeline
 from usbmd.probes import get_probe
-from usbmd.processing import Process
 from usbmd.utils import (
     log,
     safe_initialize_class,
@@ -88,8 +89,15 @@ class Interface:
         else:
             self.probe = get_probe(probe_name)
 
-        # intialize process class
-        self.process = Process(self.config, self.scan, self.probe)
+        # initialize Pipeline
+        assert (
+            "pipeline" in self.config
+        ), "Pipeline not found in config, please specify pipeline in config."
+
+        self.process = Pipeline.from_config(
+            self.config.pipeline,
+            with_batch_dim=False,
+        )
 
         # initialize attributes for UI class
         self.data = None
@@ -222,23 +230,6 @@ class Interface:
         # get data from dataset
         data = self.dataset[(file_idx, frame_no)]
 
-        ## Update scan class (probably a cleaner way to do this)
-        # check if event data by checking self.dataset.file keys start with event
-        if self.dataset.event_structure:
-            # this is still under development
-            scan_params = self.dataset.get_scan_parameters_from_file(
-                file_idx=self.dataset.file, event=self.dataset.frame_no
-            )
-            scan_class = self.dataset.get_scan_class()
-
-            scan_params = update_dictionary(scan_params, self.config_scan_params)
-            self.scan_params = update_dictionary(self.scan_params, scan_params)
-            self.scan = scan_class(**self.scan_params)
-
-            # TODO: use adaptive beamformer processing instead of reinit
-            self.process = Process(self.config, self.scan, self.probe)
-            # print(f"frame: {self.dataset.frame_no}, angles: {scan_params['polar_angles']}")
-
         return data
 
     def data_to_display(self, data=None):
@@ -255,20 +246,32 @@ class Interface:
             )
             self.to_dtype = "image_sc"
 
-        if self.process.pipeline is None:
-            if self.config.preprocess.operation_chain is None:
-                self.process.set_pipeline(
-                    dtype=self.dtype,
-                    to_dtype=self.to_dtype,
-                    verbose=self.verbose,
-                )
-            else:
-                self.process.set_pipeline(
-                    operation_chain=self.config.preprocess.operation_chain,
-                    verbose=self.verbose,
-                )
+        input_key = self.process.key if self.process.key is not None else "data"
 
-        self.image = self.process.run(self.data)
+        # select transmits if raw or aligned data
+        data_type = self.process.operations[0].input_data_type
+        if data_type in [DataTypes.RAW_DATA, DataTypes.ALIGNED_DATA]:
+            n_tx = self.data.shape[0]
+            assert len(self.scan.selected_transmits) <= n_tx, (
+                f"Number of selected transmits {len(self.scan.selected_transmits)} "
+                f"exceeds number of transmits in raw data {n_tx}"
+            )
+            self.data = np.take(self.data, self.scan.selected_transmits, axis=0)
+
+        inputs = {input_key: self.data}
+
+        args = []
+
+        for arg in [self.config, self.probe, self.scan]:
+            if arg is not None:
+                args.append(arg)
+
+        outputs = self.process(*args, **inputs)
+
+        output_key = (
+            self.process.output_key if self.process.output_key is not None else "data"
+        )
+        self.image = outputs[output_key]
 
         # match orientation if necessary
         if self.config.plot.fliplr:
@@ -308,7 +311,7 @@ class Interface:
         """Plot image using matplotlib or opencv.
 
         Args:
-            save (bool): whether to save the image to disk.
+        save (bool): whether to save the image to disk.
             block (bool): whether to block the UI while plotting.
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
