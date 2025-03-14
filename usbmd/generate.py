@@ -18,11 +18,12 @@ import numpy as np
 import tqdm
 
 from usbmd.config import Config
+from usbmd.core import DataTypes
 from usbmd.data import get_dataset
 from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.display import to_8bit
+from usbmd.ops_v2 import Pipeline
 from usbmd.probes import get_probe
-from usbmd.processing import Process
 from usbmd.utils import get_function_args, log, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES
 
@@ -114,19 +115,15 @@ class GenerateDataSet:
         else:
             self.probe = get_probe(probe_name)
 
-        # intialize process class
-        self.process = Process(self.config, self.scan, self.probe)
-        if self.config.preprocess.operation_chain is None:
-            self.process.set_pipeline(
-                dtype=self.config.data.dtype,
-                to_dtype=self.to_dtype,
-                verbose=self.verbose,
-            )
-        else:
-            self.process.set_pipeline(
-                operation_chain=self.config.preprocess.operation_chain,
-                verbose=self.verbose,
-            )
+        # initialize Pipeline
+        assert (
+            "pipeline" in self.config
+        ), "Pipeline not found in config, please specify pipeline in config."
+
+        self.process = Pipeline.from_config(
+            self.config.pipeline,
+            with_batch_dim=False,
+        )
 
         if self.dataset.datafolder is None:
             self.dataset.datafolder = Path(".")
@@ -184,7 +181,8 @@ class GenerateDataSet:
                             pbar.update(1)
                             continue
 
-                        image = self.process.run(image)
+                        image = self.process_data(image)
+
                         self.save_image(np.squeeze(image), path)
                         pbar.update(1)
 
@@ -196,7 +194,7 @@ class GenerateDataSet:
 
                     data_list = []
                     for d in data:
-                        d = self.process.run(d)
+                        d = self.process_data(d)
                         data_list.append(d)
                         pbar.update(1)
                     data = np.stack(data_list, axis=0)
@@ -207,6 +205,35 @@ class GenerateDataSet:
 
         log.success(f"Created dataset in {self.destination_folder}")
         return True
+
+    def process_data(self, data):
+        """Small wrapper for processing data with the pipeline"""
+        input_key = self.process.key if self.process.key is not None else "data"
+
+        data_type = self.process.operations[0].input_data_type
+        if data_type in [DataTypes.RAW_DATA, DataTypes.ALIGNED_DATA]:
+            n_tx = data.shape[0]
+            assert len(self.scan.selected_transmits) <= n_tx, (
+                f"Number of selected transmits {len(self.scan.selected_transmits)} "
+                f"exceeds number of transmits in raw data {n_tx}"
+            )
+            data = np.take(data, self.scan.selected_transmits, axis=0)
+
+        inputs = {input_key: data}
+
+        args = []
+
+        for arg in [self.config, self.probe, self.scan]:
+            if arg is not None:
+                args.append(arg)
+
+        outputs = self.process(*args, **inputs)
+
+        output_key = (
+            self.process.output_key if self.process.output_key is not None else "data"
+        )
+        image = outputs[output_key]
+        return image
 
     def skip_path(self, path):
         """Check if path exists and if we should skip it.
