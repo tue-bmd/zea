@@ -172,14 +172,11 @@ def tof_correction_flatgrid(
         tof_tx = tof_tx * mask
 
         # Phase correction
-        tshift = delays[:, :] / sampling_frequency
-        tdemod = flatgrid[:, None, 2] * 2 / sound_speed
-        theta = 2 * np.pi * fdemod * (tshift - tdemod)
-        # TODO: This is to make the code jit-able, but we should find a better way
-        tof_tx = ops.where(
-            apply_phase_rotation, tof_tx, ops.concatenate([tof_tx, tof_tx], -1)
-        )
-        tof_tx = ops.where(apply_phase_rotation, _complex_rotate(tof_tx, theta), tof_tx)
+        if apply_phase_rotation:
+            tshift = delays[:, :] / sampling_frequency
+            tdemod = flatgrid[:, None, 2] * 2 / sound_speed
+            theta = 2 * np.pi * fdemod * (tshift - tdemod)
+            tof_tx = _complex_rotate(tof_tx, theta)
         return tof_tx
 
     # Reshape to (n_tx, n_pix, 1)
