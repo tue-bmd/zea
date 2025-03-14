@@ -783,6 +783,8 @@ class Scan(Object):
     @property
     def flatgrid(self):
         """The beamforming grid of shape (Nz*Nx, 3)."""
+        if self.grid is None:
+            return None
         return self.grid.reshape(-1, 3)
 
     @property
@@ -796,6 +798,10 @@ class Scan(Object):
                 "scan.probe_geometry not set. Cannot compute pfield."
                 "Defaulting to uniform weights."
             )
+            if None in [self.Nz, self.Nx, self.n_tx]:
+                log.warning("Nx, Nz, or n_tx not set. Cannot compute pfield.")
+                return self._pfield
+
             self._pfield = np.ones((self.n_tx, self.Nz, self.Nx))
         else:
             if self.pfield_kwargs is None:
@@ -810,6 +816,8 @@ class Scan(Object):
     @property
     def flat_pfield(self):
         """The pfield grid of shape (Nz*Nx, n_tx)."""
+        if self.pfield is None:
+            return None
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
     @pfield.setter
