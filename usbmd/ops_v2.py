@@ -892,7 +892,6 @@ class TOFCorrection(Operation):
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
             "probe_geometry": probe_geometry,
-            # Not sure why we need this cast here, the pipeline should convert it to Tensor already
             "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
