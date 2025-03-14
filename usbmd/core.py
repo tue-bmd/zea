@@ -7,7 +7,7 @@ from copy import deepcopy
 import keras
 import numpy as np
 
-CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, bool)
+CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_PRECISION = "float32"
 
 # TODO: make static more neat
@@ -23,6 +23,14 @@ class DataTypes(enum.Enum):
     ENVELOPE_DATA = "envelope_data"
     IMAGE = "image"
     IMAGE_SC = "image_sc"
+
+
+class ModTypes(enum.Enum):
+    """Enum class for USBMD modulation types."""
+
+    NONE = None
+    RF = "rf"
+    IQ = "iq"
 
 
 class classproperty(property):
@@ -107,8 +115,17 @@ def object_to_tensor(obj: Object):
         if key.startswith("_") or key in except_tensors:
             continue
 
+        # Some objects have a _set_params dict that stores if parameters have
+        # been (lazily) set. We don't want to convert these attributes to tensors
+        # if hasattr(obj, "_set_params") and not obj._set_params.get(key, True):
+        #     continue
+
         # Skip methods
-        value = getattr(obj, key)
+        try:
+            value = getattr(obj, key)
+        except ValueError:
+            continue
+
         if callable(value):
             continue
 
