@@ -20,6 +20,7 @@ def compute_pfield(
     alpha=1,
     perc=10,
     norm=True,
+    verbose=True,
 ):
     """
     Compute the pressure field for ultrasound imaging.
@@ -150,11 +151,12 @@ def compute_pfield(
     )
 
     P_list = []
+
+    if verbose:
+        log.info("Computing pressure field for all transmits")
+        progbar = keras.utils.Progbar(n_transmits, unit_name="transmits")
     for j in range(0, n_transmits):
         # print some progress
-        if j % 10 == 0:
-            log.info(f"Precomputing pressure fields, transmit {j}/{n_transmits}")
-
         # delays and apodization of transmit event
         delaysTX = ops.convert_to_tensor(scan.t0_delays[j], dtype="float32")
         idx_nan = ops.isnan(delaysTX)
@@ -256,6 +258,9 @@ def compute_pfield(
         )
 
         P_list.append(P)
+
+        if verbose:
+            progbar.add(1)
 
     P_arr = ops.convert_to_tensor(P_list)
     P_arr = ops.where(
