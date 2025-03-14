@@ -211,6 +211,15 @@ class Scan(Object):
         """
         super().__init__()
 
+        # explicitely set parameters to None for linter to recognize them
+        # only necessary for parameters that don't have @property decorators
+        self.apply_lens_correction = None
+        self.attenuation_coef = None
+        self.f_number = None
+        self.probe_geometry = None
+        self.pixels_per_wvln = None
+        self.downsample = None
+
         # Dictionary to track which parameters have been set
         self._set_params = {}
 
