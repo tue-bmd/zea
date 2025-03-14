@@ -68,14 +68,16 @@ model_schema = Schema(
     }
 )
 
-# preprocess
-preprocess_schema = Schema(
+# pipeline / operations
+pipeline_schema = Schema(
     {
-        Optional("operation_chain", default=None): Or(None, list),
+        Optional("operations", default=["identity"]): Or(
+            None, [Or(str, {"name": str, "params": dict}, {"name": str})]
+        ),
     }
 )
 
-# postprocess
+# postprocess DEPRECATED
 postprocess_schema = Schema(
     {
         Optional("contrast_boost", default=None): Or(
@@ -138,6 +140,11 @@ scan_schema = Schema(
         Optional("lens_sound_speed", default=1000): Or(
             positive_float, positive_integer
         ),
+        Optional("theta_range", default=None): Or(None, list_of_size_two),
+        Optional("phi_range", default=None): Or(None, list_of_size_two),
+        Optional("rho_range", default=None): Or(None, list_of_size_two),
+        Optional("fill_value", default=0.0): any_number,
+        Optional("resolution", default=None): Or(None, positive_float),
     }
 )
 
@@ -172,6 +179,7 @@ data_schema = Schema(
         Optional("frame_no", default=None): Or(None, "all", int),
         Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
         Optional("input_range", default=None): Or(None, list_of_size_two),
+        Optional("output_range", default=None): Or(None, list_of_size_two),
         Optional("apodization", default=None): Or(None, str),
         Optional("modtype", default=None): Or(*_MOD_TYPES),  # ONLY FOR LEGACY DATASET
         Optional("from_modtype", default=None): Or(
@@ -187,12 +195,7 @@ config_schema = Schema(
         "data": data_schema,
         Optional("plot", default=plot_schema.validate({})): plot_schema,
         Optional("model", default=model_schema.validate({})): model_schema,
-        Optional(
-            "preprocess", default=preprocess_schema.validate({})
-        ): preprocess_schema,
-        Optional(
-            "postprocess", default=postprocess_schema.validate({})
-        ): postprocess_schema,
+        Optional("pipeline", default=pipeline_schema.validate({})): pipeline_schema,
         Optional("scan", default=scan_schema.validate({})): scan_schema,
         Optional("device", default="auto:1"): Or(
             "cpu",
