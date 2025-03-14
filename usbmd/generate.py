@@ -123,7 +123,6 @@ class GenerateDataSet:
         self.process = Pipeline.from_config(
             self.config.pipeline,
             with_batch_dim=False,
-            jit_options=None,
         )
 
         if self.dataset.datafolder is None:
