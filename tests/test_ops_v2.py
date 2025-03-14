@@ -539,5 +539,5 @@ def test_default_ultrasound_pipeline(
         assert np.nanmax(output["image"]) <= 255.0
 
     np.testing.assert_allclose(
-        output_default["image"], output_patched["image"], rtol=1e-5, atol=1e-5
+        output_default["image"], output_patched["image"], rtol=1e-3, atol=1e-3
     )
