@@ -7,6 +7,8 @@
 		"context": "..",
 		"dockerfile": "../Dockerfile"
 	},
+	// Ensure the .env file exists
+	"initializeCommand": "touch ${localWorkspaceFolder}/.env",
 	"runArgs": [
 		"--gpus", "all",
 		"-m",
