@@ -1,5 +1,4 @@
-"""Basic testing datasets
-"""
+"""Basic testing datasets"""
 
 import shutil
 import sys
@@ -77,14 +76,18 @@ def test_generate(dtype, to_dtype, filetype):
     config = setup_config("./tests/config_test.yaml")
     config.data.dtype = dtype
 
-    # setting sum_transmits to False and operation_chain to None
-    # that way we can use the default operation chain that
-    # automatically checks the dtype and to_dtype
-    config.model.beamformer.sum_transmits = False
-    config.preprocess.operation_chain = None
-
     temp_folder = Path("./tests/temp")
     shutil.rmtree(temp_folder, ignore_errors=True)
+
+    config.pipeline.operations = [
+        {"name": "tof_correction"},
+        {"name": "delay_and_sum"},
+        {"name": "envelope_detect"},
+        {"name": "normalize"},
+        {"name": "log_compress"},
+    ]
+    if dtype == "beamformed_data":
+        config.pipeline.operations = config.pipeline.operations[2:]
 
     generator = GenerateDataSet(
         config,

@@ -28,7 +28,7 @@ class DataTypes(enum.Enum):
 class ModTypes(enum.Enum):
     """Enum class for USBMD modulation types."""
 
-    NONE = "none"
+    NONE = None
     RF = "rf"
     IQ = "iq"
 
