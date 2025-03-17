@@ -353,6 +353,8 @@ class Pipeline:
                 probe = arg.to_tensor()
             elif isinstance(arg, Scan):
                 scan = arg.to_tensor()
+                # TODO: doing this twice because grid has to set Nz, Nx...
+                scan = arg.to_tensor()
             elif isinstance(arg, Config):
                 config = arg.to_tensor()  # TODO
             else:
