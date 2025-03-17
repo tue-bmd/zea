@@ -21,7 +21,7 @@ from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
-from usbmd.tensor_ops import patched_map, reshape_axis, take
+from usbmd.tensor_ops import patched_map, reshape_axis
 from usbmd.utils import log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
@@ -1151,6 +1151,7 @@ class DelayAndSum(Operation):
 
         Returns:
             dict: Dictionary containing beamformed_data of shape `(n_z*n_x, n_ch)`
+                when reshape_grid is False or `(n_z, n_x, n_ch)` when reshape_grid is True,
                 with optional batch dimension.
         """
         if rx_apo is None:
@@ -1209,7 +1210,7 @@ class EnvelopeDetect(Operation):
             data = hilbert(data, N=M, axis=self.axis)
             indices = ops.arange(n_ax)
 
-            data = take(data, indices, axis=self.axis)
+            data = ops.take(data, indices, axis=self.axis)
             data = ops.squeeze(data, axis=-1)
 
         # data = ops.abs(data)

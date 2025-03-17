@@ -1,6 +1,7 @@
 """Frequency domain ultrasound simulator based on linear scattering."""
 
 from keras import ops
+
 from usbmd.utils.lens_correction import compute_lens_corrected_travel_times
 
 PI = 3.14159265359
@@ -49,7 +50,7 @@ def simulate_rf(
         shape (n_tx, n_el).
 
     Returns:
-    rf_data (array-like): The simulated RF data of shape (1, n_ax, n_tx, n_el, 1).
+    rf_data (array-like): The simulated RF data of shape (1, n_tx, n_ax, n_el, 1).
     """
 
     n_tx = t0_delays.shape[0]
