@@ -116,36 +116,24 @@ def tof_correction_flatgrid(
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
 
-    if apply_lens_correction:
-        txdel, rxdel = calculate_lens_corrected_delays(
-            flatgrid,
-            t0_delays,
-            tx_apodizations,
-            probe_geometry,
-            initial_times,
-            sampling_frequency,
-            sound_speed,
-            n_tx,
-            n_el,
-            vfocus,
-            angles,
-            lens_thickness=lens_thickness,
-            lens_sound_speed=lens_sound_speed,
-        )
-    else:
-        txdel, rxdel = calculate_delays(
-            flatgrid,
-            t0_delays,
-            tx_apodizations,
-            probe_geometry,
-            initial_times,
-            sampling_frequency,
-            sound_speed,
-            n_tx,
-            n_el,
-            vfocus,
-            angles,
-        )
+    delay_fn = (
+        calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
+    )
+    txdel, rxdel = delay_fn(
+        flatgrid,
+        t0_delays,
+        tx_apodizations,
+        probe_geometry,
+        initial_times,
+        sampling_frequency,
+        sound_speed,
+        n_tx,
+        n_el,
+        vfocus,
+        angles,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
+    )
 
     n_pix = ops.shape(flatgrid)[0]
     mask = ops.cond(

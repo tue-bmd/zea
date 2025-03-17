@@ -287,6 +287,41 @@ class Pipeline:
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
+    @classmethod
+    def default(cls, num_patches=20, **kwargs) -> "Pipeline":
+        """Create a default pipeline."""
+        # Get beamforming ops
+        beamforming = [
+            TOFCorrection(),
+            PfieldWeighting(),
+            DelayAndSum(),
+        ]
+
+        # Optionally add patching
+        if num_patches > 1:
+            beamforming = PatchedGrid(operations=beamforming, num_patches=num_patches)
+            operations = [beamforming]
+        else:
+            operations = beamforming
+
+        # Add display ops
+        operations += [
+            EnvelopeDetect(),
+            LogCompress(output_key="image"),
+            Normalize(key="image", output_key="image"),
+        ]
+        return cls(operations, **kwargs)
+
+    def prepend(self, operation: Operation):
+        """Prepend an operation to the pipeline."""
+        self._pipeline_layers.insert(0, operation)
+        self.reset_jit()
+
+    def append(self, operation: Operation):
+        """Append an operation to the pipeline."""
+        self._pipeline_layers.append(operation)
+        self.reset_jit()
+
     @property
     def operations(self):
         """Alias for self.layers to match the USBMD naming convention"""
@@ -367,6 +402,11 @@ class Pipeline:
     def prepare_output(self, kwargs):
         """Convert output data to dictionary of tensors following the CCC"""
         raise NotImplementedError
+
+    def reset_jit(self):
+        """Reset the JIT compilation of the pipeline."""
+        # TODO: kind of hacky...
+        self.jit_options = self._jit_options
 
     @property
     def jit_options(self):
@@ -777,14 +817,12 @@ class UpMix(Operation):
 class Simulate(Operation):
     """Simulate RF data."""
 
-    def __init__(self, n_ax, apply_lens_correction=True, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
             jit_compile=False,
             **kwargs,
         )
-        self.apply_lens_correction = apply_lens_correction
-        self.n_ax = n_ax
 
     def call(
         self,
@@ -801,17 +839,19 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
+        apply_lens_correction,
+        n_ax,
     ):
         return {
             "raw_data": simulate_rf(
                 ops.convert_to_tensor(scatterer_positions),
                 ops.convert_to_tensor(scatterer_magnitudes),
                 probe_geometry=probe_geometry,
-                apply_lens_correction=self.apply_lens_correction,
+                apply_lens_correction=apply_lens_correction,
                 lens_thickness=lens_thickness,
                 lens_sound_speed=lens_sound_speed,
                 sound_speed=sound_speed,
-                n_ax=self.n_ax,
+                n_ax=n_ax,
                 center_frequency=center_frequency,
                 sampling_frequency=sampling_frequency,
                 t0_delays=t0_delays,
@@ -827,13 +867,7 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(
-        self,
-        key="raw_data",
-        output_key="aligned_data",
-        apply_lens_correction=False,
-        **kwargs,
-    ):
+    def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
@@ -841,7 +875,6 @@ class TOFCorrection(Operation):
         )
         self.key = key
         self.output_key = output_key
-        self.apply_lens_correction = apply_lens_correction
 
     def call(
         self,
@@ -1153,7 +1186,7 @@ class EnvelopeDetect(Operation):
         self,
         key: str = "beamformed_data",
         output_key: str = "envelope_data",
-        axis=-3,
+        axis=-2,
         **kwargs,
     ):
         super().__init__(
