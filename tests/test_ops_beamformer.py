@@ -1,5 +1,4 @@
-"""Tests for the ops beamformer.
-"""
+"""Tests for the ops beamformer."""
 
 # pylint: disable=import-outside-toplevel
 
@@ -45,9 +44,7 @@ def _get_params(reconstruction_mode):
     scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
 
     # use pipeline here so it is easy to propagate the scan parameters
-    simulator = Pipeline(
-        [Simulate(apply_lens_correction=scan.apply_lens_correction, n_ax=scan.n_ax)]
-    )
+    simulator = Pipeline([Simulate()])
 
     # Generate pseudorandom input tensor
     # Define scatterers
