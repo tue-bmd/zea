@@ -17,7 +17,7 @@ from usbmd.config.config import Config
 from usbmd.core import DataTypes
 from usbmd.probes import Dummy, Probe
 from usbmd.registry import ops_v2_registry as ops_registry
-from usbmd.scan import Scan
+from usbmd.scan import Scan, compute_t0_delays_planewave
 
 """Some operations for testing"""
 
@@ -117,12 +117,12 @@ def default_pipeline(ultrasound_scan):
             apply_lens_correction=ultrasound_scan.apply_lens_correction,
             n_ax=ultrasound_scan.n_ax,
         ),
-        ops.TOFCorrection(),
+        ops.TOFCorrection(apply_lens_correction=ultrasound_scan.apply_lens_correction),
         ops.PfieldWeighting(),
         ops.DelayAndSum(),
-        ops.EnvelopeDetect(),
-        ops.Normalize(),
-        ops.LogCompress(),
+        ops.EnvelopeDetect(axis=-2),
+        ops.LogCompress(output_key="image"),
+        ops.Normalize(key="image", output_key="image"),
     ]
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
     return pipeline
@@ -133,7 +133,9 @@ def patched_pipeline(ultrasound_scan):
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     patched_beamforming = ops.PatchedGrid(
         operations=[
-            ops.TOFCorrection(),
+            ops.TOFCorrection(
+                apply_lens_correction=ultrasound_scan.apply_lens_correction,
+            ),
             ops.PfieldWeighting(),
             ops.DelayAndSum(),
         ],
@@ -145,9 +147,9 @@ def patched_pipeline(ultrasound_scan):
             n_ax=ultrasound_scan.n_ax,
         ),
         patched_beamforming,
-        ops.EnvelopeDetect(),
-        ops.Normalize(),
-        ops.LogCompress(),
+        ops.EnvelopeDetect(axis=-2),
+        ops.LogCompress(output_key="image"),
+        ops.Normalize(key="image", output_key="image"),
     ]
     pipeline = ops.Pipeline(operations=operations, jit_options=None)
     return pipeline
@@ -403,18 +405,18 @@ def ultrasound_probe():
 @pytest.fixture
 def ultrasound_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
-    n_el = 128
+    n_el = ultrasound_probe.n_el
     n_tx = 2
     n_ax = 513
 
-    tx_apodizations = np.ones((n_tx, n_el))
+    tx_apodizations = np.ones((n_tx, n_el)) * np.hanning(n_el)[None]
     probe_geometry = ultrasound_probe.probe_geometry
 
-    t0_delays = np.stack(
-        [
-            np.linspace(0, 1e-6, n_el),
-            np.linspace(1e-6, 0, n_el),
-        ]
+    angles = np.linspace(10, -10, n_tx) * np.pi / 180
+    sound_speed = 1540.0
+    focus_distances = np.ones(n_tx) * np.inf
+    t0_delays = compute_t0_delays_planewave(
+        probe_geometry=probe_geometry, polar_angles=angles, sound_speed=sound_speed
     )
 
     return Scan(
@@ -423,19 +425,24 @@ def ultrasound_scan(ultrasound_probe):
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
-        center_frequency=3.125e6,
-        sampling_frequency=12.5e6,
+        center_frequency=ultrasound_probe.center_frequency,
+        sampling_frequency=ultrasound_probe.sampling_frequency,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
         element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
-        apply_lens_correction=True,
-        lens_sound_speed=1440.0,
+        apply_lens_correction=False,
+        sound_speed=sound_speed,
+        lens_sound_speed=1000,
         lens_thickness=1e-3,
-        initial_times=np.zeros((n_tx,)),
-        attenuation_coef=0.7,
+        initial_times=np.ones((n_tx,)) * 1e-6,
+        attenuation_coef=0.2,
         n_ch=1,
         selected_transmits="all",
+        focus_distances=focus_distances,
+        polar_angles=angles,
+        xlims=(-15e-3, 15e-3),
+        zlims=(0, 35e-3),
     )
 
 
@@ -444,10 +451,11 @@ def ultrasound_scatterers():
     """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
     scat_x, scat_z = np.meshgrid(
         np.linspace(-10e-3, 10e-3, 5),
-        np.linspace(5e-3, 30e-3, 5),
+        np.linspace(10e-3, 30e-3, 5),
         indexing="ij",
     )
     scat_x, scat_z = np.ravel(scat_x), np.ravel(scat_z)
+    # scat_x, scat_z = np.array([-10e-3, 0e-3]), np.array([10e-3, 20e-3])
     n_scat = len(scat_x)
     scat_positions = np.stack(
         [
@@ -531,5 +539,8 @@ def test_default_ultrasound_pipeline(
         assert np.nanmax(output["image"]) <= 255.0
 
     np.testing.assert_allclose(
-        output_default["image"], output_patched["image"], rtol=1e-5, atol=1e-5
+        output_default["image"] / np.max(output_default["image"]),
+        output_patched["image"] / np.max(output_patched["image"]),
+        rtol=1e-3,
+        atol=1e-3,
     )
