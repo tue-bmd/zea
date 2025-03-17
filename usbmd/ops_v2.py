@@ -827,7 +827,13 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
+    def __init__(
+        self,
+        key="raw_data",
+        output_key="aligned_data",
+        apply_lens_correction=False,
+        **kwargs,
+    ):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
@@ -835,6 +841,7 @@ class TOFCorrection(Operation):
         )
         self.key = key
         self.output_key = output_key
+        self.apply_lens_correction = apply_lens_correction
 
     def call(
         self,

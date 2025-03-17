@@ -76,9 +76,8 @@ def simulate_rf(
     n_ax_rounded = _round_up_to_power_of_two(n_ax)
 
     freqs = (
-        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax, "float32")
+        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax_rounded, "float32")
         * sampling_frequency
-        + 1
     )
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
@@ -91,7 +90,11 @@ def simulate_rf(
         dist_total = dist[:, None] + dist[:, :, None]
 
         # [n_scat, n_txel, n_rxel]
-        tau_total = dist_total / sound_speed + t0_delays[tx_idx] + initial_times[tx_idx]
+        tau_total = (
+            (dist_total / sound_speed)
+            + t0_delays[tx_idx][None, :, None]
+            - initial_times[tx_idx]
+        )
 
         scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
 
@@ -268,8 +271,8 @@ def get_pulse_spectrum_fn(fc, n_period=3.0):
     period = n_period / fc
 
     def spectrum_fn(f):
-        return ops.array(1 / 1j, "complex64") * ops.cast(
-            (hann_fd(f - fc, period) - hann_fd(f + fc, period)), "complex64"
+        return ops.array(1 / 2, "complex64") * ops.cast(
+            (hann_fd(f - fc, period) + hann_fd(f + fc, period)), "complex64"
         )
 
     return spectrum_fn
