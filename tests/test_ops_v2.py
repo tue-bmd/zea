@@ -110,48 +110,18 @@ def pipeline_config_with_params():
 
 
 @pytest.fixture
-def default_pipeline(ultrasound_scan):
+def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
-    operations = [
-        ops.Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        ops.TOFCorrection(apply_lens_correction=ultrasound_scan.apply_lens_correction),
-        ops.PfieldWeighting(),
-        ops.DelayAndSum(),
-        ops.EnvelopeDetect(axis=-2),
-        ops.LogCompress(output_key="image"),
-        ops.Normalize(key="image", output_key="image"),
-    ]
-    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    pipeline = ops.Pipeline.default(num_patches=1, jit_options=None)
+    pipeline.prepend(ops.Simulate())
     return pipeline
 
 
 @pytest.fixture
-def patched_pipeline(ultrasound_scan):
+def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
-    patched_beamforming = ops.PatchedGrid(
-        operations=[
-            ops.TOFCorrection(
-                apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            ),
-            ops.PfieldWeighting(),
-            ops.DelayAndSum(),
-        ],
-        num_patches=2,
-    )
-    operations = [
-        ops.Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        patched_beamforming,
-        ops.EnvelopeDetect(axis=-2),
-        ops.LogCompress(output_key="image"),
-        ops.Normalize(key="image", output_key="image"),
-    ]
-    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    pipeline = ops.Pipeline.default(jit_options=None)
+    pipeline.prepend(ops.Simulate())
     return pipeline
 
 
@@ -475,14 +445,7 @@ def ultrasound_scatterers():
 
 def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
     """Tests the simulator operation."""
-    pipeline = ops.Pipeline(
-        [
-            ops.Simulate(
-                apply_lens_correction=ultrasound_scan.apply_lens_correction,
-                n_ax=ultrasound_scan.n_ax,
-            )
-        ]
-    )
+    pipeline = ops.Pipeline([ops.Simulate()])
 
     output = pipeline(
         ultrasound_scan,
