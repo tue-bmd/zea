@@ -59,14 +59,15 @@ ARG BACKEND=all
 
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "tensorflow" ]; then \
     echo "Installing tensorflow..."; \
-    pip install --extra-index-url https://pypi.nvidia.com "tensorflow[and-cuda]==2.15.0"; \
-    # Install Keras last to ensure its version 3.x
-    pip install --upgrade 'keras>=3.6' keras-cv; \
+    KERAS_VERSION=$(pip show keras | grep '^Version:' | awk '{print $2}') && \
+    pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
+    # Reinstall Keras after tf to ensure its version 3.x
+    pip install --upgrade "keras==$KERAS_VERSION" keras-cv; \
     fi
 
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "jax" ]; then \
     echo "Installing jax..."; \
-    pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html "jax[cuda12_pip]==0.4.26"; \
+    pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
     fi
 
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ]; then \
@@ -75,8 +76,10 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ]; then \
     fi
 
 RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "all" ]; then \
+    KERAS_VERSION=$(pip show keras | grep '^Version:' | awk '{print $2}') && \
     pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-    pip install --upgrade 'keras>=3.6' keras-cv && \
+    # Reinstall Keras after tf to ensure its version 3.x
+    pip install --upgrade "keras==$KERAS_VERSION" keras-cv && \
     pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 && \
     pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
     fi
