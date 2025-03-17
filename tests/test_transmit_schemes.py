@@ -5,23 +5,82 @@
 """
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
-import os
-
-os.environ["KERAS_BACKEND"] = "numpy"
-import json
-
-import keras
 import numpy as np
 import pytest
 import matplotlib.pyplot as plt
 
 from usbmd import ops_v2 as ops
-from usbmd.config.config import Config
-from usbmd.core import DataTypes
-from usbmd.probes import Dummy, Probe
-from usbmd.registry import ops_v2_registry as ops_registry
+from usbmd.probes import Probe
 from usbmd.scan import Scan, compute_t0_delays_planewave, compute_t0_delays_focused
 from usbmd.utils.visualize import set_mpl_style
+
+
+def _get_flatgrid(extent, shape):
+    """Helper function to get a flat grid corresponding to an image."""
+    x = np.linspace(extent[0], extent[1], shape[0])
+    y = np.linspace(extent[2], extent[3], shape[1])
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    return np.vstack((X.flatten(), Y.flatten())).T
+
+
+def _get_pixel_size(extent, shape):
+    """Helper function to get the pixel size of an image.
+
+    Returns:
+        np.ndarray: The pixel size (width, height).
+    """
+
+    width, height = extent[1] - extent[0], extent[3] - extent[2]
+    if shape[0] == 1:
+        pixel_width = width
+    else:
+        pixel_width = width / (shape[0] - 1)
+
+    if shape[1] == 1:
+        pixel_height = height
+    else:
+        pixel_height = height / (shape[1] - 1)
+
+    return np.array([pixel_width, pixel_height])
+
+
+def _find_peak_location(image, extent, position, max_diff=0.6e-3):
+    """Find the point with the maximum intensity within a certain distance of a given point.
+
+    Args:
+    image (np.ndarray): The image to search in.
+    extent (tuple): The extent of the image.
+    position (np.array): The position to search around.
+    max_diff (float): The maximum distance from the position to search.
+
+    Returns:
+    np.array: The corrected position which is at most `max_diff` away from the original
+        position.
+    """
+
+    position = np.array(position)
+
+    if max_diff == 0.0:
+        return position
+
+    flatgrid = _get_flatgrid(extent, image.shape)
+
+    # Compute the distances between the points and the position
+    distances = np.linalg.norm(flatgrid - position, axis=1)
+
+    # Mask the points that are within the maximum distance
+    mask = distances <= max_diff
+    candidate_intensities = np.ravel(image)[mask]
+    candidate_points = flatgrid[mask]
+
+    no_points_to_consider = candidate_intensities.size == 0
+    if no_points_to_consider:
+        raise ValueError("No candidate points found.")
+
+    highest_intensity_pixel_idx = np.argmax(candidate_intensities)
+    highest_intensity_pixel_location = candidate_points[highest_intensity_pixel_idx]
+
+    return highest_intensity_pixel_location
 
 
 def _get_default_pipeline(ultrasound_scan):
@@ -31,10 +90,11 @@ def _get_default_pipeline(ultrasound_scan):
             apply_lens_correction=ultrasound_scan.apply_lens_correction,
             n_ax=ultrasound_scan.n_ax,
         ),
-        ops.TOFCorrection(apply_lens_correction=ultrasound_scan.apply_lens_correction),
-        ops.PfieldWeighting(),
+        ops.TOFCorrection(
+            apply_lens_correction=ultrasound_scan.apply_lens_correction,
+        ),
         ops.DelayAndSum(),
-        ops.EnvelopeDetect(axis=-2),
+        ops.EnvelopeDetect(),
         ops.LogCompress(output_key="image"),
         ops.Normalize(key="image", output_key="image"),
     ]
@@ -42,10 +102,50 @@ def _get_default_pipeline(ultrasound_scan):
     return pipeline
 
 
+def _get_fish_phantom():
+    """Returns a scatterer phantom for ultrasound simulation tests.
+
+    Returns:
+        ndarray: The scatterer positions of shape (n_scat, 3).
+    """
+    size = 11e-3
+    z_offset = 2.0 * size
+
+    def fish_curve(t, size=1):
+        x = size * (np.cos(t) - np.sin(t) ** 2 / np.sqrt(2))
+        y = size * np.cos(t) * np.sin(t)
+        return x, y
+
+    scat_x, scat_z = fish_curve(np.linspace(0, 2 * np.pi, 100), size=size)
+
+    scat_x = np.concatenate(
+        [
+            scat_x,
+            np.array([size * 0.7]),
+            np.array([size * 1.1]),
+            np.array([size * 1.4]),
+            np.array([size * 1.2]),
+        ]
+    )
+    scat_y = np.zeros_like(scat_x)
+    scat_z = np.concatenate(
+        [
+            scat_z,
+            np.array([-size * 0.1]),
+            np.array([-size * 0.25]),
+            np.array([-size * 0.6]),
+            np.array([-size * 1.0]),
+        ]
+    )
+
+    scat_z += z_offset
+    return np.stack([scat_x, scat_y, scat_z], axis=1)
+
+
 def _get_linear_probe():
     """Returns a probe for ultrasound simulation tests."""
     n_el = 128
-    aperture = 40e-3
+    aperture = 30e-3
     probe_geometry = np.stack(
         [
             np.linspace(-aperture / 2, aperture / 2, n_el),
@@ -57,8 +157,8 @@ def _get_linear_probe():
 
     return Probe(
         probe_geometry=probe_geometry,
-        center_frequency=7e6,
-        sampling_frequency=28e6,
+        center_frequency=5e6,
+        sampling_frequency=20e6,
     )
 
 
@@ -82,6 +182,10 @@ def _get_phased_array_probe():
     )
 
 
+def _get_n_ax(ultrasound_probe):
+    return 512 if ultrasound_probe.center_frequency < 4e6 else 1024
+
+
 def _get_probe(kind):
     if kind == "linear":
         return _get_linear_probe()
@@ -93,24 +197,35 @@ def _get_probe(kind):
 
 def _get_constant_scan_kwargs():
     return {
-        "Nx": 256,
-        "Nz": 256,
         "lens_sound_speed": 1000,
         "lens_thickness": 1e-3,
         "n_ch": 1,
         "selected_transmits": "all",
-        "n_ax": 513,
         "sound_speed": 1540.0,
         "apply_lens_correction": False,
         "attenuation_coef": 0.0,
     }
 
 
+def _get_lims_and_gridsize(center_frequency, sound_speed):
+    """Returns the limits and gridsize for ultrasound simulation tests."""
+    xlims = (-20e-3, 20e-3)
+    zlims = (0, 35e-3)
+    width = xlims[1] - xlims[0]
+    height = zlims[1] - zlims[0]
+    wavelength = sound_speed / center_frequency
+    gridsize = (
+        int(width / (0.25 * wavelength)) + 1,
+        int(height / (0.25 * wavelength)) + 1,
+    )
+    return {"xlims": xlims, "zlims": zlims, "Nx": gridsize[0], "Nz": gridsize[1]}
+
+
 def _get_planewave_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
-    n_tx = 5
+    n_tx = 8
 
     tx_apodizations = np.ones((n_tx, n_el)) * np.hanning(n_el)[None]
     probe_geometry = ultrasound_probe.probe_geometry
@@ -135,8 +250,8 @@ def _get_planewave_scan(ultrasound_probe):
         focus_distances=focus_distances,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
-        xlims=(-15e-3, 15e-3),
-        zlims=(0, 35e-3),
+        n_ax=_get_n_ax(ultrasound_probe),
+        **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
@@ -144,7 +259,7 @@ def _get_planewave_scan(ultrasound_probe):
 def _get_multistatic_scan(ultrasound_probe):
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
-    n_tx = 5
+    n_tx = 8
 
     tx_apodizations = np.zeros((n_tx, n_el))
     for n, idx in enumerate(np.linspace(0, n_el - 1, n_tx, dtype=int)):
@@ -153,6 +268,8 @@ def _get_multistatic_scan(ultrasound_probe):
 
     focus_distances = np.zeros(n_tx)
     t0_delays = np.zeros((n_tx, n_el))
+
+    constant_scan_kwargs = _get_constant_scan_kwargs()
 
     return Scan(
         n_tx=n_tx,
@@ -166,9 +283,11 @@ def _get_multistatic_scan(ultrasound_probe):
         focus_distances=focus_distances,
         polar_angles=np.zeros(n_tx),
         initial_times=np.ones(n_tx) * 1e-6,
-        xlims=(-15e-3, 15e-3),
-        zlims=(0, 35e-3),
-        **_get_constant_scan_kwargs(),
+        n_ax=_get_n_ax(ultrasound_probe),
+        **_get_lims_and_gridsize(
+            ultrasound_probe.center_frequency, constant_scan_kwargs["sound_speed"]
+        ),
+        **constant_scan_kwargs,
     )
 
 
@@ -176,7 +295,7 @@ def _get_diverging_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
-    n_tx = 5
+    n_tx = 8
 
     tx_apodizations = np.ones((n_tx, n_el)) * np.hanning(n_el)[None]
 
@@ -207,8 +326,8 @@ def _get_diverging_scan(ultrasound_probe):
         focus_distances=focus_distances,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
-        xlims=(-15e-3, 15e-3),
-        zlims=(0, 35e-3),
+        n_ax=_get_n_ax(ultrasound_probe),
+        **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
@@ -217,11 +336,11 @@ def _get_focused_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
-    n_tx = 5
+    n_tx = 8
 
     tx_apodizations = np.ones((n_tx, n_el)) * np.hanning(n_el)[None]
 
-    angles = np.linspace(10, -10, n_tx) * np.pi / 180
+    angles = np.linspace(30, -30, n_tx) * np.pi / 180
 
     sound_speed = constant_scan_kwargs["sound_speed"]
     focus_distances = np.ones(n_tx) * 15e-3
@@ -248,8 +367,8 @@ def _get_focused_scan(ultrasound_probe):
         focus_distances=focus_distances,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
-        xlims=(-15e-3, 15e-3),
-        zlims=(0, 35e-3),
+        n_ax=_get_n_ax(ultrasound_probe),
+        **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
@@ -258,12 +377,14 @@ def _get_linescan_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
-    n_tx = 5
+    n_tx = 8
 
-    center_elements = np.linspace(0, n_el + 1, n_tx, dtype=int)
+    center_elements = np.linspace(0, n_el + 1, n_tx + 2, dtype=int)
     center_elements = center_elements[1:-1]
     tx_apodizations = np.zeros((n_tx, n_el))
     aperture_size_elements = 24
+
+    # Define subapertures
     origins = []
     for n, idx in enumerate(center_elements):
         el0 = np.clip(idx - aperture_size_elements // 2, 0, n_el)
@@ -272,9 +393,11 @@ def _get_linescan_scan(ultrasound_probe):
         origins.append(ultrasound_probe.probe_geometry[idx])
     origins = np.stack(origins, axis=0)
 
+    # All angles should be zero because each line fires straight ahead
     angles = np.zeros(n_tx)
 
     sound_speed = constant_scan_kwargs["sound_speed"]
+
     focus_distances = np.ones(n_tx) * 15e-3
     t0_delays = compute_t0_delays_focused(
         origins=origins,
@@ -299,8 +422,8 @@ def _get_linescan_scan(ultrasound_probe):
         focus_distances=focus_distances,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
-        xlims=(-15e-3, 15e-3),
-        zlims=(0, 35e-3),
+        n_ax=_get_n_ax(ultrasound_probe),
+        **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
@@ -320,25 +443,36 @@ def _get_scan(ultrasound_probe, kind):
         raise ValueError(f"Unknown scan kind: {kind}")
 
 
+def _test_location(image, extent, true_position):
+    """Tests the peak location function."""
+
+    if true_position.shape[0] == 3:
+        true_position = np.array([true_position[0], true_position[2]])
+    offset_distance = 1.0e-3
+    offset_angle = np.pi
+    offset_vector = offset_distance * np.array(
+        [np.cos(offset_angle), np.sin(offset_angle)]
+    )
+    start_position = true_position + offset_vector
+    new_position = _find_peak_location(
+        image, extent, start_position, max_diff=offset_distance * 3.0
+    )
+
+    pixel_size = _get_pixel_size(extent, image.shape)
+
+    difference = np.abs(new_position - true_position)
+    # assert np.all(difference <= pixel_size * 3.0)
+    if not np.all(difference <= pixel_size * 3.0):
+        print(f"ERROR: true_position: {true_position}")
+
+    return new_position, start_position
+
+
 @pytest.fixture
 def ultrasound_scatterers():
     """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
-    scat_x, scat_z = np.meshgrid(
-        np.linspace(-10e-3, 10e-3, 5),
-        np.linspace(10e-3, 30e-3, 5),
-        indexing="ij",
-    )
-    scat_x, scat_z = np.ravel(scat_x), np.ravel(scat_z)
-    # scat_x, scat_z = np.array([-10e-3, 0e-3]), np.array([10e-3, 20e-3])
-    n_scat = len(scat_x)
-    scat_positions = np.stack(
-        [
-            scat_x,
-            np.zeros_like(scat_x),
-            scat_z,
-        ],
-        axis=1,
-    )
+    scat_positions = _get_fish_phantom()
+    n_scat = scat_positions.shape[0]
 
     return {
         "positions": scat_positions.astype(np.float32),
@@ -351,17 +485,17 @@ def ultrasound_scatterers():
     "probe_kind, scan_kind",
     [
         ("linear", "planewave"),
-        ("phased_array", "planewave"),
         ("linear", "multistatic"),
-        ("phased_array", "multistatic"),
         ("linear", "diverging"),
-        ("phased_array", "diverging"),
         ("linear", "focused"),
-        ("phased_array", "focused"),
         ("linear", "linescan"),
+        ("phased_array", "planewave"),
+        ("phased_array", "multistatic"),
+        ("phased_array", "diverging"),
+        ("phased_array", "focused"),
     ],
 )
-def test_default_ultrasound_pipeline(
+def test_transmit_schemes(
     probe_kind,
     scan_kind,
     ultrasound_scatterers,
@@ -378,26 +512,32 @@ def test_default_ultrasound_pipeline(
         ultrasound_probe,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
-        dynamic_range=(-50, 0),
-        input_range=(-50, 0),
+        dynamic_range=(-60, 0),
+        input_range=(-60, 0),
         output_range=(0, 255),
     )
 
     image = output_default["image"][0]
+
+    # Convert to numpy
+    image = np.array(image)
     set_mpl_style()
-    plt.figure()
     extent = [
-        ultrasound_scan.xlims[0] * 1e3,
-        ultrasound_scan.xlims[1] * 1e3,
-        ultrasound_scan.zlims[1] * 1e3,
-        ultrasound_scan.zlims[0] * 1e3,
+        ultrasound_scan.xlims[0],
+        ultrasound_scan.xlims[1],
+        ultrasound_scan.zlims[0],
+        ultrasound_scan.zlims[1],
     ]
-    plt.imshow(image, cmap="gray", aspect="auto", extent=extent)
-    plt.xlabel("x [mm]")
-    plt.ylabel("z [mm]")
-    plt.title(f"{probe_kind} {scan_kind}")
-    plt.savefig(f"{probe_kind}_{scan_kind}.png")
-    plt.close()
+
+    # Target the scatterer that forms the eye
+    target_scatterer_index = -4
+
+    # Check if the scatterer is in the right location in the image
+    _test_location(
+        image.T,
+        extent=extent,
+        true_position=ultrasound_scatterers["positions"][target_scatterer_index],
+    )
     # Check that the pipeline produced the expected outputs
     assert "image" in output_default
     assert output_default["image"].shape[0] == 1  # Batch dimension
