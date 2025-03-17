@@ -448,24 +448,13 @@ def _test_location(image, extent, true_position):
 
     if true_position.shape[0] == 3:
         true_position = np.array([true_position[0], true_position[2]])
-    offset_distance = 1.0e-3
-    offset_angle = np.pi
-    offset_vector = offset_distance * np.array(
-        [np.cos(offset_angle), np.sin(offset_angle)]
-    )
-    start_position = true_position + offset_vector
-    new_position = _find_peak_location(
-        image, extent, start_position, max_diff=offset_distance * 3.0
-    )
+    start_position = true_position
+    new_position = _find_peak_location(image, extent, start_position, max_diff=1.5e-3)
 
     pixel_size = _get_pixel_size(extent, image.shape)
 
     difference = np.abs(new_position - true_position)
-    # assert np.all(difference <= pixel_size * 3.0)
-    if not np.all(difference <= pixel_size * 3.0):
-        print(f"ERROR: true_position: {true_position}")
-
-    return new_position, start_position
+    assert np.all(difference <= pixel_size * 3.0)
 
 
 @pytest.fixture
