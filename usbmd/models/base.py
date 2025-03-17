@@ -141,7 +141,7 @@ def deserialize_usbmd_object(config):
             " `get_config()` are explicitly deserialized in the"
             " model's `from_config()` method."
             f"\n\nconfig={config}.\n\nException encountered: {e}"
-        )
+        ) from e
     build_config = config.get("build_config", None)
     if build_config and not instance.built:
         instance.build_from_config(build_config)
@@ -167,12 +167,12 @@ def _retrieve_class(module, class_name, config):
             obj = vars(mod).get(class_name, None)
             if obj is not None:
                 return obj
-        except ModuleNotFoundError:
+        except ModuleNotFoundError as exc:
             raise TypeError(
                 f"Could not deserialize class '{class_name}' because "
                 f"its parent module {module} cannot be imported. "
                 f"Full object config: {config}"
-            )
+            ) from exc
 
     raise TypeError(
         f"Could not locate class '{class_name}'. "
