@@ -795,8 +795,7 @@ class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
     def __init__(self, key: str, **kwargs):
-        super().__init__(**kwargs)
-        self.key = key
+        super().__init__(key=key, **kwargs)
 
     def call(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
 
@@ -810,7 +809,7 @@ class UpMix(Operation):
 
         data = upmix(data, fs, fc, upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
-        return data
+        return {self.output_key: data}
 
 
 @ops_registry("simulate_rf")
@@ -869,12 +868,12 @@ class TOFCorrection(Operation):
 
     def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
         super().__init__(
+            key=key,
+            output_key=output_key,
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
 
     def call(
         self,
@@ -959,9 +958,7 @@ class PfieldWeighting(Operation):
             key (str, optional): Key for input data. Defaults to "aligned_data".
             output_key (str, optional): Key for output data. Defaults to "aligned_data".
         """
-        super().__init__(**kwargs)
-        self.key = key
-        self.output_key = output_key
+        super().__init__(key=key, output_key=output_key, **kwargs)
 
     def call(self, flat_pfield=None, **kwargs):
         """Weight data with pressure field.
@@ -1106,12 +1103,12 @@ class DelayAndSum(Operation):
         **kwargs,
     ):
         super().__init__(
+            key=key,
+            output_key=output_key,
             input_data_type=None,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
         self.reshape_grid = reshape_grid
 
     def process_image(self, data, rx_apo, tx_apo):
@@ -1190,13 +1187,13 @@ class EnvelopeDetect(Operation):
         **kwargs,
     ):
         super().__init__(
+            key=key,
+            output_key=output_key,
             input_data_type=DataTypes.BEAMFORMED_DATA,
             output_data_type=DataTypes.ENVELOPE_DATA,
             **kwargs,
         )
         self.axis = axis
-        self.key = key
-        self.output_key = output_key
 
     def call(self, **kwargs):
         data = kwargs[self.key]
