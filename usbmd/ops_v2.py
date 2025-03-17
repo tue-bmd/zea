@@ -1183,7 +1183,7 @@ class EnvelopeDetect(Operation):
         self,
         key: str = "beamformed_data",
         output_key: str = "envelope_data",
-        axis=-2,
+        axis=-3,
         **kwargs,
     ):
         super().__init__(
