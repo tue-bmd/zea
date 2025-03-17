@@ -5,8 +5,6 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 
-# pylint: disable=no-member
-
 from typing import Union
 
 import matplotlib.pyplot as plt
@@ -210,6 +208,20 @@ class Scan(Object):
 
         """
         super().__init__()
+
+        # explicitely set parameters to None for linter to recognize them
+        # only necessary for parameters that don't have @property decorators
+        self.apply_lens_correction = None
+        self.f_number = None
+        self.probe_geometry = None
+        self.pixels_per_wavelength = None
+        self.downsample = None
+        self.time_to_next_transmit = None
+        self.theta_range = None
+        self.phi_range = None
+        self.rho_range = None
+        self.fill_value = None
+        self._n_tx = None
 
         # Dictionary to track which parameters have been set
         self._set_params = {}
@@ -787,6 +799,8 @@ class Scan(Object):
     @property
     def flatgrid(self):
         """The beamforming grid of shape (Nz*Nx, 3)."""
+        if self.grid is None:
+            return None
         return self.grid.reshape(-1, 3)
 
     @property
@@ -800,6 +814,10 @@ class Scan(Object):
                 "scan.probe_geometry not set. Cannot compute pfield."
                 "Defaulting to uniform weights."
             )
+            if None in [self.Nz, self.Nx, self.n_tx]:
+                log.warning("Nx, Nz, or n_tx not set. Cannot compute pfield.")
+                return self._pfield
+
             self._pfield = np.ones((self.n_tx, self.Nz, self.Nx))
         else:
             if self.pfield_kwargs is None:
@@ -814,6 +832,8 @@ class Scan(Object):
     @property
     def flat_pfield(self):
         """The pfield grid of shape (Nz*Nx, n_tx)."""
+        if self.pfield is None:
+            return None
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
     @pfield.setter
