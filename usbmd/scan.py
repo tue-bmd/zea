@@ -1155,28 +1155,48 @@ def compute_t0_delays_focused(
     focus_distances,
     probe_geometry,
     polar_angles,
-    azimuth_angles=0,
+    azimuth_angles=None,
     sound_speed=1540,
 ):
     """Computes the transmit delays for a focused transmit, shifted such that
     the first element fires at t=0.
 
     Args:
-        origin (np.ndarray): The origin of the focused transmit of shape (3,).
+        origins (np.ndarray): The origin of the focused transmit of shape (n_tx, 3,).
         focus_distance (float): The distance to the focus.
         probe_geometry (np.ndarray): The positions of the elements in the array of
             shape (element, 3).
-        polar_angles (np.ndarray): The polar angles of the planewave in radians.
-        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave
+        polar_angles (np.ndarray): The polar angles of the planewave in radians of shape (n_tx,).
+        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave in radians of shape (n_tx,).
             in radians. Defaults to 0.
         sound_speed (float, optional): The speed of sound. Defaults to 1540.
 
     Returns:
         np.ndarray: The transmit delays for each element of shape (n_tx, element).
     """
+    n_tx = len(focus_distances)
+    assert polar_angles.shape == (n_tx,), (
+        f"polar_angles must have length n_tx = {n_tx}. "
+        f"Got length {len(polar_angles)}."
+    )
+    assert origins.shape == (n_tx, 3), (
+        f"origins must have shape (n_tx, 3). " f"Got shape {origins.shape}."
+    )
+    assert probe_geometry.shape[1] == 3 and probe_geometry.ndim == 2, (
+        f"probe_geometry must have shape (element, 3). "
+        f"Got shape {probe_geometry.shape}."
+    )
+
     # Convert single angles to arrays for broadcasting
     polar_angles = np.atleast_1d(polar_angles)
-    azimuth_angles = np.atleast_1d(azimuth_angles)
+    if azimuth_angles is None:
+        azimuth_angles = np.zeros(len(polar_angles))
+    else:
+        azimuth_angles = np.atleast_1d(azimuth_angles)
+    assert azimuth_angles.shape == (n_tx,), (
+        f"azimuth_angles must have length n_tx = {n_tx}. "
+        f"Got length {len(azimuth_angles)}."
+    )
 
     # Compute v for all angles
     v = np.stack(
@@ -1189,11 +1209,12 @@ def compute_t0_delays_focused(
     )
 
     # Add a new dimension for broadcasting
+    # The shape is now (n_tx, n_el, 3)
     v = np.expand_dims(v, axis=1)
 
     # Compute the location of the virtual source by adding the focus distance
     # to the origin along the wave vectors.
-    virtual_sources = origins[None] + focus_distances[:, None, None] * v
+    virtual_sources = origins[:, None] + focus_distances[:, None, None] * v
 
     # Compute the distances between the virtual sources and each element
     dist = np.linalg.norm(virtual_sources - probe_geometry, axis=-1)
