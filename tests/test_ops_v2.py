@@ -458,10 +458,10 @@ def ultrasound_scatterers():
 def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
     """Tests the simulator operation."""
     pipeline = ops.Pipeline([ops.Simulate()])
+    parameters = pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
 
     output = pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
@@ -485,9 +485,10 @@ def test_default_ultrasound_pipeline(
     """Tests the default ultrasound pipeline."""
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
+    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+
     output_default = default_pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
         dynamic_range=(-50, 0),
@@ -496,8 +497,7 @@ def test_default_ultrasound_pipeline(
     )
 
     output_patched = patched_pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
         dynamic_range=(-50, 0),
