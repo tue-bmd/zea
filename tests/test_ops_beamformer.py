@@ -43,7 +43,6 @@ def _get_params(reconstruction_mode):
     dz = scan.wvln
     scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx)) // 4
     scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz)) // 4
-    print(f"Nx: {scan.Nx}, Nz: {scan.Nz}")
 
     # use pipeline here so it is easy to propagate the scan parameters
     simulator = Pipeline(
