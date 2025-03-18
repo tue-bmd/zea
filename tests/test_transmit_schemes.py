@@ -104,9 +104,11 @@ def _get_fish_phantom():
     Returns:
         ndarray: The scatterer positions of shape (n_scat, 3).
     """
+    # The size is the height of the fish
     size = 11e-3
     z_offset = 2.0 * size
 
+    # See https://en.wikipedia.org/wiki/Fish_curve
     def fish_curve(t, size=1):
         x = size * (np.cos(t) - np.sin(t) ** 2 / np.sqrt(2))
         y = size * np.cos(t) * np.sin(t)
@@ -216,10 +218,8 @@ def _get_constant_scan_kwargs():
 
 def _get_lims_and_gridsize(center_frequency, sound_speed):
     """Returns the limits and gridsize for ultrasound simulation tests."""
-    xlims = (-20e-3, 20e-3)
-    zlims = (0, 35e-3)
-    width = xlims[1] - xlims[0]
-    height = zlims[1] - zlims[0]
+    xlims, zlims = (-20e-3, 20e-3), (0, 35e-3)
+    width, height = xlims[1] - xlims[0], zlims[1] - zlims[0]
     wavelength = sound_speed / center_frequency
     gridsize = (
         int(width / (0.25 * wavelength)) + 1,
@@ -517,7 +517,6 @@ def test_transmit_schemes(
 
     # Convert to numpy
     image = keras.ops.convert_to_numpy(image)
-    set_mpl_style()
     extent = [
         ultrasound_scan.xlims[0],
         ultrasound_scan.xlims[1],
