@@ -51,8 +51,10 @@ def compute_pfield(
     c = scan.sound_speed
 
     # probe params
-    fc = scan.fc  # % central frequency (Hz)
-    fc = fc / downmix  # % downmixing the frequency to facilitate a smaller grid
+    center_frequency = scan.center_frequency  # % central frequency (Hz)
+    center_frequency = (
+        center_frequency / downmix
+    )  # % downmixing the frequency to facilitate a smaller grid
 
     BW = scan.bandwidth_percent  # pulse-echo 6dB fractional bandwidth of the probe (%)
 
@@ -77,7 +79,7 @@ def compute_pfield(
     # %------------------------------------%
 
     # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
-    LambdaMin = c / (fc * (1 + BW / 200))
+    LambdaMin = c / (center_frequency * (1 + BW / 200))
     M = ops.ceil(ElementWidth / LambdaMin)
 
     x_orig = ops.convert_to_tensor(scan.grid[:, :, 0], dtype="float32")
@@ -138,8 +140,8 @@ def compute_pfield(
 
     mysinc = lambda x: ops.sin(ops.abs(x) + epss) / (ops.abs(x) + epss)
 
-    T = NoW / fc  # % temporal pulse width
-    wc = 2 * np.pi * fc
+    T = NoW / center_frequency  # % temporal pulse width
+    wc = 2 * np.pi * center_frequency
 
     def pulseSpectrum(w):
         imag = mysinc(T * (w - wc) / 2) - mysinc(T * (w + wc) / 2)
@@ -190,9 +192,9 @@ def compute_pfield(
 
         # -- FREQUENCY SAMPLES
         Nf = (
-            2 * ops.cast(ops.ceil(fc / df), "int32") + 1
+            2 * ops.cast(ops.ceil(center_frequency / df), "int32") + 1
         )  # % number of frequency samples
-        f = ops.linspace(0, 2 * fc, Nf)  # % frequency samples
+        f = ops.linspace(0, 2 * center_frequency, Nf)  # % frequency samples
         df = f[1]  # % update the frequency step
 
         # -- we keep the significant components only by using options.dBThresh
@@ -230,7 +232,7 @@ def compute_pfield(
         EXP = EXP / ops.sqrt(r_complex)
         EXP = EXP * ops.cast(ops.min(ops.sqrt(r)), "complex64")  # normalize the field
 
-        kc = 2 * np.pi * fc / c  # % center wavenumber
+        kc = 2 * np.pi * center_frequency / c  # % center wavenumber
         DIR = mysinc(kc * SegLength / 2 * sinT)  # directivity of each segment
         EXP = EXP * ops.cast(DIR, "complex64")
 
