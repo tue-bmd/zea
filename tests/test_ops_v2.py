@@ -468,7 +468,7 @@ def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
 
-    assert output["raw_data"].shape == (
+    assert output["data"].shape == (
         1,
         ultrasound_scan.n_tx,
         ultrasound_scan.n_ax,
