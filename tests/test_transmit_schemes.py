@@ -178,7 +178,15 @@ def _get_phased_array_probe():
 
 
 def _get_n_ax(ultrasound_probe):
-    return 512 if ultrasound_probe.center_frequency < 4e6 else 1024
+    """Returns the number of ax for ultrasound simulation tests based on the center
+    frequency. A probe with a higher center frequency needs more samples to cover
+    the image depth.
+    """
+    is_low_frequency_probe = ultrasound_probe.center_frequency < 4e6
+    if is_low_frequency_probe:
+        return 510
+
+    return 1024
 
 
 def _get_probe(kind):
