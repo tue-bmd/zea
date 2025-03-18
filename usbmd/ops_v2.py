@@ -945,7 +945,6 @@ class Simulate(Operation):
     def __init__(self, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
-            jit_compile=False,
             **kwargs,
         )
 
@@ -969,7 +968,7 @@ class Simulate(Operation):
         **kwargs,
     ):
         return {
-            "raw_data": simulate_rf(
+            self.output_key: simulate_rf(
                 ops.convert_to_tensor(scatterer_positions),
                 ops.convert_to_tensor(scatterer_magnitudes),
                 probe_geometry=probe_geometry,
