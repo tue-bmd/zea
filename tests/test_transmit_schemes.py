@@ -82,7 +82,7 @@ def _find_peak_location(image, extent, position, max_diff=0.6e-3):
 @pytest.fixture(scope="module")
 def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
-    pipeline = ops.Pipeline.from_default(num_patches=1, jit_options="ops")
+    pipeline = ops.Pipeline.from_default(num_patches=10, jit_options="ops")
     pipeline.prepend(ops.Simulate())
     return pipeline
 
