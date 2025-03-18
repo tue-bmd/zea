@@ -962,23 +962,6 @@ def patches_to_images(
     return images
 
 
-# TODO: why not ops.take? @tristan-deep
-def take(data, indices, axis=-1):
-    """Take values from data along axis.
-
-    Args:
-        data (Tensor): input data.
-        indices (Tensor): indices to take from data.
-        axis (int, optional): axis to take from. Defaults to -1.
-    """
-
-    # make indices broadcastable by adding singleton dimensions around axis
-    if axis < 0:
-        axis = data.ndim + axis
-    indices = ops.reshape(indices, [1] * axis + [-1] + [1] * (data.ndim - axis - 1))
-    return ops.take_along_axis(data, indices, axis=axis)
-
-
 def reshape_axis(data, newshape: tuple, axis: int):
     """Reshape data along axis.
 
