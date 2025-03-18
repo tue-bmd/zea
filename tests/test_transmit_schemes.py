@@ -4,6 +4,7 @@
 import numpy as np
 import pytest
 
+import keras
 from usbmd import ops_v2 as ops
 from usbmd.probes import Probe
 from usbmd.scan import Scan, compute_t0_delays_planewave, compute_t0_delays_focused
@@ -515,7 +516,7 @@ def test_transmit_schemes(
     image = output_default["image"][0]
 
     # Convert to numpy
-    image = ops.convert_to_numpy(image)
+    image = keras.ops.convert_to_numpy(image)
     set_mpl_style()
     extent = [
         ultrasound_scan.xlims[0],
