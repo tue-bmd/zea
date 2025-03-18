@@ -9,8 +9,10 @@ import numpy as np
 from keras import ops
 
 from usbmd.utils import log
+from usbmd.utils.cache import cache_output
 
 
+@cache_output(verbose=True)
 def compute_pfield(
     scan,
     FrequencyStep=4,
