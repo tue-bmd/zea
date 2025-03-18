@@ -807,6 +807,7 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
+        **kwargs,
     ):
         return {
             "raw_data": simulate_rf(
