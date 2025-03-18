@@ -253,7 +253,7 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
         os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jax
         if hide_others:
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        return None
+        # returns None to indicate CPU
 
     if device.lower() == "cpu":
         return _cpu_case()
