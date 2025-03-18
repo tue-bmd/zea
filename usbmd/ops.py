@@ -135,7 +135,7 @@ from usbmd.config import Config
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.tensor_ops import patched_map, take
+from usbmd.tensor_ops import patched_map
 from usbmd.utils import lens_correction, log, pfield, translate
 from usbmd.utils.checks import get_check
 
@@ -1134,7 +1134,7 @@ class Downsample(Operation):
             self.phase = 0
         sample_idx = ops.arange(self.phase, length, self.factor)
 
-        return take(data, sample_idx, axis=self.axis)
+        return ops.take(data, sample_idx, axis=self.axis)
 
     def _assign_config_params(self, config):
         return {
@@ -1315,7 +1315,7 @@ class EnvelopeDetect(Operation):
             data = hilbert(data, N=M, axis=self.axis)
             indices = ops.arange(n_ax)
 
-            data = take(data, indices, axis=self.axis)
+            data = ops.take(data, indices, axis=self.axis)
             data = ops.squeeze(data, axis=-1)
 
         # data = ops.abs(data)
