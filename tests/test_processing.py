@@ -256,7 +256,7 @@ def test_up_and_down_conversion(factor, batch_size):
             scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
         )
 
-        data.append(output["raw_data"])
+        data.append(output["data"])
     data = np.concatenate(data)
 
     # slice data such that decimation fits exactly
