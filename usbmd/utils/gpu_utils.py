@@ -1,4 +1,4 @@
-""" GPU utilities for selecting GPUs and checking memory usage. """
+"""GPU utilities for selecting GPUs and checking memory usage."""
 
 import os
 import shutil
@@ -248,11 +248,15 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
         gpu_ids: list of selected GPU ids. If no GPU is selected, returns an
             empty list. If a CPU is selected, returns None.
     """
-    if device.lower() == "cpu":
+
+    def _cpu_case():
         os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jax
         if hide_others:
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
         return None
+
+    if device.lower() == "cpu":
+        return _cpu_case()
 
     if verbose:
         header = "GPU settings"
@@ -260,7 +264,7 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
 
     memory = get_gpu_memory(verbose=verbose)
     if memory is None:  # nvidia-smi not working, fallback to CPU
-        return None
+        return _cpu_case()
 
     gpu_ids = list(range(len(memory)))
 

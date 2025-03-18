@@ -19,7 +19,10 @@ debugging = sys.gettrace() is not None
 class BackendEqualityCheck:
     """This class is used to run a test function in multiple backends and compare the results.
     It starts workers for each backend and runs the test function in each worker.
-    The workers are generally started once per test session in the __init__ file."""
+    The workers are generally started once per test session in the __init__ file.
+
+    NOTE: the workers only run on CPU.
+    """
 
     def __init__(self):
         self.result_queues = {}
@@ -30,9 +33,11 @@ class BackendEqualityCheck:
     @staticmethod
     def worker(job_queue, result_queue, env, backend, seed):
         """Worker function to run the test function in a separate process."""
-        # setup worker
+        # setup worker (only cpu!)
         os.environ.update(env)
         os.environ["KERAS_BACKEND"] = backend
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jaxs
         import keras  # pylint: disable=import-outside-toplevel
 
         # start worker
@@ -152,7 +157,7 @@ class BackendEqualityCheck:
         verbose: bool = False,
         timeout: int = 30,
     ):
-        """Test the processing functions of different libraries
+        """Test the processing functions of different libraries (on CPU).
 
         Check if numpy, tensorflow, torch and jax processing funcs produce equal output.
 
