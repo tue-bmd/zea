@@ -645,7 +645,7 @@ class Pipeline:
                 raise ValueError(
                     f"Error converting key '{key}' to tensor: {e}. "
                     f"Please ensure all inputs are convertible to tensors."
-                )
+                ) from e
 
         # combine probe, scan, config and kwargs
         # explicitly so we know which keys overwrite which
