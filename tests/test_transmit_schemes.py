@@ -183,6 +183,9 @@ def _get_n_ax(ultrasound_probe):
     the image depth.
     """
     is_low_frequency_probe = ultrasound_probe.center_frequency < 4e6
+
+    # Intentionally returns values that are not powers of 2 to catch potential bugs
+    # related to this.
     if is_low_frequency_probe:
         return 510
 
