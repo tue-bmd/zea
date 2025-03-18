@@ -504,7 +504,7 @@ def test_transmit_schemes(
     image = output_default["image"][0]
 
     # Convert to numpy
-    image = np.array(image)
+    image = ops.convert_to_numpy(image)
     set_mpl_style()
     extent = [
         ultrasound_scan.xlims[0],
