@@ -89,7 +89,7 @@ class Scan(Object):
         sound_speed: float = 1540,
         Nx: Union[int, None] = None,
         Nz: Union[int, None] = None,
-        pixels_per_wvln: int = 4,
+        pixels_per_wavelength: int = 4,
         downsample: int = 1,
         pfield: Union[np.ndarray, None] = None,
         pfield_kwargs: Union[dict, None] = None,
@@ -140,7 +140,7 @@ class Scan(Object):
             ylims (tuple, optional): The y-limits in the beamforming grid.
                 Defaults to (0, 0).
             zlims (tuple, optional): The z-limits in the beamforming grid.
-                Defaults to (0, n_ax * sound_speed / fs / 2).
+                Defaults to (0, n_ax * sound_speed / sampling_frequency / 2).
             bandwidth_percent: Receive bandwidth of RF signal in % of center
                 frequency. Not necessarily the same as probe bandwidth. Defaults to 200.
             sound_speed (float, optional): The speed of sound in m/s. Defaults to 1540.
@@ -148,7 +148,7 @@ class Scan(Object):
                 in the beamforming grid. Defaults to None.
             Nz (int, optional): The number of pixels in the axial direction in
                 the beamforming grid. Defaults to None.
-            pixels_per_wvln (int, optional): The number of pixels per wavelength
+            pixels_per_wavelength (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
             downsample (int, optional): Decimation factor applied after downconverting
@@ -232,11 +232,11 @@ class Scan(Object):
         self._set_param("n_ax", n_ax)
         self._set_param("n_el", n_el)
         self._set_param("n_ch", n_ch)
-        self._set_param("fc", center_frequency)
-        self._set_param("fs", sampling_frequency)
+        self._set_param("center_frequency", center_frequency)
+        self._set_param("sampling_frequency", sampling_frequency)
         self._set_param("bandwidth_percent", bandwidth_percent)
         self._set_param("sound_speed", sound_speed)
-        self._set_param("fdemod", demodulation_frequency)
+        self._set_param("demodulation_frequency", demodulation_frequency)
         self._set_param("xlims", xlims)
         self._set_param("ylims", ylims)
         self._set_param("zlims", zlims)
@@ -258,14 +258,18 @@ class Scan(Object):
         self._set_param("grid", None)
         self._set_params["flatgrid"] = False
 
-        if not (self._set_params["sound_speed"] and self._set_params["fc"]):
+        if not (
+            self._set_params["sound_speed"] and self._set_params["center_frequency"]
+        ):
             self._set_params["wvln"] = False
 
         if not (self._set_params["zlims"] and self._set_params["n_ax"]):
             self._set_params["z_axis"] = False
 
         # Additional properties that don't need lazy initialization
-        self._set_param("pixels_per_wavelength", float(pixels_per_wvln), dunder=False)
+        self._set_param(
+            "pixels_per_wavelength", float(pixels_per_wavelength), dunder=False
+        )
         self._set_param("downsample", downsample, dunder=False)
         self._set_param("probe_geometry", probe_geometry, dunder=False)
         self._set_param("time_to_next_transmit", time_to_next_transmit, dunder=False)
@@ -624,33 +628,33 @@ class Scan(Object):
     @n_ch.setter
     def n_ch(self, value):
         self._n_ch = value
-        self._fdemod = None  # Reset fdemod
+        self._demodulation_frequency = None  # Reset demodulation_frequency
         self._set_params["n_ch"] = True
 
     @property
-    def fc(self):
+    def center_frequency(self):
         """The modulation carrier frequency."""
-        if self._fc is None:
+        if self._center_frequency is None:
             raise ValueError("Please set scan.center_frequency.")
-        return float(self._fc)
+        return float(self._center_frequency)
 
-    @fc.setter
-    def fc(self, value):
-        self._fc = value
+    @center_frequency.setter
+    def center_frequency(self, value):
+        self._center_frequency = value
         self._grid = None
-        self._set_params["fc"] = True
+        self._set_params["center_frequency"] = True
 
     @property
-    def fs(self):
+    def sampling_frequency(self):
         """The sampling rate."""
-        if self._fs is None:
+        if self._sampling_frequency is None:
             raise ValueError("Please set scan.sampling_rate.")
-        return float(self._fs)
+        return float(self._sampling_frequency)
 
-    @fs.setter
-    def fs(self, value):
-        self._fs = value
-        self._set_params["fs"] = True
+    @sampling_frequency.setter
+    def sampling_frequency(self, value):
+        self._sampling_frequency = value
+        self._set_params["sampling_frequency"] = True
 
     @property
     def bandwidth_percent(self):
@@ -678,24 +682,24 @@ class Scan(Object):
         self._set_params["sound_speed"] = True
 
     @property
-    def fdemod(self):
+    def demodulation_frequency(self):
         """The demodulation frequency."""
-        if self._fdemod is not None:
-            return self._fdemod
+        if self._demodulation_frequency is not None:
+            return self._demodulation_frequency
 
         if self.n_ch is None:
             raise ValueError(
-                "Please set scan.n_ch or scan.fdemod. Currently neither is set.\n"
-                "\tif n_ch is set to 1 (RF), then fdemod is set to 0.0.\n"
-                "\tif n_ch is set to 2 (IQ), then fdemod is set to fc.\n"
-                "\tfdemod can be set to any other value manually."
+                "Please set scan.n_ch or scan.demodulation_frequency. Currently neither is set.\n"
+                "\tif n_ch is set to 1 (RF), demodulation_frequency is set to 0.0.\n"
+                "\tif n_ch is set to 2 (IQ), demodulation_frequency is set to center_frequency.\n"
+                "\tdemodulation_frequency can be set to any other value manually."
             )
 
-        return self.fc if self.n_ch == 2 else 0.0
+        return self.center_frequency if self.n_ch == 2 else 0.0
 
-    @fdemod.setter
-    def fdemod(self, value):
-        self._fdemod = value
+    @demodulation_frequency.setter
+    def demodulation_frequency(self, value):
+        self._demodulation_frequency = value
 
     @property
     def Nx(self):
@@ -730,7 +734,7 @@ class Scan(Object):
     @property
     def wvln(self):
         """The wavelength of the modulation carrier [m]."""
-        return self.sound_speed / self.fc
+        return self.sound_speed / self.center_frequency
 
     @property
     def xlims(self):
@@ -764,7 +768,7 @@ class Scan(Object):
     def zlims(self):
         """The z-limits of the beamforming grid [m]."""
         if self._zlims is None:
-            self.zlims = [0, self.sound_speed * self.n_ax / self.fs / 2]
+            self.zlims = [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
         return self._zlims
 
     @zlims.setter
@@ -874,9 +878,9 @@ class Scan(Object):
             "n_tx": self.n_tx,
             "n_ax": self.n_ax,
             "n_el": self.n_el,
-            "center_frequency": self.fc,
-            "sampling_frequency": self.fs,
-            "demodulation_frequency": self.fdemod,
+            "center_frequency": self.center_frequency,
+            "sampling_frequency": self.sampling_frequency,
+            "demodulation_frequency": self.demodulation_frequency,
             "xlims": self.xlims,
             "ylims": self.ylims,
             "zlims": self.zlims,
@@ -885,7 +889,7 @@ class Scan(Object):
             "n_ch": self.n_ch,
             "Nx": self.Nx,
             "Nz": self.Nz,
-            "pixels_per_wvln": self.pixels_per_wavelength,
+            "pixels_per_wavelength": self.pixels_per_wavelength,
             "polar_angles": self.polar_angles,
             "azimuth_angles": self.azimuth_angles,
             "t0_delays": self.t0_delays,
@@ -933,7 +937,7 @@ class PlaneWaveScan(Scan):
         n_ax=3328,
         Nx=None,
         Nz=None,
-        pixels_per_wvln=4,
+        pixels_per_wavelength=4,
         polar_angles=None,
         azimuth_angles=None,
         tx_apodizations=None,
@@ -982,7 +986,7 @@ class PlaneWaveScan(Scan):
             tx_apodizations (np.ndarray, float, optional): The transmit
                 apodizations of shape (n_tx, n_el) or a single float to use for all
                 apodizations. Defaults to None.
-            pixels_per_wvln (int, optional): The number of pixels per wavelength
+            pixels_per_wavelength (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
                 defined. Defaults to 3.
             focus_distances (np.ndarray, optional): The focus distances of the
@@ -1042,7 +1046,7 @@ class PlaneWaveScan(Scan):
             n_ax=n_ax,
             Nx=Nx,
             Nz=Nz,
-            pixels_per_wvln=pixels_per_wvln,
+            pixels_per_wavelength=pixels_per_wavelength,
             polar_angles=polar_angles,
             azimuth_angles=azimuth_angles,
             t0_delays=t0_delays,
