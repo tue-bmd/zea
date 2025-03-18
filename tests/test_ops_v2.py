@@ -348,7 +348,7 @@ def test_pipeline_from_config(config_fixture, request):
     assert result["z"] == 9  # (2 * 3) + 3
 
 
-def test_probe():
+def get_probe():
     """Returns a probe for ultrasound simulation tests."""
     n_el = 128
     aperture = 30e-3
@@ -371,10 +371,10 @@ def test_probe():
 @pytest.fixture
 def ultrasound_probe():
     """Returns a probe for ultrasound simulation tests."""
-    return test_probe()
+    return get_probe()
 
 
-def test_scan(ultrasound_probe, Nx=None, Nz=None):
+def get_scan(ultrasound_probe, Nx=None, Nz=None):
     """Returns a scan for ultrasound simulation tests."""
     n_el = ultrasound_probe.n_el
     n_tx = 2
@@ -420,10 +420,10 @@ def test_scan(ultrasound_probe, Nx=None, Nz=None):
 @pytest.fixture
 def ultrasound_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
-    return test_scan(ultrasound_probe, Nx=100, Nz=100)
+    return get_scan(ultrasound_probe, Nx=100, Nz=100)
 
 
-def test_scatterers():
+def get_scatterers():
     """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
     scat_x, scat_z = np.meshgrid(
         np.linspace(-10e-3, 10e-3, 5),
@@ -452,7 +452,7 @@ def test_scatterers():
 @pytest.fixture
 def ultrasound_scatterers():
     """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
-    return test_scatterers()
+    return get_scatterers()
 
 
 def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
