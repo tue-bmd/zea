@@ -818,7 +818,7 @@ class PatchedGrid(Pipeline):
             out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
                 flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
             )
-            return out[self.output_data_type.value]
+            return out[self.output_key]
 
         out = patched_map(
             patched_call,
@@ -832,15 +832,15 @@ class PatchedGrid(Pipeline):
     def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
         if self.pipeline_batched:
-            input_data = inputs.pop(self.input_data_type.value)
+            input_data = inputs.pop(self.key)
             output = ops.map(
-                lambda x: self.call_item({self.input_data_type.value: x, **inputs}),
+                lambda x: self.call_item({self.key: x, **inputs}),
                 input_data,
             )
         else:
             output = self.call_item(inputs)
 
-        return {self.output_data_type.value: output}
+        return {self.output_key: output}
 
     def call(self, **inputs):
         """Process input data through the pipeline."""
