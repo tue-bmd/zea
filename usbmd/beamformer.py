@@ -116,36 +116,24 @@ def tof_correction_flatgrid(
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
 
-    if apply_lens_correction:
-        txdel, rxdel = calculate_lens_corrected_delays(
-            flatgrid,
-            t0_delays,
-            tx_apodizations,
-            probe_geometry,
-            initial_times,
-            sampling_frequency,
-            sound_speed,
-            n_tx,
-            n_el,
-            vfocus,
-            angles,
-            lens_thickness=lens_thickness,
-            lens_sound_speed=lens_sound_speed,
-        )
-    else:
-        txdel, rxdel = calculate_delays(
-            flatgrid,
-            t0_delays,
-            tx_apodizations,
-            probe_geometry,
-            initial_times,
-            sampling_frequency,
-            sound_speed,
-            n_tx,
-            n_el,
-            vfocus,
-            angles,
-        )
+    delay_fn = (
+        calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
+    )
+    txdel, rxdel = delay_fn(
+        flatgrid,
+        t0_delays,
+        tx_apodizations,
+        probe_geometry,
+        initial_times,
+        sampling_frequency,
+        sound_speed,
+        n_tx,
+        n_el,
+        vfocus,
+        angles,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
+    )
 
     n_pix = ops.shape(flatgrid)[0]
     mask = ops.cond(
@@ -242,11 +230,7 @@ def calculate_delays(
             the transducer element has shape of shape `(n_pix, n_el)`.
     """
 
-    inf_distances = ops.isinf(focus_distances)
-
-    def _tx_distances(
-        inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances
-    ):
+    def _tx_distances(polar_angles, t0_delays, tx_apodizations, focus_distances):
         return distance_Tx_generic(
             grid,
             t0_delays,
@@ -259,8 +243,8 @@ def calculate_delays(
 
     tx_distances = safe_vectorize(
         _tx_distances,
-        signature="(),(),(n_el),(n_el),()->(n_pix)",
-    )(inf_distances, polar_angles, t0_delays, tx_apodizations, focus_distances)
+        signature="(),(n_el),(n_el),()->(n_pix)",
+    )(polar_angles, t0_delays, tx_apodizations, focus_distances)
     tx_distances = ops.transpose(tx_distances, (1, 0))
     # tx_distances shape is now (n_pix, n_tx)
 
@@ -394,29 +378,6 @@ def distance_Rx(grid, probe_geometry):
     """
     # Get norm of distance vector between elements and pixels via broadcasting
     dist = ops.linalg.norm(grid - probe_geometry[None, ...], axis=-1)
-    return dist
-
-
-def distance_Tx_planewave(grid, angle):
-    """
-    Computes distance to user-defined pixels for plane wave transmits.
-
-    Args:
-        grid (ops.Tensor): Flattened tensor of pixel positions in x,y,z of shape
-           `(n_pix, 3)`.
-        angle (ops.Tensor, float): Plane wave angle (radians).
-
-    Returns:
-        Tensor: Distance from each pixel to each element in meters of shape
-            `(n_pix,)`.
-    """
-    # Use broadcasting to simplify computations
-    x = grid[..., 0]
-    z = grid[..., 2]
-    # For each element, compute distance to pixels
-    angle = ops.cast(angle, "float32")
-    dist = x * ops.sin(angle) + z * ops.cos(angle)
-
     return dist
 
 

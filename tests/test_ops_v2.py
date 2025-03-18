@@ -110,48 +110,18 @@ def pipeline_config_with_params():
 
 
 @pytest.fixture
-def default_pipeline(ultrasound_scan):
+def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
-    operations = [
-        ops.Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        ops.TOFCorrection(apply_lens_correction=ultrasound_scan.apply_lens_correction),
-        ops.PfieldWeighting(),
-        ops.DelayAndSum(),
-        ops.EnvelopeDetect(axis=-2),
-        ops.LogCompress(output_key="image"),
-        ops.Normalize(key="image", output_key="image"),
-    ]
-    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
+    pipeline.prepend(ops.Simulate())
     return pipeline
 
 
 @pytest.fixture
-def patched_pipeline(ultrasound_scan):
+def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
-    patched_beamforming = ops.PatchedGrid(
-        operations=[
-            ops.TOFCorrection(
-                apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            ),
-            ops.PfieldWeighting(),
-            ops.DelayAndSum(),
-        ],
-        num_patches=2,
-    )
-    operations = [
-        ops.Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        patched_beamforming,
-        ops.EnvelopeDetect(axis=-2),
-        ops.LogCompress(output_key="image"),
-        ops.Normalize(key="image", output_key="image"),
-    ]
-    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    pipeline = ops.Pipeline.from_default(jit_options=None)
+    pipeline.prepend(ops.Simulate())
     return pipeline
 
 
@@ -378,11 +348,7 @@ def test_pipeline_from_config(config_fixture, request):
     assert result["z"] == 9  # (2 * 3) + 3
 
 
-"""Edge Case Tests"""
-
-
-@pytest.fixture
-def ultrasound_probe():
+def get_probe():
     """Returns a probe for ultrasound simulation tests."""
     n_el = 128
     aperture = 30e-3
@@ -403,7 +369,12 @@ def ultrasound_probe():
 
 
 @pytest.fixture
-def ultrasound_scan(ultrasound_probe):
+def ultrasound_probe():
+    """Returns a probe for ultrasound simulation tests."""
+    return get_probe()
+
+
+def get_scan(ultrasound_probe, Nx=None, Nz=None):
     """Returns a scan for ultrasound simulation tests."""
     n_el = ultrasound_probe.n_el
     n_tx = 2
@@ -420,8 +391,8 @@ def ultrasound_scan(ultrasound_probe):
     )
 
     return Scan(
-        Nx=100,
-        Nz=100,
+        Nx=Nx,
+        Nz=Nz,
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
@@ -447,7 +418,12 @@ def ultrasound_scan(ultrasound_probe):
 
 
 @pytest.fixture
-def ultrasound_scatterers():
+def ultrasound_scan(ultrasound_probe):
+    """Returns a scan for ultrasound simulation tests."""
+    return get_scan(ultrasound_probe, Nx=100, Nz=100)
+
+
+def get_scatterers():
     """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
     scat_x, scat_z = np.meshgrid(
         np.linspace(-10e-3, 10e-3, 5),
@@ -473,16 +449,15 @@ def ultrasound_scatterers():
     }
 
 
+@pytest.fixture
+def ultrasound_scatterers():
+    """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
+    return get_scatterers()
+
+
 def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
     """Tests the simulator operation."""
-    pipeline = ops.Pipeline(
-        [
-            ops.Simulate(
-                apply_lens_correction=ultrasound_scan.apply_lens_correction,
-                n_ax=ultrasound_scan.n_ax,
-            )
-        ]
-    )
+    pipeline = ops.Pipeline([ops.Simulate()])
 
     output = pipeline(
         ultrasound_scan,

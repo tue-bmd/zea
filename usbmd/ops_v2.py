@@ -21,7 +21,7 @@ from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
-from usbmd.tensor_ops import patched_map, reshape_axis, take
+from usbmd.tensor_ops import patched_map, reshape_axis
 from usbmd.utils import log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
@@ -287,6 +287,41 @@ class Pipeline:
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
+    @classmethod
+    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
+        """Create a default pipeline."""
+        # Get beamforming ops
+        beamforming = [
+            TOFCorrection(),
+            PfieldWeighting(),
+            DelayAndSum(),
+        ]
+
+        # Optionally add patching
+        if num_patches > 1:
+            beamforming = PatchedGrid(operations=beamforming, num_patches=num_patches)
+            operations = [beamforming]
+        else:
+            operations = beamforming
+
+        # Add display ops
+        operations += [
+            EnvelopeDetect(),
+            LogCompress(output_key="image"),
+            Normalize(key="image", output_key="image"),
+        ]
+        return cls(operations, **kwargs)
+
+    def prepend(self, operation: Operation):
+        """Prepend an operation to the pipeline."""
+        self._pipeline_layers.insert(0, operation)
+        self.reset_jit()
+
+    def append(self, operation: Operation):
+        """Append an operation to the pipeline."""
+        self._pipeline_layers.append(operation)
+        self.reset_jit()
+
     @property
     def operations(self):
         """Alias for self.layers to match the USBMD naming convention"""
@@ -317,6 +352,8 @@ class Pipeline:
             if isinstance(arg, Probe):
                 probe = arg.to_tensor()
             elif isinstance(arg, Scan):
+                scan = arg.to_tensor()
+                # TODO: doing this twice because grid has to set Nz, Nx...
                 scan = arg.to_tensor()
             elif isinstance(arg, Config):
                 config = arg.to_tensor()  # TODO
@@ -367,6 +404,11 @@ class Pipeline:
     def prepare_output(self, kwargs):
         """Convert output data to dictionary of tensors following the CCC"""
         raise NotImplementedError
+
+    def reset_jit(self):
+        """Reset the JIT compilation of the pipeline."""
+        # TODO: kind of hacky...
+        self.jit_options = self._jit_options
 
     @property
     def jit_options(self):
@@ -755,8 +797,7 @@ class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
     def __init__(self, key: str, **kwargs):
-        super().__init__(**kwargs)
-        self.key = key
+        super().__init__(key=key, **kwargs)
 
     def call(
         self,
@@ -776,30 +817,30 @@ class UpMix(Operation):
 
         data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
-        return data
+        return {self.output_key: data}
 
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
     """Simulate RF data."""
 
-    def __init__(self, n_ax, apply_lens_correction=True, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
             jit_compile=False,
             **kwargs,
         )
-        self.apply_lens_correction = apply_lens_correction
-        self.n_ax = n_ax
 
     def call(
         self,
         scatterer_positions,
         scatterer_magnitudes,
         probe_geometry,
+        apply_lens_correction,
         lens_thickness,
         lens_sound_speed,
         sound_speed,
+        n_ax,
         center_frequency,
         sampling_frequency,
         t0_delays,
@@ -814,11 +855,11 @@ class Simulate(Operation):
                 ops.convert_to_tensor(scatterer_positions),
                 ops.convert_to_tensor(scatterer_magnitudes),
                 probe_geometry=probe_geometry,
-                apply_lens_correction=self.apply_lens_correction,
+                apply_lens_correction=apply_lens_correction,
                 lens_thickness=lens_thickness,
                 lens_sound_speed=lens_sound_speed,
                 sound_speed=sound_speed,
-                n_ax=self.n_ax,
+                n_ax=n_ax,
                 center_frequency=center_frequency,
                 sampling_frequency=sampling_frequency,
                 t0_delays=t0_delays,
@@ -834,21 +875,14 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(
-        self,
-        key="raw_data",
-        output_key="aligned_data",
-        apply_lens_correction=False,
-        **kwargs,
-    ):
+    def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
         super().__init__(
+            key=key,
+            output_key=output_key,
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
-        self.apply_lens_correction = apply_lens_correction
 
     def call(
         self,
@@ -933,9 +967,7 @@ class PfieldWeighting(Operation):
             key (str, optional): Key for input data. Defaults to "aligned_data".
             output_key (str, optional): Key for output data. Defaults to "aligned_data".
         """
-        super().__init__(**kwargs)
-        self.key = key
-        self.output_key = output_key
+        super().__init__(key=key, output_key=output_key, **kwargs)
 
     def call(self, flat_pfield=None, **kwargs):
         """Weight data with pressure field.
@@ -1080,12 +1112,12 @@ class DelayAndSum(Operation):
         **kwargs,
     ):
         super().__init__(
+            key=key,
+            output_key=output_key,
             input_data_type=None,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
-        self.key = key
-        self.output_key = output_key
         self.reshape_grid = reshape_grid
 
     def process_image(self, data, rx_apo, tx_apo):
@@ -1126,6 +1158,7 @@ class DelayAndSum(Operation):
 
         Returns:
             dict: Dictionary containing beamformed_data of shape `(n_z*n_x, n_ch)`
+                when reshape_grid is False or `(n_z, n_x, n_ch)` when reshape_grid is True,
                 with optional batch dimension.
         """
         if rx_apo is None:
@@ -1164,13 +1197,13 @@ class EnvelopeDetect(Operation):
         **kwargs,
     ):
         super().__init__(
+            key=key,
+            output_key=output_key,
             input_data_type=DataTypes.BEAMFORMED_DATA,
             output_data_type=DataTypes.ENVELOPE_DATA,
             **kwargs,
         )
         self.axis = axis
-        self.key = key
-        self.output_key = output_key
 
     def call(self, **kwargs):
         data = kwargs[self.key]
@@ -1184,7 +1217,7 @@ class EnvelopeDetect(Operation):
             data = hilbert(data, N=M, axis=self.axis)
             indices = ops.arange(n_ax)
 
-            data = take(data, indices, axis=self.axis)
+            data = ops.take(data, indices, axis=self.axis)
             data = ops.squeeze(data, axis=-1)
 
         # data = ops.abs(data)
