@@ -95,6 +95,7 @@ if __name__ == "__main__":
     model = UNet.from_preset("unet-echonet-inpainter")
 
     ground_truth = next(iter(val_dataset))
+    ground_truth = ops.clip(ground_truth, -1, 1)
 
     # set some columns to zero (75%)
     n_columns = ground_truth.shape[2]
@@ -103,6 +104,7 @@ if __name__ == "__main__":
     batch = ground_truth * lines[:, None, :, None]
 
     inpainted_batch = model(batch)
+    inpainted_batch = ops.clip(inpainted_batch, -1, 1)
 
     # compute lpips metric between ground truth and inpainted images
     lpips = LPIPS.from_preset("lpips")
