@@ -966,6 +966,7 @@ class Simulate(Operation):
         tx_apodizations,
         apply_lens_correction,
         n_ax,
+        **kwargs,
     ):
         return {
             "raw_data": simulate_rf(

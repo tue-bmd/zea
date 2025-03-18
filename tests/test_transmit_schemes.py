@@ -1,13 +1,13 @@
 """Tests the pipeline for different transmit schemes."""
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
+import keras
 import numpy as np
 import pytest
 
 from usbmd import ops_v2 as ops
 from usbmd.probes import Probe
 from usbmd.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
-from usbmd.utils.visualize import set_mpl_style
 
 
 def _get_flatgrid(extent, shape):
@@ -91,9 +91,11 @@ def _get_fish_phantom():
     Returns:
         ndarray: The scatterer positions of shape (n_scat, 3).
     """
+    # The size is the height of the fish
     size = 11e-3
     z_offset = 2.0 * size
 
+    # See https://en.wikipedia.org/wiki/Fish_curve
     def fish_curve(t, size=1):
         x = size * (np.cos(t) - np.sin(t) ** 2 / np.sqrt(2))
         y = size * np.cos(t) * np.sin(t)
@@ -166,7 +168,18 @@ def _get_phased_array_probe():
 
 
 def _get_n_ax(ultrasound_probe):
-    return 512 if ultrasound_probe.center_frequency < 4e6 else 1024
+    """Returns the number of ax for ultrasound simulation tests based on the center
+    frequency. A probe with a higher center frequency needs more samples to cover
+    the image depth.
+    """
+    is_low_frequency_probe = ultrasound_probe.center_frequency < 4e6
+
+    # Intentionally returns values that are not powers of 2 to catch potential bugs
+    # related to this.
+    if is_low_frequency_probe:
+        return 510
+
+    return 1024
 
 
 def _get_probe(kind):
@@ -192,10 +205,8 @@ def _get_constant_scan_kwargs():
 
 def _get_lims_and_gridsize(center_frequency, sound_speed):
     """Returns the limits and gridsize for ultrasound simulation tests."""
-    xlims = (-20e-3, 20e-3)
-    zlims = (0, 35e-3)
-    width = xlims[1] - xlims[0]
-    height = zlims[1] - zlims[0]
+    xlims, zlims = (-20e-3, 20e-3), (0, 35e-3)
+    width, height = xlims[1] - xlims[0], zlims[1] - zlims[0]
     wavelength = sound_speed / center_frequency
     gridsize = (
         int(width / (0.25 * wavelength)) + 1,
@@ -493,8 +504,7 @@ def test_transmit_schemes(
     image = output_default["data"][0]
 
     # Convert to numpy
-    image = np.array(image)
-    set_mpl_style()
+    image = keras.ops.convert_to_numpy(image)
     extent = [
         ultrasound_scan.xlims[0],
         ultrasound_scan.xlims[1],
