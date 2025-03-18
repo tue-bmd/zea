@@ -288,7 +288,7 @@ class Pipeline:
         self.jit_options = jit_options  # will handle the jit compilation
 
     @classmethod
-    def default(cls, num_patches=20, **kwargs) -> "Pipeline":
+    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
         # Get beamforming ops
         beamforming = [
