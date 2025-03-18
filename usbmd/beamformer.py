@@ -243,7 +243,7 @@ def calculate_delays(
 
     tx_distances = safe_vectorize(
         _tx_distances,
-        signature="(),(),(n_el),(n_el),()->(n_pix)",
+        signature="(),(n_el),(n_el),()->(n_pix)",
     )(polar_angles, t0_delays, tx_apodizations, focus_distances)
     tx_distances = ops.transpose(tx_distances, (1, 0))
     # tx_distances shape is now (n_pix, n_tx)
