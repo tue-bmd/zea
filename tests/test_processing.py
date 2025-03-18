@@ -223,9 +223,7 @@ def test_up_and_down_conversion(factor, batch_size):
     )
 
     # use pipeline here so it is easy to propagate the scan parameters
-    simulator_pipeline = Pipeline(
-        [Simulate(apply_lens_correction=scan.apply_lens_correction, n_ax=n_ax)]
-    )
+    simulator_pipeline = Pipeline([Simulate()])
 
     data = []
     for _ in range(batch_size):
