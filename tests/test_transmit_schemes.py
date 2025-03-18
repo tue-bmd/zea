@@ -78,9 +78,11 @@ def _find_peak_location(image, extent, position, max_diff=0.6e-3):
     return highest_intensity_pixel_location
 
 
-def _get_default_pipeline():
+# module scope is used to avoid recompiling the pipeline for each test
+@pytest.fixture(scope="module")
+def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
-    pipeline = ops.Pipeline.from_default(num_patches=1, jit_options="ops")
+    pipeline = ops.Pipeline.from_default(num_patches=10, jit_options="ops")
     pipeline.prepend(ops.Simulate())
     return pipeline
 
@@ -479,6 +481,7 @@ def ultrasound_scatterers():
     ],
 )
 def test_transmit_schemes(
+    default_pipeline,
     probe_kind,
     scan_kind,
     ultrasound_scatterers,
@@ -487,9 +490,9 @@ def test_transmit_schemes(
 
     ultrasound_probe = _get_probe(probe_kind)
     ultrasound_scan = _get_scan(ultrasound_probe, scan_kind)
-    default_pipeline = _get_default_pipeline()
 
     parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     output_default = default_pipeline(
