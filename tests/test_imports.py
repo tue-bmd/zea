@@ -5,6 +5,7 @@ import builtins
 import contextlib
 import glob
 import importlib
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -13,8 +14,19 @@ import pytest
 
 
 @contextlib.contextmanager
-def _no_ml_lib_import(backends=["jax", "tensorflow", "torch"]):
+def _no_ml_lib_import(
+    backends=["jax", "tensorflow", "torch"], allow_keras_backend=True
+):
     """Context manager to override and restore the built-in import function."""
+
+    if allow_keras_backend:
+        curr_backend = os.environ.get("KERAS_BACKEND", None)
+        assert (
+            curr_backend is not None
+        ), "KERAS_BACKEND environment variable is not set."
+
+        # remove curr_backend from backends
+        backends = [backend for backend in backends if backend != curr_backend]
 
     # Check if any of the disallowed backends are already imported
     for backend in backends:
@@ -39,22 +51,6 @@ def _no_ml_lib_import(backends=["jax", "tensorflow", "torch"]):
     finally:
         # Restore the original import function after exiting the context
         builtins.__import__ = original_import_func
-
-
-@pytest.fixture()
-def no_ml_lib_import():
-    with _no_ml_lib_import():
-        yield
-
-
-@pytest.fixture
-def no_torch_tensorflow():
-    """
-    NOTE: This function exists because keras with numpy backend will also import jax.
-    See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py
-    """
-    with _no_ml_lib_import(["torch", "tensorflow"]):
-        yield
 
 
 @pytest.mark.parametrize("directory", [Path(__file__).parent.parent])
@@ -87,6 +83,10 @@ def test_check_imports_errors(directory, verbose=False):
 
 
 def usbmd_import():
+    """
+    NOTE: Only torch and tensorflow because keras with numpy backend will also import jax.
+    See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py
+    """
     with _no_ml_lib_import(["torch", "tensorflow"]):
         try:
             importlib.import_module("usbmd")
