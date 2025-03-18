@@ -142,7 +142,8 @@ def load_serialized_object(config, **kwargs):
     config = set_dtype_in_config(config, dtype)
 
     config["config"] = {**config["config"], **kwargs}
-    return keras.saving.deserialize_keras_object(config)
+    # return keras.saving.deserialize_keras_object(config)
+    return usbmd.models.base.deserialize_usbmd_object(config)
 
 
 def check_config_class(config):
