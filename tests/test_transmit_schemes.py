@@ -8,7 +8,6 @@ import keras
 from usbmd import ops_v2 as ops
 from usbmd.probes import Probe
 from usbmd.scan import Scan, compute_t0_delays_planewave, compute_t0_delays_focused
-from usbmd.utils.visualize import set_mpl_style
 
 
 def _get_flatgrid(extent, shape):
