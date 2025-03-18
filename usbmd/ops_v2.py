@@ -824,10 +824,11 @@ class UpMix(Operation):
 class Simulate(Operation):
     """Simulate RF data."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, key="scatterer_positions", output_key="raw_data", **kwargs):
         super().__init__(
+            key=key,
+            output_key=output_key,
             output_data_type=DataTypes.RAW_DATA,
-            jit_compile=False,
             **kwargs,
         )
 
@@ -836,9 +837,11 @@ class Simulate(Operation):
         scatterer_positions,
         scatterer_magnitudes,
         probe_geometry,
+        apply_lens_correction,
         lens_thickness,
         lens_sound_speed,
         sound_speed,
+        n_ax,
         center_frequency,
         sampling_frequency,
         t0_delays,
@@ -846,11 +849,10 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
-        apply_lens_correction,
-        n_ax,
+        **kwargs,
     ):
         return {
-            "raw_data": simulate_rf(
+            self.output_key: simulate_rf(
                 ops.convert_to_tensor(scatterer_positions),
                 ops.convert_to_tensor(scatterer_magnitudes),
                 probe_geometry=probe_geometry,
