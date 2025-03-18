@@ -16,7 +16,13 @@ from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.display import scan_convert_2d, scan_convert_3d
-from usbmd.ops import channels_to_complex, hilbert, upmix
+from usbmd.ops import (
+    channels_to_complex,
+    hilbert,
+    upmix,
+    demodulate,
+    complex_to_channels,
+)
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
@@ -1406,3 +1412,46 @@ class ScanConvert(Operation):
             )
 
         return {self.output_key: data_out}
+
+
+class Demodulate(Operation):
+    """Demodulates the input data to baseband."""
+
+    def __init__(self, key="raw_data", output_key="raw_data", axis=-3, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.RAW_DATA,
+            key=key,
+            output_key=key,
+            jittable=True,
+            **kwargs,
+        )
+        self.axis = axis
+
+    def call(self, fdemod=None, fs=None, **kwargs):
+        data = kwargs[self.key]
+
+        # Compute the analytical signal
+        analytical_signal = hilbert(data, axis=self.axis)
+
+        # Define frequency indices
+        frequency_indices = ops.arange(analytical_signal.shape[self.axis])
+        frequency_indices_shaped_like_rf = frequency_indices[None, None, :, None, None]
+
+        # Cast to complex64
+        fdemod = ops.cast(fdemod, dtype="complex64")
+        fs = ops.cast(fs, dtype="complex64")
+        frequency_indices_shaped_like_rf = ops.cast(
+            frequency_indices_shaped_like_rf, dtype="complex64"
+        )
+
+        # Shift to baseband
+        phasor_exponent = (
+            -1j * 2 * np.pi * fdemod * frequency_indices_shaped_like_rf / fs
+        )
+        iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
+
+        # Split the complex signal into two channels
+        iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+
+        return {self.output_key: iq_data_two_channel, "fdemod": 0.0, "n_ch": 2}
