@@ -58,7 +58,7 @@ class Operation(keras.Operation):
         self,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
-        key: Union[str, None] = None,
+        key: Union[str, None] = "data",
         output_key: Union[str, None] = None,
         cache_inputs: Union[bool, List[str]] = False,
         cache_outputs: bool = False,
@@ -69,6 +69,14 @@ class Operation(keras.Operation):
     ):
         """
         Args:
+            input_data_type (DataTypes): The data type of the input data
+            output_data_type (DataTypes): The data type of the output data
+            key: The key for the input data (operation will operate on this key)
+                Defaults to "data".
+            output_key: The key for the output data (operation will output to this key)
+                Defaults to the same as the input key. If you want to store intermediate
+                results, you can set this to a different key. But make sure to update the
+                input key of the next operation to match the output key of this operation.
             cache_inputs: A list of input keys to cache or True to cache all inputs
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
@@ -740,301 +748,6 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     return Pipeline(operations=operations, **kwargs)
 
 
-## Base Operations
-
-
-@ops_registry("identity")
-class Identity(Operation):
-    """Identity operation."""
-
-    def call(self, *args, **kwargs) -> Dict:
-        """Returns the input as is."""
-        return kwargs
-
-
-@ops_registry("merge")
-class Merge(Operation):
-    """Operation that merges sets of input dictionaries."""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.allow_multiple_inputs = True
-
-    def call(self, *args, **kwargs) -> Dict:
-        """
-        Merges the input dictionaries. Priority is given to the last input.
-        """
-        merged = {}
-        for arg in args:
-            if not isinstance(arg, dict):
-                raise TypeError("All inputs must be dictionaries.")
-            merged.update(arg)
-        return merged
-
-
-@ops_registry("split")
-class Split(Operation):
-    """Operation that splits an input dictionary  n copies."""
-
-    def __init__(self, n: int, **kwargs):
-        super().__init__(**kwargs)
-        self.n = n
-
-    def call(self, **kwargs) -> List[Dict]:
-        """
-        Splits the input dictionary into n copies.
-        """
-        return [kwargs.copy() for _ in range(self.n)]
-
-
-@ops_registry("stack")
-class Stack(Operation):
-    """Stack multiple data arrays along a new axis.
-    Useful to merge data from parallel pipelines.
-    """
-
-    def __init__(
-        self,
-        keys: Union[str, List[str], None],
-        axes: Union[int, List[int], None],
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-
-        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
-
-    def call(self, **kwargs) -> Dict:
-        """
-        Stacks the inputs corresponding to the specified keys along the specified axis.
-        If a list of axes is provided, the length must match the number of keys.
-        """
-        for key, axis in zip(self.keys, self.axes):
-            kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
-        return kwargs
-
-
-@ops_registry("mean")
-class Mean(Operation):
-    """Take the mean of the input data along a specific axis."""
-
-    def __init__(self, keys, axes, **kwargs):
-        super().__init__(**kwargs)
-
-        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
-
-    def call(self, **kwargs):
-        for key, axis in zip(self.keys, self.axes):
-            kwargs[key] = ops.mean(kwargs[key], axis=axis)
-
-        return kwargs
-
-
-@ops_registry("upmix")
-class UpMix(Operation):
-    """Upmix IQ data to RF data."""
-
-    def __init__(self, key: str, **kwargs):
-        super().__init__(key=key, **kwargs)
-
-    def call(
-        self,
-        sampling_frequency=None,
-        center_frequency=None,
-        upsampling_rate=6,
-        **kwargs,
-    ):
-
-        data = kwargs[self.key]
-
-        if data.shape[-1] == 1:
-            log.warning("Upmixing is not applicable to RF data.")
-            return data
-        elif data.shape[-1] == 2:
-            data = channels_to_complex(data)
-
-        data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
-        data = ops.expand_dims(data, axis=-1)
-        return {self.output_key: data}
-
-
-@ops_registry("simulate_rf")
-class Simulate(Operation):
-    """Simulate RF data."""
-
-    def __init__(self, **kwargs):
-        super().__init__(
-            output_data_type=DataTypes.RAW_DATA,
-            jit_compile=False,
-            **kwargs,
-        )
-
-    def call(
-        self,
-        scatterer_positions,
-        scatterer_magnitudes,
-        probe_geometry,
-        lens_thickness,
-        lens_sound_speed,
-        sound_speed,
-        center_frequency,
-        sampling_frequency,
-        t0_delays,
-        initial_times,
-        element_width,
-        attenuation_coef,
-        tx_apodizations,
-        apply_lens_correction,
-        n_ax,
-    ):
-        return {
-            "raw_data": simulate_rf(
-                ops.convert_to_tensor(scatterer_positions),
-                ops.convert_to_tensor(scatterer_magnitudes),
-                probe_geometry=probe_geometry,
-                apply_lens_correction=apply_lens_correction,
-                lens_thickness=lens_thickness,
-                lens_sound_speed=lens_sound_speed,
-                sound_speed=sound_speed,
-                n_ax=n_ax,
-                center_frequency=center_frequency,
-                sampling_frequency=sampling_frequency,
-                t0_delays=t0_delays,
-                initial_times=initial_times,
-                element_width=element_width,
-                attenuation_coef=attenuation_coef,
-                tx_apodizations=tx_apodizations,
-            ),
-        }
-
-
-@ops_registry("tof_correction")
-class TOFCorrection(Operation):
-    """Time-of-flight correction operation for ultrasound data."""
-
-    def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
-        super().__init__(
-            key=key,
-            output_key=output_key,
-            input_data_type=DataTypes.RAW_DATA,
-            output_data_type=DataTypes.ALIGNED_DATA,
-            **kwargs,
-        )
-
-    def call(
-        self,
-        flatgrid=None,
-        sound_speed=None,
-        polar_angles=None,
-        focus_distances=None,
-        sampling_frequency=None,
-        f_number=None,
-        demodulation_frequency=None,
-        t0_delays=None,
-        tx_apodizations=None,
-        initial_times=None,
-        probe_geometry=None,
-        apply_lens_correction=None,
-        lens_thickness=None,
-        lens_sound_speed=None,
-        **kwargs,
-    ):
-        """Perform time-of-flight correction on raw RF data.
-
-        Args:
-            raw_data (ops.Tensor): Raw RF data to correct
-            flatgrid (ops.Tensor): Grid points at which to evaluate the time-of-flight
-            sound_speed (float): Sound speed in the medium
-            polar_angles (ops.Tensor): Polar angles for scan lines
-            focus_distances (ops.Tensor): Focus distances for scan lines
-            sampling_frequency (float): Sampling frequency
-            f_number (float): F-number for apodization
-            demodulation_frequency (float): Demodulation frequency
-            t0_delays (ops.Tensor): T0 delays
-            tx_apodizations (ops.Tensor): Transmit apodizations
-            initial_times (ops.Tensor): Initial times
-            probe_geometry (ops.Tensor): Probe element positions
-            apply_lens_correction (bool): Whether to apply lens correction
-            lens_thickness (float): Lens thickness
-            lens_sound_speed (float): Sound speed in the lens
-
-        Returns:
-            dict: Dictionary containing tof_corrected_data
-        """
-
-        raw_data = kwargs[self.key]
-
-        kwargs = {
-            "flatgrid": flatgrid,
-            "sound_speed": sound_speed,
-            "angles": polar_angles,
-            "vfocus": focus_distances,
-            "sampling_frequency": sampling_frequency,
-            "fnum": f_number,
-            "demodulation_frequency": demodulation_frequency,
-            "apply_phase_rotation": demodulation_frequency,
-            "t0_delays": t0_delays,
-            "tx_apodizations": tx_apodizations,
-            "initial_times": initial_times,
-            "probe_geometry": probe_geometry,
-            "apply_lens_correction": apply_lens_correction,
-            "lens_thickness": lens_thickness,
-            "lens_sound_speed": lens_sound_speed,
-        }
-
-        if not self.with_batch_dim:
-            tof_corrected = tof_correction_flatgrid(raw_data, **kwargs)
-        else:
-            tof_corrected = ops.map(
-                lambda data: tof_correction_flatgrid(data, **kwargs),
-                raw_data,
-            )
-
-        return {self.output_key: tof_corrected}
-
-
-@ops_registry("pfield_weighting")
-class PfieldWeighting(Operation):
-    """Weighting aligned data with the pressure field."""
-
-    def __init__(self, key="aligned_data", output_key="aligned_data", **kwargs):
-        """Initialize the PfieldWeighting operation.
-
-        Args:
-            key (str, optional): Key for input data. Defaults to "aligned_data".
-            output_key (str, optional): Key for output data. Defaults to "aligned_data".
-        """
-        super().__init__(key=key, output_key=output_key, **kwargs)
-
-    def call(self, flat_pfield=None, **kwargs):
-        """Weight data with pressure field.
-
-        Args:
-            flat_pfield (ops.Tensor): Pressure field weight mask of shape (n_pix, n_tx)
-
-        Returns:
-            dict: Dictionary containing weighted data
-        """
-        data = kwargs[self.key]
-
-        if flat_pfield is None:
-            return {self.output_key: data}
-
-        # Swap (n_pix, n_tx) to (n_tx, n_pix)
-        flat_pfield = ops.swapaxes(flat_pfield, 0, 1)
-
-        # Perform element-wise multiplication with the pressure weight mask
-        # Also add the required dimensions for broadcasting
-        if self.with_batch_dim:
-            pfield_expanded = ops.expand_dims(flat_pfield, axis=0)
-        else:
-            pfield_expanded = flat_pfield
-
-        pfield_expanded = pfield_expanded[..., None, None]
-        weighted_data = data * pfield_expanded
-
-        return {self.output_key: weighted_data}
-
-
 @ops_registry("patched_grid")
 class PatchedGrid(Pipeline):
     """
@@ -1136,20 +849,279 @@ class PatchedGrid(Pipeline):
         return inputs
 
 
+## Base Operations
+
+
+@ops_registry("identity")
+class Identity(Operation):
+    """Identity operation."""
+
+    def call(self, *args, **kwargs) -> Dict:
+        """Returns the input as is."""
+        return kwargs
+
+
+@ops_registry("merge")
+class Merge(Operation):
+    """Operation that merges sets of input dictionaries."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.allow_multiple_inputs = True
+
+    def call(self, *args, **kwargs) -> Dict:
+        """
+        Merges the input dictionaries. Priority is given to the last input.
+        """
+        merged = {}
+        for arg in args:
+            if not isinstance(arg, dict):
+                raise TypeError("All inputs must be dictionaries.")
+            merged.update(arg)
+        return merged
+
+
+@ops_registry("split")
+class Split(Operation):
+    """Operation that splits an input dictionary  n copies."""
+
+    def __init__(self, n: int, **kwargs):
+        super().__init__(**kwargs)
+        self.n = n
+
+    def call(self, **kwargs) -> List[Dict]:
+        """
+        Splits the input dictionary into n copies.
+        """
+        return [kwargs.copy() for _ in range(self.n)]
+
+
+@ops_registry("stack")
+class Stack(Operation):
+    """Stack multiple data arrays along a new axis.
+    Useful to merge data from parallel pipelines.
+    """
+
+    def __init__(
+        self,
+        keys: Union[str, List[str], None],
+        axes: Union[int, List[int], None],
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
+
+    def call(self, **kwargs) -> Dict:
+        """
+        Stacks the inputs corresponding to the specified keys along the specified axis.
+        If a list of axes is provided, the length must match the number of keys.
+        """
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
+        return kwargs
+
+
+@ops_registry("mean")
+class Mean(Operation):
+    """Take the mean of the input data along a specific axis."""
+
+    def __init__(self, keys, axes, **kwargs):
+        super().__init__(**kwargs)
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
+
+    def call(self, **kwargs):
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = ops.mean(kwargs[key], axis=axis)
+
+        return kwargs
+
+
+@ops_registry("simulate_rf")
+class Simulate(Operation):
+    """Simulate RF data."""
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            output_data_type=DataTypes.RAW_DATA,
+            jit_compile=False,
+            **kwargs,
+        )
+
+    def call(
+        self,
+        scatterer_positions,
+        scatterer_magnitudes,
+        probe_geometry,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        center_frequency,
+        sampling_frequency,
+        t0_delays,
+        initial_times,
+        element_width,
+        attenuation_coef,
+        tx_apodizations,
+        apply_lens_correction,
+        n_ax,
+    ):
+        return {
+            "raw_data": simulate_rf(
+                ops.convert_to_tensor(scatterer_positions),
+                ops.convert_to_tensor(scatterer_magnitudes),
+                probe_geometry=probe_geometry,
+                apply_lens_correction=apply_lens_correction,
+                lens_thickness=lens_thickness,
+                lens_sound_speed=lens_sound_speed,
+                sound_speed=sound_speed,
+                n_ax=n_ax,
+                center_frequency=center_frequency,
+                sampling_frequency=sampling_frequency,
+                t0_delays=t0_delays,
+                initial_times=initial_times,
+                element_width=element_width,
+                attenuation_coef=attenuation_coef,
+                tx_apodizations=tx_apodizations,
+            ),
+        }
+
+
+@ops_registry("tof_correction")
+class TOFCorrection(Operation):
+    """Time-of-flight correction operation for ultrasound data."""
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+
+    def call(
+        self,
+        flatgrid=None,
+        sound_speed=None,
+        polar_angles=None,
+        focus_distances=None,
+        sampling_frequency=None,
+        f_number=None,
+        demodulation_frequency=None,
+        t0_delays=None,
+        tx_apodizations=None,
+        initial_times=None,
+        probe_geometry=None,
+        apply_lens_correction=None,
+        lens_thickness=None,
+        lens_sound_speed=None,
+        **kwargs,
+    ):
+        """Perform time-of-flight correction on raw RF data.
+
+        Args:
+            raw_data (ops.Tensor): Raw RF data to correct
+            flatgrid (ops.Tensor): Grid points at which to evaluate the time-of-flight
+            sound_speed (float): Sound speed in the medium
+            polar_angles (ops.Tensor): Polar angles for scan lines
+            focus_distances (ops.Tensor): Focus distances for scan lines
+            sampling_frequency (float): Sampling frequency
+            f_number (float): F-number for apodization
+            demodulation_frequency (float): Demodulation frequency
+            t0_delays (ops.Tensor): T0 delays
+            tx_apodizations (ops.Tensor): Transmit apodizations
+            initial_times (ops.Tensor): Initial times
+            probe_geometry (ops.Tensor): Probe element positions
+            apply_lens_correction (bool): Whether to apply lens correction
+            lens_thickness (float): Lens thickness
+            lens_sound_speed (float): Sound speed in the lens
+
+        Returns:
+            dict: Dictionary containing tof_corrected_data
+        """
+
+        raw_data = kwargs[self.key]
+
+        kwargs = {
+            "flatgrid": flatgrid,
+            "sound_speed": sound_speed,
+            "angles": polar_angles,
+            "vfocus": focus_distances,
+            "sampling_frequency": sampling_frequency,
+            "fnum": f_number,
+            "demodulation_frequency": demodulation_frequency,
+            "apply_phase_rotation": demodulation_frequency,
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "initial_times": initial_times,
+            "probe_geometry": probe_geometry,
+            "apply_lens_correction": apply_lens_correction,
+            "lens_thickness": lens_thickness,
+            "lens_sound_speed": lens_sound_speed,
+        }
+
+        if not self.with_batch_dim:
+            tof_corrected = tof_correction_flatgrid(raw_data, **kwargs)
+        else:
+            tof_corrected = ops.map(
+                lambda data: tof_correction_flatgrid(data, **kwargs),
+                raw_data,
+            )
+
+        return {self.output_key: tof_corrected}
+
+
+@ops_registry("pfield_weighting")
+class PfieldWeighting(Operation):
+    """Weighting aligned data with the pressure field."""
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+
+    def call(self, flat_pfield=None, **kwargs):
+        """Weight data with pressure field.
+
+        Args:
+            flat_pfield (ops.Tensor): Pressure field weight mask of shape (n_pix, n_tx)
+
+        Returns:
+            dict: Dictionary containing weighted data
+        """
+        data = kwargs[self.key]
+
+        if flat_pfield is None:
+            return {self.output_key: data}
+
+        # Swap (n_pix, n_tx) to (n_tx, n_pix)
+        flat_pfield = ops.swapaxes(flat_pfield, 0, 1)
+
+        # Perform element-wise multiplication with the pressure weight mask
+        # Also add the required dimensions for broadcasting
+        if self.with_batch_dim:
+            pfield_expanded = ops.expand_dims(flat_pfield, axis=0)
+        else:
+            pfield_expanded = flat_pfield
+
+        pfield_expanded = pfield_expanded[..., None, None]
+        weighted_data = data * pfield_expanded
+
+        return {self.output_key: weighted_data}
+
+
 @ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
     def __init__(
         self,
-        key="aligned_data",
-        output_key="beamformed_data",
         reshape_grid=True,
         **kwargs,
     ):
         super().__init__(
-            key=key,
-            output_key=output_key,
             input_data_type=None,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
@@ -1227,14 +1199,10 @@ class EnvelopeDetect(Operation):
 
     def __init__(
         self,
-        key: str = "beamformed_data",
-        output_key: str = "envelope_data",
         axis=-3,
         **kwargs,
     ):
         super().__init__(
-            key=key,
-            output_key=output_key,
             input_data_type=DataTypes.BEAMFORMED_DATA,
             output_data_type=DataTypes.ENVELOPE_DATA,
             **kwargs,
@@ -1265,27 +1233,42 @@ class EnvelopeDetect(Operation):
         return {self.output_key: data}
 
 
+@ops_registry("upmix")
+class UpMix(Operation):
+    """Upmix IQ data to RF data."""
+
+    def call(
+        self,
+        sampling_frequency=None,
+        center_frequency=None,
+        upsampling_rate=6,
+        **kwargs,
+    ):
+
+        data = kwargs[self.key]
+
+        if data.shape[-1] == 1:
+            log.warning("Upmixing is not applicable to RF data.")
+            return data
+        elif data.shape[-1] == 2:
+            data = channels_to_complex(data)
+
+        data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
+        data = ops.expand_dims(data, axis=-1)
+        return {self.output_key: data}
+
+
 @ops_registry("log_compress")
 class LogCompress(Operation):
     """Logarithmic compression of data."""
 
     def __init__(
         self,
-        key: str = "envelope_data",
-        output_key: str = "image",
         **kwargs,
     ):
-        """Initialize the LogCompress operation.
-
-        Args:
-            key (str, optional): Key for input data. Defaults to "envelope_data".
-            output_key (str, optional): Key for output data. Defaults to "image".
-        """
         super().__init__(
             input_data_type=DataTypes.ENVELOPE_DATA,
             output_data_type=DataTypes.IMAGE,
-            key=key,
-            output_key=output_key,
             **kwargs,
         )
 
@@ -1314,26 +1297,6 @@ class LogCompress(Operation):
 @ops_registry("normalize")
 class Normalize(Operation):
     """Normalize data to a given range."""
-
-    def __init__(
-        self,
-        key: str = "envelope_data",
-        output_key: str = "envelope_data",
-        **kwargs,
-    ):
-        """Initialize the Normalize operation.
-
-        Args:
-            key (str, optional): Key for input data. Defaults to "envelope_data".
-            output_key (str, optional): Key for output data. Defaults to "envelope_data".
-        """
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            key=key,
-            output_key=output_key,
-            **kwargs,
-        )
 
     def call(self, output_range=None, input_range=None, **kwargs):
         """Normalize data to a given range.
@@ -1371,24 +1334,18 @@ class ScanConvert(Operation):
 
     def __init__(
         self,
-        key: str = "image",
-        output_key: str = "image_sc",
         order=1,
         **kwargs,
     ):
         """Initialize the ScanConvert operation.
 
         Args:
-            key (str, optional): Key for input data. Defaults to "image".
-            output_key (str, optional): Key for output data. Defaults to "image_sc".
             order (int, optional): Interpolation order. Defaults to 1. Currently only
                 GPU support for order=1.
         """
         super().__init__(
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
-            key=key,
-            output_key=output_key,
             jittable=False,  # currently not jittable due to variable size
             **kwargs,
         )
