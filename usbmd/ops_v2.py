@@ -349,15 +349,15 @@ class Pipeline:
         if any(key in inputs for key in ["probe", "scan", "config"]):
             raise ValueError(
                 "Probe, Scan and Config objects should be first processed with "
-                "`Pipeline.prepare_objects` before calling the pipeline. "
-                "e.g. inputs = Pipeline.prepare_objects(probe, scan, config)"
+                "`Pipeline.prepare_parameters` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
             )
 
         if any(isinstance(arg, USBMDObject) for arg in inputs.values()):
             raise ValueError(
                 "Probe, Scan and Config objects should be first processed with "
-                "`Pipeline.prepare_objects` before calling the pipeline. "
-                "e.g. inputs = Pipeline.prepare_objects(probe, scan, config)"
+                "`Pipeline.prepare_parameters` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
             )
 
         if any(isinstance(arg, str) for arg in inputs.values()):
@@ -601,7 +601,7 @@ class Pipeline:
         """Output key of the pipeline."""
         return self.operations[-1].output_key
 
-    def prepare_objects(self, *args, **kwargs):
+    def prepare_parameters(self, *args, **kwargs):
         """Prepare Probe, Scan and Config objects for the pipeline.
 
         Serializes `usbmd.core.Object` instances and converts them to

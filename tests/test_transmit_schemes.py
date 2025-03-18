@@ -6,7 +6,7 @@ import pytest
 
 from usbmd import ops_v2 as ops
 from usbmd.probes import Probe
-from usbmd.scan import Scan, compute_t0_delays_planewave, compute_t0_delays_focused
+from usbmd.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
 from usbmd.utils.visualize import set_mpl_style
 
 
@@ -80,20 +80,8 @@ def _find_peak_location(image, extent, position, max_diff=0.6e-3):
 
 def _get_default_pipeline(ultrasound_scan):
     """Returns a default pipeline for ultrasound simulation."""
-    operations = [
-        ops.Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        ops.TOFCorrection(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-        ),
-        ops.DelayAndSum(),
-        ops.EnvelopeDetect(),
-        ops.LogCompress(output_key="image"),
-        ops.Normalize(key="image", output_key="image"),
-    ]
-    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    pipeline = ops.Pipeline.from_default(jit_options=None)
+    pipeline.prepend(ops.Simulate())
     return pipeline
 
 
@@ -489,11 +477,12 @@ def test_transmit_schemes(
     ultrasound_probe = _get_probe(probe_kind)
     ultrasound_scan = _get_scan(ultrasound_probe, scan_kind)
     default_pipeline = _get_default_pipeline(ultrasound_scan)
+
+    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     output_default = default_pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
         dynamic_range=(-60, 0),
@@ -501,7 +490,7 @@ def test_transmit_schemes(
         output_range=(0, 255),
     )
 
-    image = output_default["image"][0]
+    image = output_default["data"][0]
 
     # Convert to numpy
     image = np.array(image)
@@ -523,8 +512,8 @@ def test_transmit_schemes(
         true_position=ultrasound_scatterers["positions"][target_scatterer_index],
     )
     # Check that the pipeline produced the expected outputs
-    assert "image" in output_default
-    assert output_default["image"].shape[0] == 1  # Batch dimension
+    assert "data" in output_default
+    assert output_default["data"].shape[0] == 1  # Batch dimension
     # Verify the normalized image has values between 0 and 255
-    assert np.nanmin(output_default["image"]) >= 0.0
-    assert np.nanmax(output_default["image"]) <= 255.0
+    assert np.nanmin(output_default["data"]) >= 0.0
+    assert np.nanmax(output_default["data"]) <= 255.0
