@@ -15,6 +15,7 @@ from usbmd.backend import jit
 from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
+from usbmd.core import Object as USBMDObject
 from usbmd.display import scan_convert_2d, scan_convert_3d
 from usbmd.ops import channels_to_complex, hilbert, upmix
 from usbmd.probes import Probe
@@ -334,44 +335,28 @@ class Pipeline:
             inputs = outputs
         return outputs
 
-    # TODO: a lot of time is spent on converting scan etc... to_tensor every call
-    # If you want to call pipeline on every frame in a for loop (e.g. real time applications where
-    # data is coming in on the fly), this will make it twice as slow
-    def __call__(self, *args, return_numpy=False, **kwargs):
+    def __call__(self, return_numpy=False, **inputs):
         """Process input data through the pipeline."""
 
-        if any(key in kwargs for key in ["probe", "scan", "config"]):
+        if any(key in inputs for key in ["probe", "scan", "config"]):
             raise ValueError(
-                "Probe, Scan and Config objects should be passed as positional arguments. "
-                "e.g. pipeline(probe, scan, config, **kwargs)"
+                "Probe, Scan and Config objects should be first processed with "
+                "`Pipeline.prepare_objects` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_objects(probe, scan, config)"
             )
 
-        # Extract from args Probe, Scan and Config objects
-        probe, scan, config = {}, {}, {}
-        for arg in args:
-            if isinstance(arg, Probe):
-                probe = arg.to_tensor()
-            elif isinstance(arg, Scan):
-                scan = arg.to_tensor()
-                # TODO: doing this twice because grid has to set Nz, Nx...
-                scan = arg.to_tensor()
-            elif isinstance(arg, Config):
-                config = arg.to_tensor()  # TODO
-            else:
-                raise ValueError(
-                    f"Unsupported input type for pipeline *args: {type(arg)}. "
-                    "Pipeline call expects a `usbmd.core.Object` (Probe, Scan, Config) as args. "
-                    "Alternatively, pass the input as keyword argument (kwargs)."
-                )
+        if any(isinstance(arg, USBMDObject) for arg in inputs.values()):
+            raise ValueError(
+                "Probe, Scan and Config objects should be first processed with "
+                "`Pipeline.prepare_objects` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_objects(probe, scan, config)"
+            )
 
-        # combine probe, scan, config and kwargs
-        # explicitly so we know which keys overwrite which
-        # kwargs > config > scan > probe
-        inputs = {**probe, **scan, **config, **kwargs}
-
-        # Dropping str inputs as they are not supported in jax.jit
-        # TODO: will this break any operations?
-        inputs.pop("probe_type", None)
+        if any(isinstance(arg, str) for arg in inputs.values()):
+            raise ValueError(
+                "Pipeline does not support string inputs. "
+                "Please ensure all inputs are convertible to tensors."
+            )
 
         ## PROCESSING
         outputs = self._call_pipeline(**inputs)
@@ -383,17 +368,6 @@ class Pipeline:
                 k: ops.convert_to_numpy(v) if v is ops.is_tensor(v) else v
                 for k, v in outputs.items()
             }
-
-        # TODO: if we can in-place update the Scan, Probe and Config objects, we can output those.
-
-        # update probe, scan, config with outputs
-        # for arg in args:
-        #     if isinstance(arg, Probe):
-        #         arg.update(outputs)
-        #     elif isinstance(arg, Scan):
-        #         arg.update(outputs)
-        #     elif isinstance(arg, Config):
-        #         arg.update(outputs)
 
         return outputs
 
@@ -618,6 +592,69 @@ class Pipeline:
     def output_key(self) -> str:
         """Output key of the pipeline."""
         return self.operations[-1].output_key
+
+    def prepare_objects(self, *args, **kwargs):
+        """Prepare Probe, Scan and Config objects for the pipeline.
+
+        Serializes `usbmd.core.Object` instances and converts them to
+        dictionary of tensors.
+
+        Args:
+            *args: Probe, Scan, and/or Config objects.
+            **kwargs: Additional keyword arguments to be included in the inputs.
+
+        Returns:
+            dict: Dictionary of inputs with all values as tensors.
+        """
+        # Initialize dictionaries for probe, scan, and config
+        probe_dict, scan_dict, config_dict = {}, {}, {}
+        other_dicts = {}
+
+        # Process args to extract Probe, Scan, and Config objects
+        for arg in args:
+            if isinstance(arg, Probe):
+                probe_dict.update(arg.to_tensor())
+            elif isinstance(arg, Scan):
+                scan_dict.update(arg.to_tensor())
+                # TODO: doing this twice because grid has to set Nz, Nx...
+                scan_dict.update(arg.to_tensor())
+            elif isinstance(arg, Config):
+                config_dict.update(arg.to_tensor())
+            elif isinstance(arg, USBMDObject):
+                other_dicts.update(arg.to_tensor())
+            else:
+                raise TypeError(
+                    "Expected an instance of `usbmd.core.Object`, "
+                    f"Probe, Scan, or Config, got {type(arg).__name__}"
+                )
+
+        # Convert all kwargs to tensors
+        tensor_kwargs = {}
+        for key, value in kwargs.items():
+            try:
+                tensor_kwargs[key] = ops.convert_to_tensor(value)
+            except Exception as e:
+                raise ValueError(
+                    f"Error converting key '{key}' to tensor: {e}. "
+                    f"Please ensure all inputs are convertible to tensors."
+                )
+
+        # combine probe, scan, config and kwargs
+        # explicitly so we know which keys overwrite which
+        # kwargs > config > scan > probe
+        inputs = {
+            **probe_dict,
+            **scan_dict,
+            **config_dict,
+            **other_dicts,
+            **tensor_kwargs,
+        }
+
+        # Dropping str inputs as they are not supported in jax.jit
+        # TODO: will this break any operations?
+        inputs.pop("probe_type", None)
+
+        return inputs
 
 
 def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
