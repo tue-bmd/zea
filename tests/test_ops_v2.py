@@ -112,7 +112,7 @@ def pipeline_config_with_params():
 @pytest.fixture
 def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
-    pipeline = ops.Pipeline.default(num_patches=1, jit_options=None)
+    pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
     pipeline.prepend(ops.Simulate())
     return pipeline
 
@@ -120,7 +120,7 @@ def default_pipeline():
 @pytest.fixture
 def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
-    pipeline = ops.Pipeline.default(jit_options=None)
+    pipeline = ops.Pipeline.from_default(jit_options=None)
     pipeline.prepend(ops.Simulate())
     return pipeline
 
