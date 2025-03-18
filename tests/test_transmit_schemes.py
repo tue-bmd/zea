@@ -1,13 +1,8 @@
-"""Tests for the Operation and Pipeline classes in ops_v2.py.
-
-# TODO: Run tests for all backends
-# TODO: merge with original ops
-"""
+"""Tests the pipeline for different transmit schemes."""
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 import numpy as np
 import pytest
-import matplotlib.pyplot as plt
 
 from usbmd import ops_v2 as ops
 from usbmd.probes import Probe
