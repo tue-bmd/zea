@@ -1167,8 +1167,8 @@ def compute_t0_delays_focused(
         probe_geometry (np.ndarray): The positions of the elements in the array of
             shape (element, 3).
         polar_angles (np.ndarray): The polar angles of the planewave in radians of shape (n_tx,).
-        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave in radians of shape (n_tx,).
-            in radians. Defaults to 0.
+        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave in
+            radians of shape (n_tx,).
         sound_speed (float, optional): The speed of sound. Defaults to 1540.
 
     Returns:
