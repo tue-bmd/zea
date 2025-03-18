@@ -80,15 +80,8 @@ def _find_peak_location(image, extent, position, max_diff=0.6e-3):
 
 def _get_default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
-    operations = [
-        ops.Simulate(),
-        ops.TOFCorrection(),
-        ops.DelayAndSum(),
-        ops.EnvelopeDetect(),
-        ops.LogCompress(output_key="image"),
-        ops.Normalize(key="image", output_key="image"),
-    ]
-    pipeline = ops.Pipeline(operations=operations, jit_options=None)
+    pipeline = ops.Pipeline.from_default(num_patches=1, jit_options="ops")
+    pipeline.prepend(ops.Simulate())
     return pipeline
 
 
