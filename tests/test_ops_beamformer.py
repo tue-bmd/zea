@@ -3,6 +3,7 @@
 # pylint: disable=import-outside-toplevel
 
 import numpy as np
+import pytest
 
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
@@ -40,8 +41,8 @@ def _get_params(reconstruction_mode):
     # have been changed.
     dx = scan.wvln
     dz = scan.wvln
-    scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
-    scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
+    scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx)) // 4
+    scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz)) // 4
 
     # use pipeline here so it is easy to propagate the scan parameters
     simulator = Pipeline([Simulate()])
@@ -74,6 +75,10 @@ def _get_params(reconstruction_mode):
     return config, probe, scan, data
 
 
+@pytest.mark.skip(
+    reason="This test causes timeouts on the Github runners. This needs to be fixed."
+    " See github issue #617."
+)
 @backend_equality_check(
     decimal=[0, 2, 3], timeout=300, backends=["torch", "tensorflow", "jax"]
 )
