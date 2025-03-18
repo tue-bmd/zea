@@ -942,10 +942,8 @@ class Mean(Operation):
 class Simulate(Operation):
     """Simulate RF data."""
 
-    def __init__(self, key="scatterer_positions", output_key="raw_data", **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(
-            key=key,
-            output_key=output_key,
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
