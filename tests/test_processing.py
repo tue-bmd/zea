@@ -268,9 +268,16 @@ def test_up_and_down_conversion(factor, batch_size):
 
     downsample = ops.Downsample(factor=factor, axis=-3)
     demodulate = ops.Demodulate(
-        fs=scan.fs, fc=scan.fc, bandwidth=None, filter_coeff=None
+        sampling_frequency=scan.sampling_frequency,
+        center_frequency=scan.center_frequency,
+        bandwidth=None,
+        filter_coeff=None,
     )
-    upmix = ops.UpMix(fs=scan.fs, fc=scan.fc, upsampling_rate=factor)
+    upmix = ops.UpMix(
+        sampling_frequency=scan.sampling_frequency,
+        center_frequency=scan.center_frequency,
+        upsampling_rate=factor,
+    )
 
     # cut n_ax data so it is divisible by factor
     data = data[:, :, : (data.shape[2] // factor) * factor]
@@ -335,11 +342,14 @@ def test_processing_class():
                     "num_taps": 81,
                 },
                 "modtype": "iq",
-                "fs": 40e6,
-                "fc": 5e6,
+                "sampling_frequency": 40e6,
+                "center_frequency": 5e6,
             },
         },  # this bandpass filters the data three times and returns a list
-        {"name": "demodulate", "params": {"fs": 40e6, "fc": 5e6}},
+        {
+            "name": "demodulate",
+            "params": {"sampling_frequency": 40e6, "center_frequency": 5e6},
+        },
         {"name": "envelope_detect"},
         {"name": "downsample", "params": {"factor": 4}},
         {"name": "normalize", "params": {"output_range": (0, 1)}},
