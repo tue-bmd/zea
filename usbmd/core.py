@@ -11,7 +11,14 @@ CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_PRECISION = "float32"
 
 # TODO: make static more neat
-STATIC = ["f_number", "demodulation_frequency", "apply_lens_correction", "Nx", "Nz"]
+STATIC = [
+    "f_number",
+    "demodulation_frequency",
+    "apply_lens_correction",
+    "Nx",
+    "Nz",
+    "n_ax",
+]
 
 
 class DataTypes(enum.Enum):
