@@ -78,7 +78,7 @@ def _find_peak_location(image, extent, position, max_diff=0.6e-3):
     return highest_intensity_pixel_location
 
 
-def _get_default_pipeline(ultrasound_scan):
+def _get_default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(jit_options=None)
     pipeline.prepend(ops.Simulate())
@@ -476,7 +476,7 @@ def test_transmit_schemes(
 
     ultrasound_probe = _get_probe(probe_kind)
     ultrasound_scan = _get_scan(ultrasound_probe, scan_kind)
-    default_pipeline = _get_default_pipeline(ultrasound_scan)
+    default_pipeline = _get_default_pipeline()
 
     parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
     # all dynamic parameters are set in the call method of the operations
