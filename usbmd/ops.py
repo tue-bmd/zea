@@ -2287,15 +2287,20 @@ def channels_to_complex(data):
 
 
 def hilbert(x, N: int = None, axis=-1):
-    """Manual implementation of Hilbert transform.
+    """Manual implementation of the Hilbert transform function. Tje function
+    returns the analytical signal.
 
     Operated in the Fourier domain.
+
+    Note:
+        THIS IS NOT THE MATHEMATICAL THE HILBERT TRANSFORM as you will find it on
+        wikipedia, but computes the analytical signal. The implementation reproduces
+        the behavior of the `scipy.signal.hilbert` function.
 
     Args:
         x (ndarray): input data of any shape.
         N (int, optional): number of points in the FFT. Defaults to None.
         axis (int, optional): axis to operate on. Defaults to -1.
-        ops (module, optional): operations module. Defaults to np (numpy).
     Returns:
         x (ndarray): complex iq data of any shape.k
 
