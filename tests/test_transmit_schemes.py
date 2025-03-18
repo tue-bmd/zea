@@ -209,8 +209,8 @@ def _get_lims_and_gridsize(center_frequency, sound_speed):
     width, height = xlims[1] - xlims[0], zlims[1] - zlims[0]
     wavelength = sound_speed / center_frequency
     gridsize = (
-        int(width / (0.25 * wavelength)) + 1,
-        int(height / (0.25 * wavelength)) + 1,
+        int(width / (0.5 * wavelength)) + 1,
+        int(height / (0.5 * wavelength)) + 1,
     )
     return {"xlims": xlims, "zlims": zlims, "Nx": gridsize[0], "Nz": gridsize[1]}
 

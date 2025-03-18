@@ -954,9 +954,11 @@ class Simulate(Operation):
         scatterer_positions,
         scatterer_magnitudes,
         probe_geometry,
+        apply_lens_correction,
         lens_thickness,
         lens_sound_speed,
         sound_speed,
+        n_ax,
         center_frequency,
         sampling_frequency,
         t0_delays,
@@ -964,8 +966,6 @@ class Simulate(Operation):
         element_width,
         attenuation_coef,
         tx_apodizations,
-        apply_lens_correction,
-        n_ax,
         **kwargs,
     ):
         return {
