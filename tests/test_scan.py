@@ -1,5 +1,4 @@
-"""Tests for the Scan class.
-"""
+"""Tests for the Scan class."""
 
 import numpy as np
 
@@ -19,7 +18,7 @@ scan_args = {
     "n_ax": 3328,
     "Nx": 64,
     "Nz": 128,
-    "pixels_per_wvln": 4,
+    "pixels_per_wavelength": 4,
     "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
     "azimuth_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
     "t0_delays": np.repeat(np.linspace(0, 1e-6, 10)[..., None], 10, axis=-1),
@@ -46,7 +45,7 @@ planewave_scan_args = {
     "n_ax": 3328,
     "Nx": 64,
     "Nz": 128,
-    "pixels_per_wvln": 4,
+    "pixels_per_wavelength": 4,
     "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
     "azimuth_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
     "tx_apodizations": np.ones((10, 128)),
@@ -76,9 +75,9 @@ def test_initialization():
     assert scan.xlims == scan_args["xlims"]
     assert scan.ylims == scan_args["ylims"]
     assert scan.zlims == scan_args["zlims"]
-    assert scan.fc == scan_args["center_frequency"]
-    assert scan.fs == scan_args["sampling_frequency"]
-    assert scan.fdemod == scan_args["demodulation_frequency"]
+    assert scan.center_frequency == scan_args["center_frequency"]
+    assert scan.sampling_frequency == scan_args["sampling_frequency"]
+    assert scan.demodulation_frequency == scan_args["demodulation_frequency"]
     assert scan.sound_speed == scan_args["sound_speed"]
     assert scan.n_ax == scan_args["n_ax"]
     assert scan.Nx == scan_args["Nx"]
@@ -89,7 +88,7 @@ def test_initialization():
     assert np.all(scan.tx_apodizations == scan_args["tx_apodizations"])
     assert np.all(scan.focus_distances == scan_args["focus_distances"])
     assert np.all(scan.initial_times == scan_args["initial_times"])
-    assert scan.pixels_per_wavelength == scan_args["pixels_per_wvln"]
+    assert scan.pixels_per_wavelength == scan_args["pixels_per_wavelength"]
 
 
 def test_planewave_scan():
@@ -102,9 +101,9 @@ def test_planewave_scan():
     assert scan.xlims == planewave_scan_args["xlims"]
     assert scan.ylims == planewave_scan_args["ylims"]
     assert scan.zlims == planewave_scan_args["zlims"]
-    assert scan.fc == planewave_scan_args["center_frequency"]
-    assert scan.fs == planewave_scan_args["sampling_frequency"]
-    assert scan.fdemod == scan_args["demodulation_frequency"]
+    assert scan.center_frequency == planewave_scan_args["center_frequency"]
+    assert scan.sampling_frequency == planewave_scan_args["sampling_frequency"]
+    assert scan.demodulation_frequency == scan_args["demodulation_frequency"]
     assert scan.sound_speed == planewave_scan_args["sound_speed"]
     assert scan.n_ax == planewave_scan_args["n_ax"]
     assert scan.Nx == planewave_scan_args["Nx"]
@@ -112,5 +111,5 @@ def test_planewave_scan():
     assert np.all(scan.polar_angles == planewave_scan_args["polar_angles"])
     assert np.all(scan.azimuth_angles == planewave_scan_args["azimuth_angles"])
     assert np.all(scan.tx_apodizations == planewave_scan_args["tx_apodizations"])
-    assert scan.pixels_per_wavelength == planewave_scan_args["pixels_per_wvln"]
+    assert scan.pixels_per_wavelength == planewave_scan_args["pixels_per_wavelength"]
     assert np.all(scan.initial_times == planewave_scan_args["initial_times"])

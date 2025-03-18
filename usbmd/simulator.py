@@ -144,7 +144,7 @@ def simulate_rf(
                 freqs[None, None, None],
                 tau_total[..., None],
                 n_fft=n_ax,
-                fs=sampling_frequency,
+                sampling_frequency=sampling_frequency,
             )
             * ops.cast(
                 scatterer_magnitudes[:, None, None, None]
@@ -194,7 +194,7 @@ def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
     return response
 
 
-def delay2(f, tau, n_fft, fs):
+def delay2(f, tau, n_fft, sampling_frequency):
     """
     Applies a delay in the frequency domain without phase wrapping.
 
@@ -202,13 +202,17 @@ def delay2(f, tau, n_fft, fs):
         f (array-like): The input frequencies.
         tau (float): The delay to apply.
         n_fft (int): The number of samples in the FFT.
-        fs (float): The sampling frequency.
+        sampling_frequency (float): The sampling frequency.
 
     Returns:
         array-like: The spectrum of the delay.
     """
     arg = ops.array(-1j, dtype="complex64") * ops.cast(2 * PI * tau * f, "complex64")
-    return ops.where(tau < n_fft / fs, ops.exp(arg), ops.array(0.0, dtype="complex64"))
+    return ops.where(
+        tau < n_fft / sampling_frequency,
+        ops.exp(arg),
+        ops.array(0.0, dtype="complex64"),
+    )
 
 
 def attenuate(f, attenuation_coef, dist):
@@ -258,32 +262,36 @@ def hann_unnormalized(x, width):
     return ops.where(ops.abs(x) < width / 2, ops.cos(PI * x / width) ** 2, 0)
 
 
-def get_pulse_spectrum_fn(fc, n_period=3.0):
+def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
     """Computes the spectrum of a sine that is windowed with a Hann window.
 
     Args:
-    fc (float): The center frequency of the pulse.
+    center_frequency (float): The center frequency of the pulse.
     n_period (float): The number of periods to include in the pulse.
 
     Returns:
     spectrum_fn (callable): A function that computes the spectrum of the pulse for the
         input frequencies in Hz.
     """
-    period = n_period / fc
+    period = n_period / center_frequency
 
     def spectrum_fn(f):
         return ops.array(1 / 2, "complex64") * ops.cast(
-            (hann_fd(f - fc, period) + hann_fd(f + fc, period)), "complex64"
+            (
+                hann_fd(f - center_frequency, period)
+                + hann_fd(f + center_frequency, period)
+            ),
+            "complex64",
         )
 
     return spectrum_fn
 
 
-def get_transducer_bandwidth_fn(fc, bandwidth):
+def get_transducer_bandwidth_fn(center_frequency, bandwidth):
     """Computes the spectrum of a probe with a center frequency and bandwidth.
 
     Args:
-    fc (float): The center frequency of the probe.
+    center_frequency (float): The center frequency of the probe.
     bandwidth (float): The bandwidth of the probe.
 
     Returns
@@ -292,7 +300,7 @@ def get_transducer_bandwidth_fn(fc, bandwidth):
     """
 
     def bandwidth_fn(f):
-        return hann_unnormalized(ops.abs(f) - fc, bandwidth)
+        return hann_unnormalized(ops.abs(f) - center_frequency, bandwidth)
 
     return bandwidth_fn
 
