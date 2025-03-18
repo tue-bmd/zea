@@ -299,7 +299,9 @@ def test_pipeline_with_scan_probe_config():
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = ops.Pipeline(operations=operations)
 
-    result = pipeline(scan, probe, x=2, y=3)
+    parameters = pipeline.prepare_parameters(scan, probe)
+    result = pipeline(**parameters, x=2, y=3)
+
     assert "z" in result
     assert "n_tx" in result  # Check if we parsed the scan object correctly
     assert "probe_geometry" in result  # Check if we parsed the probe object correctly
