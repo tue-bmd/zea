@@ -758,7 +758,13 @@ class UpMix(Operation):
         super().__init__(**kwargs)
         self.key = key
 
-    def call(self, fs=None, fc=None, upsampling_rate=6, **kwargs):
+    def call(
+        self,
+        sampling_frequency=None,
+        center_frequency=None,
+        upsampling_rate=6,
+        **kwargs,
+    ):
 
         data = kwargs[self.key]
 
@@ -768,7 +774,7 @@ class UpMix(Operation):
         elif data.shape[-1] == 2:
             data = channels_to_complex(data)
 
-        data = upmix(data, fs, fc, upsampling_rate)
+        data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return data
 
@@ -851,7 +857,7 @@ class TOFCorrection(Operation):
         focus_distances=None,
         sampling_frequency=None,
         f_number=None,
-        fdemod=None,
+        demodulation_frequency=None,
         t0_delays=None,
         tx_apodizations=None,
         initial_times=None,
@@ -871,7 +877,7 @@ class TOFCorrection(Operation):
             focus_distances (ops.Tensor): Focus distances for scan lines
             sampling_frequency (float): Sampling frequency
             f_number (float): F-number for apodization
-            fdemod (float): Demodulation frequency
+            demodulation_frequency (float): Demodulation frequency
             t0_delays (ops.Tensor): T0 delays
             tx_apodizations (ops.Tensor): Transmit apodizations
             initial_times (ops.Tensor): Initial times
@@ -893,8 +899,8 @@ class TOFCorrection(Operation):
             "vfocus": focus_distances,
             "sampling_frequency": sampling_frequency,
             "fnum": f_number,
-            "fdemod": fdemod,
-            "apply_phase_rotation": fdemod,
+            "demodulation_frequency": demodulation_frequency,
+            "apply_phase_rotation": demodulation_frequency,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
