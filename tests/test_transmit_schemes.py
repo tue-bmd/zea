@@ -1,13 +1,13 @@
 """Tests the pipeline for different transmit schemes."""
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
+import keras
 import numpy as np
 import pytest
 
-import keras
 from usbmd import ops_v2 as ops
 from usbmd.probes import Probe
-from usbmd.scan import Scan, compute_t0_delays_planewave, compute_t0_delays_focused
+from usbmd.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
 
 
 def _get_flatgrid(extent, shape):
@@ -78,16 +78,11 @@ def _find_peak_location(image, extent, position, max_diff=0.6e-3):
     return highest_intensity_pixel_location
 
 
-def _get_default_pipeline(ultrasound_scan):
+def _get_default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     operations = [
-        ops.Simulate(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-            n_ax=ultrasound_scan.n_ax,
-        ),
-        ops.TOFCorrection(
-            apply_lens_correction=ultrasound_scan.apply_lens_correction,
-        ),
+        ops.Simulate(),
+        ops.TOFCorrection(),
         ops.DelayAndSum(),
         ops.EnvelopeDetect(),
         ops.LogCompress(output_key="image"),
@@ -499,7 +494,7 @@ def test_transmit_schemes(
 
     ultrasound_probe = _get_probe(probe_kind)
     ultrasound_scan = _get_scan(ultrasound_probe, scan_kind)
-    default_pipeline = _get_default_pipeline(ultrasound_scan)
+    default_pipeline = _get_default_pipeline()
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     output_default = default_pipeline(
