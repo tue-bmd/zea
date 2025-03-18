@@ -1,10 +1,13 @@
-""" Base model class for all USBMD Keras models.
+"""Base model class for all USBMD Keras models.
 
 - **Author(s)**: Tristan Stevens
 - **Date**: 20/12/2024
 """
 
+import importlib
+
 import keras
+from keras.src.saving.serialization_lib import record_object_after_deserialization
 
 from usbmd.core import classproperty
 from usbmd.models.preset_utils import (
@@ -97,3 +100,83 @@ class BaseModel(keras.models.Model):
         """
         saver = get_preset_saver(preset_dir)
         saver.save_model(self)
+
+
+def deserialize_usbmd_object(config):
+    """Retrieve the object by deserializing the config dict.
+
+    Need to borrow this function from keras and customize a bit to allow
+    deserialization of custom (usbmd) objects. See the original function here:
+    `keras.utils.deserialize_keras_object()`. As from  the following keras
+    PR did not work on none Keras objects anymore:
+    - https://github.com/keras-team/keras/pull/20751
+
+    Args:
+        config (dict): The configuration dictionary
+    Returns:
+        obj (Object): The deserialized object
+    """
+    class_name = config["class_name"]
+    inner_config = config["config"] or {}
+
+    module = config.get("module", None)
+    registered_name = config.get("registered_name", class_name)
+
+    cls = _retrieve_class(module, registered_name, config)
+
+    if not hasattr(cls, "from_config"):
+        raise TypeError(
+            f"Unable to reconstruct an instance of '{class_name}' because "
+            f"the class is missing a `from_config()` method. "
+            f"Full object config: {config}"
+        )
+
+    try:
+        instance = cls.from_config(inner_config)
+    except TypeError as e:
+        raise TypeError(
+            f"{cls} could not be deserialized properly. Please"
+            " ensure that components that are Python object"
+            " instances (layers, models, etc.) returned by"
+            " `get_config()` are explicitly deserialized in the"
+            " model's `from_config()` method."
+            f"\n\nconfig={config}.\n\nException encountered: {e}"
+        ) from e
+    build_config = config.get("build_config", None)
+    if build_config and not instance.built:
+        instance.build_from_config(build_config)
+        instance.built = True
+    compile_config = config.get("compile_config", None)
+    if compile_config:
+        instance.compile_from_config(compile_config)
+        instance.compiled = True
+
+    if "shared_object_id" in config:
+        record_object_after_deserialization(instance, config["shared_object_id"])
+    return instance
+
+
+def _retrieve_class(module, class_name, config):
+    # Attempt to retrieve the class object given the `module`
+    # and `class_name`. Import the module, find the class.
+
+    package = module.split(".", maxsplit=1)[0]
+    if package in {"usbmd", "usbmd-addons"}:
+        try:
+            mod = importlib.import_module(module)
+            obj = vars(mod).get(class_name, None)
+            if obj is not None:
+                return obj
+        except ModuleNotFoundError as exc:
+            raise TypeError(
+                f"Could not deserialize class '{class_name}' because "
+                f"its parent module {module} cannot be imported. "
+                f"Full object config: {config}"
+            ) from exc
+
+    raise TypeError(
+        f"Could not locate class '{class_name}'. "
+        "Make sure custom classes are decorated with "
+        "`@usbmd.registry.model_registry().`"
+        f"Full object config: {config}"
+    )
