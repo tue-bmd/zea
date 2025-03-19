@@ -1139,6 +1139,8 @@ class PfieldWeighting(Operation):
 
 @ops_registry("sum")
 class Sum(Operation):
+    """Sum data along a specific axis."""
+
     def __init__(self, axis, **kwargs):
         super().__init__(**kwargs)
         self.axis = axis
