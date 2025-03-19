@@ -5,11 +5,14 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 
+# pylint: disable=too-many-public-methods
+
 from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from keras import ops
+
 from usbmd.core import STATIC, Object
 from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
@@ -711,7 +714,7 @@ class Scan(Object):
         If None, the number of pixels is calculated based on the
         `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
         """
-        self.grid  # Ensure grid is initialized
+        _ = self.grid  # Ensure grid is initialized
         return int(self._Nx) if self._Nx is not None else None
 
     @Nx.setter
@@ -727,7 +730,7 @@ class Scan(Object):
         If None, the number of pixels is calculated based on the
         `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
         """
-        self.grid  # Ensure grid is initialized
+        _ = self.grid  # Ensure grid is initialized
         return int(self._Nz) if self._Nz is not None else None
 
     @Nz.setter
