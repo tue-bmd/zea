@@ -1,14 +1,39 @@
-"""Tests for the device module."""
+"""GPU usage testing"""
 
-from tests.test_imports import _no_ml_lib_import
+import pytest
+
 from usbmd.utils.device import init_device
 
 
-def test_init_device_without_ml_libs():
-    """
-    Test that the init_device function does not import any ML libraries if backend is None.
-    This is important because, for example, Jax should not be imported before
-    CUDA_VISIBLE_DEVICES is set.
-    """
-    with _no_ml_lib_import(allow_keras_backend=False):
-        init_device(backend=None)
+@pytest.mark.parametrize(
+    "device, backend",
+    [
+        ("cpu", "tensorflow"),
+        ("cpu", "torch"),
+        ("gpu:0", "tensorflow"),
+        ("gpu:0", "torch"),
+        ("cuda:0", "tensorflow"),
+        ("cuda:0", "torch"),
+        ("auto:-1", "tensorflow"),
+        ("auto:-1", "torch"),
+    ],
+)
+def test_init_device(device, backend):
+    """Test gpu usage setting script"""
+    init_device(device=device, backend=backend)
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        "tensorflow",
+        "torch",
+        "jax",
+        "auto",
+        "numpy",
+        None,
+    ],
+)
+def test_default_init_device(backend):
+    """Test gpu usage setting script with defaults"""
+    init_device(backend=backend)

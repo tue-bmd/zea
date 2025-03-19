@@ -1,9 +1,56 @@
-""" Device utilities """
+"""Device utilities"""
 
 import os
 from typing import Union
 
 from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
+
+
+def set_memory_growth_tf():
+    """Attempts to allocate only as much GPU memory as needed for the runtime allocations"""
+    try:
+        import tensorflow as tf
+    except:
+        return
+
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in tf.config.get_visible_devices("GPU"):
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+
+
+def backend_key(backend):
+    if backend == "torch":
+        return "cuda"
+    if backend == "tensorflow":
+        return "gpu"
+    if backend == "jax":
+        return "gpu"
+    return "gpu"
+
+
+def backend_cuda_available(backend):
+    if backend == "torch":
+        try:
+            import torch
+        except:
+            return False
+        return torch.cuda.is_available()
+    if backend == "tensorflow":
+        try:
+            import tensorflow as tf
+        except:
+            return False
+        return tf.test.is_gpu_available()
+    if backend == "jax":
+        try:
+            import jax
+        except:
+            return False
+        return bool(jax.devices("gpu"))
+    return False
 
 
 def init_device(
@@ -45,38 +92,23 @@ def init_device(
     if backend == "auto":
         backend = os.environ.get("KERAS_BACKEND")
 
-    # Init GPU / CPU according to config
-    if backend == "torch":
-        # pylint: disable=import-outside-toplevel
-        from usbmd.backend.torch.utils.gpu_config import get_device
-
-        device = get_device(device, verbose=verbose)
-    elif backend == "tensorflow":
-        # pylint: disable=import-outside-toplevel
-        from usbmd.backend.tensorflow.utils.gpu_config import get_device
-
-        device = get_device(
-            device, verbose=verbose, allow_preallocate=allow_preallocate
-        )
-    elif backend == "jax":
-        # pylint: disable=import-outside-toplevel
-        from usbmd.utils.gpu_utils import get_device
-
-        # NOTE: JAX must not be imported before this point
-        if not allow_preallocate:
-            os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = False
-
-        selected_gpu_ids = get_device(device, verbose=verbose)
-        device = selected_gpu_ids_to_device(selected_gpu_ids, key="cuda")
-    elif backend is None:
+    if backend in ["jax", "tensorflow", "torch"]:
         # pylint: disable=import-outside-toplevel
         from usbmd.utils.gpu_utils import get_device
 
         selected_gpu_ids = get_device(device, verbose=verbose)
-        device = selected_gpu_ids_to_device(selected_gpu_ids, key="gpu")
-    elif backend == "numpy":
+        device = selected_gpu_ids_to_device(selected_gpu_ids, key=backend_key(backend))
+    elif backend == "numpy" or backend == "cpu":
         device = "cpu"
     else:
         raise ValueError(f"Unknown backend ({backend}) in config.")
+
+    if not allow_preallocate:
+        os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+        set_memory_growth_tf()
+
+    # Run this last because it will mess up the hiding of GPUs
+    if not backend_cuda_available(backend):
+        device = "cpu"
 
     return device
