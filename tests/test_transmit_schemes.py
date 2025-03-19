@@ -491,11 +491,12 @@ def test_transmit_schemes(
     ultrasound_probe = _get_probe(probe_kind)
     ultrasound_scan = _get_scan(ultrasound_probe, scan_kind)
 
+    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     output_default = default_pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
         dynamic_range=(-60, 0),
@@ -503,7 +504,7 @@ def test_transmit_schemes(
         output_range=(0, 255),
     )
 
-    image = output_default["image"][0]
+    image = output_default["data"][0]
 
     # Convert to numpy
     image = keras.ops.convert_to_numpy(image)
@@ -524,8 +525,8 @@ def test_transmit_schemes(
         true_position=ultrasound_scatterers["positions"][target_scatterer_index],
     )
     # Check that the pipeline produced the expected outputs
-    assert "image" in output_default
-    assert output_default["image"].shape[0] == 1  # Batch dimension
+    assert "data" in output_default
+    assert output_default["data"].shape[0] == 1  # Batch dimension
     # Verify the normalized image has values between 0 and 255
-    assert np.nanmin(output_default["image"]) >= 0.0
-    assert np.nanmax(output_default["image"]) <= 255.0
+    assert np.nanmin(output_default["data"]) >= 0.0
+    assert np.nanmax(output_default["data"]) <= 255.0
