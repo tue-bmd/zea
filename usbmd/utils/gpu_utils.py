@@ -76,7 +76,7 @@ def get_gpu_memory(verbose=True):
     memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
 
     # only show enabled devices
-    if "CUDA_VISIBLE_DEVICES" in os.environ:
+    if os.environ.get("CUDA_VISIBLE_DEVICES", "") != "":
         gpus = os.environ["CUDA_VISIBLE_DEVICES"]
         gpus = [int(gpu) for gpu in gpus.split(",")][: len(memory_free_values)]
         if verbose:
