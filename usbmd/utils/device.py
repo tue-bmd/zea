@@ -3,7 +3,12 @@
 import os
 from typing import Union
 
-from usbmd.utils.gpu_utils import get_device, hide_gpus, selected_gpu_ids_to_device
+from usbmd.utils.gpu_utils import (
+    backend_cuda_available,
+    get_device,
+    hide_gpus,
+    selected_gpu_ids_to_device,
+)
 
 
 def set_memory_growth_tf():
@@ -19,43 +24,6 @@ def set_memory_growth_tf():
             tf.config.experimental.set_memory_growth(gpu, True)
     except RuntimeError as e:
         print(e)
-
-
-def backend_key(backend):
-    """Returns cuda/gpu for the given backend"""
-    if backend == "torch":
-        return "cuda"
-    if backend == "tensorflow":
-        return "gpu"
-    if backend == "jax":
-        return "gpu"
-    return "gpu"
-
-
-def backend_cuda_available(backend):
-    """Check if the selected backend is installed with CUDA support."""
-    if backend == "torch":
-        try:
-            import torch  # pylint: disable=import-outside-toplevel
-        except:
-            return False
-        return torch.cuda.is_available()
-    if backend == "tensorflow":
-        try:
-            import tensorflow as tf  # pylint: disable=import-outside-toplevel
-        except:
-            return False
-        return tf.test.is_gpu_available()
-    if backend == "jax":
-        try:
-            import jax  # pylint: disable=import-outside-toplevel
-        except:
-            return False
-        try:
-            return bool(jax.devices("gpu"))
-        except:
-            return False
-    return False
 
 
 def init_device(
@@ -97,7 +65,7 @@ def init_device(
 
     if backend in ["jax", "tensorflow", "torch"]:
         selected_gpu_ids = get_device(device, verbose=verbose)
-        device = selected_gpu_ids_to_device(selected_gpu_ids, key=backend_key(backend))
+        device = selected_gpu_ids_to_device(selected_gpu_ids, backend)
     elif backend in ["numpy", "cpu"]:
         device = "cpu"
     else:
