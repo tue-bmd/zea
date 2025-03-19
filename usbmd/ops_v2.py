@@ -299,6 +299,11 @@ class Pipeline:
     @classmethod
     def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
+        operations = []
+
+        # Add the demodulate operation
+        operations.append(Demodulate())
+
         # Get beamforming ops
         beamforming = [
             TOFCorrection(apply_phase_rotation=True),
@@ -308,12 +313,10 @@ class Pipeline:
 
         # Optionally add patching
         if num_patches > 1:
-            beamforming = PatchedGrid(operations=beamforming, num_patches=num_patches)
-            operations = [beamforming]
-        else:
-            operations = beamforming
+            beamforming = [PatchedGrid(operations=beamforming, num_patches=num_patches)]
 
-        operations.insert(0, Demodulate())
+        # Add beamforming ops
+        operations += beamforming
 
         # Add display ops
         operations += [
