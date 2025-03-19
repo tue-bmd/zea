@@ -299,7 +299,9 @@ def test_pipeline_with_scan_probe_config():
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = ops.Pipeline(operations=operations)
 
-    result = pipeline(scan, probe, x=2, y=3)
+    parameters = pipeline.prepare_parameters(probe, scan)
+    result = pipeline(**parameters, x=2, y=3)
+
     assert "z" in result
     assert "n_tx" in result  # Check if we parsed the scan object correctly
     assert "probe_geometry" in result  # Check if we parsed the probe object correctly
@@ -458,15 +460,15 @@ def ultrasound_scatterers():
 def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
     """Tests the simulator operation."""
     pipeline = ops.Pipeline([ops.Simulate()])
+    parameters = pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
 
     output = pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
 
-    assert output["raw_data"].shape == (
+    assert output["data"].shape == (
         1,
         ultrasound_scan.n_tx,
         ultrasound_scan.n_ax,
@@ -485,9 +487,10 @@ def test_default_ultrasound_pipeline(
     """Tests the default ultrasound pipeline."""
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
+    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+
     output_default = default_pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
         dynamic_range=(-50, 0),
@@ -496,8 +499,7 @@ def test_default_ultrasound_pipeline(
     )
 
     output_patched = patched_pipeline(
-        ultrasound_scan,
-        ultrasound_probe,
+        **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
         dynamic_range=(-50, 0),
@@ -507,15 +509,15 @@ def test_default_ultrasound_pipeline(
 
     for output in [output_default, output_patched]:
         # Check that the pipeline produced the expected outputs
-        assert "image" in output
-        assert output["image"].shape[0] == 1  # Batch dimension
+        assert "data" in output
+        assert output["data"].shape[0] == 1  # Batch dimension
         # Verify the normalized image has values between 0 and 255
-        assert np.nanmin(output["image"]) >= 0.0
-        assert np.nanmax(output["image"]) <= 255.0
+        assert np.nanmin(output["data"]) >= 0.0
+        assert np.nanmax(output["data"]) <= 255.0
 
     np.testing.assert_allclose(
-        output_default["image"] / np.max(output_default["image"]),
-        output_patched["image"] / np.max(output_patched["image"]),
+        output_default["data"] / np.max(output_default["data"]),
+        output_patched["data"] / np.max(output_patched["data"]),
         rtol=1e-3,
         atol=1e-3,
     )
