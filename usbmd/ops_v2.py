@@ -601,14 +601,22 @@ class Pipeline:
         """Output key of the pipeline."""
         return self.operations[-1].output_key
 
-    def prepare_parameters(self, *args, **kwargs):
+    def prepare_parameters(
+        self,
+        probe: Probe = None,
+        scan: Scan = None,
+        config: Config = None,
+        **kwargs,
+    ):
         """Prepare Probe, Scan and Config objects for the pipeline.
 
         Serializes `usbmd.core.Object` instances and converts them to
         dictionary of tensors.
 
         Args:
-            *args: Probe, Scan, and/or Config objects.
+            probe: Probe object.
+            scan: Scan object.
+            config: Config object.
             **kwargs: Additional keyword arguments to be included in the inputs.
 
         Returns:
@@ -619,28 +627,32 @@ class Pipeline:
         other_dicts = {}
 
         # Process args to extract Probe, Scan, and Config objects
-        for arg in args:
-            if isinstance(arg, Probe):
-                probe_dict.update(arg.to_tensor())
-            elif isinstance(arg, Scan):
-                scan_dict.update(arg.to_tensor())
-                # TODO: doing this twice because grid has to set Nz, Nx...
-                scan_dict.update(arg.to_tensor())
-            elif isinstance(arg, Config):
-                config_dict.update(arg.to_tensor())
-            elif isinstance(arg, USBMDObject):
-                other_dicts.update(arg.to_tensor())
-            else:
-                raise TypeError(
-                    "Expected an instance of `usbmd.core.Object`, "
-                    f"Probe, Scan, or Config, got {type(arg).__name__}"
-                )
+        if probe is not None:
+            assert isinstance(
+                probe, Probe
+            ), "Expected an instance of `usbmd.probes.Probe`"
+            probe_dict = probe.to_tensor()
+
+        if scan is not None:
+            assert isinstance(scan, Scan), "Expected an instance of `usbmd.scan.Scan`"
+            scan_dict = scan.to_tensor()
+
+        if config is not None:
+            assert isinstance(
+                config, Config
+            ), "Expected an instance of `usbmd.config.Config`"
+            config_dict = config.to_tensor()
+            # TODO: doing this twice because grid has to set Nz, Nx...
+            config_dict.update(config.to_tensor())
 
         # Convert all kwargs to tensors
         tensor_kwargs = {}
         for key, value in kwargs.items():
             try:
-                tensor_kwargs[key] = ops.convert_to_tensor(value)
+                if isinstance(value, USBMDObject):
+                    tensor_kwargs[key] = value.to_tensor()
+                else:
+                    tensor_kwargs[key] = ops.convert_to_tensor(value)
             except Exception as e:
                 raise ValueError(
                     f"Error converting key '{key}' to tensor: {e}. "
