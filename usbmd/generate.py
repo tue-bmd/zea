@@ -124,6 +124,9 @@ class GenerateDataSet:
             self.config.pipeline,
             with_batch_dim=False,
         )
+        self.parameters = self.process.prepare_parameters(
+            self.probe, self.scan, self.config
+        )
 
         if self.dataset.datafolder is None:
             self.dataset.datafolder = Path(".")
@@ -208,8 +211,6 @@ class GenerateDataSet:
 
     def process_data(self, data):
         """Small wrapper for processing data with the pipeline"""
-        input_key = self.process.key if self.process.key is not None else "data"
-
         data_type = self.process.operations[0].input_data_type
         if data_type in [DataTypes.RAW_DATA, DataTypes.ALIGNED_DATA]:
             n_tx = data.shape[0]
@@ -219,20 +220,12 @@ class GenerateDataSet:
             )
             data = np.take(data, self.scan.selected_transmits, axis=0)
 
-        inputs = {input_key: data}
+        inputs = {self.process.key: data}
 
-        args = []
+        outputs = self.process(**inputs, **self.parameters)
 
-        for arg in [self.config, self.probe, self.scan]:
-            if arg is not None:
-                args.append(arg)
+        image = outputs[self.process.output_key]
 
-        outputs = self.process(*args, **inputs)
-
-        output_key = (
-            self.process.output_key if self.process.output_key is not None else "data"
-        )
-        image = outputs[output_key]
         return image
 
     def skip_path(self, path):
