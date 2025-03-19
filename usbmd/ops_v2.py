@@ -630,19 +630,22 @@ class Pipeline:
         if probe is not None:
             assert isinstance(
                 probe, Probe
-            ), "Expected an instance of `usbmd.probes.Probe`"
+            ), f"Expected an instance of `usbmd.probes.Probe`, got {type(probe)}"
             probe_dict = probe.to_tensor()
 
         if scan is not None:
-            assert isinstance(scan, Scan), "Expected an instance of `usbmd.scan.Scan`"
+            assert isinstance(
+                scan, Scan
+            ), f"Expected an instance of `usbmd.scan.Scan`, got {type(scan)}"
             scan_dict = scan.to_tensor()
 
         if config is not None:
             assert isinstance(
                 config, Config
-            ), "Expected an instance of `usbmd.config.Config`"
-            config_dict = config.to_tensor()
+            ), f"Expected an instance of `usbmd.config.Config`, got {type(config)}"
+
             # TODO: doing this twice because grid has to set Nz, Nx...
+            _ = config.to_tensor()
             config_dict.update(config.to_tensor())
 
         # Convert all kwargs to tensors
