@@ -1425,12 +1425,10 @@ class ScanConvert(Operation):
 class Demodulate(Operation):
     """Demodulates the input data to baseband."""
 
-    def __init__(self, key="raw_data", output_key="raw_data", axis=-3, **kwargs):
+    def __init__(self, axis=-3, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
-            key=key,
-            output_key=key,
             jittable=True,
             **kwargs,
         )
@@ -1439,7 +1437,7 @@ class Demodulate(Operation):
     def call(self, center_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
 
-        demodulation_frequency = float(center_frequency)
+        demodulation_frequency = center_frequency
         # Compute the analytical signal
         analytical_signal = hilbert(data, axis=self.axis)
 
