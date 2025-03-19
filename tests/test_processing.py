@@ -224,7 +224,7 @@ def test_up_and_down_conversion(factor, batch_size):
 
     # use pipeline here so it is easy to propagate the scan parameters
     simulator_pipeline = Pipeline([Simulate()])
-    parameters = simulator_pipeline.prepare_parameters(scan, probe)
+    parameters = simulator_pipeline.prepare_parameters(probe, scan)
 
     data = []
     for _ in range(batch_size):
