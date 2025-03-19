@@ -16,6 +16,27 @@ import pytest
 debugging = sys.gettrace() is not None
 
 
+def run_func(func):
+    """Run a function from a blob."""
+    pickle.loads(func)()  # run func
+
+
+def run_in_subprocess(func):
+    """Run a function in a subprocess, does not support outputs."""
+
+    @functools.wraps(func)
+    def wrapper():
+        ctx = multiprocessing.get_context("spawn")
+        process = ctx.Process(target=run_func, args=(pickle.dumps(func),))
+        process.start()
+        process.join()
+        assert (
+            process.exitcode == 0
+        ), f"Process failed with exit code {process.exitcode}"
+
+    return wrapper
+
+
 class BackendEqualityCheck:
     """This class is used to run a test function in multiple backends and compare the results.
     It starts workers for each backend and runs the test function in each worker.

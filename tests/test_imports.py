@@ -6,18 +6,21 @@ import contextlib
 import glob
 import importlib
 import os
-import sys
 import traceback
 from pathlib import Path
 
 import pytest
 
+from .helpers import run_in_subprocess
+
 
 @contextlib.contextmanager
-def _no_ml_lib_import(
-    backends=["jax", "tensorflow", "torch"], allow_keras_backend=True
-):
-    """Context manager to override and restore the built-in import function."""
+def no_ml_lib_import(backends: list = None, allow_keras_backend=True):
+    """Context manager to check if any backend in backends gets imported inside of it.
+    Will raise an ImportError if any of the backends are imported."""
+
+    if backends is None:
+        backends = ["jax", "tensorflow", "torch"]
 
     if allow_keras_backend:
         curr_backend = os.environ.get("KERAS_BACKEND", None)
@@ -27,11 +30,6 @@ def _no_ml_lib_import(
 
         # remove curr_backend from backends
         backends = [backend for backend in backends if backend != curr_backend]
-
-    # Check if any of the disallowed backends are already imported
-    for backend in backends:
-        if backend in sys.modules:
-            raise ImportError(f"{backend} is not allowed to be imported at this point.")
 
     # Save the original built-in import function
     original_import_func = builtins.__import__
@@ -82,30 +80,27 @@ def test_check_imports_errors(directory, verbose=False):
     assert success, "Import errors found in one or more Python files."
 
 
-def usbmd_import():
-    """
-    NOTE: Only torch and tensorflow because keras with numpy backend will also import jax.
-    See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py
-    """
-    with _no_ml_lib_import(["torch", "tensorflow"]):
-        try:
-            importlib.import_module("usbmd")
-        except Exception as e:
-            # Print the error message to stdout so that it can be captured by the parent process
-            print(e)
-            sys.exit(1)
-
-
-def test_package_does_not_import_heavy_ml_libraries():
+@run_in_subprocess
+def test_package_only_imports_keras_backend():
     """Test that the package does not import heavy ML libraries like torch, tensorflow,
-    or jax running in a fresh environment."""
-    import multiprocessing
+    or jax running in a fresh environment.
 
-    ctx = multiprocessing.get_context("spawn")
+    NOTE: Only torch and tensorflow because keras with numpy backend will also import jax.
+    See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py"""
 
-    process = ctx.Process(target=usbmd_import)
-    process.start()
-    process.join()
-    assert process.exitcode == 0, "Process failed with exit code {}".format(
-        process.exitcode
-    )
+    with no_ml_lib_import():
+        importlib.import_module("usbmd")
+
+
+@run_in_subprocess
+def test_init_device_without_ml_libs():
+    """Test that the init_device function does not import any ML libraries if backend is None.
+    This is important because, for example, Jax should not be imported before
+    CUDA_VISIBLE_DEVICES is set."""
+
+    with no_ml_lib_import():
+        from usbmd.utils.device import (  # pylint: disable=import-outside-toplevel
+            init_device,
+        )
+
+        init_device(backend=None)
