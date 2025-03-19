@@ -21,7 +21,6 @@ from usbmd.ops import (
     channels_to_complex,
     hilbert,
     upmix,
-    demodulate,
     complex_to_channels,
 )
 from usbmd.probes import Probe
