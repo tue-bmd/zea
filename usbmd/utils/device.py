@@ -3,7 +3,7 @@
 import os
 from typing import Union
 
-from usbmd.utils.gpu_utils import hide_gpus, selected_gpu_ids_to_device
+from usbmd.utils.gpu_utils import get_device, hide_gpus, selected_gpu_ids_to_device
 
 
 def set_memory_growth_tf():
@@ -49,7 +49,10 @@ def backend_cuda_available(backend):
             import jax
         except:
             return False
-        return bool(jax.devices("gpu"))
+        try:
+            return bool(jax.devices("gpu"))
+        except:
+            return False
     return False
 
 
@@ -65,8 +68,6 @@ def init_device(
     Args:
         backend (str): String indicating which backend to use. Can be
             'torch', 'tensorflow', 'jax', 'numpy', `None` or "auto".
-                - When `None`, the function will select GPU(s) without specific features
-                for the backend and thus will not import any backend.
                 - When "auto", the function will select the backend based on the
                 `KERAS_BACKEND` environment variable.
                 - For numpy this function will return 'cpu'.
@@ -93,9 +94,6 @@ def init_device(
         backend = os.environ.get("KERAS_BACKEND")
 
     if backend in ["jax", "tensorflow", "torch"]:
-        # pylint: disable=import-outside-toplevel
-        from usbmd.utils.gpu_utils import get_device
-
         selected_gpu_ids = get_device(device, verbose=verbose)
         device = selected_gpu_ids_to_device(selected_gpu_ids, key=backend_key(backend))
     elif backend == "numpy" or backend == "cpu":
@@ -103,11 +101,17 @@ def init_device(
     else:
         raise ValueError(f"Unknown backend ({backend}) in config.")
 
+    # Early exit if device is CPU
+    if device == "cpu":
+        return device
+
+    # Set if jax and tensorflow should preallocate memory
     if not allow_preallocate:
         os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
         set_memory_growth_tf()
 
-    # Run this last because it will mess up the hiding of GPUs
+    # Check if the selected backend is installed with CUDA support
+    # -> Run this last because it will mess up the hiding of GPUs!
     if not backend_cuda_available(backend):
         device = "cpu"
 

@@ -4,8 +4,6 @@ import os
 import shutil
 import subprocess as sp
 
-import pandas as pd
-
 from usbmd.utils import log
 
 
@@ -89,6 +87,8 @@ def get_gpu_memory(verbose=True):
         memory_free_values = [memory_free_values[gpu] for gpu in gpus]
 
     if verbose:
+        import pandas as pd  # pylint: disable=import-outside-toplevel
+
         df = df = pd.DataFrame({"memory": memory_free_values})
         df.index.name = "GPU"
         print(df)
