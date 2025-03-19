@@ -17,12 +17,7 @@ from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
 from usbmd.display import scan_convert_2d, scan_convert_3d
-from usbmd.ops import (
-    channels_to_complex,
-    hilbert,
-    upmix,
-    complex_to_channels,
-)
+from usbmd.ops import channels_to_complex, hilbert, upmix, demodulate
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
@@ -1438,33 +1433,14 @@ class Demodulate(Operation):
         data = kwargs[self.key]
 
         demodulation_frequency = center_frequency
-        # Compute the analytical signal
-        analytical_signal = hilbert(data, axis=self.axis)
-
-        # Define frequency indices
-        frequency_indices = ops.arange(analytical_signal.shape[self.axis])
-        frequency_indices_shaped_like_rf = frequency_indices[None, None, :, None, None]
-
-        # Cast to complex64
-        center_frequency = ops.cast(center_frequency, dtype="complex64")
-        sampling_frequency = ops.cast(sampling_frequency, dtype="complex64")
-        frequency_indices_shaped_like_rf = ops.cast(
-            frequency_indices_shaped_like_rf, dtype="complex64"
-        )
-
-        # Shift to baseband
-        phasor_exponent = (
-            -1j
-            * 2
-            * np.pi
-            * center_frequency
-            * frequency_indices_shaped_like_rf
-            / sampling_frequency
-        )
-        iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
 
         # Split the complex signal into two channels
-        iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+        iq_data_two_channel = demodulate(
+            data=data,
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
+            axis=self.axis,
+        )
 
         return {
             self.output_key: iq_data_two_channel,
