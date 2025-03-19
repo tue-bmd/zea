@@ -282,7 +282,44 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
     return selected_gpu_ids
 
 
-def selected_gpu_ids_to_device(selected_gpu_ids, key="cuda"):
+def backend_cuda_available(backend):
+    """Check if the selected backend is installed with CUDA support."""
+    if backend == "torch":
+        try:
+            import torch  # pylint: disable=import-outside-toplevel
+        except:
+            return False
+        return torch.cuda.is_available()
+    if backend == "tensorflow":
+        try:
+            import tensorflow as tf  # pylint: disable=import-outside-toplevel
+        except:
+            return False
+        return tf.test.is_gpu_available()
+    if backend == "jax":
+        try:
+            import jax  # pylint: disable=import-outside-toplevel
+        except:
+            return False
+        try:
+            return bool(jax.devices("gpu"))
+        except:
+            return False
+    return False
+
+
+def backend_key(backend):
+    """Returns cuda/gpu for the given backend"""
+    if backend == "torch":
+        return "cuda"
+    if backend == "tensorflow":
+        return "gpu"
+    if backend == "jax":
+        return "gpu"
+    return "gpu"
+
+
+def selected_gpu_ids_to_device(selected_gpu_ids, backend):
     """Convert selected GPU ids to device string."""
     if selected_gpu_ids is None or len(selected_gpu_ids) == 0:
         return "cpu"
@@ -295,4 +332,9 @@ def selected_gpu_ids_to_device(selected_gpu_ids, key="cuda"):
             )
         )
 
-    return f"{key}:{selected_gpu_ids[0]}"
+    key = backend_key(backend)
+    if backend == "jax":
+        # Because jax hides the other gpus, we need to set the device number to 0
+        return f"{key}:0"
+    else:
+        return f"{key}:{selected_gpu_ids[0]}"
