@@ -1014,12 +1014,13 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, apply_phase_rotation=False, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
+        self.apply_phase_rotation = apply_phase_rotation
 
     def call(
         self,
@@ -1071,8 +1072,8 @@ class TOFCorrection(Operation):
             "vfocus": focus_distances,
             "sampling_frequency": sampling_frequency,
             "fnum": f_number,
+            "apply_phase_rotation": self.apply_phase_rotation,
             "demodulation_frequency": demodulation_frequency,
-            "apply_phase_rotation": demodulation_frequency,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
