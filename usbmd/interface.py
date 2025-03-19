@@ -98,6 +98,9 @@ class Interface:
             self.config.pipeline,
             with_batch_dim=False,
         )
+        self.parameters = self.process.prepare_parameters(
+            self.probe, self.scan, self.config
+        )
 
         # initialize attributes for UI class
         self.data = None
@@ -246,8 +249,6 @@ class Interface:
             )
             self.to_dtype = "image_sc"
 
-        input_key = self.process.key if self.process.key is not None else "data"
-
         # select transmits if raw or aligned data
         data_type = self.process.operations[0].input_data_type
         if data_type in [DataTypes.RAW_DATA, DataTypes.ALIGNED_DATA]:
@@ -258,20 +259,11 @@ class Interface:
             )
             self.data = np.take(self.data, self.scan.selected_transmits, axis=0)
 
-        inputs = {input_key: self.data}
+        inputs = {self.process.key: self.data}
 
-        args = []
+        outputs = self.process(**inputs, **self.parameters)
 
-        for arg in [self.config, self.probe, self.scan]:
-            if arg is not None:
-                args.append(arg)
-
-        outputs = self.process(*args, **inputs)
-
-        output_key = (
-            self.process.output_key if self.process.output_key is not None else "data"
-        )
-        self.image = outputs[output_key]
+        self.image = outputs[self.process.output_key]
 
         # match orientation if necessary
         if self.config.plot.fliplr:
