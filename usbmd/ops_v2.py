@@ -649,8 +649,6 @@ class Pipeline:
             for key in scan._on_request:
                 if not self.needs(key):
                     except_tensors.append(key)
-            # # TODO: doing this twice because grid has to set Nz, Nx...
-            # _ = scan.to_tensor(except_tensors)
             scan_dict = scan.to_tensor(except_tensors)
 
         if config is not None:
