@@ -642,6 +642,7 @@ class Pipeline:
             scan_dict = scan.to_tensor()
 
         if config is not None:
+            # TODO: currently nothing...
             assert isinstance(
                 config, Config
             ), f"Expected an instance of `usbmd.config.Config`, got {type(config)}"
@@ -1126,6 +1127,17 @@ class PfieldWeighting(Operation):
         return {self.output_key: weighted_data}
 
 
+@ops_registry("sum")
+class Sum(Operation):
+    def __init__(self, axis, **kwargs):
+        super().__init__(**kwargs)
+        self.axis = axis
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        return {self.output_key: ops.sum(data, axis=self.axis)}
+
+
 @ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
@@ -1224,6 +1236,12 @@ class EnvelopeDetect(Operation):
         self.axis = axis
 
     def call(self, **kwargs):
+        """
+        Args:
+            - data (Tensor): The beamformed data of shape (..., n_z, n_x, n_ch).
+        Returns:
+            - envelope_data (Tensor): The envelope detected data of shape (..., n_z, n_x).
+        """
         data = kwargs[self.key]
 
         if data.shape[-1] == 2:
@@ -1312,6 +1330,22 @@ class LogCompress(Operation):
 class Normalize(Operation):
     """Normalize data to a given range."""
 
+    def __init__(self, force_output_range=None, force_input_range=None, **kwargs):
+        super().__init__(**kwargs)
+        self.force_output_range = self.to_float32(force_output_range)
+        self.force_input_range = self.to_float32(force_input_range)
+        assert force_output_range is None or len(force_output_range) == 2
+        assert force_input_range is None or len(force_input_range) == 2
+
+    @staticmethod
+    def to_float32(data):
+        """Converts an iterable to float32 and leaves None values as is."""
+        return (
+            [np.float32(x) if x is not None else None for x in data]
+            if data is not None
+            else None
+        )
+
     def call(self, output_range=None, input_range=None, **kwargs):
         """Normalize data to a given range.
 
@@ -1326,16 +1360,26 @@ class Normalize(Operation):
         """
         data = kwargs[self.key]
 
+        # Use forced ranges if provided
+        if self.force_output_range is not None:
+            output_range = self.force_output_range
+
+        if self.force_input_range is not None:
+            input_range = self.force_input_range
+
         if output_range is None:
             output_range = (0, 1)
 
         if input_range is None:
-            minimum = ops.min(data)
-            maximum = ops.max(data)
-            input_range = (minimum, maximum)
-        else:
-            a_min, a_max = input_range
-            data = ops.clip(data, a_min, a_max)
+            input_range = [None, None]
+
+        a_min, a_max = input_range
+        if a_min is None:
+            a_min = ops.min(data)
+        if a_max is None:
+            a_max = ops.max(data)
+        data = ops.clip(data, a_min, a_max)
+        input_range = (a_min, a_max)
 
         normalized_data = translate(data, input_range, output_range)
 
