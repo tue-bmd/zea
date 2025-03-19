@@ -299,7 +299,7 @@ def test_pipeline_with_scan_probe_config():
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = ops.Pipeline(operations=operations)
 
-    parameters = pipeline.prepare_parameters(scan, probe)
+    parameters = pipeline.prepare_parameters(probe, scan)
     result = pipeline(**parameters, x=2, y=3)
 
     assert "z" in result
