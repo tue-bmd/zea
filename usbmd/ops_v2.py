@@ -306,7 +306,7 @@ class Pipeline:
         """Create a default pipeline."""
         # Get beamforming ops
         beamforming = [
-            TOFCorrection(),
+            TOFCorrection(apply_phase_rotation=True),
             PfieldWeighting(),
             DelayAndSum(),
         ]
