@@ -316,8 +316,8 @@ class Pipeline:
         # Add display ops
         operations += [
             EnvelopeDetect(),
-            LogCompress(output_key="image"),
-            Normalize(key="image", output_key="image"),
+            LogCompress(),
+            Normalize(),
         ]
         return cls(operations, **kwargs)
 
