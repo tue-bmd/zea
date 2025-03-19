@@ -9,7 +9,7 @@ from usbmd.utils.gpu_utils import get_device, hide_gpus, selected_gpu_ids_to_dev
 def set_memory_growth_tf():
     """Attempts to allocate only as much GPU memory as needed for the runtime allocations"""
     try:
-        import tensorflow as tf
+        import tensorflow as tf  # pylint: disable=import-outside-toplevel
     except:
         return
 
@@ -22,6 +22,7 @@ def set_memory_growth_tf():
 
 
 def backend_key(backend):
+    """Returns cuda/gpu for the given backend"""
     if backend == "torch":
         return "cuda"
     if backend == "tensorflow":
@@ -32,21 +33,22 @@ def backend_key(backend):
 
 
 def backend_cuda_available(backend):
+    """Check if the selected backend is installed with CUDA support."""
     if backend == "torch":
         try:
-            import torch
+            import torch  # pylint: disable=import-outside-toplevel
         except:
             return False
         return torch.cuda.is_available()
     if backend == "tensorflow":
         try:
-            import tensorflow as tf
+            import tensorflow as tf  # pylint: disable=import-outside-toplevel
         except:
             return False
         return tf.test.is_gpu_available()
     if backend == "jax":
         try:
-            import jax
+            import jax  # pylint: disable=import-outside-toplevel
         except:
             return False
         try:
@@ -96,7 +98,7 @@ def init_device(
     if backend in ["jax", "tensorflow", "torch"]:
         selected_gpu_ids = get_device(device, verbose=verbose)
         device = selected_gpu_ids_to_device(selected_gpu_ids, key=backend_key(backend))
-    elif backend == "numpy" or backend == "cpu":
+    elif backend in ["numpy", "cpu"]:
         device = "cpu"
     else:
         raise ValueError(f"Unknown backend ({backend}) in config.")
