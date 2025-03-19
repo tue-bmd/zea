@@ -2022,7 +2022,7 @@ class LeeFilter(Operation):
         return img_output
 
 
-def demodulate(
+def demodulate_not_jitable(
     rf_data,
     sampling_frequency=None,
     center_frequency=None,
@@ -2215,9 +2215,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
     Returns:
         ndarray: band pass filter
     """
-    bpf = signal.firwin(
-        num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency
-    )
+    bpf = signal.firwin(num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency)
     return bpf
 
 
@@ -2375,3 +2373,51 @@ def hilbert(x, N: int = None, axis=-1):
     idx.insert(axis, idx.pop(-1))
     x = ops.transpose(x, idx)
     return x
+
+
+def demodulate(data, center_frequency, sampling_frequency, axis=-3):
+    """Demodulates the input data to baseband. The function computes the analytical
+    signal (the signal with negative frequencies removed) and then shifts the spectrum
+    of the signal to baseband by multiplying with a complex exponential. Where the
+    spectrum was centered around `center_frequency` before, it is now centered around
+    0 Hz. The baseband IQ data are complex-valued. The real and imaginary parts
+    are stored in two real-valued channels.
+
+    Args:
+        data (ops.Tensor): The input data to demodulate.
+        center_frequency (float): The center frequency of the signal.
+        sampling_frequency (float): The sampling frequency of the signal.
+        axis (int, optional): The axis along which to demodulate. Defaults to -3.
+
+    Returns:
+        ops.Tensor: The demodulated IQ data of shape `(n_frames, n_tx, n_ax, n_el, 2)`.
+    """
+    # Compute the analytical signal
+    analytical_signal = hilbert(data, axis=axis)
+
+    # Define frequency indices
+    frequency_indices = ops.arange(analytical_signal.shape[axis])
+    frequency_indices_shaped_like_rf = frequency_indices[None, None, :, None, None]
+
+    # Cast to complex64
+    center_frequency = ops.cast(center_frequency, dtype="complex64")
+    sampling_frequency = ops.cast(sampling_frequency, dtype="complex64")
+    frequency_indices_shaped_like_rf = ops.cast(
+        frequency_indices_shaped_like_rf, dtype="complex64"
+    )
+
+    # Shift to baseband
+    phasor_exponent = (
+        -1j
+        * 2
+        * np.pi
+        * center_frequency
+        * frequency_indices_shaped_like_rf
+        / sampling_frequency
+    )
+    iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
+
+    # Split the complex signal into two channels
+    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+
+    return iq_data_two_channel
