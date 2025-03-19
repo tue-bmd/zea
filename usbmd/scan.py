@@ -175,8 +175,6 @@ class Scan(Object):
                 Defaults to None.
             rho_range (tuple, optional): The range of rho values in meters.
                 Defaults to None.
-            selected_transmits (int, list[int], str, optional): Used to select a subset
-                of the transmits. Defaults to 0.2e-3.
             attenuation_coef (float, optional): The attenuation coefficient in
                 dB/cm/MHz. Defaults to 0.0.
             polar_angles (np.ndarray, optional): The polar angles of the
