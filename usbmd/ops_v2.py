@@ -15,6 +15,7 @@ from usbmd.backend import jit
 from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
+from usbmd.core import Object as USBMDObject
 from usbmd.display import scan_convert_2d, scan_convert_3d
 from usbmd.ops import (
     channels_to_complex,
@@ -63,7 +64,7 @@ class Operation(keras.Operation):
         self,
         input_data_type: Union[DataTypes, None] = None,
         output_data_type: Union[DataTypes, None] = None,
-        key: Union[str, None] = None,
+        key: Union[str, None] = "data",
         output_key: Union[str, None] = None,
         cache_inputs: Union[bool, List[str]] = False,
         cache_outputs: bool = False,
@@ -74,6 +75,14 @@ class Operation(keras.Operation):
     ):
         """
         Args:
+            input_data_type (DataTypes): The data type of the input data
+            output_data_type (DataTypes): The data type of the output data
+            key: The key for the input data (operation will operate on this key)
+                Defaults to "data".
+            output_key: The key for the output data (operation will output to this key)
+                Defaults to the same as the input key. If you want to store intermediate
+                results, you can set this to a different key. But make sure to update the
+                input key of the next operation to match the output key of this operation.
             cache_inputs: A list of input keys to cache or True to cache all inputs
             cache_outputs: A list of output keys to cache or True to cache all outputs
             jit_compile: Whether to JIT compile the 'call' method for faster execution
@@ -315,8 +324,8 @@ class Pipeline:
         # Add display ops
         operations += [
             EnvelopeDetect(),
-            LogCompress(output_key="image"),
-            Normalize(key="image", output_key="image"),
+            LogCompress(),
+            Normalize(),
         ]
         return cls(operations, **kwargs)
 
@@ -342,44 +351,28 @@ class Pipeline:
             inputs = outputs
         return outputs
 
-    # TODO: a lot of time is spent on converting scan etc... to_tensor every call
-    # If you want to call pipeline on every frame in a for loop (e.g. real time applications where
-    # data is coming in on the fly), this will make it twice as slow
-    def __call__(self, *args, return_numpy=False, **kwargs):
+    def __call__(self, return_numpy=False, **inputs):
         """Process input data through the pipeline."""
 
-        if any(key in kwargs for key in ["probe", "scan", "config"]):
+        if any(key in inputs for key in ["probe", "scan", "config"]):
             raise ValueError(
-                "Probe, Scan and Config objects should be passed as positional arguments. "
-                "e.g. pipeline(probe, scan, config, **kwargs)"
+                "Probe, Scan and Config objects should be first processed with "
+                "`Pipeline.prepare_parameters` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
             )
 
-        # Extract from args Probe, Scan and Config objects
-        probe, scan, config = {}, {}, {}
-        for arg in args:
-            if isinstance(arg, Probe):
-                probe = arg.to_tensor()
-            elif isinstance(arg, Scan):
-                scan = arg.to_tensor()
-                # TODO: doing this twice because grid has to set Nz, Nx...
-                scan = arg.to_tensor()
-            elif isinstance(arg, Config):
-                config = arg.to_tensor()  # TODO
-            else:
-                raise ValueError(
-                    f"Unsupported input type for pipeline *args: {type(arg)}. "
-                    "Pipeline call expects a `usbmd.core.Object` (Probe, Scan, Config) as args. "
-                    "Alternatively, pass the input as keyword argument (kwargs)."
-                )
+        if any(isinstance(arg, USBMDObject) for arg in inputs.values()):
+            raise ValueError(
+                "Probe, Scan and Config objects should be first processed with "
+                "`Pipeline.prepare_parameters` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
+            )
 
-        # combine probe, scan, config and kwargs
-        # explicitly so we know which keys overwrite which
-        # kwargs > config > scan > probe
-        inputs = {**probe, **scan, **config, **kwargs}
-
-        # Dropping str inputs as they are not supported in jax.jit
-        # TODO: will this break any operations?
-        inputs.pop("probe_type", None)
+        if any(isinstance(arg, str) for arg in inputs.values()):
+            raise ValueError(
+                "Pipeline does not support string inputs. "
+                "Please ensure all inputs are convertible to tensors."
+            )
 
         ## PROCESSING
         outputs = self._call_pipeline(**inputs)
@@ -391,17 +384,6 @@ class Pipeline:
                 k: ops.convert_to_numpy(v) if v is ops.is_tensor(v) else v
                 for k, v in outputs.items()
             }
-
-        # TODO: if we can in-place update the Scan, Probe and Config objects, we can output those.
-
-        # update probe, scan, config with outputs
-        # for arg in args:
-        #     if isinstance(arg, Probe):
-        #         arg.update(outputs)
-        #     elif isinstance(arg, Scan):
-        #         arg.update(outputs)
-        #     elif isinstance(arg, Config):
-        #         arg.update(outputs)
 
         return outputs
 
@@ -627,6 +609,83 @@ class Pipeline:
         """Output key of the pipeline."""
         return self.operations[-1].output_key
 
+    def prepare_parameters(
+        self,
+        probe: Probe = None,
+        scan: Scan = None,
+        config: Config = None,
+        **kwargs,
+    ):
+        """Prepare Probe, Scan and Config objects for the pipeline.
+
+        Serializes `usbmd.core.Object` instances and converts them to
+        dictionary of tensors.
+
+        Args:
+            probe: Probe object.
+            scan: Scan object.
+            config: Config object.
+            **kwargs: Additional keyword arguments to be included in the inputs.
+
+        Returns:
+            dict: Dictionary of inputs with all values as tensors.
+        """
+        # Initialize dictionaries for probe, scan, and config
+        probe_dict, scan_dict, config_dict = {}, {}, {}
+        other_dicts = {}
+
+        # Process args to extract Probe, Scan, and Config objects
+        if probe is not None:
+            assert isinstance(
+                probe, Probe
+            ), f"Expected an instance of `usbmd.probes.Probe`, got {type(probe)}"
+            probe_dict = probe.to_tensor()
+
+        if scan is not None:
+            assert isinstance(
+                scan, Scan
+            ), f"Expected an instance of `usbmd.scan.Scan`, got {type(scan)}"
+            # TODO: doing this twice because grid has to set Nz, Nx...
+            _ = scan.to_tensor()
+            scan_dict = scan.to_tensor()
+
+        if config is not None:
+            assert isinstance(
+                config, Config
+            ), f"Expected an instance of `usbmd.config.Config`, got {type(config)}"
+            config_dict.update(config.to_tensor())
+
+        # Convert all kwargs to tensors
+        tensor_kwargs = {}
+        for key, value in kwargs.items():
+            try:
+                if isinstance(value, USBMDObject):
+                    tensor_kwargs[key] = value.to_tensor()
+                else:
+                    tensor_kwargs[key] = ops.convert_to_tensor(value)
+            except Exception as e:
+                raise ValueError(
+                    f"Error converting key '{key}' to tensor: {e}. "
+                    f"Please ensure all inputs are convertible to tensors."
+                ) from e
+
+        # combine probe, scan, config and kwargs
+        # explicitly so we know which keys overwrite which
+        # kwargs > config > scan > probe
+        inputs = {
+            **probe_dict,
+            **scan_dict,
+            **config_dict,
+            **other_dicts,
+            **tensor_kwargs,
+        }
+
+        # Dropping str inputs as they are not supported in jax.jit
+        # TODO: will this break any operations?
+        inputs.pop("probe_type", None)
+
+        return inputs
+
 
 def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
@@ -709,6 +768,107 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
 
     kwargs = {**pipeline_config, **kwargs}
     return Pipeline(operations=operations, **kwargs)
+
+
+@ops_registry("patched_grid")
+class PatchedGrid(Pipeline):
+    """
+    With this class you can form a pipeline that will be applied to patches of the grid.
+    This is useful to avoid OOM errors when processing large grids.
+
+    Somethings to NOTE about this class:
+        - The ops have to use flatgrid and flat_pfield as inputs, these will be patched.
+        - Changing anything other than `self.output_data_type` in the dict will not be propagated!
+        - Will be jitted as a single operation, not the individual operations.
+        - This class handles the batching.
+    """
+
+    def __init__(self, *args, num_patches=10, **kwargs):
+        super().__init__(*args, name="patched_grid", **kwargs)
+        self.num_patches = num_patches
+
+        for operation in self.operations:
+            if isinstance(operation, DelayAndSum):
+                operation.reshape_grid = False
+
+        self._jittable_call = self.jittable_call
+
+    @property
+    def jit_options(self):
+        """Get the jit_options property of the pipeline."""
+        return self._jit_options
+
+    @jit_options.setter
+    def jit_options(self, value):
+        """Set the jit_options property of the pipeline."""
+        self._jit_options = value
+        if value in ["pipeline", "ops"]:
+            self.jit()
+        else:
+            self.unjit()
+
+    def jit(self):
+        """JIT compile the pipeline."""
+        self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
+
+    def unjit(self):
+        """Un-JIT compile the pipeline."""
+        self._jittable_call = self.jittable_call
+        self._call_pipeline = self.call
+
+    @property
+    def with_batch_dim(self):
+        """Get the with_batch_dim property of the pipeline."""
+        return self.pipeline_batched
+
+    @with_batch_dim.setter
+    def with_batch_dim(self, value):
+        """Set the with_batch_dim property of the pipeline.
+        The class handles the batching so the operations have to be set to False."""
+        self.pipeline_batched = value
+        for operation in self.operations:
+            operation.with_batch_dim = False
+
+    def call_item(self, inputs):
+        """Process data in patches."""
+        Nx = inputs["Nx"]
+        Nz = inputs["Nz"]
+        flatgrid = inputs.pop("flatgrid")
+        flat_pfield = inputs.pop("flat_pfield")
+
+        def patched_call(flatgrid, flat_pfield):
+            out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
+                flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
+            )
+            return out[self.output_key]
+
+        out = patched_map(
+            patched_call,
+            flatgrid,
+            self.num_patches,
+            flat_pfield=flat_pfield,
+            jit=bool(self.jit_options),
+        )
+        return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
+
+    def jittable_call(self, **inputs):
+        """Process input data through the pipeline."""
+        if self.pipeline_batched:
+            input_data = inputs.pop(self.key)
+            output = ops.map(
+                lambda x: self.call_item({self.key: x, **inputs}),
+                input_data,
+            )
+        else:
+            output = self.call_item(inputs)
+
+        return {self.output_key: output}
+
+    def call(self, **inputs):
+        """Process input data through the pipeline."""
+        output = self._jittable_call(**inputs)
+        inputs.update(output)
+        return inputs
 
 
 ## Base Operations
@@ -800,42 +960,12 @@ class Mean(Operation):
         return kwargs
 
 
-@ops_registry("upmix")
-class UpMix(Operation):
-    """Upmix IQ data to RF data."""
-
-    def __init__(self, key: str, **kwargs):
-        super().__init__(key=key, **kwargs)
-
-    def call(
-        self,
-        sampling_frequency=None,
-        center_frequency=None,
-        upsampling_rate=6,
-        **kwargs,
-    ):
-
-        data = kwargs[self.key]
-
-        if data.shape[-1] == 1:
-            log.warning("Upmixing is not applicable to RF data.")
-            return data
-        elif data.shape[-1] == 2:
-            data = channels_to_complex(data)
-
-        data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
-        data = ops.expand_dims(data, axis=-1)
-        return {self.output_key: data}
-
-
 @ops_registry("simulate_rf")
 class Simulate(Operation):
     """Simulate RF data."""
 
-    def __init__(self, key="scatterer_positions", output_key="raw_data", **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(
-            key=key,
-            output_key=output_key,
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
@@ -884,10 +1014,8 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(self, key="raw_data", output_key="aligned_data", **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(
-            key=key,
-            output_key=output_key,
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
@@ -969,14 +1097,12 @@ class TOFCorrection(Operation):
 class PfieldWeighting(Operation):
     """Weighting aligned data with the pressure field."""
 
-    def __init__(self, key="aligned_data", output_key="aligned_data", **kwargs):
-        """Initialize the PfieldWeighting operation.
-
-        Args:
-            key (str, optional): Key for input data. Defaults to "aligned_data".
-            output_key (str, optional): Key for output data. Defaults to "aligned_data".
-        """
-        super().__init__(key=key, output_key=output_key, **kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
 
     def call(self, flat_pfield=None, **kwargs):
         """Weight data with pressure field.
@@ -1008,121 +1134,16 @@ class PfieldWeighting(Operation):
         return {self.output_key: weighted_data}
 
 
-@ops_registry("patched_grid")
-class PatchedGrid(Pipeline):
-    """
-    With this class you can form a pipeline that will be applied to patches of the grid.
-    This is useful to avoid OOM errors when processing large grids.
-
-    Somethings to NOTE about this class:
-        - The ops have to use flatgrid and flat_pfield as inputs, these will be patched.
-        - Changing anything other than `self.output_data_type` in the dict will not be propagated!
-        - Will be jitted as a single operation, not the individual operations.
-        - This class handles the batching.
-    """
-
-    def __init__(self, *args, num_patches=10, **kwargs):
-        super().__init__(*args, name="patched_grid", **kwargs)
-        self.num_patches = num_patches
-
-        for operation in self.operations:
-            if isinstance(operation, DelayAndSum):
-                operation.reshape_grid = False
-
-        self._jittable_call = self.jittable_call
-
-    @property
-    def jit_options(self):
-        """Get the jit_options property of the pipeline."""
-        return self._jit_options
-
-    @jit_options.setter
-    def jit_options(self, value):
-        """Set the jit_options property of the pipeline."""
-        self._jit_options = value
-        if value in ["pipeline", "ops"]:
-            self.jit()
-        else:
-            self.unjit()
-
-    def jit(self):
-        """JIT compile the pipeline."""
-        self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
-
-    def unjit(self):
-        """Un-JIT compile the pipeline."""
-        self._jittable_call = self.jittable_call
-        self._call_pipeline = self.call
-
-    @property
-    def with_batch_dim(self):
-        """Get the with_batch_dim property of the pipeline."""
-        return self.pipeline_batched
-
-    @with_batch_dim.setter
-    def with_batch_dim(self, value):
-        """Set the with_batch_dim property of the pipeline.
-        The class handles the batching so the operations have to be set to False."""
-        self.pipeline_batched = value
-        for operation in self.operations:
-            operation.with_batch_dim = False
-
-    def call_item(self, inputs):
-        """Process data in patches."""
-        Nx = inputs["Nx"]
-        Nz = inputs["Nz"]
-        flatgrid = inputs.pop("flatgrid")
-        flat_pfield = inputs.pop("flat_pfield")
-
-        def patched_call(flatgrid, flat_pfield):
-            out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
-                flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
-            )
-            return out[self.output_data_type.value]
-
-        out = patched_map(
-            patched_call,
-            flatgrid,
-            self.num_patches,
-            flat_pfield=flat_pfield,
-            jit=bool(self.jit_options),
-        )
-        return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
-
-    def jittable_call(self, **inputs):
-        """Process input data through the pipeline."""
-        if self.pipeline_batched:
-            input_data = inputs.pop(self.input_data_type.value)
-            output = ops.map(
-                lambda x: self.call_item({self.input_data_type.value: x, **inputs}),
-                input_data,
-            )
-        else:
-            output = self.call_item(inputs)
-
-        return {self.output_data_type.value: output}
-
-    def call(self, **inputs):
-        """Process input data through the pipeline."""
-        output = self._jittable_call(**inputs)
-        inputs.update(output)
-        return inputs
-
-
 @ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
     def __init__(
         self,
-        key="aligned_data",
-        output_key="beamformed_data",
         reshape_grid=True,
         **kwargs,
     ):
         super().__init__(
-            key=key,
-            output_key=output_key,
             input_data_type=None,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
@@ -1200,14 +1221,10 @@ class EnvelopeDetect(Operation):
 
     def __init__(
         self,
-        key: str = "beamformed_data",
-        output_key: str = "envelope_data",
         axis=-3,
         **kwargs,
     ):
         super().__init__(
-            key=key,
-            output_key=output_key,
             input_data_type=DataTypes.BEAMFORMED_DATA,
             output_data_type=DataTypes.ENVELOPE_DATA,
             **kwargs,
@@ -1238,27 +1255,42 @@ class EnvelopeDetect(Operation):
         return {self.output_key: data}
 
 
+@ops_registry("upmix")
+class UpMix(Operation):
+    """Upmix IQ data to RF data."""
+
+    def call(
+        self,
+        sampling_frequency=None,
+        center_frequency=None,
+        upsampling_rate=6,
+        **kwargs,
+    ):
+
+        data = kwargs[self.key]
+
+        if data.shape[-1] == 1:
+            log.warning("Upmixing is not applicable to RF data.")
+            return data
+        elif data.shape[-1] == 2:
+            data = channels_to_complex(data)
+
+        data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
+        data = ops.expand_dims(data, axis=-1)
+        return {self.output_key: data}
+
+
 @ops_registry("log_compress")
 class LogCompress(Operation):
     """Logarithmic compression of data."""
 
     def __init__(
         self,
-        key: str = "envelope_data",
-        output_key: str = "image",
         **kwargs,
     ):
-        """Initialize the LogCompress operation.
-
-        Args:
-            key (str, optional): Key for input data. Defaults to "envelope_data".
-            output_key (str, optional): Key for output data. Defaults to "image".
-        """
         super().__init__(
             input_data_type=DataTypes.ENVELOPE_DATA,
             output_data_type=DataTypes.IMAGE,
-            key=key,
-            output_key=output_key,
             **kwargs,
         )
 
@@ -1287,26 +1319,6 @@ class LogCompress(Operation):
 @ops_registry("normalize")
 class Normalize(Operation):
     """Normalize data to a given range."""
-
-    def __init__(
-        self,
-        key: str = "envelope_data",
-        output_key: str = "envelope_data",
-        **kwargs,
-    ):
-        """Initialize the Normalize operation.
-
-        Args:
-            key (str, optional): Key for input data. Defaults to "envelope_data".
-            output_key (str, optional): Key for output data. Defaults to "envelope_data".
-        """
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            key=key,
-            output_key=output_key,
-            **kwargs,
-        )
 
     def call(self, output_range=None, input_range=None, **kwargs):
         """Normalize data to a given range.
@@ -1344,24 +1356,18 @@ class ScanConvert(Operation):
 
     def __init__(
         self,
-        key: str = "image",
-        output_key: str = "image_sc",
         order=1,
         **kwargs,
     ):
         """Initialize the ScanConvert operation.
 
         Args:
-            key (str, optional): Key for input data. Defaults to "image".
-            output_key (str, optional): Key for output data. Defaults to "image_sc".
             order (int, optional): Interpolation order. Defaults to 1. Currently only
                 GPU support for order=1.
         """
         super().__init__(
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
-            key=key,
-            output_key=output_key,
             jittable=False,  # currently not jittable due to variable size
             **kwargs,
         )
