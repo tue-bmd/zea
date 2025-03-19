@@ -296,6 +296,14 @@ class Pipeline:
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
+    def needs(self, key):
+        """Check if the pipeline needs a specific key."""
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                return operation.needs(key)
+            if key in operation._valid_keys:
+                return True
+
     @classmethod
     def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
@@ -637,9 +645,13 @@ class Pipeline:
             assert isinstance(
                 scan, Scan
             ), f"Expected an instance of `usbmd.scan.Scan`, got {type(scan)}"
-            # TODO: doing this twice because grid has to set Nz, Nx...
-            _ = scan.to_tensor()
-            scan_dict = scan.to_tensor()
+            except_tensors = []
+            for key in scan._on_request:
+                if not self.needs(key):
+                    except_tensors.append(key)
+            # # TODO: doing this twice because grid has to set Nz, Nx...
+            # _ = scan.to_tensor(except_tensors)
+            scan_dict = scan.to_tensor(except_tensors)
 
         if config is not None:
             # TODO: currently nothing...
