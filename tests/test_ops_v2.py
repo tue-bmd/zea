@@ -509,15 +509,15 @@ def test_default_ultrasound_pipeline(
 
     for output in [output_default, output_patched]:
         # Check that the pipeline produced the expected outputs
-        assert "image" in output
-        assert output["image"].shape[0] == 1  # Batch dimension
+        assert "data" in output
+        assert output["data"].shape[0] == 1  # Batch dimension
         # Verify the normalized image has values between 0 and 255
-        assert np.nanmin(output["image"]) >= 0.0
-        assert np.nanmax(output["image"]) <= 255.0
+        assert np.nanmin(output["data"]) >= 0.0
+        assert np.nanmax(output["data"]) <= 255.0
 
     np.testing.assert_allclose(
-        output_default["image"] / np.max(output_default["image"]),
-        output_patched["image"] / np.max(output_patched["image"]),
+        output_default["data"] / np.max(output_default["data"]),
+        output_patched["data"] / np.max(output_patched["data"]),
         rtol=1e-3,
         atol=1e-3,
     )
