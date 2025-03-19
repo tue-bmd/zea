@@ -310,6 +310,8 @@ class Pipeline:
         else:
             operations = beamforming
 
+        operations.insert(0, Demodulate())
+
         # Add display ops
         operations += [
             EnvelopeDetect(),
@@ -1428,9 +1430,10 @@ class Demodulate(Operation):
         )
         self.axis = axis
 
-    def call(self, fdemod=None, fs=None, **kwargs):
+    def call(self, center_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
 
+        demodulation_frequency = float(center_frequency)
         # Compute the analytical signal
         analytical_signal = hilbert(data, axis=self.axis)
 
@@ -1439,19 +1442,28 @@ class Demodulate(Operation):
         frequency_indices_shaped_like_rf = frequency_indices[None, None, :, None, None]
 
         # Cast to complex64
-        fdemod = ops.cast(fdemod, dtype="complex64")
-        fs = ops.cast(fs, dtype="complex64")
+        center_frequency = ops.cast(center_frequency, dtype="complex64")
+        sampling_frequency = ops.cast(sampling_frequency, dtype="complex64")
         frequency_indices_shaped_like_rf = ops.cast(
             frequency_indices_shaped_like_rf, dtype="complex64"
         )
 
         # Shift to baseband
         phasor_exponent = (
-            -1j * 2 * np.pi * fdemod * frequency_indices_shaped_like_rf / fs
+            -1j
+            * 2
+            * np.pi
+            * center_frequency
+            * frequency_indices_shaped_like_rf
+            / sampling_frequency
         )
         iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
 
         # Split the complex signal into two channels
         iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
 
-        return {self.output_key: iq_data_two_channel, "fdemod": 0.0, "n_ch": 2}
+        return {
+            self.output_key: iq_data_two_channel,
+            "demodulation_frequency": demodulation_frequency,
+            "n_ch": 2,
+        }
