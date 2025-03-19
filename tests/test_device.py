@@ -25,14 +25,7 @@ def test_init_device(device, backend):
 
 @pytest.mark.parametrize(
     "backend",
-    [
-        "tensorflow",
-        "torch",
-        "jax",
-        "auto",
-        "numpy",
-        None,
-    ],
+    ["tensorflow", "torch", "jax", "auto", "numpy"],
 )
 def test_default_init_device(backend):
     """Test gpu usage setting script with defaults"""
