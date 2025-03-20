@@ -84,7 +84,9 @@ def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=10, jit_options="ops")
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(
+        ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255))
+    )
     return pipeline
 
 
@@ -500,9 +502,6 @@ def test_transmit_schemes(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
-        dynamic_range=(-60, 0),
-        input_range=(-60, 0),
-        output_range=(0, 255),
     )
 
     image = output_default["data"][0]
