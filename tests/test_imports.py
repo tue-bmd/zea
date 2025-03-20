@@ -1,55 +1,54 @@
-""" Check that all Python files in the project can be compiled, and that no import errors occur, for
-example due to missing dependencies in the pyproject.toml file. """
+"""Check that all Python files in the project can be compiled, and that no import errors occur, for
+example due to missing dependencies in the pyproject.toml file."""
 
 import builtins
+import contextlib
 import glob
 import importlib
+import os
 import traceback
 from pathlib import Path
 
 import pytest
 
+from .helpers import run_in_subprocess
 
-@pytest.fixture
-def _no_ml_lib_import():
-    """Fixture to override and restore the built-in import function."""
-    # Override the built-in import function
+
+@contextlib.contextmanager
+def no_ml_lib_import(backends: list = None, allow_keras_backend=True):
+    """Context manager to check if any backend in backends gets imported inside of it.
+    Will raise an ImportError if any of the backends are imported."""
+
+    if backends is None:
+        backends = ["jax", "tensorflow", "torch"]
+
+    if allow_keras_backend:
+        curr_backend = os.environ.get("KERAS_BACKEND", None)
+        assert (
+            curr_backend is not None
+        ), "KERAS_BACKEND environment variable is not set."
+
+        # remove curr_backend from backends
+        backends = [backend for backend in backends if backend != curr_backend]
+
+    # Save the original built-in import function
     original_import_func = builtins.__import__
 
     # Define a custom import function
     def import_fail_on_ml_libs(name, *args, **kwargs):
-        """Custom import function that raises an error if torch, tensorflow, or jax is imported."""
-        if name.lower() in ["jax", "tensorflow", "torch"]:
+        """Raise an error if a disallowed backend is imported."""
+        if name.lower() in backends:
             raise ImportError(f"{name} is not allowed to be imported in this program.")
         return original_import_func(name, *args, **kwargs)
 
-    builtins.__import__ = import_fail_on_ml_libs
-    yield
-    # Restore the original import function after the test
-    builtins.__import__ = original_import_func
-
-
-@pytest.fixture
-def _no_torch_tensorflow():
-    """
-    Fixture to override and restore the built-in import function.
-    NOTE: This function exists because keras with numpy backend will also import jax.
-    See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py
-    """
     # Override the built-in import function
-    original_import_func = builtins.__import__
-
-    # Define a custom import function
-    def import_fail_on_ml_libs(name, *args, **kwargs):
-        """Custom import function that raises an error if torch, tensorflow, or jax is imported."""
-        if name.lower() in ["tensorflow", "torch"]:
-            raise ImportError(f"{name} is not allowed to be imported in this program.")
-        return original_import_func(name, *args, **kwargs)
-
     builtins.__import__ = import_fail_on_ml_libs
-    yield
-    # Restore the original import function after the test
-    builtins.__import__ = original_import_func
+
+    try:
+        yield
+    finally:
+        # Restore the original import function after exiting the context
+        builtins.__import__ = original_import_func
 
 
 @pytest.mark.parametrize("directory", [Path(__file__).parent.parent])
@@ -81,6 +80,13 @@ def test_check_imports_errors(directory, verbose=False):
     assert success, "Import errors found in one or more Python files."
 
 
-def test_package_does_not_import_heavy_ml_libraries(_no_torch_tensorflow):
-    """Test that the package does not import heavy ML libraries like torch, tensorflow, or jax."""
-    importlib.import_module("usbmd")
+@run_in_subprocess
+def test_package_only_imports_keras_backend():
+    """Test that the package does not import heavy ML libraries like torch, tensorflow,
+    or jax running in a fresh environment.
+
+    NOTE: Only torch and tensorflow because keras with numpy backend will also import jax.
+    See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py"""
+
+    with no_ml_lib_import():
+        importlib.import_module("usbmd")
