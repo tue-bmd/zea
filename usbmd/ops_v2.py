@@ -321,8 +321,8 @@ class Pipeline:
         # Add display ops
         operations += [
             EnvelopeDetect(),
-            LogCompress(),
             Normalize(),
+            LogCompress(),
         ]
         return cls(operations, **kwargs)
 
@@ -1318,7 +1318,12 @@ class LogCompress(Operation):
 class Normalize(Operation):
     """Normalize data to a given range."""
 
-    def call(self, output_range=None, input_range=None, **kwargs):
+    def __init__(self, output_range=None, input_range=None, **kwargs):
+        super().__init__(**kwargs)
+        self.output_range = output_range
+        self.input_range = input_range
+
+    def call(self, **kwargs):
         """Normalize data to a given range.
 
         Args:
@@ -1332,21 +1337,26 @@ class Normalize(Operation):
         """
         data = kwargs[self.key]
 
-        if output_range is None:
-            output_range = (0, 1)
+        output_range = _set_if_none(self.output_range, default=(0,1))
 
-        if input_range is None:
-            minimum = ops.min(data)
-            maximum = ops.max(data)
-            input_range = (minimum, maximum)
-        else:
-            a_min, a_max = input_range
-            data = ops.clip(data, a_min, a_max)
+        # Set the input range to the data range if not provided
+        minimum = ops.min(data)
+        maximum = ops.max(data)
+        input_range = _set_if_none(self.input_range, default=(minimum, maximum))
+        
+        # Clip the data to the input range
+        a_min, a_max = input_range
+        data = ops.clip(data, a_min, a_max)
 
+        # Map the data to the output range
         normalized_data = translate(data, input_range, output_range)
 
         return {self.output_key: normalized_data}
 
+def _set_if_none(variable, default):
+    if variable is not None:
+        return variable
+    return default
 
 @ops_registry("scan_convert")
 class ScanConvert(Operation):
