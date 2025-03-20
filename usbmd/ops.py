@@ -2384,20 +2384,25 @@ def demodulate(data, center_frequency, sampling_frequency, axis=-3):
     are stored in two real-valued channels.
 
     Args:
-        data (ops.Tensor): The input data to demodulate.
+        data (ops.Tensor): The input data to demodulate of shape `(..., axis, ..., 1)`.
         center_frequency (float): The center frequency of the signal.
         sampling_frequency (float): The sampling frequency of the signal.
         axis (int, optional): The axis along which to demodulate. Defaults to -3.
 
     Returns:
-        ops.Tensor: The demodulated IQ data of shape `(n_frames, n_tx, n_ax, n_el, 2)`.
+        ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.
     """
     # Compute the analytical signal
     analytical_signal = hilbert(data, axis=axis)
 
     # Define frequency indices
     frequency_indices = ops.arange(analytical_signal.shape[axis])
-    frequency_indices_shaped_like_rf = frequency_indices[None, None, :, None, None]
+
+    # Expand the frequency indices to match the shape of the RF data
+    indexing = [None]*data.ndim
+    indexing[axis] = slice(None)
+    indexing = tuple(indexing)
+    frequency_indices_shaped_like_rf = frequency_indices[indexing]
 
     # Cast to complex64
     center_frequency = ops.cast(center_frequency, dtype="complex64")
