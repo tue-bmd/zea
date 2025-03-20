@@ -2399,7 +2399,7 @@ def demodulate(data, center_frequency, sampling_frequency, axis=-3):
     frequency_indices = ops.arange(analytical_signal.shape[axis])
 
     # Expand the frequency indices to match the shape of the RF data
-    indexing = [None]*data.ndim
+    indexing = [None] * data.ndim
     indexing[axis] = slice(None)
     indexing = tuple(indexing)
     frequency_indices_shaped_like_rf = frequency_indices[indexing]

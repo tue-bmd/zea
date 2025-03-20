@@ -17,7 +17,7 @@ from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
 from usbmd.display import scan_convert_2d, scan_convert_3d
-from usbmd.ops import channels_to_complex, hilbert, upmix, demodulate
+from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
@@ -1264,7 +1264,6 @@ class UpMix(Operation):
         upsampling_rate=6,
         **kwargs,
     ):
-
         data = kwargs[self.key]
 
         if data.shape[-1] == 1:
@@ -1337,13 +1336,13 @@ class Normalize(Operation):
         """
         data = kwargs[self.key]
 
-        output_range = _set_if_none(self.output_range, default=(0,1))
+        output_range = _set_if_none(self.output_range, default=(0, 1))
 
         # Set the input range to the data range if not provided
         minimum = ops.min(data)
         maximum = ops.max(data)
         input_range = _set_if_none(self.input_range, default=(minimum, maximum))
-        
+
         # Clip the data to the input range
         a_min, a_max = input_range
         data = ops.clip(data, a_min, a_max)
@@ -1353,10 +1352,12 @@ class Normalize(Operation):
 
         return {self.output_key: normalized_data}
 
+
 def _set_if_none(variable, default):
     if variable is not None:
         return variable
     return default
+
 
 @ops_registry("scan_convert")
 class ScanConvert(Operation):
