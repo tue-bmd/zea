@@ -1462,3 +1462,32 @@ class Demodulate(Operation):
             "demodulation_frequency": demodulation_frequency,
             "n_ch": 2,
         }
+
+
+@ops_registry("downsample")
+class Downsample(Operation):
+    """Downsample data along a specific axis."""
+
+    def __init__(self, factor: int = 1, phase: int = 0, axis: int = -3, **kwargs):
+        super().__init__(
+            **kwargs,
+        )
+        self.factor = factor
+        self.phase = phase
+        self.axis = axis
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        length = ops.shape(data)[self.axis]
+        sample_idx = ops.arange(self.phase, length, self.factor)
+        data_downsampled = ops.take(data, sample_idx, axis=self.axis)
+
+        # downsampling also affects the sampling frequency
+        if "sampling_frequency" in kwargs:
+            kwargs["sampling_frequency"] = kwargs["sampling_frequency"] / self.factor
+            kwargs["n_ax"] = kwargs["n_ax"] // self.factor
+        return {
+            self.output_key: data_downsampled,
+            "sampling_frequency": kwargs["sampling_frequency"],
+            "n_ax": kwargs["n_ax"],
+        }
