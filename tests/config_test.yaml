@@ -21,6 +21,7 @@ scan:
 
 pipeline:
   operations:
+    - name: demodulate
     - name: tof_correction
     - name: delay_and_sum
     - name: envelope_detect
