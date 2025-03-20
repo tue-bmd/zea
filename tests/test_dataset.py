@@ -80,6 +80,7 @@ def test_generate(dtype, to_dtype, filetype):
     shutil.rmtree(temp_folder, ignore_errors=True)
 
     config.pipeline.operations = [
+        {"name": "demodulate"},
         {"name": "tof_correction"},
         {"name": "delay_and_sum"},
         {"name": "envelope_detect"},
@@ -87,7 +88,7 @@ def test_generate(dtype, to_dtype, filetype):
         {"name": "log_compress"},
     ]
     if dtype == "beamformed_data":
-        config.pipeline.operations = config.pipeline.operations[2:]
+        config.pipeline.operations = config.pipeline.operations[3:]
 
     generator = GenerateDataSet(
         config,
