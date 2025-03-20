@@ -1011,7 +1011,7 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(self, apply_phase_rotation=False, **kwargs):
+    def __init__(self, apply_phase_rotation=True, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
@@ -1431,6 +1431,7 @@ class ScanConvert(Operation):
         return {self.output_key: data_out}
 
 
+@ops_registry("demodulate")
 class Demodulate(Operation):
     """Demodulates the input data to baseband."""
 
