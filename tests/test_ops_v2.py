@@ -114,6 +114,7 @@ def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
     pipeline.prepend(ops.Simulate())
+    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -122,6 +123,7 @@ def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     pipeline = ops.Pipeline.from_default(jit_options=None)
     pipeline.prepend(ops.Simulate())
+    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -493,18 +495,12 @@ def test_default_ultrasound_pipeline(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
-        dynamic_range=(-50, 0),
-        input_range=(-50, 0),
-        output_range=(0, 255),
     )
 
     output_patched = patched_pipeline(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
-        dynamic_range=(-50, 0),
-        input_range=(-50, 0),
-        output_range=(0, 255),
     )
 
     for output in [output_default, output_patched]:
