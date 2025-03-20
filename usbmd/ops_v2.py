@@ -17,7 +17,7 @@ from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
 from usbmd.display import scan_convert_2d, scan_convert_3d
-from usbmd.ops import channels_to_complex, hilbert, upmix
+from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
@@ -307,25 +307,30 @@ class Pipeline:
     @classmethod
     def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
+        operations = []
+
+        # Add the demodulate operation
+        operations.append(Demodulate())
+
         # Get beamforming ops
         beamforming = [
-            TOFCorrection(),
+            TOFCorrection(apply_phase_rotation=True),
             PfieldWeighting(),
             DelayAndSum(),
         ]
 
         # Optionally add patching
         if num_patches > 1:
-            beamforming = PatchedGrid(operations=beamforming, num_patches=num_patches)
-            operations = [beamforming]
-        else:
-            operations = beamforming
+            beamforming = [PatchedGrid(operations=beamforming, num_patches=num_patches)]
+
+        # Add beamforming ops
+        operations += beamforming
 
         # Add display ops
         operations += [
             EnvelopeDetect(),
-            LogCompress(),
             Normalize(),
+            LogCompress(),
         ]
         return cls(operations, **kwargs)
 
@@ -1017,12 +1022,13 @@ class Simulate(Operation):
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, apply_phase_rotation=True, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
+        self.apply_phase_rotation = apply_phase_rotation
 
     def call(
         self,
@@ -1074,8 +1080,8 @@ class TOFCorrection(Operation):
             "vfocus": focus_distances,
             "sampling_frequency": sampling_frequency,
             "fnum": f_number,
+            "apply_phase_rotation": self.apply_phase_rotation,
             "demodulation_frequency": demodulation_frequency,
-            "apply_phase_rotation": demodulation_frequency,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
             "initial_times": initial_times,
@@ -1288,7 +1294,6 @@ class UpMix(Operation):
         upsampling_rate=6,
         **kwargs,
     ):
-
         data = kwargs[self.key]
 
         if data.shape[-1] == 1:
@@ -1342,12 +1347,12 @@ class LogCompress(Operation):
 class Normalize(Operation):
     """Normalize data to a given range."""
 
-    def __init__(self, force_output_range=None, force_input_range=None, **kwargs):
+    def __init__(self, output_range=None, input_range=None, **kwargs):
         super().__init__(**kwargs)
-        self.force_output_range = self.to_float32(force_output_range)
-        self.force_input_range = self.to_float32(force_input_range)
-        assert force_output_range is None or len(force_output_range) == 2
-        assert force_input_range is None or len(force_input_range) == 2
+        self.output_range = self.to_float32(output_range)
+        self.input_range = self.to_float32(input_range)
+        assert output_range is None or len(output_range) == 2
+        assert input_range is None or len(input_range) == 2
 
     @staticmethod
     def to_float32(data):
@@ -1358,7 +1363,7 @@ class Normalize(Operation):
             else None
         )
 
-    def call(self, output_range=None, input_range=None, **kwargs):
+    def call(self, **kwargs):
         """Normalize data to a given range.
 
         Args:
@@ -1372,18 +1377,8 @@ class Normalize(Operation):
         """
         data = kwargs[self.key]
 
-        # Use forced ranges if provided
-        if self.force_output_range is not None:
-            output_range = self.force_output_range
-
-        if self.force_input_range is not None:
-            input_range = self.force_input_range
-
-        if output_range is None:
-            output_range = (0, 1)
-
-        if input_range is None:
-            input_range = [None, None]
+        output_range = _set_if_none(self.output_range, default=(0, 1))
+        input_range = _set_if_none(self.input_range, default=(None, None))
 
         a_min, a_max = input_range
         if a_min is None:
@@ -1393,9 +1388,16 @@ class Normalize(Operation):
         data = ops.clip(data, a_min, a_max)
         input_range = (a_min, a_max)
 
+        # Map the data to the output range
         normalized_data = translate(data, input_range, output_range)
 
         return {self.output_key: normalized_data}
+
+
+def _set_if_none(variable, default):
+    if variable is not None:
+        return variable
+    return default
 
 
 @ops_registry("scan_convert")
@@ -1468,3 +1470,36 @@ class ScanConvert(Operation):
             )
 
         return {self.output_key: data_out}
+
+
+@ops_registry("demodulate")
+class Demodulate(Operation):
+    """Demodulates the input data to baseband."""
+
+    def __init__(self, axis=-3, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.RAW_DATA,
+            jittable=True,
+            **kwargs,
+        )
+        self.axis = axis
+
+    def call(self, center_frequency=None, sampling_frequency=None, **kwargs):
+        data = kwargs[self.key]
+
+        demodulation_frequency = center_frequency
+
+        # Split the complex signal into two channels
+        iq_data_two_channel = demodulate(
+            data=data,
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
+            axis=self.axis,
+        )
+
+        return {
+            self.output_key: iq_data_two_channel,
+            "demodulation_frequency": demodulation_frequency,
+            "n_ch": 2,
+        }
