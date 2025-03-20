@@ -13,8 +13,8 @@ BASE_PRECISION = "float32"
 # TODO: make static more neat
 STATIC = [
     "f_number",
-    "demodulation_frequency",
     "apply_lens_correction",
+    "apply_phase_rotation",
     "Nx",
     "Nz",
     "n_ax",
