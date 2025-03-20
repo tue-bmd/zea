@@ -1359,7 +1359,7 @@ class Demodulate(Operation):
         elif data.shape[-1] == 1:
             data = ops.squeeze(data, axis=-1)
 
-        data = demodulate(
+        data = demodulate_not_jitable(
             data,
             self.sampling_frequency,
             self.center_frequency,
