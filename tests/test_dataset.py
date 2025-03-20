@@ -80,6 +80,7 @@ def test_generate(dtype, to_dtype, filetype):
     shutil.rmtree(temp_folder, ignore_errors=True)
 
     config.pipeline.operations = [
+        {"name": "demodulate"},
         {"name": "tof_correction"},
         {"name": "delay_and_sum"},
         {"name": "envelope_detect"},
