@@ -88,7 +88,7 @@ def test_generate(dtype, to_dtype, filetype):
         {"name": "log_compress"},
     ]
     if dtype == "beamformed_data":
-        config.pipeline.operations = config.pipeline.operations[2:]
+        config.pipeline.operations = config.pipeline.operations[3:]
 
     generator = GenerateDataSet(
         config,
