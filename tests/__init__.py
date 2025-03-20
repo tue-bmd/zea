@@ -2,15 +2,19 @@
 
 import os
 
-# Running tests on cpu for now...
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["JAX_PLATFORMS"] = "cpu"
-
 # Set default backend for tests
 DEFAULT_TEST_BACKEND = "tensorflow"
 os.environ["KERAS_BACKEND"] = DEFAULT_TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
+if os.environ.get("CUDA_VISIBLE_DEVICES", "") != "":
+    # Selecting a device for the tests, can be cpu or gpu
+    from usbmd.utils.device import init_device
+
+    init_device()
+
+# Initializing the backend workers for `backend_equality_check` and `run_in_backend`.
+# Note that these workers only have CPU access!
 from .helpers import BackendEqualityCheck
 
 backend_workers = BackendEqualityCheck()
