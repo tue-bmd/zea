@@ -5,6 +5,8 @@ beamforming grid.
 - **Date**          : Wed Feb 15 2024
 """
 
+# pylint: disable=too-many-public-methods
+
 from typing import Union
 
 import matplotlib.pyplot as plt
@@ -175,8 +177,6 @@ class Scan(Object):
                 Defaults to None.
             rho_range (tuple, optional): The range of rho values in meters.
                 Defaults to None.
-            selected_transmits (int, list[int], str, optional): Used to select a subset
-                of the transmits. Defaults to 0.2e-3.
             attenuation_coef (float, optional): The attenuation coefficient in
                 dB/cm/MHz. Defaults to 0.0.
             polar_angles (np.ndarray, optional): The polar angles of the
@@ -205,7 +205,6 @@ class Scan(Object):
                 Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
-
         """
         super().__init__()
 
@@ -287,6 +286,8 @@ class Scan(Object):
 
         self.selected_transmits = selected_transmits
         self._static_attrs = STATIC
+
+        self._on_request = ["pfield", "flat_pfield"]
 
     def _set_param(self, name, value, dunder=True):
         """Set a parameter value and mark it as set in _set_params if not None.
@@ -575,6 +576,10 @@ class Scan(Object):
         selected. If set to None, then all transmits are used. Defaults to None."""
         return self._selected_transmits
 
+    def reset_pfield(self):
+        """Reset the pfield to None such that it will be recomputed."""
+        self._pfield = None
+
     @selected_transmits.setter
     def selected_transmits(self, value):
         self._selected_transmits = self._select_transmits(value)
@@ -583,7 +588,7 @@ class Scan(Object):
         except ValueError as e:
             log.warning(f"Error checking for aliasing: {e}")
 
-        self._pfield = None  # also trigger update of the pressure fields
+        self.reset_pfield()  # also trigger update of the pressure fields
 
     @property
     def n_tx(self):
@@ -709,6 +714,7 @@ class Scan(Object):
         If None, the number of pixels is calculated based on the
         `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
         """
+        _ = self.grid  # Ensure grid is initialized
         return int(self._Nx) if self._Nx is not None else None
 
     @Nx.setter
@@ -724,6 +730,7 @@ class Scan(Object):
         If None, the number of pixels is calculated based on the
         `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
         """
+        _ = self.grid  # Ensure grid is initialized
         return int(self._Nz) if self._Nz is not None else None
 
     @Nz.setter
@@ -785,9 +792,17 @@ class Scan(Object):
     def grid(self):
         """The beamforming grid of shape (Nz, Nx, 3)."""
         if self._grid is None:
-            self._grid = get_grid(self)
+            self._grid = get_grid(
+                self.xlims,
+                self.zlims,
+                self._Nx,
+                self._Nz,
+                self.sound_speed,
+                self.center_frequency,
+                self.pixels_per_wavelength,
+            )
             self._Nz, self._Nx, _ = self._grid.shape
-            self._pfield = None  # also trigger update of the pressure fields
+            self.reset_pfield()  # also trigger update of the pressure fields
 
         return self._grid
 
@@ -802,6 +817,10 @@ class Scan(Object):
         if self.grid is None:
             return None
         return self.grid.reshape(-1, 3)
+
+    def _default_pfield(self):
+        """Default pfield weighting."""
+        return np.ones((self.n_tx, self.Nz, self.Nx))
 
     @property
     def pfield(self):
@@ -818,7 +837,7 @@ class Scan(Object):
                 log.warning("Nx, Nz, or n_tx not set. Cannot compute pfield.")
                 return self._pfield
 
-            self._pfield = np.ones((self.n_tx, self.Nz, self.Nx))
+            self._pfield = self._default_pfield()
         else:
             if self.pfield_kwargs is None:
                 pfield_kwargs = {}
