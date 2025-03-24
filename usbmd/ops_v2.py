@@ -10,7 +10,6 @@ import keras
 import numpy as np
 import yaml
 from keras import ops
-
 from usbmd.backend import jit
 from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
@@ -254,6 +253,7 @@ class Pipeline:
         jit_options: Union[str, None] = "ops",
         jit_kwargs: dict | None = None,
         name="pipeline",
+        validate=True,
     ):
         """Initialize a pipeline
 
@@ -271,6 +271,9 @@ class Pipeline:
             caching functionality, but speeds up the operations.
             - None disables JIT compilation.
             Defaults to "ops".
+            jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
+            name (str, optional): The name of the pipeline. Defaults to "pipeline".
+            validate (bool, optional): Whether to validate the pipeline. Defaults to True.
         """
         self._call_pipeline = self.call
         self.name = name
@@ -285,7 +288,10 @@ class Pipeline:
 
         self.with_batch_dim = with_batch_dim
 
-        self.validate()
+        if validate:
+            self.validate()
+        else:
+            log.warning("Pipeline validation is disabled, make sure to validate manually.")
 
         # pylint: disable=method-hidden
         if jit_kwargs is None:
