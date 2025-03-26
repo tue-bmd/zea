@@ -292,7 +292,9 @@ class Pipeline:
         if validate:
             self.validate()
         else:
-            log.warning("Pipeline validation is disabled, make sure to validate manually.")
+            log.warning(
+                "Pipeline validation is disabled, make sure to validate manually."
+            )
 
         # pylint: disable=method-hidden
         if jit_kwargs is None:
@@ -703,7 +705,16 @@ class Pipeline:
 
 
 def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
-    """Make an operation chain supporting nested operations defined at the same level as name and params."""
+    """Make an operation chain from a custom list of operations.
+    Args:
+        operation_chain (list): List of operations to be performed.
+            Each operation can be a string or a dictionary.
+            if a string, the operation is initialized with default parameters.
+            if a dictionary, the operation is initialized with the parameters
+            provided in the dictionary, which should have the keys 'name' and 'params'.
+    Returns:
+        list: List of operations to be performed.
+    """
     chain = []
     for operation in operation_chain:
         assert isinstance(
@@ -727,13 +738,11 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
                 # Instantiate pipeline-type operations with nested operations
                 if issubclass(operation_cls, Pipeline):
                     operation_instance = operation_cls(
-                        operations=nested_operations,
-                        **params
+                        operations=nested_operations, **params
                     )
                 else:
                     operation_instance = operation_cls(
-                        operations=nested_operations,
-                        **params
+                        operations=nested_operations, **params
                     )
             else:
                 operation_instance = get_ops(operation["name"])(**params)
@@ -741,7 +750,6 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
         chain.append(operation_instance)
 
     return chain
-
 
 
 def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:

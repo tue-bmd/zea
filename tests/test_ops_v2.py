@@ -358,7 +358,9 @@ def test_pipeline_with_scan_probe_config():
 
 """Pipeline build from config / json tests"""
 
+
 def validate_basic_pipeline(pipeline, with_params=False):
+    """Validates a basic pipeline."""
     assert len(pipeline.operations) == 2
     assert isinstance(pipeline.operations[0], MultiplyOperation)
     assert isinstance(pipeline.operations[1], AddOperation)
@@ -370,6 +372,7 @@ def validate_basic_pipeline(pipeline, with_params=False):
 
 
 def validate_default_pipeline(pipeline, patched=False):
+    """Validates the default pipeline."""
     assert isinstance(pipeline.operations[0], ops.Simulate)
     assert isinstance(pipeline.operations[1], ops.Demodulate)
 
