@@ -10,6 +10,7 @@ import keras
 import numpy as np
 import yaml
 from keras import ops
+
 from usbmd.backend import jit
 from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
@@ -702,47 +703,45 @@ class Pipeline:
 
 
 def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
-    """Make an operation chain from a custom list of operations.
-
-    Args:
-        operation_chain (list): List of operations to be performed.
-            Each operation can be a string or a dictionary.
-            if a string, the operation is initialized with default parameters.
-            if a dictionary, the operation is initialized with the parameters
-            provided in the dictionary, which should have the keys 'name' and 'params'.
-
-    Returns:
-        list: List of operations to be performed.
-
-    """
+    """Make an operation chain supporting nested operations defined at the same level as name and params."""
     chain = []
     for operation in operation_chain:
         assert isinstance(
             operation, (str, dict, Config)
-        ), f"Operation {operation} should be a string, dictionary or Config object"
+        ), f"Operation {operation} should be a string, dictionary, or Config object"
+
         if isinstance(operation, str):
-            operation = get_ops(operation)()
+            operation_instance = get_ops(operation)()
+
         else:
             if isinstance(operation, Config):
                 operation = operation.serialize()
-            # should have either name or name and params keys
-            assert set(operation.keys()).issubset({"name", "params"}), (
-                f"Operation {operation} should have keys 'name' and 'params'"
-                f"or only 'name' got {operation.keys()}"
-            )
-            if operation.get("params") is None:
-                operation["params"] = {}
 
-            # this allows for nested operations
-            if operation["params"].get("operations") is not None:
-                operation["params"]["operations"] = make_operation_chain(
-                    operation["params"]["operations"]
-                )
+            params = operation.get("params", {})
 
-            operation = get_ops(operation["name"])(**operation["params"])
-        chain.append(operation)
+            # Check for nested operations at the same level as params
+            if "operations" in operation:
+                nested_operations = make_operation_chain(operation["operations"])
+                operation_cls = get_ops(operation["name"])
+
+                # Instantiate pipeline-type operations with nested operations
+                if issubclass(operation_cls, Pipeline):
+                    operation_instance = operation_cls(
+                        operations=nested_operations,
+                        **params
+                    )
+                else:
+                    operation_instance = operation_cls(
+                        operations=nested_operations,
+                        **params
+                    )
+            else:
+                operation_instance = get_ops(operation["name"])(**params)
+
+        chain.append(operation_instance)
 
     return chain
+
 
 
 def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
