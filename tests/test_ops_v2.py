@@ -399,6 +399,7 @@ def validate_default_pipeline(pipeline, patched=False):
     "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
 )
 def test_pipeline_from_json(config_fixture, request):
+    """Tests building a dummy pipeline from a JSON string."""
     config = request.getfixturevalue(config_fixture)
     json_string = json.dumps(config)
     pipeline = ops.pipeline_from_json(json_string, jit_options=None)
@@ -412,6 +413,7 @@ def test_pipeline_from_json(config_fixture, request):
     "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
 )
 def test_default_pipeline_from_json(config_fixture, request):
+    """Tests building a default pipeline from a JSON string."""
     config = request.getfixturevalue(config_fixture)
     json_string = json.dumps(config)
     pipeline = ops.pipeline_from_json(json_string, jit_options=None)
@@ -425,6 +427,7 @@ def test_default_pipeline_from_json(config_fixture, request):
     "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
 )
 def test_pipeline_from_config(config_fixture, request):
+    """Tests building a dummy pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
     pipeline = ops.pipeline_from_config(config, jit_options=None)
@@ -438,6 +441,7 @@ def test_pipeline_from_config(config_fixture, request):
     "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
 )
 def test_default_pipeline_from_config(config_fixture, request):
+    """Tests building a default pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
     pipeline = ops.pipeline_from_config(config, jit_options=None)
