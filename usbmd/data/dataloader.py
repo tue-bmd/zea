@@ -303,7 +303,48 @@ def _h5_reopen_on_io_error(
     )
 
 
-class H5Generator(keras.utils.PyDataset):
+class H5FileHandleCache:
+    def __init__(
+        self,
+        file_handle_cache_capacity: int = FILE_HANDLE_CACHE_CAPACITY,
+    ):
+        self._file_handle_cache = OrderedDict()
+        self.file_handle_cache_capacity = file_handle_cache_capacity
+
+    @staticmethod
+    def _check_if_open(file):
+        """Check if a file is open."""
+        return bool(file.id.valid)
+
+    def get_file(self, file_name):
+        """Open an HDF5 file and cache it."""
+        # If file is already in cache, return it and move it to the end
+        if file_name in self._file_handle_cache:
+            self._file_handle_cache.move_to_end(file_name)
+            file = self._file_handle_cache[file_name]
+            # if file was closed, reopen:
+            if not self._check_if_open(file):
+                file = h5py.File(file_name, "r", locking=False)
+                self._file_handle_cache[file_name] = file
+        # If file is not in cache, open it and add it to the cache
+        else:
+            # If cache is full, close the least recently used file
+            if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
+                _, close_file = self._file_handle_cache.popitem(last=False)
+                close_file.close()
+            file = h5py.File(file_name, "r", locking=False)
+            self._file_handle_cache[file_name] = file
+
+        return self._file_handle_cache[file_name]
+
+    def __del__(self):
+        """Ensure cached files are closed."""
+        for _, file in self._file_handle_cache.items():
+            file.close()
+        self._file_handle_cache = OrderedDict()
+
+
+class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
     """Generator from h5 file using provided indices."""
 
     def __init__(
@@ -328,7 +369,6 @@ class H5Generator(keras.utils.PyDataset):
         batch_size: int = 1,
         as_tensor: bool = True,
         search_file_tree_kwargs: dict | None = None,
-        file_handle_cache_capacity: int = FILE_HANDLE_CACHE_CAPACITY,
         **kwargs,
     ):
         assert (directory is not None) ^ (
@@ -426,10 +466,6 @@ class H5Generator(keras.utils.PyDataset):
             )
             self.indices = self.indices[:limit_n_samples]
 
-        # LRU cache for file handles
-        self._file_handle_cache = OrderedDict()
-        self.file_handle_cache_capacity = file_handle_cache_capacity
-
         # Retry count for I/O errors
         self.retry_count = 0
 
@@ -483,27 +519,6 @@ class H5Generator(keras.utils.PyDataset):
         """Check if a file is open."""
         return bool(file.id.valid)
 
-    def _get_file(self, file_name):
-        """Open an HDF5 file and cache it."""
-        # If file is already in cache, return it and move it to the end
-        if file_name in self._file_handle_cache:
-            self._file_handle_cache.move_to_end(file_name)
-            file = self._file_handle_cache[file_name]
-            # if file was closed, reopen:
-            if not self._check_if_open(file):
-                file = h5py.File(file_name, "r", locking=False)
-                self._file_handle_cache[file_name] = file
-        # If file is not in cache, open it and add it to the cache
-        else:
-            # If cache is full, close the least recently used file
-            if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
-                _, close_file = self._file_handle_cache.popitem(last=False)
-                close_file.close()
-            file = h5py.File(file_name, "r", locking=False)
-            self._file_handle_cache[file_name] = file
-
-        return self._file_handle_cache[file_name]
-
     @retry_on_io_error(
         max_retries=MAX_RETRY_ATTEMPTS,
         initial_delay=INITIAL_RETRY_DELAY,
@@ -518,7 +533,8 @@ class H5Generator(keras.utils.PyDataset):
         Returns:
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
-        file = self._get_file(file_name)
+        file_name, key, indices = indices
+        file = self.get_file(file_name)
 
         # Convert any range objects in indices to lists
         processed_indices = tuple(
@@ -564,10 +580,10 @@ class H5Generator(keras.utils.PyDataset):
         return math.ceil(len(self.indices) / self.batch_size)
 
     def __del__(self):
-        """Ensure cached files are closed."""
-        for _, file in self._file_handle_cache.items():
-            file.close()
-        self._file_handle_cache = OrderedDict()
+        """Delete the H5Generator object."""
+        # Explicitly call the parent class destructors
+        keras.utils.PyDataset.__del__(self)
+        H5FileHandleCache.__del__(self)
 
 
 class H5Dataloader(H5Generator):
