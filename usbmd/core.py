@@ -51,7 +51,6 @@ class Object:
 
     def __init__(self):
         self._serialized = None
-        self._except_tensors = []  # To be filled by child classes
 
     @property
     def serialized(self):
@@ -97,17 +96,15 @@ class Object:
     def __delitem__(self, key):
         delattr(self, key)
 
-    def to_tensor(self):
+    def to_tensor(self, except_tensors=None):
         """Convert the attributes in the object to keras tensors"""
-        return object_to_tensor(self)
+        return object_to_tensor(self, except_tensors)
 
 
-def object_to_tensor(obj: Object):
+def object_to_tensor(obj: Object, except_tensors=None):
     """Convert an object to a tensor"""
     snapshot = {}
-    if hasattr(obj, "_except_tensors"):
-        except_tensors = obj._except_tensors
-    else:
+    if except_tensors is None:
         except_tensors = []
 
     # Check if the object has static attributes, we will not convert them to tensors
