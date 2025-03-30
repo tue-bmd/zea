@@ -10,7 +10,6 @@ import keras
 import numpy as np
 import yaml
 from keras import ops
-
 from usbmd.backend import jit
 from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
@@ -254,6 +253,7 @@ class Pipeline:
         jit_options: Union[str, None] = "ops",
         jit_kwargs: dict | None = None,
         name="pipeline",
+        validate=True,
     ):
         """Initialize a pipeline
 
@@ -271,6 +271,9 @@ class Pipeline:
             caching functionality, but speeds up the operations.
             - None disables JIT compilation.
             Defaults to "ops".
+            jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
+            name (str, optional): The name of the pipeline. Defaults to "pipeline".
+            validate (bool, optional): Whether to validate the pipeline. Defaults to True.
         """
         self._call_pipeline = self.call
         self.name = name
@@ -285,7 +288,10 @@ class Pipeline:
 
         self.with_batch_dim = with_batch_dim
 
-        self.validate()
+        if validate:
+            self.validate()
+        else:
+            log.warning("Pipeline validation is disabled, make sure to validate manually.")
 
         # pylint: disable=method-hidden
         if jit_kwargs is None:
@@ -295,6 +301,14 @@ class Pipeline:
                 jit_kwargs = {}
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
+
+    def needs(self, key):
+        """Check if the pipeline needs a specific key."""
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                return operation.needs(key)
+            if key in operation._valid_keys:
+                return True
 
     @classmethod
     def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
@@ -642,11 +656,14 @@ class Pipeline:
             assert isinstance(
                 scan, Scan
             ), f"Expected an instance of `usbmd.scan.Scan`, got {type(scan)}"
-            # TODO: doing this twice because grid has to set Nz, Nx...
-            _ = scan.to_tensor()
-            scan_dict = scan.to_tensor()
+            except_tensors = []
+            for key in scan._on_request:
+                if not self.needs(key):
+                    except_tensors.append(key)
+            scan_dict = scan.to_tensor(except_tensors)
 
         if config is not None:
+            # TODO: currently nothing...
             assert isinstance(
                 config, Config
             ), f"Expected an instance of `usbmd.config.Config`, got {type(config)}"
@@ -1132,6 +1149,19 @@ class PfieldWeighting(Operation):
         return {self.output_key: weighted_data}
 
 
+@ops_registry("sum")
+class Sum(Operation):
+    """Sum data along a specific axis."""
+
+    def __init__(self, axis, **kwargs):
+        super().__init__(**kwargs)
+        self.axis = axis
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        return {self.output_key: ops.sum(data, axis=self.axis)}
+
+
 @ops_registry("delay_and_sum")
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
@@ -1230,6 +1260,12 @@ class EnvelopeDetect(Operation):
         self.axis = axis
 
     def call(self, **kwargs):
+        """
+        Args:
+            - data (Tensor): The beamformed data of shape (..., n_z, n_x, n_ch).
+        Returns:
+            - envelope_data (Tensor): The envelope detected data of shape (..., n_z, n_x).
+        """
         data = kwargs[self.key]
 
         if data.shape[-1] == 2:
@@ -1319,8 +1355,19 @@ class Normalize(Operation):
 
     def __init__(self, output_range=None, input_range=None, **kwargs):
         super().__init__(**kwargs)
-        self.output_range = output_range
-        self.input_range = input_range
+        self.output_range = self.to_float32(output_range)
+        self.input_range = self.to_float32(input_range)
+        assert output_range is None or len(output_range) == 2
+        assert input_range is None or len(input_range) == 2
+
+    @staticmethod
+    def to_float32(data):
+        """Converts an iterable to float32 and leaves None values as is."""
+        return (
+            [np.float32(x) if x is not None else None for x in data]
+            if data is not None
+            else None
+        )
 
     def call(self, **kwargs):
         """Normalize data to a given range.
@@ -1337,15 +1384,15 @@ class Normalize(Operation):
         data = kwargs[self.key]
 
         output_range = _set_if_none(self.output_range, default=(0, 1))
+        input_range = _set_if_none(self.input_range, default=(None, None))
 
-        # Set the input range to the data range if not provided
-        minimum = ops.min(data)
-        maximum = ops.max(data)
-        input_range = _set_if_none(self.input_range, default=(minimum, maximum))
-
-        # Clip the data to the input range
         a_min, a_max = input_range
+        if a_min is None:
+            a_min = ops.min(data)
+        if a_max is None:
+            a_max = ops.max(data)
         data = ops.clip(data, a_min, a_max)
+        input_range = (a_min, a_max)
 
         # Map the data to the output range
         normalized_data = translate(data, input_range, output_range)
