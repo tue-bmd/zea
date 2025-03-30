@@ -11,24 +11,29 @@ from usbmd.utils import log
 eps = 1e-10
 
 
-def get_grid(scan, verbose=False):
+def get_grid(
+    xlims,
+    zlims,
+    Nx: int,
+    Nz: int,
+    sound_speed,
+    center_frequency,
+    pixels_per_wavelength,
+    verbose=False,
+):
     """Creates a pixelgrid based on scan class parameters."""
-    xlims = scan.xlims
-    zlims = scan.zlims
-    Nx = scan.Nx
-    Nz = scan.Nz
 
     if Nx and Nz:
-        grid = cartesian_pixel_grid(xlims, zlims, Nx=Nx, Nz=Nz)
+        grid = cartesian_pixel_grid(xlims, zlims, Nx=int(Nx), Nz=int(Nz))
     else:
-        wvln = scan.sound_speed / scan.center_frequency
-        dx = wvln / scan.pixels_per_wavelength
+        wvln = sound_speed / center_frequency
+        dx = wvln / pixels_per_wavelength
         dz = dx
         grid = cartesian_pixel_grid(xlims, zlims, dx=dx, dz=dz)
         if verbose:
             print(
                 f"Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, "
-                f"using {scan.pixels_per_wavelength} pixels per wavelength."
+                f"using {pixels_per_wavelength} pixels per wavelength."
             )
     return grid
 
