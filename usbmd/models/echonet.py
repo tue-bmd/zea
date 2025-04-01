@@ -9,6 +9,7 @@ https://github.com/bryanhe/dynamic
 from pathlib import Path
 
 import keras
+import tensorflow as tf
 import wget
 from keras import backend, ops
 
@@ -43,10 +44,10 @@ class EchoNetDynamic(BaseModel):
     """
 
     def __init__(self, **kwargs):
-        if backend.backend() != "tensorflow":
+        if backend.backend() not in ["tensorflow", "jax"]:
             raise NotImplementedError(
                 "EchoNetDynamic is only currently supported with the "
-                "TensorFlow backend."
+                "TensorFlow or Jax backend."
             )
 
         super().__init__(**kwargs)
@@ -58,6 +59,25 @@ class EchoNetDynamic(BaseModel):
             "fingerprint.pb",
         ]
         self.network = None
+
+    def build(self, input_shape):
+        """Builds the network."""
+        self.maybe_convert_to_jax(input_shape)
+
+    def maybe_convert_to_jax(self, input_shape):
+        """Converts the network to Jax if backend is Jax."""
+        if backend.backend() == "jax":
+            inputs = ops.zeros(input_shape)
+            import tf2jax  # pylint: disable=import-outside-toplevel
+
+            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
+
+            def call_fn(
+                params, state, rng, inputs, training
+            ):  # pylint: disable=unused-argument
+                return jax_func(state, inputs)
+
+            self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
 
     def call(self, inputs):  # pylint: disable=arguments-differ
         """Segment the input image."""
@@ -81,12 +101,26 @@ class EchoNetDynamic(BaseModel):
         if inputs.shape[-1] != 3:
             inputs = ops.tile(inputs, [1, 1, 1, 3])
 
-        output = self.network(inputs)["segmentation"]
+        if backend.backend() == "tensorflow":
+            output = self.network(inputs)["segmentation"]
+        elif backend.backend() == "jax":
+            output = self.network(inputs)
 
         # resize output to original size
         output = ops.image.resize(output, original_size)
 
         return output
+
+    def _load_layer(self, path: Path | str):
+        if backend.backend() == "tensorflow":
+            return keras.layers.TFSMLayer(path, call_endpoint="serving_default")
+        elif backend.backend() == "jax":
+            return tf.saved_model.load(path)
+        else:
+            raise NotImplementedError(
+                f"{self.__class__.__name__} is only currently supported with the "
+                f"TensorFlow or Jax backend. You are using {backend.backend()}."
+            )
 
     def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
         """Load the weights for the segmentation model."""
@@ -96,10 +130,7 @@ class EchoNetDynamic(BaseModel):
 
         base_path = Path(filename).parent
 
-        self.network = keras.layers.TFSMLayer(
-            base_path,
-            call_endpoint="serving_default",
-        )
+        self.network = self._load_layer(base_path)
 
     def _download_original_weights(self, weights_folder=None):
         """Download the originals weights from the EchoNet Github repository."""
