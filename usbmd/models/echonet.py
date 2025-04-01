@@ -105,6 +105,11 @@ class EchoNetDynamic(BaseModel):
             output = self.network(inputs)["segmentation"]
         elif backend.backend() == "jax":
             output = self.network(inputs)
+        else:
+            raise NotImplementedError(
+                f"{self.__class__.__name__} is only currently supported with the "
+                f"TensorFlow or Jax backend. You are using {backend.backend()}."
+            )
 
         # resize output to original size
         output = ops.image.resize(output, original_size)
