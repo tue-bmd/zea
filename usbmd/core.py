@@ -148,3 +148,64 @@ def object_to_tensor(obj: Object, except_tensors=None):
 
         snapshot[key] = keras.ops.convert_to_tensor(value, dtype=dtype)
     return snapshot
+
+
+class USBMDEncoder(json.JSONEncoder):
+    """
+    A custom JSONEncoder that:
+      - Converts NumPy arrays to native Python types.
+      - Converts USBMD Enums to their values
+    """
+    def default(self, obj):
+        # Convert USBMD Enums to their values
+        if isinstance(obj, enum.Enum):
+            return obj.value
+
+        # Convert NumPy types to native Python
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+
+        return super().default(obj)
+
+
+class USBMDDecoder(json.JSONDecoder):
+    """
+    A custom JSONDecoder that:
+      - Converts lists into NumPy arrays.
+      - Restores USBMD enum fields to their respective enum members.
+    """
+
+    # Create maps for quick enum lookups based on their .value
+    _DATA_TYPES_MAP = {dt.value: dt for dt in DataTypes}
+    _MOD_TYPES_MAP = {mt.value: mt for mt in ModTypes}
+
+    def __init__(self, *args, **kwargs):
+        # We supply our custom object_hook
+        super().__init__(object_hook=self.object_hook, *args, **kwargs)
+
+    def object_hook(self, obj):
+        """
+        Called once for every JSON object (dict). We iterate through each key/value
+        to see if we need to convert it into an enum or a NumPy array.
+        """
+        for key, value in list(obj.items()):
+            # Convert lists to NumPy arrays
+            if isinstance(value, list):
+                # If you want a more selective approach (e.g. only numeric lists -> arrays),
+                # you could check if all elements are numeric before converting.
+                obj[key] = np.array(value)
+
+            # Convert strings to DataTypes enum if it matches
+            elif isinstance(value, str) and value in self._DATA_TYPES_MAP:
+                obj[key] = self._DATA_TYPES_MAP[value]
+
+            # Convert string or None to ModTypes enum if it matches
+            elif (value is None and None in self._MOD_TYPES_MAP) or \
+                 (isinstance(value, str) and value in self._MOD_TYPES_MAP):
+                obj[key] = self._MOD_TYPES_MAP[value]
+
+        return obj

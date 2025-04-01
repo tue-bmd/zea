@@ -16,6 +16,7 @@ from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
+from usbmd.core import USBMDDecoder, USBMDEncoder
 from usbmd.display import scan_convert_2d, scan_convert_3d
 from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
@@ -243,8 +244,24 @@ class Operation(keras.Operation):
 
         return combined_kwargs
 
+    def serialize(self):
+        """
+        Serialize the operation to a dictionary.
+        """
+        op_config = {
+        "name": self.__class__.__name__.lower(),
+        "params": {} # TODO, extract params
+        }
 
-class Pipeline:
+        if hasattr(self, "operations") and isinstance(self.operations, list):
+            op_config["operations"] = [op.serialize() for op in self.operations]
+
+        return op_config
+
+
+
+
+class Pipeline(Operation):
     """Pipeline class for processing ultrasound data through a series of operations."""
 
     def __init__(
@@ -752,22 +769,7 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
     return chain
 
 
-def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
-    """
-    Create a Pipeline instance from a JSON string.
-    """
-    pipeline_config = Config(json.loads(json_string))
-    return pipeline_from_config(pipeline_config, **kwargs)
-
-
-def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
-    """
-    Create a Pipeline instance from a YAML file.
-    """
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        pipeline_config = yaml.safe_load(f)
-    operations = pipeline_config["operations"]
-    return pipeline_from_config(Config({"operations": operations}), **kwargs)
+# Loading functions
 
 
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
@@ -789,6 +791,27 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
 
     kwargs = {**pipeline_config, **kwargs}
     return Pipeline(operations=operations, **kwargs)
+
+
+def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a JSON string.
+    """
+    pipeline_config = Config(json.loads(json_string, cls=USBMDDecoder))
+    return pipeline_from_config(pipeline_config, **kwargs)
+
+
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a YAML file.
+    """
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        pipeline_config = yaml.safe_load(f)
+    operations = pipeline_config["operations"]
+    return pipeline_from_config(Config({"operations": operations}), **kwargs)
+
+
+# Save functions
 
 
 @ops_registry("patched_grid")
