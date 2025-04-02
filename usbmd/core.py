@@ -1,6 +1,7 @@
 """Base classes for the toolbox"""
 
 import enum
+import json
 import pickle
 from copy import deepcopy
 
@@ -156,6 +157,7 @@ class USBMDEncoder(json.JSONEncoder):
       - Converts NumPy arrays to native Python types.
       - Converts USBMD Enums to their values
     """
+
     def default(self, obj):
         # Convert USBMD Enums to their values
         if isinstance(obj, enum.Enum):
@@ -204,8 +206,9 @@ class USBMDDecoder(json.JSONDecoder):
                 obj[key] = self._DATA_TYPES_MAP[value]
 
             # Convert string or None to ModTypes enum if it matches
-            elif (value is None and None in self._MOD_TYPES_MAP) or \
-                 (isinstance(value, str) and value in self._MOD_TYPES_MAP):
+            elif (value is None and None in self._MOD_TYPES_MAP) or (
+                isinstance(value, str) and value in self._MOD_TYPES_MAP
+            ):
                 obj[key] = self._MOD_TYPES_MAP[value]
 
         return obj

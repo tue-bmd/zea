@@ -244,21 +244,20 @@ class Operation(keras.Operation):
 
         return combined_kwargs
 
-    def serialize(self):
-        """
-        Serialize the operation to a dictionary.
-        """
-        op_config = {
-        "name": self.__class__.__name__.lower(),
-        "params": {} # TODO, extract params
+    def get_dict(self):
+        """Get the configuration of the operation. Inherit from keras.Operation."""
+        config = super().get_config()
+        config.update({"name": ops_registry.get_name(self)})
+        config["params"] = {
+            "key": self.key,
+            "output_key": self.output_key,
+            "cache_inputs": self.cache_inputs,
+            "cache_outputs": self.cache_outputs,
+            "jit_compile": self._jit_compile,
+            "with_batch_dim": self.with_batch_dim,
+            "jit_kwargs": self.jit_kwargs,
         }
-
-        if hasattr(self, "operations") and isinstance(self.operations, list):
-            op_config["operations"] = [op.serialize() for op in self.operations]
-
-        return op_config
-
-
+        return config
 
 
 class Pipeline(Operation):
@@ -630,6 +629,10 @@ class Pipeline(Operation):
         """
         return pipeline_from_config(Config(config), **kwargs)
 
+    def to_config(self) -> Config:
+        """Convert the pipeline to a `usbmd.Config` object."""
+        return pipeline_to_config(self)
+
     @property
     def key(self) -> str:
         """Input key of the pipeline."""
@@ -814,6 +817,54 @@ def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
 # Save functions
 
 
+def pipeline_to_dict(pipeline: Pipeline, **kwargs) -> dict:
+    """
+    Convert a Pipeline instance into a dictionary.
+    Supports nested pipelines by recursively converting them.
+
+    The resulting dict will have an "operations" key containing a list of operations.
+    For nested pipelines, each is represented as a dict with:
+      - "name": the name of the pipeline class (or registry key),
+      - "params": a dict of parameters excluding sub-operations,
+      - "operations": a list of sub-operations converted to dicts.
+
+    Any additional keyword arguments are added to the top-level dictionary.
+    """
+    result = {}
+    ops_list = []
+
+    for operation in pipeline.operations:
+        if isinstance(operation, Pipeline):
+            # Recursively convert the nested pipeline to a dictionary.
+            nested_dict = pipeline_to_dict(operation)
+
+            # Construct a dict representation for the nested pipeline.
+            op_dict = {
+                "name": ops_registry.get_name(operation),
+                "params": {k: v for k, v in nested_dict.items() if k != "operations"},
+                "operations": nested_dict.get("operations", []),
+            }
+            ops_list.append(op_dict)
+        elif isinstance(operation, Operation):
+            # Convert a simple operation to a dict using its get_dict method.
+            ops_list.append(operation.get_dict())
+        else:
+            # If the operation is already a dict or some other type, include it as-is.
+            ops_list.append(operation)
+
+    result["operations"] = ops_list
+    result.update(kwargs)
+    return result
+
+
+def pipeline_to_config(pipeline: Pipeline, **kwargs) -> Config:
+    """
+    Convert a Pipeline instance into a Config object.
+    """
+    pipeline_dict = pipeline_to_dict(pipeline, **kwargs)
+    return Config(pipeline_dict)
+
+
 @ops_registry("patched_grid")
 class PatchedGrid(Pipeline):
     """
@@ -914,6 +965,10 @@ class PatchedGrid(Pipeline):
         inputs.update(output)
         return inputs
 
+    def get_config(self):
+        """Get the configuration of the pipeline."""
+        config = super().get_config()
+        config["params"].update({"num_patches": self.num_patches})
 
 ## Base Operations
 
