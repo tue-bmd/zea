@@ -450,6 +450,23 @@ def test_default_pipeline_from_config(config_fixture, request):
         pipeline, patched=config_fixture == "patched_pipeline_config"
     )
 
+@pytest.mark.parametrize(
+    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+)
+def test_pipeline_to_config(config_fixture, request):
+    """Tests converting a pipeline to a Config object."""
+    config_dict = request.getfixturevalue(config_fixture)
+    config = Config(**config_dict)
+    pipeline = ops.pipeline_from_config(config, jit_options=None)
+
+    # Convert the pipeline back to a Config object
+    new_config = pipeline.to_config()
+
+    # Create a new pipeline from the new Config object
+    new_pipeline = ops.pipeline_from_config(new_config, jit_options=None)
+
+    for op in zip(pipeline.operations, new_pipeline.operations):
+        assert isinstance(op[0], type(op[1]))
 
 def get_probe():
     """Returns a probe for ultrasound simulation tests."""
