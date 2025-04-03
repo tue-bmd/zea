@@ -151,7 +151,7 @@ def object_to_tensor(obj: Object, except_tensors=None):
     return snapshot
 
 
-class USBMDEncoder(json.JSONEncoder):
+class USBMDEncoderJSON(json.JSONEncoder):
     """
     A custom JSONEncoder that:
       - Converts NumPy arrays to native Python types.
@@ -174,7 +174,7 @@ class USBMDEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-class USBMDDecoder(json.JSONDecoder):
+class USBMDDecoderJSON(json.JSONDecoder):
     """
     A custom JSONDecoder that:
       - Converts lists into NumPy arrays.
@@ -212,3 +212,4 @@ class USBMDDecoder(json.JSONDecoder):
                 obj[key] = self._MOD_TYPES_MAP[value]
 
         return obj
+
