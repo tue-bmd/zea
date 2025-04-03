@@ -824,7 +824,7 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
     """
-    pipeline_config = Config(json.loads(json_string, cls=USBMDDecoderJSON))
+    pipeline_config = Config({"operations": [json.loads(json_string, cls=USBMDDecoderJSON)]})
     return pipeline_from_config(pipeline_config, **kwargs)
 
 
