@@ -465,7 +465,7 @@ def test_pipeline_to_config(config_fixture, request):
     # Create a new pipeline from the new Config object
     new_pipeline = ops.pipeline_from_config(new_config, jit_options=None)
 
-    for op in zip(pipeline.operations, new_pipeline.operations):
+    for op in zip(pipeline.operations, new_pipeline.operations[0].operations):
         assert isinstance(op[0], type(op[1]))
 
 def get_probe():
