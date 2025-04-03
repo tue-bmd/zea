@@ -16,7 +16,7 @@ from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
-from usbmd.core import USBMDDecoder, USBMDEncoder
+from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
 from usbmd.display import scan_convert_2d, scan_convert_3d
 from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
@@ -653,6 +653,10 @@ class Pipeline:
         """Convert the pipeline to a `usbmd.Config` object."""
         return pipeline_to_config(self)
 
+    def to_json(self) -> str:
+        """Convert the pipeline to a JSON string."""
+        return pipeline_to_json(self)
+
     @property
     def key(self) -> str:
         """Input key of the pipeline."""
@@ -820,7 +824,7 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
     """
-    pipeline_config = Config(json.loads(json_string, cls=USBMDDecoder))
+    pipeline_config = Config(json.loads(json_string, cls=USBMDDecoderJSON))
     return pipeline_from_config(pipeline_config, **kwargs)
 
 
@@ -846,6 +850,23 @@ def pipeline_to_config(pipeline: Pipeline) -> Config:
     # entry. This allows us to also have non-default pipeline classes as top level op.
     pipeline_dict = {"operations": [pipeline.get_dict()]}
     return Config(pipeline_dict)
+
+
+def pipeline_to_json(pipeline: Pipeline) -> str:
+    """
+    Convert a Pipeline instance into a JSON string.
+    """
+    pipeline_dict = pipeline.get_dict()
+    return json.dumps(pipeline_dict, cls=USBMDEncoderJSON, indent=4)
+
+
+def pipeline_to_yaml(pipeline: Pipeline, file_path: str) -> None:
+    """
+    Convert a Pipeline instance into a YAML file.
+    """
+    pipeline_dict = pipeline.get_dict()
+    with open(file_path, "w", encoding="utf-8") as f:
+        yaml.dump(pipeline_dict, f, Dumper=yaml.Dumper, indent=4)
 
 
 @ops_registry("patched_grid")

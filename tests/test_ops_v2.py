@@ -450,6 +450,7 @@ def test_default_pipeline_from_config(config_fixture, request):
         pipeline, patched=config_fixture == "patched_pipeline_config"
     )
 
+
 @pytest.mark.parametrize(
     "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
 )
@@ -465,8 +466,33 @@ def test_pipeline_to_config(config_fixture, request):
     # Create a new pipeline from the new Config object
     new_pipeline = ops.pipeline_from_config(new_config, jit_options=None)
 
+    # TODO: Because of the way the config.operations is defined, it always assumes a standard
+    # root pipeline. However the root can also be a pipeline subclass. Because of this, after saving
+    # first entry in config.operations is always a Pipeline, which can contain any other type of
+    # pipeline or operation. This should be changed in a future version.
     for op in zip(pipeline.operations, new_pipeline.operations[0].operations):
         assert isinstance(op[0], type(op[1]))
+
+@pytest.mark.parametrize(
+    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+)
+def test_pipeline_to_json(config_fixture, request):
+    """Tests converting a pipeline to a JSON string."""
+    config_dict = request.getfixturevalue(config_fixture)
+    config = Config(**config_dict)
+    pipeline = ops.pipeline_from_config(config, jit_options=None)
+
+    # Convert the pipeline to a JSON string
+    json_string = pipeline.to_json()
+
+    # Create a new pipeline from the JSON string
+    new_pipeline = ops.pipeline_from_json(json_string, jit_options=None)
+
+    # Validate the new pipeline
+    validate_default_pipeline(
+        new_pipeline, patched=config_fixture == "patched_pipeline_config"
+    )
+
 
 def get_probe():
     """Returns a probe for ultrasound simulation tests."""
