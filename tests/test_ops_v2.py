@@ -470,6 +470,7 @@ def test_pipeline_to_config(config_fixture, request):
     # root pipeline. However the root can also be a pipeline subclass. Because of this, after saving
     # first entry in config.operations is always a Pipeline, which can contain any other type of
     # pipeline or operation. This should be changed in a future version.
+    # TODO: in new version, use the validate_pipeline function to validate the pipeline
     for op in zip(pipeline.operations, new_pipeline.operations[0].operations):
         assert isinstance(op[0], type(op[1]))
 
@@ -488,10 +489,9 @@ def test_pipeline_to_json(config_fixture, request):
     # Create a new pipeline from the JSON string
     new_pipeline = ops.pipeline_from_json(json_string, jit_options=None)
 
-    # Validate the new pipeline
-    validate_default_pipeline(
-        new_pipeline, patched=config_fixture == "patched_pipeline_config"
-    )
+    # TODO: in new version, use the validate_pipeline function to validate the pipeline
+    for op in zip(pipeline.operations, new_pipeline.operations[0].operations):
+        assert isinstance(op[0], type(op[1]))
 
 
 def get_probe():

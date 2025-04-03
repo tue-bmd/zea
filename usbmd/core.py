@@ -36,7 +36,6 @@ class DataTypes(enum.Enum):
 class ModTypes(enum.Enum):
     """Enum class for USBMD modulation types."""
 
-    NONE = None
     RF = "rf"
     IQ = "iq"
 
@@ -212,4 +211,3 @@ class USBMDDecoderJSON(json.JSONDecoder):
                 obj[key] = self._MOD_TYPES_MAP[value]
 
         return obj
-
