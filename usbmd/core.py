@@ -157,7 +157,9 @@ class USBMDEncoderJSON(json.JSONEncoder):
       - Converts USBMD Enums to their values
     """
 
-    def default(self, obj):
+    def default(self, o):
+        """Convert objects to JSON serializable types."""
+        obj = o
         # Convert USBMD Enums to their values
         if isinstance(obj, enum.Enum):
             return obj.value
@@ -186,9 +188,9 @@ class USBMDDecoderJSON(json.JSONDecoder):
 
     def __init__(self, *args, **kwargs):
         # We supply our custom object_hook
-        super().__init__(object_hook=self.object_hook, *args, **kwargs)
+        super().__init__(object_hook=self._object_hook, *args, **kwargs)
 
-    def object_hook(self, obj):
+    def _object_hook(self, obj):
         """
         Called once for every JSON object (dict). We iterate through each key/value
         to see if we need to convert it into an enum or a NumPy array.
