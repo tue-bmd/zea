@@ -627,6 +627,7 @@ class Pipeline:
 
     @staticmethod
     def pipeline_to_list(pipeline):
+        """Convert the pipeline to a list of operations."""
         ops_list = []
         for op in pipeline.operations:
             ops_list.append(op.get_dict())
@@ -828,7 +829,9 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
     """
-    pipeline_config = Config({"operations": [json.loads(json_string, cls=USBMDDecoderJSON)]})
+    pipeline_config = Config(
+        {"operations": [json.loads(json_string, cls=USBMDDecoderJSON)]}
+    )
     return pipeline_from_config(pipeline_config, **kwargs)
 
 
