@@ -657,6 +657,10 @@ class Pipeline:
         """Convert the pipeline to a JSON string."""
         return pipeline_to_json(self)
 
+    def to_yaml(self, file_path: str) -> None:
+        """Convert the pipeline to a YAML file."""
+        pipeline_to_yaml(self, file_path)
+
     @property
     def key(self) -> str:
         """Input key of the pipeline."""
