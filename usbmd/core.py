@@ -38,6 +38,7 @@ class ModTypes(enum.Enum):
 
     RF = "rf"
     IQ = "iq"
+    NONE = None
 
 
 class classproperty(property):
@@ -184,7 +185,7 @@ class USBMDDecoderJSON(json.JSONDecoder):
 
     # Create maps for quick enum lookups based on their .value
     _DATA_TYPES_MAP = {dt.value: dt for dt in DataTypes}
-    _MOD_TYPES_MAP = {mt.value: mt for mt in ModTypes}
+    _MOD_TYPES_MAP = {mt.value: mt for mt in ModTypes if mt.value is not None}
 
     def __init__(self, *args, **kwargs):
         # We supply our custom object_hook
@@ -206,10 +207,10 @@ class USBMDDecoderJSON(json.JSONDecoder):
             elif isinstance(value, str) and value in self._DATA_TYPES_MAP:
                 obj[key] = self._DATA_TYPES_MAP[value]
 
-            # Convert string or None to ModTypes enum if it matches
-            elif (value is None and None in self._MOD_TYPES_MAP) or (
+            # Convert string to ModTypes enum if it matches. Also, allow None for the 'modtype' key.
+            elif (key == "modtype" and value is None) or (
                 isinstance(value, str) and value in self._MOD_TYPES_MAP
             ):
-                obj[key] = self._MOD_TYPES_MAP[value]
+                obj[key] = self._MOD_TYPES_MAP[value] if value is not None else None
 
         return obj
