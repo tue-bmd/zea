@@ -812,8 +812,8 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
         "operations" in config
     ), "Config object must have an 'operations' key for pipeline creation."
     assert isinstance(
-        config.operations, list
-    ), "Config object must have a list of operations for pipeline creation."
+        config.operations, (list, np.ndarray)
+    ), "Config object must have a list or numpy array of operations for pipeline creation."
 
     operations = make_operation_chain(config.operations)
 
@@ -829,9 +829,7 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
     """
-    pipeline_config = Config(
-        {"operations": [json.loads(json_string, cls=USBMDDecoderJSON)]}
-    )
+    pipeline_config = Config(json.loads(json_string, cls=USBMDDecoderJSON))
     return pipeline_from_config(pipeline_config, **kwargs)
 
 
