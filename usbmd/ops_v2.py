@@ -861,7 +861,7 @@ def pipeline_to_json(pipeline: Pipeline) -> str:
     """
     Convert a Pipeline instance into a JSON string.
     """
-    pipeline_dict = pipeline.get_dict()
+    pipeline_dict = {'operations': [pipeline.get_dict()]}
     return json.dumps(pipeline_dict, cls=USBMDEncoderJSON, indent=4)
 
 
