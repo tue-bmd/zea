@@ -125,12 +125,14 @@ class RegisterDecorator:
 
     def get_name(self, cls):
         """Retrieve the registry key name associated with the given class or instance."""
-        for name, c in self.registry.items():
-            if isinstance(cls, type):  # Check if cls is a class
-                if issubclass(cls, c):
+        for name, registered_class in self.registry.items():
+            if isinstance(cls, type):  # cls is a class
+                if issubclass(cls, registered_class):
                     return name
-            elif isinstance(cls, c):  # Check if cls is an instance
-        raise KeyError(f"Class {cls} not registered.")
+            else:  # cls is an instance
+                if isinstance(cls, registered_class):
+                    return name
+        raise KeyError(f"Class or instance {cls} not registered.")
 
     def get_additional_registries(self):
         """Returns a list of the names of the additional registries."""
