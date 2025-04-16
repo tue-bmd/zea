@@ -17,10 +17,18 @@ import h5py
 import keras
 import numpy as np
 from keras import ops
+from keras.src.utils import backend_utils
 
 from usbmd.data.layers import Resizer
 from usbmd.utils import log, map_negative_indices, translate
 from usbmd.utils.io_lib import _get_shape_hdf5_file, retry_on_io_error, search_file_tree
+
+if keras.backend.backend() == "jax":
+    from usbmd.backend.jax import on_device_jax as on_device
+elif keras.backend.backend() == "tensorflow":
+    from usbmd.backend.tensorflow import on_device_tf as on_device
+elif keras.backend.backend() == "torch":
+    from usbmd.backend.torch import on_device_torch as on_device
 
 FILE_TYPES = [".hdf5", ".h5"]
 FILE_HANDLE_CACHE_CAPACITY = 128
@@ -435,7 +443,7 @@ class H5Generator(keras.utils.PyDataset):
 
         images = []
         for indices in indices_list:
-            images.append(self.extract_image(indices))
+            images.append(self.extract_image(*indices))
 
         if self.batch_size == 1:
             images = images[0]
@@ -501,15 +509,15 @@ class H5Generator(keras.utils.PyDataset):
         initial_delay=INITIAL_RETRY_DELAY,
         retry_action=_h5_reopen_on_io_error,
     )
-    def extract_image(self, indices):
+    def extract_image(self, file_name, key, indices):
         """Extract image from hdf5 file.
         Args:
-            indices (tuple): indices to extract image from.
-                (file_name, key, indices) with indices being a tuple of slices.
+            file_name (str): name of the file to extract image from.
+            key (str): key of the hdf5 dataset to grab data from.
+            indices (tuple): indices to extract image from (tuple of slices)
         Returns:
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
-        file_name, key, indices = indices
         file = self._get_file(file_name)
 
         # Convert any range objects in indices to lists
@@ -529,9 +537,7 @@ class H5Generator(keras.utils.PyDataset):
                 f"and file {file_name} of shape {file[key].shape}"
             ) from exc
 
-        # stack frames along frame_axis, and default to last axis
-        frame_axis = self.frame_axis
-
+        # stack frames along frame_axis
         if self.insert_frame_axis:
             # move frames axis to self.frame_axis
             initial_frame_axis = self.initial_frame_axis
@@ -543,10 +549,10 @@ class H5Generator(keras.utils.PyDataset):
                 )
                 initial_frame_axis = initial_frame_axis - additional_axes_before
 
-            images = np.moveaxis(images, initial_frame_axis, frame_axis)
+            images = np.moveaxis(images, initial_frame_axis, self.frame_axis)
         else:
             # append frames to existing axis
-            images = np.concatenate(images, axis=frame_axis)
+            images = np.concatenate(images, axis=self.frame_axis)
 
         return images
 
@@ -576,6 +582,10 @@ class H5Dataloader(H5Generator):
         resize_kwargs: dict = None,
         map_fns: list = None,
         augmentation: callable = None,
+        assert_image_range: bool = True,
+        clip_image_range: bool = False,
+        backend=None,
+        device=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -593,6 +603,12 @@ class H5Dataloader(H5Generator):
         self.map_fns = map_fns or []
         if augmentation is not None:
             self.map_fns.append(augmentation)
+        self.assert_image_range = assert_image_range
+        self.clip_image_range = clip_image_range
+        if backend is None:
+            backend = keras.backend.backend()
+        self.backend = backend_utils.DynamicBackend(backend)
+        self.device = device
 
     def map(self, fn):
         """Add a mapping function to the dataloader.
@@ -608,8 +624,7 @@ class H5Dataloader(H5Generator):
         dl.map_fns.append(fn)
         return dl
 
-    def __getitem__(self, index):
-        out = super().__getitem__(index)
+    def preprocess(self, out):
         if self.return_filename:
             images, filenames = out
         else:
@@ -617,9 +632,20 @@ class H5Dataloader(H5Generator):
 
         # add channel dim
         if len(self.shape) != 3:
-            images = ops.expand_dims(images, axis=-1)
+            images = self.backend.expand_dims(images, axis=-1)
 
-        # normalize
+        # Check if there are outliers in the image range
+        if self.assert_image_range:
+            assert (
+                self.image_range[0] <= images.min()
+                and images.max() <= self.image_range[1]
+            ), f"Image range {self.image_range} is not in the range of the data {images.min()} - {images.max()}"
+
+        # Clip to image range
+        if self.clip_image_range:
+            images = self.backend.clip(images, *self.image_range[0])
+
+        # Translate to normalization range
         images = translate(images, self.image_range, self.normalization_range)
 
         # resize
@@ -633,6 +659,13 @@ class H5Dataloader(H5Generator):
             return images, filenames
         else:
             return images
+
+    def __getitem__(self, index):
+        out = super().__getitem__(index)
+        if self.device is None:
+            return self.preprocess(out)
+        else:
+            return on_device(self.preprocess, out, self.device)
 
 
 class USBMDJSONEncoder(json.JSONEncoder):
