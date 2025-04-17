@@ -418,14 +418,6 @@ class Pipeline:
 
         return outputs
 
-    def prepare_input(self, *args):
-        """Convert input data and parameters to dictionary of tensors following the CCC"""
-        raise NotImplementedError
-
-    def prepare_output(self, kwargs):
-        """Convert output data to dictionary of tensors following the CCC"""
-        raise NotImplementedError
-
     def reset_jit(self):
         """Reset the JIT compilation of the pipeline."""
         # TODO: kind of hacky...
@@ -617,7 +609,7 @@ class Pipeline:
         """Convert the pipeline to a dictionary."""
         config = {}
         config["name"] = ops_registry.get_name(self)
-        config["operations"] = self.pipeline_to_list(self)
+        config["operations"] = self._pipeline_to_list(self)
         config["params"] = {
             "with_batch_dim": self.with_batch_dim,
             "jit_options": self.jit_options,
@@ -626,7 +618,7 @@ class Pipeline:
         return config
 
     @staticmethod
-    def pipeline_to_list(pipeline):
+    def _pipeline_to_list(pipeline):
         """Convert the pipeline to a list of operations."""
         ops_list = []
         for op in pipeline.operations:
