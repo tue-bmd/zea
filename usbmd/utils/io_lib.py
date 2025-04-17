@@ -35,6 +35,7 @@ from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
+from usbmd.data.read_h5 import H5File
 from usbmd.utils import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
@@ -176,9 +177,9 @@ def load_image(filename, grayscale=True, color_order="RGB"):
 
 
 def _get_shape_hdf5_file(filepath, key):
-    """Retrieve the length of a dataset in an hdf5 file."""
-    with h5py.File(filepath, "r", locking=False) as f:
-        return list(f[key].shape)
+    """Retrieve the shape of some key in a hdf5 file."""
+    with H5File(filepath, mode="r") as f:
+        return f.shape(key)
 
 
 def search_file_tree(
