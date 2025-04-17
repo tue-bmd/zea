@@ -4,13 +4,44 @@
 - **Date**          : -
 """
 
+import inspect
 import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 
+from usbmd.probes import get_probe
+from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import log
+
+
+class H5File(h5py.File):
+    """h5py.File in usbmd format."""
+
+    def __init__(self, *args, **kwargs):
+        if not "locking" in kwargs:
+            kwargs["locking"] = False
+        super().__init__(*args, **kwargs)
+
+    def event_keys(self):
+        """Return all events in the file."""
+        return [key for key in self.keys() if "event" in key]
+
+    @property
+    def has_events(self):
+        """Check if the file has events."""
+        return any("event" in key for key in self.keys())
+
+    def shape(self, key):
+        """Return shape of some key, or all events."""
+        if key not in self.keys():
+            raise KeyError(f"{key} not found in file")
+        if not self.has_events or "event" in key:
+            return list(self[key].shape)
+        else:
+            for event_key in self.event_keys():
+                yield self[event_key][key].shape
 
 
 class ReadH5:
@@ -146,6 +177,89 @@ class ReadH5:
         idx = np.argmax([gi[1] for gi in group_info])
         key_name, _ = group_info[idx]
         return key_name
+
+
+def get_parameters_from_file(h5_file, event=None):
+    """Returns a dictionary of parameters to initialize a scan
+    object that comes with the dataset (stored inside datafile).
+
+    If there are no scan parameters in the hdf5 file, returns
+    an empty dictionary.
+
+    Args:
+        file (h5py or mat): File container.
+        event (int, optional): Event number. When specified an event structure
+            is expected as follows:
+                - event_0/scan
+                - event_1/scan
+                - ...
+            Defaults to None. In that case no event structure is expected.
+
+    Returns:
+        dict: The scan parameters.
+    """
+    scan_parameters = {}
+    if "scan" in h5_file:
+        scan_parameters = recursively_load_dict_contents_from_group(h5_file, "scan")
+    elif "event" in list(h5_file.keys())[0]:
+        if event is None:
+            raise ValueError(
+                log.error(
+                    "Please specify an event number to read scan parameters "
+                    "from a file with an event structure."
+                )
+            )
+
+        assert f"event_{event}/scan" in h5_file, (
+            f"Could not find scan parameters for event {event} in file. "
+            f"Found number of events: {len(h5_file.keys())}."
+        )
+
+        scan_parameters = recursively_load_dict_contents_from_group(
+            h5_file, f"event_{event}/scan"
+        )
+    else:
+        log.warning("Could not find scan parameters in file.")
+
+    scan_parameters = cast_scan_parameters(scan_parameters)
+    return scan_parameters
+
+
+def get_scan_parameters_from_file(h5_file, event=None):
+    """Returns a dictionary of default parameters to initialize a scan
+    object that works with the dataset.
+
+    Returns:
+        dict: The default parameters (the keys are identical to the
+            __init__ parameters of the Scan class).
+    """
+    file_scan_parameters = get_parameters_from_file(h5_file, event)
+
+    sig = inspect.signature(Scan.__init__)
+    scan_parameters = {
+        key: file_scan_parameters[key]
+        for key in sig.parameters
+        if key in file_scan_parameters
+    }
+    return scan_parameters
+
+
+def get_probe_parameters_from_file(h5_file, event=None):
+    """Returns a dictionary of probe parameters to initialize a probe
+    object that comes with the dataset (stored inside datafile).
+
+    Returns:
+        dict: The probe parameters.
+    """
+    file_scan_parameters = get_parameters_from_file(h5_file, event)
+
+    sig = inspect.signature(get_probe("generic").__init__)
+    probe_parameters = {
+        key: file_scan_parameters[key]
+        for key in sig.parameters
+        if key in file_scan_parameters
+    }
+    return probe_parameters
 
 
 def recursively_load_dict_contents_from_group(
