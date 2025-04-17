@@ -74,7 +74,7 @@ def simulate_rf(
             * sound_speed
         )
 
-    n_ax_rounded = _round_up_to_power_of_two(n_ax)
+    n_ax_rounded = _round_up_to_power_of_two(int(n_ax))
 
     freqs = (
         ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax_rounded, "float32")
@@ -143,7 +143,7 @@ def simulate_rf(
             * delay2(
                 freqs[None, None, None],
                 tau_total[..., None],
-                n_fft=n_ax,
+                n_fft=n_ax_rounded,
                 sampling_frequency=sampling_frequency,
             )
             * ops.cast(
