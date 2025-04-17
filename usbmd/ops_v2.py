@@ -637,7 +637,12 @@ class Pipeline:
     def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
         """Create a pipeline from a dictionary or `usbmd.Config` object.
 
-        Must have an 'operations' key with a list of operations.
+        Args:
+            config (dict or Config): Configuration dictionary or `usbmd.Config` object.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the a `pipeline` key with a subkey `operations`.
 
         Example:
         ```python
@@ -649,6 +654,43 @@ class Pipeline:
         pipeline = Pipeline.from_config(config)
         """
         return pipeline_from_config(Config(config), **kwargs)
+
+    @classmethod
+    def from_yaml(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Create a pipeline from a YAML file.
+
+        Args:
+            file_path (str): Path to the YAML file.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the a `pipeline` key with a subkey `operations`.
+
+        Example:
+        ```python
+        pipeline = Pipeline.from_yaml("pipeline.yaml")
+        ```
+        """
+        return pipeline_from_yaml(file_path, **kwargs)
+
+    @classmethod
+    def from_json(cls, json_string: str, **kwargs) -> "Pipeline":
+        """Create a pipeline from a JSON string.
+
+        Args:
+            json_string (str): JSON string representing the pipeline.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the `operations` key.
+
+        Example:
+        ```python
+        json_string = '{"operations": ["identity"]}'
+        pipeline = Pipeline.from_json(json_string)
+        ```
+        """
+        return pipeline_from_json(json_string, **kwargs)
 
     def to_config(self) -> Config:
         """Convert the pipeline to a `usbmd.Config` object."""
@@ -671,6 +713,23 @@ class Pipeline:
     def output_key(self) -> str:
         """Output key of the pipeline."""
         return self.operations[-1].output_key
+
+    def __eq__(self, other):
+        """Check if two pipelines are equal."""
+        if not isinstance(other, Pipeline):
+            return False
+
+        # Compare the operations in both pipelines
+        if len(self.operations) != len(other.operations):
+            return False
+
+        for op1, op2 in zip(self.operations, other.operations):
+            if not isinstance(op1, type(op2)):
+                return False
+            if op1.get_dict() != op2.get_dict():
+                return False
+
+        return True
 
     def prepare_parameters(
         self,
@@ -801,9 +860,6 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
     return chain
 
 
-# Loading functions
-
-
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a Config object.
@@ -843,9 +899,6 @@ def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
     return pipeline_from_config(Config({"operations": operations}), **kwargs)
 
 
-# Save functions
-
-
 def pipeline_to_config(pipeline: Pipeline) -> Config:
     """
     Convert a Pipeline instance into a Config object.
@@ -861,7 +914,7 @@ def pipeline_to_json(pipeline: Pipeline) -> str:
     """
     Convert a Pipeline instance into a JSON string.
     """
-    pipeline_dict = {'operations': [pipeline.get_dict()]}
+    pipeline_dict = {"operations": [pipeline.get_dict()]}
     return json.dumps(pipeline_dict, cls=USBMDEncoderJSON, indent=4)
 
 
