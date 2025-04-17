@@ -21,6 +21,7 @@ from keras.src.utils import backend_utils
 
 from usbmd.data.layers import Resizer
 from usbmd.utils import log, map_negative_indices, translate
+from usbmd.utils.checks import _DATA_TYPES, get_check
 from usbmd.utils.io_lib import _get_shape_hdf5_file, retry_on_io_error, search_file_tree
 
 if keras.backend.backend() == "jax":
@@ -215,7 +216,7 @@ def generate_h5_indices(
 
 
 def _find_h5_files_from_directory(
-    directory,
+    directory: str | list,
     key: str,
     search_file_tree_kwargs: dict | None = None,
     additional_axes_iter: tuple | None = None,
@@ -349,7 +350,7 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
 
     def __init__(
         self,
-        directory: str = None,
+        directory: str | List[str] = None,
         file_names: List[str] = None,
         file_shapes: List[tuple] = None,
         n_frames: int = 1,
@@ -407,6 +408,8 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
                 self.search_file_tree_kwargs,
                 self.additional_axes_iter,
             )
+            self.file_names = file_names
+            self.file_shapes = file_shapes
 
         assert len(file_names) > 0, f"No files in directories:\n{directory}"
 
@@ -469,6 +472,9 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         # Retry count for I/O errors
         self.retry_count = 0
 
+    def __repr__(self):
+        return f"{self.__class__.__name__} containing {len(self)} batches."
+
     def __getitem__(self, index):
         if index == 0 and self.shuffle:
             self._shuffle()
@@ -479,7 +485,7 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
 
         images = []
         for indices in indices_list:
-            images.append(self.extract_image(*indices))
+            images.append(self.load(*indices))
 
         if self.batch_size == 1:
             images = images[0]
@@ -524,8 +530,8 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         initial_delay=INITIAL_RETRY_DELAY,
         retry_action=_h5_reopen_on_io_error,
     )
-    def extract_image(self, file_name, key, indices):
-        """Extract image from hdf5 file.
+    def load(self, file_name: str, key: str, indices: tuple | str):
+        """Extract data from hdf5 file.
         Args:
             file_name (str): name of the file to extract image from.
             key (str): key of the hdf5 dataset to grab data from.
@@ -533,13 +539,18 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         Returns:
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
-        file_name, key, indices = indices
         file = self.get_file(file_name)
 
-        # Convert any range objects in indices to lists
-        processed_indices = tuple(
-            list(idx) if isinstance(idx, range) else idx for idx in indices
-        )
+        # TODO: add event logic
+
+        if indices == "all":
+            # TODO: test this
+            processed_indices = slice(None)
+        else:
+            # Convert any range objects in indices to lists
+            processed_indices = tuple(
+                list(idx) if isinstance(idx, range) else idx for idx in indices
+            )
 
         try:
             images = file[key][processed_indices]
@@ -552,6 +563,10 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
                 f"Could not load image at index {processed_indices} "
                 f"and file {file_name} of shape {file[key].shape}"
             ) from exc
+
+        # If the key is a usbmd datatype, check the data
+        if key in _DATA_TYPES:
+            get_check(key)(images, with_batch_dim=True)  # TODO: fix with_batch_dim
 
         # stack frames along frame_axis
         if self.insert_frame_axis:
@@ -584,6 +599,40 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         # Explicitly call the parent class destructors
         keras.utils.PyDataset.__del__(self)
         H5FileHandleCache.__del__(self)
+
+    @staticmethod
+    def get_probe_name(h5_file):
+        """Reads the probe name from the data file and returns it."""
+        assert "probe" in h5_file.attrs, (
+            "Probe name not found in file attributes. "
+            "Make sure you are using a USBMD dataset. "
+            f"Found attributes: {list(h5_file.attrs)}"
+        )
+        probe_name = h5_file.attrs["probe"]
+        return probe_name
+
+    @staticmethod
+    def event_structure(h5_file):
+        """Whether the files in the dataset have an event structure."""
+        return h5_file.attrs.get("event_structure", False)
+
+    def num_frames(self, file_name):
+        """Return number of frames in a file."""
+        # TODO: what about multiple events?
+        file_shape = _get_shape_hdf5_file(file_name, self.key)
+        return file_shape[self.initial_frame_axis]
+
+    @property
+    def n_files(self):
+        """Return number of files in dataset."""
+        return len(self.file_names)
+
+    @property
+    def total_frames(self):
+        """Return total number of frames in dataset."""
+        return sum(
+            [file_shape[self.initial_frame_axis] for file_shape in self.file_shapes]
+        )
 
 
 class H5Dataloader(H5Generator):
