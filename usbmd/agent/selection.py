@@ -122,7 +122,8 @@ class GreedyEntropy(LinesActionModel):
             particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
 
         Returns:
-            Tensor: batch of pixelwise pairwise Gaussian errors, of shape (n_particles, n_particles, batch, height, width)
+            Tensor: batch of pixelwise pairwise Gaussian errors,
+            of shape (n_particles, n_particles, batch, height, width)
         """
         assert (
             particles.shape[0] > 1
