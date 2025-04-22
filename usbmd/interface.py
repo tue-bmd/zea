@@ -18,7 +18,7 @@ from PIL import Image
 
 from usbmd.config import Config
 from usbmd.core import DataTypes
-from usbmd.data import get_dataset
+from usbmd.data.file import File
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
 from usbmd.probes import get_probe
@@ -53,7 +53,7 @@ class Interface:
         # intialize dataset
         if dataset_kwargs is None:
             dataset_kwargs = {}
-        self.dataset = get_dataset(self.config.data, **dataset_kwargs)
+        self.dataset = File.from_config(**self.config.data, **dataset_kwargs)
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()

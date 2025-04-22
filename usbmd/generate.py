@@ -19,8 +19,8 @@ import tqdm
 
 from usbmd.config import Config
 from usbmd.core import DataTypes
-from usbmd.data import get_dataset
 from usbmd.data.data_format import generate_usbmd_dataset
+from usbmd.data.file import File
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
 from usbmd.probes import get_probe
@@ -78,7 +78,7 @@ class GenerateDataSet:
         self.verbose = verbose
 
         # intialize dataset
-        self.dataset = get_dataset(self.config.data)
+        self.dataset = File.from_config(**self.config.data)
 
         # Initialize scan based on dataset (if it can find proper scan parameters)
         scan_class = self.dataset.get_scan_class()
