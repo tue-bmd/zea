@@ -30,6 +30,10 @@ jobs:
             echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
           fi
 
+          # Print out the tag we just set for debugging
+          TAG_VALUE=$(grep '^tag=' "$GITHUB_OUTPUT" | cut -d'=' -f2-)
+          echo "Determined image tag: $TAG_VALUE"
+
   build-full-image:
     needs: set-tag
     runs-on: ubuntu-latest
