@@ -8,14 +8,14 @@
 		"dockerfile": "../Dockerfile"
 	},
 	// Ensure the .env file exists
-	// "initializeCommand": "touch ${localWorkspaceFolder}/.env",
+	"initializeCommand": "touch ${localWorkspaceFolder}/.env",
 	"runArgs": [
 		"--gpus", "all",
-		// "-m",
-		// "100g",
-		// "--cpus",
-		// "7",
-		// "--env-file", "${localWorkspaceFolder}/.env"
+		"-m",
+		"100g",
+		"--cpus",
+		"7",
+		"--env-file", "${localWorkspaceFolder}/.env"
 	],
 	// Link the workspace folder to the container
 	"workspaceMount": "source=${localWorkspaceFolder},target=/ultrasound-toolbox,type=bind",
@@ -23,13 +23,13 @@
 	"shutdownAction": "stopContainer",
 	"containerUser": "devcontainer0", // change this to your username in the container
 	// Mount the NAS drive
-	// "mounts": [
-	// 	{
-	// 		"source": "bmd-ai",
-	// 		"target": "/mnt/z",
-	// 		"type": "volume"
-	// 	}
-	// ],
+	"mounts": [
+		{
+			"source": "bmd-ai",
+			"target": "/mnt/z",
+			"type": "volume"
+		}
+	],
 	// Install vscode extensions
 	"customizations": {
 		"vscode": {
