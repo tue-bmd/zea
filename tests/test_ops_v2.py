@@ -110,11 +110,56 @@ def pipeline_config_with_params():
 
 
 @pytest.fixture
+def default_pipeline_config():
+    """Config for default pipeline"""
+    return {
+        "operations": [
+            {"name": "simulate_rf"},
+            {"name": "demodulate"},
+            {"name": "tof_correction", "params": {"apply_phase_rotation": True}},
+            {"name": "pfield_weighting"},
+            {"name": "delay_and_sum"},
+            {"name": "envelope_detect"},
+            {"name": "normalize"},
+            {"name": "log_compress"},
+        ]
+    }
+
+
+@pytest.fixture
+def patched_pipeline_config():
+    """Config for patch-wise default pipeline"""
+    return {
+        "operations": [
+            {"name": "simulate_rf"},
+            {"name": "demodulate"},
+            {
+                "name": "patched_grid",
+                "params": {"num_patches": 15},
+                "operations": [
+                    {
+                        "name": "tof_correction",
+                        "params": {"apply_phase_rotation": True},
+                    },
+                    {"name": "pfield_weighting"},
+                    {"name": "delay_and_sum"},
+                ],
+            },
+            {"name": "envelope_detect"},
+            {"name": "normalize"},
+            {"name": "log_compress"},
+        ]
+    }
+
+
+@pytest.fixture
 def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(
+        ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255))
+    )
     return pipeline
 
 
@@ -123,7 +168,9 @@ def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     pipeline = ops.Pipeline.from_default(jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(
+        ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255))
+    )
     return pipeline
 
 
@@ -312,44 +359,96 @@ def test_pipeline_with_scan_probe_config():
 """Pipeline build from config / json tests"""
 
 
+def validate_basic_pipeline(pipeline, with_params=False):
+    """Validates a basic pipeline."""
+    assert len(pipeline.operations) == 2
+    assert isinstance(pipeline.operations[0], MultiplyOperation)
+    assert isinstance(pipeline.operations[1], AddOperation)
+    if with_params:
+        assert pipeline.operations[0].useless_parameter == 10
+
+    result = pipeline(x=2, y=3)
+    assert result["z"] == 9  # (2 * 3) + 3
+
+
+def validate_default_pipeline(pipeline, patched=False):
+    """Validates the default pipeline."""
+    assert isinstance(pipeline.operations[0], ops.Simulate)
+    assert isinstance(pipeline.operations[1], ops.Demodulate)
+
+    if not patched:
+        assert isinstance(pipeline.operations[2], ops.TOFCorrection)
+        assert isinstance(pipeline.operations[3], ops.PfieldWeighting)
+        assert isinstance(pipeline.operations[4], ops.DelayAndSum)
+        assert isinstance(pipeline.operations[5], ops.EnvelopeDetect)
+        assert isinstance(pipeline.operations[6], ops.Normalize)
+        assert isinstance(pipeline.operations[7], ops.LogCompress)
+    else:
+        patched_grid = pipeline.operations[2]
+        assert hasattr(patched_grid, "operations")
+        assert isinstance(patched_grid.operations[0], ops.TOFCorrection)
+        assert isinstance(patched_grid.operations[1], ops.PfieldWeighting)
+        assert isinstance(patched_grid.operations[2], ops.DelayAndSum)
+
+        assert isinstance(pipeline.operations[3], ops.EnvelopeDetect)
+        assert isinstance(pipeline.operations[4], ops.Normalize)
+        assert isinstance(pipeline.operations[5], ops.LogCompress)
+
+
 @pytest.mark.parametrize(
     "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
 )
 def test_pipeline_from_json(config_fixture, request):
-    """Tests creating a pipeline from a JSON string."""
+    """Tests building a dummy pipeline from a JSON string."""
     config = request.getfixturevalue(config_fixture)
     json_string = json.dumps(config)
     pipeline = ops.pipeline_from_json(json_string, jit_options=None)
 
-    assert len(pipeline.operations) == 2
-    assert isinstance(pipeline.operations[0], MultiplyOperation)
-    assert isinstance(pipeline.operations[1], AddOperation)
+    validate_basic_pipeline(
+        pipeline, with_params=config_fixture == "pipeline_config_with_params"
+    )
 
-    result = pipeline(x=2, y=3)
-    if config_fixture == "pipeline_config_with_params":
-        assert pipeline.operations[0].useless_parameter == 10
 
-    assert result["z"] == 9  # (2 * 3) + 3
+@pytest.mark.parametrize(
+    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+)
+def test_default_pipeline_from_json(config_fixture, request):
+    """Tests building a default pipeline from a JSON string."""
+    config = request.getfixturevalue(config_fixture)
+    json_string = json.dumps(config)
+    pipeline = ops.pipeline_from_json(json_string, jit_options=None)
+
+    validate_default_pipeline(
+        pipeline, patched=config_fixture == "patched_pipeline_config"
+    )
 
 
 @pytest.mark.parametrize(
     "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
 )
 def test_pipeline_from_config(config_fixture, request):
-    """Tests creating a pipeline from a Config object."""
+    """Tests building a dummy pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
     pipeline = ops.pipeline_from_config(config, jit_options=None)
 
-    assert len(pipeline.operations) == 2
-    assert isinstance(pipeline.operations[0], MultiplyOperation)
-    assert isinstance(pipeline.operations[1], AddOperation)
+    validate_basic_pipeline(
+        pipeline, with_params=config_fixture == "pipeline_config_with_params"
+    )
 
-    result = pipeline(x=2, y=3)
-    if config_fixture == "pipeline_config_with_params":
-        assert pipeline.operations[0].useless_parameter == 10
 
-    assert result["z"] == 9  # (2 * 3) + 3
+@pytest.mark.parametrize(
+    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+)
+def test_default_pipeline_from_config(config_fixture, request):
+    """Tests building a default pipeline from a Config object."""
+    config_dict = request.getfixturevalue(config_fixture)
+    config = Config(**config_dict)
+    pipeline = ops.pipeline_from_config(config, jit_options=None)
+
+    validate_default_pipeline(
+        pipeline, patched=config_fixture == "patched_pipeline_config"
+    )
 
 
 def get_probe():

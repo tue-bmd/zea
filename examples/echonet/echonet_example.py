@@ -9,7 +9,8 @@ https://echonet.github.io/dynamic/
 
 import os
 
-# NOTE: should be `tensorflow` for EchoNetDynamic
+# NOTE: should be `tensorflow` or `jax` for EchoNetDynamic
+# You'll need tf2jax installed to use JAX backend
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -19,6 +20,7 @@ from keras import ops
 from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.models.echonet import EchoNetDynamic
+from usbmd.utils import translate
 from usbmd.utils.selection_tool import add_shape_from_mask
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
@@ -33,7 +35,7 @@ if __name__ == "__main__":
         key="data/image",
         batch_size=n_imgs,
         shuffle=True,
-        image_size=[256, 256],
+        image_size=[112, 112],
         resize_type="resize",
         image_range=[-60, 0],
         normalization_range=[-1, 1],
@@ -46,14 +48,16 @@ if __name__ == "__main__":
     model = EchoNetDynamic.from_preset("echonet-dynamic")
 
     batch = next(iter(val_dataset))
+    rgb_batch = ops.concatenate([batch, batch, batch], axis=-1)  # grayscale to RGB
 
-    masks = model(batch)
+    masks = model(rgb_batch)
     masks = ops.squeeze(masks, axis=-1)
     masks = ops.convert_to_numpy(masks)
 
     set_mpl_style()
 
-    fig, _ = plot_image_grid(batch)
+    batch = translate(rgb_batch, [-1, 1], [0, 1])
+    fig, _ = plot_image_grid(batch, vmin=0, vmax=1)
     axes = fig.axes[:n_imgs]
     for ax, mask in zip(axes, masks):
         add_shape_from_mask(ax, mask, color="red", alpha=0.5)
