@@ -103,7 +103,11 @@ jobs:
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
       - name: Pull full Docker image
-        run: docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+        run: |
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then \
+          echo "Image tag not set!" && exit 1 \
+          fi
+          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pylint in container
         run: |
@@ -129,7 +133,11 @@ jobs:
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
       - name: Pull full Docker image
-        run: docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+        run: |
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then \
+          echo "Image tag not set!" && exit 1 \
+          fi
+          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pytest in container
         run: |
