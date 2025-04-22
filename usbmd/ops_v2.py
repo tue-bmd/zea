@@ -24,7 +24,7 @@ from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, reshape_axis
-from usbmd.utils import log, translate
+from usbmd.utils import deep_compare, log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
@@ -258,6 +258,27 @@ class Operation(keras.Operation):
             "jit_kwargs": self.jit_kwargs,
         }
         return config
+
+    def __eq__(self, other):
+        """Check equality of two operations based on type and configuration."""
+        if not isinstance(other, Operation):
+            return False
+
+        # Compare the class name and parameters
+        if self.__class__.__name__ != other.__class__.__name__:
+            return False
+
+        # Compare the name assigned to the operation
+        name = ops_registry.get_name(self)
+        other_name = ops_registry.get_name(other)
+        if name != other_name:
+            return False
+
+        # Compare the parameters of the operations
+        if not deep_compare(self.get_dict(), other.get_dict()):
+            return False
+
+        return True
 
 
 @ops_registry("pipeline")
@@ -716,9 +737,7 @@ class Pipeline:
             return False
 
         for op1, op2 in zip(self.operations, other.operations):
-            if not isinstance(op1, type(op2)):
-                return False
-            if op1.get_dict() != op2.get_dict():
+            if not op1 == op2:
                 return False
 
         return True
