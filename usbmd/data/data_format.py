@@ -9,7 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
+from usbmd.data.file import recursively_load_dict_contents_from_group
 from usbmd.probes import get_probe
 from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import (

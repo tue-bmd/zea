@@ -64,7 +64,7 @@ def get_check(data_type):
 
 
 @checks_registry("raw_data")
-def _check_raw_data(data=None, shape=None, with_batch_dim=False):
+def _check_raw_data(data=None, shape=None, with_batch_dim=None):
     """Check raw data shape.
 
     If data is provided, shape is derived from data.
@@ -89,6 +89,9 @@ def _check_raw_data(data=None, shape=None, with_batch_dim=False):
     if data is not None:
         shape = data.shape
 
+    if with_batch_dim is None:
+        with_batch_dim = len(shape) == 5
+
     if not with_batch_dim:
         assert len(shape) == 4, (
             "raw data must be 4D, with expected shape [n_tx, n_ax, n_el, n_ch], "
@@ -106,7 +109,7 @@ def _check_raw_data(data=None, shape=None, with_batch_dim=False):
 
 
 @checks_registry("aligned_data")
-def _check_aligned_data(data=None, shape=None, with_batch_dim=False):
+def _check_aligned_data(data=None, shape=None, with_batch_dim=None):
     """Check aligned data shape.
 
     If data is provided, shape is derived from data.
@@ -131,6 +134,9 @@ def _check_aligned_data(data=None, shape=None, with_batch_dim=False):
     if data is not None:
         shape = data.shape
 
+    if with_batch_dim is None:
+        with_batch_dim = len(shape) == 5
+
     if not with_batch_dim:
         assert len(shape) == 4, (
             "aligned data must be 4D, with expected shape [n_tx, n_ax, n_el, n_ch], "
@@ -148,7 +154,7 @@ def _check_aligned_data(data=None, shape=None, with_batch_dim=False):
 
 
 @checks_registry("beamformed_data")
-def _check_beamformed_data(data=None, shape=None, with_batch_dim=False):
+def _check_beamformed_data(data=None, shape=None, with_batch_dim=None):
     """Check beamformed data shape.
 
     If data is provided, shape is derived from data.
@@ -173,6 +179,9 @@ def _check_beamformed_data(data=None, shape=None, with_batch_dim=False):
     if data is not None:
         shape = data.shape
 
+    if with_batch_dim is None:
+        with_batch_dim = len(shape) == 4
+
     if not with_batch_dim:
         assert len(shape) == 3, (
             "beamformed data must be 3D, with expected shape [Ny, Nx, n_ch], "
@@ -190,7 +199,7 @@ def _check_beamformed_data(data=None, shape=None, with_batch_dim=False):
 
 
 @checks_registry("envelope_data")
-def _check_envelope_data(data=None, shape=None, with_batch_dim=False):
+def _check_envelope_data(data=None, shape=None, with_batch_dim=None):
     """Check envelope data shape.
 
     If data is provided, shape is derived from data.
@@ -214,6 +223,9 @@ def _check_envelope_data(data=None, shape=None, with_batch_dim=False):
     if data is not None:
         shape = data.shape
 
+    if with_batch_dim is None:
+        with_batch_dim = len(shape) == 3
+
     if not with_batch_dim:
         assert len(shape) == 2, (
             "envelope data must be 2D, with expected shape [Ny, Nx], " f"got {shape}"
@@ -226,7 +238,7 @@ def _check_envelope_data(data=None, shape=None, with_batch_dim=False):
 
 
 @checks_registry("image")
-def _check_image(data=None, shape=None, with_batch_dim=False):
+def _check_image(data=None, shape=None, with_batch_dim=None):
     """Check image data shape.
 
     If data is provided, shape is derived from data.
@@ -250,6 +262,9 @@ def _check_image(data=None, shape=None, with_batch_dim=False):
     if data is not None:
         shape = data.shape
 
+    if with_batch_dim is None:
+        with_batch_dim = len(shape) == 3
+
     if not with_batch_dim:
         assert len(shape) == 2, (
             "image data must be 2D, with expected shape [Ny, Nx], " f"got {shape}"
@@ -261,7 +276,7 @@ def _check_image(data=None, shape=None, with_batch_dim=False):
 
 
 @checks_registry("image_sc")
-def _check_image_sc(data=None, shape=None, with_batch_dim=False):
+def _check_image_sc(data=None, shape=None, with_batch_dim=None):
     """Check image data shape.
 
     If data is provided, shape is derived from data.
@@ -284,6 +299,9 @@ def _check_image_sc(data=None, shape=None, with_batch_dim=False):
     ), "Either data or shape must be provided."
     if data is not None:
         shape = data.shape
+
+    if with_batch_dim is None:
+        with_batch_dim = len(shape) == 3
 
     if not with_batch_dim:
         assert len(shape) == 2, (

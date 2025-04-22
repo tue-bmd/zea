@@ -14,7 +14,6 @@ import numpy as np
 from keras import ops
 
 from usbmd.core import STATIC, Object
-from usbmd.data.read_h5 import get_scan_parameters_from_file
 from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
@@ -925,10 +924,6 @@ class Scan(Object):
             "rho_range": self.rho_range,
             "fill_value": self.fill_value,
         }
-
-    @classmethod
-    def from_h5(cls, file, event=None):
-        return cls(**get_scan_parameters_from_file(file, event=event))
 
 
 class FocussedScan(Scan):

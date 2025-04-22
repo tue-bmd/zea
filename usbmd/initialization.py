@@ -5,28 +5,9 @@
 """
 
 from usbmd.probes import get_probe
-from usbmd.registry import dataset_registry, probe_registry
+from usbmd.registry import probe_registry
 from usbmd.scan import Scan
 from usbmd.utils import safe_initialize_class
-
-
-def get_probe_from_config(config):
-    """
-    Defines a probe based on parameters in a config.
-    Specifically, `data.dataset_name` key is necessary to
-    figure out which probe to initialize.
-
-    Args:
-        config (utils.config.Config): The config object to read parameters from.
-
-    """
-    dataset_name = config.data.dataset_name
-
-    probe_name = dataset_registry.get_parameter(
-        cls_or_name=dataset_name, parameter="probe_name"
-    )
-    probe = probe_registry[probe_name]
-    return probe
 
 
 def initialize_scan_from_probe(probe):

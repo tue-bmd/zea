@@ -12,7 +12,7 @@ import h5py
 import numpy as np
 import scipy.io as sio
 
-from usbmd.data.read_h5 import recursively_load_dict_contents_from_group
+from usbmd.data.file import recursively_load_dict_contents_from_group
 from usbmd.utils.io_lib import filename_from_window_dialog
 
 

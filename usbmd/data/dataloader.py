@@ -13,16 +13,16 @@ from itertools import product
 from pathlib import Path
 from typing import List
 
-import h5py
 import keras
 import numpy as np
 from keras import ops
 from keras.src.utils import backend_utils
 
+from usbmd.data.file import File, get_shape_hdf5_file
 from usbmd.data.layers import Resizer
 from usbmd.utils import log, map_negative_indices, translate
 from usbmd.utils.checks import _DATA_TYPES, get_check
-from usbmd.utils.io_lib import _get_shape_hdf5_file, retry_on_io_error, search_file_tree
+from usbmd.utils.io_lib import retry_on_io_error, search_file_tree
 
 if keras.backend.backend() == "jax":
     from usbmd.backend.jax import on_device_jax as on_device
@@ -247,7 +247,7 @@ def _find_h5_files_from_directory(
     # 'directory' is actually just a single hdf5 file
     if not isinstance(directory, list) and Path(directory).is_file():
         filename = directory
-        file_shapes = [_get_shape_hdf5_file(filename, key)]
+        file_shapes = [get_shape_hdf5_file(filename, key)]
         file_names = [str(filename)]
 
     # 'directory' points to a directory or list of directories
@@ -325,7 +325,7 @@ class H5FileHandleCache:
             file = self._file_handle_cache[file_name]
             # if file was closed, reopen:
             if not self._check_if_open(file):
-                file = h5py.File(file_name, "r", locking=False)
+                file = File(file_name, "r")
                 self._file_handle_cache[file_name] = file
         # If file is not in cache, open it and add it to the cache
         else:
@@ -333,7 +333,7 @@ class H5FileHandleCache:
             if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
                 _, close_file = self._file_handle_cache.popitem(last=False)
                 close_file.close()
-            file = h5py.File(file_name, "r", locking=False)
+            file = File(file_name, "r")
             self._file_handle_cache[file_name] = file
 
         return self._file_handle_cache[file_name]
@@ -541,32 +541,17 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         """
         file = self.get_file(file_name)
 
-        # TODO: add event logic
-
-        if indices == "all":
-            # TODO: test this
-            processed_indices = slice(None)
-        else:
-            # Convert any range objects in indices to lists
-            processed_indices = tuple(
-                list(idx) if isinstance(idx, range) else idx for idx in indices
-            )
-
         try:
-            images = file[key][processed_indices]
+            images = file[key][indices]
         except (OSError, IOError):
             # Let the decorator handle I/O errors
             raise
         except Exception as exc:
             # For non-I/O errors, provide detailed context
             raise ValueError(
-                f"Could not load image at index {processed_indices} "
+                f"Could not load image at index {indices} "
                 f"and file {file_name} of shape {file[key].shape}"
             ) from exc
-
-        # If the key is a usbmd datatype, check the data
-        if key in _DATA_TYPES:
-            get_check(key)(images, with_batch_dim=True)  # TODO: fix with_batch_dim
 
         # stack frames along frame_axis
         if self.insert_frame_axis:
@@ -599,28 +584,6 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         # Explicitly call the parent class destructors
         keras.utils.PyDataset.__del__(self)
         H5FileHandleCache.__del__(self)
-
-    @staticmethod
-    def get_probe_name(h5_file):
-        """Reads the probe name from the data file and returns it."""
-        assert "probe" in h5_file.attrs, (
-            "Probe name not found in file attributes. "
-            "Make sure you are using a USBMD dataset. "
-            f"Found attributes: {list(h5_file.attrs)}"
-        )
-        probe_name = h5_file.attrs["probe"]
-        return probe_name
-
-    @staticmethod
-    def event_structure(h5_file):
-        """Whether the files in the dataset have an event structure."""
-        return h5_file.attrs.get("event_structure", False)
-
-    def num_frames(self, file_name):
-        """Return number of frames in a file."""
-        # TODO: what about multiple events?
-        file_shape = _get_shape_hdf5_file(file_name, self.key)
-        return file_shape[self.initial_frame_axis]
 
     @property
     def n_files(self):
