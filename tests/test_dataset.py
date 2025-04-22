@@ -10,7 +10,7 @@ import pytest
 
 from usbmd.config import Config
 from usbmd.config.validation import check_config
-from usbmd.data import generate_usbmd_dataset, get_dataset
+from usbmd.data import File, generate_usbmd_dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup_config
 
@@ -50,7 +50,7 @@ def test_dataset_indexing(file_idx, frame_idx):
 
     config = {"data": {"dataset_folder": str(temp_folder), "dtype": "image"}}
     config = check_config(Config(config))
-    dataset = get_dataset(config.data)
+    dataset = File.from_config(**config.data)
 
     data = dataset[(file_idx, frame_idx)]
 

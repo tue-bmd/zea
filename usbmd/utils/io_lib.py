@@ -35,7 +35,7 @@ from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
-from usbmd.data.read_h5 import H5File
+from usbmd.data.file import get_shape_hdf5_file
 from usbmd.utils import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
@@ -176,12 +176,6 @@ def load_image(filename, grayscale=True, color_order="RGB"):
     return image
 
 
-def _get_shape_hdf5_file(filepath, key):
-    """Retrieve the shape of some key in a hdf5 file."""
-    with H5File(filepath, mode="r") as f:
-        return f.shape(key)
-
-
 def search_file_tree(
     directory,
     filetypes=None,
@@ -288,8 +282,8 @@ def search_file_tree(
         if verbose:
             log.info("Getting number of frames in each hdf5 file...")
 
-        _get_shape_hdf5_file_partial = functools.partial(
-            _get_shape_hdf5_file, key=hdf5_key_for_length
+        get_shape_hdf5_file_partial = functools.partial(
+            get_shape_hdf5_file, key=hdf5_key_for_length
         )
         # make sure to call search_file_tree from within a function
         # or use if __name__ == "__main__":
@@ -300,7 +294,7 @@ def search_file_tree(
                 file_shapes = list(
                     tqdm.tqdm(
                         pool.imap(
-                            _get_shape_hdf5_file_partial,
+                            get_shape_hdf5_file_partial,
                             absolute_file_paths,
                         ),
                         total=len(file_paths),
@@ -315,7 +309,7 @@ def search_file_tree(
                 desc="Getting number of frames in each hdf5 file",
                 disable=not verbose,
             ):
-                file_shapes.append(_get_shape_hdf5_file(file_path, hdf5_key_for_length))
+                file_shapes.append(get_shape_hdf5_file(file_path, hdf5_key_for_length))
 
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
     if verbose:

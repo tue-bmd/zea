@@ -1,5 +1,7 @@
 """Tests for the read_h5 module."""
 
+# TODO: redo these tests for the new File class
+
 import os
 from pathlib import Path
 
@@ -7,11 +9,12 @@ import h5py
 import numpy as np
 import pytest
 
-from usbmd.data.read_h5 import (
+from usbmd.data.file import (
     ReadH5,
     print_hdf5_attrs,
     recursively_load_dict_contents_from_group,
 )
+from usbmd.data.legacy_datasets import ReadH5
 
 
 @pytest.fixture
