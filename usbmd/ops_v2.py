@@ -16,6 +16,7 @@ from usbmd.beamformer import tof_correction_flatgrid
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
+from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
 from usbmd.display import scan_convert_2d, scan_convert_3d
 from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
@@ -23,7 +24,7 @@ from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, reshape_axis
-from usbmd.utils import log, translate
+from usbmd.utils import deep_compare, log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
 log.warning("WARNING: This module is work in progress and may not work as expected!")
@@ -243,7 +244,44 @@ class Operation(keras.Operation):
 
         return combined_kwargs
 
+    def get_dict(self):
+        """Get the configuration of the operation. Inherit from keras.Operation."""
+        config = {}
+        config.update({"name": ops_registry.get_name(self)})
+        config["params"] = {
+            "key": self.key,
+            "output_key": self.output_key,
+            "cache_inputs": self.cache_inputs,
+            "cache_outputs": self.cache_outputs,
+            "jit_compile": self._jit_compile,
+            "with_batch_dim": self.with_batch_dim,
+            "jit_kwargs": self.jit_kwargs,
+        }
+        return config
 
+    def __eq__(self, other):
+        """Check equality of two operations based on type and configuration."""
+        if not isinstance(other, Operation):
+            return False
+
+        # Compare the class name and parameters
+        if self.__class__.__name__ != other.__class__.__name__:
+            return False
+
+        # Compare the name assigned to the operation
+        name = ops_registry.get_name(self)
+        other_name = ops_registry.get_name(other)
+        if name != other_name:
+            return False
+
+        # Compare the parameters of the operations
+        if not deep_compare(self.get_dict(), other.get_dict()):
+            return False
+
+        return True
+
+
+@ops_registry("pipeline")
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
@@ -400,14 +438,6 @@ class Pipeline:
             }
 
         return outputs
-
-    def prepare_input(self, *args):
-        """Convert input data and parameters to dictionary of tensors following the CCC"""
-        raise NotImplementedError
-
-    def prepare_output(self, kwargs):
-        """Convert output data to dictionary of tensors following the CCC"""
-        raise NotImplementedError
 
     def reset_jit(self):
         """Reset the JIT compilation of the pipeline."""
@@ -596,11 +626,36 @@ class Pipeline:
         else:
             raise ValueError("File must have extension .json, .yaml, or .yml")
 
+    def get_dict(self) -> dict:
+        """Convert the pipeline to a dictionary."""
+        config = {}
+        config["name"] = ops_registry.get_name(self)
+        config["operations"] = self._pipeline_to_list(self)
+        config["params"] = {
+            "with_batch_dim": self.with_batch_dim,
+            "jit_options": self.jit_options,
+            "jit_kwargs": self.jit_kwargs,
+        }
+        return config
+
+    @staticmethod
+    def _pipeline_to_list(pipeline):
+        """Convert the pipeline to a list of operations."""
+        ops_list = []
+        for op in pipeline.operations:
+            ops_list.append(op.get_dict())
+        return ops_list
+
     @classmethod
     def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
         """Create a pipeline from a dictionary or `usbmd.Config` object.
 
-        Must have an 'operations' key with a list of operations.
+        Args:
+            config (dict or Config): Configuration dictionary or `usbmd.Config` object.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the a `pipeline` key with a subkey `operations`.
 
         Example:
         ```python
@@ -613,6 +668,55 @@ class Pipeline:
         """
         return pipeline_from_config(Config(config), **kwargs)
 
+    @classmethod
+    def from_yaml(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Create a pipeline from a YAML file.
+
+        Args:
+            file_path (str): Path to the YAML file.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the a `pipeline` key with a subkey `operations`.
+
+        Example:
+        ```python
+        pipeline = Pipeline.from_yaml("pipeline.yaml")
+        ```
+        """
+        return pipeline_from_yaml(file_path, **kwargs)
+
+    @classmethod
+    def from_json(cls, json_string: str, **kwargs) -> "Pipeline":
+        """Create a pipeline from a JSON string.
+
+        Args:
+            json_string (str): JSON string representing the pipeline.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the `operations` key.
+
+        Example:
+        ```python
+        json_string = '{"operations": ["identity"]}'
+        pipeline = Pipeline.from_json(json_string)
+        ```
+        """
+        return pipeline_from_json(json_string, **kwargs)
+
+    def to_config(self) -> Config:
+        """Convert the pipeline to a `usbmd.Config` object."""
+        return pipeline_to_config(self)
+
+    def to_json(self) -> str:
+        """Convert the pipeline to a JSON string."""
+        return pipeline_to_json(self)
+
+    def to_yaml(self, file_path: str) -> None:
+        """Convert the pipeline to a YAML file."""
+        pipeline_to_yaml(self, file_path)
+
     @property
     def key(self) -> str:
         """Input key of the pipeline."""
@@ -622,6 +726,21 @@ class Pipeline:
     def output_key(self) -> str:
         """Output key of the pipeline."""
         return self.operations[-1].output_key
+
+    def __eq__(self, other):
+        """Check if two pipelines are equal."""
+        if not isinstance(other, Pipeline):
+            return False
+
+        # Compare the operations in both pipelines
+        if len(self.operations) != len(other.operations):
+            return False
+
+        for op1, op2 in zip(self.operations, other.operations):
+            if not op1 == op2:
+                return False
+
+        return True
 
     def prepare_parameters(
         self,
@@ -752,11 +871,32 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
     return chain
 
 
+def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a Config object.
+    """
+    assert (
+        "operations" in config
+    ), "Config object must have an 'operations' key for pipeline creation."
+    assert isinstance(
+        config.operations, (list, np.ndarray)
+    ), "Config object must have a list or numpy array of operations for pipeline creation."
+
+    operations = make_operation_chain(config.operations)
+
+    # merge pipeline config without operations with kwargs
+    pipeline_config = copy.deepcopy(config)
+    pipeline_config.pop("operations")
+
+    kwargs = {**pipeline_config, **kwargs}
+    return Pipeline(operations=operations, **kwargs)
+
+
 def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a JSON string.
     """
-    pipeline_config = Config(json.loads(json_string))
+    pipeline_config = Config(json.loads(json_string, cls=USBMDDecoderJSON))
     return pipeline_from_config(pipeline_config, **kwargs)
 
 
@@ -770,25 +910,50 @@ def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
     return pipeline_from_config(Config({"operations": operations}), **kwargs)
 
 
-def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+def pipeline_to_config(pipeline: Pipeline) -> Config:
     """
-    Create a Pipeline instance from a Config object.
+    Convert a Pipeline instance into a Config object.
     """
-    assert (
-        "operations" in config
-    ), "Config object must have an 'operations' key for pipeline creation."
-    assert isinstance(
-        config.operations, list
-    ), "Config object must have a list of operations for pipeline creation."
+    # TODO: we currently add the full pipeline as 1 operation to the config.
+    # In another PR we should add a "pipeline" entry to the config instead of the "operations"
+    # entry. This allows us to also have non-default pipeline classes as top level op.
+    pipeline_dict = {"operations": [pipeline.get_dict()]}
 
-    operations = make_operation_chain(config.operations)
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
 
-    # merge pipeline config without operations with kwargs
-    pipeline_config = copy.deepcopy(config)
-    pipeline_config.pop("operations")
+    return Config(pipeline_dict)
 
-    kwargs = {**pipeline_config, **kwargs}
-    return Pipeline(operations=operations, **kwargs)
+
+def pipeline_to_json(pipeline: Pipeline) -> str:
+    """
+    Convert a Pipeline instance into a JSON string.
+    """
+    pipeline_dict = {"operations": [pipeline.get_dict()]}
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
+    return json.dumps(pipeline_dict, cls=USBMDEncoderJSON, indent=4)
+
+
+def pipeline_to_yaml(pipeline: Pipeline, file_path: str) -> None:
+    """
+    Convert a Pipeline instance into a YAML file.
+    """
+    pipeline_dict = pipeline.get_dict()
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        yaml.dump(pipeline_dict, f, Dumper=yaml.Dumper, indent=4)
 
 
 @ops_registry("patched_grid")
@@ -890,6 +1055,13 @@ class PatchedGrid(Pipeline):
         output = self._jittable_call(**inputs)
         inputs.update(output)
         return inputs
+
+    def get_dict(self):
+        """Get the configuration of the pipeline."""
+        config = super().get_dict()
+        config.update({"name": "patched_grid"})
+        config["params"].update({"num_patches": self.num_patches})
+        return config
 
 
 ## Base Operations
