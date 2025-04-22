@@ -899,6 +899,12 @@ def pipeline_to_config(pipeline: Pipeline) -> Config:
     # In another PR we should add a "pipeline" entry to the config instead of the "operations"
     # entry. This allows us to also have non-default pipeline classes as top level op.
     pipeline_dict = {"operations": [pipeline.get_dict()]}
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
     return Config(pipeline_dict)
 
 
@@ -907,6 +913,12 @@ def pipeline_to_json(pipeline: Pipeline) -> str:
     Convert a Pipeline instance into a JSON string.
     """
     pipeline_dict = {"operations": [pipeline.get_dict()]}
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
     return json.dumps(pipeline_dict, cls=USBMDEncoderJSON, indent=4)
 
 
@@ -915,6 +927,12 @@ def pipeline_to_yaml(pipeline: Pipeline, file_path: str) -> None:
     Convert a Pipeline instance into a YAML file.
     """
     pipeline_dict = pipeline.get_dict()
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
     with open(file_path, "w", encoding="utf-8") as f:
         yaml.dump(pipeline_dict, f, Dumper=yaml.Dumper, indent=4)
 

@@ -470,9 +470,11 @@ def test_pipeline_to_config(config_fixture, request):
     # root pipeline. However the root can also be a pipeline subclass. Because of this, after saving
     # first entry in config.operations is always a Pipeline, which can contain any other type of
     # pipeline or operation. This should be changed in a future version.
-    # TODO: in new version, use the validate_pipeline function to validate the pipeline
-    for op in zip(pipeline.operations, new_pipeline.operations[0].operations):
-        assert isinstance(op[0], type(op[1]))
+
+    validate_default_pipeline(
+        new_pipeline, patched=config_fixture == "patched_pipeline_config"
+    )
+
 
 
 @pytest.mark.parametrize(
@@ -490,10 +492,9 @@ def test_pipeline_to_json(config_fixture, request):
     # Create a new pipeline from the JSON string
     new_pipeline = ops.pipeline_from_json(json_string, jit_options=None)
 
-    # TODO: in new version, use the validate_pipeline function to validate the pipeline
-    for op in zip(pipeline.operations, new_pipeline.operations[0].operations):
-        assert isinstance(op[0], type(op[1]))
-
+    validate_default_pipeline(
+        new_pipeline, patched=config_fixture == "patched_pipeline_config"
+    )
 
 @pytest.mark.parametrize("config_fixture", ["default_pipeline_config", "patched_pipeline_config"])
 def test_pipeline_to_yaml(config_fixture, request, tmp_path):
@@ -509,10 +510,9 @@ def test_pipeline_to_yaml(config_fixture, request, tmp_path):
     # Load the pipeline from the YAML file
     new_pipeline = ops.pipeline_from_yaml(path, jit_options=None)
 
-    # Compare operations to ensure they match in type
-    for op in zip(pipeline.operations, new_pipeline.operations):
-        assert isinstance(op[0], type(op[1]))
-
+    validate_default_pipeline(
+        new_pipeline, patched=config_fixture == "patched_pipeline_config"
+    )
 
 def get_probe():
     """Returns a probe for ultrasound simulation tests."""
