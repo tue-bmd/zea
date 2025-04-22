@@ -4,6 +4,7 @@
 - **Date**          : October 25th, 2022
 """
 
+import collections.abc
 import datetime
 import functools
 import hashlib
@@ -518,6 +519,27 @@ def safe_initialize_class(cls, **kwargs):
     reduced_params = {key: kwargs[key] for key in sig.parameters if key in kwargs}
 
     return cls(**reduced_params)
+
+
+def deep_compare(obj1, obj2):
+    """Recursively compare two objects for equality."""
+    # Only recurse into dicts
+    if isinstance(obj1, dict) and isinstance(obj2, dict):
+        if obj1.keys() != obj2.keys():
+            return False
+        return all(deep_compare(obj1[k], obj2[k]) for k in obj1)
+
+    # If not dict, but both are iterable (excluding strings/bytes), compare items
+    if (
+        isinstance(obj1, collections.abc.Iterable)
+        and isinstance(obj2, collections.abc.Iterable)
+        and not isinstance(obj1, (str, bytes))
+        and not isinstance(obj2, (str, bytes))
+    ):
+        return all(deep_compare(a, b) for a, b in zip(obj1, obj2))
+
+    # Fallback to direct comparison (also handles int, float, str, etc.)
+    return obj1 == obj2
 
 
 class FunctionTimer:
