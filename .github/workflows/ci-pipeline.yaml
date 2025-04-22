@@ -6,9 +6,32 @@ on:
     branches:
       - main
       - develop
+  release:
+    types: [published]
+
+env:
+  REGISTRY: docker.io
+  IMAGE_PREFIX: usbmd
 
 jobs:
+  set-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_tag: ${{ steps.set.outputs.tag }}
+    steps:
+      - name: Set image tag
+        id: set
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "push" && github.ref == 'refs/heads/main' ]]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          fi
+
   build-full-image:
+    needs: set-tag
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -23,21 +46,23 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push full Docker image (all)
+      - name: Build and push full Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
           push: true
-          tags: usbmd/all:latest
-          build-args: |
-            BACKEND=all
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all:${{ needs.set-tag.outputs.docker_tag }}
+          build-args: BACKEND=all
           cache-from: type=registry,ref=usbmd/all:cache
           cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
   build-other-images:
-    needs: build-full-image
+    needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        backend: [tensorflow, torch, jax, numpy]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -51,53 +76,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image (tensorflow)
+      - name: Build and push Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
           push: true
-          tags: usbmd/tensorflow:latest
-          build-args: |
-            BACKEND=tensorflow
-          cache-from: type=registry,ref=usbmd/tensorflow:cache
-          cache-to: type=registry,ref=usbmd/tensorflow:cache,mode=max
-
-      - name: Build and push Docker image (torch)
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: usbmd/torch:latest
-          build-args: |
-            BACKEND=torch
-          cache-from: type=registry,ref=usbmd/torch:cache
-          cache-to: type=registry,ref=usbmd/torch:cache,mode=max
-
-      - name: Build and push Docker image (jax)
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: usbmd/jax:latest
-          build-args: |
-            BACKEND=jax
-          cache-from: type=registry,ref=usbmd/jax:cache
-          cache-to: type=registry,ref=usbmd/jax:cache,mode=max
-
-      - name: Build and push Docker image (base)
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: usbmd/base:latest
-          build-args: |
-            BACKEND=numpy
-          cache-from: type=registry,ref=usbmd/base:cache
-          cache-to: type=registry,ref=usbmd/base:cache,mode=max
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
+          build-args: BACKEND=${{ matrix.backend }}
+          cache-from: type=registry,ref=usbmd/${{ matrix.backend }}:cache
+          cache-to: type=registry,ref=usbmd/${{ matrix.backend }}:cache,mode=max
 
   pylint:
     needs: build-full-image
@@ -111,7 +99,7 @@ jobs:
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
       - name: Pull full Docker image
-        run: docker pull usbmd/all:latest
+        run: docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pylint in container
         run: |
@@ -122,7 +110,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:latest \
+            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
 
   tests:
@@ -137,7 +125,7 @@ jobs:
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
       - name: Pull full Docker image
-        run: docker pull usbmd/all:latest
+        run: docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pytest in container
         run: |
@@ -148,5 +136,5 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:latest \
+            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
