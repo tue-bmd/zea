@@ -1,3 +1,5 @@
+"""Gaussian Mixture Model (GMM) implementation"""
+
 import keras
 import numpy as np
 from keras import ops
@@ -31,6 +33,10 @@ class GaussianMixtureModel(GenerativeModel):
         self.seed = seed
         self._initialized = False
 
+        self.means = None  # (n_components, n_features)
+        self.vars = None  # (n_components, n_features)
+        self.pi = None  # (n_components,)
+
     def _initialize(self, X):
         # X: (n_samples, n_features)
         n_samples = ops.shape(X)[0]
@@ -48,7 +54,6 @@ class GaussianMixtureModel(GenerativeModel):
 
     def _e_step(self, X):
         # X: (n_samples, n_features)
-        n_samples = ops.shape(X)[0]
         X_exp = ops.expand_dims(X, axis=1)  # (n_samples, 1, n_features)
         means = ops.expand_dims(self.means, axis=0)  # (1, n_components, n_features)
         vars_ = ops.expand_dims(self.vars, axis=0)  # (1, n_components, n_features)
