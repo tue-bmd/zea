@@ -823,22 +823,28 @@ class Pipeline:
         return inputs
 
 
-def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
+def make_operation_chain(operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]]) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
     Args:
         operation_chain (list): List of operations to be performed.
-            Each operation can be a string or a dictionary.
-            if a string, the operation is initialized with default parameters.
-            if a dictionary, the operation is initialized with the parameters
-            provided in the dictionary, which should have the keys 'name' and 'params'.
+            Each operation can be:
+            - A string: operation initialized with default parameters
+            - A dictionary: operation initialized with parameters in the dictionary
+            - A Config object: converted to a dictionary and initialized
+            - An Operation/Pipeline instance: used as-is
     Returns:
         list: List of operations to be performed.
     """
     chain = []
     for operation in operation_chain:
+        # Handle already instantiated Operation or Pipeline objects
+        if isinstance(operation, (Operation, Pipeline)):
+            chain.append(operation)
+            continue
+
         assert isinstance(
             operation, (str, dict, Config)
-        ), f"Operation {operation} should be a string, dictionary, or Config object"
+        ), f"Operation {operation} should be a string, dictionary, Config object, Operation, or Pipeline"
 
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()
@@ -848,11 +854,36 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
                 operation = operation.serialize()
 
             params = operation.get("params", {})
+            op_name = operation.get("name")
+            operation_cls = get_ops(op_name)
 
+            # Handle branches for branched pipeline
+            if op_name == "branched_pipeline" and "branches" in operation:
+                branch_configs = operation.get("branches", {})
+                branches = []
+
+                # Convert each branch configuration to an operation chain
+                for branch_name, branch_config in branch_configs.items():
+                    if "operations" in branch_config:
+                        # This is a pipeline-like branch
+                        branch = make_operation_chain(branch_config["operations"])
+                    else:
+                        # This is a single operation branch
+                        branch_op_cls = get_ops(branch_config["name"])
+                        branch_params = branch_config.get("params", {})
+                        branch = branch_op_cls(**branch_params)
+
+                    branches.append(branch)
+
+                # Create the branched pipeline instance
+                operation_instance = operation_cls(
+                    branches=branches,
+                    merge_strategy=operation.get("merge_strategy", "nested"),
+                    **params
+                )
             # Check for nested operations at the same level as params
-            if "operations" in operation:
+            elif "operations" in operation:
                 nested_operations = make_operation_chain(operation["operations"])
-                operation_cls = get_ops(operation["name"])
 
                 # Instantiate pipeline-type operations with nested operations
                 if issubclass(operation_cls, Pipeline):
@@ -864,7 +895,7 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
                         operations=nested_operations, **params
                     )
             else:
-                operation_instance = get_ops(operation["name"])(**params)
+                operation_instance = operation_cls(**params)
 
         chain.append(operation_instance)
 
