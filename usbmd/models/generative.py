@@ -20,7 +20,7 @@ class GenerativeModel(abc.ABC):
             data: The data to fit the model to.
             **kwargs: Additional arguments to pass to the fitting procedure.
         """
-        pass
+        raise NotImplementedError("fit() must be implemented in subclasses.")
 
     @abc.abstractmethod
     def sample(self, n_samples=1, **kwargs):
@@ -33,7 +33,7 @@ class GenerativeModel(abc.ABC):
         Returns:
             Samples from the model.
         """
-        pass
+        raise NotImplementedError("sample() must be implemented in subclasses.")
 
     @abc.abstractmethod
     def posterior_sample(self, data, **kwargs):
@@ -46,7 +46,9 @@ class GenerativeModel(abc.ABC):
         Returns:
             Samples from the posterior distribution.
         """
-        pass
+        raise NotImplementedError(
+            "posterior_sample() must be implemented in subclasses."
+        )
 
     @abc.abstractmethod
     def log_likelihood(self, data, **kwargs):
@@ -59,10 +61,10 @@ class GenerativeModel(abc.ABC):
         Returns:
             Log-likelihood of the data.
         """
-        pass
+        raise NotImplementedError("log_likelihood() must be implemented in subclasses.")
 
 
-class DeepGenerativeModel(GenerativeModel, BaseModel):
+class DeepGenerativeModel(BaseModel):
     """Base class for deep generative models.
 
     Inherits from both GenerativeModel and BaseModel to combine
@@ -79,20 +81,6 @@ class DeepGenerativeModel(GenerativeModel, BaseModel):
         BaseModel.__init__(self, name=name, **kwargs)
         self.built = False
 
-    def fit(self, data, **kwargs):
-        """Fit the model to the data.
-
-        This implementation delegates to Keras's fit method.
-
-        Args:
-            data: The data to fit the model to.
-            **kwargs: Additional arguments to pass to keras.Model.fit.
-
-        Returns:
-            Training history.
-        """
-        return self.network.fit(data, **kwargs)
-
     def build(self, input_shape=None):
         """Build the model architecture.
 
@@ -104,14 +92,16 @@ class DeepGenerativeModel(GenerativeModel, BaseModel):
     @abc.abstractmethod
     def sample(self, n_samples=1, **kwargs):
         """Sample from the model."""
-        pass
+        raise NotImplementedError("sample() must be implemented in subclasses.")
 
     @abc.abstractmethod
     def posterior_sample(self, data, **kwargs):
         """Sample from the posterior distribution given data."""
-        pass
+        raise NotImplementedError(
+            "posterior_sample() must be implemented in subclasses."
+        )
 
     @abc.abstractmethod
     def log_likelihood(self, data, **kwargs):
         """Compute the log-likelihood of the data under the model."""
-        pass
+        raise NotImplementedError("log_likelihood() must be implemented in subclasses.")
