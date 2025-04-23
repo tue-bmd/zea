@@ -104,6 +104,7 @@ class File(h5py.File):
 
     @staticmethod
     def _prepare_indices(indices):
+        # TODO: assert the typing of indices
         if indices == "all":
             return slice(None)
 
@@ -228,6 +229,7 @@ class File(h5py.File):
             Scan: The scan object.
         """
         scan_parameters = self.get_scan_parameters(event)
+        # TODO: use safe_initialize_class?
         return Scan(**scan_parameters)
 
     def get_probe_parameters(self, event=None):
@@ -246,6 +248,35 @@ class File(h5py.File):
             if key in file_scan_parameters
         }
         return probe_parameters
+
+    def probe(self, event=None):
+        """Returns a Probe object initialized with the parameters from the file.
+
+        Args:
+            event (int, optional): Event number. When specified an event structure
+                is expected as follows:
+                    - event_0/scan
+                    - event_1/scan
+                    - ...
+                Defaults to None. In that case no event structure is expected.
+
+        Returns:
+            Probe: The probe object.
+        """
+        probe_parameters = self.get_probe_parameters(event)
+        if self.probe_name == "generic":
+            return get_probe(self.probe_name, **probe_parameters)
+        else:
+            probe = get_probe(self.probe_name)
+
+            probe_geometry = probe_parameters.get("probe_geometry", None)
+            if not np.allclose(probe_geometry, probe.probe_geometry):
+                probe.probe_geometry = probe_geometry
+                log.warning(
+                    "The probe geometry in the data file does not "
+                    "match the probe geometry of the probe. The probe "
+                    "geometry has been updated to match the data file."
+                )
 
 
 def recursively_load_dict_contents_from_group(

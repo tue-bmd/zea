@@ -116,7 +116,7 @@ selected_frames = [0]
 
 # loading a file manually using `load_usbmd_file`
 data, scan, probe = load_usbmd_file(
-    data_path, frames=selected_frames, config=config, data_type="raw_data"
+    data_path, frames=selected_frames, scan=config.scan, data_type="raw_data"
 )
 
 # initialize the Process class

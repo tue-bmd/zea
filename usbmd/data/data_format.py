@@ -9,9 +9,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from usbmd.data.file import recursively_load_dict_contents_from_group
-from usbmd.probes import get_probe
-from usbmd.scan import Scan, cast_scan_parameters
+from usbmd.data.file import File
+from usbmd.scan import Scan
 from usbmd.utils import (
     first_not_none_item,
     log,
@@ -722,13 +721,12 @@ def generate_usbmd_dataset(
     log.info(f"USBMD dataset written to {log.yellow(path)}")
 
 
-# TODO: maybe can also be part of new dataloader (and other stuff in this file?)
-def load_usbmd_file(
-    path, frames=None, transmits=None, data_type="raw_data", config=None
-):
+def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data", scan=None):
     """Loads a hdf5 file in the USBMD format and returns the data together with
     a scan object containing the parameters of the acquisition and a probe
     object containing the parameters of the probe.
+
+    # TODO: add support for event
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
@@ -739,8 +737,8 @@ def load_usbmd_file(
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
-        config (utils.config.Config, optional): A config object containing parameters.
-            This function only uses parameters from config.scan.
+        scan (utils.config.Config, optional): A Scan object to override the scan parameters
+            in the data file. Defaults to None.
 
     Returns:
         (np.ndarray): The raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
@@ -748,19 +746,17 @@ def load_usbmd_file(
         (Probe): A probe object containing the parameters of the probe.
     """
 
-    assert isinstance(
-        path, (str, Path)
-    ), "The path must be a string or a pathlib.Path object."
-
-    assert isinstance(
-        frames, (tuple, list, type(None))
-    ), "The frames must be a tuple, list or None."
-
     if frames is not None:
         # Assert that all frames are integers
         assert all(
             isinstance(frame, int) for frame in frames
         ), "All frames must be integers."
+    else:
+        frames = "all"
+
+    # Define the additional keyword parameters from the scan object
+    if scan is None:
+        scan = {}
 
     if transmits is not None:
         # Assert that all frames are integers
@@ -768,78 +764,18 @@ def load_usbmd_file(
             isinstance(tx, int) for tx in transmits
         ), "All transmits must be integers."
 
-    assert (
-        data_type in _DATA_TYPES
-    ), f"Data type {data_type} does not exist, should be in {_DATA_TYPES}"
-
-    with h5py.File(path, "r", locking=False) as hdf5_file:
-        # Define the probe
-        probe_name = hdf5_file.attrs["probe"]
-        file_scan_parameters = recursively_load_dict_contents_from_group(
-            hdf5_file, "scan"
-        )
-        file_scan_parameters = cast_scan_parameters(file_scan_parameters)
-        sig = inspect.signature(get_probe("generic").__init__)
-        file_probe_params = {
-            key: file_scan_parameters[key]
-            for key in sig.parameters
-            if key in file_scan_parameters
-        }
-
-        if probe_name == "generic":
-            probe = get_probe(probe_name, **file_probe_params)
-        else:
-            probe = get_probe(probe_name)
-
-            probe_geometry = file_probe_params.get("probe_geometry", None)
-
-            # Verify that the probe geometry matches the probe geometry in the
-            # dataset
-            if not np.allclose(probe_geometry, probe.probe_geometry):
-                probe.probe_geometry = probe_geometry
-                log.warning(
-                    "The probe geometry in the data file does not "
-                    "match the probe geometry of the probe. The probe "
-                    "geometry has been updated to match the data file."
-                )
-
-        n_frames = file_scan_parameters.pop(
-            "n_frames"
-        )  # this is not part of Scan class
-        remove_params = ["PRF", "origin"]
-        for param in remove_params:
-            if param in file_scan_parameters:
-                file_scan_parameters.pop(param)
-
-        n_tx = file_scan_parameters["n_tx"]
-
-        if frames is None:
-            frames = np.arange(n_frames, dtype=np.int32)
-
-        if transmits is None:
-            transmits = np.arange(n_tx, dtype=np.int32)
-
-        n_tx = len(transmits)
+    with File(path, mode="r") as file:
+        # Load the probe object from the file
+        probe = file.probe()
 
         # Load the desired frames from the file
-        data = hdf5_file["data"][data_type][frames]
+        data = file.load_data(data_type, indices=frames)
 
-        if data_type in ["raw_data", "aligned_data", "beamformed_data"]:
-            if data.shape[-1] != 1 and data.shape[-1] != 2:
-                raise ValueError(
-                    f"The data has an unexpected shape: {data.shape}. Last "
-                    "dimension must be 1 (RF) or 2 (IQ), when data_type is "
-                    f"{data_type}."
-                )
-        # Define the additional keyword parameters from the config object or an emtpy
-        # dict if no config object is provided.
-        if config is None:
-            config_scan_dict = {}
-        else:
-            config_scan_dict = config.scan
+        # merge data file scan parameters with the ones from the scan object
+        scan_params = update_dictionary(file.scan(), scan)
 
-        # merge file scan parameters with config scan parameters
-        scan_params = update_dictionary(file_scan_parameters, config_scan_dict)
+        # Set the selected transmits
+        scan_params.selected_transmits = transmits
 
         # Initialize the scan object
         scan = safe_initialize_class(Scan, **scan_params)
