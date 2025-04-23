@@ -108,6 +108,55 @@ class GreedyEntropy(LinesActionModel):
         self.upside_down_gaussian = upside_down_gaussian(points_to_evaluate)
         self.entropy_sigma = 1
 
+    @staticmethod
+    def compute_pairwise_pixel_gaussian_error(
+        particles, stack_n_cols=1, n_possible_actions=None, entropy_sigma=1
+    ):
+        """
+        This function computes the Gaussian error between each pair of pixels in the
+        set of particles provided. This can be used to approximate the entropy of
+        a Gaussian mixture model, where the particles are the means of the Gaussians.
+        For more details see Section 4 here: https://arxiv.org/abs/2406.14388
+
+        Args:
+            particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
+
+        Returns:
+            Tensor: batch of pixelwise pairwise Gaussian errors,
+            of shape (n_particles, n_particles, batch, height, width)
+        """
+        assert (
+            particles.shape[0] > 1
+        ), "The entropy cannot be approximated using a single sample."
+
+        if n_possible_actions is None:
+            n_possible_actions = particles.shape[-1]
+
+        # TODO: I think we only need to compute the lower triangular
+        # of this matrix, since it's symmetric
+        squared_l2_error_matrices = (
+            particles[:, None, ...] - particles[None, :, ...]
+        ) ** 2
+        gaussian_error_per_pixel_i_j = ops.exp(
+            (squared_l2_error_matrices) / (2 * entropy_sigma**2)
+        )
+        # Vertically stack all columns corresponding with the same line
+        # This way we can just sum across the height axis and get the entropy
+        # for each pixel in a given line
+        _, n_particles, batch_size, height, _ = gaussian_error_per_pixel_i_j.shape
+        gaussian_error_per_pixel_stacked = ops.reshape(
+            gaussian_error_per_pixel_i_j,
+            [
+                n_particles,
+                n_particles,
+                batch_size,
+                height * stack_n_cols,
+                n_possible_actions,
+            ],
+        )
+        # [n_particles, n_particles, batch, height, width]
+        return gaussian_error_per_pixel_stacked
+
     def compute_gmm_entropy_per_line(self, particles):
         """
         This function computes the entropy for each line using a Gaussian Mixture Model
@@ -120,31 +169,13 @@ class GreedyEntropy(LinesActionModel):
         Returns:
             Tensor: batch of entropies per line, of shape (batch, n_possible_actions)
         """
-        assert (
-            particles.shape[0] > 1
-        ), "The entropy cannot be approximated using a single sample."
-
-        # TODO: I think we only need to compute the lower triangular
-        # of this matrix, since it's symmetric
-        squared_l2_error_matrices = (
-            particles[:, None, ...] - particles[None, :, ...]
-        ) ** 2
-        gaussian_error_per_pixel_i_j = ops.exp(
-            (squared_l2_error_matrices) / (2 * self.entropy_sigma**2)
-        )
-        # Vertically stack all columns corresponding with the same line
-        # This way we can just sum across the height axis and get the entropy
-        # for each pixel in a given line
-        _, n_particles, batch_size, height, _ = gaussian_error_per_pixel_i_j.shape
-        gaussian_error_per_pixel_stacked = ops.reshape(
-            gaussian_error_per_pixel_i_j,
-            [
-                n_particles,
-                n_particles,
-                batch_size,
-                height * self.stack_n_cols,
+        gaussian_error_per_pixel_stacked = (
+            GreedyEntropy.compute_pairwise_pixel_gaussian_error(
+                particles,
+                self.stack_n_cols,
                 self.n_possible_actions,
-            ],
+                self.entropy_sigma,
+            )
         )
         gaussian_error_per_line = ops.sum(gaussian_error_per_pixel_stacked, axis=3)
         # sum out first dimension of (n_particles x n_particles) error matrix
@@ -154,6 +185,52 @@ class GreedyEntropy(LinesActionModel):
         # [batch, n_possible_actions]
         entropy_per_line = ops.sum(entropy_per_line_i, axis=0)
         return entropy_per_line
+
+    def select_line_and_reweight_entropy(self, entropy_per_line):
+        """
+        Selected the max entropy line and reweights the entropy values around it,
+        approximating the decrease in entropy that would occur from observing that line.
+
+        Args:
+            entropy_per_line (Tensor): Entropy per line of shape
+                (batch_size, n_possible_actions)
+
+        Returns:
+            Tuple: The selected line index and the updated entropies per line
+        """
+
+        # Find the line with maximum entropy
+        max_entropy_line = ops.argmax(entropy_per_line)
+
+        ## The rest of this function updates the entropy values around max_entropy_line
+        ## by multiplying them with an upside-down Gaussian function centered at
+        ## max_entropy_line, setting the entropy of the selected line to 0, and decreasing
+        ## the entropies of neighbouring lines.
+
+        # Pad the entropy per line to allow for re-weighting with fixed
+        # size RBF, which is necessary for tracing.
+        padded_entropy_per_line = ops.pad(
+            entropy_per_line,
+            (self.num_lines_to_update // 2, self.num_lines_to_update // 2),
+        )
+        # because the entropy per line has now been padded, the start index
+        # of the set of lines to update is simply the index of the max_entropy_line
+        start_index = max_entropy_line
+
+        # Create the re-weighting vector
+        reweighting = ops.ones_like(padded_entropy_per_line)
+        reweighting = ops.slice_update(
+            reweighting, (start_index,), self.upside_down_gaussian
+        )
+
+        # Apply re-weighting to entropy values
+        updated_entropy_per_line_padded = padded_entropy_per_line * reweighting
+        updated_entropy_per_line = ops.slice(
+            updated_entropy_per_line_padded,
+            (self.num_lines_to_update // 2,),
+            (self.n_possible_actions,),
+        )
+        return max_entropy_line, updated_entropy_per_line
 
     def sample(self, particles):
         """
@@ -165,57 +242,11 @@ class GreedyEntropy(LinesActionModel):
         """
         entropy_per_line = self.compute_gmm_entropy_per_line(particles)
 
-        def select_line_and_reweight_entropy(entropy_per_line):
-            """
-            Selected the max entropy line and reweights the entropy values around it,
-            approximating the decrease in entropy that would occur from observing that line.
-
-            Args:
-                entropy_per_line (Tensor): Entropy per line of shape
-                    (batch_size, n_possible_actions)
-
-            Returns:
-                Tuple: The selected line index and the updated entropies per line
-            """
-
-            # Find the line with maximum entropy
-            max_entropy_line = ops.argmax(entropy_per_line)
-
-            ## The rest of this function updates the entropy values around max_entropy_line
-            ## by multiplying them with an upside-down Gaussian function centered at
-            ## max_entropy_line, setting the entropy of the selected line to 0, and decreasing
-            ## the entropies of neighbouring lines.
-
-            # Pad the entropy per line to allow for re-weighting with fixed
-            # size RBF, which is necessary for tracing.
-            padded_entropy_per_line = ops.pad(
-                entropy_per_line,
-                (self.num_lines_to_update // 2, self.num_lines_to_update // 2),
-            )
-            # because the entropy per line has now been padded, the start index
-            # of the set of lines to update is simply the index of the max_entropy_line
-            start_index = max_entropy_line
-
-            # Create the re-weighting vector
-            reweighting = ops.ones_like(padded_entropy_per_line)
-            reweighting = ops.slice_update(
-                reweighting, (start_index,), self.upside_down_gaussian
-            )
-
-            # Apply re-weighting to entropy values
-            updated_entropy_per_line_padded = padded_entropy_per_line * reweighting
-            updated_entropy_per_line = ops.slice(
-                updated_entropy_per_line_padded,
-                (self.num_lines_to_update // 2,),
-                (self.n_possible_actions,),
-            )
-            return max_entropy_line, updated_entropy_per_line
-
         # Greedily select best line, reweight entropies, and repeat
         all_selected_lines = []
         for _ in range(self.n_actions):
             max_entropy_line, entropy_per_line = ops.vectorized_map(
-                select_line_and_reweight_entropy, entropy_per_line
+                self.select_line_and_reweight_entropy, entropy_per_line
             )
             all_selected_lines.append(max_entropy_line)
 
