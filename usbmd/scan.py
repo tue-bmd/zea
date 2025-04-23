@@ -825,6 +825,11 @@ class Scan(Object):
     @property
     def pfield(self):
         """The pfield grid of shape (n_tx, Nz, Nx)."""
+        # TODO: pfield should be recomputed when some scan parameters change...
+        # e.g. you change Nx, the grid gets changed, but only once you try to access self.grid,
+        # which does not happen if you access self.pfield.
+        # We should either make it very clear what each attribute depends on, or we should just
+        # always recompute everything...
         if self._pfield is not None:
             return self._pfield
 
