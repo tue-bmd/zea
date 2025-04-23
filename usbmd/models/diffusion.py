@@ -65,6 +65,10 @@ class DiffusionModel(DeepGenerativeModel):
         self.image_loss_tracker = LossTrackerWrapper("i_loss")
         self.noise_loss_tracker = LossTrackerWrapper("n_loss")
 
+        # for storing intermediate results (i.e. diffusion trajectory)
+        self.track_progress_interval = 1
+        self.track_progress = []
+
     def call(self, inputs, training=False):
         """Simply calls the score network."""
         return self.network(inputs, training=training)
@@ -123,12 +127,14 @@ class DiffusionModel(DeepGenerativeModel):
 
     @property
     def metrics(self):
+        """Metrics for training."""
         return [*self.noise_loss_tracker, *self.image_loss_tracker]
 
-    def compile(self, *args, **kwargs):
-        super().compile(*args, **kwargs)
-
     def train_step(self, images):
+        """Custom train step so we can call model.fit() on the diffusion model.
+        Note:
+            - Only implemented for the TensorFlow backend.
+        """
         # Get batch size and image shape
         batch_size, *input_shape = ops.shape(images)
         n_dims = len(input_shape)
@@ -199,6 +205,7 @@ class DiffusionModel(DeepGenerativeModel):
         return noise_rates, signal_rates
 
     def linear_diffusion_schedule(self, diffusion_times):
+        """Create a linear diffusion schedule"""
         compute_alpha_t = lambda t: ops.prod(
             1 - diffusion_times[:t], axis=diffusion_times.shape[1:]
         )
@@ -226,6 +233,21 @@ class DiffusionModel(DeepGenerativeModel):
         seed=None,
         stochastic_sampling=False,
     ):
+        """A single reverse diffusion step.
+
+        Args:
+            shape: Shape of the input tensor.
+            pred_images: Predicted images.
+            pred_noises: Predicted noises.
+            signal_rates: Current signal rates.
+            next_signal_rates: Next signal rates.
+            next_noise_rates: Next noise rates.
+            seed: Random seed generator.
+            stochastic_sampling: Whether to use stochastic sampling (DDPM).
+
+        Returns:
+            next_noisy_images: Noisy images after the reverse diffusion step.
+        """
         if not stochastic_sampling:
             next_noisy_images = (
                 next_signal_rates * pred_images + next_noise_rates * pred_noises
@@ -259,7 +281,21 @@ class DiffusionModel(DeepGenerativeModel):
         verbose: bool = False,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
     ):
-        # reverse diffusion = sampling
+        """Reverse diffusion process to generate images from noise.
+
+        Args:
+            initial_noise: Initial noise tensor.
+            diffusion_steps: Number of diffusion steps.
+            initial_samples: Optional initial samples to start from.
+            initial_step: Initial step to start from.
+            stochastic_sampling: Whether to use stochastic sampling (DDPM).
+            seed: Random seed generator.
+            verbose: Whether to show a progress bar.
+            track_progress_type: Type of progress tracking ("x_0" or "x_t").
+
+        Returns:
+            Generated images.
+        """
         num_images, *input_shape = ops.shape(initial_noise)
         step_size, progbar = self.prepare_diffusion(
             diffusion_steps, initial_step, verbose
@@ -319,6 +355,11 @@ class DiffusionModel(DeepGenerativeModel):
     def prepare_diffusion(
         self, diffusion_steps, initial_step, verbose, disable_jit=False
     ):
+        """Prepare the diffusion process.
+
+        This method sets up the parameters for the diffusion process, including
+        validation of the initial step and calculation of the step size.
+        """
         # Asserts
         if not disable_jit:
             assert (
@@ -347,6 +388,23 @@ class DiffusionModel(DeepGenerativeModel):
         initial_step,
         step_size,
     ):
+        """Prepare the diffusion schedule.
+
+        This method sets up the initial noisy images based on the provided
+        initial noise and samples. It handles the case where the initial step
+        is greater than 0, allowing for the use of partially noised images for
+        initialization of the diffusion process.
+
+        Args:
+            base_diffusion_times: Base diffusion times.
+            initial_noise: Initial noise tensor.
+            initial_samples: Optional initial samples to start from.
+            initial_step: Initial step to start from.
+            step_size: Step size for the diffusion process.
+
+        Returns:
+            next_noisy_images: Noisy images after the initial step.
+        """
         # We can optionally start with a set of samples that are partially noised
         if initial_samples is not None and initial_step > 0:
             starting_diffusion_times = base_diffusion_times - (
@@ -376,7 +434,8 @@ class DiffusionModel(DeepGenerativeModel):
         return next_noisy_images
 
     def start_track_progress(self, diffusion_steps):
-        """
+        """Initialize the progress tracking for the diffusion process.
+
         For diffusion animation we keep track of the diffusion progress.
         For large number of steps, we do not store all the images due to memory constraints.
         """
@@ -393,9 +452,17 @@ class DiffusionModel(DeepGenerativeModel):
         next_noisy_images,
         pred_images,
     ):
-        """
-        put to pred_images if you want the x_0 tweedie estimate
-        put to noisy_images if you want the x_t estimate
+        """Store the progress of the diffusion process.
+
+        Args:
+            step: Current diffusion step.
+            track_progress_type: Type of progress tracking ("x_0" or "x_t").
+            next_noisy_images: Noisy images after the current step.
+            pred_images: Predicted images.
+
+        Notes:
+            - x_0 is considered the predicted image (aka Tweedie estimate)
+            - x_t is the noisy intermediate image
         """
         if not track_progress_type:
             return
