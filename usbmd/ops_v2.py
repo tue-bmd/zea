@@ -425,6 +425,8 @@ class Pipeline:
         if value == "pipeline":
             assert self.jittable, log.error(
                 "jit_options 'pipeline' cannot be used as the entire pipeline is not jittable. "
+                "The following operations are not jittable: "
+                f"{self.unjitable_ops}. "
                 "Try setting jit_options to 'ops' or None."
             )
             self.jit()
@@ -451,6 +453,11 @@ class Pipeline:
     def jittable(self):
         """Check if all operations in the pipeline are jittable."""
         return all(operation.jittable for operation in self.operations)
+
+    @property
+    def unjitable_ops(self):
+        """Get a list of operations that are not jittable."""
+        return [operation for operation in self.operations if not operation.jittable]
 
     @property
     def with_batch_dim(self):
