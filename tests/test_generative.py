@@ -1,3 +1,5 @@
+"""Tests for generative models in usbmd."""
+
 import keras
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,10 +8,13 @@ import pytest
 from usbmd import log
 from usbmd.models.diffusion import DiffusionModel
 from usbmd.models.gmm import GaussianMixtureModel
+from usbmd.utils.io_lib import matplotlib_figure_to_numpy
+from usbmd.utils.utils import save_to_gif
 
 
 @pytest.fixture(params=[2, 3])
 def synthetic_2d_data(request):
+    """Generate synthetic 2D data with Gaussian clusters."""
     n_centers = request.param
     rng = np.random.default_rng(42)
     n = 600
@@ -35,6 +40,7 @@ def synthetic_2d_data(request):
 def plot_distributions(
     data, samples, means=None, covs=None, title="", filename="test.png"
 ):
+    """Plot data, model samples, and optionally GMM means/covariances."""
     plt.figure(figsize=(6, 6))
     plt.scatter(data[:, 0], data[:, 1], alpha=0.3, label="Data", s=20)
     plt.scatter(samples[:, 0], samples[:, 1], alpha=0.3, label="Model Samples", s=20)
