@@ -151,6 +151,7 @@ def patched_pipeline_config():
         ]
     }
 
+
 @pytest.fixture
 def branched_pipeline_config():
     """Returns a configuration for a BranchedPipeline."""
@@ -163,14 +164,20 @@ def branched_pipeline_config():
                     "branch_1": [
                         {"name": "simulate_rf"},
                         {"name": "demodulate"},
-                        {"name": "tof_correction", "params": {"apply_phase_rotation": True}},
+                        {
+                            "name": "tof_correction",
+                            "params": {"apply_phase_rotation": True},
+                        },
                         {"name": "pfield_weighting"},
                         {"name": "delay_and_sum"},
                     ],
                     "branch_2": [
                         {"name": "simulate_rf"},
                         {"name": "demodulate"},
-                        {"name": "tof_correction", "params": {"apply_phase_rotation": False}},
+                        {
+                            "name": "tof_correction",
+                            "params": {"apply_phase_rotation": False},
+                        },
                         {"name": "pfield_weighting"},
                         {"name": "delay_and_sum"},
                     ],
@@ -446,7 +453,8 @@ def validate_default_pipeline(pipeline, patched=False):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["pipeline_config", "pipeline_config_with_params", "branched_pipeline_config"]
+    "config_fixture",
+    ["pipeline_config", "pipeline_config_with_params", "branched_pipeline_config"],
 )
 def test_pipeline_from_json(config_fixture, request):
     """Tests building a dummy pipeline from a JSON string."""
@@ -463,7 +471,8 @@ def test_pipeline_from_json(config_fixture, request):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_default_pipeline_from_json(config_fixture, request):
     """Tests building a default pipeline from a JSON string."""
@@ -494,7 +503,8 @@ def test_pipeline_from_config(config_fixture, request):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_default_pipeline_from_config(config_fixture, request):
     """Tests building a default pipeline from a Config object."""
@@ -511,7 +521,8 @@ def test_default_pipeline_from_config(config_fixture, request):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_pipeline_to_config(config_fixture, request):
     """Tests converting a pipeline to a Config object."""
@@ -534,7 +545,8 @@ def test_pipeline_to_config(config_fixture, request):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_pipeline_to_json(config_fixture, request):
     """Tests converting a pipeline to a JSON string."""
@@ -556,7 +568,10 @@ def test_pipeline_to_json(config_fixture, request):
         )
 
 
-@pytest.mark.parametrize("config_fixture", ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"])
+@pytest.mark.parametrize(
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
+)
 def test_pipeline_to_yaml(config_fixture, request, tmp_path):
     """Tests converting a pipeline to a YAML file (in tmp directory), and then loading it back."""
     config_dict = request.getfixturevalue(config_fixture)
@@ -576,6 +591,7 @@ def test_pipeline_to_yaml(config_fixture, request, tmp_path):
         validate_default_pipeline(
             new_pipeline, patched=config_fixture == "patched_pipeline_config"
         )
+
 
 def get_probe():
     """Returns a probe for ultrasound simulation tests."""
