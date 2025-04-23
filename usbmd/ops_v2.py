@@ -823,7 +823,9 @@ class Pipeline:
         return inputs
 
 
-def make_operation_chain(operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]]) -> List[Operation]:
+def make_operation_chain(
+    operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
+) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
     Args:
         operation_chain (list): List of operations to be performed.
@@ -864,7 +866,10 @@ def make_operation_chain(operation_chain: List[Union[str, Dict, Config, Operatio
 
                 # Convert each branch configuration to an operation chain
                 for branch_name, branch_config in branch_configs.items():
-                    if "operations" in branch_config:
+                    if isinstance(branch_config, list):
+                        # This is a list of operations
+                        branch = make_operation_chain(branch_config)
+                    elif "operations" in branch_config:
                         # This is a pipeline-like branch
                         branch = make_operation_chain(branch_config["operations"])
                     else:
@@ -876,11 +881,7 @@ def make_operation_chain(operation_chain: List[Union[str, Dict, Config, Operatio
                     branches.append(branch)
 
                 # Create the branched pipeline instance
-                operation_instance = operation_cls(
-                    branches=branches,
-                    merge_strategy=operation.get("merge_strategy", "nested"),
-                    **params
-                )
+                operation_instance = operation_cls(branches=branches, **params)
             # Check for nested operations at the same level as params
             elif "operations" in operation:
                 nested_operations = make_operation_chain(operation["operations"])
@@ -1721,7 +1722,6 @@ class Demodulate(Operation):
         }
 
 
-
 @ops_registry("branched_pipeline")
 class BranchedPipeline(Operation):
     """Operation that processes data through multiple branches.
@@ -1730,12 +1730,7 @@ class BranchedPipeline(Operation):
     and then merges the results from those branches using the specified merge strategy.
     """
 
-    def __init__(
-        self,
-        branches=None,
-        merge_strategy="nested",
-        **kwargs
-    ):
+    def __init__(self, branches=None, merge_strategy="nested", **kwargs):
         """Initialize a branched pipeline.
 
         Args:
@@ -1764,7 +1759,9 @@ class BranchedPipeline(Operation):
                 # Already a pipeline or operation
                 self.branches[branch_name] = branch
             else:
-                raise ValueError(f"Branch must be a list, Pipeline, or Operation, got {type(branch)}")
+                raise ValueError(
+                    f"Branch must be a list, Pipeline, or Operation, got {type(branch)}"
+                )
 
         # Set merge strategy
         self.merge_strategy = merge_strategy
@@ -1862,9 +1859,29 @@ class BranchedPipeline(Operation):
             # For custom functions, use the name if available
             merge_strategy_config = getattr(self.merge_strategy, "__name__", "custom")
 
-        config.update({
-            "branches": branch_configs,
-            "merge_strategy": merge_strategy_config,
-        })
+        config.update(
+            {
+                "branches": branch_configs,
+                "merge_strategy": merge_strategy_config,
+            }
+        )
 
+        return config
+
+    def get_dict(self):
+        """Get the configuration of the operation."""
+        config = super().get_dict()
+        config.update({"name": "branched_pipeline"})
+
+        # Add branches (recursively) to the config
+        branches = {}
+        for branch_name, branch in self.branches.items():
+            if isinstance(branch, Pipeline):
+                branches[branch_name] = branch.get_dict()
+            elif isinstance(branch, list):
+                branches[branch_name] = [op.get_dict() for op in branch]
+            else:
+                branches[branch_name] = branch.get_dict()
+        config["branches"] = branches
+        config["merge_strategy"] = self.merge_strategy
         return config
