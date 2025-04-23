@@ -263,15 +263,13 @@ class Pipeline:
                 to be performed.
             with_batch_dim (bool, optional): Whether operations should expect a batch dimension.
                 Defaults to True.
-            device (str, optional): The device to use for the operations. Defaults to None.
-                Can be `cpu` or `cuda`, `cuda:0`, etc.
             jit_options (str, optional): The JIT options to use. Must be "pipeline", "ops", or None.
-            - "pipeline" compiles the entire pipeline as a single function. This may be faster but,
-            does not preserve python control flow, such as caching.
-            - "ops" compiles each operation separately. This preserves python control flow and
-            caching functionality, but speeds up the operations.
-            - None disables JIT compilation.
-            Defaults to "ops".
+                - "pipeline" compiles the entire pipeline as a single function.
+                    This may be faster but, does not preserve python control flow, such as caching.
+                - "ops" compiles each operation separately. This preserves python control flow and
+                    caching functionality, but speeds up the operations.
+                - None disables JIT compilation.
+                Defaults to "ops".
             jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
             validate (bool, optional): Whether to validate the pipeline. Defaults to True.
