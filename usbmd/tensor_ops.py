@@ -296,7 +296,9 @@ def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
     # Ensure all batch kwargs have the same leading dimension as xs.
     if batch_kwargs:
         assert all(
-            ops.shape(xs)[0] == ops.shape(v)[0] for v in batch_kwargs.values()
+            ops.shape(xs)[0] == ops.shape(v)[0]
+            for v in batch_kwargs.values()
+            if v is not None
         ), "All batch kwargs must have the same first dimension size as xs."
 
     total = ops.shape(xs)[0]
@@ -337,10 +339,13 @@ def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
     # Pad and reshape batch_kwargs similarly.
     reshaped_kwargs = {}
     for k, v in batch_kwargs.items():
-        v_padded = pad_array_to_divisible(v, batch_size, axis=0)
-        reshaped_kwargs[k] = ops.reshape(
-            v_padded, (-1, batch_size) + ops.shape(v_padded)[1:]
-        )
+        if v is None:
+            reshaped_kwargs[k] = None
+        else:
+            v_padded = pad_array_to_divisible(v, batch_size, axis=0)
+            reshaped_kwargs[k] = ops.reshape(
+                v_padded, (-1, batch_size) + ops.shape(v_padded)[1:]
+            )
 
     batched_f = create_batched_f(list(reshaped_kwargs.keys()))
     out = ops.map(batched_f, (xs_reshaped, *reshaped_kwargs.values()))
