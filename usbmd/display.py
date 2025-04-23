@@ -133,6 +133,7 @@ def _scan_convert_2d(
     Returns:
         images_sc (ndarray): Scan-converted 2D image in Cartesian (z, x) coordinates.
     """
+    image = ops.cast(image, dtype="float32")
     images_sc = _interpolate_batch(image, coordinates, fill_value, order=order)
     # swap axis to match z, x
     images_sc = ops.swapaxes(images_sc, -1, -2)
@@ -303,7 +304,7 @@ def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value
         )
 
 
-def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
+def _interpolate_batch(images, coordinates, fill_value=0, order=1):
     """Interpolate a batch of images."""
     image_shape = images.shape
     num_image_dims = coordinates.shape[0]
