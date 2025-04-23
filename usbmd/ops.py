@@ -1889,6 +1889,8 @@ class GaussianBlur(Operation):
     Uses scipy.ndimage.gaussian_filter to create a kernel.
 
     Src: https://docs.scipy.org/doc/scipy/reference/generated/scipy.ndimage.gaussian_filter.html
+
+    # TODO: use tensor_ops.gaussian_filter
     """
 
     def __init__(
