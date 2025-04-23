@@ -454,24 +454,6 @@ def validate_default_pipeline(pipeline, patched=False):
 
 @pytest.mark.parametrize(
     "config_fixture",
-    ["pipeline_config", "pipeline_config_with_params", "branched_pipeline_config"],
-)
-def test_pipeline_from_json(config_fixture, request):
-    """Tests building a dummy pipeline from a JSON string."""
-    config = request.getfixturevalue(config_fixture)
-    json_string = json.dumps(config)
-    pipeline = ops.pipeline_from_json(json_string, jit_options=None)
-
-    if config_fixture == "branched_pipeline_config":
-        validate_branched_pipeline(pipeline)
-    else:
-        validate_basic_pipeline(
-            pipeline, with_params=config_fixture == "pipeline_config_with_params"
-        )
-
-
-@pytest.mark.parametrize(
-    "config_fixture",
     ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_default_pipeline_from_json(config_fixture, request):
