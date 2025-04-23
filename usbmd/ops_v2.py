@@ -842,33 +842,27 @@ def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operat
     """
     chain = []
     for operation in operation_chain:
+        # Ensure operation is a string, dict, or Config object.
         assert isinstance(
             operation, (str, dict, Config)
         ), f"Operation {operation} should be a string, dictionary, or Config object"
 
+        # Convert Config objects to dict.
+        if isinstance(operation, Config):
+            operation = operation.serialize()
+
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()
-
         else:
-            if isinstance(operation, Config):
-                operation = operation.serialize()
-
             params = operation.get("params", {})
 
             # Check for nested operations at the same level as params
             if "operations" in operation:
                 nested_operations = make_operation_chain(operation["operations"])
                 operation_cls = get_ops(operation["name"])
-
-                # Instantiate pipeline-type operations with nested operations
-                if issubclass(operation_cls, Pipeline):
-                    operation_instance = operation_cls(
-                        operations=nested_operations, **params
-                    )
-                else:
-                    operation_instance = operation_cls(
-                        operations=nested_operations, **params
-                    )
+                operation_instance = operation_cls(
+                    operations=nested_operations, **params
+                )
             else:
                 operation_instance = get_ops(operation["name"])(**params)
 
@@ -891,7 +885,7 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     operations = make_operation_chain(config.operations)
 
     # merge pipeline config without operations with kwargs
-    pipeline_config = copy.deepcopy(config)
+    pipeline_config = config.copy()
     pipeline_config.pop("operations")
 
     kwargs = {**pipeline_config, **kwargs}
