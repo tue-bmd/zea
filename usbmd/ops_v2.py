@@ -312,7 +312,7 @@ class Pipeline:
                 return True
 
     @classmethod
-    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
+    def from_default(cls, num_patches=20, pfield=True, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
         operations = []
 
@@ -322,9 +322,10 @@ class Pipeline:
         # Get beamforming ops
         beamforming = [
             TOFCorrection(apply_phase_rotation=True),
-            PfieldWeighting(),
             DelayAndSum(),
         ]
+        if pfield:
+            beamforming.insert(1, PfieldWeighting())
 
         # Optionally add patching
         if num_patches > 1:
@@ -853,7 +854,7 @@ class PatchedGrid(Pipeline):
         Nx = inputs["Nx"]
         Nz = inputs["Nz"]
         flatgrid = inputs.pop("flatgrid")
-        flat_pfield = inputs.pop("flat_pfield")
+        flat_pfield = inputs.pop("flat_pfield", None)
 
         def patched_call(flatgrid, flat_pfield):
             out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
