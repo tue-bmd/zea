@@ -71,3 +71,5 @@ unet_presets = {
         "hf_handle": "hf://usbmd/unet-echonet-inpainter",
     },
 }
+
+linear_presets = {}

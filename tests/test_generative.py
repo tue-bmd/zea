@@ -75,6 +75,7 @@ def plot_distributions(
 
 
 def test_gmm_fit_and_sample_2d(synthetic_2d_data, debug=False):
+    """Test GMM fitting and sampling on synthetic 2D data."""
     data, true_means, true_covs = synthetic_2d_data
     n_components = len(true_means)
     gmm = GaussianMixtureModel(n_components=n_components, n_features=2)
@@ -96,3 +97,81 @@ def test_gmm_fit_and_sample_2d(synthetic_2d_data, debug=False):
     # Check log likelihood is finite
     ll = gmm.log_likelihood(data)
     assert np.isfinite(keras.ops.convert_to_numpy(ll)).all()
+
+
+def animate_diffusion_trajectory_2d(
+    model, data, filename="diffusion_trajectory.gif", n_show=300, show_data=True
+):
+    """
+    Animate the intermediate diffusion steps using model.track_progress.
+
+    Args:
+        model: Trained DiffusionModel with track_progress filled (after sampling).
+        data: Original data (for plotting as background).
+        filename: Output GIF filename.
+        n_show: Number of samples to show per frame.
+        show_data: Whether to plot the original data in the background.
+    """
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    n_show = min(n_show, data.shape[0])
+    frames = []
+    for i, samples in enumerate(model.track_progress):
+        fig, ax = plt.subplots(figsize=(6, 6))
+        if show_data:
+            ax.scatter(
+                data[:n_show, 0], data[:n_show, 1], alpha=0.2, label="Data", s=15
+            )
+        ax.scatter(
+            samples[:n_show, 0],
+            samples[:n_show, 1],
+            alpha=0.7,
+            label="x₀ estimate",
+            s=15,
+            color="tab:blue",
+        )
+        ax.set_title(f"Diffusion Step {i+1}/{len(model.track_progress)}")
+        ax.axis("equal")
+        ax.set_xlim(data[:, 0].min() - 2, data[:, 0].max() + 2)
+        ax.set_ylim(data[:, 1].min() - 2, data[:, 1].max() + 2)
+        ax.legend()
+        fig.tight_layout()
+        frame = matplotlib_figure_to_numpy(fig)
+        frames.append(frame)
+        plt.close(fig)
+    save_to_gif(frames, filename, fps=10)
+    log.success(f"Animated diffusion trajectory saved to {filename}")
+
+
+def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
+    """Test diffusion model fitting and sampling on synthetic 2D data."""
+    data, true_means, true_covs = synthetic_2d_data
+    n = len(data)
+    model = DiffusionModel(
+        input_shape=(2,),
+        network_name="linear_time_conditional",
+        network_kwargs={"widths": [64, 64], "output_dim": 2},
+        min_signal_rate=0.02,
+        max_signal_rate=0.95,
+    )
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=1e-3),
+        loss=keras.losses.MeanSquaredError(),
+    )
+
+    model.fit(data, epochs=100, batch_size=64, verbose=1)
+
+    samples = model.sample(n_samples=n, n_steps=100)
+    samples = keras.ops.convert_to_numpy(samples)
+    samples = samples.reshape(-1, 2)
+
+    if debug:
+        plot_distributions(data, samples, title="Diffusion 2D Fit Debug")
+        animate_diffusion_trajectory_2d(
+            model, filename="diffusion_trajectory.gif", n_show=300
+        )
+
+    assert np.allclose(samples.mean(axis=0), data.mean(axis=0), atol=2.0)
+    assert np.isfinite(np.cov(samples.T)).all()
