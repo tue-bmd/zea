@@ -866,7 +866,7 @@ def make_operation_chain(
 
                 # Convert each branch configuration to an operation chain
                 for branch_name, branch_config in branch_configs.items():
-                    if isinstance(branch_config, list):
+                    if isinstance(branch_config, (list, np.ndarray)):
                         # This is a list of operations
                         branch = make_operation_chain(branch_config)
                     elif "operations" in branch_config:
