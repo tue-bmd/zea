@@ -213,6 +213,23 @@ class File(h5py.File):
         }
         return scan_parameters
 
+    def scan(self, event=None):
+        """Returns a Scan object initialized with the parameters from the file.
+
+        Args:
+            event (int, optional): Event number. When specified an event structure
+                is expected as follows:
+                    - event_0/scan
+                    - event_1/scan
+                    - ...
+                Defaults to None. In that case no event structure is expected.
+
+        Returns:
+            Scan: The scan object.
+        """
+        scan_parameters = self.get_scan_parameters(event)
+        return Scan(**scan_parameters)
+
     def get_probe_parameters(self, event=None):
         """Returns a dictionary of probe parameters to initialize a probe
         object that comes with the dataset (stored inside datafile).
