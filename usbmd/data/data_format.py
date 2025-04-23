@@ -9,14 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from usbmd.data.file import File
-from usbmd.scan import Scan
-from usbmd.utils import (
-    first_not_none_item,
-    log,
-    safe_initialize_class,
-    update_dictionary,
-)
+from usbmd.utils import first_not_none_item, log
 from usbmd.utils.checks import _DATA_TYPES, validate_dataset
 
 
@@ -719,65 +712,3 @@ def generate_usbmd_dataset(
 
     validate_dataset(path)
     log.info(f"USBMD dataset written to {log.yellow(path)}")
-
-
-def load_usbmd_file(path, frames=None, transmits=None, data_type="raw_data", scan=None):
-    """Loads a hdf5 file in the USBMD format and returns the data together with
-    a scan object containing the parameters of the acquisition and a probe
-    object containing the parameters of the probe.
-
-    # TODO: add support for event
-
-    Args:
-        path (str, pathlike): The path to the hdf5 file.
-        frames (tuple, list, optional): The frames to load. Defaults to None in
-            which case all frames are loaded.
-        transmits (tuple, list, optional): The transmits to load. Defaults to
-            None in which case all transmits are used.
-        data_type (str, optional): The type of data to load. Defaults to
-            'raw_data'. Other options are 'aligned_data', 'beamformed_data',
-            'envelope_data', 'image' and 'image_sc'.
-        scan (utils.config.Config, optional): A Scan object to override the scan parameters
-            in the data file. Defaults to None.
-
-    Returns:
-        (np.ndarray): The raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
-        (Scan): A scan object containing the parameters of the acquisition.
-        (Probe): A probe object containing the parameters of the probe.
-    """
-
-    if frames is not None:
-        # Assert that all frames are integers
-        assert all(
-            isinstance(frame, int) for frame in frames
-        ), "All frames must be integers."
-    else:
-        frames = "all"
-
-    # Define the additional keyword parameters from the scan object
-    if scan is None:
-        scan = {}
-
-    if transmits is not None:
-        # Assert that all frames are integers
-        assert all(
-            isinstance(tx, int) for tx in transmits
-        ), "All transmits must be integers."
-
-    with File(path, mode="r") as file:
-        # Load the probe object from the file
-        probe = file.probe()
-
-        # Load the desired frames from the file
-        data = file.load_data(data_type, indices=frames)
-
-        # merge data file scan parameters with the ones from the scan object
-        scan_params = update_dictionary(file.scan(), scan)
-
-        # Set the selected transmits
-        scan_params.selected_transmits = transmits
-
-        # Initialize the scan object
-        scan = safe_initialize_class(Scan, **scan_params)
-
-        return data, scan, probe
