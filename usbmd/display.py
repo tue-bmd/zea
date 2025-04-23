@@ -317,7 +317,7 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
         coordinates=coordinates,
         order=order,
         fill_mode="constant",
-        fill_value=fill_value,
+        fill_value=np.nan,
     )
 
     images_sc = ops.vectorized_map(map_coordinates_fn, images)
