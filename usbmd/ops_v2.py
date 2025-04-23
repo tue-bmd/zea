@@ -846,7 +846,7 @@ def make_operation_chain(
 
         assert isinstance(
             operation, (str, dict, Config)
-        ), f"Operation {operation} should be a string, dictionary, Config object, Operation, or Pipeline"
+        ), f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
 
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()
@@ -865,7 +865,7 @@ def make_operation_chain(
                 branches = []
 
                 # Convert each branch configuration to an operation chain
-                for branch_name, branch_config in branch_configs.items():
+                for _, branch_config in branch_configs.items():
                     if isinstance(branch_config, (list, np.ndarray)):
                         # This is a list of operations
                         branch = make_operation_chain(branch_config)
