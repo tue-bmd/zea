@@ -4,6 +4,8 @@ import keras
 
 
 class LossTrackerWrapper:
+    """A wrapper for Keras Mean metrics to track multiple loss values."""
+
     def __init__(self, prefix):
         """
         Initialize the loss tracker wrapper.
