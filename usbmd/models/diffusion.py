@@ -1,3 +1,8 @@
+"""Diffusion models
+- **Author(s)**     : Tristan Stevens
+- **Date**          : 23/04/2025
+"""
+
 from typing import Literal
 
 import keras
@@ -69,9 +74,10 @@ class DiffusionModel(DeepGenerativeModel):
         self.track_progress_interval = 1
         self.track_progress = []
 
-    def call(self, inputs, training=False):
+    # pylint: disable=arguments-differ
+    def call(self, inputs, training=False, **kwargs):
         """Simply calls the score network."""
-        return self.network(inputs, training=training)
+        return self.network(inputs, training=training, **kwargs)
 
     def sample(self, n_samples=1, n_steps=20, seed=None, **kwargs):
         """Sample from the model.
@@ -130,17 +136,17 @@ class DiffusionModel(DeepGenerativeModel):
         """Metrics for training."""
         return [*self.noise_loss_tracker, *self.image_loss_tracker]
 
-    def train_step(self, images):
+    def train_step(self, data):
         """Custom train step so we can call model.fit() on the diffusion model.
         Note:
             - Only implemented for the TensorFlow backend.
         """
         # Get batch size and image shape
-        batch_size, *input_shape = ops.shape(images)
+        batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
 
         # Generate random noise
-        noises = keras.random.normal(shape=ops.shape(images))
+        noises = keras.random.normal(shape=ops.shape(data))
 
         # Sample uniform random diffusion times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
@@ -150,15 +156,15 @@ class DiffusionModel(DeepGenerativeModel):
         )
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
-        # Mix images and noises
-        noisy_images = signal_rates * images + noise_rates * noises
+        # Mix data and noises
+        noisy_data = signal_rates * data + noise_rates * noises
 
         with tf.GradientTape() as tape:
             pred_noises, pred_images = self.denoise(
-                noisy_images, noise_rates, signal_rates, training=True
+                noisy_data, noise_rates, signal_rates, training=True
             )
             noise_loss = self.loss(noises, pred_noises)
-            image_loss = self.loss(images, pred_images)
+            image_loss = self.loss(data, pred_images)
 
         gradients = tape.gradient(noise_loss, self.network.trainable_weights)
         self.optimizer.apply_gradients(zip(gradients, self.network.trainable_weights))
@@ -169,6 +175,7 @@ class DiffusionModel(DeepGenerativeModel):
         return {m.name: m.result() for m in self.metrics}
 
     def diffusion_schedule(self, diffusion_times):
+        # pylint: disable=line-too-long
         """Cosine diffusion schedule https://arxiv.org/abs/2102.09672
 
         Args:
