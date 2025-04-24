@@ -1081,6 +1081,9 @@ def gaussian_filter(
     """
     Multidimensional Gaussian filter.
 
+    If you want to use this function with jax.jit, you can set:
+    `static_argnames=("truncate", "sigma")`
+
     Args:
         array (Tensor): The input array.
         sigma (float or tuple): Standard deviation for Gaussian kernel. The standard deviations
@@ -1108,11 +1111,7 @@ def gaussian_filter(
     orders = _ni_support._normalize_sequence(order, num_axes)
     sigmas = _ni_support._normalize_sequence(sigma, num_axes)
     modes = _ni_support._normalize_sequence(mode, num_axes)
-    axes = [
-        (axes[ii], sigmas[ii], orders[ii], modes[ii])
-        for ii in range(num_axes)
-        if sigmas[ii] > 1e-15
-    ]
+    axes = [(axes[ii], sigmas[ii], orders[ii], modes[ii]) for ii in range(num_axes)]
     if len(axes) > 0:
         for (
             axis,
