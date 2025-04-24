@@ -31,8 +31,19 @@ class File(h5py.File):
             kwargs["locking"] = False
         super().__init__(*args, **kwargs)
 
+    @property
+    def name(self):
+        """Return the name of the file."""
+        return Path(self.filename).name
+
+    @property
+    def stem(self):
+        """Return the stem of the file."""
+        return Path(self.filename).stem
+
     @classmethod
     def from_config(self, dataset_folder, file_path, user, **kwargs):
+        # TODO: WIP
         """Create a File object from a config file.
 
         Args:
