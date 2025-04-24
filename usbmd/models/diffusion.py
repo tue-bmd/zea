@@ -25,6 +25,7 @@ class DiffusionModel(DeepGenerativeModel):
     def __init__(
         self,
         input_shape,
+        input_range=(0, 1),
         min_signal_rate=0.02,
         max_signal_rate=0.95,
         network_name="unet_time_conditional",
@@ -47,9 +48,13 @@ class DiffusionModel(DeepGenerativeModel):
         super().__init__(name=name, **kwargs)
 
         self.input_shape = input_shape
+        self.input_range = input_range
         self.min_signal_rate = min_signal_rate
         self.max_signal_rate = max_signal_rate
+        self.network_name = network_name
+        self.network_kwargs = network_kwargs or {}
 
+        # reverse diffusion (i.e. sampling) goes from max_t to min_t
         self.min_t = 0.0
         self.max_t = 1.0
 
@@ -485,20 +490,13 @@ class DiffusionModel(DeepGenerativeModel):
         config = super().get_config()
         config.update(
             {
-                "image_shape": self.image_shape,
-                "block_depth": self.block_depth,
-                "widths": self.widths,
-                "mean": self.mean,
-                "variance": self.variance,
-                "image_range": self.image_range,
-                "latent_diffusion": self.latent_diffusion,
-                "latent_shape": self.latent_shape,
-                "autoencoder_checkpoint_directory": self.autoencoder_checkpoint_directory,
-                "autoencoder_config": self.autoencoder_config,
+                "input_shape": self.input_shape,
+                "input_range": self.input_range,
+                "network_name": self.network_name,
+                "network_kwargs": self.network_kwargs,
                 "min_signal_rate": self.min_signal_rate,
                 "max_signal_rate": self.max_signal_rate,
                 "min_t": self.min_t,
                 "max_t": self.max_t,
-                "corrupt_noise": self.corrupt_noise,
             }
         )
