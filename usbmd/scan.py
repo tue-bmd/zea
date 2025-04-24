@@ -653,7 +653,7 @@ class Scan(Object):
     def sampling_frequency(self):
         """The sampling rate."""
         if self._sampling_frequency is None:
-            raise ValueError("Please set scan.sampling_rate.")
+            raise ValueError("Please set scan.sampling_frequency.")
         return float(self._sampling_frequency)
 
     @sampling_frequency.setter
@@ -792,7 +792,7 @@ class Scan(Object):
     def grid(self):
         """The beamforming grid of shape (Nz, Nx, 3)."""
         if self._grid is None:
-            self._grid = get_grid(
+            self.grid = get_grid(
                 self.xlims,
                 self.zlims,
                 self._Nx,
@@ -801,8 +801,6 @@ class Scan(Object):
                 self.center_frequency,
                 self.pixels_per_wavelength,
             )
-            self._Nz, self._Nx, _ = self._grid.shape
-            self.reset_pfield()  # also trigger update of the pressure fields
 
         return self._grid
 
@@ -810,6 +808,8 @@ class Scan(Object):
     def grid(self, value):
         """Manually set the grid."""
         self._grid = value
+        self._Nz, self._Nx, _ = self._grid.shape
+        self.reset_pfield()  # also trigger update of the pressure fields
 
     @property
     def flatgrid(self):
