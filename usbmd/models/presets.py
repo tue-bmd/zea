@@ -72,4 +72,4 @@ unet_presets = {
     },
 }
 
-linear_presets = {}
+dense_presets = {}

@@ -4,8 +4,8 @@ import keras
 import tensorflow as tf
 from keras import ops
 
+from usbmd.models.dense import get_time_conditional_dense_network
 from usbmd.models.generative import DeepGenerativeModel
-from usbmd.models.linear import get_time_conditional_linear_network
 from usbmd.models.unet import get_time_conditional_unetwork
 from usbmd.models.utils import LossTrackerWrapper
 from usbmd.registry import model_registry
@@ -53,9 +53,9 @@ class DiffusionModel(DeepGenerativeModel):
                 image_shape=self.input_shape,
                 **network_kwargs,
             )
-        elif network_name == "linear_time_conditional":
-            assert len(input_shape) == 1, "Linear network only supports 1D input"
-            self.network = get_time_conditional_linear_network(
+        elif network_name == "dense_time_conditional":
+            assert len(input_shape) == 1, "Dense network only supports 1D input"
+            self.network = get_time_conditional_dense_network(
                 input_dim=self.input_shape[0],
                 **network_kwargs,
             )
