@@ -448,7 +448,8 @@ class DiffusionModel(DeepGenerativeModel):
         else:
             raise ValueError(
                 "Why are you trying to do this? Initial samples should be provided "
-                "if initial_step is greater than 0 (i.e. you want to start with a partially noised image)"
+                "if initial_step is greater than 0 (i.e. you want to start with "
+                "a partially noised image)"
             )
         return next_noisy_images
 

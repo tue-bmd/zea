@@ -23,6 +23,7 @@ def split_seed(seed, n):
 
     # If seed is a JAX key, split it into n keys
     if keras.backend.backend() == "jax":
+        # pylint: disable=import-outside-toplevel
         import jax
 
         return jax.random.split(seed, n)

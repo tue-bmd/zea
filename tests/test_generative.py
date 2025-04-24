@@ -113,9 +113,6 @@ def animate_diffusion_trajectory_2d(
         show_data: Whether to plot the original data in the background.
     """
 
-    import matplotlib.pyplot as plt
-    import numpy as np
-
     n_show = min(n_show, data.shape[0])
     frames = []
     for i, samples in enumerate(model.track_progress):
@@ -147,11 +144,11 @@ def animate_diffusion_trajectory_2d(
 
 def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     """Test diffusion model fitting and sampling on synthetic 2D data."""
-    data, true_means, true_covs = synthetic_2d_data
+    data, *_ = synthetic_2d_data
     n = len(data)
     model = DiffusionModel(
         input_shape=(2,),
-        network_name="linear_time_conditional",
+        network_name="dense_time_conditional",
         network_kwargs={"widths": [64, 64], "output_dim": 2},
         min_signal_rate=0.02,
         max_signal_rate=0.95,
@@ -161,7 +158,7 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
         loss=keras.losses.MeanSquaredError(),
     )
 
-    model.fit(data, epochs=100, batch_size=64, verbose=1)
+    model.fit(data, epochs=100, batch_size=64, verbose=0)
 
     samples = model.sample(n_samples=n, n_steps=100)
     samples = keras.ops.convert_to_numpy(samples)
@@ -170,7 +167,7 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     if debug:
         plot_distributions(data, samples, title="Diffusion 2D Fit Debug")
         animate_diffusion_trajectory_2d(
-            model, filename="diffusion_trajectory.gif", n_show=300
+            model, data, filename="diffusion_trajectory.gif", n_show=300
         )
 
     assert np.allclose(samples.mean(axis=0), data.mean(axis=0), atol=2.0)
