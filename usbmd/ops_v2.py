@@ -1600,10 +1600,11 @@ class ScanConvert(Operation):
             order (int, optional): Interpolation order. Defaults to 1. Currently only
                 GPU support for order=1.
         """
+        jittable = kwargs.pop("jittable", False)
         super().__init__(
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
-            jittable=False,  # currently not jittable due to variable size
+            jittable=jittable,  # if you provide coordinates, this operation can be jitted!
             **kwargs,
         )
         self.order = order
@@ -1615,6 +1616,7 @@ class ScanConvert(Operation):
         phi_range=None,
         resolution=None,
         fill_value=None,
+        coordinates=None,
         **kwargs,
     ):
         """Scan convert images to cartesian coordinates.
@@ -1628,6 +1630,9 @@ class ScanConvert(Operation):
                 Defined in radians.
             resolution (float): Resolution of the output image in meters per pixel.
                 if None, the resolution is computed based on the input data.
+            coordinates (Tensor): Coordinates for scan convertion. If None, will be computed
+                based on rho_range, theta_range, phi_range and resolution. If provided, this
+                operation can be jitted.
             fill_value (float): Value to fill the image with outside the defined region.
 
         """
@@ -1651,6 +1656,7 @@ class ScanConvert(Operation):
                 theta_range,
                 resolution,
                 fill_value,
+                coordinates=coordinates,
                 order=self.order,
             )
 
@@ -1688,3 +1694,18 @@ class Demodulate(Operation):
             "demodulation_frequency": demodulation_frequency,
             "n_ch": 2,
         }
+
+
+@ops_registry("clip")
+class Clip(Operation):
+    """Clip the input data to a given range."""
+
+    def __init__(self, min_value=None, max_value=None, **kwargs):
+        super().__init__(**kwargs)
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        data = ops.clip(data, self.min_value, self.max_value)
+        return {self.output_key: data}
