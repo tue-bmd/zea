@@ -1,0 +1,11 @@
+sphinx
+sphinx-autobuild
+
+# if using typehints
+sphinx-autodoc-typehints
+
+mock
+autodoc
+
+# https://sphinx-themes.org/sample-sites/sphinx-rtd-theme/
+sphinx-rtd-theme
