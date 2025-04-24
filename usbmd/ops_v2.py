@@ -1631,6 +1631,8 @@ class ScanConvert(Operation):
             fill_value (float): Value to fill the image with outside the defined region.
 
         """
+        if fill_value is None:
+            fill_value = np.nan
 
         data = kwargs[self.key]
 

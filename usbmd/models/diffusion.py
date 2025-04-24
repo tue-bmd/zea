@@ -11,6 +11,8 @@ from keras import ops
 
 from usbmd.models.dense import get_time_conditional_dense_network
 from usbmd.models.generative import DeepGenerativeModel
+from usbmd.models.preset_utils import register_presets
+from usbmd.models.presets import diffusion_model_presets
 from usbmd.models.unet import get_time_conditional_unetwork
 from usbmd.models.utils import LossTrackerWrapper
 from usbmd.registry import model_registry
@@ -293,7 +295,7 @@ class DiffusionModel(DeepGenerativeModel):
         initial_step: int = 0,
         stochastic_sampling: bool = False,
         seed: keras.random.SeedGenerator | None = None,
-        verbose: bool = False,
+        verbose: bool = True,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
     ):
         """Reverse diffusion process to generate images from noise.
@@ -505,3 +507,6 @@ class DiffusionModel(DeepGenerativeModel):
                 "max_t": self.max_t,
             }
         )
+
+
+register_presets(diffusion_model_presets, DiffusionModel)
