@@ -229,9 +229,7 @@ class File(h5py.File):
         Returns:
             Scan: The scan object.
         """
-        scan_parameters = self.get_scan_parameters(event)
-        # TODO: use safe_initialize_class?
-        return Scan(**scan_parameters)
+        return safe_initialize_class(Scan, **self.get_scan_parameters(event))
 
     def get_probe_parameters(self, event=None):
         """Returns a dictionary of probe parameters to initialize a probe
