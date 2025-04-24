@@ -1,4 +1,4 @@
-"""Linear models and architectures
+"""Dense models and architectures
 - **Author(s)**     : Tristan Stevens
 - **Date**          : 23/04/2025
 """
@@ -9,27 +9,27 @@ from keras import layers
 from usbmd.models.base import BaseModel
 from usbmd.models.layers import sinusoidal_embedding
 from usbmd.models.preset_utils import register_presets
-from usbmd.models.presets import linear_presets
+from usbmd.models.presets import dense_presets
 from usbmd.registry import model_registry
 
 
-@model_registry(name="linear")
-class LinearNet(BaseModel):
-    """Simple linear feedforward model"""
+@model_registry(name="dense")
+class DenseNet(BaseModel):
+    """Simple dense model"""
 
     def __init__(
         self,
         input_dim,
         widths,
         output_dim,
-        name="linear",
+        name="dense",
         **kwargs,
     ):
         super().__init__(name=name, **kwargs)
         self.input_dim = input_dim
         self.widths = widths
         self.output_dim = output_dim
-        self.network = get_linear_network(self.input_dim, self.widths, self.output_dim)
+        self.network = get_dense_network(self.input_dim, self.widths, self.output_dim)
 
     def get_config(self):
         config = super().get_config()
@@ -46,19 +46,19 @@ class LinearNet(BaseModel):
         return self.network(*args, **kwargs)
 
 
-def get_linear_network(input_dim, widths, output_dim):
+def get_dense_network(input_dim, widths, output_dim):
     """Simple feedforward network"""
     inputs = keras.Input(shape=(input_dim,))
     x = inputs
     for width in widths:
         x = layers.Dense(width, activation="relu")(x)
     outputs = layers.Dense(output_dim, kernel_initializer="zeros")(x)
-    return keras.Model(inputs, outputs, name="linear_net")
+    return keras.Model(inputs, outputs, name="dense_net")
 
 
-@model_registry(name="linear_time_conditional")
-class LinearTimeConditionalNet(BaseModel):
-    """Linear model with time-conditional sinusoidal embedding"""
+@model_registry(name="dense_time_conditional")
+class DenseTimeConditionalNet(BaseModel):
+    """Dense model with time-conditional sinusoidal embedding"""
 
     def __init__(
         self,
@@ -68,7 +68,7 @@ class LinearTimeConditionalNet(BaseModel):
         embedding_min_frequency=1.0,
         embedding_max_frequency=1000.0,
         embedding_dims=32,
-        name="linear_time_conditional",
+        name="dense_time_conditional",
         **kwargs,
     ):
         super().__init__(name=name, **kwargs)
@@ -78,7 +78,7 @@ class LinearTimeConditionalNet(BaseModel):
         self.embedding_min_frequency = embedding_min_frequency
         self.embedding_max_frequency = embedding_max_frequency
         self.embedding_dims = embedding_dims
-        self.network = get_time_conditional_linear_network(
+        self.network = get_time_conditional_dense_network(
             self.input_dim,
             self.widths,
             self.output_dim,
@@ -105,7 +105,7 @@ class LinearTimeConditionalNet(BaseModel):
         return self.network(*args, **kwargs)
 
 
-def get_time_conditional_linear_network(
+def get_time_conditional_dense_network(
     input_dim,
     widths,
     output_dim,
@@ -113,7 +113,7 @@ def get_time_conditional_linear_network(
     embedding_max_frequency=1000.0,
     embedding_dims=32,
 ):
-    """Feedforward network with time-conditional sinusoidal embedding"""
+    """Dense network with time-conditional sinusoidal embedding"""
     inputs = keras.Input(shape=(input_dim,))
     time_input = keras.Input(shape=(1,))
 
@@ -128,10 +128,8 @@ def get_time_conditional_linear_network(
     for width in widths:
         x = layers.Dense(width, activation="relu")(x)
     outputs = layers.Dense(output_dim, kernel_initializer="zeros")(x)
-    return keras.Model(
-        [inputs, time_input], outputs, name="linear_time_conditional_net"
-    )
+    return keras.Model([inputs, time_input], outputs, name="dense_time_conditional_net")
 
 
-register_presets(linear_presets, LinearNet)
-register_presets(linear_presets, LinearTimeConditionalNet)
+register_presets(dense_presets, DenseNet)
+register_presets(dense_presets, DenseTimeConditionalNet)
