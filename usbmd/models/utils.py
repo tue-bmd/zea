@@ -44,7 +44,7 @@ class LossTrackerWrapper:
         Return a dictionary with the current average results.
         """
         results = {}
-        for key, tracker in self.trackers.items():
+        for _, tracker in self.trackers.items():
             # Use the tracker's name (e.g. "n_loss_a") if available
             results[tracker.name] = tracker.result()
         return results
