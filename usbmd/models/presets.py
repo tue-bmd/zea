@@ -73,3 +73,14 @@ unet_presets = {
 }
 
 dense_presets = {}
+
+diffusion_model_presets = {
+    "diffusion-echonet-dynamic": {
+        "metadata": {
+            "description": ("Diffusion model trained on EchoNet-Dynamic dataset."),
+            "params": 0,
+            "path": "diffusion",
+        },
+        "hf_handle": "hf://usbmd/diffusion-echonet-dynamic",
+    },
+}
