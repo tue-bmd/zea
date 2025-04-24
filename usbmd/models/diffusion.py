@@ -14,6 +14,7 @@ from usbmd.models.generative import DeepGenerativeModel
 from usbmd.models.unet import get_time_conditional_unetwork
 from usbmd.models.utils import LossTrackerWrapper
 from usbmd.registry import model_registry
+from usbmd.tensor_ops import split_seed
 
 
 @model_registry(name="diffusion")
@@ -96,14 +97,16 @@ class DiffusionModel(DeepGenerativeModel):
         Returns:
             Generated samples.
         """
+        seed, seed1 = split_seed(seed, 2)
+
         # Generate random noise
         noise = keras.random.normal(
             shape=(n_samples, *self.input_shape),
-            seed=seed,
+            seed=seed1,
         )
         # Reverse diffusion process
         return self.reverse_diffusion(
-            initial_noise=noise, diffusion_steps=n_steps, **kwargs
+            initial_noise=noise, diffusion_steps=n_steps, seed=seed, **kwargs
         )
 
     def posterior_sample(self, data, **kwargs):
@@ -272,7 +275,7 @@ class DiffusionModel(DeepGenerativeModel):
         sigma_t = ops.sqrt((1 - alpha) / (1 - alpha_prev)) * ops.sqrt(
             1 - alpha_prev / alpha
         )
-        epsilon = keras.random.normal(shape=shape, seed=self.get_seed(seed))
+        epsilon = keras.random.normal(shape=shape, seed=seed)
 
         next_noise_rates = ops.sqrt(1 - alpha - sigma_t**2)
         next_noisy_images = (
@@ -343,6 +346,8 @@ class DiffusionModel(DeepGenerativeModel):
                 noisy_images, noise_rates, signal_rates, training=False
             )
 
+            seed, seed1 = split_seed(seed, 2)
+
             next_noisy_images = self.reverse_diffusion_step(
                 shape=(num_images, *input_shape),
                 pred_images=pred_images,
@@ -350,7 +355,7 @@ class DiffusionModel(DeepGenerativeModel):
                 signal_rates=signal_rates,
                 next_signal_rates=next_signal_rates,
                 next_noise_rates=next_noise_rates,
-                seed=seed,
+                seed=seed1,
                 stochastic_sampling=stochastic_sampling,
             )
 
