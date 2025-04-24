@@ -44,7 +44,8 @@ if "KERAS_BACKEND" not in os.environ:
 
 # Main (isort: split)
 from .config import Config, load_config_from_yaml
-from .data.datasets import USBMDDataSet
+from .data.dataloader import H5Dataloader
+from .data.file import File
 from .datapaths import set_data_paths
 from .interface import Interface
 from .ops import Pipeline
