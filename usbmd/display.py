@@ -103,9 +103,6 @@ def scan_convert_2d(
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
-    x_lim = [ops.min(x_grid), ops.max(x_grid)]
-    z_lim = [ops.min(z_grid), ops.max(z_grid)]
-
     x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
     z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
 
@@ -274,8 +271,7 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
         )
         images_sc.append(image_sc)
 
-    images_sc = ops.convert_to_tensor(images_sc)
-    images_sc = ops.where(ops.isnan(images_sc), fill_value, images_sc)
+    images_sc = ops.nan_to_num(images_sc, nan=fill_value)
 
     images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc.shape))
 
