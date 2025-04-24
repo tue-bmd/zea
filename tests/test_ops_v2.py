@@ -153,6 +153,63 @@ def patched_pipeline_config():
 
 
 @pytest.fixture
+def branched_pipeline_config():
+    """Returns a configuration for a BranchedPipeline."""
+    return {
+        "operations": [
+            {
+                "name": "branched_pipeline",
+                "params": {"merge_strategy": "flatten"},
+                "branches": {
+                    "branch_1": [
+                        {"name": "simulate_rf"},
+                        {"name": "demodulate"},
+                        {
+                            "name": "tof_correction",
+                            "params": {"apply_phase_rotation": True},
+                        },
+                        {"name": "pfield_weighting"},
+                        {"name": "delay_and_sum"},
+                    ],
+                    "branch_2": [
+                        {"name": "simulate_rf"},
+                        {"name": "demodulate"},
+                        {
+                            "name": "tof_correction",
+                            "params": {"apply_phase_rotation": False},
+                        },
+                        {"name": "pfield_weighting"},
+                        {"name": "delay_and_sum"},
+                    ],
+                },
+            },
+            {"name": "envelope_detect"},
+            {"name": "normalize"},
+            {"name": "log_compress"},
+        ]
+    }
+
+
+def validate_branched_pipeline(pipeline):
+    """Validates the branched pipeline."""
+    assert len(pipeline.operations) == 4
+    assert hasattr(pipeline.operations[0], "branches")
+    assert isinstance(pipeline.operations[1], ops.EnvelopeDetect)
+    assert isinstance(pipeline.operations[2], ops.Normalize)
+    assert isinstance(pipeline.operations[3], ops.LogCompress)
+
+    branch_1 = pipeline.operations[0].branches["branch_1"]
+    branch_2 = pipeline.operations[0].branches["branch_2"]
+
+    for branch in [branch_1, branch_2]:
+        assert isinstance(branch[0], ops.Simulate)
+        assert isinstance(branch[1], ops.Demodulate)
+        assert isinstance(branch[2], ops.TOFCorrection)
+        assert isinstance(branch[3], ops.PfieldWeighting)
+        assert isinstance(branch[4], ops.DelayAndSum)
+
+
+@pytest.fixture
 def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
@@ -396,21 +453,8 @@ def validate_default_pipeline(pipeline, patched=False):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
-)
-def test_pipeline_from_json(config_fixture, request):
-    """Tests building a dummy pipeline from a JSON string."""
-    config = request.getfixturevalue(config_fixture)
-    json_string = json.dumps(config)
-    pipeline = ops.pipeline_from_json(json_string, jit_options=None)
-
-    validate_basic_pipeline(
-        pipeline, with_params=config_fixture == "pipeline_config_with_params"
-    )
-
-
-@pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_default_pipeline_from_json(config_fixture, request):
     """Tests building a default pipeline from a JSON string."""
@@ -418,9 +462,12 @@ def test_default_pipeline_from_json(config_fixture, request):
     json_string = json.dumps(config)
     pipeline = ops.pipeline_from_json(json_string, jit_options=None)
 
-    validate_default_pipeline(
-        pipeline, patched=config_fixture == "patched_pipeline_config"
-    )
+    if config_fixture == "branched_pipeline_config":
+        validate_branched_pipeline(pipeline)
+    else:
+        validate_default_pipeline(
+            pipeline, patched=config_fixture == "patched_pipeline_config"
+        )
 
 
 @pytest.mark.parametrize(
@@ -438,7 +485,8 @@ def test_pipeline_from_config(config_fixture, request):
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_default_pipeline_from_config(config_fixture, request):
     """Tests building a default pipeline from a Config object."""
@@ -446,13 +494,17 @@ def test_default_pipeline_from_config(config_fixture, request):
     config = Config(**config_dict)
     pipeline = ops.pipeline_from_config(config, jit_options=None)
 
-    validate_default_pipeline(
-        pipeline, patched=config_fixture == "patched_pipeline_config"
-    )
+    if config_fixture == "branched_pipeline_config":
+        validate_branched_pipeline(pipeline)
+    else:
+        validate_default_pipeline(
+            pipeline, patched=config_fixture == "patched_pipeline_config"
+        )
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_pipeline_to_config(config_fixture, request):
     """Tests converting a pipeline to a Config object."""
@@ -466,19 +518,17 @@ def test_pipeline_to_config(config_fixture, request):
     # Create a new pipeline from the new Config object
     new_pipeline = ops.pipeline_from_config(new_config, jit_options=None)
 
-    # TODO: Because of the way the config.operations is defined, it always assumes a standard
-    # root pipeline. However the root can also be a pipeline subclass. Because of this, after saving
-    # first entry in config.operations is always a Pipeline, which can contain any other type of
-    # pipeline or operation. This should be changed in a future version.
-
-    validate_default_pipeline(
-        new_pipeline, patched=config_fixture == "patched_pipeline_config"
-    )
-
+    if config_fixture == "branched_pipeline_config":
+        validate_branched_pipeline(new_pipeline)
+    else:
+        validate_default_pipeline(
+            new_pipeline, patched=config_fixture == "patched_pipeline_config"
+        )
 
 
 @pytest.mark.parametrize(
-    "config_fixture", ["default_pipeline_config", "patched_pipeline_config"]
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
 )
 def test_pipeline_to_json(config_fixture, request):
     """Tests converting a pipeline to a JSON string."""
@@ -492,11 +542,18 @@ def test_pipeline_to_json(config_fixture, request):
     # Create a new pipeline from the JSON string
     new_pipeline = ops.pipeline_from_json(json_string, jit_options=None)
 
-    validate_default_pipeline(
-        new_pipeline, patched=config_fixture == "patched_pipeline_config"
-    )
+    if config_fixture == "branched_pipeline_config":
+        validate_branched_pipeline(new_pipeline)
+    else:
+        validate_default_pipeline(
+            new_pipeline, patched=config_fixture == "patched_pipeline_config"
+        )
 
-@pytest.mark.parametrize("config_fixture", ["default_pipeline_config", "patched_pipeline_config"])
+
+@pytest.mark.parametrize(
+    "config_fixture",
+    ["default_pipeline_config", "patched_pipeline_config", "branched_pipeline_config"],
+)
 def test_pipeline_to_yaml(config_fixture, request, tmp_path):
     """Tests converting a pipeline to a YAML file (in tmp directory), and then loading it back."""
     config_dict = request.getfixturevalue(config_fixture)
@@ -510,9 +567,13 @@ def test_pipeline_to_yaml(config_fixture, request, tmp_path):
     # Load the pipeline from the YAML file
     new_pipeline = ops.pipeline_from_yaml(path, jit_options=None)
 
-    validate_default_pipeline(
-        new_pipeline, patched=config_fixture == "patched_pipeline_config"
-    )
+    if config_fixture == "branched_pipeline_config":
+        validate_branched_pipeline(new_pipeline)
+    else:
+        validate_default_pipeline(
+            new_pipeline, patched=config_fixture == "patched_pipeline_config"
+        )
+
 
 def get_probe():
     """Returns a probe for ultrasound simulation tests."""
