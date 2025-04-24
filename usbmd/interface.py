@@ -21,7 +21,7 @@ from usbmd.core import DataTypes
 from usbmd.data.file import File
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
-from usbmd.probes import get_probe
+from usbmd.scan import Scan
 from usbmd.utils import (
     log,
     safe_initialize_class,
@@ -44,6 +44,7 @@ class Interface:
 
     Useful for inspecting datasets and single ultrasound images.
 
+    # TODO: maybe we can refactor such that it is clear what needs to be in config.
     """
 
     def __init__(self, config=None, verbose=True, dataset_kwargs=None):
@@ -53,41 +54,22 @@ class Interface:
         # intialize dataset
         if dataset_kwargs is None:
             dataset_kwargs = {}
-        self.dataset = File.from_config(**self.config.data, **dataset_kwargs)
+        self.dataset = File(self.file_path, **dataset_kwargs)
 
-        # Initialize scan based on dataset (if it can find proper scan parameters)
-        scan_class = self.dataset.get_scan_class()
-        file_scan_params = self.dataset.get_scan_parameters_from_file(event=0)
-        file_probe_params = self.dataset.get_probe_parameters_from_file(event=0)
-
-        self.scan = None
+        file_scan_params = self.dataset.get_scan_parameters()
         if len(file_scan_params) == 0:
             log.info(
                 f"Could not find proper scan parameters in {self.dataset} at "
                 f"{log.yellow(str(self.dataset.datafolder))}."
             )
             log.info("Proceeding without scan class.")
+            self.scan = None
         else:
-            self.config_scan_params = self.config.scan
             # dict merging of manual config and dataset default scan parameters
-            self.scan_params = update_dictionary(
-                file_scan_params, self.config_scan_params
-            )
-            try:
-                self.scan = safe_initialize_class(scan_class, **self.scan_params)
-            except Exception as e:
-                log.error(
-                    "Could not initialize scan class with parameters: "
-                    f"{self.scan_params}\n{e}"
-                )
+            scan_params = update_dictionary(file_scan_params, self.config.scan)
+            self.scan = safe_initialize_class(Scan, **scan_params)
 
-        # initialize probe
-        probe_name = self.dataset.get_probe_name()
-
-        if probe_name == "generic":
-            self.probe = get_probe(probe_name, **file_probe_params)
-        else:
-            self.probe = get_probe(probe_name)
+        self.probe = self.dataset.probe()
 
         # initialize Pipeline
         assert (
@@ -105,7 +87,6 @@ class Interface:
         # initialize attributes for UI class
         self.data = None
         self.image = None
-        self.file_path = None
         self.mpl_img = None
         self.fig = None
         self.ax = None
@@ -121,11 +102,7 @@ class Interface:
 
         self.check_for_display()
 
-        if hasattr(self.dataset.file_name, "name"):
-            window_name = str(self.dataset.file_name.name)
-        else:
-            window_name = "usbmd"
-
+        window_name = Path(self.dataset.filename).name
         if self.plot_lib == "opencv":
             self.image_viewer = ImageViewerOpenCV(
                 self.data_to_display,
@@ -145,6 +122,48 @@ class Interface:
         """Data type of data when loaded from file."""
         return self.config.data.dtype
 
+    @property
+    def dataset_folder(self):
+        """Path to dataset folder."""
+        return self.config.data.dataset_folder
+
+    @property
+    def file_path(self):
+        """Path to data file."""
+        if self.config.data.file_path:
+            file_path = Path(self.config.data.file_path)
+            if file_path.is_absolute():
+                return Path(file_path)
+            else:
+                return self.data_root / self.dataset_folder / file_path
+        else:
+            return self.choose_file_path()
+
+    @file_path.setter
+    def file_path(self, value):
+        """Set file path to data file."""
+        self.config.data.file_path = value
+
+    def choose_file_path(self):
+        if self.headless:
+            raise ValueError(
+                "No file path specified for data file, which is required "
+                "in headless mode as window dialog cannot be opened."
+            )
+        filetype = "hdf5"
+        log.info("Please select file from window dialog...")
+        self.file_path = filename_from_window_dialog(
+            f"Choose .{filetype} file",
+            filetypes=((filetype, "*." + filetype),),
+            initialdir=self.dataset_folder,
+        )
+        return self.file_path
+
+    @property
+    def data_root(self):
+        """Root path to data file."""
+        return Path(self.config.user.data_root)
+
     @dtype.setter
     def dtype(self, value):
         self.config.data.dtype = value
@@ -157,6 +176,15 @@ class Interface:
     @to_dtype.setter
     def to_dtype(self, value):
         self.config.data.to_dtype = value
+
+    @property
+    def frame_no(self):
+        """Frame number to display."""
+        return self.config.data.get("frame_no")
+
+    @frame_no.setter
+    def frame_no(self, value):
+        self.config.data.frame_no = value
 
     def check_for_display(self):
         """check if in headless mode (no monitor available)"""
@@ -182,56 +210,24 @@ class Interface:
         Returns:
             data (np.ndarray): data array of shape (n_tx, n_el, n_ax, N_ch)
         """
-        if self.config.data.file_path:
-            path = Path(self.config.data.file_path)
-            if path.is_absolute():
-                self.file_path = path
-            else:
-                self.file_path = self.dataset.data_root / path
-        else:
-            if self.headless:
-                raise ValueError(
-                    "No file path specified for data file, which is required "
-                    "in headless mode as window dialog cannot be opened."
-                )
-            filtetype = self.dataset.filetype
-            initialdir = self.dataset.data_root
-            log.info("Please select file from window dialog...")
-            self.file_path = filename_from_window_dialog(
-                f"Choose .{filtetype} file",
-                filetypes=((filtetype, "*." + filtetype),),
-                initialdir=initialdir,
-            )
-            self.config.data.file_path = self.file_path
-
         if self.verbose:
             log.info(f"Selected {log.yellow(self.file_path)}")
 
-        # find file in dataset
-        if self.file_path in self.dataset.file_paths:
-            file_idx = self.dataset.file_paths.index(self.file_path)
-        else:
-            raise ValueError(
-                f"Chosen datafile {self.file_path} does not exist in dataset!"
-            )
-
         # grab frame number from config or user input if not set in config
-        frame_no = self.config.data.get("frame_no")
-
-        if frame_no == "all":
+        if self.frame_no == "all":
             log.info("Will run all frames as `all` was chosen in config...")
-        elif frame_no is None:
+        elif self.frame_no is None:
             if self.dataset.num_frames == 1:
-                frame_no = 0
+                self.frame_no = 0
             else:
-                frame_no = keep_trying(
+                self.frame_no = keep_trying(
                     lambda: int(
                         input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
                     )
                 )
 
         # get data from dataset
-        data = self.dataset[(file_idx, frame_no)]
+        data = self.dataset.load_data(self.dtype, self.frame_no)
 
         return data
 
@@ -277,7 +273,7 @@ class Interface:
         """Run ui. Will retrieve, process and plot data if set to True."""
         save = self.config.plot.save
 
-        if self.config.data.get("frame_no") == "all":
+        if self.frame_no == "all":
             if not asyncio.get_event_loop().is_running():
                 asyncio.run(self.run_movie(save))
             else:
@@ -303,7 +299,7 @@ class Interface:
         """Plot image using matplotlib or opencv.
 
         Args:
-        save (bool): whether to save the image to disk.
+            save (bool): whether to save the image to disk.
             block (bool): whether to block the UI while plotting.
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
@@ -399,7 +395,7 @@ class Interface:
         images = []
 
         # Load correct number of frames (needs to get_data first)
-        self.config.data.frame_no = 0
+        self.frame_no = 0
         self.get_data()
         n_frames = self.dataset.num_frames
 
@@ -417,7 +413,7 @@ class Interface:
 
                     await asyncio.sleep(0.01)
 
-                    self.config.data.frame_no = frame_counter
+                    self.frame_no = frame_counter
 
                     if frame_counter == 0:
                         if self.plot_lib == "matplotlib":
@@ -430,7 +426,7 @@ class Interface:
                     frame_counter = self.image_viewer.frame_no
 
                     # check if frame counter updated
-                    if frame_counter != self.config.data.frame_no:
+                    if frame_counter != self.frame_no:
                         fps = frame_counter / (time.time() - start_time)
                         print(
                             f"frame {frame_counter} / {n_frames} ({fps:.2f} fps)",
@@ -491,21 +487,14 @@ class Interface:
             else:
                 tag = ""
 
-            if self.dataset.frame_no is not None:
-                filename = (
-                    self.file_path.stem
-                    + "-"
-                    + str(self.dataset.frame_no)
-                    + tag
-                    + "."
-                    + self.config.plot.image_extension
-                )
+            if self.frame_no is not None:
+                filename = self.file_path.stem + "-" + str(self.frame_no) + tag
             else:
-                filename = (
-                    self.file_path.stem + tag + "." + self.config.plot.image_extension
-                )
+                filename = self.file_path.stem + tag
 
-            path = Path("./figures", filename)
+            path = Path("./figures", filename).with_suffix(
+                self.config.plot.image_extension
+            )
             Path("./figures").mkdir(parents=True, exist_ok=True)
 
         if isinstance(fig, plt.Figure):
