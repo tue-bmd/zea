@@ -1,10 +1,11 @@
 """Frequency domain ultrasound simulator based on linear scattering."""
 
+import numpy as np
 from keras import ops
 
 from usbmd.utils.lens_correction import compute_lens_corrected_travel_times
 
-PI = 3.14159265359
+PI = np.pi
 
 
 def simulate_rf(
@@ -313,4 +314,4 @@ def sinc(x):
 
 def _round_up_to_power_of_two(x):
     """Rounds up to the next power of two."""
-    return 2 ** (x - 1).bit_length()
+    return 2 ** ops.ceil(ops.log2(x))
