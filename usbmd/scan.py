@@ -210,7 +210,7 @@ class Scan(Object):
                 in meters. Necessary for automatic xlim calculation if not set.
                 Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
-                transmit events of shape (n_tx*n_frames,). Defaults to None.
+                transmit events of shape (n_frames, n_tx). Defaults to None.
             resolution (float, optional): The resolution for scan conversion.
                 Defaults to None, in which case it will be automatically computed.
             coordinates (np.ndarray, optional): The coordinates for scan conversion.
@@ -226,7 +226,6 @@ class Scan(Object):
         self.probe_geometry = None
         self.pixels_per_wavelength = None
         self.downsample = None
-        self.time_to_next_transmit = None
         self.theta_range = None
         self.phi_range = None
         self.rho_range = None
@@ -265,6 +264,7 @@ class Scan(Object):
         self._set_param("initial_times", initial_times)
         self._set_param("pfield", pfield)
         self._set_param("coordinates", coordinates)
+        self._set_param("time_to_next_transmit", time_to_next_transmit)
 
         if pfield is None:
             self._set_params["flat_pfield"] = False
@@ -286,7 +286,6 @@ class Scan(Object):
         )
         self._set_param("downsample", downsample, dunder=False)
         self._set_param("probe_geometry", probe_geometry, dunder=False)
-        self._set_param("time_to_next_transmit", time_to_next_transmit, dunder=False)
         self._set_param("f_number", f_number, dunder=False)
         self._set_param("pfield_kwargs", pfield_kwargs, dunder=False)
         self._set_param("apply_lens_correction", apply_lens_correction, dunder=False)
@@ -940,6 +939,28 @@ class Scan(Object):
                 self.resolution,
             )
         return self._coordinates
+
+    @property
+    def time_to_next_transmit(self):
+        """The time between subsequent transmit events of shape (n_frames, n_tx)."""
+        return self._time_to_next_transmit[:, self.selected_transmits]
+
+    @property
+    def frames_per_second(self):
+        """The number of frames per second."""
+        if self.time_to_next_transmit is None:
+            raise ValueError(
+                "Please set scan.time_to_next_transmit. Currently not set."
+            )
+
+        # Check if fps is constant
+        uniq = np.unique(self.time_to_next_transmit, axis=0)  # frame axis
+        assert uniq.shape[0] == 1, "Time to next transmit is not constant"
+
+        # Compute fps
+        time = np.sum(self.time_to_next_transmit[0])
+        fps = 1 / time
+        return fps
 
     def get_scan_parameters(self):
         """Returns a dictionary with all the parameters of the scan.
