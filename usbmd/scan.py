@@ -15,8 +15,8 @@ from keras import ops
 
 from usbmd.core import STATIC, Object
 from usbmd.display import (
-    _compute_scan_convert_2d_coordinates,
-    _compute_scan_convert_3d_coordinates,
+    compute_scan_convert_2d_coordinates,
+    compute_scan_convert_3d_coordinates,
 )
 from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
@@ -119,6 +119,7 @@ class Scan(Object):
         selected_transmits: Union[int, list[int], str, None] = None,
         probe_geometry: Union[np.ndarray, None] = None,
         time_to_next_transmit: Union[np.ndarray, None] = None,
+        resolution: Union[float, None] = None,
         coordinates: Union[np.ndarray, None] = None,
     ):
         """Initializes a Scan object representing the number and type of
@@ -210,6 +211,8 @@ class Scan(Object):
                 Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
                 transmit events of shape (n_tx*n_frames,). Defaults to None.
+            resolution (float, optional): The resolution for scan conversion.
+                Defaults to None, in which case it will be automatically computed.
             coordinates (np.ndarray, optional): The coordinates for scan conversion.
                 Defaults to None.
 
@@ -229,6 +232,8 @@ class Scan(Object):
         self.rho_range = None
         self.fill_value = None
         self._n_tx = None
+        self.resolution = None
+        self._coordinates = None
 
         # Dictionary to track which parameters have been set
         self._set_params = {}
@@ -249,6 +254,7 @@ class Scan(Object):
         self._set_param("zlims", zlims)
         self._set_param("Nx", Nx)
         self._set_param("Nz", Nz)
+        self._set_param("resolution", resolution)
 
         # Store array values and mark as set if not None
         self._set_param("t0_delays", t0_delays)
@@ -906,17 +912,13 @@ class Scan(Object):
         if self._coordinates is not None:
             return self._coordinates
 
-        # If rho_range, theta_range, and resolution are not set, return None
-        if (
-            self.rho_range is None
-            or self.theta_range is None
-            or self.resolution is None
-        ):
+        # If rho_range or theta_range is not set, return None
+        if self.rho_range is None or self.theta_range is None:
             return None
 
         # If phi_range is set, use 3D scan conversion
         if self.phi_range is not None:
-            self._coordinates = _compute_scan_convert_3d_coordinates(
+            self._coordinates = compute_scan_convert_3d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
@@ -926,7 +928,7 @@ class Scan(Object):
 
         # If phi_range is not set, use 2D scan conversion
         else:
-            self._coordinates = _compute_scan_convert_2d_coordinates(
+            self._coordinates = compute_scan_convert_2d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
