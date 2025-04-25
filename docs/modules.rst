@@ -7,8 +7,6 @@ Welcome to the documentation for the `usbmd` package.
    :maxdepth: 2
    :caption: Contents:
 
-   modules
-
 Indices and tables
 ==================
 * :ref:`genindex`
