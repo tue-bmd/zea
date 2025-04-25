@@ -23,8 +23,8 @@ from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.data.file import File
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
-from usbmd.probes import get_probe
-from usbmd.utils import get_function_args, log, update_dictionary
+from usbmd.scan import Scan
+from usbmd.utils import get_function_args, log
 from usbmd.utils.checks import _DATA_TYPES
 
 
@@ -42,6 +42,8 @@ class GenerateDataSet:
         verbose: bool = True,
     ):
         """
+        TODO: Assumes that the scan parameters are the same for all frames and files.
+
         Args:
             config (object): Config object.
             to_dtype (str): output dtype, default is `image`.
@@ -79,41 +81,8 @@ class GenerateDataSet:
 
         # intialize dataset
         self.dataset = File.from_config(**self.config.data)
-
-        # Initialize scan based on dataset (if it can find proper scan parameters)
-        scan_class = self.dataset.get_scan_class()
-        file_scan_params = self.dataset.get_scan_parameters_from_file()
-        file_probe_params = self.dataset.get_probe_parameters_from_file()
-
-        if len(file_scan_params) == 0:
-            log.info(
-                f"Could not find proper scan parameters in {self.dataset} at "
-                f"{log.yellow(str(self.dataset.datafolder))}."
-            )
-            log.info("Proceeding without scan class.")
-
-            self.scan = None
-        else:
-            config_scan_params = self.config.scan
-            # dict merging of manual config and dataset default scan parameters
-            scan_params = update_dictionary(file_scan_params, config_scan_params)
-            # Retrieve the argument names of the Scan class
-            sig = inspect.signature(scan_class.__init__)
-
-            # Filter out the arguments that are not part of the Scan class
-            reduced_scan_params = {
-                key: scan_params[key] for key in sig.parameters if key in scan_params
-            }
-
-            self.scan = scan_class(**reduced_scan_params)
-
-        # initialize probe
-        probe_name = self.dataset.get_probe_name()
-
-        if probe_name == "generic":
-            self.probe = get_probe(probe_name, **file_probe_params)
-        else:
-            self.probe = get_probe(probe_name)
+        self.scan = Scan.merge(self.dataset.get_scan_parameters(), self.config.scan)
+        self.probe = self.dataset.probe()
 
         # initialize Pipeline
         assert (
@@ -157,10 +126,6 @@ class GenerateDataSet:
 
         Generates a dataset based on `filetype` that is being set during initalization.
         Either a `png` or `hdf5` dataset.
-
-        Returns:
-            bool: if succesfull returns `True`.
-
         """
         total_num_frames = self.dataset.total_num_frames
         pbar = tqdm.tqdm(
@@ -207,7 +172,6 @@ class GenerateDataSet:
                 raise
 
         log.success(f"Created dataset in {self.destination_folder}")
-        return True
 
     def process_data(self, data):
         """Small wrapper for processing data with the pipeline"""
@@ -277,8 +241,8 @@ class GenerateDataSet:
         gen_kwargs = {
             str(self.to_dtype): data,
             **file_scan_parameters,
-            "probe_name": self.dataset.file.attrs["probe"],
-            "description": self.dataset.file.attrs["description"],
+            "probe_name": self.dataset.probe_name,
+            "description": self.dataset.description,
         }
 
         # automatically get correct gen_kwargs for generate_usbmd_dataset function
