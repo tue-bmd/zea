@@ -210,7 +210,7 @@ class Scan(Object):
                 in meters. Necessary for automatic xlim calculation if not set.
                 Defaults to None.
             time_to_next_transmit (np.ndarray, float, optional): The time between subsequent
-                transmit events of shape (n_tx*n_frames,). Defaults to None.
+                transmit events of shape (n_frames, n_tx). Defaults to None.
             resolution (float, optional): The resolution for scan conversion.
                 Defaults to None, in which case it will be automatically computed.
             coordinates (np.ndarray, optional): The coordinates for scan conversion.
@@ -226,8 +226,6 @@ class Scan(Object):
         self.probe_geometry = None
         self.pixels_per_wavelength = None
         self.downsample = None
-        self.time_to_next_transmit = None
-        self.theta_range = None
         self.phi_range = None
         self.rho_range = None
         self.fill_value = None
@@ -255,6 +253,7 @@ class Scan(Object):
         self._set_param("Nx", Nx)
         self._set_param("Nz", Nz)
         self._set_param("resolution", resolution)
+        self._set_param("theta_range", theta_range)
 
         # Store array values and mark as set if not None
         self._set_param("t0_delays", t0_delays)
@@ -265,6 +264,7 @@ class Scan(Object):
         self._set_param("initial_times", initial_times)
         self._set_param("pfield", pfield)
         self._set_param("coordinates", coordinates)
+        self._set_param("time_to_next_transmit", time_to_next_transmit)
 
         if pfield is None:
             self._set_params["flat_pfield"] = False
@@ -286,7 +286,6 @@ class Scan(Object):
         )
         self._set_param("downsample", downsample, dunder=False)
         self._set_param("probe_geometry", probe_geometry, dunder=False)
-        self._set_param("time_to_next_transmit", time_to_next_transmit, dunder=False)
         self._set_param("f_number", f_number, dunder=False)
         self._set_param("pfield_kwargs", pfield_kwargs, dunder=False)
         self._set_param("apply_lens_correction", apply_lens_correction, dunder=False)
@@ -295,7 +294,6 @@ class Scan(Object):
         self._set_param("element_width", element_width, dunder=False)
         self._set_param("attenuation_coef", attenuation_coef, dunder=False)
         self._set_param("fill_value", fill_value, dunder=False)
-        self._set_param("theta_range", theta_range, dunder=False)
         self._set_param("phi_range", phi_range, dunder=False)
         self._set_param("rho_range", rho_range, dunder=False)
 
@@ -670,7 +668,7 @@ class Scan(Object):
     def sampling_frequency(self):
         """The sampling rate."""
         if self._sampling_frequency is None:
-            raise ValueError("Please set scan.sampling_rate.")
+            raise ValueError("Please set scan.sampling_frequency.")
         return float(self._sampling_frequency)
 
     @sampling_frequency.setter
@@ -809,7 +807,7 @@ class Scan(Object):
     def grid(self):
         """The beamforming grid of shape (Nz, Nx, 3)."""
         if self._grid is None:
-            self._grid = get_grid(
+            self.grid = get_grid(
                 self.xlims,
                 self.zlims,
                 self._Nx,
@@ -818,8 +816,6 @@ class Scan(Object):
                 self.center_frequency,
                 self.pixels_per_wavelength,
             )
-            self._Nz, self._Nx, _ = self._grid.shape
-            self.reset_pfield()  # also trigger update of the pressure fields
 
         return self._grid
 
@@ -827,6 +823,8 @@ class Scan(Object):
     def grid(self, value):
         """Manually set the grid."""
         self._grid = value
+        self._Nz, self._Nx, _ = self._grid.shape
+        self.reset_pfield()  # also trigger update of the pressure fields
 
     @property
     def flatgrid(self):
@@ -842,6 +840,11 @@ class Scan(Object):
     @property
     def pfield(self):
         """The pfield grid of shape (n_tx, Nz, Nx)."""
+        # TODO: pfield should be recomputed when some scan parameters change...
+        # e.g. you change Nx, the grid gets changed, but only once you try to access self.grid,
+        # which does not happen if you access self.pfield.
+        # We should either make it very clear what each attribute depends on, or we should just
+        # always recompute everything...
         if self._pfield is not None:
             return self._pfield
 
@@ -907,6 +910,13 @@ class Scan(Object):
         self._attenuation_coef = value
 
     @property
+    def theta_range(self):
+        """The theta range for scan conversion."""
+        if self._theta_range is None and self.polar_angles is not None:
+            self._theta_range = (self.polar_angles.min(), self.polar_angles.max())
+        return self._theta_range
+
+    @property
     def coordinates(self):
         """The coordinates for scan conversion."""
         if self._coordinates is not None:
@@ -935,6 +945,28 @@ class Scan(Object):
                 self.resolution,
             )
         return self._coordinates
+
+    @property
+    def time_to_next_transmit(self):
+        """The time between subsequent transmit events of shape (n_frames, n_tx)."""
+        return self._time_to_next_transmit[:, self.selected_transmits]
+
+    @property
+    def frames_per_second(self):
+        """The number of frames per second."""
+        if self.time_to_next_transmit is None:
+            raise ValueError(
+                "Please set scan.time_to_next_transmit. Currently not set."
+            )
+
+        # Check if fps is constant
+        uniq = np.unique(self.time_to_next_transmit, axis=0)  # frame axis
+        assert uniq.shape[0] == 1, "Time to next transmit is not constant"
+
+        # Compute fps
+        time = np.sum(self.time_to_next_transmit[0])
+        fps = 1 / time
+        return fps
 
     def get_scan_parameters(self):
         """Returns a dictionary with all the parameters of the scan.
