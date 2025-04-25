@@ -64,6 +64,7 @@ jobs:
   build-other-images:
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
+    name: Build partial images (${{ matrix.backend }})
     strategy:
       matrix:
         backend: [tensorflow, torch, jax, numpy]
