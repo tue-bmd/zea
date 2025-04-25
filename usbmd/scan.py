@@ -226,7 +226,6 @@ class Scan(Object):
         self.probe_geometry = None
         self.pixels_per_wavelength = None
         self.downsample = None
-        self.theta_range = None
         self.phi_range = None
         self.rho_range = None
         self.fill_value = None
@@ -254,6 +253,7 @@ class Scan(Object):
         self._set_param("Nx", Nx)
         self._set_param("Nz", Nz)
         self._set_param("resolution", resolution)
+        self._set_param("theta_range", theta_range)
 
         # Store array values and mark as set if not None
         self._set_param("t0_delays", t0_delays)
@@ -294,7 +294,6 @@ class Scan(Object):
         self._set_param("element_width", element_width, dunder=False)
         self._set_param("attenuation_coef", attenuation_coef, dunder=False)
         self._set_param("fill_value", fill_value, dunder=False)
-        self._set_param("theta_range", theta_range, dunder=False)
         self._set_param("phi_range", phi_range, dunder=False)
         self._set_param("rho_range", rho_range, dunder=False)
 
@@ -909,6 +908,13 @@ class Scan(Object):
         value = float(value)
         assert value >= 0.0, "Attenuation coefficient must be non-negative"
         self._attenuation_coef = value
+
+    @property
+    def theta_range(self):
+        """The theta range for scan conversion."""
+        if self._theta_range is None and self.polar_angles is not None:
+            self._theta_range = (self.polar_angles.min(), self.polar_angles.max())
+        return self._theta_range
 
     @property
     def coordinates(self):
