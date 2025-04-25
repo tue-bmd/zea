@@ -1634,10 +1634,19 @@ class ScanConvert(Operation):
             order (int, optional): Interpolation order. Defaults to 1. Currently only
                 GPU support for order=1.
         """
-        jittable = kwargs.pop("jittable", False)
+        if order > 1:
+            jittable = False
+            log.warning(
+                "GPU support for order > 1 is not available. "
+                + "Disabling jit for ScanConvert."
+            )
+        else:
+            jittable = True
+
         super().__init__(
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
+            jittable=jittable,
             **kwargs,
         )
         self.order = order
