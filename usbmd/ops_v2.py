@@ -111,10 +111,20 @@ class Operation(keras.Operation):
 
         if jit_kwargs is None:
             # TODO: set static_argnames only for operations that require it
+
+            # Get global static parameters
+            static_params = list(STATIC)
+
+            # Add operation-specific static parameters
+            op_static = list(getattr(self.__class__, "STATIC_PARAMS", []))
+            if op_static:
+                static_params = list(set(static_params + op_static))
+
             if keras.backend.backend() == "jax":
-                jit_kwargs = {"static_argnames": STATIC}
+                jit_kwargs = {"static_argnames": static_params}
             else:
                 jit_kwargs = {}
+
         self.jit_kwargs = jit_kwargs
 
         self.with_batch_dim = with_batch_dim
@@ -1194,6 +1204,9 @@ class Mean(Operation):
 class Simulate(Operation):
     """Simulate RF data."""
 
+    # Define operation-specific static parameters
+    STATIC_PARAMS = ["n_ax"]
+
     def __init__(self, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
@@ -1243,6 +1256,15 @@ class Simulate(Operation):
 @ops_registry("tof_correction")
 class TOFCorrection(Operation):
     """Time-of-flight correction operation for ultrasound data."""
+
+    # Define operation-specific static parameters
+    STATIC_PARAMS = [
+        "f_number",
+        "apply_lens_correction",
+        "apply_phase_rotation",
+        "Nx",
+        "Nz",
+    ]
 
     def __init__(self, apply_phase_rotation=True, **kwargs):
         super().__init__(
@@ -1747,6 +1769,35 @@ class Clip(Operation):
         data = kwargs[self.key]
         data = ops.clip(data, self.min_value, self.max_value)
         return {self.output_key: data}
+
+
+@ops_registry("downsample")
+class Downsample(Operation):
+    """Downsample data along a specific axis."""
+
+    def __init__(self, factor: int = 1, phase: int = 0, axis: int = -3, **kwargs):
+        super().__init__(
+            **kwargs,
+        )
+        self.factor = factor
+        self.phase = phase
+        self.axis = axis
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        length = ops.shape(data)[self.axis]
+        sample_idx = ops.arange(self.phase, length, self.factor)
+        data_downsampled = ops.take(data, sample_idx, axis=self.axis)
+
+        # downsampling also affects the sampling frequency
+        if "sampling_frequency" in kwargs:
+            kwargs["sampling_frequency"] = kwargs["sampling_frequency"] / self.factor
+            kwargs["n_ax"] = kwargs["n_ax"] // self.factor
+        return {
+            self.output_key: data_downsampled,
+            "sampling_frequency": kwargs["sampling_frequency"],
+            "n_ax": kwargs["n_ax"],
+        }
 
 
 @ops_registry("branched_pipeline")
