@@ -17,7 +17,7 @@ from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
 from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
-from usbmd.display import scan_convert_2d, scan_convert_3d
+from usbmd.display import scan_convert
 from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
@@ -829,42 +829,80 @@ class Pipeline:
         return inputs
 
 
-def make_operation_chain(operation_chain: List[Union[str, Dict]]) -> List[Operation]:
+def make_operation_chain(
+    operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
+) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
     Args:
         operation_chain (list): List of operations to be performed.
-            Each operation can be a string or a dictionary.
-            if a string, the operation is initialized with default parameters.
-            if a dictionary, the operation is initialized with the parameters
-            provided in the dictionary, which should have the keys 'name' and 'params'.
+            Each operation can be:
+            - A string: operation initialized with default parameters
+            - A dictionary: operation initialized with parameters in the dictionary
+            - A Config object: converted to a dictionary and initialized
+            - An Operation/Pipeline instance: used as-is
     Returns:
         list: List of operations to be performed.
     """
     chain = []
     for operation in operation_chain:
-        # Ensure operation is a string, dict, or Config object.
+        # Handle already instantiated Operation or Pipeline objects
+        if isinstance(operation, (Operation, Pipeline)):
+            chain.append(operation)
+            continue
+
         assert isinstance(
             operation, (str, dict, Config)
-        ), f"Operation {operation} should be a string, dictionary, or Config object"
-
-        # Convert Config objects to dict.
-        if isinstance(operation, Config):
-            operation = operation.serialize()
+        ), f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
 
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()
-        else:
-            params = operation.get("params", {})
 
+        else:
+            if isinstance(operation, Config):
+                operation = operation.serialize()
+
+            params = operation.get("params", {})
+            op_name = operation.get("name")
+            operation_cls = get_ops(op_name)
+
+            # Handle branches for branched pipeline
+            if op_name == "branched_pipeline" and "branches" in operation:
+                branch_configs = operation.get("branches", {})
+                branches = []
+
+                # Convert each branch configuration to an operation chain
+                for _, branch_config in branch_configs.items():
+                    if isinstance(branch_config, (list, np.ndarray)):
+                        # This is a list of operations
+                        branch = make_operation_chain(branch_config)
+                    elif "operations" in branch_config:
+                        # This is a pipeline-like branch
+                        branch = make_operation_chain(branch_config["operations"])
+                    else:
+                        # This is a single operation branch
+                        branch_op_cls = get_ops(branch_config["name"])
+                        branch_params = branch_config.get("params", {})
+                        branch = branch_op_cls(**branch_params)
+
+                    branches.append(branch)
+
+                # Create the branched pipeline instance
+                operation_instance = operation_cls(branches=branches, **params)
             # Check for nested operations at the same level as params
-            if "operations" in operation:
+            elif "operations" in operation:
                 nested_operations = make_operation_chain(operation["operations"])
-                operation_cls = get_ops(operation["name"])
-                operation_instance = operation_cls(
-                    operations=nested_operations, **params
-                )
+
+                # Instantiate pipeline-type operations with nested operations
+                if issubclass(operation_cls, Pipeline):
+                    operation_instance = operation_cls(
+                        operations=nested_operations, **params
+                    )
+                else:
+                    operation_instance = operation_cls(
+                        operations=nested_operations, **params
+                    )
             else:
-                operation_instance = get_ops(operation["name"])(**params)
+                operation_instance = operation_cls(**params)
 
         chain.append(operation_instance)
 
@@ -1589,11 +1627,7 @@ def _set_if_none(variable, default):
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
-    def __init__(
-        self,
-        order=1,
-        **kwargs,
-    ):
+    def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
 
         Args:
@@ -1604,7 +1638,6 @@ class ScanConvert(Operation):
         super().__init__(
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
-            jittable=jittable,  # if you provide coordinates, this operation can be jitted!
             **kwargs,
         )
         self.order = order
@@ -1615,8 +1648,8 @@ class ScanConvert(Operation):
         theta_range=None,
         phi_range=None,
         resolution=None,
-        fill_value=None,
         coordinates=None,
+        fill_value=None,
         **kwargs,
     ):
         """Scan convert images to cartesian coordinates.
@@ -1639,26 +1672,23 @@ class ScanConvert(Operation):
 
         data = kwargs[self.key]
 
-        if phi_range is not None:
-            data_out = scan_convert_3d(
-                data,
-                rho_range,
-                theta_range,
-                phi_range,
-                resolution,
-                fill_value,
-                order=self.order,
+        if self.jittable:
+            assert coordinates is not None, (
+                "coordinates must be provided to jit scan conversion."
+                "You can set ScanConvert(jittable=False) to disable jitting."
             )
-        else:
-            data_out = scan_convert_2d(
-                data,
-                rho_range,
-                theta_range,
-                resolution,
-                fill_value,
-                coordinates=coordinates,
-                order=self.order,
-            )
+
+        data_out = scan_convert(
+            data,
+            rho_range,
+            theta_range,
+            phi_range,
+            resolution,
+            coordinates,
+            fill_value,
+            self.order,
+            with_batch_dim=self.with_batch_dim,
+        )
 
         return {self.output_key: data_out}
 
@@ -1709,3 +1739,168 @@ class Clip(Operation):
         data = kwargs[self.key]
         data = ops.clip(data, self.min_value, self.max_value)
         return {self.output_key: data}
+
+
+@ops_registry("branched_pipeline")
+class BranchedPipeline(Operation):
+    """Operation that processes data through multiple branches.
+
+    This operation takes input data, processes it through multiple parallel branches,
+    and then merges the results from those branches using the specified merge strategy.
+    """
+
+    def __init__(self, branches=None, merge_strategy="nested", **kwargs):
+        """Initialize a branched pipeline.
+
+        Args:
+            branches (List[Union[List, Pipeline, Operation]]): List of branch operations
+            merge_strategy (str or callable): How to merge the outputs from branches:
+                - "nested" (default): Return outputs as a dictionary keyed by branch name
+                - "flatten": Flatten outputs by prefixing keys with the branch name
+                - "suffix": Flatten outputs by suffixing keys with the branch name
+                - callable: A custom merge function that accepts the branch outputs dict
+            **kwargs: Additional arguments for the Operation base class
+        """
+        super().__init__(**kwargs)
+
+        # Convert branch specifications to operation chains
+        if branches is None:
+            branches = []
+
+        self.branches = {}
+        for i, branch in enumerate(branches, start=1):
+            branch_name = f"branch_{i}"
+            # Convert different branch specification types
+            if isinstance(branch, list):
+                # Convert list to operation chain
+                self.branches[branch_name] = make_operation_chain(branch)
+            elif isinstance(branch, (Pipeline, Operation)):
+                # Already a pipeline or operation
+                self.branches[branch_name] = branch
+            else:
+                raise ValueError(
+                    f"Branch must be a list, Pipeline, or Operation, got {type(branch)}"
+                )
+
+        # Set merge strategy
+        self.merge_strategy = merge_strategy
+        if isinstance(merge_strategy, str):
+            if merge_strategy == "nested":
+                self._merge_function = lambda outputs: outputs
+            elif merge_strategy == "flatten":
+                self._merge_function = self.flatten_outputs
+            elif merge_strategy == "suffix":
+                self._merge_function = self.suffix_merge_outputs
+            else:
+                raise ValueError(f"Unknown merge_strategy: {merge_strategy}")
+        elif callable(merge_strategy):
+            self._merge_function = merge_strategy
+        else:
+            raise ValueError("Invalid merge_strategy type provided.")
+
+    def call(self, **kwargs):
+        """Process input through branches and merge results.
+
+        Args:
+            **kwargs: Input keyword arguments
+
+        Returns:
+            dict: Merged outputs from all branches according to merge strategy
+        """
+        branch_outputs = {}
+        for branch_name, branch in self.branches.items():
+            # Each branch gets a fresh copy of kwargs to avoid interference
+            branch_kwargs = kwargs.copy()
+
+            # Process through the branch
+            branch_result = branch(**branch_kwargs)
+
+            # Store branch outputs
+            branch_outputs[branch_name] = branch_result
+
+        # Apply merge strategy to combine outputs
+        merged_outputs = self._merge_function(branch_outputs)
+
+        return merged_outputs
+
+    def flatten_outputs(self, outputs: dict) -> dict:
+        """
+        Flatten a nested dictionary by prefixing keys with the branch name.
+        For each branch, the resulting key is "{branch_name}_{original_key}".
+        """
+        flat = {}
+        for branch_name, branch_dict in outputs.items():
+            for key, value in branch_dict.items():
+                new_key = f"{branch_name}_{key}"
+                if new_key in flat:
+                    raise ValueError(f"Key collision detected for {new_key}")
+                flat[new_key] = value
+        return flat
+
+    def suffix_merge_outputs(self, outputs: dict) -> dict:
+        """
+        Flatten a nested dictionary by suffixing keys with the branch name.
+        For each branch, the resulting key is "{original_key}_{branch_name}".
+        """
+        flat = {}
+        for branch_name, branch_dict in outputs.items():
+            for key, value in branch_dict.items():
+                new_key = f"{key}_{branch_name}"
+                if new_key in flat:
+                    raise ValueError(f"Key collision detected for {new_key}")
+                flat[new_key] = value
+        return flat
+
+    def get_config(self):
+        """Return the config dictionary for serialization."""
+        config = super().get_config()
+
+        # Add branch configurations
+        branch_configs = {}
+        for branch_name, branch in self.branches.items():
+            if isinstance(branch, Pipeline):
+                # Get the operations list from the Pipeline
+                branch_configs[branch_name] = branch.get_config()
+            elif isinstance(branch, list):
+                # Convert list of operations to list of operation configs
+                branch_op_configs = []
+                for op in branch:
+                    branch_op_configs.append(op.get_config())
+                branch_configs[branch_name] = {"operations": branch_op_configs}
+            else:
+                # Single operation
+                branch_configs[branch_name] = branch.get_config()
+
+        # Add merge strategy
+        if isinstance(self.merge_strategy, str):
+            merge_strategy_config = self.merge_strategy
+        else:
+            # For custom functions, use the name if available
+            merge_strategy_config = getattr(self.merge_strategy, "__name__", "custom")
+
+        config.update(
+            {
+                "branches": branch_configs,
+                "merge_strategy": merge_strategy_config,
+            }
+        )
+
+        return config
+
+    def get_dict(self):
+        """Get the configuration of the operation."""
+        config = super().get_dict()
+        config.update({"name": "branched_pipeline"})
+
+        # Add branches (recursively) to the config
+        branches = {}
+        for branch_name, branch in self.branches.items():
+            if isinstance(branch, Pipeline):
+                branches[branch_name] = branch.get_dict()
+            elif isinstance(branch, list):
+                branches[branch_name] = [op.get_dict() for op in branch]
+            else:
+                branches[branch_name] = branch.get_dict()
+        config["branches"] = branches
+        config["merge_strategy"] = self.merge_strategy
+        return config
