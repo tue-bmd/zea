@@ -8,7 +8,6 @@ import copy
 import json
 import math
 import re
-from collections import OrderedDict
 from itertools import product
 from pathlib import Path
 from typing import List
@@ -18,11 +17,11 @@ import numpy as np
 from keras import ops
 from keras.src.utils import backend_utils
 
-from usbmd.data.file import File, get_shape_hdf5_file
+from usbmd.data.datasets import Dataset
+from usbmd.data.file import File
 from usbmd.data.layers import Resizer
 from usbmd.utils import log, map_negative_indices, translate
-from usbmd.utils.checks import _DATA_TYPES, get_check
-from usbmd.utils.io_lib import retry_on_io_error, search_file_tree
+from usbmd.utils.io_lib import retry_on_io_error
 
 if keras.backend.backend() == "jax":
     from usbmd.backend.jax import on_device_jax as on_device
@@ -31,8 +30,6 @@ elif keras.backend.backend() == "tensorflow":
 elif keras.backend.backend() == "torch":
     from usbmd.backend.torch import on_device_torch as on_device
 
-FILE_TYPES = [".hdf5", ".h5"]
-FILE_HANDLE_CACHE_CAPACITY = 128
 DEFAULT_IMAGE_RANGE = (0, 255)
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 MAX_RETRY_ATTEMPTS = 3
@@ -215,72 +212,6 @@ def generate_h5_indices(
     return indices
 
 
-def _find_h5_files_from_directory(
-    directory: str | list,
-    key: str,
-    search_file_tree_kwargs: dict | None = None,
-    additional_axes_iter: tuple | None = None,
-):
-    """
-    Find HDF5 files from a directory or list of directories and retrieve their shapes.
-
-    Args:
-        directory (str or list): A single directory path, a list of directory paths,
-            or a single HDF5 file path.
-        key (str): The key to access the HDF5 dataset.
-        search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
-            search_file_tree function. Defaults to None.
-        additional_axes_iter (tuple, optional): Additional axes to iterate over if dataset_info
-            contains file_shapes. Defaults to None.
-
-    Returns:
-        - file_names (list): List of file paths to the HDF5 files.
-        - file_shapes (list): List of shapes of the HDF5 datasets.
-    """
-
-    file_names = []
-    file_shapes = []
-
-    if search_file_tree_kwargs is None:
-        search_file_tree_kwargs = {}
-
-    # 'directory' is actually just a single hdf5 file
-    if not isinstance(directory, list) and Path(directory).is_file():
-        filename = directory
-        file_shapes = [get_shape_hdf5_file(filename, key)]
-        file_names = [str(filename)]
-
-    # 'directory' points to a directory or list of directories
-    else:
-        if not isinstance(directory, list):
-            directory = [directory]
-
-        for _dir in directory:
-            dataset_info = search_file_tree(
-                _dir,
-                filetypes=FILE_TYPES,
-                hdf5_key_for_length=key,
-                **search_file_tree_kwargs,
-            )
-            file_paths = dataset_info["file_paths"]
-            file_paths = [str(Path(_dir) / file_path) for file_path in file_paths]
-            file_names.extend(file_paths)
-            if "file_shapes" not in dataset_info:
-                assert additional_axes_iter is None, (
-                    "additional_axes_iter is only supported if the dataset_info "
-                    "contains file_shapes. please remove dataset_info.yaml files and rerun."
-                )
-                # since in this case we only need to iterate over the first axis it is
-                # okay we only have the lengths of the files (and not the full shape)
-                file_shapes.extend(
-                    [[length] for length in dataset_info["file_lengths"]]
-                )
-            else:
-                file_shapes.extend(dataset_info["file_shapes"])
-
-    return file_names, file_shapes
-
-
 def _h5_reopen_on_io_error(
     dataloader_obj,
     indices,
@@ -304,48 +235,7 @@ def _h5_reopen_on_io_error(
     )
 
 
-class H5FileHandleCache:
-    def __init__(
-        self,
-        file_handle_cache_capacity: int = FILE_HANDLE_CACHE_CAPACITY,
-    ):
-        self._file_handle_cache = OrderedDict()
-        self.file_handle_cache_capacity = file_handle_cache_capacity
-
-    @staticmethod
-    def _check_if_open(file):
-        """Check if a file is open."""
-        return bool(file.id.valid)
-
-    def get_file(self, file_name):
-        """Open an HDF5 file and cache it."""
-        # If file is already in cache, return it and move it to the end
-        if file_name in self._file_handle_cache:
-            self._file_handle_cache.move_to_end(file_name)
-            file = self._file_handle_cache[file_name]
-            # if file was closed, reopen:
-            if not self._check_if_open(file):
-                file = File(file_name, "r")
-                self._file_handle_cache[file_name] = file
-        # If file is not in cache, open it and add it to the cache
-        else:
-            # If cache is full, close the least recently used file
-            if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
-                _, close_file = self._file_handle_cache.popitem(last=False)
-                close_file.close()
-            file = File(file_name, "r")
-            self._file_handle_cache[file_name] = file
-
-        return self._file_handle_cache[file_name]
-
-    def __del__(self):
-        """Ensure cached files are closed."""
-        for _, file in self._file_handle_cache.items():
-            file.close()
-        self._file_handle_cache = OrderedDict()
-
-
-class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
+class H5Generator(keras.utils.PyDataset, Dataset):
     """Generator from h5 file using provided indices."""
 
     def __init__(
@@ -358,7 +248,7 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         frame_axis: int = -1,
         insert_frame_axis: bool = True,
         initial_frame_axis: int = 0,
-        return_filename: bool = False,
+        return_metadata: bool = False,
         additional_axes_iter: tuple = None,
         key: str = "data/image",
         shuffle: bool = True,
@@ -376,14 +266,14 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
             file_names is not None and file_shapes is not None
         ), "Either `directory` or `file_names` and `file_shapes` must be provided."
 
-        super().__init__(**kwargs)
-        self.directory = directory
+        super().__init__(path=directory, key=key, **kwargs)
+
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
         self.insert_frame_axis = insert_frame_axis
         self.initial_frame_axis = int(initial_frame_axis)
-        self.return_filename = return_filename
+        self.return_metadata = return_metadata
         if additional_axes_iter is None:
             self.additional_axes_iter = []
         else:
@@ -400,18 +290,6 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         self.search_file_tree_kwargs = search_file_tree_kwargs
 
         self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
-
-        if self.directory is not None:
-            file_names, file_shapes = _find_h5_files_from_directory(
-                self.directory,
-                self.key,
-                self.search_file_tree_kwargs,
-                self.additional_axes_iter,
-            )
-            self.file_names = file_names
-            self.file_shapes = file_shapes
-
-        assert len(file_names) > 0, f"No files in directories:\n{directory}"
 
         assert (
             self.frame_index_stride > 0
@@ -484,53 +362,40 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         indices_list = self.indices[low:high]
 
         images = []
-        for indices in indices_list:
-            images.append(self.load(*indices))
+        metadata = []
+        for file_name, key, indices in indices_list:
+            file = self.get_file(file_name)
+            images.append(self.load(file, key, indices))
+            metadata.append(
+                json_dumps(
+                    {
+                        "fullpath": file.filename,
+                        "filename": file.stem,
+                        "indices": indices,
+                    }
+                )
+            )
 
         if self.batch_size == 1:
             images = images[0]
         else:
             images = np.stack(images)
 
-        fileinfo = [
-            json_dumps(
-                {
-                    "fullpath": filename,
-                    "filename": Path(filename).stem,
-                    "indices": indices,
-                }
-            )
-            for filename, _, indices in indices_list
-        ]
-
         if self.batch_size == 1:
-            fileinfo = fileinfo[0]
+            metadata = metadata[0]
 
-        if self.return_filename:
-            return self.maybe_tensor(images), fileinfo
+        if self.return_metadata:
+            return self.maybe_tensor(images), metadata
         else:
             return self.maybe_tensor(images)
-
-    def __iter__(self):
-        """
-        Generator that yields images from the hdf5 files.
-        """
-        for idx in range(len(self)):
-            yield self[idx]
-
-    def __call__(self):
-        return iter(self)
-
-    def _check_if_open(self, file):
-        """Check if a file is open."""
-        return bool(file.id.valid)
 
     @retry_on_io_error(
         max_retries=MAX_RETRY_ATTEMPTS,
         initial_delay=INITIAL_RETRY_DELAY,
         retry_action=_h5_reopen_on_io_error,
     )
-    def load(self, file_name: str, key: str, indices: tuple | str):
+    # TODO: move retry to File?
+    def load(self, file: File, key: str, indices: tuple | str):
         """Extract data from hdf5 file.
         Args:
             file_name (str): name of the file to extract image from.
@@ -539,8 +404,6 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         Returns:
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
-        file = self.get_file(file_name)
-
         try:
             images = file[key][indices]
         except (OSError, IOError):
@@ -550,7 +413,7 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
             # For non-I/O errors, provide detailed context
             raise ValueError(
                 f"Could not load image at index {indices} "
-                f"and file {file_name} of shape {file[key].shape}"
+                f"and file {file.name} of shape {file[key].shape}"
             ) from exc
 
         # stack frames along frame_axis
@@ -583,7 +446,7 @@ class H5Generator(keras.utils.PyDataset, H5FileHandleCache):
         """Delete the H5Generator object."""
         # Explicitly call the parent class destructors
         keras.utils.PyDataset.__del__(self)
-        H5FileHandleCache.__del__(self)
+        Dataset.__del__(self)
 
     @property
     def n_files(self):
@@ -653,7 +516,7 @@ class H5Dataloader(H5Generator):
         return dl
 
     def preprocess(self, out):
-        if self.return_filename:
+        if self.return_metadata:
             images, filenames = out
         else:
             images = out
@@ -683,7 +546,7 @@ class H5Dataloader(H5Generator):
         for map_fn in self.map_fns:
             images = map_fn(images)
 
-        if self.return_filename:
+        if self.return_metadata:
             return images, filenames
         else:
             return images
