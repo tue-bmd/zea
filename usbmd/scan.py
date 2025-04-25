@@ -232,6 +232,8 @@ class Scan(Object):
         self._n_tx = None
         self.resolution = None
         self._coordinates = None
+        self._theta_range = None
+        self._time_to_next_transmit = None
 
         # Dictionary to track which parameters have been set
         self._set_params = {}
@@ -949,22 +951,32 @@ class Scan(Object):
     @property
     def time_to_next_transmit(self):
         """The time between subsequent transmit events of shape (n_frames, n_tx)."""
-        return self._time_to_next_transmit[:, self.selected_transmits]
+        if self._time_to_next_transmit is not None:
+            return self._time_to_next_transmit[:, self.selected_transmits]
+        else:
+            return None
 
     @property
     def frames_per_second(self):
-        """The number of frames per second."""
-        if self.time_to_next_transmit is None:
+        """The number of frames per second [Hz]. Assumes a constant frame rate.
+
+        Frames per second computed based on time between transmits within a frame.
+        Ignores time between frames (e.g. due to processing).
+
+        Uses the time it took to do all transmits (per frame). So if you only use some portion
+        of the transmits, the fps will still be calculated based on all.
+        """
+        if self._time_to_next_transmit is None:
             raise ValueError(
                 "Please set scan.time_to_next_transmit. Currently not set."
             )
 
         # Check if fps is constant
-        uniq = np.unique(self.time_to_next_transmit, axis=0)  # frame axis
+        uniq = np.unique(self._time_to_next_transmit, axis=0)  # frame axis
         assert uniq.shape[0] == 1, "Time to next transmit is not constant"
 
         # Compute fps
-        time = np.sum(self.time_to_next_transmit[0])
+        time = np.sum(self._time_to_next_transmit[0])
         fps = 1 / time
         return fps
 
