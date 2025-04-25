@@ -1768,6 +1768,168 @@ class ScanConvert(Operation):
         return {self.output_key: data_out}
 
 
+@ops_registry("gaussian_blur")
+class GaussianBlur(Operation):
+    """
+    GaussianBlur is an operation that applies a Gaussian blur to an input image.
+    Uses scipy.ndimage.gaussian_filter to create a kernel.
+    """
+
+    def __init__(
+        self,
+        sigma: float,
+        kernel_size: int | None = None,
+        pad_mode="symmetric",
+        truncate=4.0,
+        **kwargs,
+    ):
+        """
+        Args:
+            sigma (float): Standard deviation for Gaussian kernel.
+            kernel_size (int, optional): The size of the kernel. If None, the kernel
+                size is calculated based on the sigma and truncate. Default is None.
+            pad_mode (str): Padding mode for the input image. Default is 'symmetric'.
+            truncate (float): Truncate the filter at this many standard deviations.
+        """
+        super().__init__(**kwargs)
+        if kernel_size is None:
+            radius = round(truncate * sigma)
+            self.kernel_size = 2 * radius + 1
+        else:
+            self.kernel_size = kernel_size
+        self.sigma = sigma
+        self.pad_mode = pad_mode
+        self.radius = self.kernel_size // 2
+        self.kernel = self.get_kernel()
+
+    def get_kernel(self):
+        """
+        Create a gaussian kernel for blurring.
+
+        Returns:
+            kernel (Tensor): A gaussian kernel for blurring.
+                Shape is (kernel_size, kernel_size, 1, 1).
+        """
+        n = np.zeros((self.kernel_size, self.kernel_size))
+        n[self.radius, self.radius] = 1
+        kernel = scipy.ndimage.gaussian_filter(
+            n, sigma=self.sigma, mode="constant"
+        ).astype(np.float32)
+        kernel = kernel[:, :, None, None]
+        return ops.convert_to_tensor(kernel)
+
+    def call(self, data, **kwargs):
+        """Blur the input image with a gaussian kernel.
+
+        Args:
+            data (Tensor): Input image to blur.
+
+        Returns:
+            dict: Dictionary containing the blurred image.
+        """
+        # Add batch dimension if not present
+        if not self.with_batch_dim:
+            data = data[None]
+
+        # Add channel dimension to kernel
+        kernel = ops.tile(self.kernel, (1, 1, data.shape[-1], data.shape[-1]))
+
+        # Pad the input image according to the padding mode
+        padded = ops.pad(
+            data,
+            [[0, 0], [self.radius, self.radius], [self.radius, self.radius], [0, 0]],
+            mode=self.pad_mode,
+        )
+
+        # Apply the gaussian kernel to the padded image
+        out = ops.conv(padded, kernel, padding="valid", data_format="channels_last")
+
+        # Remove padding
+        out = ops.slice(
+            out,
+            [0, 0, 0, 0],
+            [out.shape[0], data.shape[1], data.shape[2], data.shape[3]],
+        )
+
+        # Remove batch dimension if it was not present before
+        if not self.with_batch_dim:
+            out = ops.squeeze(out, axis=0)
+
+        return {self.output_key: out}
+
+
+@ops_registry("lee_filter")
+class LeeFilter(Operation):
+    """
+    The Lee filter is a speckle reduction filter commonly used in synthetic aperture radar (SAR)
+    and ultrasound image processing. It smooths the image while preserving edges and details.
+    This implementation uses Gaussian filter for local statistics and treats channels independently.
+
+    Lee, J.S. (1980). Digital image enhancement and noise filtering by use of local statistics.
+    IEEE Transactions on Pattern Analysis and Machine Intelligence, (2), 165-168.
+    """
+
+    def __init__(self, sigma=3, kernel_size=None, pad_mode="symmetric", **kwargs):
+        """
+        Args:
+            sigma (float): Standard deviation for Gaussian kernel. Default is 3.
+            kernel_size (int, optional): Size of the Gaussian kernel. If None,
+                it will be calculated based on sigma.
+            pad_mode (str): Padding mode to be used for Gaussian blur. Default is "symmetric".
+        """
+        super().__init__(**kwargs)
+        self.sigma = sigma
+        self.kernel_size = kernel_size
+        self.pad_mode = pad_mode
+
+        # Create a GaussianBlur instance for computing local statistics
+        self.gaussian_blur = GaussianBlur(
+            sigma=self.sigma,
+            kernel_size=self.kernel_size,
+            pad_mode=self.pad_mode,
+            with_batch_dim=self.with_batch_dim,
+            jittable=self._jittable,
+        )
+
+    def call(self, data, **kwargs):
+        """
+        Apply Lee filter to reduce speckle while preserving edges.
+
+        Args:
+            data (Tensor): Input image data to be filtered.
+
+        Returns:
+            dict: Dictionary containing the filtered image.
+        """
+        # Apply Gaussian blur to get local mean
+        img_mean = self.gaussian_blur.call(data, **kwargs)[
+            self.gaussian_blur.output_key
+        ]
+
+        # Apply Gaussian blur to squared data to get local squared mean
+        data_squared = data**2
+        img_sqr_mean = self.gaussian_blur.call(data_squared, **kwargs)[
+            self.gaussian_blur.output_key
+        ]
+
+        # Calculate local variance
+        img_variance = img_sqr_mean - img_mean**2
+
+        # Calculate global variance (per channel)
+        if self.with_batch_dim:
+            overall_variance = ops.var(data, axis=(-3, -2), keepdims=True)
+        else:
+            overall_variance = ops.var(data, axis=(-2, -1), keepdims=True)
+
+        # Calculate adaptive weights
+        img_weights = img_variance / (img_variance + overall_variance)
+
+        # Apply Lee filter formula
+        img_output = img_mean + img_weights * (data - img_mean)
+
+        return {self.output_key: img_output}
+
+
 @ops_registry("demodulate")
 class Demodulate(Operation):
     """Demodulates the input data to baseband."""
