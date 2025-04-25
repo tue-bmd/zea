@@ -955,6 +955,13 @@ def make_operation_chain(
                     operation_instance = operation_cls(
                         operations=nested_operations, **params
                     )
+            elif operation["name"] in ["patched_grid"]:
+                nested_operations = make_operation_chain(
+                    operation["params"].pop("operations")
+                )
+                operation_instance = operation_cls(
+                    operations=nested_operations, **params
+                )
             else:
                 operation_instance = operation_cls(**params)
 
