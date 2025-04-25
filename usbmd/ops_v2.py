@@ -1685,6 +1685,7 @@ class ScanConvert(Operation):
             coordinates,
             fill_value,
             self.order,
+            with_batch_dim=self.with_batch_dim,
         )
 
         return {self.output_key: data_out}

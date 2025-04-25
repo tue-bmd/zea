@@ -312,7 +312,10 @@ def scan_convert(
             order,
         )
     else:
-        raise ValueError("Image must be 2D or 3D (with optional batch dim).")
+        raise ValueError(
+            "Image must be 2D or 3D (with optional batch dim). "
+            f"Got shape: {image.shape}"
+        )
 
 
 def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value=0):
