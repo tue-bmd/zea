@@ -1,14 +1,25 @@
-usbmd package
-=============
+Module contents
+---------------
 
-
-usbmd module
------------------------
 .. automodule:: usbmd
    :members:
    :undoc-members:
    :imported-members:
    :show-inheritance:
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   usbmd.backend
+   usbmd.config
+   usbmd.data
+   usbmd.utils
+
+Submodules
+----------
 
 usbmd.beamformer module
 -----------------------

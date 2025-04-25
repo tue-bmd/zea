@@ -1,13 +1,7 @@
-usbmd API Reference
-===================
+usbmd
+=====
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
 
    usbmd
-
-Indices and tables
-==================
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
