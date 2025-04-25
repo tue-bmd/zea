@@ -8,6 +8,8 @@ from copy import deepcopy
 import keras
 import numpy as np
 
+from usbmd.utils.utils import safe_initialize_class
+
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_PRECISION = "float32"
 
@@ -101,6 +103,10 @@ class Object:
     def to_tensor(self, except_tensors=None):
         """Convert the attributes in the object to keras tensors"""
         return object_to_tensor(self, except_tensors)
+
+    @classmethod
+    def safe_initialize(cls, **kwargs):
+        return safe_initialize_class(cls, **kwargs)
 
 
 def object_to_tensor(obj: Object, except_tensors=None):

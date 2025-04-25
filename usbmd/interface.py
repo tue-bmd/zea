@@ -22,13 +22,7 @@ from usbmd.data.file import File
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
 from usbmd.scan import Scan
-from usbmd.utils import (
-    log,
-    safe_initialize_class,
-    save_to_gif,
-    save_to_mp4,
-    update_dictionary,
-)
+from usbmd.utils import log, save_to_gif, save_to_mp4
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
@@ -65,9 +59,7 @@ class Interface:
             log.info("Proceeding without scan class.")
             self.scan = None
         else:
-            # dict merging of manual config and dataset default scan parameters
-            scan_params = update_dictionary(file_scan_params, self.config.scan)
-            self.scan = safe_initialize_class(Scan, **scan_params)
+            self.scan = Scan.merge(file_scan_params, self.config.scan)
 
         self.probe = self.dataset.probe()
 

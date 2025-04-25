@@ -1,6 +1,5 @@
 """Experimental version of the USBMD ops module"""
 
-import copy
 import hashlib
 import inspect
 import json
