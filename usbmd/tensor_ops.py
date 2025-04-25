@@ -14,8 +14,7 @@ from usbmd.utils.utils import map_negative_indices
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
-    """
-    Adds salt and pepper noise to the input image.
+    """Adds salt and pepper noise to the input image.
 
     Args:
         image (ndarray): The input image, must be of type float32 and normalized between 0 and 1.
@@ -56,8 +55,9 @@ def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
 
 
 def extend_n_dims(arr, axis, n_dims):
-    """
-    Extend the number of dimensions of an array by inserting 'n_dims' ones at the specified axis.
+    """Extend the number of dimensions of an array.
+
+    Inserts 'n_dims' ones at the specified axis.
 
     Args:
         arr: The input array.
@@ -96,9 +96,9 @@ def func_with_one_batch_dim(
     func_axis: int | None = None,
     **kwargs,
 ):
-    """
-    Applies a function to an input tensor with one or more batch dimensions. The function will
-    be executed in parallel on all batch elements.
+    """Wraps a function to apply it to an input tensor with one or more batch dimensions.
+
+    The function will be executed in parallel on all batch elements.
 
     Args:
         func (function): The function to apply to the image.
@@ -149,8 +149,8 @@ def func_with_one_batch_dim(
 
 
 def matrix_power(matrix, power):
-    """
-    Compute the power of a square matrix.
+    """Compute the power of a square matrix.
+
     Should match the
     [numpy](https://numpy.org/doc/stable/reference/generated/numpy.linalg.matrix_power.html)
     implementation.
@@ -174,8 +174,7 @@ def matrix_power(matrix, power):
 
 
 def boolean_mask(tensor, mask, size=None):
-    """
-    Apply a boolean mask to a tensor.
+    """Apply a boolean mask to a tensor.
 
     Args:
         tensor (Tensor): The input tensor.
@@ -216,8 +215,7 @@ def flatten(tensor, start_dim=0, end_dim=-1):
 
 
 def batch_cov(x, rowvar=True, bias=False, ddof=None):
-    """
-    Compute the batch covariance matrices of the input tensor.
+    """Compute the batch covariance matrices of the input tensor.
 
     Args:
         x (Tensor): Input tensor of shape (..., m, n) where m is the number of features
@@ -260,9 +258,9 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
 
 
 def patched_map(f, xs, patches: int, jit=True, **batch_kwargs):
-    """
-    Wrapper around `batched_map` which allows you to specify the number of patches rather than
-    the batch size.
+    """Wrapper around `batched_map` for patching.
+
+    Allows you to specify the number of patches rather than the batch size.
     """
     assert patches > 0, "Number of patches must be greater than 0."
 
@@ -275,8 +273,7 @@ def patched_map(f, xs, patches: int, jit=True, **batch_kwargs):
 
 
 def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
-    """
-    Map a function over leading array axes.
+    """Map a function over leading array axes.
 
     Args:
         f (callable): Function to apply element-wise over the first axis.
@@ -363,6 +360,7 @@ else:
 
 def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
     """Pad an array to be divisible by N along the specified axis.
+
     Args:
         arr (Tensor): The input array to pad.
         N (int): The number to which the length of the specified axis should be divisible.
@@ -374,6 +372,7 @@ def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
             `"circular"`. Defaults to `"constant"`.
         pad_value (float, optional): The value to use for padding when mode='constant'.
             Defaults to None. If mode is not `constant`, this value should be None.
+
     Returns:
         Tensor: The padded array.
     """
@@ -395,8 +394,7 @@ def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
 
 
 def interpolate_data(subsampled_data, mask, order=1, axis=-1):
-    """
-    Interpolate subsampled data along a specified axis using `map_coordinates`.
+    """Interpolate subsampled data along a specified axis using `map_coordinates`.
 
     Args:
         subsampled_data (ndarray): The data subsampled along the specified axis.
@@ -490,11 +488,13 @@ def interpolate_data(subsampled_data, mask, order=1, axis=-1):
 
 
 def is_monotonic(array, increasing=True):
-    """
-    Checks if a given 1D array is monotonic (either entirely non-decreasing or non-increasing).
+    """Checks if a given 1D array is monotonic.
+
+    Either entirely non-decreasing or non-increasing.
 
     Args:
         array (ndarray): A 1D numpy array.
+
     Returns:
         bool: True if the array is monotonic, False otherwise.
     """
@@ -508,7 +508,9 @@ def is_monotonic(array, increasing=True):
 
 
 def map_indices_for_interpolation(indices):
-    """Map a 1D array of indices with gaps to a 1D array where gaps
+    """Interpolates a 1D array of indices with gaps.
+
+    Maps a 1D array of indices with gaps to a 1D array where gaps
     would be between the integers.
 
     Used in the `interpolate_data` function.
@@ -564,7 +566,8 @@ def map_indices_for_interpolation(indices):
 
 
 def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number: int):
-    """
+    """Stacks tensor data along a specified stack axis.
+
     Stack tensor data along a specified stack axis by splitting it into blocks along the batch axis.
 
     Args:
@@ -605,8 +608,8 @@ def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number:
 def split_volume_data_from_axis(
     data, batch_axis: int, stack_axis: int, number: int, padding: int
 ):
-    """
-    Split previously stacked tensor data back to its original shape.
+    """Splits previously stacked tensor data back to its original shape.
+
     This function reverses the operation performed by `stack_volume_data_along_axis`.
 
     Args:
@@ -692,7 +695,9 @@ def compute_required_patch_overlap(image_shape, patch_shape):
 
 
 def compute_required_patch_shape(image_shape, patch_shape, overlap):
-    """Compute patch_shape closest to the original patch_shape that will result
+    """Compute required patch shape to cover the entire image.
+
+    Compute patch_shape closest to the original patch_shape that will result
     in integer number of patches given the image and overlap.
 
     Args:
@@ -1031,8 +1036,7 @@ def _gaussian_filter1d(array, kernel, radius, cval=None, axis=-1, mode="symmetri
 def gaussian_filter1d(
     array, sigma, axis=-1, order=0, mode="symmetric", truncate=4.0, cval=None
 ):
-    """
-    1-D Gaussian filter.
+    """1-D Gaussian filter.
 
     Args:
         array (Tensor): The input array.
@@ -1078,8 +1082,7 @@ def gaussian_filter(
     truncate: float = 4.0,
     axes: Tuple[int] = None,
 ):
-    """
-    Multidimensional Gaussian filter.
+    """Multidimensional Gaussian filter.
 
     If you want to use this function with jax.jit, you can set:
     `static_argnames=("truncate", "sigma")`
@@ -1131,8 +1134,11 @@ if keras.backend.backend() == "tensorflow":
     def safe_vectorize(
         pyfunc, excluded=None, signature=None  # pylint: disable=unused-argument
     ):
-        """Because tensorflow does not support multiple arguments to ops.vectorize(func)(...)
-        We will just map the function manually."""
+        """Just a wrapper around ops.vectorize.
+
+        Because tensorflow does not support multiple arguments to ops.vectorize(func)(...)
+        We will just map the function manually.
+        """
 
         def _map(*args):
             outputs = []
