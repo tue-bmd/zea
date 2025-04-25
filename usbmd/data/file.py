@@ -14,7 +14,6 @@ from usbmd.probes import get_probe
 from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import log
 from usbmd.utils.checks import _DATA_TYPES, get_check
-from usbmd.utils.utils import safe_initialize_class, update_dictionary
 
 
 def get_shape_hdf5_file(filepath, key):
@@ -240,7 +239,7 @@ class File(h5py.File):
         Returns:
             Scan: The scan object.
         """
-        return safe_initialize_class(Scan, **self.get_scan_parameters(event))
+        return Scan.safe_initialize(**self.get_scan_parameters(event))
 
     def get_probe_parameters(self, event=None):
         """Returns a dictionary of probe parameters to initialize a probe
@@ -341,14 +340,8 @@ def load_usbmd_file(
         # Load the desired frames from the file
         data = file.load_data(data_type, indices=frames)
 
-        # merge data file scan parameters with the ones from the scan object
-        scan_params = update_dictionary(file.scan(), scan)
-
-        # Set the selected transmits
-        scan_params.selected_transmits = transmits
-
-        # Initialize the scan object
-        scan = safe_initialize_class(Scan, **scan_params)
+        scan["selected_transmits"] = transmits
+        scan = Scan.merge(file.scan(), scan)
 
         return data, scan, probe
 
