@@ -162,6 +162,17 @@ class File(h5py.File):
         probe_name = self.attrs["probe"]
         return probe_name
 
+    @property
+    def description(self):
+        """Reads the description from the data file and returns it."""
+        assert "description" in self.attrs, (
+            "Description not found in file attributes. "
+            "Make sure you are using a USBMD dataset. "
+            f"Found attributes: {list(self.attrs)}"
+        )
+        description = self.attrs["description"]
+        return description
+
     def get_parameters(self, event=None):
         """Returns a dictionary of parameters to initialize a scan
         object that comes with the dataset (stored inside datafile).
@@ -223,6 +234,8 @@ class File(h5py.File):
             for key in sig.parameters
             if key in file_scan_parameters
         }
+        if len(scan_parameters) == 0:
+            log.info(f"Could not find proper scan parameters in {self}.")
         return scan_parameters
 
     def scan(self, event=None):
