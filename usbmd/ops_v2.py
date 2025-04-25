@@ -17,12 +17,7 @@ from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
 from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
-from usbmd.display import (
-    _compute_scan_convert_2d_coordinates,
-    _compute_scan_convert_3d_coordinates,
-    _scan_convert_2d,
-    _scan_convert_3d,
-)
+from usbmd.display import scan_convert
 from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
@@ -1657,8 +1652,8 @@ class ScanConvert(Operation):
         theta_range=None,
         phi_range=None,
         resolution=None,
-        fill_value=None,
         coordinates=None,
+        fill_value=None,
         **kwargs,
     ):
         """Scan convert images to cartesian coordinates.
@@ -1681,40 +1676,16 @@ class ScanConvert(Operation):
 
         data = kwargs[self.key]
 
-        is_3d = phi_range is not None
-
-        if coordinates is None and is_3d:
-            coordinates = _compute_scan_convert_3d_coordinates(
-                data.shape,
-                rho_range,
-                theta_range,
-                phi_range,
-                resolution,
-                data.dtype,
-            )
-        elif coordinates is None:
-            coordinates = _compute_scan_convert_2d_coordinates(
-                data.shape,
-                rho_range,
-                theta_range,
-                resolution,
-                data.dtype,
-            )
-
-        if is_3d:
-            data_out = _scan_convert_3d(
-                data,
-                coordinates,
-                fill_value,
-                order=self.order,
-            )
-        else:
-            data_out = _scan_convert_2d(
-                data,
-                coordinates,
-                fill_value,
-                order=self.order,
-            )
+        data_out = scan_convert(
+            data,
+            rho_range,
+            theta_range,
+            phi_range,
+            resolution,
+            coordinates,
+            fill_value,
+            self.order,
+        )
 
         return {self.output_key: data_out}
 
