@@ -36,9 +36,9 @@ pip install -e .[opencv-python-headless]
 > You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the [Jax installation guide](https://jax.readthedocs.io/en/latest/installation.html). The easiest way to set up your environment is through the provided docker image (see [Install.md](Install.md#docker)), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running `pip install usbmd[jax]` although this is not extensively tested (yet).
 
 ## Example usage
-```{tip}
-A more complete set of examples can be found in the [examples](examples) folder.
-```
+> [!TIP]
+> A more complete set of examples can be found in the [examples](examples) folder.
+
 After installation, you can use the package as follows in your own project. `usbmd` is written in Python on top of [Keras 3](https://keras.io/about/). This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend ("jax", "tensorflow", "torch" or "numpy"), which means you can use `usbmd` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the `KERAS_BACKEND` environment variable, either in your code or in your terminal. The default backend used by `usbmd` is "numpy", if no backend is specified before importing `usbmd`. This will not allow you to use the GPU for processing.
 
 ```shell
