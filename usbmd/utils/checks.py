@@ -543,37 +543,6 @@ def _assert_unit_and_description_present(hdf5_file, _prefix=""):
             ), f"The dataset {_prefix}/{key} does not have a description attribute."
 
 
-def _assert_uint8_images(images: np.ndarray):
-    """
-    Asserts that the input images have the correct properties.
-
-    Args:
-        images (np.ndarray): The input images.
-
-    Raises:
-        AssertionError: If the dtype of images is not uint8.
-        AssertionError: If the shape of images is not (n_frames, height, width, channels)
-            or (n_frames, height, width) for grayscale images.
-        AssertionError: If images have anything other than 1 (grayscale),
-            3 (rgb) or 4 (rgba) channels.
-    """
-    assert (
-        images.dtype == np.uint8
-    ), f"dtype of images should be uint8, got {images.dtype}"
-
-    assert images.ndim in (3, 4), (
-        "images must have shape (n_frames, height, width, channels),"
-        f" or (n_frames, height, width) for grayscale images. Got {images.shape}"
-    )
-
-    if images.ndim == 4:
-        assert images.shape[-1] in (1, 3, 4), (
-            "Grayscale images must have 1 channel, "
-            "RGB images must have 3 channels, and RGBA images must have 4 channels. "
-            f"Got shape: {images.shape}, channels: {images.shape[-1]}"
-        )
-
-
 def _assert_keys_and_axes(keys, axes):
     """Quick check to ensure that the keys and axes are lists of the same length,
     and that the keys are strings and the axes are integers."""
