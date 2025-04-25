@@ -6,108 +6,58 @@ in a specific order.
 
 ## Stand-alone manual usage
 Operations can be run on their own:
+
 Examples:
 ```python
 data = np.random.randn(2000, 128, 1)
+# static arguments are passed in the constructor
 envelope_detect = EnvelopeDetect(axis=-1)
-envelope_data = envelope_detect(data)
+# other parameters can be passed here along with the data
+envelope_data = envelope_detect(data=data)
 ```
 
 ## Using a pipeline
-We can leave the arguments to the operation empty and set them later using the
-`set_params` method. This is useful when using the operations in a pipeline.
+You can initialize with a default pipeline or create your own custom pipeline.
 ```python
+pipeline = Pipeline.from_default()
+
 operations = [
-    Beamform(),
-    Sum(),
-    Demodulate(),
     EnvelopeDetect(),
-    Downsample(),
     Normalize(),
     LogCompress(),
-    ScanConvert(),
 ]
-
-config = ...
-scan = ...
-probe = ...
-
-pipeline = Pipeline(operations, ops="numpy", device="cpu")
-pipeline.set_params(config, scan, probe)
-pipeline.initialize()
-
-raw_data = np.random.randn(11, 2000, 128, 1)
-image = pipeline.process(data)
-
+pipeline_custom = Pipeline(operations)
 ```
-If you do not have a config, scan, or probe, you can set the parameters to the
-operations individually during initialization.
 
-## The process class
-Finally, there is an even higher level abstraction called the `Process` class.
-This class defines a pipeline with a set of operations for you. You can use
-this class to process data directly without having to define the operations explicitly.
+One can also load a pipeline from a config or yaml/json file:
 
 ```python
-process = Process(config, scan, probe)
-process.set_pipeline(
-    operation_chain=[
-        {"name": "tof_correction"},
-        {"name": "delay_and_sum"},
-        {"name": "demodulate", "params": {"sampling_frequency": 50e6, "center_frequency": 5e6}},
-        {"name": "envelope_detect"},
-        {"name": "downsample"},
-        {"name": "normalize"},
-        {"name": "log_compress"},
-        {"name": "scan_convert"},
-    ],
-)
+json_string = '{"operations": ["identity"]}'
+pipeline = Pipeline.from_json(json_string)
 
-raw_data = np.random.randn(11, 2000, 128, 1)
-image = pipeline.process(data)
+yaml_file = "pipeline.yaml"
+pipeline = Pipeline.from_yaml(yaml_file)
 ```
 
-## Go crazy with parallel pipelines
-You can also use blocks that output multiple data arrays as a list,
-process them in parallel, and then stack them back together later in the pipeline.
+Example of a yaml file:
+```yaml
+pipeline:
+  operations:
+    - name: demodulate
+    - name: "patched_grid"
+      params:
+        operations:
+          - name: tof_correction
+            params:
+              apply_phase_rotation: true
+          - name: pfield_weighting
+          - name: delay_and_sum
+        num_patches: 100
+    - name: envelope_detect
+    - name: normalize
+    - name: log_compress
 
-```python
-process = Process(config, scan, probe)
-process.set_pipeline(
-    operations_chain = [
-        {
-            "name": "multi_bandpass_filter",
-            "params": {
-                "params": {
-                    "freqs": [-0.2e6, 0.0e6, 0.2e6],
-                    "bandwidths": [1.2e6, 1.4e6, 1.0e6],
-                    "num_taps": 81,
-                },
-                "modtype": "iq",
-            },
-        },  # this bandpass filters the data three times and returns a list
-        {"name": "demodulate"},
-        {"name": "envelope_detect"},
-        {"name": "downsample"},
-        {"name": "normalize"},
-        {"name": "log_compress"},
-        {
-            "name": "stack",
-            "params": {"axis": 0},
-        },  # stack the data back together
-        {
-            "name": "mean",
-            "params": {"axis": 0},
-        },  # take the mean of the stack
-    ]
-)
 ```
-which will give the following pipeline:
-```bash
-MBPF -> Demodulate -> EnvelopeDetect -> Downsample -> Normalize -> LogCompress -> Stack -> Mean
-    \\-> Demodulate -> EnvelopeDetect -> Downsample -> Normalize -> LogCompress/->
-```
-
 """
 
 import copy
