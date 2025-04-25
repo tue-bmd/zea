@@ -8,12 +8,45 @@ on:
       - develop
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      clear_cache:
+        description: 'Clear GitHub Actions cache'
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
 
 env:
   REGISTRY: docker.io
   IMAGE_PREFIX: usbmd
 
 jobs:
+  clear-cache:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.clear_cache }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clear cache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            console.log("About to clear")
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            })
+            for (const cache of caches.data.actions_caches) {
+              console.log(cache)
+              github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                cache_id: cache.id,
+              })
+            }
+            console.log("Clear completed")
+
   set-tag:
     runs-on: ubuntu-latest
     outputs:
@@ -37,137 +70,59 @@ jobs:
   build-full-image:
     needs: set-tag
     runs-on: ubuntu-latest
-    env:
-      BACKEND: all
-      IMAGE_NAME: all
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Buildx
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Docker Login
+
+      - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build & Push
+
+      - name: Build and push full Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ env.IMAGE_NAME }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ env.BACKEND }}
-          cache-from: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache
-          cache-to: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache,mode=max
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all:${{ needs.set-tag.outputs.docker_tag }}
+          build-args: BACKEND=all
+          cache-from: type=registry,ref=usbmd/all:cache
+          cache-to: type=registry,ref=usbmd/all:cache,mode=max
 
-  build-numpy-image:
+  build-other-images:
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
-    env:
-      BACKEND: numpy
-      IMAGE_NAME: numpy
+    strategy:
+      matrix:
+        backend: [tensorflow, torch, jax, numpy]
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Docker Login
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build & Push
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ env.IMAGE_NAME }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ env.BACKEND }}
-          cache-from: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache
-          cache-to: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache,mode=max
 
-  build-tensorflow-image:
-    needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
-    env:
-      BACKEND: tensorflow
-      IMAGE_NAME: tensorflow
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Docker Login
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build & Push
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ env.IMAGE_NAME }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ env.BACKEND }}
-          cache-from: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache
-          cache-to: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache,mode=max
 
-  build-torch-image:
-    needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
-    env:
-      BACKEND: torch
-      IMAGE_NAME: torch
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Docker Login
+      - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build & Push
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ env.IMAGE_NAME }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ env.BACKEND }}
-          cache-from: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache
-          cache-to: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache,mode=max
 
-  build-jax-image:
-    needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
-    env:
-      BACKEND: jax
-      IMAGE_NAME: jax
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Docker Login
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build & Push
+      - name: Build and push Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ env.IMAGE_NAME }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ env.BACKEND }}
-          cache-from: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache
-          cache-to: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache,mode=max
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
+          build-args: BACKEND=${{ matrix.backend }}
+          cache-from: type=registry,ref=usbmd/${{ matrix.backend }}:cache
+          cache-to: type=registry,ref=usbmd/${{ matrix.backend }}:cache,mode=max
 
   pylint:
     needs: [build-full-image, set-tag]
