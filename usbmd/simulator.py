@@ -28,29 +28,29 @@ def simulate_rf(
     Simulates RF data for a given set of scatterers.
 
     Args:
-    scatterer_positions (array-like): The positions of the scatterers [m] of shape
-        (n_scat, 3).
-    scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape
-        (n_scat,).
-    probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
-    apply_lens_correction (bool): Whether to apply lens correction.
-    lens_thickness (float): The thickness of the lens [m].
-    lens_sound_speed (float): The speed of sound in the lens [m/s].
-    sound_speed (float): The speed of sound in the medium [m/s].
-    n_ax (int): The number of samples in the RF data.
-    center_frequency (float): The center frequency of the pulse [Hz].
-    sampling_frequency (float): The sampling frequency of the RF data [Hz].
-    t0_delays (array-like): The delays of the transmitting elements [s] of shape
-        (n_tx, n_el).
-    initial_times (array-like): The initial times of the transmitting elements [s] of
-        shape (n_tx,).
-    element_width (float): The width of the elements [m].
-    attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
-    tx_apodizations (array-like): The apodizations of the transmitting elements of
-        shape (n_tx, n_el).
+        scatterer_positions (array-like): The positions of the scatterers [m] of shape
+            (n_scat, 3).
+        scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape
+            (n_scat,).
+        probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
+        apply_lens_correction (bool): Whether to apply lens correction.
+        lens_thickness (float): The thickness of the lens [m].
+        lens_sound_speed (float): The speed of sound in the lens [m/s].
+        sound_speed (float): The speed of sound in the medium [m/s].
+        n_ax (int): The number of samples in the RF data.
+        center_frequency (float): The center frequency of the pulse [Hz].
+        sampling_frequency (float): The sampling frequency of the RF data [Hz].
+        t0_delays (array-like): The delays of the transmitting elements [s] of shape
+            (n_tx, n_el).
+        initial_times (array-like): The initial times of the transmitting elements [s] of
+            shape (n_tx,).
+        element_width (float): The width of the elements [m].
+        attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
+        tx_apodizations (array-like): The apodizations of the transmitting elements of
+            shape (n_tx, n_el).
 
     Returns:
-    rf_data (array-like): The simulated RF data of shape (1, n_tx, n_ax, n_el, 1).
+        rf_data (array-like): The simulated RF data of shape (1, n_tx, n_ax, n_el, 1).
     """
 
     n_tx = t0_delays.shape[0]
@@ -252,12 +252,12 @@ def hann_unnormalized(x, width):
     window function is not necessarily 1.
 
     Args:
-    x (array-like): The input values.
-    width (float): The width of the window. This is the total width from -x to x. The
-        window will be nonzero in the range [-width/2, width/2].
+        x (array-like): The input values.
+        width (float): The width of the window. This is the total width from -x to x. The
+            window will be nonzero in the range [-width/2, width/2].
 
     Returns:
-    hann_vals (array-like): The values of the Hann window function.
+        hann_vals (array-like): The values of the Hann window function.
     """
     return ops.where(ops.abs(x) < width / 2, ops.cos(PI * x / width) ** 2, 0)
 
@@ -266,12 +266,12 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
     """Computes the spectrum of a sine that is windowed with a Hann window.
 
     Args:
-    center_frequency (float): The center frequency of the pulse.
-    n_period (float): The number of periods to include in the pulse.
+        center_frequency (float): The center frequency of the pulse.
+        n_period (float): The number of periods to include in the pulse.
 
     Returns:
-    spectrum_fn (callable): A function that computes the spectrum of the pulse for the
-        input frequencies in Hz.
+        spectrum_fn (callable): A function that computes the spectrum of the pulse for the
+            input frequencies in Hz.
     """
     period = n_period / center_frequency
 
@@ -291,12 +291,12 @@ def get_transducer_bandwidth_fn(center_frequency, bandwidth):
     """Computes the spectrum of a probe with a center frequency and bandwidth.
 
     Args:
-    center_frequency (float): The center frequency of the probe.
-    bandwidth (float): The bandwidth of the probe.
+        center_frequency (float): The center frequency of the probe.
+        bandwidth (float): The bandwidth of the probe.
 
     Returns
-    spectrum_fn (callable): A function that computes the spectrum of the pulse for the
-        input frequencies in Hz.
+        spectrum_fn (callable): A function that computes the spectrum of the pulse for the
+            input frequencies in Hz.
     """
 
     def bandwidth_fn(f):

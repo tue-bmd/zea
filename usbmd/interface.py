@@ -303,8 +303,8 @@ class Interface:
         """Plot image using matplotlib or opencv.
 
         Args:
-        save (bool): whether to save the image to disk.
-            block (bool): whether to block the UI while plotting.
+            save (bool): whether to save the image to disk.
+                block (bool): whether to block the UI while plotting.
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
