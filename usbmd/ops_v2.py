@@ -1626,22 +1626,16 @@ def _set_if_none(variable, default):
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
-    def __init__(
-        self,
-        order=1,
-        **kwargs,
-    ):
+    def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
 
         Args:
             order (int, optional): Interpolation order. Defaults to 1. Currently only
                 GPU support for order=1.
         """
-        jittable = kwargs.pop("jittable", False)
         super().__init__(
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
-            jittable=jittable,  # if you provide coordinates, this operation can be jitted!
             **kwargs,
         )
         self.order = order
@@ -1675,6 +1669,12 @@ class ScanConvert(Operation):
         """
 
         data = kwargs[self.key]
+
+        if self.jittable:
+            assert coordinates is not None, (
+                "coordinates must be provided to jit scan conversion."
+                "You can set ScanConvert(jittable=False) to disable jitting."
+            )
 
         data_out = scan_convert(
             data,
