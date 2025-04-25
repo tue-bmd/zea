@@ -6,6 +6,8 @@ from typing import Tuple, Union
 import keras
 import numpy as np
 from keras import ops
+from scipy.ndimage import _ni_support
+from scipy.ndimage._filters import _gaussian_kernel1d
 
 from usbmd.utils import log
 from usbmd.utils.utils import map_negative_indices
@@ -1008,6 +1010,147 @@ def reshape_axis(data, newshape: tuple, axis: int):
     shape = list(ops.shape(data))  # list
     shape = shape[:axis] + list(newshape) + shape[axis + 1 :]
     return ops.reshape(data, shape)
+
+
+def _gaussian_filter1d(array, kernel, radius, cval=None, axis=-1, mode="symmetric"):
+    if keras.backend.backend() == "torch":
+        assert mode == "constant", (
+            "Only constant padding is for sure correct in torch."
+            "Symmetric padding produces different results in torch compared to tensorflow..."
+        )
+
+    # Pad input along the specified axis.
+    pad_width = [(0, 0)] * array.ndim
+    pad_width[axis] = (radius, radius)
+    padded = ops.pad(array, pad_width, mode=mode, constant_values=cval)
+
+    # Move the convolution axis to the last axis.
+    moved = ops.moveaxis(padded, axis, -1)  # shape: (..., length)
+    orig_shape = moved.shape
+    length = orig_shape[-1]
+
+    # Collapse all non-convolution dimensions into the batch.
+    reshaped = ops.reshape(
+        moved, (-1, length, 1)
+    )  # shape: (batch, length, in_channels=1)
+
+    # Reshape kernel for convolution: expected shape (kernel_size, in_channels, out_channels)
+    kernel_size = kernel.shape[0]
+    kernel_reshaped = ops.reshape(kernel, (kernel_size, 1, 1))
+
+    # Run the convolution using 'VALID' padding.
+    conv_result = ops.depthwise_conv(
+        reshaped,
+        kernel_reshaped,
+        padding="valid",
+        data_format="channels_last",
+    )
+
+    # Reshape the convolved result back to the padded shape.
+    new_length = conv_result.shape[1]
+    conv_result = ops.reshape(conv_result, (*orig_shape[:-1], new_length))
+
+    # Move the convolution axis back to its original position.
+    result = ops.moveaxis(conv_result, -1, axis)
+    return result
+
+
+def gaussian_filter1d(
+    array, sigma, axis=-1, order=0, mode="symmetric", truncate=4.0, cval=None
+):
+    """
+    1-D Gaussian filter.
+
+    Args:
+        array (Tensor): The input array.
+        sigma (float or tuple): Standard deviation for Gaussian kernel. The standard deviations
+            of the Gaussian filter are given for each axis as a sequence, or as a single number,
+            in which case it is equal for all axes.
+        order (int or Tuple[int]): The order of the filter along each axis is given as a sequence of
+            integers, or as a single number. An order of 0 corresponds to convolution with a
+            Gaussian kernel. A positive order corresponds to convolution with that derivative
+            of a Gaussian. Default is 0.
+        mode (str, optional): Padding mode for the input image. Default is 'symmetric'.
+            See [keras docs](https://www.tensorflow.org/api_docs/python/tf/keras/ops/pad) for
+            all options and [tensoflow docs](https://www.tensorflow.org/api_docs/python/tf/pad)
+            for some examples. Note that the naming differs from scipy.ndimage.gaussian_filter!
+        cval (float, optional): Value to fill past edges of input if mode is 'constant'.
+            Default is None.
+        truncate (float, optional): Truncate the filter at this many standard deviations.
+            Default is 4.0.
+        axes (Tuple[int], optional): If None, input is filtered along all axes. Otherwise, input
+            is filtered along the specified axes. When axes is specified, any tuples used for
+            sigma, order, mode and/or radius must match the length of axes. The ith entry in
+            any of these tuples corresponds to the ith entry in axes.
+    """
+    # Determine the effective kernel radius and generate the Gaussian kernel
+    radius = int(round(truncate * sigma))
+    kernel = _gaussian_kernel1d(sigma, order, radius).astype(
+        ops.dtype(array)
+    )  # shape: (kernel_size,)
+
+    # Reverse the kernel for odd orders to mimic correlation (SciPy behavior)
+    if order % 2:
+        kernel = kernel[::-1]
+
+    return _gaussian_filter1d(array, kernel, radius, cval, axis, mode)
+
+
+def gaussian_filter(
+    array,
+    sigma,
+    order: int | Tuple[int] = 0,
+    mode: str = "symmetric",
+    cval: float | None = None,
+    truncate: float = 4.0,
+    axes: Tuple[int] = None,
+):
+    """
+    Multidimensional Gaussian filter.
+
+    If you want to use this function with jax.jit, you can set:
+    `static_argnames=("truncate", "sigma")`
+
+    Args:
+        array (Tensor): The input array.
+        sigma (float or tuple): Standard deviation for Gaussian kernel. The standard deviations
+            of the Gaussian filter are given for each axis as a sequence, or as a single number,
+            in which case it is equal for all axes.
+        order (int or Tuple[int]): The order of the filter along each axis is given as a sequence of
+            integers, or as a single number. An order of 0 corresponds to convolution with a
+            Gaussian kernel. A positive order corresponds to convolution with that derivative
+            of a Gaussian. Default is 0.
+        mode (str, optional): Padding mode for the input image. Default is 'symmetric'.
+            See [keras docs](https://www.tensorflow.org/api_docs/python/tf/keras/ops/pad) for
+            all options and [tensoflow docs](https://www.tensorflow.org/api_docs/python/tf/pad)
+            for some examples. Note that the naming differs from scipy.ndimage.gaussian_filter!
+        cval (float, optional): Value to fill past edges of input if mode is 'constant'.
+            Default is None.
+        truncate (float, optional): Truncate the filter at this many standard deviations.
+            Default is 4.0.
+        axes (Tuple[int], optional): If None, input is filtered along all axes. Otherwise, input
+            is filtered along the specified axes. When axes is specified, any tuples used for
+            sigma, order, mode and/or radius must match the length of axes. The ith entry in
+            any of these tuples corresponds to the ith entry in axes.
+    """
+    axes = _ni_support._check_axes(axes, array.ndim)
+    num_axes = len(axes)
+    orders = _ni_support._normalize_sequence(order, num_axes)
+    sigmas = _ni_support._normalize_sequence(sigma, num_axes)
+    modes = _ni_support._normalize_sequence(mode, num_axes)
+    axes = [(axes[ii], sigmas[ii], orders[ii], modes[ii]) for ii in range(num_axes)]
+    if len(axes) > 0:
+        for (
+            axis,
+            sigma,  # pylint: disable=redefined-argument-from-local
+            order,  # pylint: disable=redefined-argument-from-local
+            mode,  # pylint: disable=redefined-argument-from-local
+        ) in axes:
+            output = gaussian_filter1d(array, sigma, axis, order, mode, truncate, cval)
+            array = output
+    else:
+        output = array
+    return output
 
 
 if keras.backend.backend() == "tensorflow":
