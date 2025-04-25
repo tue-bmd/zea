@@ -5,78 +5,175 @@ ultrasound datasets.
 - **Date**          : November 18th, 2021
 """
 
+from collections import OrderedDict
 from pathlib import Path
 
 import tqdm
 
-from usbmd.data.legacy_datasets import DataSet
-from usbmd.scan import Scan
+from usbmd.data.file import File, get_shape_hdf5_file
 from usbmd.utils import (
     calculate_file_hash,
     date_string_to_readable,
     get_date_string,
     log,
 )
-from usbmd.utils.checks import get_check, validate_dataset
+from usbmd.utils.checks import validate_dataset
+from usbmd.utils.io_lib import search_file_tree
 
 _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
+FILE_HANDLE_CACHE_CAPACITY = 128
+FILE_TYPES = [".hdf5", ".h5"]
 
 
-class USBMDDataSet(DataSet):
-    """Class to read dataset in USBMD format."""
+class H5FileHandleCache:
+    def __init__(
+        self,
+        file_handle_cache_capacity: int = FILE_HANDLE_CACHE_CAPACITY,
+    ):
+        self._file_handle_cache = OrderedDict()
+        self.file_handle_cache_capacity = file_handle_cache_capacity
 
-    def __init__(self, config, validate=True, verbose=True):
-        """Initializes the USBMDDataSet class.
+    @staticmethod
+    def _check_if_open(file):
+        """Check if a file is open."""
+        return bool(file.id.valid)
+
+    def get_file(self, file_path) -> File:
+        """Open an HDF5 file and cache it."""
+        # If file is already in cache, return it and move it to the end
+        if file_path in self._file_handle_cache:
+            self._file_handle_cache.move_to_end(file_path)
+            file = self._file_handle_cache[file_path]
+            # if file was closed, reopen:
+            if not self._check_if_open(file):
+                file = File(file_path, "r")
+                self._file_handle_cache[file_path] = file
+        # If file is not in cache, open it and add it to the cache
+        else:
+            # If cache is full, close the least recently used file
+            if len(self._file_handle_cache) >= self.file_handle_cache_capacity:
+                _, close_file = self._file_handle_cache.popitem(last=False)
+                close_file.close()
+            file = File(file_path, "r")
+            self._file_handle_cache[file_path] = file
+
+        return self._file_handle_cache[file_path]
+
+    def __del__(self):
+        """Ensure cached files are closed."""
+        for _, file in self._file_handle_cache.items():
+            file.close()
+        self._file_handle_cache = OrderedDict()
+
+
+def find_h5_files_from_directory(
+    directory: str | list,
+    key: str,
+    search_file_tree_kwargs: dict | None = None,
+    additional_axes_iter: tuple | None = None,
+):
+    """
+    Find HDF5 files from a directory or list of directories and retrieve their shapes.
+
+    Args:
+        directory (str or list): A single directory path, a list of directory paths,
+            or a single HDF5 file path.
+        key (str): The key to access the HDF5 dataset.
+        search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
+            search_file_tree function. Defaults to None.
+        additional_axes_iter (tuple, optional): Additional axes to iterate over if dataset_info
+            contains file_shapes. Defaults to None.
+
+    Returns:
+        - file_names (list): List of file paths to the HDF5 files.
+        - file_shapes (list): List of shapes of the HDF5 datasets.
+    """
+
+    file_names = []
+    file_shapes = []
+
+    if search_file_tree_kwargs is None:
+        search_file_tree_kwargs = {}
+
+    # 'directory' is actually just a single hdf5 file
+    if not isinstance(directory, list) and Path(directory).is_file():
+        filename = directory
+        file_shapes = [get_shape_hdf5_file(filename, key)]
+        file_names = [str(filename)]
+        return file_names, file_shapes
+
+    dataset_info = search_file_tree(
+        directory,
+        filetypes=FILE_TYPES,
+        hdf5_key_for_length=key,
+        **search_file_tree_kwargs,
+    )
+    file_paths = dataset_info["file_paths"]
+    file_paths = [str(Path(directory) / file_path) for file_path in file_paths]
+    file_names.extend(file_paths)
+    if "file_shapes" not in dataset_info:
+        assert additional_axes_iter is None, (
+            "additional_axes_iter is only supported if the dataset_info "
+            "contains file_shapes. please remove dataset_info.yaml files and rerun."
+        )
+        # since in this case we only need to iterate over the first axis it is
+        # okay we only have the lengths of the files (and not the full shape)
+        file_shapes.extend([[length] for length in dataset_info["file_lengths"]])
+    else:
+        file_shapes.extend(dataset_info["file_shapes"])
+
+    return file_names, file_shapes
+
+
+class Dataset(H5FileHandleCache):
+    """Read multiple usbmd.File objects from a folder."""
+
+    def __init__(self, path, key: str, validate=True):
+        """Initializes the Dataset.
 
         Args:
             config (utils.config.Config): The config.data configuration object.
         """
-        self.config = config
-        self.dtype = config.dtype
-        self.verbose = verbose
-
-        if "user" in config and config.user is not None:
-            self.data_root = Path(config.user["data_root"]) / config["dataset_folder"]
-        else:
-            self.data_root = config["dataset_folder"]
-        super().__init__(
-            config, datafolder=self.data_root, filetype="hdf5", reader="hdf5"
+        self.path = Path(path)
+        assert "data/" in key, (
+            "Key should be in the format 'data/<data_type>' or "
+            "'event_<frame_no>/data/<data_type>'"
         )
+        self.key = key.replace("data/", "")
+        file_names, file_shapes = find_h5_files_from_directory(
+            self.path,
+            self.key,
+            self.search_file_tree_kwargs,
+            self.additional_axes_iter,
+        )
+        self.file_names = file_names
+        self.file_shapes = file_shapes
+        self.file_paths = [self.path / file_name for file_name in file_names]
+
+        assert len(self) > 0, f"No files in directories:\n{self.path}"
 
         if validate:
             self.validate_dataset()
 
+    def __len__(self):
+        """Returns the number of files in the dataset."""
+        return len(self.file_paths)
+
     def __getitem__(self, index):
         """Retrieves an item from the dataset."""
-        if isinstance(index, int):
-            frame_no = None
-        elif len(index) == 2:
-            index, frame_no = index
-        else:
-            raise ValueError(
-                "Index should either be an integer (indicating file index), "
-                "or tuple containing file index and frame number!"
-            )
-        self.file = super().__getitem__(index)
+        file = self.get_file(self.file_paths[index])
+        return file
 
-        self.frame_no = self.get_frame_no(frame_no)
+    def __iter__(self):
+        """
+        Generator that yields images from the hdf5 files.
+        """
+        for idx in range(len(self)):
+            yield self[idx]
 
-        if "data" in self.file:
-            data = self.file[f"data/{self.dtype}"][self.frame_no]
-        else:
-            assert not isinstance(self.frame_no, list), (
-                "Reading multiple frames from event structure is not supported. "
-                "Please specify a single frame number."
-            )
-            data = self.file[f"event_{self.frame_no}/data/{self.dtype}"][0]
-
-        if isinstance(self.frame_no, list):
-            get_check(self.dtype)(data, with_batch_dim=True)
-        else:
-            get_check(self.dtype)(data)
-
-        return data
+    def __call__(self):
+        return iter(self)
 
     def validate_dataset(self):
         """Validate dataset contents.
@@ -87,10 +184,10 @@ class USBMDDataSet(DataSet):
         If the validation file was not corrupted and validated, it prints a message and returns.
         """
 
-        validation_file_path = Path(self.data_root, _VALIDATED_FLAG_FILE)
+        validation_file_path = Path(self.path, _VALIDATED_FLAG_FILE)
         # for error logging
         validation_error_file_path = Path(
-            self.data_root, get_date_string() + "_validation_errors.log"
+            self.path, get_date_string() + "_validation_errors.log"
         )
         validation_error_log = []
 
@@ -98,11 +195,11 @@ class USBMDDataSet(DataSet):
             self._assert_validation_file(validation_file_path)
             return
 
-        if len(self.file_paths) > _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE:
+        if len(self) > _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE:
             log.warning(
                 "Checking scan parameters in more than "
                 f"{_CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE} files takes too long. "
-                f"Found {len(self.file_paths)} files in dataset. "
+                f"Found {len(self)} files in dataset. "
                 "Not checking scan parameters."
             )
             return
@@ -180,21 +277,27 @@ class USBMDDataSet(DataSet):
             f"Remove it if you want to redo validation.\n"
         )
 
+    def get_data_types(self, file_path):
+        """Get data types from file."""
+        file = self.get_file(file_path)
+        if "data" in file:
+            data_types = list(file["data"].keys())
+        else:
+            data_types = list(file["event_0"]["data"].keys())
+        return data_types
+
     def _write_validation_file(self, num_frames_per_file):
         """Write validation file."""
-        validation_file_path = Path(self.data_root, _VALIDATED_FLAG_FILE)
-        self.file = self.get_file(0)  # read a file to initiate self.file
-        if "data" in self.file:
-            data_types = list(self.file["data"].keys())
-        else:
-            data_types = list(self.file["event_0"]["data"].keys())
+        validation_file_path = Path(self.path, _VALIDATED_FLAG_FILE)
 
-        number_of_files = len(self.file_paths)
+        # Read data types from the first file
+        data_types = self.get_data_types(self.file_paths[0])
+
         number_of_frames = sum(num_frames_per_file)
         with open(validation_file_path, "w", encoding="utf-8") as f:
-            f.write(f"Dataset: {self.data_root}\n")
+            f.write(f"Dataset: {self.path}\n")
             f.write(f"Validated on: {get_date_string()}\n")
-            f.write(f"Number of files: {number_of_files}\n")
+            f.write(f"Number of files: {len(self)}\n")
             f.write(f"Number of frames: {number_of_frames}\n")
             f.write(f"Data types: {', '.join(data_types)}\n")
             f.write(f"{'-' * 80}\n")
