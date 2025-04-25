@@ -951,7 +951,10 @@ class Scan(Object):
     @property
     def time_to_next_transmit(self):
         """The time between subsequent transmit events of shape (n_frames, n_tx)."""
-        return self._time_to_next_transmit[:, self.selected_transmits]
+        if self._time_to_next_transmit is not None:
+            return self._time_to_next_transmit[:, self.selected_transmits]
+        else:
+            return None
 
     @property
     def frames_per_second(self):
