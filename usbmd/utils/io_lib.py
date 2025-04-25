@@ -219,6 +219,30 @@ def search_file_tree(
                 }
 
     """
+    # Check if multiple directories were given, recursively aggregate.
+    if isinstance(directory, (tuple, list)):
+        dataset_infos = {
+            "file_paths": [],
+            "total_num_files": 0,
+            "file_lengths": [],
+            "file_shapes": [],
+            "total_num_frames": 0,
+        }
+        for dir in directory:
+            dataset_info = search_file_tree(
+                dir,
+                filetypes,
+                write,
+                dataset_info_filename,
+                hdf5_key_for_length,
+                redo,
+                parallel,
+                verbose,
+            )
+            for key, value in dataset_info.items():
+                dataset_infos[key] += value
+        return dataset_infos
+
     directory = Path(directory)
     if not directory.is_dir():
         raise ValueError(
