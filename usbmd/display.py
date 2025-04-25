@@ -121,7 +121,8 @@ def scan_convert_2d(
             If provided, it will be used instead of computing new coordinates based on
             the input image shape and ranges.
         fill_value (float, optional): The value to fill in for coordinates
-            outside the input image ranges. Defaults to 0.0.
+            outside the input image ranges. Defaults to 0.0. When set to NaN,
+            no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
 
     Returns:
@@ -247,6 +248,8 @@ def scan_convert_3d(
             If provided, it will be used instead of computing new coordinates based on
             the input image shape and ranges.
         fill_value (float, optional): The value to fill in for coordinates
+            outside the input image ranges. Defaults to 0.0. When set to NaN,
+            no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
 
     Returns:
