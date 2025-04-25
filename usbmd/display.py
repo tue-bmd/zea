@@ -407,6 +407,7 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
         )
         non_zeros_flipped = model_fitted_bottom(range(len(non_zeros_flipped)))
         non_zeros_flipped = non_zeros_flipped.round().astype(np.int64)
+        non_zeros_flipped = np.clip(non_zeros_flipped, 0, None)
 
     non_zeros = polar_image.shape[0] - non_zeros_flipped
 
