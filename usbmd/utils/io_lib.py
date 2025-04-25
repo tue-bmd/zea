@@ -260,7 +260,7 @@ def search_file_tree(
         assert isinstance(
             hdf5_key_for_length, str
         ), "hdf5_key_for_length must be a string"
-        assert set(filetypes) == {".hdf5", ".h5"}, (
+        assert set(filetypes).issubset({".hdf5", ".h5"}), (
             "hdf5_key_for_length only works with when filetypes is set to "
             f"`.hdf5` or `.h5`, got {filetypes}"
         )
