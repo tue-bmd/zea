@@ -12,6 +12,8 @@ CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_PRECISION = "float32"
 
 # TODO: make static more neat
+# These are global static attributes for all ops. Ops specific
+# static attributes should be defined in the respective ops class
 STATIC = [
     "f_number",
     "apply_lens_correction",
