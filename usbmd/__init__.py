@@ -1,8 +1,4 @@
-"""
-The official documentation for the Python package `usbmd` - a convenient ultrasound toolbox.
-
-.. include:: ./README.md
-"""
+"""usbmd: A Python package for ultrasound image reconstructing using deep learning."""
 
 __version__ = "2.3.0"
 
@@ -10,7 +6,7 @@ import inspect
 import os
 
 
-def imported_from_main():
+def _imported_from_main():
     """Check if the module was imported from __main__.py
     or usbmd was called from the command line.
 
@@ -35,7 +31,7 @@ def imported_from_main():
 # as this will set the backend in __main__.py just after this __init__.py
 if "KERAS_BACKEND" not in os.environ:
     os.environ["KERAS_BACKEND"] = "numpy"
-    if not imported_from_main():
+    if not _imported_from_main():
         print(
             "`KERAS_BACKEND` not set. usbmd will set it to `numpy` by default. "
             "It is recommended to set it manually using `os.environ['KERAS_BACKEND']` "
