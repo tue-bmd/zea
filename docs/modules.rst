@@ -1,11 +1,10 @@
-usbmd docs
+usbmd API Reference
 ===================
-
-Welcome to the documentation for the `usbmd` package.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+
+   usbmd
 
 Indices and tables
 ==================

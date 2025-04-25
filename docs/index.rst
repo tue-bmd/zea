@@ -8,7 +8,16 @@ usbmd docs
 
 Welcome to the documentation for the `usbmd` package.
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents:
+
+   modules
+   examples
+   contributing
+   changelog
+
 .. include:: ../README.md
-   :parser: myst_parser.sphinx_
+   :parser: markdown
    :start-line: 4
 
