@@ -22,7 +22,7 @@ from usbmd.data.file import File
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
 from usbmd.scan import Scan
-from usbmd.utils import log, save_to_gif, save_to_mp4
+from usbmd.utils import keep_trying, log, save_to_gif, save_to_mp4
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
@@ -30,7 +30,6 @@ from usbmd.utils.io_lib import (
     matplotlib_figure_to_numpy,
     running_in_notebook,
 )
-from usbmd.utils.utils import keep_trying
 
 
 class Interface:
@@ -50,16 +49,7 @@ class Interface:
             dataset_kwargs = {}
         self.dataset = File(self.file_path, **dataset_kwargs)
 
-        file_scan_params = self.dataset.get_scan_parameters()
-        if len(file_scan_params) == 0:
-            log.info(
-                f"Could not find proper scan parameters in {self.dataset} at "
-                f"{log.yellow(str(self.dataset.datafolder))}."
-            )
-            log.info("Proceeding without scan class.")
-            self.scan = None
-        else:
-            self.scan = Scan.merge(file_scan_params, self.config.scan)
+        self.scan = Scan.merge(self.dataset.get_scan_parameters(), self.config.scan)
 
         self.probe = self.dataset.probe()
 
