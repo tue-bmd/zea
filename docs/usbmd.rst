@@ -1,19 +1,14 @@
 usbmd package
 =============
 
-Subpackages
------------
 
-.. toctree::
-   :maxdepth: 4
-
-   usbmd.backend
-   usbmd.config
-   usbmd.data
-   usbmd.utils
-
-Submodules
-----------
+usbmd module
+-----------------------
+.. automodule:: usbmd
+   :members:
+   :undoc-members:
+   :imported-members:
+   :show-inheritance:
 
 usbmd.beamformer module
 -----------------------
@@ -151,10 +146,3 @@ usbmd.tensor\_ops module
    :undoc-members:
    :show-inheritance:
 
-Module contents
----------------
-
-.. automodule:: usbmd
-   :members:
-   :undoc-members:
-   :show-inheritance:
