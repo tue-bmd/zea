@@ -8,7 +8,6 @@ import importlib.util
 from pathlib import Path
 
 import h5py
-import numpy as np
 
 from usbmd.core import DataTypes, ModTypes
 from usbmd.registry import checks_registry
