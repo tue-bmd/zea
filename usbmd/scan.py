@@ -232,6 +232,8 @@ class Scan(Object):
         self._n_tx = None
         self.resolution = None
         self._coordinates = None
+        self._theta_range = None
+        self._time_to_next_transmit = None
 
         # Dictionary to track which parameters have been set
         self._set_params = {}
