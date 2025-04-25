@@ -22,8 +22,8 @@ def test_gaussian_blur(sigma):
     image = rng.normal(size=(32, 32)).astype(np.float32)
     image_tensor = ops.convert_to_tensor(image[..., None])
 
-    blurred_scipy = gaussian_filter(data=image, sigma=sigma)["data"]
-    blurred_usbmd = blur(image_tensor)[..., 0]
+    blurred_scipy = gaussian_filter(image, sigma=sigma)
+    blurred_usbmd = blur(data=image_tensor)["data"][..., 0]
 
     np.testing.assert_allclose(blurred_scipy, blurred_usbmd, rtol=1e-4)
 
