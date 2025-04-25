@@ -17,7 +17,7 @@ from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
 from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
-from usbmd.display import scan_convert_2d, scan_convert_3d
+from usbmd.display import scan_convert
 from usbmd.ops import channels_to_complex, demodulate, hilbert, upmix
 from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
@@ -301,15 +301,13 @@ class Pipeline:
                 to be performed.
             with_batch_dim (bool, optional): Whether operations should expect a batch dimension.
                 Defaults to True.
-            device (str, optional): The device to use for the operations. Defaults to None.
-                Can be `cpu` or `cuda`, `cuda:0`, etc.
             jit_options (str, optional): The JIT options to use. Must be "pipeline", "ops", or None.
-            - "pipeline" compiles the entire pipeline as a single function. This may be faster but,
-            does not preserve python control flow, such as caching.
-            - "ops" compiles each operation separately. This preserves python control flow and
-            caching functionality, but speeds up the operations.
-            - None disables JIT compilation.
-            Defaults to "ops".
+                - "pipeline" compiles the entire pipeline as a single function.
+                    This may be faster but, does not preserve python control flow, such as caching.
+                - "ops" compiles each operation separately. This preserves python control flow and
+                    caching functionality, but speeds up the operations.
+                - None disables JIT compilation.
+                Defaults to "ops".
             jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
             validate (bool, optional): Whether to validate the pipeline. Defaults to True.
@@ -456,6 +454,8 @@ class Pipeline:
         if value == "pipeline":
             assert self.jittable, log.error(
                 "jit_options 'pipeline' cannot be used as the entire pipeline is not jittable. "
+                "The following operations are not jittable: "
+                f"{self.unjitable_ops}. "
                 "Try setting jit_options to 'ops' or None."
             )
             self.jit()
@@ -482,6 +482,11 @@ class Pipeline:
     def jittable(self):
         """Check if all operations in the pipeline are jittable."""
         return all(operation.jittable for operation in self.operations)
+
+    @property
+    def unjitable_ops(self):
+        """Get a list of operations that are not jittable."""
+        return [operation for operation in self.operations if not operation.jittable]
 
     @property
     def with_batch_dim(self):
@@ -1621,21 +1626,26 @@ def _set_if_none(variable, default):
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
-    def __init__(
-        self,
-        order=1,
-        **kwargs,
-    ):
+    def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
 
         Args:
             order (int, optional): Interpolation order. Defaults to 1. Currently only
                 GPU support for order=1.
         """
+        if order > 1:
+            jittable = False
+            log.warning(
+                "GPU support for order > 1 is not available. "
+                + "Disabling jit for ScanConvert."
+            )
+        else:
+            jittable = True
+
         super().__init__(
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
-            jittable=False,  # currently not jittable due to variable size
+            jittable=jittable,
             **kwargs,
         )
         self.order = order
@@ -1646,6 +1656,7 @@ class ScanConvert(Operation):
         theta_range=None,
         phi_range=None,
         resolution=None,
+        coordinates=None,
         fill_value=None,
         **kwargs,
     ):
@@ -1660,31 +1671,32 @@ class ScanConvert(Operation):
                 Defined in radians.
             resolution (float): Resolution of the output image in meters per pixel.
                 if None, the resolution is computed based on the input data.
+            coordinates (Tensor): Coordinates for scan convertion. If None, will be computed
+                based on rho_range, theta_range, phi_range and resolution. If provided, this
+                operation can be jitted.
             fill_value (float): Value to fill the image with outside the defined region.
 
         """
 
         data = kwargs[self.key]
 
-        if phi_range is not None:
-            data_out = scan_convert_3d(
-                data,
-                rho_range,
-                theta_range,
-                phi_range,
-                resolution,
-                fill_value,
-                order=self.order,
+        if self.jittable:
+            assert coordinates is not None, (
+                "coordinates must be provided to jit scan conversion."
+                "You can set ScanConvert(jittable=False) to disable jitting."
             )
-        else:
-            data_out = scan_convert_2d(
-                data,
-                rho_range,
-                theta_range,
-                resolution,
-                fill_value,
-                order=self.order,
-            )
+
+        data_out = scan_convert(
+            data,
+            rho_range,
+            theta_range,
+            phi_range,
+            resolution,
+            coordinates,
+            fill_value,
+            self.order,
+            with_batch_dim=self.with_batch_dim,
+        )
 
         return {self.output_key: data_out}
 
@@ -1720,6 +1732,21 @@ class Demodulate(Operation):
             "demodulation_frequency": demodulation_frequency,
             "n_ch": 2,
         }
+
+
+@ops_registry("clip")
+class Clip(Operation):
+    """Clip the input data to a given range."""
+
+    def __init__(self, min_value=None, max_value=None, **kwargs):
+        super().__init__(**kwargs)
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        data = ops.clip(data, self.min_value, self.max_value)
+        return {self.output_key: data}
 
 
 @ops_registry("branched_pipeline")
