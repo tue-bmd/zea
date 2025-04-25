@@ -34,63 +34,64 @@ jobs:
           TAG_VALUE=$(grep '^tag=' "$GITHUB_OUTPUT" | cut -d'=' -f2-)
           echo "Determined image tag: $TAG_VALUE"
 
+  # Template for image build jobs
+  build-image-template: &build-image-template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Docker Login
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build & Push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ env.IMAGE_NAME }}:${{ needs.set-tag.outputs.docker_tag }}
+          build-args: BACKEND=${{ env.BACKEND }}
+          cache-from: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache
+          cache-to: type=registry,ref=usbmd/${{ env.IMAGE_NAME }}:cache,mode=max
+
   build-full-image:
     needs: set-tag
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    env:
+      IMAGE_NAME: all
+      BACKEND: all
+    <<: *build-image-template
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push full Docker image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=all
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
-
-  build-other-images:
+  build-numpy-image:
     needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
-    name: Build partial images (${{ matrix.backend }})
-    strategy:
-      matrix:
-        backend: [tensorflow, torch, jax, numpy]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    env:
+      IMAGE_NAME: numpy
+      BACKEND: numpy
+    <<: *build-image-template
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+  build-tensorflow-image:
+    needs: [build-full-image, set-tag]
+    env:
+      IMAGE_NAME: tensorflow
+      BACKEND: tensorflow
+    <<: *build-image-template
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+  build-torch-image:
+    needs: [build-full-image, set-tag]
+    env:
+      IMAGE_NAME: torch
+      BACKEND: torch
+    <<: *build-image-template
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ matrix.backend }}
-          cache-from: type=registry,ref=usbmd/${{ matrix.backend }}:cache
-          cache-to: type=registry,ref=usbmd/${{ matrix.backend }}:cache,mode=max
+  build-jax-image:
+    needs: [build-full-image, set-tag]
+    env:
+      IMAGE_NAME: jax
+      BACKEND: jax
+    <<: *build-image-template
 
   pylint:
     needs: [build-full-image, set-tag]
