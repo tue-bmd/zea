@@ -112,12 +112,7 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     rho_range = (0, 100)
     theta_range = np.deg2rad((-45, 45))
 
-    cartesian_data = display.scan_convert_2d(
-        polar_data,
-        rho_range,
-        theta_range,
-    )
-    cartesian_data = ops.where(ops.isnan(cartesian_data), 0, cartesian_data)
+    cartesian_data = display.scan_convert_2d(polar_data, rho_range, theta_range)
     cartesian_data = ops.convert_to_numpy(cartesian_data)
     cartesian_data_inv = display.transform_sc_image_to_polar(
         cartesian_data, output_size=polar_data.shape
