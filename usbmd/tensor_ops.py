@@ -580,7 +580,6 @@ def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number:
         Tensor: Reshaped tensor with data stacked along stack_axis.
 
     Example:
-        ```python
         >>> keras.random.uniform((10, 20, 30))
         >>> # stacking along 1st axis with 2 frames per block
         >>> stacked_data = stack_volume_data_along_axis(data, 0, 1, 2)
