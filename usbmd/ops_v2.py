@@ -1902,22 +1902,19 @@ class LeeFilter(Operation):
             pad_mode=self.pad_mode,
             with_batch_dim=self.with_batch_dim,
             jittable=self._jittable,
+            input_key=self.key,
         )
 
     def call(self, **kwargs):
-
         data = kwargs[self.key]
 
         # Apply Gaussian blur to get local mean
-        img_mean = self.gaussian_blur.call(data=data, **kwargs)[
-            self.gaussian_blur.output_key
-        ]
+        img_mean = self.gaussian_blur.call(**kwargs)[self.gaussian_blur.output_key]
 
         # Apply Gaussian blur to squared data to get local squared mean
         data_squared = data**2
-        img_sqr_mean = self.gaussian_blur.call(data=data_squared, **kwargs)[
-            self.gaussian_blur.output_key
-        ]
+        kwargs[self.gaussian_blur.key] = data_squared
+        img_sqr_mean = self.gaussian_blur.call(**kwargs)[self.gaussian_blur.output_key]
 
         # Calculate local variance
         img_variance = img_sqr_mean - img_mean**2
