@@ -95,7 +95,7 @@ def test_gmm_fit_and_sample_2d(synthetic_2d_data, debug=False):
     for i in range(n_components):
         assert np.allclose(covs[i], true_covs[i], atol=2.0)
     # Check log likelihood is finite
-    ll = gmm.log_likelihood(data)
+    ll = gmm.log_density(data)
     assert np.isfinite(keras.ops.convert_to_numpy(ll)).all()
 
 
