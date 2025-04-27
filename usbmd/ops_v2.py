@@ -199,7 +199,8 @@ class Operation(keras.Operation):
         """Check if the operation can be JIT compiled."""
         return self._jittable
 
-    def call(self, *args, **kwargs):
+    # pylint: disable=arguments-differ
+    def call(self, **kwargs):
         """
         Abstract method that defines the processing logic for the operation.
         Subclasses must implement this method.
@@ -1170,7 +1171,7 @@ class PatchedGrid(Pipeline):
 class Identity(Operation):
     """Identity operation."""
 
-    def call(self, *args, **kwargs) -> Dict:
+    def call(self, **kwargs) -> Dict:
         """Returns the input as is."""
         return kwargs
 
@@ -1265,6 +1266,7 @@ class Simulate(Operation):
             **kwargs,
         )
 
+    # pylint: disable=arguments-differ
     def call(
         self,
         scatterer_positions,
@@ -1834,15 +1836,10 @@ class GaussianBlur(Operation):
         kernel = kernel[:, :, None, None]
         return ops.convert_to_tensor(kernel)
 
-    def call(self, data, **kwargs):
-        """Blur the input image with a gaussian kernel.
+    def call(self, **kwargs):
 
-        Args:
-            data (Tensor): Input image to blur.
+        data = kwargs[self.key]
 
-        Returns:
-            dict: Dictionary containing the blurred image.
-        """
         # Add batch dimension if not present
         if not self.with_batch_dim:
             data = data[None]
@@ -1907,24 +1904,18 @@ class LeeFilter(Operation):
             jittable=self._jittable,
         )
 
-    def call(self, data, **kwargs):
-        """
-        Apply Lee filter to reduce speckle while preserving edges.
+    def call(self, **kwargs):
 
-        Args:
-            data (Tensor): Input image data to be filtered.
+        data = kwargs[self.key]
 
-        Returns:
-            dict: Dictionary containing the filtered image.
-        """
         # Apply Gaussian blur to get local mean
-        img_mean = self.gaussian_blur.call(data, **kwargs)[
+        img_mean = self.gaussian_blur.call(data=data, **kwargs)[
             self.gaussian_blur.output_key
         ]
 
         # Apply Gaussian blur to squared data to get local squared mean
         data_squared = data**2
-        img_sqr_mean = self.gaussian_blur.call(data_squared, **kwargs)[
+        img_sqr_mean = self.gaussian_blur.call(data=data_squared, **kwargs)[
             self.gaussian_blur.output_key
         ]
 
@@ -2030,16 +2021,19 @@ class Companding(Operation):
                 self._a_law_expand if self.expand else self._a_law_compress
             )
 
+    # pylint: disable=unused-argument
     @staticmethod
     def _mu_law_compress(x, mu=255, **kwargs):
         x = ops.clip(x, -1, 1)
         return ops.sign(x) * ops.log(1.0 + mu * ops.abs(x)) / ops.log(1.0 + mu)
 
+    # pylint: disable=unused-argument
     @staticmethod
     def _mu_law_expand(y, mu=255, **kwargs):
         y = ops.clip(y, -1, 1)
         return ops.sign(y) * ((1.0 + mu) ** ops.abs(y) - 1.0) / mu
 
+    # pylint: disable=unused-argument
     @staticmethod
     def _a_law_compress(x, A=87.6, **kwargs):
         x = ops.clip(x, -1, 1)
@@ -2051,6 +2045,7 @@ class Companding(Operation):
         y = ops.where((x_abs >= 0) & (x_abs < (1.0 / A)), val1, val2)
         return y
 
+    # pylint: disable=unused-argument
     @staticmethod
     def _a_law_expand(y, A=87.6, **kwargs):
         y = ops.clip(y, -1, 1)
