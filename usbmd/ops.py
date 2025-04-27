@@ -19,6 +19,7 @@ from usbmd.ops_v2 import (
     get_band_pass_filter,
     get_low_pass_iq_filter,
     hilbert,
+    upmix,
 )
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
