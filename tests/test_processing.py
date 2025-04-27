@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from scipy.signal import hilbert
 
-from usbmd import ops
+import usbmd.ops_v2 as ops
 from usbmd.ops_v2 import Pipeline, Simulate
 from usbmd.probes import Probe
 from usbmd.scan import Scan
@@ -30,7 +30,7 @@ from . import backend_equality_check
 def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
 
-    from usbmd import ops
+    from usbmd import ops_v2 as ops
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
@@ -68,7 +68,7 @@ def test_companding(comp_type, size, parameter_value_range):
 def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
 
-    from usbmd import ops
+    from usbmd import ops_v2 as ops
 
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
@@ -108,7 +108,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
 
-    from usbmd import ops
+    from usbmd import ops_v2 as ops
 
     normalize = ops.Normalize(output_range, input_range)
 
@@ -294,9 +294,9 @@ def test_up_and_down_conversion(factor, batch_size):
 def test_hilbert_transform():
     """Test hilbert transform"""
 
-    from keras import ops as kops
+    import keras
 
-    from usbmd import ops
+    from usbmd import ops_v2 as ops
 
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
@@ -311,10 +311,10 @@ def test_hilbert_transform():
 
     data_prepared = envelope_detect.prepare_tensor(data)
     data_iq = ops.hilbert(data_prepared, axis=-3)
-    assert kops.dtype(data_iq) in [
+    assert keras.ops.dtype(data_iq) in [
         "complex64",
         "complex128",
-    ], f"Data type should be complex, got {kops.dtype(data_iq)} instead."
+    ], f"Data type should be complex, got {keras.ops.dtype(data_iq)} instead."
 
     data_iq = envelope_detect.to_numpy(data_iq)
 
@@ -322,62 +322,3 @@ def test_hilbert_transform():
     np.testing.assert_almost_equal(reference_data_iq, data_iq, decimal=4)
 
     return data_iq
-
-
-@backend_equality_check(decimal=4)
-def test_processing_class():
-    """Test the processing class"""
-
-    from usbmd import Process
-
-    operation_chain = [
-        {
-            "name": "multi_bandpass_filter",
-            "params": {
-                "params": {
-                    "freqs": [-0.2e6, 0.0e6, 0.2e6],
-                    "bandwidths": [1.2e6, 1.4e6, 1.0e6],
-                    "num_taps": 81,
-                },
-                "modtype": "iq",
-                "sampling_frequency": 40e6,
-                "center_frequency": 5e6,
-            },
-        },  # this bandpass filters the data three times and returns a list
-        {
-            "name": "demodulate",
-            "params": {"sampling_frequency": 40e6, "center_frequency": 5e6},
-        },
-        {"name": "envelope_detect"},
-        {"name": "downsample", "params": {"factor": 4}},
-        {"name": "normalize", "params": {"output_range": (0, 1)}},
-        {"name": "log_compress", "params": {"dynamic_range": (-60, 0)}},
-        {
-            "name": "stack",
-            "params": {"axis": 0},
-        },  # stack the data back together
-        {
-            "name": "mean",
-            "params": {"axis": 0},
-        },  # take the mean of the stack
-    ]
-
-    process = Process()
-    process.set_pipeline(
-        operation_chain=operation_chain,
-        device="cpu",
-    )
-
-    beamformed_data = np.random.random((2, 500, 128, 2))
-    process.run(beamformed_data)
-
-    process.set_pipeline(
-        dtype="beamformed_data",
-        to_dtype="image",
-        device="cpu",
-    )
-
-    beamformed_data = np.random.random((2, 500, 128, 2))
-    image = process.run(beamformed_data)
-
-    return image
