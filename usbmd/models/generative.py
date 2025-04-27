@@ -24,47 +24,47 @@ class GenerativeModel(abc.ABC):
 
     @abc.abstractmethod
     def sample(self, n_samples=1, **kwargs):
-        """Sample from the model.
+        r"""Draw samples $x \sim p(x)$ from the model.
 
         Args:
             n_samples: Number of samples to generate.
             **kwargs: Additional arguments to pass to the sampling procedure.
 
         Returns:
-            Samples from the model.
+            Samples $x$ from the model distribution $p(x)$.
         """
         raise NotImplementedError("sample() must be implemented in subclasses.")
 
     @abc.abstractmethod
     def posterior_sample(self, data, **kwargs):
-        """Sample from the posterior distribution given data.
+        r"""Draw samples $z \sim p(z \mid x)$ from the posterior given data.
 
         Args:
-            data: The data to condition the posterior on.
+            data: The data $x$ to condition the posterior on.
             **kwargs: Additional arguments to pass to the sampling procedure.
 
         Returns:
-            Samples from the posterior distribution.
+            Samples $z$ from the posterior $p(z \mid x)$.
         """
         raise NotImplementedError(
             "posterior_sample() must be implemented in subclasses."
         )
 
     @abc.abstractmethod
-    def log_likelihood(self, data, **kwargs):
-        """Compute the log-likelihood of the data under the model.
+    def log_density(self, data, **kwargs):
+        r"""Compute the log-density $\log p(x)$ of the data under the model.
 
         Args:
-            data: The data to compute the log-likelihood for.
+            data: The data $x$ to compute the log-density for.
             **kwargs: Additional arguments.
 
         Returns:
-            Log-likelihood of the data.
+            Log-density $\log p(x)$ of the data.
         """
-        raise NotImplementedError("log_likelihood() must be implemented in subclasses.")
+        raise NotImplementedError("log_density() must be implemented in subclasses.")
 
 
-class DeepGenerativeModel(BaseModel):
+class DeepGenerativeModel(BaseModel, GenerativeModel):
     """Base class for deep generative models.
 
     Inherits from both GenerativeModel and BaseModel to combine
@@ -80,28 +80,3 @@ class DeepGenerativeModel(BaseModel):
         """
         BaseModel.__init__(self, name=name, **kwargs)
         self.built = False
-
-    def build(self, input_shape=None):
-        """Build the model architecture.
-
-        Args:
-            input_shape: Shape of the input tensor.
-        """
-        self.built = True
-
-    @abc.abstractmethod
-    def sample(self, n_samples=1, **kwargs):
-        """Sample from the model."""
-        raise NotImplementedError("sample() must be implemented in subclasses.")
-
-    @abc.abstractmethod
-    def posterior_sample(self, data, **kwargs):
-        """Sample from the posterior distribution given data."""
-        raise NotImplementedError(
-            "posterior_sample() must be implemented in subclasses."
-        )
-
-    @abc.abstractmethod
-    def log_likelihood(self, data, **kwargs):
-        """Compute the log-likelihood of the data under the model."""
-        raise NotImplementedError("log_likelihood() must be implemented in subclasses.")

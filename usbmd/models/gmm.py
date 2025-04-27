@@ -140,7 +140,7 @@ class GaussianMixtureModel(GenerativeModel):
         comp_idx = ops.squeeze(comp_idx, axis=-1)
         return comp_idx
 
-    def log_likelihood(self, data, **kwargs):
+    def log_density(self, data, **kwargs):
         X = ops.convert_to_tensor(data, dtype="float32")
         pdf = ops.sum(self._component_pdf(X) * self.pi, axis=1)
         return ops.log(pdf)
