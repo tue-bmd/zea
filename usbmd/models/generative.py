@@ -12,7 +12,6 @@ from usbmd.models.base import BaseModel
 class GenerativeModel(abc.ABC):
     """Abstract base class for generative models."""
 
-    @abc.abstractmethod
     def fit(self, data, **kwargs):
         """Fit the model to the data.
 
@@ -22,7 +21,6 @@ class GenerativeModel(abc.ABC):
         """
         raise NotImplementedError("fit() must be implemented in subclasses.")
 
-    @abc.abstractmethod
     def sample(self, n_samples=1, **kwargs):
         r"""Draw samples $x \sim p(x)$ from the model.
 
@@ -35,7 +33,6 @@ class GenerativeModel(abc.ABC):
         """
         raise NotImplementedError("sample() must be implemented in subclasses.")
 
-    @abc.abstractmethod
     def posterior_sample(self, data, **kwargs):
         r"""Draw samples $z \sim p(z \mid x)$ from the posterior given data.
 
@@ -50,7 +47,6 @@ class GenerativeModel(abc.ABC):
             "posterior_sample() must be implemented in subclasses."
         )
 
-    @abc.abstractmethod
     def log_density(self, data, **kwargs):
         r"""Compute the log-density $\log p(x)$ of the data under the model.
 
@@ -79,4 +75,3 @@ class DeepGenerativeModel(BaseModel, GenerativeModel):
             **kwargs: Additional arguments to pass to BaseModel.
         """
         BaseModel.__init__(self, name=name, **kwargs)
-        self.built = False
