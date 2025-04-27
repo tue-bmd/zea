@@ -47,7 +47,7 @@ from .config import Config, load_config_from_yaml
 from .data.datasets import USBMDDataSet
 from .datapaths import set_data_paths
 from .interface import Interface
-from .ops import Pipeline
+from .ops_v2 import Pipeline
 from .probes import Probe
 from .scan import Scan
 from .setup_usbmd import set_backend, setup, setup_config
