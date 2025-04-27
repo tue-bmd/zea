@@ -83,7 +83,7 @@ from usbmd.probes import Probe
 from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
-from usbmd.tensor_ops import patched_map, reshape_axis
+from usbmd.tensor_ops import patched_map, resample, reshape_axis
 from usbmd.utils import deep_compare, log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
@@ -1583,11 +1583,20 @@ class EnvelopeDetect(Operation):
 class UpMix(Operation):
     """Upmix IQ data to RF data."""
 
+    def __init__(
+        self,
+        upsampling_rate=1,
+        **kwargs,
+    ):
+        super().__init__(
+            **kwargs,
+        )
+        self.upsampling_rate = upsampling_rate
+
     def call(
         self,
         sampling_frequency=None,
         center_frequency=None,
-        upsampling_rate=6,
         **kwargs,
     ):
         data = kwargs[self.key]
@@ -1598,7 +1607,7 @@ class UpMix(Operation):
         elif data.shape[-1] == 2:
             data = channels_to_complex(data)
 
-        data = upmix(data, sampling_frequency, center_frequency, upsampling_rate)
+        data = upmix(data, sampling_frequency, center_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return {self.output_key: data}
 
@@ -1985,6 +1994,84 @@ class Clip(Operation):
         return {self.output_key: data}
 
 
+@ops_registry("companding")
+class Companding(Operation):
+    """Companding according to the A- or μ-law algorithm.
+
+    Invertible compressing operation. Used to compress
+    dynamic range of input data (and subsequently expand).
+
+    μ-law companding:
+    https://en.wikipedia.org/wiki/%CE%9C-law_algorithm
+    A-law companding:
+    https://en.wikipedia.org/wiki/A-law_algorithm
+
+    Args:
+        expand (bool, optional): If set to False (default),
+            data is compressed, else expanded.
+        comp_type (str): either `a` or `mu`.
+        mu (float, optional): compression parameter. Defaults to 255.
+        A (float, optional): compression parameter. Defaults to 87.6.
+    """
+
+    def __init__(self, expand=False, comp_type="mu", **kwargs):
+        super().__init__(**kwargs)
+        self.expand = expand
+        self.comp_type = comp_type.lower()
+        if self.comp_type not in ["mu", "a"]:
+            raise ValueError("comp_type must be 'mu' or 'a'.")
+
+        if self.comp_type == "mu":
+            self._compand_func = (
+                self._mu_law_expand if self.expand else self._mu_law_compress
+            )
+        else:
+            self._compand_func = (
+                self._a_law_expand if self.expand else self._a_law_compress
+            )
+
+    @staticmethod
+    def _mu_law_compress(x, mu=255, **kwargs):
+        x = ops.clip(x, -1, 1)
+        return ops.sign(x) * ops.log(1.0 + mu * ops.abs(x)) / ops.log(1.0 + mu)
+
+    @staticmethod
+    def _mu_law_expand(y, mu=255, **kwargs):
+        y = ops.clip(y, -1, 1)
+        return ops.sign(y) * ((1.0 + mu) ** ops.abs(y) - 1.0) / mu
+
+    @staticmethod
+    def _a_law_compress(x, A=87.6, **kwargs):
+        x = ops.clip(x, -1, 1)
+        x_sign = ops.sign(x)
+        x_abs = ops.abs(x)
+        A_log = ops.log(A)
+        val1 = x_sign * A * x_abs / (1.0 + A_log)
+        val2 = x_sign * (1.0 + ops.log(A * x_abs)) / (1.0 + A_log)
+        y = ops.where((x_abs >= 0) & (x_abs < (1.0 / A)), val1, val2)
+        return y
+
+    @staticmethod
+    def _a_law_expand(y, A=87.6, **kwargs):
+        y = ops.clip(y, -1, 1)
+        y_sign = ops.sign(y)
+        y_abs = ops.abs(y)
+        A_log = ops.log(A)
+        val1 = y_sign * y_abs * (1.0 + A_log) / A
+        val2 = y_sign * ops.exp(y_abs * (1.0 + A_log) - 1.0) / A
+        x = ops.where((y_abs >= 0) & (y_abs < (1.0 / (1.0 + A_log))), val1, val2)
+        return x
+
+    def call(self, mu=255, A=87.6, **kwargs):
+        data = kwargs[self.key]
+
+        mu = ops.cast(mu, data.dtype)
+        A = ops.cast(A, data.dtype)
+
+        data_out = self._compand_func(data, mu=mu, A=A)
+        return {self.output_key: data_out}
+
+
 @ops_registry("downsample")
 class Downsample(Operation):
     """Downsample data along a specific axis."""
@@ -2324,7 +2411,6 @@ def upmix(iq_data, sampling_frequency, center_frequency, upsampling_rate=6):
 
     Returns:
         rf_data (ndarray): output real valued rf data.
-
     """
     assert iq_data.dtype in [
         "complex64",
@@ -2339,25 +2425,30 @@ def upmix(iq_data, sampling_frequency, center_frequency, upsampling_rate=6):
         n_ax, _ = input_shape
 
     # Time vector
-    n_ax *= upsampling_rate
-    sampling_frequency *= upsampling_rate
+    n_ax_up = n_ax * upsampling_rate
+    sampling_frequency_up = sampling_frequency * upsampling_rate
 
-    t = np.arange(n_ax) / sampling_frequency
+    t = ops.arange(n_ax_up, dtype="float32") / sampling_frequency_up
     t0 = 0
     t = t + t0
 
-    # interpolation
-    iq_data_upsampled = scipy.signal.resample(iq_data, num=n_ax, axis=-2)
+    iq_data_upsampled = resample(
+        iq_data,
+        n_samples=n_ax_up,
+        axis=-2,
+        order=1,
+    )
 
     # Up-mixing of the IQ signals
-    carrier = np.exp(1j * 2 * np.pi * center_frequency * t)
-    # add the singleton dimensions
-    carrier = np.reshape(carrier, (*[1] * (n_dim - 2), n_ax, 1))
+    t = ops.cast(t, dtype="complex64")
+    center_frequency = ops.cast(center_frequency, dtype="complex64")
+    carrier = ops.exp(1j * 2 * np.pi * center_frequency * t)
+    carrier = ops.reshape(carrier, (*[1] * (n_dim - 2), n_ax_up, 1))
 
     rf_data = iq_data_upsampled * carrier
-    rf_data = np.real(rf_data) * np.sqrt(2)
+    rf_data = ops.real(rf_data) * ops.sqrt(2)
 
-    return rf_data.astype(np.float32)
+    return ops.cast(rf_data, "float32")
 
 
 def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
