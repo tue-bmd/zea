@@ -5,14 +5,21 @@ from abc import ABC, abstractmethod
 
 import keras
 import numpy as np
-import scipy
 from keras import ops
-from scipy import ndimage, signal
+from scipy import ndimage
 from scipy.ndimage import gaussian_filter
 
 import usbmd.beamformer as bmf
 from usbmd import display
 from usbmd.config import Config
+from usbmd.ops_v2 import (
+    channels_to_complex,
+    complex_to_channels,
+    demodulate_not_jitable,
+    get_band_pass_filter,
+    get_low_pass_iq_filter,
+    hilbert,
+)
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
