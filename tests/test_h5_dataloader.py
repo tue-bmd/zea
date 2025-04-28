@@ -15,6 +15,7 @@ from keras import ops
 from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
 from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS
 from usbmd.data.layers import Resizer
+from usbmd.data.augmentations import RandomCircleInclusion
 
 CAMUS_DATASET_PATH = (
     "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/train/patient0001"
@@ -458,3 +459,46 @@ def test_h5_file_retry_count(
     assert (
         generator.retry_count == expected_retries
     ), f"Expected {expected_retries} retries but got {generator.retry_count}"
+
+
+@pytest.mark.usefixtures("dummy_hdf5")
+def test_random_circle_inclusion_augmentation(dummy_hdf5):
+    """Test RandomCircleInclusion augmentation with h5_dataset_from_directory."""
+
+    # 2D case: use as dataloader augmentation (must not return centers)
+    augmentation = keras.Sequential(
+        [
+            RandomCircleInclusion(
+                radius=5,
+                fill_value=1.0,
+                circle_axes=(0, 1),
+                return_centers=True,
+                with_batch_dim=False,
+            )
+        ]
+    )
+
+    dataset = h5_dataset_from_directory(
+        dummy_hdf5,
+        "data",
+        image_size=(28, 28),
+        n_frames=1,
+        search_file_tree_kwargs={"parallel": False, "verbose": False},
+        shuffle=False,
+        seed=42,
+        augmentation=augmentation,
+    )
+
+    images = next(iter(dataset))
+    images_np = np.array(images)
+
+    # Output shape should match input shape
+    assert images_np.shape[-3:-1] == (
+        28,
+        28,
+    ), f"Output shape {images_np.shape} does not match expected (28, 28)"
+
+    # Since input is random and augmentation sets a circle to fill_value=1.0, there should be some pixels exactly 1.0
+    assert np.any(
+        np.isclose(images_np, 1.0)
+    ), "Augmentation did not set any pixels to fill_value=1.0 as expected"
