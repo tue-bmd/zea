@@ -171,6 +171,11 @@ class Dataset(H5FileHandleCache):
         if validate:
             self.validate_dataset()
 
+    @property
+    def name(self):
+        """Returns the name of the dataset."""
+        return self.path.name
+
     @classmethod
     def from_config(cls, dataset_folder, dtype, user, **kwargs):
         """Creates a Dataset from a config file."""
@@ -189,7 +194,7 @@ class Dataset(H5FileHandleCache):
         """Returns the number of files in the dataset."""
         return len(self.file_paths)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index) -> File:
         """Retrieves an item from the dataset."""
         file = self.get_file(self.file_paths[index])
         return file
