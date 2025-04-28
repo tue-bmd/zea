@@ -4,6 +4,7 @@ import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+import scipy
 
 from usbmd import log
 from usbmd.models.diffusion import DiffusionModel
@@ -74,6 +75,17 @@ def plot_distributions(
     log.success(f"Saved plot to {log.yellow(filename)}")
 
 
+def match_means_covariances(means, true_means, covs, true_covs):
+    """Match estimated means/covs to true ones using minimal distance assignment."""
+    cost = np.linalg.norm(means[:, None, :] - true_means[None, :, :], axis=-1)
+    row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost)
+    means_matched = means[row_ind]
+    true_means_matched = true_means[col_ind]
+    covs_matched = [covs[i] for i in row_ind]
+    true_covs_matched = [true_covs[j] for j in col_ind]
+    return means_matched, true_means_matched, covs_matched, true_covs_matched
+
+
 def test_gmm_fit_and_sample_2d(synthetic_2d_data, debug=False):
     """Test GMM fitting and sampling on synthetic 2D data."""
     data, true_means, true_covs = synthetic_2d_data
@@ -87,14 +99,13 @@ def test_gmm_fit_and_sample_2d(synthetic_2d_data, debug=False):
 
     if debug:
         plot_distributions(data, samples, means, covs, title="GMM 2D Fit Debug")
-    # Check means close to true means (up to permutation)
-    means_sorted = means[np.argsort(means[:, 0])]
-    true_means_sorted = true_means[np.argsort(true_means[:, 0])]
-    assert np.allclose(means_sorted, true_means_sorted, atol=2.0)
-    # Check if covariances are close to true covariances
-    for i in range(n_components):
-        assert np.allclose(covs[i], true_covs[i], atol=2.0)
-    # Check log likelihood is finite
+    # Robust matching of means/covs
+    means_m, true_means_m, covs_m, true_covs_m = match_means_covariances(
+        means, true_means, covs, true_covs
+    )
+    assert np.allclose(means_m, true_means_m, atol=2.0)
+    for c, tc in zip(covs_m, true_covs_m):
+        assert np.allclose(c, tc, atol=2.0)
     ll = gmm.log_density(data)
     assert np.isfinite(keras.ops.convert_to_numpy(ll)).all()
 
