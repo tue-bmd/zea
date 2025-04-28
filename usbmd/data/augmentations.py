@@ -257,30 +257,42 @@ class RandomCircleInclusion(layers.Layer):
         )
         return cfg
 
-    def evaluate_recovered_circle_accuracy(self, images, centers):
+    def evaluate_recovered_circle_accuracy(
+        self, images, centers, recovery_threshold, fill_value=None
+    ):
         """
         Evaluate the percentage of the true circle that has been recovered in the images.
 
         Args:
             images: Tensor of images (any shape, with circle axes as specified).
             centers: Tensor of circle centers (matching batch size).
+            fill_value: optionally override fill_value for cases where image_range
+                has changed.
 
         Returns:
             Tensor of percentage recovered for each circle (shape: [num_circles]).
         """
-        images = ops.convert_to_tensor(images)
-        centers = ops.convert_to_tensor(centers)
-        # Permute axes so circle axes are last
-        images_perm = self._permute_axes_to_circle_last(images)
-        h, w = images_perm.shape[-2], images_perm.shape[-1]
-        flat_images, flat_batch, _, _ = self._flatten_batch_and_other_dims(images_perm)
-        flat_centers = ops.reshape(centers, [-1, 2])
-        mask = self._make_circle_mask(
-            flat_centers, h, w, self.radius, flat_images.dtype
-        )
-        diff = ops.abs(flat_images - self.fill_value)
-        recovered = ops.cast(diff <= self.recovery_threshold, flat_images.dtype) * mask
-        recovered_sum = ops.sum(recovered, axis=[1, 2])
-        mask_sum = ops.sum(mask, axis=[1, 2])
-        percent_recovered = recovered_sum / (mask_sum + 1e-8)
-        return percent_recovered
+        fill_value = fill_value or self.fill_value
+
+        def _evaluate_recovered_circle_accuracy(image, center):
+            image_perm = self._permute_axes_to_circle_last(image)
+            h, w = image_perm.shape[-2], image_perm.shape[-1]
+            flat_image, _, _, _ = self._flatten_batch_and_other_dims(image_perm)
+            flat_center = ops.reshape(center, [-1, 2])
+            mask = self._make_circle_mask(
+                flat_center, h, w, self.radius, flat_image.dtype
+            )
+            diff = ops.abs(flat_image - fill_value)
+            recovered = ops.cast(diff <= recovery_threshold, flat_image.dtype) * mask
+            recovered_sum = ops.sum(recovered, axis=[1, 2])
+            mask_sum = ops.sum(mask, axis=[1, 2])
+            percent_recovered = recovered_sum / (mask_sum + 1e-8)
+            return percent_recovered
+
+        if self.with_batch_dim:
+            return ops.vectorized_map(
+                lambda args: _evaluate_recovered_circle_accuracy(args[0], args[1]),
+                (images, centers),
+            )[..., 0]
+        else:
+            return _evaluate_recovered_circle_accuracy(images, centers)
