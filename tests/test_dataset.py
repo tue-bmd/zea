@@ -1,6 +1,5 @@
 """Basic testing datasets"""
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -17,23 +16,11 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-@pytest.mark.parametrize(
-    "file_idx, frame_idx",
-    [
-        (0, "all"),
-        (-1, (1, 2, 3)),
-        (0, [1, 2, 3]),
-        (0, np.array([1, 2, 3])),
-    ],
-)
-def test_dataset_indexing(file_idx, frame_idx):
-    """Test ui initialization function"""
-    temp_folder = Path("./temp/temp_dataset")
-    # if temp_folder.exists():
-    #     shutil.rmtree(temp_folder)
-
+@pytest.fixture
+def dataset_path(tmp_path):
+    """Fixture to create a temporary dataset"""
     for i in range(2):
-        temp_file = temp_folder / f"test{i}.hdf5"
+        temp_file = tmp_path / f"test{i}.hdf5"
         dummy_data = np.random.rand(10, 20, 30)
 
         if not temp_file.exists():
@@ -44,7 +31,21 @@ def test_dataset_indexing(file_idx, frame_idx):
                 description="dummy dataset",
             )
 
-    config = {"data": {"dataset_folder": str(temp_folder), "dtype": "image"}}
+    return str(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "file_idx, frame_idx",
+    [
+        (0, "all"),
+        (-1, (1, 2, 3)),
+        (0, [1, 2, 3]),
+        (0, np.array([1, 2, 3])),
+    ],
+)
+def test_dataset_indexing(file_idx, frame_idx, dataset_path):
+    """Test ui initialization function"""
+    config = {"data": {"dataset_folder": dataset_path, "dtype": "image"}}
     config = check_config(Config(config))
     dataset = File.from_config(**config.data)
 
@@ -67,13 +68,10 @@ def test_dataset_indexing(file_idx, frame_idx):
         ("beamformed_data", "image", "hdf5"),
     ],
 )
-def test_generate(dtype, to_dtype, filetype):
+def test_generate(dtype, to_dtype, filetype, tmp_path):
     """Test generate class"""
     config = setup_config("./tests/config_test.yaml")
     config.data.dtype = dtype
-
-    temp_folder = Path("./tests/temp")
-    shutil.rmtree(temp_folder, ignore_errors=True)
 
     config.pipeline.operations = [
         {"name": "demodulate"},
@@ -88,7 +86,7 @@ def test_generate(dtype, to_dtype, filetype):
 
     generator = GenerateDataSet(
         config,
-        destination_folder=temp_folder,
+        destination_folder=tmp_path,
         to_dtype=to_dtype,
         retain_folder_structure=True,
         filetype=filetype,
@@ -96,4 +94,3 @@ def test_generate(dtype, to_dtype, filetype):
         verbose=False,
     )
     generator.generate()
-    shutil.rmtree(temp_folder)
