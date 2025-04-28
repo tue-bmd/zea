@@ -1902,7 +1902,7 @@ class LeeFilter(Operation):
             pad_mode=self.pad_mode,
             with_batch_dim=self.with_batch_dim,
             jittable=self._jittable,
-            input_key=self.key,
+            key=self.key,
         )
 
     def call(self, **kwargs):
