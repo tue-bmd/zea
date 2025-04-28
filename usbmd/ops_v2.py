@@ -1770,6 +1770,8 @@ class ScanConvert(Operation):
             fill_value (float): Value to fill the image with outside the defined region.
 
         """
+        if fill_value is None:
+            fill_value = np.nan
 
         data = kwargs[self.key]
 
@@ -1910,7 +1912,7 @@ class LeeFilter(Operation):
             pad_mode=self.pad_mode,
             with_batch_dim=self.with_batch_dim,
             jittable=self._jittable,
-            input_key=self.key,
+            key=self.key,
         )
 
     def call(self, **kwargs):
