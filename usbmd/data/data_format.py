@@ -6,11 +6,11 @@ import inspect
 from dataclasses import dataclass
 from pathlib import Path
 
-import h5py
 import numpy as np
 
+from usbmd.data.file import File, validate_dataset
 from usbmd.utils import first_not_none_item, log
-from usbmd.utils.checks import _DATA_TYPES, validate_dataset
+from usbmd.utils.checks import _DATA_TYPES
 
 
 @dataclass
@@ -682,7 +682,7 @@ def generate_usbmd_dataset(
     # Create the directory if it does not exist
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    with h5py.File(path, "w") as dataset:
+    with File(path, "w") as dataset:
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
         dataset.attrs["event_structure"] = event_structure

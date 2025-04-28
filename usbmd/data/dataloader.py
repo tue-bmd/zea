@@ -278,7 +278,6 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.insert_frame_axis = insert_frame_axis
         self.initial_frame_axis = int(initial_frame_axis)
         self.return_filename = return_filename
-        self.key = key
         self.shuffle = shuffle
         self.sort_files = sort_files
         self.overlapping_blocks = overlapping_blocks
