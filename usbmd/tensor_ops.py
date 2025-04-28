@@ -13,6 +13,33 @@ from usbmd.utils import log
 from usbmd.utils.utils import map_negative_indices
 
 
+def split_seed(seed, n):
+    """
+    Split seed into n seeds with support for keras SeedGenerator and jax.random.key.
+        - https://docs.jax.dev/en/latest/_autosummary/jax.random.split.html
+        - https://keras.io/api/random/seed_generator/
+    """
+    # If seed is None, return a list of None
+    if seed is None:
+        return [None for _ in range(n)]
+
+    # If seed is a JAX key, split it into n keys
+    if keras.backend.backend() == "jax":
+        # pylint: disable=import-outside-toplevel
+        import jax
+
+        return jax.random.split(seed, n)
+
+    # For other backends, we have to use Keras SeedGenerator
+    else:
+        assert isinstance(
+            seed, keras.random.SeedGenerator
+        ), "seed must be a SeedGenerator when not using JAX."
+
+        # Just duplicate the SeedGenerator
+        return [seed for _ in range(n)]
+
+
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
     """Adds salt and pepper noise to the input image.
 
