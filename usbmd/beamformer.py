@@ -7,7 +7,7 @@ from usbmd.tensor_ops import safe_vectorize
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
-def tof_correction_flatgrid(
+def tof_correction(
     data,
     flatgrid,
     t0_delays,
