@@ -176,6 +176,14 @@ class Dataset(H5FileHandleCache):
         if validate:
             self.validate_dataset()
 
+    @classmethod
+    def from_config(cls, dataset_folder, file_path, dtype, user, **kwargs):
+        """Creates a Dataset from a config file."""
+        data_root = user.data_root
+        path = data_root / dataset_folder / file_path
+
+        return cls(path, key=dtype)
+
     def __len__(self):
         """Returns the number of files in the dataset."""
         return len(self.file_paths)
@@ -195,9 +203,21 @@ class Dataset(H5FileHandleCache):
     def __call__(self):
         return iter(self)
 
+    @property
+    def n_files(self):
+        """Return number of files in dataset."""
+        return len(self.file_names)
+
+    @property
+    def total_frames(self):
+        """Return total number of frames in dataset."""
+        return sum(self.get_file(file_path).num_frames for file_path in self.file_paths)
+
     def validate_dataset(self):
         """Validate dataset contents.
         Furthermore, it checks if all files in the dataset have the same scan parameters.
+
+        TODO: I don't think it actually checks for the same scan parameters.
 
         If a validation file exists, it checks if the dataset was validated on the same date.
         If the validation file was corrupted, it raises an error.
