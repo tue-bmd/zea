@@ -1,5 +1,4 @@
-"""Backend module for USBMD.
-The existance of this (maybe empty) file is essential for the package to work."""
+"""Backend module for USBMD."""
 
 import keras
 
