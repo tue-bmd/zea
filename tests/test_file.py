@@ -1,4 +1,4 @@
-"""Tests for the read_h5 module."""
+"""Tests for the File module."""
 
 import numpy as np
 import pytest
@@ -33,8 +33,8 @@ def complex_h5_file(h5_filepath):
     yield h5_filepath
 
 
-def test_readh5_basic_properties(simple_h5_file):
-    """Test basic properties of ReadH5 class."""
+def test_basic_properties(simple_h5_file):
+    """Test basic properties of File class."""
 
     with File(simple_h5_file) as file:
         assert file.attrs["dummy_attr"] == "dummy_value"
@@ -43,8 +43,8 @@ def test_readh5_basic_properties(simple_h5_file):
         assert len(file) == 0
 
 
-def test_readh5_with_datasets(complex_h5_file):
-    """Test ReadH5 features with datasets."""
+def test_with_datasets(complex_h5_file):
+    """Test File features with datasets."""
     with File(complex_h5_file) as file:
         # Get length of file
         assert len(file) == 10
