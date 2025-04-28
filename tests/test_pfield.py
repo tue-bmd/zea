@@ -6,7 +6,6 @@ Test the pytorch implementation of the beamformers.
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -64,6 +63,8 @@ def test_pfield(scantype, debug=False):
 
     # plot results
     if debug:
+        import matplotlib.pyplot as plt
+
         plt.figure()
         plt.imshow(scan._pfield[0])
         plt.title("Pressure field for Tx1")

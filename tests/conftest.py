@@ -1,8 +1,11 @@
-""" This file contains fixtures that are used by all tests in the tests directory. """
+"""This file contains fixtures that are used by all tests in the tests directory."""
 
+import matplotlib.pyplot as plt
 import pytest
 
 from . import backend_workers
+
+plt.rcParams["backend"] = "agg"
 
 
 @pytest.fixture(scope="session", autouse=True)
