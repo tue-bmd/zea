@@ -14,11 +14,8 @@ from usbmd.config import Config
 from usbmd.ops_v2 import (
     channels_to_complex,
     complex_to_channels,
-    demodulate_not_jitable,
     get_band_pass_filter,
     get_low_pass_iq_filter,
-    hilbert,
-    upmix,
 )
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry

@@ -18,8 +18,11 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinx.ext.coverage",
-    "myst_parser",
+    "sphinx.ext.intersphinx",  # for cross-project links
+    "myst_parser",  # for markdown support
 ]
+
+autosummary_generate = True  # Turn on sphinx.ext.autosummary
 
 templates_path = ["_templates"]
 exclude_patterns = []
