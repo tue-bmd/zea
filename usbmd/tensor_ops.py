@@ -13,6 +13,33 @@ from usbmd.utils import log
 from usbmd.utils.utils import map_negative_indices
 
 
+def split_seed(seed, n):
+    """
+    Split seed into n seeds with support for keras SeedGenerator and jax.random.key.
+        - https://docs.jax.dev/en/latest/_autosummary/jax.random.split.html
+        - https://keras.io/api/random/seed_generator/
+    """
+    # If seed is None, return a list of None
+    if seed is None:
+        return [None for _ in range(n)]
+
+    # If seed is a JAX key, split it into n keys
+    if keras.backend.backend() == "jax":
+        # pylint: disable=import-outside-toplevel
+        import jax
+
+        return jax.random.split(seed, n)
+
+    # For other backends, we have to use Keras SeedGenerator
+    else:
+        assert isinstance(
+            seed, keras.random.SeedGenerator
+        ), "seed must be a SeedGenerator when not using JAX."
+
+        # Just duplicate the SeedGenerator
+        return [seed for _ in range(n)]
+
+
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
     """
     Adds salt and pepper noise to the input image.
@@ -1129,6 +1156,58 @@ def gaussian_filter(
     else:
         output = array
     return output
+
+
+def resample(x, n_samples, axis=-2, order=1):
+    """Resample tensor along axis.
+
+    Similar to scipy.signal.resample.
+
+    Args:
+        x: input tensor.
+        n_samples: number of samples after resampling.
+        axis: axis to resample along.
+        order: interpolation order (1=linear).
+
+    Returns:
+        Resampled tensor.
+    """
+    shape = ops.shape(x)
+    rank = len(shape)
+
+    # Move axis-to-resample to position 1
+    perm = list(range(rank))
+    perm_axis1 = perm.copy()
+    perm_axis1[axis], perm_axis1[1] = perm_axis1[1], perm_axis1[axis]
+    x = ops.transpose(x, perm_axis1)
+
+    # Shape after transpose
+    shape = ops.shape(x)
+    batch_size = shape[0]
+    old_n = shape[1]
+    other_dims = shape[2:]
+
+    # Create sampling grid
+    batch_coords = ops.arange(batch_size, dtype="float32")  # (batch_size,)
+    new_coords = ops.linspace(
+        0.0, ops.cast(old_n - 1, dtype="float32"), n_samples
+    )  # (n_samples,)
+    other_coords = [ops.arange(d, dtype="float32") for d in other_dims]
+
+    # Meshgrid
+    grid = ops.meshgrid(
+        batch_coords, new_coords, *other_coords, indexing="ij"
+    )  # list of (batch_size, n_samples, ...)
+    coord_grid = ops.stack(grid, axis=0)  # shape: (rank, batch_size, n_samples, ...)
+
+    # Interpolate
+    resampled = ops.image.map_coordinates(x, coord_grid, order=order)
+
+    # Inverse transpose to restore original axis order
+    inv_perm = [perm_axis1.index(i) for i in range(rank)]
+    resampled = ops.transpose(resampled, inv_perm)
+
+    return resampled
 
 
 if keras.backend.backend() == "tensorflow":
