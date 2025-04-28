@@ -30,6 +30,10 @@ class File(h5py.File):
             kwargs["locking"] = False
         super().__init__(*args, **kwargs)
 
+    def print(self):
+        """Print the contents of the file."""
+        print_hdf5_attrs(self)
+
     @property
     def name(self):
         """Return the name of the file."""
@@ -299,6 +303,24 @@ class File(h5py.File):
                     "match the probe geometry of the probe. The probe "
                     "geometry has been updated to match the data file."
                 )
+
+    def recursively_load_dict_contents_from_group(
+        self, path: str, squeeze: bool = False
+    ) -> dict:
+        """Load dict from contents of group
+
+        Values inside the group are converted to numpy arrays
+        or primitive types (int, float, str). Single element
+        arrays are converted to the corresponding primitive type (if squeeze=True)
+
+        Args:
+            path (str): path to group
+            squeeze (bool, optional): squeeze arrays with single element.
+                Defaults to False.
+        Returns:
+            dict: dictionary with contents of group
+        """
+        return recursively_load_dict_contents_from_group(self, path, squeeze)
 
 
 def load_usbmd_file(
