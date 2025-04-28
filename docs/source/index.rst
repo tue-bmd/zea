@@ -17,7 +17,7 @@ Welcome to the documentation for the `usbmd` package.
    contributing
    changelog
 
-.. include:: ../README.md
+.. include:: ../../README.md
    :parser: markdown
    :start-line: 4
 
