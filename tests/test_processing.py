@@ -5,11 +5,12 @@
 
 import math
 
+import keras
 import numpy as np
 import pytest
 from scipy.signal import hilbert
 
-from usbmd import ops
+import usbmd.ops_v2 as ops
 from usbmd.ops_v2 import Pipeline, Simulate
 from usbmd.probes import Probe
 from usbmd.scan import Scan
@@ -30,27 +31,37 @@ from . import backend_equality_check
 def test_companding(comp_type, size, parameter_value_range):
     """Test companding function"""
 
-    from usbmd import ops
+    import keras
+
+    from usbmd import ops_v2 as ops
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
         mu = parameter_value if comp_type == "mu" else 0
 
-        companding = ops.Companding(comp_type=comp_type, A=A, mu=mu, expand=False)
+        companding = ops.Companding(comp_type=comp_type, expand=False)
 
         signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
         signal = signal.astype("float32")
+        signal = keras.ops.convert_to_tensor(signal)
 
-        signal = companding.prepare_tensor(signal)
-        signal_out = companding.process(signal)
+        signal_out = companding(data=signal, A=A, mu=mu)["data"]
+
+        signal = keras.ops.convert_to_numpy(signal)
+        signal_out = keras.ops.convert_to_numpy(signal_out)
+
         assert np.any(
-            np.not_equal(companding.to_numpy(signal), companding.to_numpy(signal_out))
+            np.not_equal(signal, signal_out)
         ), "Companding failed, arrays should not be equal"
-        companding.expand = True
-        signal_out = companding.process(signal_out)
 
-        signal = companding.to_numpy(signal)
-        signal_out = companding.to_numpy(signal_out)
+        companding = ops.Companding(comp_type=comp_type, expand=True)
+
+        signal_out = keras.ops.convert_to_tensor(signal_out)
+        signal_out = companding(data=signal_out, A=A, mu=mu)["data"]
+
+        signal = keras.ops.convert_to_numpy(signal)
+        signal_out = keras.ops.convert_to_numpy(signal_out)
+
         np.testing.assert_almost_equal(signal, signal_out, decimal=6)
     return signal_out
 
@@ -68,7 +79,9 @@ def test_companding(comp_type, size, parameter_value_range):
 def test_converting_to_image(size, dynamic_range, input_range):
     """Test converting to image functions"""
 
-    from usbmd import ops
+    import keras
+
+    from usbmd import ops_v2 as ops
 
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
@@ -84,11 +97,15 @@ def test_converting_to_image(size, dynamic_range, input_range):
     )
     output_range = (0, 1)
     normalize = ops.Normalize(output_range, input_range)
-    log_compress = ops.LogCompress(dynamic_range)
+    log_compress = ops.LogCompress()
 
-    data = normalize.prepare_tensor(data)
-    _data = log_compress(normalize(data))
-    _data = log_compress.to_numpy(_data)
+    data = keras.ops.convert_to_tensor(data)
+
+    _data = normalize(data=data)["data"]
+    _data = log_compress(data=_data, dynamic_range=dynamic_range)["data"]
+
+    _data = keras.ops.convert_to_numpy(_data)
+
     # data should be in dynamic range
     assert np.all(
         np.logical_and(_data >= _dynamic_range[0], _data <= _dynamic_range[1]),
@@ -108,7 +125,9 @@ def test_converting_to_image(size, dynamic_range, input_range):
 def test_normalize(size, output_range, input_range):
     """Test normalize function"""
 
-    from usbmd import ops
+    import keras
+
+    from usbmd import ops_v2 as ops
 
     normalize = ops.Normalize(output_range, input_range)
 
@@ -118,18 +137,19 @@ def test_normalize(size, output_range, input_range):
 
     # create random data between input range
     data = np.random.random(size) * (input_range[1] - input_range[0]) + input_range[0]
-    data = normalize.prepare_tensor(data)
-    _data = normalize(data)
-    input_range, output_range = output_range, input_range
-    _data = normalize_back(_data)
-    # test if default args work too
-    normalize = ops.Normalize()
-    _ = normalize(data)
 
-    np.testing.assert_almost_equal(
-        normalize.to_numpy(data), normalize.to_numpy(_data), decimal=4
-    )
-    return normalize.to_numpy(_data)
+    data = keras.ops.convert_to_tensor(data)
+
+    _data = normalize(data=data)["data"]
+
+    input_range, output_range = output_range, input_range
+    _data = normalize_back(data=_data)["data"]
+
+    _data = keras.ops.convert_to_numpy(_data)
+    data = keras.ops.convert_to_numpy(data)
+
+    np.testing.assert_almost_equal(data, _data, decimal=4)
+    return _data
 
 
 @pytest.mark.parametrize(
@@ -223,10 +243,18 @@ def test_up_and_down_conversion(factor, batch_size):
     )
 
     # use pipeline here so it is easy to propagate the scan parameters
-    simulator_pipeline = Pipeline([Simulate()])
-    parameters = simulator_pipeline.prepare_parameters(probe, scan)
+    simulator_pipeline = Pipeline(
+        [
+            Simulate(output_key="simulated_data"),
+            ops.Demodulate(key="simulated_data", output_key="data"),
+            ops.Downsample(factor=factor),
+            ops.UpMix(upsampling_rate=factor),
+        ]
+    )
+    parameters = simulator_pipeline.prepare_parameters(probe=probe, scan=scan)
 
     data = []
+    _data = []
     for _ in range(batch_size):
 
         # Define scatterers with random variation
@@ -256,47 +284,27 @@ def test_up_and_down_conversion(factor, batch_size):
             scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
         )
 
-        data.append(output["data"])
+        data.append(keras.ops.convert_to_numpy(output["data"]))
+        _data.append(keras.ops.convert_to_numpy(output["simulated_data"]))
+
     data = np.concatenate(data)
+    _data = np.concatenate(_data)
 
-    # slice data such that decimation fits exactly
-    idx = data.shape[-3] % factor
-    if idx > 0:
-        data = data[..., :-idx, :, :]
-
-    downsample = ops.Downsample(factor=factor, axis=-3)
-    demodulate = ops.Demodulate(
-        sampling_frequency=scan.sampling_frequency,
-        center_frequency=scan.center_frequency,
-        bandwidth=None,
-        filter_coeff=None,
+    np.testing.assert_almost_equal(
+        data,
+        _data,
+        decimal=2,
+        err_msg="Data is not equal after up and down conversion.",
     )
-    upmix = ops.UpMix(
-        sampling_frequency=scan.sampling_frequency,
-        center_frequency=scan.center_frequency,
-        upsampling_rate=factor,
-    )
-
-    # cut n_ax data so it is divisible by factor
-    data = data[:, :, : (data.shape[2] // factor) * factor]
-
-    _data = demodulate(data)
-    _data = downsample(_data)
-    _data = upmix(_data)
-
-    # TODO: make this test more tight
-    assert (
-        np.mean(np.abs((data - _data) ** 2)) < 10
-    ), "Data is not equal after up and down conversion."
 
 
 @backend_equality_check(decimal=4)
 def test_hilbert_transform():
     """Test hilbert transform"""
 
-    from keras import ops as kops
+    import keras
 
-    from usbmd import ops
+    from usbmd import ops_v2 as ops
 
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
@@ -306,78 +314,17 @@ def test_hilbert_transform():
 
     data = data + np.random.random(data.shape) * 0.1
 
-    # just getting this operation for the utils
-    envelope_detect = ops.EnvelopeDetect(axis=-3)
+    data = keras.ops.convert_to_tensor(data)
 
-    data_prepared = envelope_detect.prepare_tensor(data)
-    data_iq = ops.hilbert(data_prepared, axis=-3)
-    assert kops.dtype(data_iq) in [
+    data_iq = ops.hilbert(data, axis=-3)
+    assert keras.ops.dtype(data_iq) in [
         "complex64",
         "complex128",
-    ], f"Data type should be complex, got {kops.dtype(data_iq)} instead."
+    ], f"Data type should be complex, got {keras.ops.dtype(data_iq)} instead."
 
-    data_iq = envelope_detect.to_numpy(data_iq)
+    data_iq = keras.ops.convert_to_numpy(data_iq)
 
     reference_data_iq = hilbert(data, axis=-3)
     np.testing.assert_almost_equal(reference_data_iq, data_iq, decimal=4)
 
     return data_iq
-
-
-@backend_equality_check(decimal=4)
-def test_processing_class():
-    """Test the processing class"""
-
-    from usbmd import Process
-
-    operation_chain = [
-        {
-            "name": "multi_bandpass_filter",
-            "params": {
-                "params": {
-                    "freqs": [-0.2e6, 0.0e6, 0.2e6],
-                    "bandwidths": [1.2e6, 1.4e6, 1.0e6],
-                    "num_taps": 81,
-                },
-                "modtype": "iq",
-                "sampling_frequency": 40e6,
-                "center_frequency": 5e6,
-            },
-        },  # this bandpass filters the data three times and returns a list
-        {
-            "name": "demodulate",
-            "params": {"sampling_frequency": 40e6, "center_frequency": 5e6},
-        },
-        {"name": "envelope_detect"},
-        {"name": "downsample", "params": {"factor": 4}},
-        {"name": "normalize", "params": {"output_range": (0, 1)}},
-        {"name": "log_compress", "params": {"dynamic_range": (-60, 0)}},
-        {
-            "name": "stack",
-            "params": {"axis": 0},
-        },  # stack the data back together
-        {
-            "name": "mean",
-            "params": {"axis": 0},
-        },  # take the mean of the stack
-    ]
-
-    process = Process()
-    process.set_pipeline(
-        operation_chain=operation_chain,
-        device="cpu",
-    )
-
-    beamformed_data = np.random.random((2, 500, 128, 2))
-    process.run(beamformed_data)
-
-    process.set_pipeline(
-        dtype="beamformed_data",
-        to_dtype="image",
-        device="cpu",
-    )
-
-    beamformed_data = np.random.random((2, 500, 128, 2))
-    image = process.run(beamformed_data)
-
-    return image

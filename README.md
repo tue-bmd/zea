@@ -75,24 +75,19 @@ config = setup(config_path, users_paths, create_user=True)
 
 # initialize the Interface class with your config
 interface = Interface(config)
-image = interface.run()
-# interface.plot()
-
-# plot the image
-plt.figure()
-plt.imshow(image, cmap="gray")
-plt.show()
+image = interface.run(plot=True)
 ```
 
 ### Loading a single file
 The `Interface` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
 We do this by manually loading a single usbmd file with `load_usbmd_file` and processing it with the `Process` class.
 ```python
+import keras
 import matplotlib.pyplot as plt
 
 from usbmd import setup
 from usbmd.data import load_usbmd_file
-from usbmd.processing import Process
+from usbmd.ops_v2 import Pipeline
 
 # choose your config file
 # all necessary settings should be in the config file
@@ -119,56 +114,82 @@ data, scan, probe = load_usbmd_file(
     data_path, frames=selected_frames, scan=config.scan, data_type="raw_data"
 )
 
-# initialize the Process class
-process = Process(config=config, scan=scan, probe=probe)
-
-# initialize the processing pipeline so it know what kind
-# of data it is processing and what it should output
-process.set_pipeline(dtype="raw_data", to_dtype="image")
+pipeline = Pipeline.from_default(with_batch_dim=False)
+parameters = pipeline.prepare_parameters(probe, scan, config)
 
 # index the first frame
 data_frame = data[0]
 
 # processing the data from raw_data to image
-image = process.run(data_frame)
+output = pipeline(data=data_frame, **parameters)
+# the output is a dictionary with all paramaters and data
+image = output["data"]
+image = keras.ops.convert_to_numpy(image)
 
 plt.figure()
 plt.imshow(image, cmap="gray")
 
 # we can also process a single plane wave angle by
 # setting the `selected_transmits` parameter in the scan object
-process.scan.selected_transmits = 1
+scan.selected_transmits = 1
+parameters = pipeline.prepare_parameters(probe, scan, config)
 
-image = process.run(data_frame)
+image = pipeline(data=data_frame, **parameters)["data"]
+image = keras.ops.convert_to_numpy(image)
 
 plt.figure()
 plt.imshow(image, cmap="gray")
+```
 
-# lastly instead of setting the pipeline with `dtype` and `to_dtype`
-# we can also opt for passing a custom operation chain as follows
+### Custom pipeline
+Custom pipelines are also supported in various ways. One way is to define a pipeline in a dictionary format. Pipelines can be nested, and operations can be referenced in a list by using just their name, or by using a dictionary with the name and parameters.
 
-# initialize the processing pipeline
-process.set_pipeline(
-    operation_chain=[
-        {"name": "tof_correction"},
-        {"name": "delay_and_sum"},
-        {"name": "demodulate"},
-        {"name": "envelope_detect"},
-        {"name": "downsample"},
-        {"name": "normalize"},
-        # we now only set log_compress parameters to show how it can be done
-        # if you don't pass any parameters it will use default or
-        # params from config / scan / probe
-        {"name": "log_compress", "params": {"dynamic_range": (-40, 0)}},
-    ],
+```python
+import keras
+from usbmd import Config
+from usbmd.ops_v2 import Pipeline
+
+config = Config(
+    {
+        # operations should be a list
+        "operations": [
+            # operations can be just referenced by their name
+            "demodulate",
+            # or by name and (static) parameters
+            {"name": "downsample", "params": {"factor": 4}},
+            # or we can have nested pipelines even
+            {
+                "name": "patched_grid",
+                "params": {
+                    "operations": [
+                        "tof_correction",
+                        "delay_and_sum",
+                    ],
+                },
+            },
+            "envelope_detect",
+            "normalize",
+            "log_compress",
+        ],
+    }
 )
 
-image = process.run(data_frame)
+pipeline = Pipeline.from_config(config, with_batch_dim=False)
+parameters = pipeline.prepare_parameters(probe, scan, config)
+image = pipeline(data=data_frame, **parameters)["data"]
+image = keras.ops.convert_to_numpy(image)
 
 plt.figure()
 plt.imshow(image, cmap="gray")
 
+# change dynamic range
+image = pipeline(data=data_frame, **parameters, dynamic_range=(-30, 0))["data"]
+image = keras.ops.convert_to_numpy(image)
+
+plt.figure()
+plt.imshow(image, cmap="gray")
 ```
+
 
 ### Handling multiple files (i.e. datasets)
 
@@ -182,15 +203,11 @@ import usbmd
 from usbmd import setup
 from usbmd.data import USBMDDataSet
 from usbmd.probes import Probe
-from usbmd.processing import Process
 from usbmd.scan import Scan
 from usbmd.utils import update_dictionary, safe_initialize_class
 from usbmd.utils.device import init_device
 
 device = init_device()
-
-# let's check if your usbmd version is up to date
-assert usbmd.__version__ >= "2.0", "Please update usbmd to version 2.0 or higher"
 
 # choose your config file with all your settings
 config_path = "configs/config_picmus_rf.yaml"
@@ -212,53 +229,24 @@ config_scan_params = config.scan
 scan_params = update_dictionary(file_scan_params, config_scan_params)
 scan = safe_initialize_class(Scan, **scan_params)
 probe = Probe(**file_probe_params)
-process = Process(config=config, scan=scan, probe=probe)
-
-# initialize the processing pipeline
-process.set_pipeline(
-    operation_chain=[
-        {"name": "tof_correction"},
-        {"name": "delay_and_sum"},
-        {"name": "demodulate"},
-        {"name": "envelope_detect"},
-        {"name": "downsample"},
-        {"name": "normalize"},
-        {"name": "log_compress"},
-    ],
-    device=device,
-)
 
 # pick a frame from the dataset
 file_idx = 0
-frame_idx = 10
-data = dataset[(file_idx, frame_idx)]
-
-# process the data
-image = process.run(data)
-
-# plot the image
-plt.figure()
-plt.imshow(image, cmap="gray")
-plt.show()
-```
-
-### Batch processing
-For batch processing you can request multiple frames from the `USBMDDataSet` class. For the `Process` we need to set a pipeline `with_batch_dim` processing set to True.
-
-```python
-file_idx = 0
-
 # the following are now all valid `frame_idx` examples
 frame_idx = 1 # just asking for a single frame
 frame_idx = (0, 1, 2, 3) # asking for multiple frames
 frame_idx = 'all' # return all frames of the file specified with `file_idx` in the dataset
 data = dataset[(file_idx, frame_idx)]
 
-# now it is wise to do inform the process class that we are processing a batch with `with_batch_dim=True`
-# unless you picked a single frame with `frame_idx` then you can set it to False
-process.set_pipeline(operation_chain=operation_chain, with_batch_dim=True)
+# initiate a pipeline now with batch processing
+pipeline = Pipeline.from_default(with_batch_dim=False)
+parameters = pipeline.prepare_parameters(probe, scan, config)
+image = pipeline(data=data, **parameters)["data"]
+image = keras.ops.convert_to_numpy(image)
 
-images = process.run(data)
+# plot the image
+plt.figure()
+plt.imshow(image, cmap="gray")
 ```
 
 ## Models
