@@ -254,7 +254,7 @@ class H5Generator(keras.utils.PyDataset, Dataset):
         frame_axis: int = -1,
         insert_frame_axis: bool = True,
         initial_frame_axis: int = 0,
-        return_metadata: bool = False,
+        return_filename: bool = False,
         additional_axes_iter: tuple = None,
         key: str = "data/image",
         shuffle: bool = True,
@@ -278,7 +278,7 @@ class H5Generator(keras.utils.PyDataset, Dataset):
         self.frame_axis = int(frame_axis)
         self.insert_frame_axis = insert_frame_axis
         self.initial_frame_axis = int(initial_frame_axis)
-        self.return_metadata = return_metadata
+        self.return_filename = return_filename
         if additional_axes_iter is None:
             self.additional_axes_iter = []
         else:
@@ -366,11 +366,11 @@ class H5Generator(keras.utils.PyDataset, Dataset):
         indices_list = self.indices[low:high]
 
         images = []
-        metadata = []
+        filenames = []
         for file_name, key, indices in indices_list:
             file = self.get_file(file_name)
             images.append(self.load(file, key, indices))
-            metadata.append(
+            filenames.append(
                 json_dumps(
                     {
                         "fullpath": file.filename,
@@ -386,10 +386,10 @@ class H5Generator(keras.utils.PyDataset, Dataset):
             images = np.stack(images)
 
         if self.batch_size == 1:
-            metadata = metadata[0]
+            filenames = filenames[0]
 
-        if self.return_metadata:
-            return self.maybe_tensor(images), metadata
+        if self.return_filename:
+            return self.maybe_tensor(images), filenames
         else:
             return self.maybe_tensor(images)
 
@@ -520,7 +520,7 @@ class H5Dataloader(H5Generator):
         return dl
 
     def preprocess(self, out):
-        if self.return_metadata:
+        if self.return_filename:
             images, filenames = out
         else:
             images = out
@@ -553,7 +553,7 @@ class H5Dataloader(H5Generator):
         for map_fn in self.map_fns:
             images = map_fn(images)
 
-        if self.return_metadata:
+        if self.return_filename:
             return images, filenames
         else:
             return images
