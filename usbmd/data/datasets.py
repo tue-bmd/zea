@@ -142,6 +142,7 @@ class Dataset(H5FileHandleCache):
         key: str,
         validate=True,
         search_file_tree_kwargs: dict | None = None,
+        additional_axes_iter: tuple = None,
         **kwargs,
     ):
         """Initializes the Dataset.
@@ -156,11 +157,15 @@ class Dataset(H5FileHandleCache):
             "'event_<frame_no>/data/<data_type>'"
         )
         self.key = key.replace("data/", "")
+        if additional_axes_iter is None:
+            additional_axes_iter = []
+        self.additional_axes_iter = additional_axes_iter
+
         file_names, file_shapes = find_h5_files_from_directory(
             self.path,
             self.key,
             search_file_tree_kwargs,
-            self.additional_axes_iter,  # TODO: dataset does not have this
+            self.additional_axes_iter,
         )
         self.file_names = file_names
         self.file_shapes = file_shapes

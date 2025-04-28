@@ -241,7 +241,7 @@ def _h5_reopen_on_io_error(
     )
 
 
-class H5Generator(keras.utils.PyDataset, Dataset):
+class H5Generator(Dataset, keras.utils.PyDataset):
     """Generator from h5 file using provided indices."""
 
     def __init__(
@@ -255,7 +255,6 @@ class H5Generator(keras.utils.PyDataset, Dataset):
         insert_frame_axis: bool = True,
         initial_frame_axis: int = 0,
         return_filename: bool = False,
-        additional_axes_iter: tuple = None,
         key: str = "data/image",
         shuffle: bool = True,
         sort_files: bool = True,
@@ -279,10 +278,6 @@ class H5Generator(keras.utils.PyDataset, Dataset):
         self.insert_frame_axis = insert_frame_axis
         self.initial_frame_axis = int(initial_frame_axis)
         self.return_filename = return_filename
-        if additional_axes_iter is None:
-            self.additional_axes_iter = []
-        else:
-            self.additional_axes_iter = additional_axes_iter
         self.key = key
         self.shuffle = shuffle
         self.sort_files = sort_files
@@ -446,12 +441,6 @@ class H5Generator(keras.utils.PyDataset, Dataset):
     def __len__(self):
         return math.ceil(len(self.indices) / self.batch_size)
 
-    def __del__(self):
-        """Delete the H5Generator object."""
-        # Explicitly call the parent class destructors
-        keras.utils.PyDataset.__del__(self)
-        Dataset.__del__(self)
-
     @property
     def n_files(self):
         """Return number of files in dataset."""
@@ -461,7 +450,7 @@ class H5Generator(keras.utils.PyDataset, Dataset):
     def total_frames(self):
         """Return total number of frames in dataset."""
         return sum(
-            [file_shape[self.initial_frame_axis] for file_shape in self.file_shapes]
+            file_shape[self.initial_frame_axis] for file_shape in self.file_shapes
         )
 
 
@@ -520,6 +509,7 @@ class H5Dataloader(H5Generator):
         return dl
 
     def preprocess(self, out):
+        """Preprocess the images such as resizing and normalizing them."""
         if self.return_filename:
             images, filenames = out
         else:

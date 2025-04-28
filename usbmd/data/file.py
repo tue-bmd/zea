@@ -62,7 +62,7 @@ class File(h5py.File):
         data_root = user.data_root
         path = data_root / dataset_folder / file_path
 
-        return self(path)
+        return cls(path)
 
     @property
     def event_keys(self):
@@ -83,11 +83,11 @@ class File(h5py.File):
             return int(self.file["scan"]["n_frames"][()])
         else:
             return sum(
-                int(self.file[event]["scan"]["n_frames"][()])
-                for event in self.file.keys()
+                int(event["scan"]["n_frames"][()]) for event in self.file.values()
             )
 
     def get_event_shapes(self, key):
+        """Get the shapes of a key for all events."""
         for event_key in self.event_keys:
             yield self[event_key][key].shape
 
@@ -137,6 +137,8 @@ class File(h5py.File):
 
     @staticmethod
     def check_data(data, key):
+        """Check the data for a given key. For example, will check if the shape matches
+        the data type (such as raw_data, ...)"""
         if key in _DATA_TYPES:
             get_check(key)(data, with_batch_dim=None)
 

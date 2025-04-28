@@ -21,7 +21,6 @@ from usbmd.display import (
 from usbmd.utils import log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
-from usbmd.utils.utils import update_dictionary
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -1016,20 +1015,6 @@ class Scan(Object):
             "rho_range": self.rho_range,
             "fill_value": self.fill_value,
         }
-
-    @classmethod
-    def merge(cls, scan1, scan2):
-        """
-        Merge multiple scans into a single scan.
-
-        Args:
-            *args: The scans to merge.
-
-        Returns:
-            A new scan object with the merged parameters.
-        """
-        params = update_dictionary(scan1, scan2)
-        return cls.safe_initialize(**params)
 
 
 class FocussedScan(Scan):
