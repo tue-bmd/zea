@@ -1153,6 +1153,58 @@ def gaussian_filter(
     return output
 
 
+def resample(x, n_samples, axis=-2, order=1):
+    """Resample tensor along axis.
+
+    Similar to scipy.signal.resample.
+
+    Args:
+        x: input tensor.
+        n_samples: number of samples after resampling.
+        axis: axis to resample along.
+        order: interpolation order (1=linear).
+
+    Returns:
+        Resampled tensor.
+    """
+    shape = ops.shape(x)
+    rank = len(shape)
+
+    # Move axis-to-resample to position 1
+    perm = list(range(rank))
+    perm_axis1 = perm.copy()
+    perm_axis1[axis], perm_axis1[1] = perm_axis1[1], perm_axis1[axis]
+    x = ops.transpose(x, perm_axis1)
+
+    # Shape after transpose
+    shape = ops.shape(x)
+    batch_size = shape[0]
+    old_n = shape[1]
+    other_dims = shape[2:]
+
+    # Create sampling grid
+    batch_coords = ops.arange(batch_size, dtype="float32")  # (batch_size,)
+    new_coords = ops.linspace(
+        0.0, ops.cast(old_n - 1, dtype="float32"), n_samples
+    )  # (n_samples,)
+    other_coords = [ops.arange(d, dtype="float32") for d in other_dims]
+
+    # Meshgrid
+    grid = ops.meshgrid(
+        batch_coords, new_coords, *other_coords, indexing="ij"
+    )  # list of (batch_size, n_samples, ...)
+    coord_grid = ops.stack(grid, axis=0)  # shape: (rank, batch_size, n_samples, ...)
+
+    # Interpolate
+    resampled = ops.image.map_coordinates(x, coord_grid, order=order)
+
+    # Inverse transpose to restore original axis order
+    inv_perm = [perm_axis1.index(i) for i in range(rank)]
+    resampled = ops.transpose(resampled, inv_perm)
+
+    return resampled
+
+
 if keras.backend.backend() == "tensorflow":
 
     def safe_vectorize(
