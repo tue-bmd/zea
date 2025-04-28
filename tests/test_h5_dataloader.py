@@ -498,7 +498,8 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
         28,
     ), f"Output shape {images_np.shape} does not match expected (28, 28)"
 
-    # Since input is random and augmentation sets a circle to fill_value=1.0, there should be some pixels exactly 1.0
+    # Since input is random and augmentation sets a circle to fill_value=1.0,
+    # there should be some pixels exactly 1.0
     assert np.any(
         np.isclose(images_np, 1.0)
     ), "Augmentation did not set any pixels to fill_value=1.0 as expected"
