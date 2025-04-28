@@ -10,7 +10,6 @@ Example:
 - **Date**          : November 18th, 2021
 """
 
-import inspect
 from pathlib import Path
 from typing import Union
 

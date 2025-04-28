@@ -22,7 +22,6 @@ from tkinter.filedialog import askopenfilename
 from typing import Callable, Optional
 
 import cv2
-import h5py
 import imageio
 import matplotlib
 import matplotlib.pyplot as plt
@@ -228,9 +227,9 @@ def search_file_tree(
             "file_shapes": [],
             "total_num_frames": 0,
         }
-        for dir in directory:
+        for dir_item in directory:
             dataset_info = search_file_tree(
-                dir,
+                dir_item,
                 filetypes,
                 write,
                 dataset_info_filename,
