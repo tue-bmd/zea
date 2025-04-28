@@ -1120,11 +1120,19 @@ class PatchedGrid(Pipeline):
         Nx = inputs["Nx"]
         Nz = inputs["Nz"]
         flatgrid = inputs.pop("flatgrid")
-        flat_pfield = inputs.pop("flat_pfield")
 
-        def patched_call(flatgrid, flat_pfield):
+        # Define a list of keys to look up for patching
+        patch_keys = ["flat_pfield"]
+
+        patch_arrays = {}
+        for key in patch_keys:
+            if key in inputs:
+                patch_arrays[key] = inputs.pop(key)
+
+        def patched_call(flatgrid, **patch_kwargs):
+            patch_args = {k: v for k, v in patch_kwargs.items() if v is not None}
             out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
-                flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
+                flatgrid=flatgrid, **patch_args, **inputs
             )
             return out[self.output_key]
 
@@ -1132,7 +1140,7 @@ class PatchedGrid(Pipeline):
             patched_call,
             flatgrid,
             self.num_patches,
-            flat_pfield=flat_pfield,
+            **patch_arrays,
             jit=bool(self.jit_options),
         )
         return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
