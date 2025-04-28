@@ -1,11 +1,5 @@
-Module contents
----------------
-
-.. automodule:: usbmd
-   :members:
-   :undoc-members:
-   :imported-members:
-   :show-inheritance:
+usbmd package
+=============
 
 Subpackages
 -----------
@@ -13,9 +7,12 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   usbmd.agent
    usbmd.backend
    usbmd.config
    usbmd.data
+   usbmd.models
+   usbmd.tools
    usbmd.utils
 
 Submodules
@@ -109,14 +106,6 @@ usbmd.probes module
    :undoc-members:
    :show-inheritance:
 
-usbmd.processing module
------------------------
-
-.. automodule:: usbmd.processing
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 usbmd.registry module
 ---------------------
 
@@ -157,3 +146,10 @@ usbmd.tensor\_ops module
    :undoc-members:
    :show-inheritance:
 
+Module contents
+---------------
+
+.. automodule:: usbmd
+   :members:
+   :undoc-members:
+   :show-inheritance:

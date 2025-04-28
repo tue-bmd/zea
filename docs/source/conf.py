@@ -22,7 +22,12 @@ extensions = [
     "myst_parser",  # for markdown support
 ]
 
-autosummary_generate = True  # Turn on sphinx.ext.autosummary
+autosummary_generate = True
+autodoc_default_options = {
+    "members": True,
+    "undoc-members": True,
+    "show-inheritance": True,
+}
 
 templates_path = ["_templates"]
 exclude_patterns = []

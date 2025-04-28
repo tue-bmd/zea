@@ -44,14 +44,6 @@ usbmd.data.layers module
    :undoc-members:
    :show-inheritance:
 
-usbmd.data.legacy\_datasets module
-----------------------------------
-
-.. automodule:: usbmd.data.legacy_datasets
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 usbmd.data.read\_h5 module
 --------------------------
 
