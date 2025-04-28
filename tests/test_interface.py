@@ -3,7 +3,6 @@
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from usbmd.interface import Interface
@@ -11,9 +10,6 @@ from usbmd.setup_usbmd import setup_config
 
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
-
-
-plt.rcParams["backend"] = "agg"
 
 
 def test_interface_initialization():
