@@ -35,7 +35,7 @@ class UNet(BaseModel):
         self.widths = widths
         self.block_depth = block_depth
 
-        self.network = get_network(self.image_shape, self.widths, self.block_depth)
+        self.network = get_unetwork(self.image_shape, self.widths, self.block_depth)
 
     def get_config(self):
         config = super().get_config()
@@ -53,7 +53,7 @@ class UNet(BaseModel):
         return self.network(*args, **kwargs)
 
 
-def get_network(
+def get_unetwork(
     image_shape,
     widths,
     block_depth,
@@ -92,7 +92,59 @@ def get_network(
     return keras.Model(noisy_images, x, name="residual_unet")
 
 
-def get_time_conditional_network(
+@model_registry(name="unet_time_conditional")
+class UNetTimeConditional(BaseModel):
+    """UNet model with time-conditional sinusoidal embedding"""
+
+    def __init__(
+        self,
+        image_shape,
+        widths,
+        block_depth,
+        image_range,
+        embedding_min_frequency=1.0,
+        embedding_max_frequency=1000.0,
+        embedding_dims=32,
+        name="unet_time_conditional",
+        **kwargs,
+    ):
+        super().__init__(name=name, **kwargs)
+        self.image_shape = image_shape
+        self.image_range = image_range
+        self.widths = widths
+        self.block_depth = block_depth
+        self.embedding_min_frequency = embedding_min_frequency
+        self.embedding_max_frequency = embedding_max_frequency
+        self.embedding_dims = embedding_dims
+        self.network = get_time_conditional_unetwork(
+            self.image_shape,
+            self.widths,
+            self.block_depth,
+            self.embedding_min_frequency,
+            self.embedding_max_frequency,
+            self.embedding_dims,
+        )
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "image_shape": self.image_shape,
+                "image_range": self.image_range,
+                "widths": self.widths,
+                "block_depth": self.block_depth,
+                "embedding_min_frequency": self.embedding_min_frequency,
+                "embedding_max_frequency": self.embedding_max_frequency,
+                "embedding_dims": self.embedding_dims,
+            }
+        )
+        return config
+
+    def call(self, *args, **kwargs):
+        return self.network(*args, **kwargs)
+
+
+def get_time_conditional_unetwork(
     image_shape,
     widths,
     block_depth,
@@ -153,3 +205,4 @@ def get_time_conditional_network(
 
 
 register_presets(unet_presets, UNet)
+register_presets(unet_presets, UNetTimeConditional)
