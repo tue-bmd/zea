@@ -29,6 +29,12 @@ elif keras.backend.backend() == "tensorflow":
     from usbmd.backend.tensorflow import on_device_tf as on_device
 elif keras.backend.backend() == "torch":
     from usbmd.backend.torch import on_device_torch as on_device
+else:
+
+    def on_device(func, *args, **kwargs):
+        """Dummy function for non-backend specific code."""
+        return func(*args, **kwargs)
+
 
 DEFAULT_IMAGE_RANGE = (0, 255)
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
@@ -259,7 +265,6 @@ class H5Generator(keras.utils.PyDataset, Dataset):
         seed: int | None = None,
         batch_size: int = 1,
         as_tensor: bool = True,
-        search_file_tree_kwargs: dict | None = None,
         **kwargs,
     ):
         assert (directory is not None) ^ (
@@ -287,7 +292,6 @@ class H5Generator(keras.utils.PyDataset, Dataset):
         self.seed = seed
         self.batch_size = batch_size
         self.as_tensor = as_tensor
-        self.search_file_tree_kwargs = search_file_tree_kwargs
 
         self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
 
@@ -530,7 +534,10 @@ class H5Dataloader(H5Generator):
             assert (
                 self.image_range[0] <= images.min()
                 and images.max() <= self.image_range[1]
-            ), f"Image range {self.image_range} is not in the range of the data {images.min()} - {images.max()}"
+            ), (
+                f"Image range {self.image_range} is not in the range of the data "
+                f"{images.min()} - {images.max()}"
+            )
 
         # Clip to image range
         if self.clip_image_range:

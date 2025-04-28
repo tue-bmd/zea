@@ -127,6 +127,7 @@ class Interface:
         self.config.data.file_path = value
 
     def choose_file_path(self):
+        """Choose file path from window dialog."""
         if self.headless:
             raise ValueError(
                 "No file path specified for data file, which is required "

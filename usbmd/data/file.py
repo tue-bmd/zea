@@ -26,7 +26,7 @@ class File(h5py.File):
     """h5py.File in usbmd format."""
 
     def __init__(self, *args, **kwargs):
-        if not "locking" in kwargs:
+        if "locking" not in kwargs:
             kwargs["locking"] = False
         super().__init__(*args, **kwargs)
 
@@ -41,7 +41,7 @@ class File(h5py.File):
         return Path(self.filename).stem
 
     @classmethod
-    def from_config(self, dataset_folder, file_path, user, **kwargs):
+    def from_config(cls, dataset_folder, file_path, user, **kwargs):
         # TODO: WIP
         """Create a File object from a config file.
 
