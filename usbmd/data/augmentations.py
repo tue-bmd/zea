@@ -1,8 +1,15 @@
+"""Augmentation layers for ultrasound data."""
+
+import numpy as np
 import keras
 from keras import layers, ops
 
+# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
+
 
 class RandomCircleInclusion(layers.Layer):
+    """Randomly includes a filled circle at a random location in an image."""
+
     def __init__(
         self,
         radius: int,
@@ -13,6 +20,18 @@ class RandomCircleInclusion(layers.Layer):
         return_centers=False,
         **kwargs,
     ):
+        """
+        Initialize RandomCircleInclusion.
+
+        Args:
+            radius: Radius of the circle.
+            fill_value: Value to fill inside the circle.
+            circle_axes: Axes along which to draw the circle.
+            with_batch_dim: Whether input has a batch dimension.
+            seed: Random seed.
+            return_centers: Whether to return circle centers.
+            **kwargs: Additional layer arguments.
+        """
         super().__init__(**kwargs)
         self.radius = radius
         self.fill_value = fill_value
@@ -20,8 +39,13 @@ class RandomCircleInclusion(layers.Layer):
         self.seed = seed
         self.with_batch_dim = with_batch_dim
         self.return_centers = return_centers
+        self._axis1 = None
+        self._axis2 = None
+        self._perm = None
+        self._inv_perm = None
 
     def build(self, input_shape):
+        """Build the layer."""
         rank = len(input_shape) - 1 if self.with_batch_dim else len(input_shape)
         a1, a2 = self.circle_axes
         if self.with_batch_dim and (a1 == 0 or a2 == 0):
@@ -51,10 +75,12 @@ class RandomCircleInclusion(layers.Layer):
         self._inv_perm = inv
         super().build(input_shape)
 
-    def compute_output_shape(self, input_shape):
+    def compute_output_shape(self, input_shape, *args, **kwargs):
+        """Compute output shape."""
         return input_shape
 
-    def call(self, x):
+    def call(self, x, *args, **kwargs):
+        """Apply the augmentation."""
         if self.with_batch_dim:
             imgs, centers = ops.map(self._call, x)
         else:
@@ -66,6 +92,7 @@ class RandomCircleInclusion(layers.Layer):
             return imgs
 
     def _call(self, x):
+        """Internal call for augmentation."""
         x = ops.transpose(x, axes=self._perm)
         full_shape = ops.shape(x)
         squeeze_batch = full_shape[:-2] == ()
@@ -100,6 +127,7 @@ class RandomCircleInclusion(layers.Layer):
         return (aug_imgs, centers)
 
     def get_config(self):
+        """Get layer config."""
         cfg = super().get_config()
         cfg.update(
             {
@@ -126,8 +154,6 @@ class RandomCircleInclusion(layers.Layer):
         Returns:
             float: percentage of recovered pixels inside the true circle (0.0 - 1.0).
         """
-        import numpy as np
-
         if hasattr(image, "numpy"):
             image = image.numpy()
         if hasattr(center, "numpy"):
