@@ -540,13 +540,22 @@ def keep_trying(fn, args=None, required_set=None):
             print(e)
 
 
+def reduce_to_signature(func, kwargs):
+    """Reduce the kwargs to the signature of the function."""
+    # Retrieve the argument names of the function
+    sig = inspect.signature(func)
+
+    # Filter out the arguments that are not part of the function
+    reduced_params = {key: kwargs[key] for key in sig.parameters if key in kwargs}
+
+    return reduced_params
+
+
 def safe_initialize_class(cls, **kwargs):
     """Safely initialize a class by removing any invalid arguments."""
-    # Retrieve the argument names of the Scan class
-    sig = inspect.signature(cls.__init__)
 
     # Filter out the arguments that are not part of the Scan class
-    reduced_params = {key: kwargs[key] for key in sig.parameters if key in kwargs}
+    reduced_params = reduce_to_signature(cls.__init__, kwargs)
 
     return cls(**reduced_params)
 
