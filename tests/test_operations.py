@@ -1,4 +1,9 @@
-"""Tests for the processing module."""
+"""Tests for different operations.
+
+Note that in each test, we have to reimport all modules involving keras, such
+that when the backend is switched, the functions inside are reimported with the
+correct backend.
+"""
 
 # pylint: disable=import-outside-toplevel
 # pylint: disable=reimported
@@ -8,6 +13,8 @@ import math
 import keras
 import numpy as np
 import pytest
+from keras import ops
+from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert
 
 import usbmd.ops_v2 as ops
@@ -328,3 +335,52 @@ def test_hilbert_transform():
     np.testing.assert_almost_equal(reference_data_iq, data_iq, decimal=4)
 
     return data_iq
+
+
+@pytest.mark.parametrize("sigma", [0.5, 1.0, 2.0])
+@backend_equality_check(decimal=4)
+def test_gaussian_blur(sigma):
+    """
+    Test `ops.GaussianBlur against scipy.ndimage.gaussian_filter.`
+    `GaussianBlur` with default args should be equivalent to scipy.
+    """
+
+    import keras
+
+    from usbmd import ops_v2 as ops
+
+    blur = ops.GaussianBlur(sigma=sigma, with_batch_dim=False)
+
+    rng = np.random.default_rng(seed=42)
+    image = rng.normal(size=(32, 32)).astype(np.float32)
+    image_tensor = keras.ops.convert_to_tensor(image[..., None])
+
+    blurred_scipy = gaussian_filter(image, sigma=sigma)
+    blurred_usbmd = blur(data=image_tensor)["data"][..., 0]
+
+    blurred_usbmd = keras.ops.convert_to_numpy(blurred_usbmd)
+
+    np.testing.assert_allclose(blurred_scipy, blurred_usbmd, rtol=1e-4)
+
+
+@pytest.mark.parametrize("sigma", [1.0, 2.0])
+@backend_equality_check(decimal=4)
+def test_lee_filter(sigma):
+    """
+    Test `ops.LeeFilter`, only checks if variance is reduced.
+    """
+    import keras
+
+    from usbmd import ops_v2 as ops
+
+    rng = np.random.default_rng(seed=42)
+    image = rng.normal(size=(32, 32)).astype(np.float32)
+
+    lee = ops.LeeFilter(sigma=sigma, with_batch_dim=False)
+
+    image_tensor = keras.ops.convert_to_tensor(image[..., None])
+    filtered = lee(data=image_tensor)["data"][..., 0]
+
+    assert keras.ops.var(filtered) < keras.ops.var(
+        image_tensor
+    ), "LeeFilter should reduce variance of the processed image"
