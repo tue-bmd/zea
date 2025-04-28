@@ -8,7 +8,8 @@ import pytest
 
 from usbmd.config import Config
 from usbmd.config.validation import check_config
-from usbmd.data import File, generate_usbmd_dataset
+from usbmd.data import generate_usbmd_dataset
+from usbmd.data.datasets import Dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup_config
 
@@ -46,10 +47,11 @@ def dataset_path(tmp_path):
 def test_dataset_indexing(file_idx, frame_idx, dataset_path):
     """Test ui initialization function"""
     config = {"data": {"dataset_folder": dataset_path, "dtype": "image"}}
-    config = check_config(Config(config))
-    dataset = File.from_config(**config.data)
+    config = check_config(config)
+    dataset = Dataset.from_config(**config.data)
 
-    data = dataset[(file_idx, frame_idx)]
+    file = dataset[file_idx]
+    data = file.load_data(config.data.dtype, frame_idx=frame_idx)
 
     if isinstance(frame_idx, (list, tuple, np.ndarray)):
         assert len(data) == len(

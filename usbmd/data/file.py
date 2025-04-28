@@ -13,7 +13,12 @@ import numpy as np
 from usbmd.probes import get_probe
 from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import log
-from usbmd.utils.checks import _DATA_TYPES, get_check
+from usbmd.utils.checks import (
+    _DATA_TYPES,
+    _NON_IMAGE_DATA_TYPES,
+    _REQUIRED_SCAN_KEYS,
+    get_check,
+)
 
 
 def get_shape_hdf5_file(filepath, key):
@@ -22,11 +27,18 @@ def get_shape_hdf5_file(filepath, key):
         return f.shape(key)
 
 
+def assert_key(file, key):
+    """Asserts key is in file."""
+    if key not in file.keys():
+        raise KeyError(f"{key} not found in file")
+
+
 class File(h5py.File):
     """h5py.File in usbmd format."""
 
     def __init__(self, *args, **kwargs):
-        if "locking" not in kwargs:
+        if "locking" not in kwargs and "mode" in kwargs and kwargs["mode"] == "r":
+            # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
         super().__init__(*args, **kwargs)
 
@@ -84,10 +96,9 @@ class File(h5py.File):
         shapes = list(self.get_event_shapes(key))
         return len(np.unique(shapes)) == 1
 
-    def _check_key(self, key):
-        """Check if key is in file."""
-        if key not in self.keys():
-            raise KeyError(f"{key} not found in file")
+    def assert_key(self, key):
+        """Asserts key is in file."""
+        return assert_key(self, key)
 
     def _simple_index(self, key):
         return not self.has_events or "event" in key
@@ -95,7 +106,7 @@ class File(h5py.File):
     def shape(self, key):
         """Return shape of some key, or all events."""
 
-        self._check_key(key)
+        self.assert_key(key)
 
         if self._simple_index(key):
             return list(self[key].shape)
@@ -129,7 +140,7 @@ class File(h5py.File):
 
     def load_data(self, dtype, indices: str | int | List[int] = "all"):
         key = "data/" + dtype
-        self._check_key(key)
+        self.assert_key(key)
         indices = self._prepare_indices(indices)
 
         if self._simple_index(key):
@@ -445,3 +456,224 @@ def print_hdf5_attrs(hdf5_obj, prefix=""):
                 new_prefix = prefix + "│   "
             print(prefix + marker + key + "/")
             print_hdf5_attrs(hdf5_obj[key], new_prefix)
+
+
+def validate_dataset(path: str = None, dataset: File = None):
+    """Reads the hdf5 dataset at the given path and validates its structure.
+
+    Provide either the path or the dataset, but not both.
+
+    Args:
+        path (str, pathlike): The path to the hdf5 dataset.
+        dataset (File): The hdf5 dataset.
+
+    """
+    assert (path is not None) ^ (
+        dataset is not None
+    ), "Provide either the path or the dataset, but not both."
+
+    if path is not None:
+        path = Path(path)
+        with File(path, "r") as _dataset:
+            event_structure, num_events = _validate_hdf5_dataset(_dataset)
+    else:
+        event_structure, num_events = _validate_hdf5_dataset(dataset)
+
+    return {
+        "status": "success",
+        "event_structure": event_structure,
+        "num_events": num_events,
+    }
+
+
+def _validate_hdf5_dataset(dataset: File):
+    all_keys = list(dataset.keys())
+
+    if dataset.has_events:
+        num_events = len(all_keys)
+        for event_no in range(num_events):
+            assert_key(dataset, f"event_{event_no}")
+            _validate_structure(dataset[f"event_{event_no}"])
+    else:
+        num_events = 0
+        _validate_structure(dataset)
+
+    return dataset.has_events, num_events
+
+
+def _validate_structure(dataset: File):
+    # Validate the root group
+    assert_key(dataset, "data")
+
+    # Check if there is only image data
+    not_only_image_data = (
+        len([i for i in _NON_IMAGE_DATA_TYPES if i in dataset["data"].keys()]) > 0
+    )
+
+    # Only check scan group if there is non-image data
+    if not_only_image_data:
+        assert_key(dataset, "scan")
+
+        for key in _REQUIRED_SCAN_KEYS:
+            assert_key(dataset["scan"], key)
+
+    # validate the data group
+    for key in dataset["data"].keys():
+        assert key in _DATA_TYPES, "The data group contains an unexpected key."
+
+        # Validate data shape
+        data_shape = dataset["data"][key].shape
+        if key == "raw_data":
+            get_check(key)(shape=data_shape, with_batch_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of raw_data."
+            assert (
+                data_shape[1] == dataset["scan"]["n_tx"][()]
+            ), "n_tx does not match the second dimension of raw_data."
+            assert (
+                data_shape[2] == dataset["scan"]["n_ax"][()]
+            ), "n_ax does not match the third dimension of raw_data."
+            assert (
+                data_shape[3] == dataset["scan"]["n_el"][()]
+            ), "n_el does not match the fourth dimension of raw_data."
+        elif key == "aligned_data":
+            get_check(key)(shape=data_shape, with_batch_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of aligned_data."
+        elif key == "beamformed_data":
+            get_check(key)(shape=data_shape, with_batch_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of beamformed_data."
+        elif key == "envelope_data":
+            get_check(key)(shape=data_shape, with_batch_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of envelope_data."
+        elif key == "image":
+            get_check(key)(shape=data_shape, with_batch_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of image."
+        elif key == "image_sc":
+            get_check(key)(shape=data_shape, with_batch_dim=True)
+            assert (
+                data_shape[0] == dataset["scan"]["n_frames"][()]
+            ), "n_frames does not match the first dimension of image_sc."
+
+    if not_only_image_data:
+        _assert_scan_keys_present(dataset)
+
+    _assert_unit_and_description_present(dataset)
+
+
+def _assert_scan_keys_present(dataset):
+    """Ensure that all required keys are present.
+
+    Args:
+        dataset (h5py.File): The dataset instance to check.
+
+    Raises:
+        AssertionError: If a required key is missing or does not have the right shape.
+    """
+    for required_key in _REQUIRED_SCAN_KEYS:
+        assert (
+            required_key in dataset["scan"].keys()
+        ), f"The scan group does not contain the required key {required_key}."
+
+    # Ensure that all keys have the correct shape
+    for key in dataset["scan"].keys():
+        if isinstance(dataset["scan"][key], h5py.Group):
+            shape_dataset = None
+        else:
+            shape_dataset = dataset["scan"][key].shape
+
+        if key == "probe_geometry":
+            correct_shape = (dataset["scan"]["n_el"][()], 3)
+
+        elif key == "t0_delays":
+            correct_shape = (
+                dataset["scan"]["n_tx"][()],
+                dataset["scan"]["n_el"][()],
+            )
+        elif key == "tx_apodizations":
+            correct_shape = (
+                dataset["scan"]["n_tx"][()],
+                dataset["scan"]["n_el"][()],
+            )
+
+        elif key == "focus_distances":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+
+        elif key == "polar_angles":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+
+        elif key == "azimuth_angles":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+
+        elif key == "initial_times":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+
+        elif key == "time_to_next_transmit":
+            correct_shape = (
+                dataset["scan"]["n_frames"][()],
+                dataset["scan"]["n_tx"][()],
+            )
+        elif key == "tgc_gain_curve":
+            correct_shape = (dataset["scan"]["n_ax"][()],)
+        elif key == "tx_waveform_indices":
+            correct_shape = (dataset["scan"]["n_tx"][()],)
+        elif key in ("waveforms_one_way", "waveforms_two_way"):
+            correct_shape = None
+
+        elif key in (
+            "sampling_frequency",
+            "center_frequency",
+            "n_frames",
+            "n_tx",
+            "n_el",
+            "n_ax",
+            "n_ch",
+            "sound_speed",
+            "bandwidth_percent",
+            "element_width",
+            "lens_correction",
+        ):
+            correct_shape = ()
+            shape_dataset = dataset["scan"][key].shape
+
+        else:
+            correct_shape = None
+            log.warning(f"No validation has been defined for {log.orange(key)}.")
+
+        if correct_shape is not None:
+            assert shape_dataset == correct_shape, (
+                f"`{key}` does not have the correct shape. "
+                f"Expected shape: {correct_shape}, got shape: {shape_dataset}"
+            )
+
+
+def _assert_unit_and_description_present(hdf5_file, _prefix=""):
+    """Checks that all datasets have a unit and description attribute.
+
+    Args:
+        hdf5_file (h5py.File): The hdf5 file to check.
+
+    Raises:
+        AssertionError: If a dataset does not have a unit or description
+            attribute.
+    """
+    for key in hdf5_file.keys():
+        if isinstance(hdf5_file[key], h5py.Group):
+            _assert_unit_and_description_present(
+                hdf5_file[key], _prefix=_prefix + key + "/"
+            )
+        else:
+            assert (
+                "unit" in hdf5_file[key].attrs.keys()
+            ), f"The dataset {_prefix}/{key} does not have a unit attribute."
+            assert (
+                "description" in hdf5_file[key].attrs.keys()
+            ), f"The dataset {_prefix}/{key} does not have a description attribute."

@@ -10,14 +10,13 @@ from pathlib import Path
 
 import tqdm
 
-from usbmd.data.file import File, get_shape_hdf5_file
+from usbmd.data.file import File, get_shape_hdf5_file, validate_dataset
 from usbmd.utils import (
     calculate_file_hash,
     date_string_to_readable,
     get_date_string,
     log,
 )
-from usbmd.utils.checks import validate_dataset
 from usbmd.utils.io_lib import search_file_tree
 
 _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE = 10000
@@ -152,11 +151,7 @@ class Dataset(H5FileHandleCache):
         """
         super().__init__(**kwargs)
         self.path = Path(path)
-        assert "data/" in key, (
-            "Key should be in the format 'data/<data_type>' or "
-            "'event_<frame_no>/data/<data_type>'"
-        )
-        self.key = key.replace("data/", "")
+        self.key = key
         if additional_axes_iter is None:
             additional_axes_iter = []
         self.additional_axes_iter = additional_axes_iter
@@ -177,10 +172,16 @@ class Dataset(H5FileHandleCache):
             self.validate_dataset()
 
     @classmethod
-    def from_config(cls, dataset_folder, file_path, dtype, user, **kwargs):
+    def from_config(cls, dataset_folder, dtype, user, **kwargs):
         """Creates a Dataset from a config file."""
         data_root = user.data_root
-        path = data_root / dataset_folder / file_path
+        path = data_root / dataset_folder
+
+        if "file_path" in kwargs:
+            log.warning(
+                "Found 'file_path' in config, this will be ignored since a Dataset is "
+                + "always multiple files."
+            )
 
         return cls(path, key=dtype)
 
