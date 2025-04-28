@@ -27,6 +27,13 @@ FILE_TYPES = [".hdf5", ".h5"]
 
 
 class H5FileHandleCache:
+    """Cache for HDF5 file handles.
+
+    This class manages a cache of HDF5 file handles to avoid reopening files
+    multiple times. It uses an OrderedDict to maintain the order of file
+    access and closes the least recently used file when the cache reaches
+    its capacity."""
+
     def __init__(
         self,
         file_handle_cache_capacity: int = FILE_HANDLE_CACHE_CAPACITY,
@@ -129,12 +136,20 @@ def find_h5_files_from_directory(
 class Dataset(H5FileHandleCache):
     """Read multiple usbmd.File objects from a folder."""
 
-    def __init__(self, path, key: str, validate=True):
+    def __init__(
+        self,
+        path,
+        key: str,
+        validate=True,
+        search_file_tree_kwargs: dict | None = None,
+        **kwargs,
+    ):
         """Initializes the Dataset.
 
         Args:
             config (utils.config.Config): The config.data configuration object.
         """
+        super().__init__(**kwargs)
         self.path = Path(path)
         assert "data/" in key, (
             "Key should be in the format 'data/<data_type>' or "
@@ -144,8 +159,8 @@ class Dataset(H5FileHandleCache):
         file_names, file_shapes = find_h5_files_from_directory(
             self.path,
             self.key,
-            self.search_file_tree_kwargs,
-            self.additional_axes_iter,
+            search_file_tree_kwargs,
+            self.additional_axes_iter,  # TODO: dataset does not have this
         )
         self.file_names = file_names
         self.file_shapes = file_shapes
@@ -210,7 +225,6 @@ class Dataset(H5FileHandleCache):
             self.file_paths,
             total=len(self),
             desc="Checking dataset files on validity (USBMD format)",
-            disable=not self.verbose,
         ):
             try:
                 validate_dataset(file_path)
