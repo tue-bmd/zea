@@ -19,6 +19,7 @@ from PIL import Image
 from usbmd.config import Config
 from usbmd.core import DataTypes
 from usbmd.data.file import File
+from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
 from usbmd.scan import Scan
@@ -106,17 +107,13 @@ class Interface:
     @property
     def dataset_folder(self):
         """Path to dataset folder."""
-        return self.config.data.dataset_folder
+        return format_data_path(self.config.data.dataset_folder, self.config.user)
 
     @property
     def file_path(self):
         """Path to data file."""
         if self.config.data.file_path:
-            file_path = Path(self.config.data.file_path)
-            if file_path.is_absolute():
-                return Path(file_path)
-            else:
-                return self.data_root / self.dataset_folder / file_path
+            return self.dataset_folder / self.config.data.file_path
         else:
             return self.choose_file_path()
 

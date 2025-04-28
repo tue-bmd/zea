@@ -40,7 +40,7 @@ DATASET_PARAMETERS = {
 
 
 @pytest.fixture
-def tmp_hdf5_path(tmp_path) -> Generator[Path]:
+def tmp_hdf5_path(tmp_path) -> Generator[Path, None, None]:
     """Fixture to create a temporary HDF5 file."""
     yield Path(tmp_path, "test_case_dataset.hdf5")
 
