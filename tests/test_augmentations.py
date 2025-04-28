@@ -1,51 +1,47 @@
+"""Tests for RandomCircleInclusion augmentation."""
+
 import numpy as np
 from keras import ops
 from usbmd.data.augmentations import RandomCircleInclusion
 
 
 def assert_circle_pixels(image, center, radius, fill_value, tol=1e-5):
-    """Assert that pixels within the circle are set to fill_value."""
+    """Check that pixels inside the circle are set to fill_value."""
     h, w = image.shape[-2:]
     cx, cy = center
     Y, X = np.ogrid[:h, :w]
     mask = (X - cx) ** 2 + (Y - cy) ** 2 <= radius**2
-    # All pixels inside the circle should be close to fill_value
     assert np.allclose(image[mask], fill_value, atol=tol)
-    # At least some pixels outside the circle should not be fill_value
     if np.any(~mask):
         assert not np.allclose(image[~mask], fill_value, atol=tol)
 
 
 def test_random_circle_inclusion_2d_with_batch():
-    # Create a dummy 2D image batch (batch, height, width)
+    """Test 2D batch augmentation."""
     images = np.zeros((4, 28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5, fill_value=1.0, circle_axes=(1, 2), with_batch_dim=True
     )
     out = layer(ops.convert_to_tensor(images))
     out_np = ops.convert_to_numpy(out)
-    # Output shape should match input
     assert out_np.shape == images.shape
-    # Should have some pixels set to fill_value in each image
     assert np.all([np.any(np.isclose(im, 1.0)) for im in out_np])
 
 
 def test_random_circle_inclusion_2d_no_batch():
-    # Create a dummy 2D image (height, width)
+    """Test 2D single image augmentation."""
     image = np.zeros((28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5, fill_value=1.0, circle_axes=(0, 1), with_batch_dim=False
     )
     out = layer(ops.convert_to_tensor(image))
     out_np = ops.convert_to_numpy(out)
-    # Output shape should match input
     assert out_np.shape == image.shape
-    # Should have some pixels set to fill_value
     assert np.any(np.isclose(out_np, 1.0))
 
 
 def test_random_circle_inclusion_3d_with_batch():
-    # Create a dummy 3D image batch (batch, depth, height, width)
+    """Test 3D batch augmentation."""
     images = np.zeros((2, 8, 28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -55,14 +51,12 @@ def test_random_circle_inclusion_3d_with_batch():
     )
     out = layer(ops.convert_to_tensor(images))
     out_np = ops.convert_to_numpy(out)
-    # Output shape should match input
     assert out_np.shape == images.shape
-    # Should have some pixels set to fill_value in each image
     assert np.all([np.any(np.isclose(im, 1.0)) for im in out_np.reshape(-1, 28, 28)])
 
 
 def test_random_circle_inclusion_3d_no_batch():
-    # Create a dummy 3D image (depth, height, width)
+    """Test 3D single image augmentation."""
     image = np.zeros((8, 28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -72,13 +66,12 @@ def test_random_circle_inclusion_3d_no_batch():
     )
     out = layer(ops.convert_to_tensor(image))
     out_np = ops.convert_to_numpy(out)
-    # Output shape should match input
     assert out_np.shape == image.shape
-    # Should have some pixels set to fill_value in each slice
     assert np.all([np.any(np.isclose(im, 1.0)) for im in out_np])
 
 
 def test_random_circle_inclusion_2d_with_batch_centers():
+    """Test 2D batch augmentation with returned centers."""
     images = np.zeros((4, 28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -97,6 +90,7 @@ def test_random_circle_inclusion_2d_with_batch_centers():
 
 
 def test_random_circle_inclusion_2d_no_batch_centers():
+    """Test 2D single image augmentation with returned center."""
     image = np.zeros((28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -114,7 +108,7 @@ def test_random_circle_inclusion_2d_no_batch_centers():
 
 
 def test_evaluate_recovered_circle_accuracy_2d_with_batch_centers():
-    # Batched 2D images, with known centers
+    """Test recovery accuracy for 2D batch with centers."""
     images = np.zeros((4, 28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -132,7 +126,7 @@ def test_evaluate_recovered_circle_accuracy_2d_with_batch_centers():
 
 
 def test_evaluate_recovered_circle_accuracy_3d_with_batch_centers():
-    # Batched 3D images (batch, depth, height, width)
+    """Test recovery accuracy for 3D batch with centers."""
     images = np.zeros((2, 8, 28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -144,9 +138,6 @@ def test_evaluate_recovered_circle_accuracy_3d_with_batch_centers():
     out, centers = layer(ops.convert_to_tensor(images))
     out_np = ops.convert_to_numpy(out)
     centers_np = ops.convert_to_numpy(centers)
-    # centers_np shape: (batch*depth, 2) or (batch, depth, 2) depending on your implementation
-    # out_np shape: (batch, depth, height, width)
-    # We'll flatten batch and depth for simplicity
     flat_imgs = out_np.reshape(-1, 28, 28)
     flat_centers = centers_np.reshape(-1, 2)
     for img, center in zip(flat_imgs, flat_centers):
@@ -155,7 +146,7 @@ def test_evaluate_recovered_circle_accuracy_3d_with_batch_centers():
 
 
 def test_evaluate_recovered_circle_accuracy_3d_no_batch_centers():
-    # 3D image (depth, height, width)
+    """Test recovery accuracy for 3D single image with centers."""
     image = np.zeros((8, 28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -167,14 +158,13 @@ def test_evaluate_recovered_circle_accuracy_3d_no_batch_centers():
     out, centers = layer(ops.convert_to_tensor(image))
     out_np = ops.convert_to_numpy(out)
     centers_np = ops.convert_to_numpy(centers)
-    # out_np shape: (8, 28, 28), centers_np shape: (8, 2)
     for img, center in zip(out_np, centers_np):
         acc = layer.evaluate_recovered_circle_accuracy(img, center, threshold=1e-5)
         assert np.isclose(acc, 1.0), f"Expected 1.0, got {acc}"
 
 
 def test_evaluate_recovered_circle_accuracy_partial_recovery():
-    # Single 2D image, partial recovery
+    """Test partial recovery accuracy."""
     image = np.zeros((28, 28), dtype=np.float32)
     layer = RandomCircleInclusion(
         radius=5,
@@ -183,7 +173,6 @@ def test_evaluate_recovered_circle_accuracy_partial_recovery():
         with_batch_dim=False,
     )
     center = (14, 14)
-    # Draw a partial circle at the center
     Y, X = np.ogrid[:28, :28]
     mask = (X - center[0]) ** 2 + (Y - center[1]) ** 2 <= 5**2
     mask_indices = np.argwhere(mask)
