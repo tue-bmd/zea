@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from usbmd.config import Config
 from usbmd.config.validation import check_config
 from usbmd.data import generate_usbmd_dataset
 from usbmd.data.datasets import Dataset
@@ -59,8 +58,8 @@ def test_dataset_indexing(file_idx, frame_idx, dataset_path):
         ), f"Data length {data.shape} does not match frame_idx length {len(frame_idx)}"
     elif frame_idx == "all":
         assert (
-            len(data) == dataset.num_frames
-        ), f"Data length {data.shape} does not match file length {dataset.num_frames}"
+            len(data) == file.num_frames
+        ), f"Data length {data.shape} does not match file length {file.num_frames}"
 
 
 @pytest.mark.parametrize(

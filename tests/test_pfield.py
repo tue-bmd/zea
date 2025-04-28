@@ -63,7 +63,7 @@ def test_pfield(scantype, debug=False):
 
     # plot results
     if debug:
-        import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
 
         plt.figure()
         plt.imshow(scan._pfield[0])

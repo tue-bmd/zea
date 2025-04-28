@@ -139,7 +139,20 @@ class File(h5py.File):
             get_check(key)(data, with_batch_dim=None)
 
     def load_data(self, dtype, indices: str | int | List[int] = "all"):
-        key = "data/" + dtype
+        """Load data from the file.
+
+        Args:
+            dtype (str): The type of data to load. Options are 'raw_data', 'aligned_data',
+                'beamformed_data', 'envelope_data', 'image' and 'image_sc'.
+            indices (str, int, list, optional): The indices to load. Defaults to "all" in
+                which case all frames are loaded. If an int is provided, it will be used
+                as a single index. If a list is provided, it will be used as a list of
+                indices.
+        """
+        if "data/" not in dtype:
+            key = "data/" + dtype
+        else:
+            key = dtype
         self.assert_key(key)
         indices = self._prepare_indices(indices)
 
