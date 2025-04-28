@@ -14,10 +14,11 @@ class RandomCircleInclusion(layers.Layer):
         self,
         radius: int,
         fill_value: float = 1.0,
-        circle_axes: tuple[int, int] = (0, 1),
+        circle_axes: tuple[int, int] = (1, 2),
         with_batch_dim=True,
         seed=None,
         return_centers=False,
+        recovery_threshold=0.1,
         **kwargs,
     ):
         """
@@ -39,6 +40,7 @@ class RandomCircleInclusion(layers.Layer):
         self.seed = seed
         self.with_batch_dim = with_batch_dim
         self.return_centers = return_centers
+        self.recovery_threshold = recovery_threshold
         self._axis1 = None
         self._axis2 = None
         self._perm = None
@@ -140,7 +142,7 @@ class RandomCircleInclusion(layers.Layer):
         )
         return cfg
 
-    def evaluate_recovered_circle_accuracy(self, image, center, threshold):
+    def evaluate_recovered_circle_accuracy(self, image, center):
         """
         Evaluate what percentage of the true circle at `center` with `self.radius`
         has been recovered in `image`, with a pixel considered 'recovered' if it is
@@ -149,8 +151,6 @@ class RandomCircleInclusion(layers.Layer):
         Args:
             image: 2D numpy array or tensor (height, width).
             center: (cx, cy) tuple or array.
-            threshold: float, absolute tolerance for fill_value.
-
         Returns:
             float: percentage of recovered pixels inside the true circle (0.0 - 1.0).
         """
@@ -162,6 +162,6 @@ class RandomCircleInclusion(layers.Layer):
         h, w = image.shape[-2:]
         Y, X = np.ogrid[:h, :w]
         mask = (X - cx) ** 2 + (Y - cy) ** 2 <= self.radius**2
-        recovered = np.abs(image[mask] - self.fill_value) <= threshold
+        recovered = np.abs(image[mask] - self.fill_value) <= self.recovery_threshold
         percent_recovered = np.sum(recovered) / np.sum(mask)
         return percent_recovered
