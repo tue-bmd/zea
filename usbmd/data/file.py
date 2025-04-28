@@ -35,34 +35,19 @@ class File(h5py.File):
         print_hdf5_attrs(self)
 
     @property
+    def path(self):
+        """Return the path of the file."""
+        return Path(self.filename)
+
+    @property
     def name(self):
         """Return the name of the file."""
-        return Path(self.filename).name
+        return self.path.name
 
     @property
     def stem(self):
         """Return the stem of the file."""
-        return Path(self.filename).stem
-
-    @classmethod
-    def from_config(cls, dataset_folder, file_path, user, **kwargs):
-        # TODO: WIP
-        """Create a File object from a config file.
-
-        Args:
-            dataset_folder (Path): Path to the dataset folder.
-            file_path (Path): Path to the file.
-            dtype (str): Data type of the file.
-            **kwargs: Additional arguments for h5py.File.
-
-        Returns:
-            File: The File object.
-        """
-
-        data_root = user.data_root
-        path = data_root / dataset_folder / file_path
-
-        return cls(path)
+        return self.path.stem
 
     @property
     def event_keys(self):
