@@ -84,18 +84,17 @@ class Interface:
 
         self.check_for_display()
 
-        window_name = Path(self.dataset.filename).name
         if self.plot_lib == "opencv":
             self.image_viewer = ImageViewerOpenCV(
                 self.data_to_display,
-                window_name=window_name,
+                window_name=self.dataset.name,
                 num_threads=1,
                 headless=self.headless,
             )
         elif self.plot_lib == "matplotlib":
             self.image_viewer = ImageViewerMatplotlib(
                 self.data_to_display,
-                window_name=window_name,
+                window_name=self.dataset.name,
                 num_threads=1,
             )
 

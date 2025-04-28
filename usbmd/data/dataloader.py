@@ -441,18 +441,6 @@ class H5Generator(Dataset, keras.utils.PyDataset):
     def __len__(self):
         return math.ceil(len(self.indices) / self.batch_size)
 
-    @property
-    def n_files(self):
-        """Return number of files in dataset."""
-        return len(self.file_names)
-
-    @property
-    def total_frames(self):
-        """Return total number of frames in dataset."""
-        return sum(
-            file_shape[self.initial_frame_axis] for file_shape in self.file_shapes
-        )
-
 
 class H5Dataloader(H5Generator):
     """Dataloader for h5 files. Can resize images and normalize them."""
