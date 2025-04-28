@@ -11,6 +11,7 @@ from pathlib import Path
 import tqdm
 
 from usbmd.data.file import File, get_shape_hdf5_file, validate_dataset
+from usbmd.datapaths import format_data_path
 from usbmd.utils import (
     calculate_file_hash,
     date_string_to_readable,
@@ -151,7 +152,7 @@ class Dataset(H5FileHandleCache):
         """
         super().__init__(**kwargs)
         self.path = Path(path)
-        self.key = key
+        self.key = File.format_key(key)
         if additional_axes_iter is None:
             additional_axes_iter = []
         self.additional_axes_iter = additional_axes_iter
@@ -177,10 +178,9 @@ class Dataset(H5FileHandleCache):
         return self.path.name
 
     @classmethod
-    def from_config(cls, dataset_folder, dtype, user, **kwargs):
+    def from_config(cls, dataset_folder, dtype, user=None, **kwargs):
         """Creates a Dataset from a config file."""
-        data_root = user.data_root
-        path = data_root / dataset_folder
+        path = format_data_path(dataset_folder, user)
 
         if "file_path" in kwargs:
             log.warning(

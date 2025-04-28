@@ -115,14 +115,21 @@ class File(h5py.File):
 
     @staticmethod
     def _prepare_indices(indices):
-        # TODO: assert the typing of indices
-        if indices == "all":
-            return slice(None)
+        """Prepare the indices for loading data."""
+        # TODO: assert the typing of indices and test the options
+        if isinstance(indices, str):
+            if indices == "all":
+                return slice(None)
+            else:
+                raise ValueError(
+                    f"Invalid value for indices: {indices}. "
+                    "Expected 'all', int, or list of ints."
+                )
 
         if isinstance(indices, int):
             return indices
 
-        processed_indices = tuple(
+        processed_indices = list(
             list(idx) if isinstance(idx, range) else idx for idx in indices
         )
         return processed_indices
@@ -138,6 +145,15 @@ class File(h5py.File):
         if key in _DATA_TYPES:
             get_check(key)(data, with_batch_dim=None)
 
+    @staticmethod
+    def format_key(key):
+        """Format the key to match the data type."""
+        # TODO: support events
+        if "data/" not in key:
+            return "data/" + key
+        else:
+            return key
+
     def load_data(self, dtype, indices: str | int | List[int] = "all"):
         """Load data from the file.
 
@@ -149,10 +165,7 @@ class File(h5py.File):
                 as a single index. If a list is provided, it will be used as a list of
                 indices.
         """
-        if "data/" not in dtype:
-            key = "data/" + dtype
-        else:
-            key = dtype
+        key = self.format_key(dtype)
         self.assert_key(key)
         indices = self._prepare_indices(indices)
 

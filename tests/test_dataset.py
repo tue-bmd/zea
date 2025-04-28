@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from usbmd.config import Config
 from usbmd.config.validation import check_config
 from usbmd.data import generate_usbmd_dataset
 from usbmd.data.datasets import Dataset
@@ -22,16 +23,14 @@ def dataset_path(tmp_path):
     for i in range(2):
         temp_file = tmp_path / f"test{i}.hdf5"
         dummy_data = np.random.rand(10, 20, 30)
+        generate_usbmd_dataset(
+            path=temp_file,
+            image=dummy_data,
+            probe_name="dummy",
+            description="dummy dataset",
+        )
 
-        if not temp_file.exists():
-            generate_usbmd_dataset(
-                path=temp_file,
-                image=dummy_data,
-                probe_name="dummy",
-                description="dummy dataset",
-            )
-
-    return str(tmp_path)
+    yield str(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -46,19 +45,19 @@ def dataset_path(tmp_path):
 def test_dataset_indexing(file_idx, frame_idx, dataset_path):
     """Test ui initialization function"""
     config = {"data": {"dataset_folder": dataset_path, "dtype": "image"}}
-    config = check_config(config)
+    config = check_config(Config(config))
     dataset = Dataset.from_config(**config.data)
 
     file = dataset[file_idx]
-    data = file.load_data(config.data.dtype, frame_idx=frame_idx)
+    data = file.load_data(config.data.dtype, frame_idx)
 
     if isinstance(frame_idx, (list, tuple, np.ndarray)):
-        assert len(data) == len(
+        assert data.shape[0] == len(
             frame_idx
         ), f"Data length {data.shape} does not match frame_idx length {len(frame_idx)}"
     elif frame_idx == "all":
         assert (
-            len(data) == file.num_frames
+            data.shape[0] == file.num_frames
         ), f"Data length {data.shape} does not match file length {file.num_frames}"
 
 
