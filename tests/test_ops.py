@@ -7,7 +7,7 @@ import pytest
 from keras import ops
 from scipy.ndimage import gaussian_filter
 
-from usbmd.ops import GaussianBlur, LeeFilter
+from usbmd.ops_v2 import GaussianBlur, LeeFilter
 
 
 @pytest.mark.parametrize("sigma", [0.5, 1.0, 2.0])
@@ -23,7 +23,7 @@ def test_gaussian_blur(sigma):
     image_tensor = ops.convert_to_tensor(image[..., None])
 
     blurred_scipy = gaussian_filter(image, sigma=sigma)
-    blurred_usbmd = blur(image_tensor)[..., 0]
+    blurred_usbmd = blur(data=image_tensor)["data"][..., 0]
 
     np.testing.assert_allclose(blurred_scipy, blurred_usbmd, rtol=1e-4)
 
@@ -39,6 +39,6 @@ def test_lee_filter(sigma):
     lee = LeeFilter(sigma=sigma, with_batch_dim=False)
 
     image_tensor = ops.convert_to_tensor(image[..., None])
-    filtered = lee(image_tensor)[..., 0]
+    filtered = lee(data=image_tensor)["data"][..., 0]
 
     assert ops.var(filtered) < ops.var(image_tensor), "Variance should be reduced"

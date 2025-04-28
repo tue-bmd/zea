@@ -6,6 +6,7 @@ All functionality related to displaying ultrasound images.
 - **Date**          : 02/11/2023
 """
 
+from functools import partial
 from typing import Tuple, Union
 
 import numpy as np
@@ -41,52 +42,20 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     return image
 
 
-def scan_convert_2d(
-    image,
-    rho_range: Tuple,
-    theta_range: Tuple,
+def compute_scan_convert_2d_coordinates(
+    image_shape,
+    rho_range: Tuple[float, float],
+    theta_range: Tuple[float, float],
     resolution: Union[float, None] = None,
-    fill_value: float = 0.0,
-    order: int = 1,
+    dtype: str = "float32",
 ):
-    """
-    Perform scan conversion on a 2D ultrasound image from polar coordinates
-    (rho, theta) to Cartesian coordinates (x, z).
-
-    Args:
-        image (ndarray): The input 2D ultrasound image in polar coordinates.
-            Has dimensions (n_rho, n_theta).
-        rho_range (tuple): A tuple specifying the range of rho values
-            (min_rho, max_rho). Defined in mm.
-        theta_range (tuple): A tuple specifying the range of theta values
-            (min_theta, max_theta). Defined in radians.
-        resolution (float, optional): The resolution for the Cartesian grid.
-            If None, it is calculated based on the input image. In mm / pixel.
-        fill_value (float, optional): The value to fill in for coordinates
-            outside the input image ranges. Defaults to 0.0.
-        order (int, optional): The order of the spline interpolation. Defaults to 1.
-
-    Returns:
-        ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
-            Has dimensions (n_z, n_x). Coordinates outside the input image
-            ranges are filled with NaNs.
-
-    Note:
-        Polar grid is inferred from the input image shape and the supplied
-        rho and theta ranges. Cartesian grid is computed based on polar grid
-        with resolutions specified by resolution parameter.
-
-    """
-    image = ops.cast(image, dtype="float32")
-
+    """Precompute coordinates for 2d scan conversion from polar coordinates"""
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
     assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
     assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
 
-    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-2], dtype=image.dtype)
-    theta = ops.linspace(
-        theta_range[0], theta_range[1], image.shape[-1], dtype=image.dtype
-    )
+    rho = ops.linspace(rho_range[0], rho_range[1], image_shape[-2], dtype=dtype)
+    theta = ops.linspace(theta_range[0], theta_range[1], image_shape[-1], dtype=dtype)
 
     rho_grid, theta_grid = ops.meshgrid(rho, theta, indexing="ij")
 
@@ -103,9 +72,6 @@ def scan_convert_2d(
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
-    x_lim = [ops.min(x_grid), ops.max(x_grid)]
-    z_lim = [ops.min(z_grid), ops.max(z_grid)]
-
     x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
     z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
 
@@ -118,15 +84,64 @@ def scan_convert_2d(
     # Map rho and theta interpolation points to grid indices
     rho_min, rho_max = ops.min(rho), ops.max(rho)
     theta_min, theta_max = ops.min(theta), ops.max(theta)
-    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image.shape[-2] - 1)
+    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image_shape[-2] - 1)
     theta_idx = (
         (theta_grid_interp - theta_min)
         / (theta_max - theta_min)
-        * (image.shape[-1] - 1)
+        * (image_shape[-1] - 1)
     )
-
     # Stack coordinates as required for map_coordinates
     coordinates = ops.stack([rho_idx, theta_idx], axis=0)
+    return coordinates
+
+
+def scan_convert_2d(
+    image,
+    rho_range: Tuple[float, float] = None,
+    theta_range: Tuple[float, float] = None,
+    resolution: Union[float, None] = None,
+    coordinates: Union[None, np.ndarray] = None,
+    fill_value: float = 0.0,
+    order: int = 1,
+):
+    """
+    Perform scan conversion on a 2D ultrasound image from polar coordinates
+    (rho, theta) to Cartesian coordinates (x, z).
+
+    Args:
+        image (ndarray): The input 2D ultrasound image in polar coordinates.
+            Has dimensions (n_rho, n_theta) with optional batch.
+        rho_range (tuple): A tuple specifying the range of rho values
+            (min_rho, max_rho). Defined in mm.
+        theta_range (tuple): A tuple specifying the range of theta values
+            (min_theta, max_theta). Defined in radians.
+        resolution (float, optional): The resolution for the Cartesian grid.
+            If None, it is calculated based on the input image. In mm / pixel.
+        coordinates (ndarray, optional): Precomputed coordinates for scan conversion.
+            If provided, it will be used instead of computing new coordinates based on
+            the input image shape and ranges.
+        fill_value (float, optional): The value to fill in for coordinates
+            outside the input image ranges. Defaults to 0.0. When set to NaN,
+            no interpolation at the edges will happen.
+        order (int, optional): The order of the spline interpolation. Defaults to 1.
+
+    Returns:
+        ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
+            Has dimensions (n_z, n_x). Coordinates outside the input image
+            ranges are filled with NaNs.
+
+    Note:
+        Polar grid is inferred from the input image shape and the supplied
+        rho and theta ranges. Cartesian grid is computed based on polar grid
+        with resolutions specified by resolution parameter.
+
+    """
+    image = ops.cast(image, dtype="float32")
+
+    if coordinates is None:
+        coordinates = compute_scan_convert_2d_coordinates(
+            image.shape, rho_range, theta_range, resolution, dtype=image.dtype
+        )
 
     images_sc = _interpolate_batch(image, coordinates, fill_value, order=order)
 
@@ -136,56 +151,23 @@ def scan_convert_2d(
     return images_sc
 
 
-def scan_convert_3d(
-    image,
+def compute_scan_convert_3d_coordinates(
+    image_shape,
     rho_range: Tuple[float, float],
     theta_range: Tuple[float, float],
     phi_range: Tuple[float, float],
     resolution: Union[float, None] = None,
-    fill_value: float = 0.0,
-    order: int = 1,
+    dtype: str = "float32",
 ):
-    """
-    Perform scan conversion on a 3D ultrasound image from polar coordinates
-    (rho, theta, phi) to Cartesian coordinates (z, x, y).
-
-    Args:
-        image (ndarray): The input 3D ultrasound image in polar coordinates.
-            Has dimensions (n_rho, n_theta, n_phi).
-        rho_range (tuple): A tuple specifying the range of rho values
-            (min_rho, max_rho). Defined in mm.
-        theta_range (tuple): A tuple specifying the range of theta values
-            (min_theta, max_theta). Defined in radians.
-        phi_range (tuple): A tuple specifying the range of phi values
-            (min_phi, max_phi). Defined in radians.
-        resolution (float, optional): The resolution for the Cartesian grid.
-            If None, it is calculated based on the input image. In mm / pixel.
-        fill_value (float, optional): The value to fill in for coordinates
-        order (int, optional): The order of the spline interpolation. Defaults to 1.
-
-    Returns:
-        ndarray: The scan-converted 3D ultrasound image in Cartesian coordinates.
-            Has dimensions (n_z, n_x, n_y). Coordinates outside the input image
-            ranges are filled with NaNs.
-
-    Note:
-        Polar grid is inferred from the input image shape and the supplied
-        rho, theta and phi ranges. Cartesian grid is computed based on polar grid
-        with resolutions specified by resolution parameter.
-
-    """
-    image = ops.cast(image, dtype="float32")
-
+    """Precompute coordinates for 3d scan conversion from polar coordinates"""
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
     assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
     assert len(phi_range) == 2, "phi_range should be a tuple of length 2"
     assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
 
-    rho = ops.linspace(rho_range[0], rho_range[1], image.shape[-3], dtype=image.dtype)
-    theta = ops.linspace(
-        theta_range[0], theta_range[1], image.shape[-2], dtype=image.dtype
-    )
-    phi = ops.linspace(phi_range[0], phi_range[1], image.shape[-1], dtype=image.dtype)
+    rho = ops.linspace(rho_range[0], rho_range[1], image_shape[-3], dtype=dtype)
+    theta = ops.linspace(theta_range[0], theta_range[1], image_shape[-2], dtype=dtype)
+    phi = ops.linspace(phi_range[0], phi_range[1], image_shape[-1], dtype=dtype)
 
     rho_grid, theta_grid, phi_grid = ops.meshgrid(rho, theta, phi, indexing="ij")
 
@@ -225,23 +207,118 @@ def scan_convert_3d(
     rho_min, rho_max = ops.min(rho), ops.max(rho)
     theta_min, theta_max = ops.min(theta), ops.max(theta)
     phi_min, phi_max = ops.min(phi), ops.max(phi)
-    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image.shape[-3] - 1)
+    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image_shape[-3] - 1)
     theta_idx = (
         (theta_grid_interp - theta_min)
         / (theta_max - theta_min)
-        * (image.shape[-2] - 1)
+        * (image_shape[-2] - 1)
     )
-    phi_idx = (phi_grid_interp - phi_min) / (phi_max - phi_min) * (image.shape[-1] - 1)
+    phi_idx = (phi_grid_interp - phi_min) / (phi_max - phi_min) * (image_shape[-1] - 1)
 
     # Stack coordinates as required for map_coordinates
-    coordinates = ops.stack([rho_idx, theta_idx, phi_idx], axis=0)
+    return ops.stack([rho_idx, theta_idx, phi_idx], axis=0)
 
-    volume = _interpolate_batch(image, coordinates, fill_value, order=order)
+
+def scan_convert_3d(
+    image,
+    rho_range: Tuple[float, float] = None,
+    theta_range: Tuple[float, float] = None,
+    phi_range: Tuple[float, float] = None,
+    resolution: Union[float, None] = None,
+    coordinates: Union[None, np.ndarray] = None,
+    fill_value: float = 0.0,
+    order: int = 1,
+):
+    """
+    Perform scan conversion on a 3D ultrasound image from polar coordinates
+    (rho, theta, phi) to Cartesian coordinates (z, x, y).
+
+    Args:
+        image (ndarray): The input 3D ultrasound image in polar coordinates.
+            Has dimensions (n_rho, n_theta, n_phi) with optional batch.
+        rho_range (tuple): A tuple specifying the range of rho values
+            (min_rho, max_rho). Defined in mm.
+        theta_range (tuple): A tuple specifying the range of theta values
+            (min_theta, max_theta). Defined in radians.
+        phi_range (tuple): A tuple specifying the range of phi values
+            (min_phi, max_phi). Defined in radians.
+        resolution (float, optional): The resolution for the Cartesian grid.
+            If None, it is calculated based on the input image. In mm / pixel.
+        coodinates (ndarray, optional): Precomputed coordinates for scan conversion.
+            If provided, it will be used instead of computing new coordinates based on
+            the input image shape and ranges.
+        fill_value (float, optional): The value to fill in for coordinates
+            outside the input image ranges. Defaults to 0.0. When set to NaN,
+            no interpolation at the edges will happen.
+        order (int, optional): The order of the spline interpolation. Defaults to 1.
+
+    Returns:
+        ndarray: The scan-converted 3D ultrasound image in Cartesian coordinates.
+            Has dimensions (n_z, n_x, n_y). Coordinates outside the input image
+            ranges are filled with NaNs.
+
+    Note:
+        Polar grid is inferred from the input image shape and the supplied
+        rho, theta and phi ranges. Cartesian grid is computed based on polar grid
+        with resolutions specified by resolution parameter.
+    """
+    image = ops.cast(image, dtype="float32")
+
+    if coordinates is None:
+        coordinates = compute_scan_convert_3d_coordinates(
+            image.shape,
+            rho_range,
+            theta_range,
+            phi_range,
+            resolution,
+            dtype=image.dtype,
+        )
+
+    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order)
 
     # swap axis to match z, x, y
-    volume = ops.swapaxes(volume, -3, -2)
+    images_sc = ops.swapaxes(images_sc, -2, -3)
+    return images_sc
 
-    return volume
+
+def scan_convert(
+    image,
+    rho_range: Tuple[float, float] = None,
+    theta_range: Tuple[float, float] = None,
+    phi_range: Tuple[float, float] = None,
+    resolution: Union[float, None] = None,
+    coordinates: Union[None, np.ndarray] = None,
+    fill_value: float = 0.0,
+    order: int = 1,
+    with_batch_dim: bool = False,
+):
+    """Scan convert image based on number of dimensions."""
+    if len(image.shape) == 2 + int(with_batch_dim):
+        return scan_convert_2d(
+            image,
+            rho_range,
+            theta_range,
+            resolution,
+            coordinates,
+            fill_value,
+            order,
+        )
+    elif len(image.shape) == 3 + int(with_batch_dim):
+        return scan_convert_3d(
+            image,
+            rho_range,
+            theta_range,
+            phi_range,
+            resolution,
+            coordinates,
+            fill_value,
+            order,
+        )
+    else:
+        raise ValueError(
+            "Image must be 2D or 3D (with optional batch dim). "
+            f"Got shape: {image.shape}"
+        )
 
 
 def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value=0):
@@ -261,23 +338,25 @@ def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value
 def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
     """Interpolate a batch of images."""
     image_shape = images.shape
-    num_image_dims = len(coordinates)
+    num_image_dims = coordinates.shape[0]
 
     batch_dims = images.shape[:-num_image_dims]
 
     images = ops.reshape(images, (-1, *image_shape[-num_image_dims:]))
 
-    images_sc = []
-    for image in images:
-        image_sc = map_coordinates(
-            image, coordinates, order=order, fill_mode="constant", fill_value=np.nan
-        )
-        images_sc.append(image_sc)
+    map_coordinates_fn = partial(
+        map_coordinates,
+        coordinates=coordinates,
+        order=order,
+        fill_mode="constant",
+        fill_value=fill_value,
+    )
 
-    images_sc = ops.convert_to_tensor(images_sc)
-    images_sc = ops.where(ops.isnan(images_sc), fill_value, images_sc)
+    images_sc = ops.vectorized_map(map_coordinates_fn, images)
 
-    images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc.shape))
+    # ignore batch dim to get image shape
+    image_sc_shape = ops.shape(images_sc)[1:]
+    images_sc = ops.reshape(images_sc, (*batch_dims, *image_sc_shape))
 
     return images_sc
 
@@ -334,6 +413,7 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
         )
         non_zeros_flipped = model_fitted_bottom(range(len(non_zeros_flipped)))
         non_zeros_flipped = non_zeros_flipped.round().astype(np.int64)
+        non_zeros_flipped = np.clip(non_zeros_flipped, 0, None)
 
     non_zeros = polar_image.shape[0] - non_zeros_flipped
 
