@@ -1205,6 +1205,30 @@ def resample(x, n_samples, axis=-2, order=1):
     return resampled
 
 
+def linear_sum_assignment(cost):
+    """Greedy linear sum assignment.
+
+    Args:
+        cost (Tensor): Cost matrix of shape (n, n).
+    Returns:
+        Tuple: Row indices and column indices for assignment.
+
+    Returns row indices and column indices for assignment.
+    """
+    n = ops.shape(cost)[0]
+    assigned_true = ops.zeros((n,), dtype="bool")
+    row_ind = []
+    col_ind = []
+    for i in range(n):
+        mask = 1.0 - ops.cast(assigned_true, "float32")
+        masked_cost = cost[i] + (1.0 - mask) * 1e6
+        idx = int(ops.argmin(masked_cost))
+        row_ind.append(i)
+        col_ind.append(idx)
+        assigned_true = keras.ops.scatter_update(assigned_true, [[idx]], [True])
+    return np.array(row_ind), np.array(col_ind)
+
+
 if keras.backend.backend() == "tensorflow":
 
     def safe_vectorize(
