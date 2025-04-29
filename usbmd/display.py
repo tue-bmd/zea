@@ -352,7 +352,12 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
         fill_value=fill_value,
     )
 
-    images_sc = ops.vectorized_map(map_coordinates_fn, images)
+    if order > 1:
+        # cpu bound
+        images_sc = ops.stack(list(map(map_coordinates_fn, images)))
+    else:
+        # gpu bound
+        images_sc = ops.vectorized_map(map_coordinates_fn, images)
 
     # ignore batch dim to get image shape
     image_sc_shape = ops.shape(images_sc)[1:]
