@@ -5,6 +5,7 @@ import numpy as np
 from keras import ops
 
 from usbmd.models.generative import GenerativeModel
+from usbmd.tensor_ops import linear_sum_assignment
 
 
 class GaussianMixtureModel(GenerativeModel):
@@ -40,14 +41,36 @@ class GaussianMixtureModel(GenerativeModel):
     def _initialize(self, X):
         # X: (n_samples, n_features)
         n_samples = ops.shape(X)[0]
-        # Initialize means by randomly picking data points
-        idx = keras.random.shuffle(ops.arange(n_samples), seed=self.seed)[
-            : self.n_components
-        ]
-        self.means = ops.take(X, idx, axis=0)  # (n_components, n_features)
+        n_features = ops.shape(X)[1]
+        chosen = []
+        # Pick the first mean randomly
+        idx = ops.cast(
+            keras.random.uniform(
+                shape=(),
+                minval=0,
+                maxval=n_samples,
+                seed=self.seed,
+            ),
+            "int32",
+        )
+        chosen.append(idx)
+        for _ in range(1, self.n_components):
+            # Gather chosen means so far
+            chosen_means = ops.stack(
+                [ops.take(X, i, axis=0) for i in chosen], axis=0
+            )  # (len(chosen), n_features)
+            # Compute distances from all points to each chosen mean
+            # (n_samples, len(chosen), n_features)
+            diffs = ops.expand_dims(X, 1) - ops.expand_dims(chosen_means, 0)
+            dists = ops.sqrt(ops.sum(diffs**2, axis=-1))  # (n_samples, len(chosen))
+            min_dists = ops.min(dists, axis=1)  # (n_samples,)
+            idx = ops.argmax(min_dists, axis=0)
+            chosen.append(idx)
+        means = ops.stack([ops.take(X, i, axis=0) for i in chosen], axis=0)
+        self.means = means
         # Initialize variances to variance of data
         var = ops.var(X, axis=0)
-        self.vars = ops.ones((self.n_components, self.n_features)) * var
+        self.vars = ops.ones((self.n_components, n_features)) * var
         # Initialize mixture weights uniformly
         self.pi = ops.ones((self.n_components,)) / self.n_components
         self._initialized = True
@@ -144,3 +167,31 @@ class GaussianMixtureModel(GenerativeModel):
         X = ops.convert_to_tensor(data, dtype="float32")
         pdf = ops.sum(self._component_pdf(X) * self.pi, axis=1)
         return ops.log(pdf)
+
+
+def match_means_covariances(means, true_means, covs, true_covs):
+    """Match estimated means/covs to true ones.
+
+    Uses greedy minimal distance assignment.
+
+    Args:
+        means: Estimated means (n_components, n_features).
+        true_means: True means (n_components, n_features).
+        covs: Estimated covariances (n_components, n_features, n_features).
+        true_covs: True covariances (n_components, n_features, n_features).
+
+    Returns:
+        means_matched: Matched estimated means.
+        true_means_matched: Matched true means.
+        covs_matched: Matched estimated covariances.
+        true_covs_matched: Matched true covariances.
+    """
+    n = ops.shape(means)[0]
+    diff = ops.expand_dims(means, 1) - ops.expand_dims(true_means, 0)
+    cost = ops.sqrt(ops.sum(diff**2, axis=-1))
+    row_ind, col_ind = linear_sum_assignment(cost)
+    means_matched = ops.take(means, row_ind, axis=0)
+    true_means_matched = ops.take(true_means, col_ind, axis=0)
+    covs_matched = [covs[i] for i in row_ind]
+    true_covs_matched = [true_covs[j] for j in col_ind]
+    return means_matched, true_means_matched, covs_matched, true_covs_matched
