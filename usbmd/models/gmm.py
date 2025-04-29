@@ -186,7 +186,6 @@ def match_means_covariances(means, true_means, covs, true_covs):
         covs_matched: Matched estimated covariances.
         true_covs_matched: Matched true covariances.
     """
-    n = ops.shape(means)[0]
     diff = ops.expand_dims(means, 1) - ops.expand_dims(true_means, 0)
     cost = ops.sqrt(ops.sum(diff**2, axis=-1))
     row_ind, col_ind = linear_sum_assignment(cost)
