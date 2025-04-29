@@ -3,6 +3,7 @@
 import numpy as np
 import keras
 from keras import layers, ops
+import jax
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 
@@ -40,7 +41,6 @@ class RandomCircleInclusion(layers.Layer):
         self.radius = radius
         self.fill_value = fill_value
         self.circle_axes = circle_axes
-        self.seed = seed
         self.with_batch_dim = with_batch_dim
         self.return_centers = return_centers
         self.recovery_threshold = recovery_threshold
@@ -166,7 +166,7 @@ class RandomCircleInclusion(layers.Layer):
         mask = ops.cast(dist2 <= radius**2, dtype)
         return mask
 
-    def call(self, x):
+    def call(self, x, seed):
         """
         Apply the random circle inclusion augmentation.
 
@@ -177,7 +177,6 @@ class RandomCircleInclusion(layers.Layer):
             Augmented images, and optionally the circle centers.
         """
         backend = keras.backend.backend()
-        seed = self.seed
 
         if self.with_batch_dim:
             if backend == "jax":
@@ -220,8 +219,9 @@ class RandomCircleInclusion(layers.Layer):
                 keras.random.uniform((), self.radius, w - self.radius, seed=seed),
                 "int32",
             )
+            new_seed, _ = jax.random.split(seed)
             cy = ops.cast(
-                keras.random.uniform((), self.radius, h - self.radius, seed=seed),
+                keras.random.uniform((), self.radius, h - self.radius, seed=new_seed),
                 "int32",
             )
             mask = self._make_circle_mask(
@@ -251,7 +251,6 @@ class RandomCircleInclusion(layers.Layer):
                 "radius": self.radius,
                 "fill_value": self.fill_value,
                 "circle_axes": self.circle_axes,
-                "seed": self.seed,
                 "return_centers": self.return_centers,
             }
         )
