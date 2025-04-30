@@ -167,7 +167,7 @@ class Dataset(H5FileHandleCache):
         self.file_shapes = file_shapes
         self.file_paths = [self.path / file_name for file_name in file_names]
 
-        assert len(self) > 0, f"No files in directories:\n{self.path}"
+        assert self.n_files > 0, f"No files in directories:\n{self.path}"
 
         if validate:
             self.validate_dataset()
@@ -192,6 +192,11 @@ class Dataset(H5FileHandleCache):
 
     def __len__(self):
         """Returns the number of files in the dataset."""
+        return self.n_files
+
+    @property
+    def n_files(self):
+        """Return number of files in dataset."""
         return len(self.file_paths)
 
     def __getitem__(self, index) -> File:
@@ -203,7 +208,7 @@ class Dataset(H5FileHandleCache):
         """
         Generator that yields images from the hdf5 files.
         """
-        for idx in range(len(self)):
+        for idx in range(self.n_files):
             yield self[idx]
 
     def __call__(self):
@@ -241,11 +246,11 @@ class Dataset(H5FileHandleCache):
             self._assert_validation_file(validation_file_path)
             return
 
-        if len(self) > _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE:
+        if self.n_files > _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE:
             log.warning(
                 "Checking scan parameters in more than "
                 f"{_CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE} files takes too long. "
-                f"Found {len(self)} files in dataset. "
+                f"Found {self.n_files} files in dataset. "
                 "Not checking scan parameters."
             )
             return
@@ -254,7 +259,7 @@ class Dataset(H5FileHandleCache):
         validated_succesfully = True
         for file_path in tqdm.tqdm(
             self.file_paths,
-            total=len(self),
+            total=self.n_files,
             desc="Checking dataset files on validity (USBMD format)",
         ):
             try:
@@ -342,7 +347,7 @@ class Dataset(H5FileHandleCache):
         with open(validation_file_path, "w", encoding="utf-8") as f:
             f.write(f"Dataset: {self.path}\n")
             f.write(f"Validated on: {get_date_string()}\n")
-            f.write(f"Number of files: {len(self)}\n")
+            f.write(f"Number of files: {self.n_files}\n")
             f.write(f"Number of frames: {number_of_frames}\n")
             f.write(f"Data types: {', '.join(data_types)}\n")
             f.write(f"{'-' * 80}\n")

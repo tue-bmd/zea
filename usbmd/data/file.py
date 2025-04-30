@@ -119,7 +119,7 @@ class File(h5py.File):
         # TODO: assert the typing of indices and test the options
         if isinstance(indices, str):
             if indices == "all":
-                return slice(None)
+                return [slice(None)]
             else:
                 raise ValueError(
                     f"Invalid value for indices: {indices}. "
@@ -127,7 +127,7 @@ class File(h5py.File):
                 )
 
         if isinstance(indices, int):
-            return indices
+            return [indices]
 
         processed_indices = list(
             list(idx) if isinstance(idx, range) else idx for idx in indices
@@ -170,7 +170,7 @@ class File(h5py.File):
         indices = self._prepare_indices(indices)
 
         if self._simple_index(key):
-            data = self[key][indices]
+            data = self[key][tuple(indices)]
             self.check_data(data, key)
         elif self.events_have_same_shape(key):
             raise NotImplementedError
