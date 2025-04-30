@@ -3,7 +3,7 @@
 import numpy as np
 import keras
 from keras import layers, ops
-from usbmd.tensor_ops import split_seed
+from usbmd.tensor_ops import split_seed, is_jax_prng_key
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 
@@ -199,6 +199,10 @@ class RandomCircleInclusion(layers.Layer):
             Tensor or tuple: Augmented images, and optionally the circle
                 centers if return_centers is True.
         """
+        if keras.backend.backend() == "jax" and not is_jax_prng_key(seed):
+            raise NotImplementedError(
+                "jax.random.key() is not supported, please use jax.random.PRNGKey()"
+            )
         seed = seed if seed is not None else self.seed
 
         if self.with_batch_dim:
