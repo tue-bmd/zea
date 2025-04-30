@@ -136,7 +136,7 @@ def scan_convert_2d(
         with resolutions specified by resolution parameter.
 
     """
-    image = ops.cast(image, dtype="float32")
+    assert "float" in ops.dtype(image), "Image must be float type"
 
     if coordinates is None:
         coordinates = compute_scan_convert_2d_coordinates(
@@ -262,7 +262,7 @@ def scan_convert_3d(
         rho, theta and phi ranges. Cartesian grid is computed based on polar grid
         with resolutions specified by resolution parameter.
     """
-    image = ops.cast(image, dtype="float32")
+    assert "float" in ops.dtype(image), "Image must be float type"
 
     if coordinates is None:
         coordinates = compute_scan_convert_3d_coordinates(
