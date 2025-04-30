@@ -1,7 +1,7 @@
 """Tests for RandomCircleInclusion augmentation."""
 
 import numpy as np
-from keras import ops
+from keras import ops, random as keras_random
 from usbmd.data.augmentations import RandomCircleInclusion
 
 
@@ -22,7 +22,8 @@ def test_random_circle_inclusion_2d_with_batch():
     layer = RandomCircleInclusion(
         radius=5, fill_value=1.0, circle_axes=(1, 2), with_batch_dim=True
     )
-    out = layer(ops.convert_to_tensor(images))
+    seed = keras_random.SeedGenerator(123)
+    out = layer(ops.convert_to_tensor(images), seed=seed)
     out_np = ops.convert_to_numpy(out)
     assert out_np.shape == images.shape
     assert np.all([np.any(np.isclose(im, 1.0)) for im in out_np])
@@ -34,7 +35,8 @@ def test_random_circle_inclusion_2d_no_batch():
     layer = RandomCircleInclusion(
         radius=5, fill_value=1.0, circle_axes=(0, 1), with_batch_dim=False
     )
-    out = layer(ops.convert_to_tensor(image))
+    seed = keras_random.SeedGenerator(123)
+    out = layer(ops.convert_to_tensor(image), seed=seed)
     out_np = ops.convert_to_numpy(out)
     assert out_np.shape == image.shape
     assert np.any(np.isclose(out_np, 1.0))
@@ -49,7 +51,8 @@ def test_random_circle_inclusion_3d_with_batch():
         circle_axes=(2, 3),
         with_batch_dim=True,
     )
-    out = layer(ops.convert_to_tensor(images))
+    seed = keras_random.SeedGenerator(123)
+    out = layer(ops.convert_to_tensor(images), seed=seed)
     out_np = ops.convert_to_numpy(out)
     assert out_np.shape == images.shape
     assert np.all([np.any(np.isclose(im, 1.0)) for im in out_np.reshape(-1, 28, 28)])
@@ -64,7 +67,8 @@ def test_random_circle_inclusion_3d_no_batch():
         circle_axes=(1, 2),
         with_batch_dim=False,
     )
-    out = layer(ops.convert_to_tensor(image))
+    seed = keras_random.SeedGenerator(123)
+    out = layer(ops.convert_to_tensor(image), seed=seed)
     out_np = ops.convert_to_numpy(out)
     assert out_np.shape == image.shape
     assert np.all([np.any(np.isclose(im, 1.0)) for im in out_np])
@@ -80,7 +84,8 @@ def test_random_circle_inclusion_2d_with_batch_centers():
         with_batch_dim=True,
         return_centers=True,
     )
-    out, centers = layer(ops.convert_to_tensor(images))
+    seed = keras_random.SeedGenerator(123)
+    out, centers = layer(ops.convert_to_tensor(images), seed=seed)
     out_np = ops.convert_to_numpy(out)
     centers_np = ops.convert_to_numpy(centers)
     assert out_np.shape == images.shape
@@ -99,7 +104,8 @@ def test_random_circle_inclusion_2d_no_batch_centers():
         with_batch_dim=False,
         return_centers=True,
     )
-    out, center = layer(ops.convert_to_tensor(image))
+    seed = keras_random.SeedGenerator(123)
+    out, center = layer(ops.convert_to_tensor(image), seed=seed)
     out_np = ops.convert_to_numpy(out)
     center_np = ops.convert_to_numpy(center)
     assert out_np.shape == image.shape
@@ -117,12 +123,12 @@ def test_evaluate_recovered_circle_accuracy_2d_with_batch_centers():
         with_batch_dim=True,
         return_centers=True,
     )
-    out, centers = layer(ops.convert_to_tensor(images))
-    out_np = ops.convert_to_numpy(out)
-    centers_np = ops.convert_to_numpy(centers)
-    for img, center in zip(out_np, centers_np):
-        acc = layer.evaluate_recovered_circle_accuracy(img, center, threshold=1e-5)
-        assert np.isclose(acc, 1.0), f"Expected 1.0, got {acc}"
+    seed = keras_random.SeedGenerator(123)
+    out, centers = layer(ops.convert_to_tensor(images), seed=seed)
+    acc = layer.evaluate_recovered_circle_accuracy(
+        out, centers, recovery_threshold=1e-5
+    )
+    assert np.all(np.isclose(acc, 1.0)), f"Expected 1.0, got {acc}"
 
 
 def test_evaluate_recovered_circle_accuracy_3d_with_batch_centers():
@@ -135,14 +141,12 @@ def test_evaluate_recovered_circle_accuracy_3d_with_batch_centers():
         with_batch_dim=True,
         return_centers=True,
     )
-    out, centers = layer(ops.convert_to_tensor(images))
-    out_np = ops.convert_to_numpy(out)
-    centers_np = ops.convert_to_numpy(centers)
-    flat_imgs = out_np.reshape(-1, 28, 28)
-    flat_centers = centers_np.reshape(-1, 2)
-    for img, center in zip(flat_imgs, flat_centers):
-        acc = layer.evaluate_recovered_circle_accuracy(img, center, threshold=1e-5)
-        assert np.isclose(acc, 1.0), f"Expected 1.0, got {acc}"
+    seed = keras_random.SeedGenerator(123)
+    out, centers = layer(ops.convert_to_tensor(images), seed=seed)
+    acc = layer.evaluate_recovered_circle_accuracy(
+        out, centers, recovery_threshold=1e-5
+    )
+    assert np.all(np.isclose(acc, 1.0)), f"Expected 1.0, got {acc}"
 
 
 def test_evaluate_recovered_circle_accuracy_3d_no_batch_centers():
@@ -155,12 +159,12 @@ def test_evaluate_recovered_circle_accuracy_3d_no_batch_centers():
         with_batch_dim=False,
         return_centers=True,
     )
-    out, centers = layer(ops.convert_to_tensor(image))
-    out_np = ops.convert_to_numpy(out)
-    centers_np = ops.convert_to_numpy(centers)
-    for img, center in zip(out_np, centers_np):
-        acc = layer.evaluate_recovered_circle_accuracy(img, center, threshold=1e-5)
-        assert np.isclose(acc, 1.0), f"Expected 1.0, got {acc}"
+    seed = keras_random.SeedGenerator(123)
+    out, centers = layer(ops.convert_to_tensor(image), seed=seed)
+    acc = layer.evaluate_recovered_circle_accuracy(
+        out, centers, recovery_threshold=1e-5
+    )
+    assert np.all(np.isclose(acc, 1.0)), f"Expected 1.0, got {acc}"
 
 
 def test_evaluate_recovered_circle_accuracy_partial_recovery():
@@ -179,5 +183,7 @@ def test_evaluate_recovered_circle_accuracy_partial_recovery():
     half = len(mask_indices) // 2
     for idx in mask_indices[:half]:
         image[tuple(idx)] = 1.0
-    acc = layer.evaluate_recovered_circle_accuracy(image, center, threshold=1e-5)
+    acc = layer.evaluate_recovered_circle_accuracy(
+        image, center, recovery_threshold=1e-5
+    )
     assert 0.4 < acc < 0.6, f"Expected ~0.5, got {acc}"

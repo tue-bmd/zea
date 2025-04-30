@@ -3,13 +3,31 @@
 import numpy as np
 import keras
 from keras import layers, ops
-import jax
+from usbmd.tensor_ops import split_seed
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 
 
 class RandomCircleInclusion(layers.Layer):
-    """Randomly includes a filled circle at a random location in an image."""
+    """
+    Adds a circular inclusion to the image, optionally at random locations.
+
+    Since this can accept N-dimensional inputs, you'll need to specify your
+    'circle_axes' -- these are the axes onto which a circle will be drawn.
+    This circle will then be broadcast along the remaining dimensions.
+
+    You can then optionally specify whether there is a batch dim,
+    and whether the circles should be located randomly across that batch.
+
+    For example, if you have a batch of videos, e.g. of shape [batch, frame, height, width],
+    then you might want to specify circle_axes=(2, 3), and randomize_location_across_batch=True.
+    This would result in a circle that is located in the same place _per video_, but
+    different locations for different videos.
+
+    Once your method has recovered the circles, you can evaluate them using
+    the evaluate_recovered_circle_accuracy() method, which will expect an input
+    shape matching your inputs to call().
+    """
 
     def __init__(
         self,
@@ -17,25 +35,25 @@ class RandomCircleInclusion(layers.Layer):
         fill_value: float = 1.0,
         circle_axes: tuple[int, int] = (1, 2),
         with_batch_dim=True,
-        seed=None,
         return_centers=False,
         recovery_threshold=0.1,
         randomize_location_across_batch=True,
+        seed=None,
         **kwargs,
     ):
         """
         Initialize RandomCircleInclusion.
 
         Args:
-            radius: Radius of the circle.
-            fill_value: Value to fill inside the circle.
-            circle_axes: Axes along which to draw the circle.
-            with_batch_dim: Whether input has a batch dimension.
-            seed: Random seed.
-            return_centers: Whether to return circle centers.
-            recovery_threshold: Threshold for considering a pixel as recovered.
-            randomize_location_across_batch: If True, randomize circle location per batch element.
-            **kwargs: Additional layer arguments.
+            radius (int): Radius of the circle to include.
+            fill_value (float): Value to fill inside the circle.
+            circle_axes (tuple[int, int]): Axes along which to draw the circle (height, width).
+            with_batch_dim (bool): Whether input has a batch dimension.
+            return_centers (bool): Whether to return circle centers along with images.
+            recovery_threshold (float): Threshold for considering a pixel as recovered.
+            randomize_location_across_batch (bool): If True, randomize circle location per batch element.
+            seed (Any): Optional random seed for reproducibility.
+            **kwargs: Additional keyword arguments for the parent Layer.
         """
         super().__init__(**kwargs)
         self.radius = radius
@@ -45,6 +63,7 @@ class RandomCircleInclusion(layers.Layer):
         self.return_centers = return_centers
         self.recovery_threshold = recovery_threshold
         self.randomize_location_across_batch = randomize_location_across_batch
+        self.seed = seed
         self._axis1 = None
         self._axis2 = None
         self._perm = None
@@ -59,7 +78,7 @@ class RandomCircleInclusion(layers.Layer):
         Build the layer and compute static shape and permutation info.
 
         Args:
-            input_shape: Shape of the input tensor.
+            input_shape (tuple): Shape of the input tensor.
         """
         rank = len(input_shape) - 1 if self.with_batch_dim else len(input_shape)
         a1, a2 = self.circle_axes
@@ -107,10 +126,10 @@ class RandomCircleInclusion(layers.Layer):
         Compute output shape for the layer.
 
         Args:
-            input_shape: Shape of the input tensor.
+            input_shape (tuple): Shape of the input tensor.
 
         Returns:
-            The output shape (same as input).
+            tuple: The output shape (same as input).
         """
         return input_shape
 
@@ -119,10 +138,10 @@ class RandomCircleInclusion(layers.Layer):
         Permute axes so that circle axes are last.
 
         Args:
-            x: Input tensor.
+            x (Tensor): Input tensor.
 
         Returns:
-            Tensor with circle axes as the last two dimensions.
+            Tensor: Tensor with circle axes as the last two dimensions.
         """
         return ops.transpose(x, axes=self._perm)
 
@@ -131,10 +150,10 @@ class RandomCircleInclusion(layers.Layer):
         Flatten all axes except the last two (circle axes).
 
         Args:
-            x: Input tensor with circle axes last.
+            x (Tensor): Input tensor with circle axes last.
 
         Returns:
-            Tuple of (reshaped tensor, flat batch size, height, width).
+            tuple: (reshaped tensor, flat batch size, height, width).
         """
         shape = x.shape
         flat_batch = int(np.prod(shape[:-2])) if len(shape) > 2 else 1
@@ -146,52 +165,54 @@ class RandomCircleInclusion(layers.Layer):
         Create a mask for each center (batch, h, w) using Keras ops.
 
         Args:
-            centers: Tensor of shape (batch, 2) with circle centers.
-            h: Height of the image.
-            w: Width of the image.
-            radius: Radius of the circle.
-            dtype: Data type for the mask.
+            centers (Tensor): Tensor of shape (batch, 2) with circle centers.
+            h (int): Height of the image.
+            w (int): Width of the image.
+            radius (int): Radius of the circle.
+            dtype (str or dtype): Data type for the mask.
 
         Returns:
-            Tensor mask of shape (batch, h, w).
+            Tensor: Mask of shape (batch, h, w).
         """
         Y = ops.arange(h)
         X = ops.arange(w)
         Y, X = ops.meshgrid(Y, X, indexing="ij")
         Y = ops.expand_dims(Y, 0)  # (1, h, w)
         X = ops.expand_dims(X, 0)  # (1, h, w)
-        cx = ops.cast(centers[:, 0], "float32")[:, None, None]
-        cy = ops.cast(centers[:, 1], "float32")[:, None, None]
+        # cx = ops.cast(centers[:, 0], "float32")[:, None, None]
+        # cy = ops.cast(centers[:, 1], "float32")[:, None, None]
+        cx = centers[:, 0][:, None, None]
+        cy = centers[:, 1][:, None, None]
         dist2 = (X - cx) ** 2 + (Y - cy) ** 2
         mask = ops.cast(dist2 <= radius**2, dtype)
         return mask
 
-    def call(self, x, seed):
+    def call(self, x, seed=None):
         """
         Apply the random circle inclusion augmentation.
 
         Args:
-            x: Input tensor.
+            x (Tensor): Input tensor.
+            seed (Any, optional): Optional random seed for reproducibility.
 
         Returns:
-            Augmented images, and optionally the circle centers.
+            Tensor or tuple: Augmented images, and optionally the circle centers if return_centers is True.
         """
-        backend = keras.backend.backend()
+        seed = seed if seed is not None else self.seed
 
         if self.with_batch_dim:
-            if backend == "jax":
-                batch_size = x.shape[0]
-                import jax
+            batch_size = ops.shape(x)[0]
 
-                if self.randomize_location_across_batch:
-                    seeds = jax.random.split(seed, batch_size)
+            if self.randomize_location_across_batch:
+                seeds = split_seed(seed, batch_size)
+                if all([seed is seeds[0] for seed in seeds]):
+                    imgs, centers = ops.map(lambda arg: self._call(arg, seeds[0]), x)
+                else:
                     imgs, centers = ops.map(
                         lambda args: self._call(args[0], args[1]), (x, seeds)
                     )
-                else:
-                    imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
             else:
-                imgs, centers = ops.map(lambda xi: self._call(xi, seed), x)
+                imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
         else:
             imgs, centers = self._call(x, seed)
 
@@ -205,11 +226,11 @@ class RandomCircleInclusion(layers.Layer):
         Internal method to apply the augmentation to a single image.
 
         Args:
-            x: Input image tensor with circle axes last.
-            seed: Random seed for circle location.
+            x (Tensor): Input image tensor with circle axes last.
+            seed (Any): Random seed for circle location.
 
         Returns:
-            Tuple of (augmented image, center coordinates).
+            tuple: (augmented image, center coordinates).
         """
         x = self._permute_axes_to_circle_last(x)
         flat, flat_batch_size, h, w = self._flatten_batch_and_other_dims(x)
@@ -219,7 +240,7 @@ class RandomCircleInclusion(layers.Layer):
                 keras.random.uniform((), self.radius, w - self.radius, seed=seed),
                 "int32",
             )
-            new_seed, _ = jax.random.split(seed)
+            new_seed, _ = split_seed(seed, 2)  # ensure that cx and cy are independent
             cy = ops.cast(
                 keras.random.uniform((), self.radius, h - self.radius, seed=new_seed),
                 "int32",
@@ -243,7 +264,7 @@ class RandomCircleInclusion(layers.Layer):
         Get layer configuration for serialization.
 
         Returns:
-            Dictionary of layer configuration.
+            dict: Dictionary of layer configuration.
         """
         cfg = super().get_config()
         cfg.update(
@@ -263,13 +284,13 @@ class RandomCircleInclusion(layers.Layer):
         Evaluate the percentage of the true circle that has been recovered in the images.
 
         Args:
-            images: Tensor of images (any shape, with circle axes as specified).
-            centers: Tensor of circle centers (matching batch size).
-            fill_value: optionally override fill_value for cases where image_range
-                has changed.
+            images (Tensor): Tensor of images (any shape, with circle axes as specified).
+            centers (Tensor): Tensor of circle centers (matching batch size).
+            recovery_threshold (float): Threshold for considering a pixel as recovered.
+            fill_value (float, optional): Optionally override fill_value for cases where image range has changed.
 
         Returns:
-            Tensor of percentage recovered for each circle (shape: [num_circles]).
+            Tensor: Percentage recovered for each circle (shape: [num_circles]).
         """
         fill_value = fill_value or self.fill_value
 
