@@ -205,11 +205,8 @@ class LVHProcessor(H5Processor):
     def __call__(self, avi_file):
         """Process a single AVI file."""
         hdf5_file = avi_file.stem + ".hdf5"
-        # sequence = load_video(avi_file)
-        sequence = load_video(
-            "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh/Batch4/0XB4FC1CB94F182CE1.avi"
-        )
-
+        sequence = load_video(avi_file)
+        
         # Normalize to [0,1]
         sequence = translate(sequence, self.range_from, self._process_range)
 
