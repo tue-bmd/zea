@@ -5,14 +5,12 @@ Tests for the `tensor_ops` module.
 # pylint: disable=import-outside-toplevel
 # pylint: disable=reimported
 
-import os
-
-os.environ["KERAS_BACKEND"] = "tensorflow"
-
 import numpy as np
 import pytest
 import torch
 from keras import ops
+from numpy.random import default_rng
+from scipy.ndimage import gaussian_filter
 
 from usbmd import tensor_ops
 
@@ -413,3 +411,36 @@ def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
     )
     np.testing.assert_allclose(image, reconstructed_image, rtol=1e-5, atol=1e-5)
     return reconstructed_image
+
+
+@pytest.mark.parametrize(
+    "array, sigma, order, truncate",
+    [
+        [default_rng(seed=1).normal(size=(32, 32)), 0.5, 0, 4.0],
+        [default_rng(seed=2).normal(size=(32, 32)), 1.0, 0, 5.0],
+        [default_rng(seed=3).normal(size=(32, 32)), 1.5, (0, 1), 4.0],
+        [default_rng(seed=4).normal(size=(32, 32)), (1.0, 2.0), (1, 0), 4.0],
+    ],
+)
+@backend_equality_check(backends=["jax", "tensorflow"])
+def test_gaussian_filter(array, sigma, order, truncate):
+    """
+    Test `tensor_ops.gaussian_filter against scipy.ndimage.gaussian_filter.`
+    `GaussianBlur` with default args should be equivalent to scipy.
+    """
+    from keras import ops
+
+    from usbmd import tensor_ops
+
+    array = array.astype(np.float32)
+
+    blurred_scipy = gaussian_filter(array, sigma=sigma, order=order, truncate=truncate)
+
+    tensor = ops.convert_to_tensor(array)
+    blurred_usbmd = tensor_ops.gaussian_filter(
+        tensor, sigma=sigma, order=order, truncate=truncate
+    )
+    blurred_usbmd = ops.convert_to_numpy(blurred_usbmd)
+
+    np.testing.assert_allclose(blurred_scipy, blurred_usbmd, rtol=1e-5, atol=1e-5)
+    return blurred_usbmd
