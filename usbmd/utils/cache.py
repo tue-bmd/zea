@@ -1,10 +1,20 @@
 """Caching utilities for function outputs.
 
+>[!TIP]
+> Caching works best for functions that take long, but output small results. If loading of a large
+> cached tensor for instance take longer than the function itself, it is better to not cache the result.
+
 >[!NOTE]
 > It can be useful to inherit custom classes from `usbmd.core.Object`, as
 > these classes will be serialized properly, just like regular python objects. Otherwise
 > custom classes will not be recognized as equal if they have the same attributes by the
 > caching mechanism.
+
+>[!NOTE]
+> For large experiments, it can be recommended to either set a custom cache directory
+> or disable the cache completely. This can be done by setting the environment variable
+> `USBMD_CACHE_DIR` to a custom directory or `USBMD_DISABLE_CACHE` to `1` or `true`.
+> Otherwise, the cache will be stored in `~/.usbmd_cache` by default, which can pile up over time.
 
 - **Author(s)**     : Tristan Stevens, Wessel van Nierop
 - **Date**          : October 11th, 2024
@@ -45,6 +55,12 @@ except Exception as e:
         f"Could not create cache directory {unavailable_cache_dir}: {e} "
         + f"Using a temporary directory instead {_CACHE_DIR}"
     )
+
+
+def is_cache_disabled():
+    """Check if caching is disabled via environment variable."""
+    val = os.environ.get("USBMD_DISABLE_CACHE", "0").lower()
+    return val in ("1", "true", "yes")
 
 
 def serialize_elements(key_elements: list):
@@ -166,6 +182,10 @@ def cache_output(*arg_names, verbose=False):
 
     def decorator(func):
         def wrapper(*args, **kwargs):
+            if is_cache_disabled():
+                if verbose:
+                    log.info(f"Caching is globally disabled for {func.__qualname__}.")
+                return func(*args, **kwargs)
             try:
                 cache_key = generate_cache_key(func, args, kwargs, arg_names)
             except Exception as e:
