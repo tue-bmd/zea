@@ -297,7 +297,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         ), f"`n_frames` must be greater than 0, got {self.n_frames}"
 
         # Extract some general information about the dataset
-        image_shapes = np.array(file_shapes)
+        image_shapes = np.array(self.file_shapes)
         image_shapes = np.delete(
             image_shapes, (self.initial_frame_axis, *self.additional_axes_iter), axis=1
         )
@@ -323,8 +323,8 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.rng = np.random.default_rng(self.seed)
 
         self.indices = generate_h5_indices(
-            file_names=file_names,
-            file_shapes=file_shapes,
+            file_names=self.file_names,
+            file_shapes=self.file_shapes,
             n_frames=self.n_frames,
             frame_index_stride=self.frame_index_stride,
             key=self.key,
@@ -403,7 +403,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
             np.ndarray: image extracted from hdf5 file and indexed by indices.
         """
         try:
-            images = file[key][indices]
+            images = file.load_data(key, indices)
         except (OSError, IOError):
             # Let the decorator handle I/O errors
             raise
