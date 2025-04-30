@@ -40,6 +40,20 @@ def split_seed(seed, n):
         return [seed for _ in range(n)]
 
 
+def is_jax_prng_key(x):
+    """
+    To distinguish between jax.random.PRNGKey() and jax.random.key()
+    """
+    if keras.backend.backend() == "jax":
+        import jax
+
+        return (
+            isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
+        )
+    else:
+        return False
+
+
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
     """
     Adds salt and pepper noise to the input image.
