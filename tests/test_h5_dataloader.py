@@ -10,7 +10,7 @@ import h5py
 import keras
 import numpy as np
 import pytest
-from keras import ops
+from keras import ops, random as keras_random
 
 from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
 from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS
@@ -474,6 +474,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
                 circle_axes=(0, 1),
                 return_centers=True,
                 with_batch_dim=False,
+                seed=keras_random.SeedGenerator(42),
             )
         ]
     )
