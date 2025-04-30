@@ -136,7 +136,7 @@ def scan_convert_2d(
         with resolutions specified by resolution parameter.
 
     """
-    image = ops.cast(image, dtype="float32")
+    assert "float" in ops.dtype(image), "Image must be float type"
 
     if coordinates is None:
         coordinates = compute_scan_convert_2d_coordinates(
@@ -262,7 +262,7 @@ def scan_convert_3d(
         rho, theta and phi ranges. Cartesian grid is computed based on polar grid
         with resolutions specified by resolution parameter.
     """
-    image = ops.cast(image, dtype="float32")
+    assert "float" in ops.dtype(image), "Image must be float type"
 
     if coordinates is None:
         coordinates = compute_scan_convert_3d_coordinates(
@@ -352,7 +352,12 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
         fill_value=fill_value,
     )
 
-    images_sc = ops.vectorized_map(map_coordinates_fn, images)
+    if order > 1:
+        # cpu bound
+        images_sc = ops.stack(list(map(map_coordinates_fn, images)))
+    else:
+        # gpu bound
+        images_sc = ops.vectorized_map(map_coordinates_fn, images)
 
     # ignore batch dim to get image shape
     image_sc_shape = ops.shape(images_sc)[1:]
