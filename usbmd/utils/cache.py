@@ -60,7 +60,7 @@ except Exception as e:
 
 def is_cache_disabled():
     """Check if caching is disabled via environment variable."""
-    val = os.environ.get("USBMD_DISABLE_CACHE", "0").lower()
+    val = os.environ.get("USBMD_DISABLE_CACHE", "0").strip().lower()
     return val in ("1", "true", "yes")
 
 
