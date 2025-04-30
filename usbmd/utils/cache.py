@@ -2,7 +2,8 @@
 
 >[!TIP]
 > Caching works best for functions that take long, but output small results. If loading of a large
-> cached tensor for instance take longer than the function itself, it is better to not cache the result.
+> cached tensor for instance take longer than the function itself,
+> it is better to not cache the result.
 
 >[!NOTE]
 > It can be useful to inherit custom classes from `usbmd.core.Object`, as
