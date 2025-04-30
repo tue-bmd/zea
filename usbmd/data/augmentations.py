@@ -51,7 +51,8 @@ class RandomCircleInclusion(layers.Layer):
             with_batch_dim (bool): Whether input has a batch dimension.
             return_centers (bool): Whether to return circle centers along with images.
             recovery_threshold (float): Threshold for considering a pixel as recovered.
-            randomize_location_across_batch (bool): If True, randomize circle location per batch element.
+            randomize_location_across_batch (bool): If True, randomize circle location
+                per batch element.
             seed (Any): Optional random seed for reproducibility.
             **kwargs: Additional keyword arguments for the parent Layer.
         """
@@ -72,6 +73,7 @@ class RandomCircleInclusion(layers.Layer):
         self._static_batch = None
         self._static_h = None
         self._static_w = None
+        self._static_flat_batch = 1
 
     def build(self, input_shape):
         """
@@ -113,8 +115,6 @@ class RandomCircleInclusion(layers.Layer):
         permuted_shape = [input_shape[ax] for ax in self._perm]
         if len(permuted_shape) > 2:
             self._static_flat_batch = int(np.prod(permuted_shape[:-2]))
-        else:
-            self._static_flat_batch = 1
         self._static_h = int(permuted_shape[-2])
         self._static_w = int(permuted_shape[-1])
         self._static_shape = tuple(permuted_shape)
@@ -196,7 +196,8 @@ class RandomCircleInclusion(layers.Layer):
             seed (Any, optional): Optional random seed for reproducibility.
 
         Returns:
-            Tensor or tuple: Augmented images, and optionally the circle centers if return_centers is True.
+            Tensor or tuple: Augmented images, and optionally the circle
+                centers if return_centers is True.
         """
         seed = seed if seed is not None else self.seed
 
@@ -205,7 +206,7 @@ class RandomCircleInclusion(layers.Layer):
 
             if self.randomize_location_across_batch:
                 seeds = split_seed(seed, batch_size)
-                if all([seed is seeds[0] for seed in seeds]):
+                if all(seed is seeds[0] for seed in seeds):
                     imgs, centers = ops.map(lambda arg: self._call(arg, seeds[0]), x)
                 else:
                     imgs, centers = ops.map(
@@ -287,7 +288,8 @@ class RandomCircleInclusion(layers.Layer):
             images (Tensor): Tensor of images (any shape, with circle axes as specified).
             centers (Tensor): Tensor of circle centers (matching batch size).
             recovery_threshold (float): Threshold for considering a pixel as recovered.
-            fill_value (float, optional): Optionally override fill_value for cases where image range has changed.
+            fill_value (float, optional): Optionally override fill_value for cases
+                where image range has changed.
 
         Returns:
             Tensor: Percentage recovered for each circle (shape: [num_circles]).
