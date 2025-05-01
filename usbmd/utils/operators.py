@@ -18,7 +18,7 @@ class LinearOperator(abc.ABC, Object):
     sigma = 0.0
 
     @abc.abstractmethod
-    def forward(self, data, **kwargs):
+    def forward(self, data, *args, **kwargs):
         """Implements the forward operator A: x -> y."""
         raise NotImplementedError
 
@@ -27,9 +27,8 @@ class LinearOperator(abc.ABC, Object):
         """String representation of the operator."""
         raise NotImplementedError
 
-    # pylint disable=unused-argument
     @classmethod
-    def _tree_unflatten(cls, aux, children):
+    def _tree_unflatten(cls, aux, children):  # pylint disable=unused-argument
         return cls(*children)
 
     def _tree_flatten(self):
