@@ -57,7 +57,7 @@ if __name__ == "__main__":
     mask = agent.sample()
     mask = ops.expand_dims(mask, axis=-1)
 
-    measurements = mask * batch
+    measurements = ops.where(mask, batch, -1.0)
 
     ## Diffusion Model
     presets = list(DiffusionModel.presets.keys())

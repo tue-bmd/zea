@@ -28,7 +28,7 @@ class LinearOperator(abc.ABC, Object):
         raise NotImplementedError
 
     @classmethod
-    def _tree_unflatten(cls, aux, children):  # pylint disable=unused-argument
+    def _tree_unflatten(cls, aux, children):  # pylint: disable=unused-argument
         return cls(*children)
 
     def _tree_flatten(self):
@@ -49,6 +49,7 @@ class InpaintingOperator(LinearOperator):
         super().__init__(**kwargs)
         self.min_val = min_val
 
+    # pylint: disable=arguments-differ
     def forward(self, data, mask):
         # return self.mask * data
         return ops.where(mask, data, self.min_val)
