@@ -215,11 +215,6 @@ class Dataset(H5FileHandleCache):
         return iter(self)
 
     @property
-    def n_files(self):
-        """Return number of files in dataset."""
-        return len(self.file_names)
-
-    @property
     def total_frames(self):
         """Return total number of frames in dataset."""
         return sum(self.get_file(file_path).num_frames for file_path in self.file_paths)
