@@ -1205,6 +1205,34 @@ def resample(x, n_samples, axis=-2, order=1):
     return resampled
 
 
+def fori_loop(lower, upper, body_fun, init_val, disable_jit=False):
+    """For loop allowing for non-jitted for loop with same signature as jax.
+
+    Args:
+        lower (int): Lower bound of the loop.
+        upper (int): Upper bound of the loop.
+        body_fun (function): Function to be executed in the loop.
+        init_val (any): Initial value for the loop.
+        disable_jit (bool, optional): If True, disables JIT compilation. Defaults to False.
+    """
+    if not disable_jit:
+        return ops.fori_loop(lower, upper, body_fun, init_val)
+
+    # Fallback to a non-jitted for loop
+    val = init_val
+    for i in range(lower, upper):
+        val = body_fun(i, val)
+    return val
+
+
+def L2(x):
+    """L2 norm of a tensor.
+
+    Implementation of L2 norm: https://mathworld.wolfram.com/L2-Norm.html
+    """
+    return ops.sqrt(ops.sum(x**2))
+
+
 if keras.backend.backend() == "tensorflow":
 
     def safe_vectorize(
