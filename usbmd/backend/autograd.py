@@ -127,6 +127,8 @@ class AutoGrad:
             )(variable, **kwargs)
             if has_aux:
                 out, aux = out
+        else:
+            raise ValueError(f"Unsupported backend: {self.backend}")
 
         if has_aux:
             return gradients, (out, aux)

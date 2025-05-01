@@ -481,6 +481,27 @@ class DiffusionModel(DeepGenerativeModel):
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
         **kwargs,
     ):
+        """Reverse diffusion process conditioned on some measurement.
+
+        Effectively performs diffusion posterior sampling p(x_0 | y).
+
+        Args:
+            measurements: Conditioning data.
+            initial_noise: Initial noise tensor.
+            diffusion_steps: Number of diffusion steps.
+            initial_samples: Optional initial samples to start from.
+            initial_step: Initial step to start from.
+            stochastic_sampling: Whether to use stochastic sampling (DDPM).
+            seed: Random seed generator.
+            verbose: Whether to show a progress bar.
+            track_progress_type: Type of progress tracking ("x_0" or "x_t").
+            **kwargs: Additional arguments. These are passed to the guidance
+                function and the operator. Examples are omega, mask, etc.
+
+        Returns:
+            Generated images.
+
+        """
         num_images, *input_shape = ops.shape(initial_noise)
 
         step_size, progbar = self.prepare_diffusion(
@@ -712,6 +733,8 @@ class DiffusionGuidance(abc.ABC, Object):
             diffusion_model: The diffusion model to use for guidance.
             disable_jit: Whether to disable JIT compilation.
         """
+        super().__init__()
+
         self.diffusion_model = diffusion_model
         self.operator = operator
         self.disable_jit = disable_jit
@@ -720,11 +743,6 @@ class DiffusionGuidance(abc.ABC, Object):
     @abc.abstractmethod
     def setup(self):
         """Setup the guidance function. Should be implemented by subclasses."""
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def compute_error(self, *args, **kwargs):
-        """Compute the guidance error. Should be implemented by subclasses."""
         raise NotImplementedError
 
     @abc.abstractmethod
