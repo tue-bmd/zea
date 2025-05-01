@@ -105,6 +105,7 @@ class AutoGrad:
             "jax",
         ], f"Unsupported backend: {self.backend}"
 
+        aux = None
         if self.backend == "torch":
             # We can use: https://pytorch.org/docs/stable/generated/torch.func.grad_and_value.html
             variable = variable.detach().requires_grad_(True)
