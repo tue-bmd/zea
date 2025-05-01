@@ -115,23 +115,32 @@ class File(h5py.File):
 
     @staticmethod
     def _prepare_indices(indices):
-        """Prepare the indices for loading data."""
+        """Prepare the indices for loading data from hdf5 files.
+        Options:
+            - str("all")
+            - int -> single frame
+            - list of ints -> indexes first axis (frames)
+            - list of list, ranges or slices -> indexes multiple axes
+        """
         # TODO: assert the typing of indices and test the options
         if isinstance(indices, str):
             if indices == "all":
-                return [slice(None)]
+                return slice(None)
             else:
-                raise ValueError(
-                    f"Invalid value for indices: {indices}. "
-                    "Expected 'all', int, or list of ints."
-                )
+                raise ValueError(f"Invalid value for indices: {indices}. ")
 
         if isinstance(indices, int):
-            return [indices]
+            return indices
 
-        processed_indices = list(
+        # Convert ranges to lists
+        processed_indices = [
             list(idx) if isinstance(idx, range) else idx for idx in indices
-        )
+        ]
+
+        # Check if items are list-like and cast to tuple (needed for hdf5)
+        if any(isinstance(idx, (list, tuple, slice)) for idx in processed_indices):
+            processed_indices = tuple(processed_indices)
+
         return processed_indices
 
     def load_scan(self, event=None):
@@ -170,7 +179,7 @@ class File(h5py.File):
         indices = self._prepare_indices(indices)
 
         if self._simple_index(key):
-            data = self[key][tuple(indices)]
+            data = self[key][indices]
             self.check_data(data, key)
         elif self.events_have_same_shape(key):
             raise NotImplementedError
