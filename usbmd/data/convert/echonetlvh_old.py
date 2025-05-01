@@ -5,26 +5,20 @@ Will segment the images and convert them to polar coordinates.
 
 import os
 
-os.environ["KERAS_BACKEND"] = "jax"
+os.environ["KERAS_BACKEND"] = "numpy"
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import subprocess
 from pathlib import Path
 import pandas as pd
 
 import numpy as np
 from tqdm import tqdm
 
-import jax.numpy as jnp
-from jax import jit, vmap, pmap
-from jax.scipy.ndimage import map_coordinates
-
-from usbmd.data.convert.echonet import H5Processor, segment
+from usbmd.data.convert.echonet import H5Processor, segment, cartesian_to_polar_matrix
 from usbmd.utils.io_lib import load_video
 from usbmd.utils.utils import translate
 from usbmd.data import generate_usbmd_dataset
-from usbmd import init_device
 
 
 def get_args():
@@ -41,14 +35,11 @@ def get_args():
         default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonetlvh_v2025",
     )
     parser.add_argument("--output_numpy", type=str, default=None)
-    parser.add_argument("--file_list", type=str, help="Optional path to list of files")
     parser.add_argument(
         "--use_hyperthreading", action="store_true", help="Enable hyperthreading"
     )
-    parser.add_argument(
-        "--batch", type=str, help="Specify which BatchX directory to process"
-    )
-    return parser.parse_args()
+    args = parser.parse_args()
+    return args
 
 
 def load_splits(source_dir):
@@ -68,63 +59,25 @@ def load_splits(source_dir):
     return splits
 
 
-def find_avi_file(source_dir, hashed_filename, batch=None):
-    """Find AVI file in the specified batch directory or any batch if not specified."""
-    if batch:
-        batch_dir = Path(source_dir) / batch
+def find_avi_file(source_dir, hashed_filename):
+    """Find AVI file in any of the batch directories"""
+    for batch_dir in Path(source_dir).glob("Batch*"):
         avi_path = batch_dir / f"{hashed_filename}.avi"
         if avi_path.exists():
             return avi_path
-        return None
-    else:
-        for batch_dir in Path(source_dir).glob("Batch*"):
-            avi_path = batch_dir / f"{hashed_filename}.avi"
-            if avi_path.exists():
-                return avi_path
-        return None
+    return None
 
 
 def manual_crop(sequence):
     """Manually crop sequence to remove zero padding for two known shapes."""
-
-    """
-    File shape counts:
-    Unique (Height, Width) pairs with counts and example HashedFileNames:
-    (300, 400.0) — 7 files
-    (384, 512.0) — 26 files
-    (480, 640.0) — 6 files
-    (576, 1024.0) — 1 files
-    (600, 800.0) — 3532 files --> TODO: there are at least 2 views here, we need to account for this
-    (708, 1016.0) — 1 files
-    (768, 1024.0) — 8417 files
-    (768, 1040.0) — 10 files    
-    """
-
     F, H, W = sequence.shape
-    # full scan, new size = [632, 868]
+    # Case 1:
     if (H, W) == (768, 1024):
         return sequence[:, 86:-50, 78:-78]
-    # full scan, new size = [490, 680]
+    # Case 2:
     elif (H, W) == (600, 800):
         return sequence[:, 70:-40, 60:-60]
-    # scan cropped ~15% on all sides, new size = [344, 452]
-    elif (H, W) == (384, 512):
-        return sequence[:, 20:-20, 30:-30]
-    # scan cropped ~15% on all sides, new size = [267, 356]
-    elif (H, W) == (300, 400):
-        return sequence[:, 18:-15, 22:-22]
-    # full scan, new size = [362, 514]
-    elif (H, W) == (480, 640):
-        return sequence[:, 90:-28, 85:-40]
-    # full scan, new size = [500, 684]
-    elif (H, W) == (576, 1024):
-        return sequence[:, 50:-26, 175:-165]
-    # almost full scan, cropped ~5% at top. new size = [588, 816]
-    elif (H, W) == (708, 1016):
-        return sequence[:, 70:-50, 100:-100]
-    # this one is quite whacky, likely an outlier, new size = [653, 865]
-    elif (H, W) == (768, 1040):
-        return sequence[:, 50:-65, 15:-160]
+    # Add more cases as needed
     else:
         raise ValueError(f"Unexpected image shape: {sequence.shape}")
 
@@ -206,139 +159,115 @@ def adaptive_accept_shape(tensor):
     return left_content > 0.1 and right_content > 0.1
 
 
-def rotate_coordinates(coords, angle_deg):
-    """Rotate (x, y) coordinates by a given angle in degrees."""
-    angle_rad = jnp.deg2rad(angle_deg)
-    rotation_matrix = jnp.array(
-        [
-            [jnp.cos(angle_rad), -jnp.sin(angle_rad)],
-            [jnp.sin(angle_rad), jnp.cos(angle_rad)],
-        ]
-    )
-    return coords @ rotation_matrix.T
-
-
-def cartesian_to_polar_matrix_jax(
-    cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="linear"
-):
-    rows, cols = cartesian_matrix.shape
-    center_x, center_y = tip
-
-    # Create cartesian coordinate grid
-    x = jnp.linspace(-center_x, cols - center_x - 1, cols)
-    y = jnp.linspace(-center_y, rows - center_y - 1, rows)
-    x_grid, y_grid = jnp.meshgrid(x, y)
-
-    # Flatten and rotate coordinates
-    coords = jnp.column_stack((x_grid.ravel(), y_grid.ravel()))
-
-    # Interpolation grid in polar coordinates
-    r = jnp.linspace(0, r_max, rows)
-    theta = jnp.linspace(-angle, angle, cols)
-    r_grid, theta_grid = jnp.meshgrid(r, theta)
-
-    x_polar = r_grid * jnp.cos(theta_grid)
-    y_polar = r_grid * jnp.sin(theta_grid)
-
-    # Inverse rotation to match original orientation
-    polar_coords = jnp.stack([x_polar.ravel(), y_polar.ravel()], axis=0)
-    polar_coords_rotated = rotate_coordinates(polar_coords.T, 90).T
-
-    # Shift to image indices
-    yq = polar_coords_rotated[1, :] + center_y
-    xq = polar_coords_rotated[0, :] + center_x
-    coords_for_interp = jnp.stack([yq, xq])
-
-    order = 0 if interpolation == "nearest" else 1
-    polar_values = map_coordinates(
-        cartesian_matrix,
-        coords_for_interp,
-        order=order,
-        mode="constant",
-        cval=0.0,
-    )
-
-    polar_matrix = jnp.rot90(polar_values.reshape(cols, rows), k=-1)
-    return polar_matrix
-
-
-def adaptive_cartesian_to_polar(cartesian_matrix, angle=jnp.deg2rad(42)):
-    """Converts cartesian image to polar coordinates adaptively using JAX.
+def adaptive_cartesian_to_polar(cartesian_matrix, angle):
+    """Converts cartesian image to polar coordinates adaptively.
 
     Args:
         cartesian_matrix (ndarray): Input image with shape (H, W)
     """
     H, W = cartesian_matrix.shape
-    # assume tip is at center top
     center_x = W // 2
-    tip_y = 0
 
-    # Use JAX-based polar conversion with adapted parameters
-    polar_jax = cartesian_to_polar_matrix_jax(
+    # Find tip of cone (assume it's at the top center)
+    tip_y = 0
+    for y in range(H // 4):
+        if np.any(cartesian_matrix[y, center_x - 10 : center_x + 10] > 0.1):
+            tip_y = y
+            break
+
+    # Use existing polar conversion with adapted parameters
+    return cartesian_to_polar_matrix(
         cartesian_matrix,
         tip=(center_x, tip_y),
         r_max=H,
         angle=angle,
+        interpolation="cubic",
     )
-    return polar_jax  # Convert back to numpy for downstream compatibility
 
 
 class LVHProcessor(H5Processor):
     """Modified H5Processor for EchoNet-LVH dataset."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.cart2pol_jit = jit(adaptive_cartesian_to_polar)
-        self.cart2pol_batched = vmap(self.cart2pol_jit)
-
     def get_split(self, hdf5_file: str, sequence):
+        """Override split determination to use predefined splits."""
+        # First check acceptance
+        # accepted = self.accept_shape(sequence[0])
+        # if not accepted:
+        #     return "rejected"
+
+        # Use predefined split from csv
         for split, files in self.splits.items():
             if hdf5_file in files:
                 return split
+
         raise UserWarning("Unknown split for file: " + hdf5_file)
 
     def __call__(self, avi_file):
-        print(avi_file)
+        """Process a single AVI file."""
         hdf5_file = avi_file.stem + ".hdf5"
-        sequence = jnp.array(load_video(avi_file))
+        sequence = load_video(avi_file)
 
+        # Normalize to [0,1]
         sequence = translate(sequence, self.range_from, self._process_range)
+
+        # Segment adaptively
+        # sequence = adaptive_segment(sequence)
         sequence = manual_crop(sequence)
 
         split = self.get_split(hdf5_file, sequence)
+        accepted = split != "rejected"
+
         out_h5 = self.path_out_h5 / split / hdf5_file
+        if self._to_numpy:
+            out_dir = self.path_out / split / avi_file.stem
+            out_dir.mkdir(parents=True, exist_ok=True)
 
-        polar_im_set = self.cart2pol_batched(sequence)
+        polar_im_set = []
+        for i, im in enumerate(sequence):
+            print(f"file: {avi_file}, frame: {i}")
+            if self._to_numpy:
+                np.save(out_dir / f"sc{str(i).zfill(3)}.npy", im)
 
+            if not accepted:
+                continue
+
+            polar_im = adaptive_cartesian_to_polar(im, angle=np.deg2rad(42))
+            polar_im = np.clip(polar_im, *self._process_range)
+            if self._to_numpy:
+                np.save(out_dir / f"polar{str(i).zfill(3)}.npy", polar_im)
+            polar_im_set.append(polar_im)
+
+        if accepted:
+            polar_im_set = np.stack(polar_im_set, axis=0)
+
+        # Create USBMD dataset
         usbmd_dataset = {
             "path": out_h5,
-            "image_sc": self.translate(np.array(sequence)),
+            "image_sc": self.translate(sequence),
             "probe_name": "generic",
             "description": "EchoNet-LVH dataset converted to USBMD format",
-            "image": self.translate(np.array(polar_im_set)),
         }
+        if accepted:
+            usbmd_dataset["image"] = self.translate(polar_im_set)
         return generate_usbmd_dataset(**usbmd_dataset)
 
 
 if __name__ == "__main__":
     args = get_args()
-    init_device([7])
-
     source_path = Path(args.source)
+
+    # Load splits from CSV
     splits = load_splits(source_path)
 
+    # Get list of all unique files from CSV
     files_to_process = []
     for split_files in splits.values():
         for hdf5_file in split_files:
-            avi_file = find_avi_file(
-                args.source, hdf5_file[:-5], batch=args.batch
-            )  # Pass batch arg
+            avi_file = find_avi_file(args.source, hdf5_file[:-5])  # Remove .hdf5
             if avi_file:
                 files_to_process.append(avi_file)
             else:
-                print(
-                    f"Warning: Could not find AVI file for {hdf5_file} in batch {args.batch if args.batch else 'any'}"
-                )
+                print(f"Warning: Could not find AVI file for {hdf5_file}")
 
     # List files that have already been processed
     files_done = []
