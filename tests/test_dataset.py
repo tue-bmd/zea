@@ -13,9 +13,6 @@ from usbmd.data.datasets import Dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup_config
 
-wd = Path(__file__).parent.parent
-sys.path.append(str(wd))
-
 
 @pytest.fixture
 def dataset_path(tmp_path):
@@ -68,10 +65,12 @@ def test_dataset_indexing(file_idx, frame_idx, dataset_path):
         ("beamformed_data", "image", "hdf5"),
     ],
 )
-def test_generate(dtype, to_dtype, filetype, tmp_path):
+def test_generate(dtype, to_dtype, filetype, tmp_path, dataset_path):
     """Test generate class"""
     config = setup_config("./tests/config_test.yaml")
     config.data.dtype = dtype
+    config.data.dataset_folder = dataset_path
+    config.data.file_path = "test0.hdf5"
 
     config.pipeline.operations = [
         {"name": "demodulate"},
