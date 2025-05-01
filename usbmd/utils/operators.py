@@ -24,7 +24,7 @@ class LinearOperator(abc.ABC, Object):
 
     @abc.abstractmethod
     def __str__(self):
-        """String repentation of the operator."""
+        """String representation of the operator."""
         raise NotImplementedError
 
     @classmethod
