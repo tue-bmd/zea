@@ -14,8 +14,9 @@ from usbmd.utils.utils import map_negative_indices
 
 
 def split_seed(seed, n):
-    """
-    Split seed into n seeds with support for keras SeedGenerator and jax.random.key.
+    """Split seed into n seeds.
+
+    With support for keras SeedGenerator and jax.random.key.
         - https://docs.jax.dev/en/latest/_autosummary/jax.random.split.html
         - https://keras.io/api/random/seed_generator/
     """
@@ -41,11 +42,9 @@ def split_seed(seed, n):
 
 
 def is_jax_prng_key(x):
-    """
-    To distinguish between jax.random.PRNGKey() and jax.random.key()
-    """
+    """Distinguish between jax.random.PRNGKey() and jax.random.key()"""
     if keras.backend.backend() == "jax":
-        import jax
+        import jax  # pylint: disable=import-outside-toplevel
 
         return (
             isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
