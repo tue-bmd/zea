@@ -1,6 +1,8 @@
 #!/bin/bash
 # Run this script on the linux server where the docker images are built.
-# Depends on: docker, apptainer, scp, awk and poetry
+# Depends on: git, docker, apptainer, scp, awk and poetry
+# Make sure `./post-release.sh` is executable: `chmod +x post-release.sh`
+# Also make sure to checkout the usbmd version you want to release before running this script.
 # Run this script using `./post-release.sh <USBMD_VERSION> <SNELLIUS_USER>`
 
 shopt -s expand_aliases
@@ -11,6 +13,14 @@ TMP_USBMD_IMAGE_SIF=/tmp/usbmd.sif
 SNELLIUS_ADDRESS=snellius.surf.nl
 PREPEND_ECHO="[post-release.sh]"
 alias precho='echo $PREPEND_ECHO'
+
+# Check if required commands are installed
+for cmd in git docker apptainer scp awk; do
+    if ! command -v "$cmd" &> /dev/null; then
+        precho "$cmd is not installed. Please install $cmd to proceed."
+        exit 1
+    fi
+done
 
 # Check if version argument is provided
 if [ -z "$1" ]; then
@@ -26,6 +36,20 @@ fi
 
 VERSION=$1
 VERSION_WITHOUT_V="${VERSION#v}"
+
+# Check if Git working directory is clean
+if [ -n "$(git status --porcelain)" ]; then
+    precho "Error: Git working directory is not clean. Please commit or stash your changes before running this script."
+    exit 1
+fi
+
+# Check if the current version in pyproject.toml matches the requested version
+CURRENT_TOML_VERSION=$(grep -E "^version\s*=" pyproject.toml | sed -E 's/version\s*=\s*"([^"]+)"/\1/')
+if [ "$CURRENT_TOML_VERSION" != "$VERSION_WITHOUT_V" ]; then
+    precho "Error: Requested version ($VERSION) does not match the version in pyproject.toml (v$CURRENT_TOML_VERSION)."
+    precho "Make sure you're on the correct branch/tag that matches the version you want to release."
+    exit 1
+fi
 
 # previous version
 PREVIOUS_VERSION=$(awk -F'"' '/__version__/ {print $2}' usbmd/__init__.py)
