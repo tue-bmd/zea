@@ -129,6 +129,8 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
         dirs (np.ndarray): Steering direction of each ray in azimuth, in units of
             radians (nrays, 2)
 
+    # nr = Number of radial pixels = len(r)
+
     Returns:
         grid (np.ndarray): Pixel grid of size (nr, nrays, 3) in
             Cartesian coordinates (x, y, z)
