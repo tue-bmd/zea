@@ -163,6 +163,11 @@ class File(h5py.File):
         else:
             return key
 
+    def to_iterator(self, key):
+        """Convert the data to an iterator over all frames."""
+        for frame_idx in range(self.num_frames):
+            yield self.load_data(key, frame_idx)
+
     def load_data(self, dtype, indices: str | int | List[int] = "all"):
         """Load data from the file.
 
