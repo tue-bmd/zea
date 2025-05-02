@@ -47,10 +47,6 @@ fi
 # Check if the current version in pyproject.toml matches the requested version
 CURRENT_TOML_VERSION=$(grep -E "^version\s*=" pyproject.toml | sed -E 's/version\s*=\s*"([^"]+)"/\1/' | tr -d '\r\n')
 
-# Debug output to see what's being compared with explicit length
-precho "Debug: Comparing '${VERSION_WITHOUT_V}' (${#VERSION_WITHOUT_V} chars) with '${CURRENT_TOML_VERSION}' (${#CURRENT_TOML_VERSION} chars)"
-
-# Strip all non-printing characters for a clean comparison
 if [ "$VERSION_WITHOUT_V" != "$CURRENT_TOML_VERSION" ]; then
     precho "Error: Requested version ($VERSION) does not match the version in pyproject.toml (v$CURRENT_TOML_VERSION)."
     precho "Make sure you're on the correct branch/tag that matches the version you want to release."
