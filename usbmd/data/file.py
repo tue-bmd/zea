@@ -260,7 +260,7 @@ class File(h5py.File):
         scan_parameters = cast_scan_parameters(scan_parameters)
         return scan_parameters
 
-    def get_scan_parameters(self, event=None):
+    def get_scan_parameters(self, event=None) -> dict:
         """Returns a dictionary of default parameters to initialize a scan
         object that works with the dataset.
 
@@ -280,7 +280,7 @@ class File(h5py.File):
             log.info(f"Could not find proper scan parameters in {self}.")
         return scan_parameters
 
-    def scan(self, event=None):
+    def scan(self, event=None) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
 
         Args:
@@ -296,7 +296,7 @@ class File(h5py.File):
         """
         return Scan.safe_initialize(**self.get_scan_parameters(event))
 
-    def get_probe_parameters(self, event=None):
+    def get_probe_parameters(self, event=None) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe
         object that comes with the dataset (stored inside datafile).
 
@@ -313,7 +313,7 @@ class File(h5py.File):
         }
         return probe_parameters
 
-    def probe(self, event=None):
+    def probe(self, event=None) -> "Probe":
         """Returns a Probe object initialized with the parameters from the file.
 
         Args:

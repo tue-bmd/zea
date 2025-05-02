@@ -856,8 +856,11 @@ class Pipeline:
         tensor_kwargs = {}
         for key, value in kwargs.items():
             try:
+                # TODO: maybe some logic of convert_to_tensor is needed
                 if isinstance(value, USBMDObject):
                     tensor_kwargs[key] = value.to_tensor()
+                elif value is None:
+                    tensor_kwargs[key] = None
                 else:
                     tensor_kwargs[key] = ops.convert_to_tensor(value)
             except Exception as e:
