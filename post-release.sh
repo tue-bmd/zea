@@ -1,13 +1,14 @@
 #!/bin/bash
 # Run this script on the linux server where the docker images are built.
 # Depends on: git, docker, apptainer, scp, awk and poetry
-# Make sure `./post-release.sh` is executable: `chmod +x post-release.sh`
-# Also make sure to checkout the usbmd version you want to release before running this script.
-# Run this script using `./post-release.sh <USBMD_VERSION> <SNELLIUS_USER>`
+# 1. Make sure `./post-release.sh` is executable: `chmod +x post-release.sh`
+# 2. Also make sure to checkout the usbmd version you want to release before running this script.
+# 3. Also make sure your git working directory is clean (no uncommitted changes).
+# 4. Run this script using `./post-release.sh <USBMD_VERSION> <SNELLIUS_USER>`
+#    e.g. `./post-release.sh v2.1.1 tstevens`
 
 shopt -s expand_aliases
 
-# Constants
 TMP_USBMD_IMAGE_TAR=/tmp/usbmd.tar
 TMP_USBMD_IMAGE_SIF=/tmp/usbmd.sif
 SNELLIUS_ADDRESS=snellius.surf.nl
@@ -44,8 +45,13 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 # Check if the current version in pyproject.toml matches the requested version
-CURRENT_TOML_VERSION=$(grep -E "^version\s*=" pyproject.toml | sed -E 's/version\s*=\s*"([^"]+)"/\1/')
-if [ "$CURRENT_TOML_VERSION" != "$VERSION_WITHOUT_V" ]; then
+CURRENT_TOML_VERSION=$(grep -E "^version\s*=" pyproject.toml | sed -E 's/version\s*=\s*"([^"]+)"/\1/' | tr -d '\r\n')
+
+# Debug output to see what's being compared with explicit length
+precho "Debug: Comparing '${VERSION_WITHOUT_V}' (${#VERSION_WITHOUT_V} chars) with '${CURRENT_TOML_VERSION}' (${#CURRENT_TOML_VERSION} chars)"
+
+# Strip all non-printing characters for a clean comparison
+if [ "$VERSION_WITHOUT_V" != "$CURRENT_TOML_VERSION" ]; then
     precho "Error: Requested version ($VERSION) does not match the version in pyproject.toml (v$CURRENT_TOML_VERSION)."
     precho "Make sure you're on the correct branch/tag that matches the version you want to release."
     exit 1
