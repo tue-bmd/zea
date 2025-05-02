@@ -48,7 +48,7 @@ fi
 PREVIOUS_VERSION=$(awk -F'"' '/__version__/ {print $2}' usbmd/__init__.py)
 PREVIOUS_VERSION="v$PREVIOUS_VERSION"
 
-# Update version in pyproject.toml
+## Update version in pyproject.toml
 sed -i "s/^version = .*/version = \"$VERSION_WITHOUT_V\"/" pyproject.toml
 
 # Update version in __init__.py
@@ -67,18 +67,18 @@ if [ -z "$1" ]; then
 fi
 SNELLIUS_USER=$1
 
-# Check if snellius is reachable
+## Check if snellius is reachable
 if ssh -q -o BatchMode=yes -o ConnectTimeout=5 "$SNELLIUS_USER@$SNELLIUS_ADDRESS" exit; then
     precho "Snellius is reachable with username '$SNELLIUS_USER'."
 else
     precho "Snellius is not reachable or authentication failed for username '$SNELLIUS_USER'."
 fi
 
-# Change directory to the script's location (so repo root)
+## Change directory to the script's location (so repo root)
 cd "$(dirname "$0")"
 precho "Current directory: $(pwd)"
 
-# Update poetry lockfile
+## Update poetry lockfile
 precho "Updating poetry lockfile..."
 if command -v poetry &> /dev/null; then
     # If poetry is installed, use it
@@ -88,22 +88,27 @@ else
     docker run --rm -v "$(pwd):/ultrasound-toolbox" --user "$(id -u):$(id -g)" usbmd/base:latest sudo /opt/poetry-venv/bin/python3 -m poetry lock --no-interaction
 fi
 
-# Build images
+## Build images
 precho "Building docker images..."
 docker build -f Dockerfile.base --build-arg BACKEND=all . -t usbmd/all:latest
 docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t usbmd/base:latest
 
-# Tag images
-docker tag usbmd/all:latest usbmd/all:$VERSION # tag latest image with version
-docker tag usbmd/base:latest usbmd/base:$VERSION # tag latest image with version
+## Tag images
+# tag latest image with version
+docker tag usbmd/all:latest usbmd/all:$VERSION
+# tag latest image with version
+docker tag usbmd/base:latest usbmd/base:$VERSION
 
-# Build private image
+## Build private image
 precho "Building private docker image..."
-docker build . -t usbmd/private:$VERSION
-docker tag usbmd/private:$VERSION usbmd/private:latest
+docker build -t "usbmd/private:$VERSION" .
+docker tag "usbmd/private:$VERSION" usbmd/private:latest
 
-# Update image on snellius
+## Update image on snellius
 precho "Updating images on snellius..."
-docker save -o $TMP_USBMD_IMAGE_TAR usbmd/private:latest # save docker image to file.
-apptainer build $TMP_USBMD_IMAGE_SIF docker-archive://$TMP_USBMD_IMAGE_TAR # convert docker image to apptainer image
-scp $TMP_USBMD_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/usbmd-private-$VERSION.sif # copy apptainer image to snellius
+# save docker image to file.
+docker save -o $TMP_USBMD_IMAGE_TAR usbmd/private:latest
+# convert docker image to apptainer image
+apptainer build $TMP_USBMD_IMAGE_SIF docker-archive://$TMP_USBMD_IMAGE_TAR
+# copy apptainer image to snellius
+scp $TMP_USBMD_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/usbmd-private-$VERSION.sif
