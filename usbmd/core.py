@@ -176,6 +176,9 @@ def object_to_tensor(obj: Object, except_tensors=None):
         except ValueError:
             continue
 
+        if value is None:
+            snapshot[key] = None
+
         if callable(value):
             continue
 
