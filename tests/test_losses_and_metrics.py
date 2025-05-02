@@ -1,4 +1,4 @@
-""" Module for testing loss functions """
+"""Module for testing loss functions"""
 
 import inspect
 
@@ -77,11 +77,12 @@ def test_metrics_registry():
 
 def test_sector_reweight_image():
     """Test sector reweight util function"""
+    # TODO: redo this test to not reimplement the function
     # arrange
     cube_of_ones = np.ones((3, 3, 3))
 
     # act
-    reweighted_cube = metrics._sector_reweight_image(cube_of_ones, 180)
+    reweighted_cube = metrics.sector_reweight_image(cube_of_ones, 180)
 
     # assert
     # depths are set at the 'center' of each pixel index

@@ -132,7 +132,7 @@ def image_sharpness(image):
     return np.mean(np.abs(np.gradient(image)))
 
 
-def _sector_reweight_image(image, sector_angle):
+def sector_reweight_image(image, sector_angle, axis):
     """
     Reweights image according to the amount of area each
     row of pixels will occupy if that image is scan converted
@@ -144,18 +144,19 @@ def _sector_reweight_image(image, sector_angle):
     See: https://en.wikipedia.org/wiki/Circular_sector
 
     Params:
-        image (tensor of shape (img_height, img_width, channels)): image to be re-weighted
+        image (ndarray): image to be re-weighted, any shape
         sector_angle (float | int): angle in degrees
+        axis (int): axis corresponding to the height/depth dimension.
+
     Returns:
-        reweighted_image (tensor of shape (img_height, img_width, channels)): image according
-        with pixels reweightedto area occupied by each pixel post-scan-conversion.
+        reweighted_image (ndarray): image with pixels reweighted to area occupied by each
+            pixel post-scan-conversion.
     """
-    assert len(image.shape) == 3, "image should have shape (height, width, channels)"
-    height = image.shape[0]
-    depths = (
-        np.arange(height) + 0.5
-    )  # add 0.5 to measure the center of the pixel as its depth
-    # Reweighting factor is set as the arc length of the sector:
-    # https://en.wikipedia.org/wiki/Circular_sector#Arc_length
+    height = image.shape[axis]
+    depths = np.arange(height) + 0.5  # center of the pixel as its depth
     reweighting_factors = (sector_angle / 360) * 2 * np.pi * depths
-    return reweighting_factors[:, None] * image
+    # Reshape reweighting_factors to broadcast along the specified axis
+    shape = [1] * image.ndim
+    shape[axis] = height
+    reweighting_factors = reweighting_factors.reshape(shape)
+    return reweighting_factors * image
