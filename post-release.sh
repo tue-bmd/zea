@@ -44,15 +44,6 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-# Check if the current version in pyproject.toml matches the requested version
-CURRENT_TOML_VERSION=$(grep -E "^version\s*=" pyproject.toml | sed -E 's/version\s*=\s*"([^"]+)"/\1/' | tr -d '\r\n')
-
-if [ "$VERSION_WITHOUT_V" != "$CURRENT_TOML_VERSION" ]; then
-    precho "Error: Requested version ($VERSION) does not match the version in pyproject.toml (v$CURRENT_TOML_VERSION)."
-    precho "Make sure you're on the correct branch/tag that matches the version you want to release."
-    exit 1
-fi
-
 # previous version
 PREVIOUS_VERSION=$(awk -F'"' '/__version__/ {print $2}' usbmd/__init__.py)
 PREVIOUS_VERSION="v$PREVIOUS_VERSION"
@@ -94,7 +85,7 @@ if command -v poetry &> /dev/null; then
     poetry lock --no-interaction
 else
     # If poetry is not installed, use docker
-    docker run --rm -v $(pwd):/ultrasound-toolbox --user "$(id -u):$(id -g)" usbmd/base:latest sudo /opt/poetry-venv/bin/python3 -m poetry lock --no-interaction
+    docker run --rm -v "$(pwd):/ultrasound-toolbox" --user "$(id -u):$(id -g)" usbmd/base:latest sudo /opt/poetry-venv/bin/python3 -m poetry lock --no-interaction
 fi
 
 # Build images
