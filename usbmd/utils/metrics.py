@@ -144,7 +144,7 @@ def sector_reweight_image(image, sector_angle, axis):
     See: https://en.wikipedia.org/wiki/Circular_sector
 
     Params:
-        image (ndarray): image to be re-weighted, any shape
+        image (ndarray or Tensor): image to be re-weighted, any shape
         sector_angle (float | int): angle in degrees
         axis (int): axis corresponding to the height/depth dimension.
 
@@ -158,5 +158,5 @@ def sector_reweight_image(image, sector_angle, axis):
     # Reshape reweighting_factors to broadcast along the specified axis
     shape = [1] * image.ndim
     shape[axis] = height
-    reweighting_factors = reweighting_factors.reshape(shape)
+    reweighting_factors = np.reshape(reweighting_factors, shape)
     return reweighting_factors * image
