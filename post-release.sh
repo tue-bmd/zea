@@ -6,6 +6,7 @@
 # 3. Also make sure your git working directory is clean (no uncommitted changes).
 # 4. Run this script using `./post-release.sh <USBMD_VERSION> <SNELLIUS_USER>`
 #    e.g. `./post-release.sh v2.1.1 tstevens`
+# 5. Sit back and relax, this might take a while...
 
 shopt -s expand_aliases
 
