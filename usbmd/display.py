@@ -156,6 +156,7 @@ def scan_convert_2d(
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
     order: int = 1,
+    **kwargs,
 ):
     """
     Perform scan conversion on a 2D ultrasound image from polar coordinates
@@ -196,7 +197,9 @@ def scan_convert_2d(
             image.shape, rho_range, theta_range, resolution, dtype=image.dtype
         )
 
-    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order)
+    images_sc = _interpolate_batch(
+        image, coordinates, fill_value, order=order, **kwargs
+    )
 
     # swap axis to match z, x
     images_sc = ops.swapaxes(images_sc, -1, -2)
@@ -388,7 +391,7 @@ def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value
         )
 
 
-def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
+def _interpolate_batch(images, coordinates, fill_value=0.0, order=1, vectorize=True):
     """Interpolate a batch of images."""
     image_shape = images.shape
     num_image_dims = coordinates.shape[0]
@@ -408,6 +411,8 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
     if order > 1:
         # cpu bound
         images_sc = ops.stack(list(map(map_coordinates_fn, images)))
+    elif not vectorize:
+        images_sc = ops.map(map_coordinates_fn, images)
     else:
         # gpu bound
         images_sc = ops.vectorized_map(map_coordinates_fn, images)
