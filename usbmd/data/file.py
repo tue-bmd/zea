@@ -96,17 +96,12 @@ class File(h5py.File):
         shapes = list(self.get_event_shapes(key))
         return len(np.unique(shapes)) == 1
 
-    def assert_key(self, key):
-        """Asserts key is in file."""
-        return assert_key(self, key)
-
     def _simple_index(self, key):
         return not self.has_events or "event" in key
 
     def shape(self, key):
         """Return shape of some key, or all events."""
-
-        self.assert_key(key)
+        key = self.format_key(key)
 
         if self._simple_index(key):
             return list(self[key].shape)
@@ -122,7 +117,6 @@ class File(h5py.File):
             - list of ints -> indexes first axis (frames)
             - list of list, ranges or slices -> indexes multiple axes
         """
-        # TODO: assert the typing of indices and test the options
         if isinstance(indices, str):
             if indices == "all":
                 return slice(None)
@@ -131,6 +125,14 @@ class File(h5py.File):
 
         if isinstance(indices, int):
             return indices
+
+        # TODO: add test for all options
+        assert all(
+            isinstance(idx, (list, tuple, int, slice, range)) for idx in indices
+        ), (
+            f"Invalid value for indices: {indices}. "
+            "Indices can be a 'all', int or a List[int, tuple, list, slice, range]."
+        )
 
         # Convert ranges to lists
         processed_indices = [
@@ -154,14 +156,24 @@ class File(h5py.File):
         if key in _DATA_TYPES:
             get_check(key)(data, with_batch_dim=None)
 
-    @staticmethod
-    def format_key(key):
+    def format_key(self, key):
         """Format the key to match the data type."""
         # TODO: support events
-        if "data/" not in key:
-            return "data/" + key
-        else:
+
+        # Return the key if it is in the file
+        if key in self.keys():
             return key
+
+        # Add 'data/' prefix if not present
+        if "data/" not in key:
+            key = "data/" + key
+
+        assert key in self.keys(), (
+            f"Key {key} or data/{key} not found in file. "
+            f"Available keys: {list(self.keys())}"
+        )
+
+        return key
 
     def to_iterator(self, key):
         """Convert the data to an iterator over all frames."""
@@ -180,7 +192,6 @@ class File(h5py.File):
                 indices.
         """
         key = self.format_key(dtype)
-        self.assert_key(key)
         indices = self._prepare_indices(indices)
 
         if self._simple_index(key):
