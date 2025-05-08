@@ -4,7 +4,6 @@ import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-import scipy
 
 from usbmd import log
 from usbmd.models.diffusion import DiffusionModel
