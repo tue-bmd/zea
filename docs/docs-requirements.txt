@@ -12,3 +12,6 @@ myst-parser
 
 # https://sphinx-themes.org/sample-sites/sphinx-rtd-theme/
 sphinx-rtd-theme
+
+# install stemmer package
+PyStemmer
