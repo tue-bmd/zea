@@ -114,10 +114,7 @@ def main():
 
     elif args.task == "generate":
         destination_folder = keep_trying(
-            lambda: input(
-                ">> Give destination folder path"
-                + " (if relative path, will be relative to the original dataset): "
-            )
+            lambda: input(">> Give absolute destination folder path")
         )
         to_dtype = keep_trying(
             lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),

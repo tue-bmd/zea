@@ -383,7 +383,6 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         initial_delay=INITIAL_RETRY_DELAY,
         retry_action=_h5_reopen_on_io_error,
     )
-    # TODO: move retry to File?
     def load(self, file: File, key: str, indices: tuple | str):
         """Extract data from hdf5 file.
         Args:
@@ -430,6 +429,13 @@ class H5Generator(Dataset, keras.utils.PyDataset):
 
     def __len__(self):
         return math.ceil(len(self.indices) / self.batch_size)
+
+    def __iter__(self):
+        """
+        Generator that yields images from the hdf5 files.
+        """
+        for idx in range(len(self)):
+            yield self[idx]
 
 
 class Dataloader(H5Generator):
@@ -482,13 +488,13 @@ class Dataloader(H5Generator):
             limit_n_samples (int, optional): take only a subset of samples.
                 Useful for debuging. Defaults to None.
             limit_n_frames (int, optional): limit the number of frames to load from each file. This
-                means n_frames per data file will be used. These will be the first frames in the file.
-                Defaults to None
+                means n_frames per data file will be used. These will be the first frames in
+                the file. Defaults to None
             resize_type (str, optional): resize type. Defaults to 'center_crop'.
                 can be 'center_crop', 'random_crop' or 'resize'.
             resize_axes (tuple, optional): axes to resize along. Should be of length 2
-                (height, width) as resizing function only supports 2D resizing / cropping. Should only
-                be set when your data is more than (h, w, c). Defaults to None.
+                (height, width) as resizing function only supports 2D resizing / cropping.
+                Should only be set when your data is more than (h, w, c). Defaults to None.
             resize_kwargs (dict, optional): kwargs for the resize function.
             image_range (tuple, optional): image range. Defaults to (0, 255).
                 will always translate from specified image range to normalization range.
