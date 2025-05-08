@@ -152,7 +152,7 @@ class Dataset(H5FileHandleCache):
         """
         super().__init__(**kwargs)
         self.path = Path(path)
-        self.key = File.format_key(key)
+        self.key = key
         if additional_axes_iter is None:
             additional_axes_iter = []
         self.additional_axes_iter = additional_axes_iter
