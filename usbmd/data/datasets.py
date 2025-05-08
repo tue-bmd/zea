@@ -20,6 +20,7 @@ from usbmd.utils import (
     log,
 )
 from usbmd.utils.io_lib import search_file_tree
+from usbmd.utils.utils import reduce_to_signature
 
 _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
@@ -193,7 +194,8 @@ class Dataset(H5FileHandleCache):
                 + "always multiple files."
             )
 
-        return cls(path, key=dtype)
+        reduced_params = reduce_to_signature(cls.__init__, kwargs)
+        return cls(path, key=dtype, **reduced_params)
 
     def __len__(self):
         """Returns the number of files in the dataset."""
