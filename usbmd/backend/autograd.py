@@ -8,7 +8,6 @@ import functools
 
 import jax
 import keras
-import numpy as np
 import tensorflow as tf
 import torch
 
