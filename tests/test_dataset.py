@@ -17,12 +17,16 @@ from usbmd.setup_usbmd import setup_config
 @pytest.fixture
 def dataset_path(tmp_path):
     """Fixture to create a temporary dataset"""
+    n_frames = 4
+
     for i in range(2):
         temp_file = tmp_path / f"test{i}.hdf5"
-        dummy_data = np.random.rand(10, 20, 30)
+        raw_data = np.random.rand(n_frames, 4, 10, 10, 1)
+        image = np.random.rand(n_frames, 20, 30)
         generate_usbmd_dataset(
             path=temp_file,
-            image=dummy_data,
+            raw_data=raw_data,
+            image=image,
             probe_name="dummy",
             description="dummy dataset",
         )

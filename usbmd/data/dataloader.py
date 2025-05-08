@@ -36,7 +36,6 @@ else:
         return func(*args, **kwargs)
 
 
-DEFAULT_IMAGE_RANGE = (0, 255)
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 MAX_RETRY_ATTEMPTS = 3
 INITIAL_RETRY_DELAY = 0.1
@@ -93,7 +92,7 @@ def _usbmd_datasets_json_decoder(dct):
 
 
 def generate_h5_indices(
-    file_names: List[str],
+    file_paths: List[str],
     file_shapes: list,
     n_frames: int,
     frame_index_stride: int,
@@ -110,7 +109,7 @@ def generate_h5_indices(
     is the length of the extracted dataset.
 
     Args:
-        file_names (list): list of file names.
+        file_paths (list): list of file paths.
         file_shapes (list): list of file shapes.
         n_frames (int): number of frames to load from each hdf5 file.
         frame_index_stride (int): interval between frames to load.
@@ -138,9 +137,9 @@ def generate_h5_indices(
     if not limit_n_frames:
         limit_n_frames = np.inf
 
-    assert len(file_names) == len(
+    assert len(file_paths) == len(
         file_shapes
-    ), "file_names and file_shapes must have same length"
+    ), "file_paths and file_shapes must have same length"
 
     if additional_axes_iter:
         # cannot contain initial_frame_axis
@@ -154,14 +153,14 @@ def generate_h5_indices(
     if sort_files:
         try:
             # this is like an np.argsort, returns the indices that would sort the array
-            indices_sorting_file_names = sorted(
-                range(len(file_names)),
-                key=lambda i: int(re.findall(r"\d+", file_names[i])[-2]),
+            indices_sorting_file_paths = sorted(
+                range(len(file_paths)),
+                key=lambda i: int(re.findall(r"\d+", file_paths[i])[-2]),
             )
-            file_names = [file_names[i] for i in indices_sorting_file_names]
-            file_shapes = [file_shapes[i] for i in indices_sorting_file_names]
+            file_paths = [file_paths[i] for i in indices_sorting_file_paths]
+            file_shapes = [file_shapes[i] for i in indices_sorting_file_paths]
         except:
-            log.warning("H5Generator: Could not sort file_names by number.")
+            log.warning("H5Generator: Could not sort file_paths by number.")
 
     # block size with stride included
     block_size = n_frames * frame_index_stride
@@ -187,7 +186,7 @@ def generate_h5_indices(
     indices = []
     skipped_files = 0
     for file, shape, axis_indices in zip(
-        file_names, file_shapes, list(axis_indices_files())
+        file_paths, file_shapes, list(axis_indices_files())
     ):
         # remove all the files that have empty list at initial_frame_axis
         # this can happen if the file is too small to fit a block
@@ -209,7 +208,7 @@ def generate_h5_indices(
     if skipped_files > 0:
         log.warning(
             f"H5Generator: Skipping {skipped_files} files with not enough frames "
-            f"which is about {skipped_files / len(file_names) * 100:.2f}% of the "
+            f"which is about {skipped_files / len(file_paths) * 100:.2f}% of the "
             f"dataset. This can be fine if you expect set `n_frames` and "
             "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
             f"least n_frames * frame_index_stride = {n_frames * frame_index_stride}. "
@@ -246,8 +245,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
 
     def __init__(
         self,
-        directory: str | List[str] = None,
-        file_names: List[str] = None,
+        file_paths: List[str] = None,
         file_shapes: List[tuple] = None,
         n_frames: int = 1,
         frame_index_stride: int = 1,
@@ -266,11 +264,12 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         as_tensor: bool = True,
         **kwargs,
     ):
-        assert (directory is not None) ^ (
-            file_names is not None and file_shapes is not None
-        ), "Either `directory` or `file_names` and `file_shapes` must be provided."
-
-        super().__init__(path=directory, key=key, **kwargs)
+        super().__init__(
+            key=key,
+            file_paths=file_paths,
+            file_shapes=file_shapes,
+            **kwargs,
+        )
 
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
@@ -323,7 +322,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.rng = np.random.default_rng(self.seed)
 
         self.indices = generate_h5_indices(
-            file_names=self.file_names,
+            file_paths=self.file_paths,
             file_shapes=self.file_shapes,
             n_frames=self.n_frames,
             frame_index_stride=self.frame_index_stride,
@@ -365,13 +364,11 @@ class H5Generator(Dataset, keras.utils.PyDataset):
             file = self.get_file(file_name)
             images.append(self.load(file, key, indices))
             filenames.append(
-                json_dumps(
-                    {
-                        "fullpath": file.filename,
-                        "filename": file.stem,
-                        "indices": indices,
-                    }
-                )
+                {
+                    "fullpath": file.filename,
+                    "filename": file.stem,
+                    "indices": indices,
+                }
             )
 
         if self.batch_size == 1:
@@ -441,33 +438,119 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         return math.ceil(len(self.indices) / self.batch_size)
 
 
-class H5Dataloader(H5Generator):
-    """Dataloader for h5 files. Can resize images and normalize them."""
+class Dataloader(H5Generator):
+    """Dataloader for h5 files. Can resize images and normalize them.
+
+    Does the following in order to load a dataset:
+    - Find all .hdf5 files in the directory
+    - Load the dataset from each file using the specified key
+    - Apply the following transformations in order (if specified):
+        - limit_n_samples
+        - add channel dim
+        - shuffle (if cached)
+        - resize
+        - batch
+        - normalize
+    """
+
+    # TODO: repeat, caching, augmentation, prefetch, shard, drop_remainder, etc.
+    # TODO: order arguments
 
     def __init__(
         self,
         resize_type: str = "center_crop",
         image_size: tuple | None = None,
-        image_range: tuple = DEFAULT_IMAGE_RANGE,
-        normalization_range: tuple = DEFAULT_NORMALIZATION_RANGE,
-        resize_kwargs: dict = None,
-        map_fns: list = None,
+        image_range: tuple | None = None,
+        normalization_range: tuple | None = None,
+        resize_axes: tuple | None = None,
+        resize_kwargs: dict | None = None,
+        map_fns: list | None = None,
         augmentation: callable = None,
         assert_image_range: bool = True,
         clip_image_range: bool = False,
-        backend=None,
-        device=None,
+        backend: str | None = None,
+        device: str | None = None,
         **kwargs,
     ):
+        """Initialize the dataloader.
+
+        Args:
+            directory (str or list): Directory where the data is located.
+                can also be a list of directories. Works recursively.
+            key (str): key of hdf5 dataset to grab data from.
+            batch_size (int, optional): batch the dataset. Defaults to None.
+            image_size (tuple, optional): resize images to image_size. Should
+                be of length two (height, width). Defaults to None.
+            shuffle (bool, optional): shuffle dataset.
+            seed (int, optional): random seed of shuffle.
+            limit_n_samples (int, optional): take only a subset of samples.
+                Useful for debuging. Defaults to None.
+            limit_n_frames (int, optional): limit the number of frames to load from each file. This
+                means n_frames per data file will be used. These will be the first frames in the file.
+                Defaults to None
+            resize_type (str, optional): resize type. Defaults to 'center_crop'.
+                can be 'center_crop', 'random_crop' or 'resize'.
+            resize_axes (tuple, optional): axes to resize along. Should be of length 2
+                (height, width) as resizing function only supports 2D resizing / cropping. Should only
+                be set when your data is more than (h, w, c). Defaults to None.
+            resize_kwargs (dict, optional): kwargs for the resize function.
+            image_range (tuple, optional): image range. Defaults to (0, 255).
+                will always translate from specified image range to normalization range.
+                if image_range is set to None, no normalization will be done. Note that it does not
+                clip to the image range, so values outside the image range will be outside the
+                normalization range!
+            normalization_range (tuple, optional): normalization range. Defaults to (0, 1).
+                See image_range for more info!
+            augmentation (keras.Sequential, optional): keras augmentation layer.
+            dataset_repetitions (int, optional): repeat dataset. Note that this happens
+                after sharding, so the shard will be repeated. Defaults to None.
+            n_frames (int, optional): number of frames to load from each hdf5 file.
+                Defaults to 1. These frames are stacked along the last axis (channel).
+            insert_frame_axis (bool, optional): if True, new dimension to stack
+                frames along will be created. Defaults to False. In that case
+                frames will be stacked along existing dimension (frame_axis).
+            frame_axis (int, optional): dimension to stack frames along.
+                Defaults to -1. If insert_frame_axis is True, this will be the
+                new dimension to stack frames along.
+            initial_frame_axis (int, optional): axis where in the files the frames are stored.
+                Defaults to 0.
+            frame_index_stride (int, optional): interval between frames to load.
+                Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
+            additional_axes_iter (tuple, optional): additional axes to iterate over
+                in the dataset. Defaults to None, in that case we only iterate over
+                the first axis (we assume those contain the frames).
+            overlapping_blocks (bool, optional): if True, blocks overlap by n_frames - 1.
+                Defaults to False. Has no effect if n_frames = 1.
+            return_filename (bool, optional): return file name with image. Defaults to False.
+            shard_index (int, optional): index which part of the dataset should be selected.
+                Can only be used if num_shards is specified. Defaults to None.
+                See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
+            num_shards (int, optional): this is used to divide the dataset into `num_shards` parts.
+                Sharding happens before all other operations. Defaults to 1.
+                See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
+            search_file_tree_kwargs (dict, optional): kwargs for search_file_tree.
+            drop_remainder (bool, optional): representing whether the last batch should be dropped
+                in the case it has fewer than batch_size elements. Defaults to False.
+            cache (bool or str, optional): cache dataset. If a string is provided, caching will
+                be done to disk with that filename. Defaults to False.
+            prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
+            wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
+                If True, will convert the dataset that returns backend tensors.
+        """
         super().__init__(**kwargs)
         self.resize_type = resize_type
         self.image_size = image_size
         self.image_range = image_range
+        if normalization_range is not None:
+            assert (
+                self.image_range is not None
+            ), "If normalization_range is set, image_range must be set as well."
         self.normalization_range = normalization_range
         self.resize_kwargs = resize_kwargs or {}
         self.resizer = Resizer(
             resize_type=resize_type,
             image_size=image_size,
+            resize_axes=resize_axes,
             seed=self.seed,
             **self.resize_kwargs,
         )
@@ -507,7 +590,7 @@ class H5Dataloader(H5Generator):
             images = self.backend.numpy.expand_dims(images, axis=-1)
 
         # Check if there are outliers in the image range
-        if self.assert_image_range:
+        if self.assert_image_range and self.image_range is not None:
             minval = self.backend.numpy.min(images)
             maxval = self.backend.numpy.max(images)
             assert self.image_range[0] <= minval and maxval <= self.image_range[1], (
@@ -516,11 +599,12 @@ class H5Dataloader(H5Generator):
             )
 
         # Clip to image range
-        if self.clip_image_range:
+        if self.clip_image_range and self.image_range is not None:
             images = self.backend.numpy.clip(images, *self.image_range[0])
 
         # Translate to normalization range
-        images = translate(images, self.image_range, self.normalization_range)
+        if self.normalization_range is not None:
+            images = translate(images, self.image_range, self.normalization_range)
 
         # resize
         if self.image_size is not None:
