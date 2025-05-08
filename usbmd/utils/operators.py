@@ -12,8 +12,19 @@ from usbmd.core import Object
 from usbmd.registry import operator_registry
 
 
-class LinearOperator(abc.ABC, Object):
-    """Linear operator class y = Ax + n."""
+class Operator(abc.ABC, Object):
+    """Operator base class.
+
+    Used to define a generatic operator for a specific task / forward model.
+
+    Examples are denoising, inpainting, deblurring, etc.
+
+    One can derive linear and non-linear operators from this class.
+
+    - Linear operators: y = Ax + n
+    - Non-linear operators: y = f(x) + n
+
+    """
 
     sigma = 0.0
 
@@ -29,8 +40,19 @@ class LinearOperator(abc.ABC, Object):
 
 
 @operator_registry(name="inpainting")
-class InpaintingOperator(LinearOperator):
-    """Inpainting operator A = I * M."""
+class InpaintingOperator(Operator):
+    """Inpainting operator class.
+
+    Inpainting task is a linear operator that masks the data with a mask.
+
+    Formally defined as:
+        y = Ax + n, where A = I * M
+
+    Note that this generally only is the case for min_val = 0.0.
+    Since we implement the operator using `ops.where`.
+
+    where I is the identity operator, M is the mask, and n is the noise.
+    """
 
     def __init__(self, min_val=0.0, **kwargs):
         """Initialize the inpainting operator.
