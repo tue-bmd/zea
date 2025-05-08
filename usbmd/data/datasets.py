@@ -7,6 +7,7 @@ ultrasound datasets.
 
 from collections import OrderedDict
 from pathlib import Path
+from typing import List
 
 import tqdm
 
@@ -93,11 +94,11 @@ def find_h5_files_from_directory(
             contains file_shapes. Defaults to None.
 
     Returns:
-        - file_names (list): List of file paths to the HDF5 files.
+        - file_paths (list): List of file paths to the HDF5 files.
         - file_shapes (list): List of shapes of the HDF5 datasets.
     """
 
-    file_names = []
+    file_paths = []
     file_shapes = []
 
     if search_file_tree_kwargs is None:
@@ -107,8 +108,8 @@ def find_h5_files_from_directory(
     if not isinstance(directory, list) and Path(directory).is_file():
         filename = directory
         file_shapes = [get_shape_hdf5_file(filename, key)]
-        file_names = [str(filename)]
-        return file_names, file_shapes
+        file_paths = [str(filename)]
+        return file_paths, file_shapes
 
     dataset_info = search_file_tree(
         directory,
@@ -118,7 +119,6 @@ def find_h5_files_from_directory(
     )
     file_paths = dataset_info["file_paths"]
     file_paths = [str(Path(directory) / file_path) for file_path in file_paths]
-    file_names.extend(file_paths)
     if "file_shapes" not in dataset_info:
         assert additional_axes_iter is None, (
             "additional_axes_iter is only supported if the dataset_info "
@@ -130,7 +130,7 @@ def find_h5_files_from_directory(
     else:
         file_shapes.extend(dataset_info["file_shapes"])
 
-    return file_names, file_shapes
+    return file_paths, file_shapes
 
 
 class Dataset(H5FileHandleCache):
@@ -138,10 +138,9 @@ class Dataset(H5FileHandleCache):
 
     def __init__(
         self,
-        path,
         key: str,
-        validate=True,
-        search_file_tree_kwargs: dict | None = None,
+        file_paths: List[str],
+        file_shapes: List[tuple],
         additional_axes_iter: tuple = None,
         **kwargs,
     ):
@@ -151,31 +150,48 @@ class Dataset(H5FileHandleCache):
             config (utils.config.Config): The config.data configuration object.
         """
         super().__init__(**kwargs)
-        self.path = Path(path)
         self.key = key
+        self.file_paths = file_paths
+        self.file_shapes = file_shapes
         if additional_axes_iter is None:
             additional_axes_iter = []
         self.additional_axes_iter = additional_axes_iter
 
-        file_names, file_shapes = find_h5_files_from_directory(
-            self.path,
-            self.key,
+        assert self.n_files > 0, f"No files in file_paths: {file_paths}"
+
+    @classmethod
+    def from_path(
+        cls,
+        path: str | list,
+        key: str,
+        search_file_tree_kwargs: dict | None = None,
+        additional_axes_iter: tuple = None,
+        validate=True,
+        **kwargs,
+    ):
+        """Creates a Dataset from a path.
+
+        Saves a dataset_info.yaml file in the directory with information about the dataset.
+        This file is used to load the dataset later on, which speeds up the initial loading
+        of the dataset for very large datasets.
+        """
+        path = Path(path)
+        file_paths, file_shapes = find_h5_files_from_directory(
+            path,
+            key,
             search_file_tree_kwargs,
-            self.additional_axes_iter,
+            additional_axes_iter,
         )
-        self.file_names = file_names
-        self.file_shapes = file_shapes
-        self.file_paths = [self.path / file_name for file_name in file_names]
-
-        assert self.n_files > 0, f"No files in directories:\n{self.path}"
-
+        assert len(file_paths) > 0, f"No files in directories:\n{path}"
+        instance = cls(
+            key=key,
+            file_paths=file_paths,
+            file_shapes=file_shapes,
+            **kwargs,
+        )
         if validate:
-            self.validate_dataset()
-
-    @property
-    def name(self):
-        """Returns the name of the dataset."""
-        return self.path.name
+            instance.validate_dataset(path)
+        return instance
 
     @classmethod
     def from_config(cls, dataset_folder, dtype, user=None, **kwargs):
@@ -188,7 +204,7 @@ class Dataset(H5FileHandleCache):
                 + "always multiple files."
             )
 
-        return cls(path, key=dtype)
+        return cls.from_path(path, key=dtype)
 
     def __len__(self):
         """Returns the number of files in the dataset."""
@@ -219,7 +235,7 @@ class Dataset(H5FileHandleCache):
         """Return total number of frames in dataset."""
         return sum(self.get_file(file_path).num_frames for file_path in self.file_paths)
 
-    def validate_dataset(self):
+    def validate_dataset(self, path):
         """Validate dataset contents.
         Furthermore, it checks if all files in the dataset have the same scan parameters.
 
@@ -230,10 +246,10 @@ class Dataset(H5FileHandleCache):
         If the validation file was not corrupted and validated, it prints a message and returns.
         """
 
-        validation_file_path = Path(self.path, _VALIDATED_FLAG_FILE)
+        validation_file_path = path / _VALIDATED_FLAG_FILE
         # for error logging
         validation_error_file_path = Path(
-            self.path, get_date_string() + "_validation_errors.log"
+            path, get_date_string() + "_validation_errors.log"
         )
         validation_error_log = []
 
@@ -285,7 +301,7 @@ class Dataset(H5FileHandleCache):
             return
 
         # Create the validated flag file
-        self._write_validation_file(num_frames_per_file)
+        self._write_validation_file(path, num_frames_per_file)
         log.info(
             f"{log.green('Dataset validated.')} Check {validation_file_path} for details."
         )
@@ -331,16 +347,16 @@ class Dataset(H5FileHandleCache):
             data_types = list(file["event_0"]["data"].keys())
         return data_types
 
-    def _write_validation_file(self, num_frames_per_file):
+    def _write_validation_file(self, path, num_frames_per_file):
         """Write validation file."""
-        validation_file_path = Path(self.path, _VALIDATED_FLAG_FILE)
+        validation_file_path = Path(path, _VALIDATED_FLAG_FILE)
 
         # Read data types from the first file
         data_types = self.get_data_types(self.file_paths[0])
 
         number_of_frames = sum(num_frames_per_file)
         with open(validation_file_path, "w", encoding="utf-8") as f:
-            f.write(f"Dataset: {self.path}\n")
+            f.write(f"Dataset: {path}\n")
             f.write(f"Validated on: {get_date_string()}\n")
             f.write(f"Number of files: {self.n_files}\n")
             f.write(f"Number of frames: {number_of_frames}\n")
