@@ -504,21 +504,20 @@ class H5Dataloader(H5Generator):
 
         # add channel dim
         if len(self.shape) != 3:
-            images = self.backend.expand_dims(images, axis=-1)
+            images = self.backend.numpy.expand_dims(images, axis=-1)
 
         # Check if there are outliers in the image range
         if self.assert_image_range:
-            assert (
-                self.image_range[0] <= images.min()
-                and images.max() <= self.image_range[1]
-            ), (
+            minval = self.backend.numpy.min(images)
+            maxval = self.backend.numpy.max(images)
+            assert self.image_range[0] <= minval and maxval <= self.image_range[1], (
                 f"Image range {self.image_range} is not in the range of the data "
-                f"{images.min()} - {images.max()}"
+                f"{minval} - {maxval}"
             )
 
         # Clip to image range
         if self.clip_image_range:
-            images = self.backend.clip(images, *self.image_range[0])
+            images = self.backend.numpy.clip(images, *self.image_range[0])
 
         # Translate to normalization range
         images = translate(images, self.image_range, self.normalization_range)
