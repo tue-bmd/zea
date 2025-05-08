@@ -123,6 +123,37 @@ class Object:
         """Convert the attributes in the object to keras tensors"""
         return object_to_tensor(self, except_tensors)
 
+    @classmethod
+    def _tree_unflatten(cls, aux, children):  # pylint: disable=unused-argument
+        if cls is not Object:
+            raise NotImplementedError(f"{cls.__name__} must implement _tree_unflatten.")
+        return cls(*children)
+
+    def _tree_flatten(self):
+        if type(self) is not Object:
+            raise NotImplementedError(
+                f"{type(self).__name__} must implement _tree_flatten."
+            )
+        return (), ()
+
+    @classmethod
+    def register_pytree_node(cls):
+        """Register the object as a PyTree node for JAX.
+        https://docs.jax.dev/en/latest/_autosummary/jax.tree_util.register_pytree_node.html
+        """
+        try:
+            from jax import tree_util  # pylint: disable=import-outside-toplevel
+        except ImportError:
+            raise ImportError(
+                "JAX is not installed. Please install JAX to use `register_pytree_node`."
+            )
+
+        tree_util.register_pytree_node(
+            cls,
+            cls._tree_flatten,
+            cls._tree_unflatten,
+        )
+
 
 def object_to_tensor(obj: Object, except_tensors=None):
     """Convert an object to a tensor"""
