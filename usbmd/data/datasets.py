@@ -142,7 +142,7 @@ class Dataset(H5FileHandleCache):
 
         Args:
             file_paths (str or list): (list of) path(s) to the folder(s) containing the HDF5 file(s)
-                or a single HDF5 file path.
+                or list of HDF5 file paths. Can be a mixed list of folders and files.
             key (str): The key to access the HDF5 dataset.
             additional_axes_iter (list, optional): additional axes to iterate over in the dataset.
                 Defaults to None.
