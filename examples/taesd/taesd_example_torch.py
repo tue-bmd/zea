@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
     n_imgs = 10
     dtype = torch.float32
-    val_dataset = Dataloader.from_path(
+    val_dataset = Dataloader(
         data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,

@@ -218,30 +218,6 @@ def search_file_tree(
                 }
 
     """
-    # Check if multiple directories were given, recursively aggregate.
-    if isinstance(directory, (tuple, list)):
-        dataset_infos = {
-            "file_paths": [],
-            "total_num_files": 0,
-            "file_lengths": [],
-            "file_shapes": [],
-            "total_num_frames": 0,
-        }
-        for dir_item in directory:
-            dataset_info = search_file_tree(
-                dir_item,
-                filetypes,
-                write,
-                dataset_info_filename,
-                hdf5_key_for_length,
-                redo,
-                parallel,
-                verbose,
-            )
-            for key, value in dataset_info.items():
-                dataset_infos[key] += value
-        return dataset_infos
-
     directory = Path(directory)
     if not directory.is_dir():
         raise ValueError(
@@ -255,15 +231,18 @@ def search_file_tree(
     )
 
     if (directory / dataset_info_filename).is_file() and not redo:
-        if verbose:
-            log.info(
-                "Using pregenerated dataset info file: "
-                f"{log.yellow(directory / dataset_info_filename)} ..."
-            )
-            log.info(f"...for reading file paths in {log.yellow(directory)}")
         with open(directory / dataset_info_filename, "r", encoding="utf-8") as file:
             dataset_info = yaml.load(file, Loader=yaml.FullLoader)
-        return dataset_info
+
+        # Check if the file_shapes key is present in the dataset_info, otherwise redo the search
+        if "file_shapes" in dataset_info:
+            if verbose:
+                log.info(
+                    "Using pregenerated dataset info file: "
+                    f"{log.yellow(directory / dataset_info_filename)} ..."
+                )
+                log.info(f"...for reading file paths in {log.yellow(directory)}")
+            return dataset_info
 
     if redo and verbose:
         log.info(
