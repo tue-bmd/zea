@@ -14,8 +14,9 @@ from usbmd.utils.utils import map_negative_indices
 
 
 def split_seed(seed, n):
-    """
-    Split seed into n seeds with support for keras SeedGenerator and jax.random.key.
+    """Split seed into n seeds.
+
+    With support for keras SeedGenerator and jax.random.key.
         - https://docs.jax.dev/en/latest/_autosummary/jax.random.split.html
         - https://keras.io/api/random/seed_generator/
     """
@@ -38,6 +39,18 @@ def split_seed(seed, n):
 
         # Just duplicate the SeedGenerator
         return [seed for _ in range(n)]
+
+
+def is_jax_prng_key(x):
+    """Distinguish between jax.random.PRNGKey() and jax.random.key()"""
+    if keras.backend.backend() == "jax":
+        import jax  # pylint: disable=import-outside-toplevel
+
+        return (
+            isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
+        )
+    else:
+        return False
 
 
 def add_salt_and_pepper_noise(image, salt_prob, pepper_prob=None, seed=None):
@@ -1205,6 +1218,30 @@ def resample(x, n_samples, axis=-2, order=1):
     resampled = ops.transpose(resampled, inv_perm)
 
     return resampled
+
+
+def linear_sum_assignment(cost):
+    """Greedy linear sum assignment.
+
+    Args:
+        cost (Tensor): Cost matrix of shape (n, n).
+    Returns:
+        Tuple: Row indices and column indices for assignment.
+
+    Returns row indices and column indices for assignment.
+    """
+    n = ops.shape(cost)[0]
+    assigned_true = ops.zeros((n,), dtype="bool")
+    row_ind = []
+    col_ind = []
+    for i in range(n):
+        mask = 1.0 - ops.cast(assigned_true, "float32")
+        masked_cost = cost[i] + (1.0 - mask) * 1e6
+        idx = int(ops.argmin(masked_cost))
+        row_ind.append(i)
+        col_ind.append(idx)
+        assigned_true = keras.ops.scatter_update(assigned_true, [[idx]], [True])
+    return np.array(row_ind), np.array(col_ind)
 
 
 if keras.backend.backend() == "tensorflow":
