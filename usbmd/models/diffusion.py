@@ -24,7 +24,7 @@ from usbmd.registry import (
     operator_registry,
 )
 from usbmd.tensor_ops import L2, fori_loop, split_seed
-from usbmd.utils.operators import LinearOperator
+from usbmd.utils.operators import Operator
 
 
 @model_registry(name="diffusion")
@@ -59,7 +59,7 @@ class DiffusionModel(DeepGenerativeModel):
             guidance: Guidance method to use. Can be a string, or dict with
                 "name" and "params" keys. Additionally, can be a DiffusionGuidance object.
             operator: Linear operator to use. Can be a string, or dict with
-                "name" and "params" keys. Additionally, can be a LinearOperator object.
+                "name" and "params" keys. Additionally, can be an `Operator` object.
 
             **kwargs: Additional arguments.
         """
@@ -107,7 +107,7 @@ class DiffusionModel(DeepGenerativeModel):
             if isinstance(operator, str):
                 operator_class = operator_registry[operator]
                 self.operator = operator_class()
-            elif isinstance(operator, LinearOperator):
+            elif isinstance(operator, Operator):
                 self.operator = operator
             elif isinstance(operator, dict):
                 operator_class = operator_registry[operator["name"]]
@@ -115,7 +115,7 @@ class DiffusionModel(DeepGenerativeModel):
             else:
                 raise ValueError(
                     f"Invalid operator provided, must be a string, dict or "
-                    f"LinearOperator object, got {operator}"
+                    f"Operator object, got {operator}"
                 )
 
         if guidance is not None:
