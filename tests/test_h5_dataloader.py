@@ -10,12 +10,12 @@ import h5py
 import keras
 import numpy as np
 import pytest
-from keras import ops, random as keras_random
+from keras import ops
 
-from usbmd.backend.tensorflow.dataloader import H5Generator, h5_dataset_from_directory
-from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS
-from usbmd.data.layers import Resizer
 from usbmd.data.augmentations import RandomCircleInclusion
+from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS, Dataloader, H5Generator
+from usbmd.data.file import File
+from usbmd.data.layers import Resizer
 
 CAMUS_DATASET_PATH = (
     "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/train/patient0001"
@@ -68,14 +68,14 @@ def camus_file():
     return CAMUS_FILE
 
 
-def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=None):
-    with h5py.File(filename, "r", locking=False) as f:
+def _get_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis, seed=None):
+    with h5py.File(file_path, "r", locking=False) as f:
         file_shapes = [f[dataset_name].shape]
 
-    file_names = [filename]
+    file_paths = [file_path]
     # Create a H5Generator instance
     generator = H5Generator(
-        file_names=file_names,
+        file_paths=file_paths,
         file_shapes=file_shapes,
         key=dataset_name,
         n_frames=n_frames,
@@ -86,7 +86,7 @@ def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=
 
 
 @pytest.mark.parametrize(
-    "filename, dataset_name, n_frames, insert_frame_axis",
+    "file_path, dataset_name, n_frames, insert_frame_axis",
     [
         ("dummy_hdf5", "data", 1, True),
         ("dummy_hdf5", "data", 3, True),
@@ -99,12 +99,12 @@ def _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, seed=
         ("camus_file", "data/image_sc", 15, False),
     ],
 )
-def test_h5_generator(filename, dataset_name, n_frames, insert_frame_axis, request):
+def test_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis, request):
     """Test the H5Generator class"""
 
-    filename = request.getfixturevalue(filename)
+    file_path = request.getfixturevalue(file_path)
 
-    generator = _get_h5_generator(filename, dataset_name, n_frames, insert_frame_axis)
+    generator = _get_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis)
 
     batch_shape = next(generator()).shape
     if insert_frame_axis:
@@ -139,7 +139,7 @@ def test_h5_generator_shuffle(dummy_hdf5):
         ("fake_directory", "data", 5, False, 3, 9 * 3),
     ],
 )
-def test_h5_dataset_from_directory(
+def test_dataloader(
     tmp_path,
     directory,
     key,
@@ -149,7 +149,7 @@ def test_h5_dataset_from_directory(
     total_samples,
     request,
 ):
-    """Test the h5_dataset_from_directory function.
+    """Test the Dataloader class.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
 
     if directory == "fake_directory":
@@ -160,20 +160,23 @@ def test_h5_dataset_from_directory(
                 f.create_dataset(key, data=data)
         expected_len_dataset = total_samples // num_files // n_frames * num_files
         directory = tmp_path
+        image_range = (0, 1)
     elif directory == "camus_dataset":
         directory = request.getfixturevalue(directory)
         expected_len_dataset = 18 // n_frames + 20 // n_frames
+        image_range = (-60, 0)
     else:
         raise ValueError("Invalid directory for testing")
 
-    dataset = h5_dataset_from_directory(
+    dataset = Dataloader.from_path(
         directory,
-        key,
+        key=key,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
         search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=True,
         seed=42,
+        image_range=image_range,
     )
     batch_shape = next(iter(dataset)).shape
 
@@ -219,13 +222,13 @@ def test_h5_dataset_from_directory(
 def test_h5_dataset_return_filename(
     directory, key, n_frames, insert_frame_axis, image_size, request
 ):
-    """Test the h5_dataset_from_directory function with return_filename=True."""
+    """Test the Dataloader class with return_filename=True."""
 
     directory = request.getfixturevalue(directory)
 
-    dataset = h5_dataset_from_directory(
+    dataset = Dataloader.from_path(
         directory,
-        key,
+        key=key,
         image_size=image_size,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
@@ -234,6 +237,7 @@ def test_h5_dataset_return_filename(
         seed=42,
         return_filename=True,
         resize_type="resize",
+        batch_size=1,
     )
 
     batch = next(iter(dataset))
@@ -241,10 +245,15 @@ def test_h5_dataset_return_filename(
     assert (
         len(batch) == 2
     ), "The batch should contain two elements: images and file names"
-    images, file_names = batch  # pylint: disable=unused-variable
-    assert file_names.dtype == "string", "The file names should be of type string"
-    file_name = file_names[()].numpy().decode("utf-8")
-    assert isinstance(file_name, str), "The returned file name is not a string"
+
+    _, file_dict = batch
+    # only one file_dict because batch_size=1
+    filename = file_dict["filename"]
+    assert isinstance(filename, str), "The filename should be a string"
+    fullpath = file_dict["fullpath"]
+    assert isinstance(fullpath, str), "The fullpath should be a string"
+    indices = file_dict["indices"]
+    File._prepare_indices(indices)  # will raise an error if indices are not valid
 
 
 @pytest.mark.parametrize(
@@ -291,13 +300,13 @@ def test_h5_dataset_return_filename(
     ],
 )
 def test_h5_dataset_resize_types(directory, key, image_size, resize_type, request):
-    """Test the h5_dataset_from_directory function with different resize types."""
+    """Test the Dataloader class with different resize types."""
 
     directory = request.getfixturevalue(directory)
 
-    dataset = h5_dataset_from_directory(
+    dataset = Dataloader.from_path(
         directory,
-        key,
+        key=key,
         image_size=image_size,
         n_frames=1,
         search_file_tree_kwargs={"parallel": False, "verbose": False},
@@ -305,6 +314,7 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, reques
         seed=42,
         return_filename=False,
         resize_type=resize_type,
+        assert_image_range=False,
     )
 
     images = next(iter(dataset))
@@ -379,11 +389,11 @@ def test_ndim_hdf5_dataset(
     resize_type,
     image_size,
 ):
-    """Test the h5_dataset_from_directory function with an n-dimensional HDF5 dataset."""
+    """Test the Dataloader class with an n-dimensional HDF5 dataset."""
 
-    dataset = h5_dataset_from_directory(
+    dataset = Dataloader.from_path(
         ndim_hdf5_dataset_path,
-        key,
+        key=key,
         image_size=image_size,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
@@ -397,6 +407,7 @@ def test_ndim_hdf5_dataset(
         return_filename=False,
         resize_type=resize_type,
         resize_axes=(-3, -1),
+        validate=False,  # ndim_hdf5_dataset_path is not a usbmd dataset
     )
 
     next(iter(dataset))
@@ -463,7 +474,7 @@ def test_h5_file_retry_count(
 
 @pytest.mark.usefixtures("dummy_hdf5")
 def test_random_circle_inclusion_augmentation(dummy_hdf5):
-    """Test RandomCircleInclusion augmentation with h5_dataset_from_directory."""
+    """Test RandomCircleInclusion augmentation with Dataloader."""
 
     # 2D case: use as dataloader augmentation (must not return centers)
     augmentation = keras.Sequential(
@@ -474,14 +485,14 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
                 circle_axes=(0, 1),
                 return_centers=True,
                 with_batch_dim=False,
-                seed=keras_random.SeedGenerator(42),
+                seed=keras.random.SeedGenerator(42),
             )
         ]
     )
 
-    dataset = h5_dataset_from_directory(
+    dataset = Dataloader.from_path(
         dummy_hdf5,
-        "data",
+        key="data",
         image_size=(28, 28),
         n_frames=1,
         search_file_tree_kwargs={"parallel": False, "verbose": False},
