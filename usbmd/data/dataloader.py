@@ -245,15 +245,14 @@ class H5Generator(Dataset, keras.utils.PyDataset):
 
     def __init__(
         self,
-        file_paths: List[str] = None,
-        file_shapes: List[tuple] = None,
+        file_paths: List[str],
+        key: str = "data/image",
         n_frames: int = 1,
         frame_index_stride: int = 1,
         frame_axis: int = -1,
         insert_frame_axis: bool = True,
         initial_frame_axis: int = 0,
         return_filename: bool = False,
-        key: str = "data/image",
         shuffle: bool = True,
         sort_files: bool = True,
         overlapping_blocks: bool = False,
@@ -264,12 +263,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         as_tensor: bool = True,
         **kwargs,
     ):
-        super().__init__(
-            key=key,
-            file_paths=file_paths,
-            file_shapes=file_shapes,
-            **kwargs,
-        )
+        super().__init__(file_paths, key, **kwargs)
 
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
@@ -458,6 +452,8 @@ class Dataloader(H5Generator):
 
     def __init__(
         self,
+        file_paths: List[str],
+        key: str = "data/image",
         resize_type: str = "center_crop",
         image_size: tuple | None = None,
         image_range: tuple | None = None,
@@ -475,9 +471,9 @@ class Dataloader(H5Generator):
         """Initialize the dataloader.
 
         Args:
-            directory (str or list): Directory where the data is located.
-                can also be a list of directories. Works recursively.
-            key (str): key of hdf5 dataset to grab data from.
+            file_paths (str or list): Path to the folder(s) containing the HDF5 files or a single
+                HDF5 file path.
+            key (str): The key to access the HDF5 dataset.
             batch_size (int, optional): batch the dataset. Defaults to None.
             image_size (tuple, optional): resize images to image_size. Should
                 be of length two (height, width). Defaults to None.
@@ -537,7 +533,7 @@ class Dataloader(H5Generator):
             wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
                 If True, will convert the dataset that returns backend tensors.
         """
-        super().__init__(**kwargs)
+        super().__init__(file_paths, key, **kwargs)
         self.resize_type = resize_type
         self.image_size = image_size
         self.image_range = image_range

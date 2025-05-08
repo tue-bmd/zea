@@ -26,7 +26,7 @@ if __name__ == "__main__":
     device = init_device()
 
     n_imgs = 9
-    val_dataset = Dataloader.from_path(
+    val_dataset = Dataloader(
         data_paths.data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,
