@@ -164,8 +164,8 @@ class Dataset(H5FileHandleCache):
         cls,
         path: str | list,
         key: str,
-        search_file_tree_kwargs: dict | None = None,
         additional_axes_iter: tuple = None,
+        search_file_tree_kwargs: dict | None = None,
         validate=True,
         **kwargs,
     ):
@@ -187,6 +187,7 @@ class Dataset(H5FileHandleCache):
             key=key,
             file_paths=file_paths,
             file_shapes=file_shapes,
+            additional_axes_iter=additional_axes_iter,
             **kwargs,
         )
         if validate:
