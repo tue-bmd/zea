@@ -270,7 +270,7 @@ from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 data_paths = set_data_paths()
 init_device()
 
-val_dataset = Dataloader.from_path(
+val_dataset = Dataloader(
     data_paths.data_root / "USBMD_datasets/CAMUS/val",
     key="data/image",
     batch_size=16,

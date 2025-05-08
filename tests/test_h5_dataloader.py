@@ -69,14 +69,10 @@ def camus_file():
 
 
 def _get_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis, seed=None):
-    with h5py.File(file_path, "r", locking=False) as f:
-        file_shapes = [f[dataset_name].shape]
-
     file_paths = [file_path]
     # Create a H5Generator instance
     generator = H5Generator(
         file_paths=file_paths,
-        file_shapes=file_shapes,
         key=dataset_name,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
@@ -168,7 +164,7 @@ def test_dataloader(
     else:
         raise ValueError("Invalid directory for testing")
 
-    dataset = Dataloader.from_path(
+    dataset = Dataloader(
         directory,
         key=key,
         n_frames=n_frames,
@@ -226,7 +222,7 @@ def test_h5_dataset_return_filename(
 
     directory = request.getfixturevalue(directory)
 
-    dataset = Dataloader.from_path(
+    dataset = Dataloader(
         directory,
         key=key,
         image_size=image_size,
@@ -304,7 +300,7 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, reques
 
     directory = request.getfixturevalue(directory)
 
-    dataset = Dataloader.from_path(
+    dataset = Dataloader(
         directory,
         key=key,
         image_size=image_size,
@@ -391,7 +387,7 @@ def test_ndim_hdf5_dataset(
 ):
     """Test the Dataloader class with an n-dimensional HDF5 dataset."""
 
-    dataset = Dataloader.from_path(
+    dataset = Dataloader(
         ndim_hdf5_dataset_path,
         key=key,
         image_size=image_size,
@@ -490,7 +486,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
         ]
     )
 
-    dataset = Dataloader.from_path(
+    dataset = Dataloader(
         dummy_hdf5,
         key="data",
         image_size=(28, 28),

@@ -75,60 +75,52 @@ class H5FileHandleCache:
         self._file_handle_cache = OrderedDict()
 
 
-def find_h5_files_from_directory(
-    directory: str | list,
-    key: str,
-    search_file_tree_kwargs: dict | None = None,
-    additional_axes_iter: tuple | None = None,
+def find_h5_files(
+    paths: str | list, key: str, search_file_tree_kwargs: dict | None = None
 ):
     """
     Find HDF5 files from a directory or list of directories and retrieve their shapes.
 
     Args:
-        directory (str or list): A single directory path, a list of directory paths,
+        paths (str or list): A single directory path, a list of directory paths,
             or a single HDF5 file path.
         key (str): The key to access the HDF5 dataset.
         search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
             search_file_tree function. Defaults to None.
-        additional_axes_iter (tuple, optional): Additional axes to iterate over if dataset_info
-            contains file_shapes. Defaults to None.
 
     Returns:
         - file_paths (list): List of file paths to the HDF5 files.
         - file_shapes (list): List of shapes of the HDF5 datasets.
     """
 
-    file_paths = []
-    file_shapes = []
-
     if search_file_tree_kwargs is None:
         search_file_tree_kwargs = {}
 
-    # 'directory' is actually just a single hdf5 file
-    if not isinstance(directory, list) and Path(directory).is_file():
-        filename = directory
-        file_shapes = [get_shape_hdf5_file(filename, key)]
-        file_paths = [str(filename)]
-        return file_paths, file_shapes
+    # Make sure paths is a list
+    if not isinstance(paths, (tuple, list)):
+        paths = [paths]
 
-    dataset_info = search_file_tree(
-        directory,
-        filetypes=FILE_TYPES,
-        hdf5_key_for_length=key,
-        **search_file_tree_kwargs,
-    )
-    file_paths = dataset_info["file_paths"]
-    file_paths = [str(Path(directory) / file_path) for file_path in file_paths]
-    if "file_shapes" not in dataset_info:
-        assert additional_axes_iter is None, (
-            "additional_axes_iter is only supported if the dataset_info "
-            "contains file_shapes. please remove dataset_info.yaml files and rerun."
+    paths = [Path(path) for path in paths]
+
+    file_shapes = []
+    file_paths = []
+    for path in paths:
+        if path.is_file():
+            # If the path is a file, get its shape directly
+            file_shapes.append(get_shape_hdf5_file(path, key))
+            file_paths.append(str(path))
+            continue
+
+        dataset_info = search_file_tree(
+            path,
+            filetypes=FILE_TYPES,
+            hdf5_key_for_length=key,
+            **search_file_tree_kwargs,
         )
-        # since in this case we only need to iterate over the first axis it is
-        # okay we only have the lengths of the files (and not the full shape)
-        file_shapes.extend([[length] for length in dataset_info["file_lengths"]])
-    else:
-        file_shapes.extend(dataset_info["file_shapes"])
+        file_shapes += dataset_info["file_shapes"]
+        file_paths += [
+            str(Path(path) / file_path) for file_path in dataset_info["file_paths"]
+        ]
 
     return file_paths, file_shapes
 
@@ -138,61 +130,57 @@ class Dataset(H5FileHandleCache):
 
     def __init__(
         self,
+        file_paths: List[str] | str,
         key: str,
-        file_paths: List[str],
-        file_shapes: List[tuple],
         additional_axes_iter: tuple = None,
+        search_file_tree_kwargs: dict | None = None,
+        validate: bool = True,
         **kwargs,
     ):
         """Initializes the Dataset.
 
         Args:
-            config (utils.config.Config): The config.data configuration object.
+            file_paths (str or list): (list of) path(s) to the folder(s) containing the HDF5 file(s)
+                or a single HDF5 file path.
+            key (str): The key to access the HDF5 dataset.
+            additional_axes_iter (list, optional): additional axes to iterate over in the dataset.
+                Defaults to None.
+            search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
+                search_file_tree function. These are only used when `file_paths` are directories.
+                Defaults to None.
+            validate (bool, optional): Whether to validate the dataset. Defaults to True.
         """
         super().__init__(**kwargs)
         self.key = key
-        self.file_paths = file_paths
-        self.file_shapes = file_shapes
         if additional_axes_iter is None:
             additional_axes_iter = []
         self.additional_axes_iter = additional_axes_iter
+        self.search_file_tree_kwargs = search_file_tree_kwargs
+        self.validate = validate
 
+        self.file_paths = file_paths
         assert self.n_files > 0, f"No files in file_paths: {file_paths}"
 
-    @classmethod
-    def from_path(
-        cls,
-        path: str | list,
-        key: str,
-        additional_axes_iter: tuple = None,
-        search_file_tree_kwargs: dict | None = None,
-        validate=True,
-        **kwargs,
-    ):
-        """Creates a Dataset from a path.
+    @property
+    def file_paths(self):
+        """Return file paths."""
+        return self._file_paths
 
-        Saves a dataset_info.yaml file in the directory with information about the dataset.
-        This file is used to load the dataset later on, which speeds up the initial loading
-        of the dataset for very large datasets.
-        """
-        path = Path(path)
-        file_paths, file_shapes = find_h5_files_from_directory(
-            path,
-            key,
-            search_file_tree_kwargs,
-            additional_axes_iter,
+    @file_paths.setter
+    def file_paths(self, file_paths):
+        """Set file paths."""
+        self._file_paths, self.file_shapes = find_h5_files(
+            file_paths, self.key, self.search_file_tree_kwargs
         )
-        assert len(file_paths) > 0, f"No files in directories:\n{path}"
-        instance = cls(
-            key=key,
-            file_paths=file_paths,
-            file_shapes=file_shapes,
-            additional_axes_iter=additional_axes_iter,
-            **kwargs,
-        )
-        if validate:
-            instance.validate_dataset(path)
-        return instance
+        assert self.n_files > 0, f"No files in file_paths: {file_paths}"
+
+        if self.validate:
+            if isinstance(file_paths, (str, Path)):
+                self.validate_dataset(Path(file_paths))
+            else:
+                log.warning(
+                    "Can only validate dataset if the file_paths is a single path."
+                )
 
     @classmethod
     def from_config(cls, dataset_folder, dtype, user=None, **kwargs):
@@ -205,7 +193,7 @@ class Dataset(H5FileHandleCache):
                 + "always multiple files."
             )
 
-        return cls.from_path(path, key=dtype)
+        return cls(path, key=dtype)
 
     def __len__(self):
         """Returns the number of files in the dataset."""
