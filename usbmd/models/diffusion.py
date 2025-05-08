@@ -58,7 +58,7 @@ class DiffusionModel(DeepGenerativeModel):
             name: Name of the model.
             guidance: Guidance method to use. Can be a string, or dict with
                 "name" and "params" keys. Additionally, can be a DiffusionGuidance object.
-            operator: Linear operator to use. Can be a string, or dict with
+            operator: Operator to use. Can be a string, or dict with
                 "name" and "params" keys. Additionally, can be a LinearOperator object.
 
             **kwargs: Additional arguments.
