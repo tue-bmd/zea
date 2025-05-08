@@ -27,13 +27,6 @@ class LinearOperator(abc.ABC, Object):
         """String representation of the operator."""
         raise NotImplementedError
 
-    @classmethod
-    def _tree_unflatten(cls, aux, children):  # pylint: disable=unused-argument
-        return cls(*children)
-
-    def _tree_flatten(self):
-        return (), ()
-
 
 @operator_registry(name="inpainting")
 class InpaintingOperator(LinearOperator):
