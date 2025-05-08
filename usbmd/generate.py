@@ -33,8 +33,8 @@ class GenerateDataSet:
     def __init__(
         self,
         config,
-        to_dtype: str = "image",
-        destination_folder: Union[None, str] = None,
+        to_dtype: str,
+        destination_folder: Union[None, str],
         retain_folder_structure: bool = True,
         filetype: str = "hdf5",
         overwrite: bool = False,
@@ -45,10 +45,7 @@ class GenerateDataSet:
             config (object): Config object.
             to_dtype (str): output dtype, default is `image`.
             destination_folder (bool, optional): Folder to which dataset should
-                be saved. Defaults to None. If None, new folder with dtype suffix
-                is created in the parent folder of the original dataset folder.
-                If relative path, folder will be created in parent folder
-                of source dataset.
+                be saved.
             retain_folder_structure (bool, optional): Whether to exactly copy
                 the folder structure of the original dataset or put all output
                 files in one folder. Defaults to True.
@@ -89,16 +86,7 @@ class GenerateDataSet:
             with_batch_dim=False,
         )
 
-        if destination_folder is None:
-            self.destination_folder = (
-                self.dataset.path.parent / f"{self.dataset.path.name}_{to_dtype}"
-            )
-        else:
-            self.destination_folder = Path(destination_folder)
-            if not self.destination_folder.is_absolute():
-                self.destination_folder = (
-                    self.dataset.path.parent / self.destination_folder
-                )
+        self.destination_folder = Path(destination_folder)
 
         if self.destination_folder.exists():
             if self.overwrite:
