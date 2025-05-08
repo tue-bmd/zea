@@ -57,9 +57,9 @@ class DiffusionModel(DeepGenerativeModel):
             beta_end: Final noise schedule value.
             name: Name of the model.
             guidance: Guidance method to use. Can be a string, or dict with
-                "name" and "params" keys. Additionally, can be a DiffusionGuidance object.
-            operator: Linear operator to use. Can be a string, or dict with
-                "name" and "params" keys. Additionally, can be an `Operator` object.
+                "name" and "params" keys. Additionally, can be a `DiffusionGuidance` object.
+            operator: Operator to use. Can be a string, or dict with
+                "name" and "params" keys. Additionally, can be a `Operator` object.
 
             **kwargs: Additional arguments.
         """
@@ -476,7 +476,7 @@ class DiffusionModel(DeepGenerativeModel):
         initial_samples=None,
         initial_step: int = 0,
         stochastic_sampling: bool = False,
-        seed: keras.random.SeedGenerator | None = None,
+        seed=None,
         verbose: bool = False,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
         **kwargs,
