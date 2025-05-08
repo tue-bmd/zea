@@ -130,7 +130,7 @@ class Object:
         return cls(*children)
 
     def _tree_flatten(self):
-        if type(self) is not Object:
+        if not isinstance(self, Object):
             raise NotImplementedError(
                 f"{type(self).__name__} must implement _tree_flatten."
             )
@@ -143,10 +143,10 @@ class Object:
         """
         try:
             from jax import tree_util  # pylint: disable=import-outside-toplevel
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "JAX is not installed. Please install JAX to use `register_pytree_node`."
-            )
+            ) from exc
 
         tree_util.register_pytree_node(
             cls,
