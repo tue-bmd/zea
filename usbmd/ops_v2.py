@@ -371,9 +371,6 @@ class Pipeline:
         self._call_pipeline = self.call
         self.name = name
 
-        # add functionality here
-        # operations = ...
-
         self._pipeline_layers = operations
 
         if jit_options not in ["pipeline", "ops", None]:
@@ -523,7 +520,7 @@ class Pipeline:
             if isinstance(operation, Pipeline):
                 operation.jit_options = value
             else:
-                if operation.jittable:
+                if operation.jittable and operation._jit_compile:
                     operation.set_jit(value == "ops")
 
     def jit(self):
@@ -1775,10 +1772,10 @@ class ScanConvert(Operation):
 
         data = kwargs[self.key]
 
-        if self.jittable:
+        if self._jit_compile and self.jittable:
             assert coordinates is not None, (
                 "coordinates must be provided to jit scan conversion."
-                "You can set ScanConvert(jittable=False) to disable jitting."
+                "You can set ScanConvert(jit_compile=False) to disable jitting."
             )
 
         data_out = scan_convert(
