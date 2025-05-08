@@ -444,3 +444,15 @@ def test_gaussian_filter(array, sigma, order, truncate):
 
     np.testing.assert_allclose(blurred_scipy, blurred_usbmd, rtol=1e-5, atol=1e-5)
     return blurred_usbmd
+
+
+def test_linear_sum_assignment_greedy():
+    """Test the custom greedy linear_sum_assignment function."""
+    from usbmd import tensor_ops
+
+    # Simple cost matrix: diagonal is optimal
+    cost = np.array([[1, 2, 3], [2, 1, 3], [3, 2, 1]], dtype=np.float32)
+    row_ind, col_ind = tensor_ops.linear_sum_assignment(cost)
+    # Should assign 0->0, 1->1, 2->2
+    assert np.all(row_ind == np.array([0, 1, 2]))
+    assert np.all(col_ind == np.array([0, 1, 2]))
