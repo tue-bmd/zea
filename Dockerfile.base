@@ -7,6 +7,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Prevent python from writing pyc files
 ENV PYTHONDONTWRITEBYTECODE=1
 
+# Use default "C" locale
+ENV LC_ALL=C
+
 # Set pip cache directory
 ENV PIP_CACHE_DIR=/tmp/pip_cache
 
