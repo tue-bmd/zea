@@ -76,17 +76,6 @@ def plot_distributions(
     log.success(f"Saved plot to {log.yellow(filename)}")
 
 
-def match_means_covariances(means, true_means, covs, true_covs):
-    """Match estimated means/covs to true ones using minimal distance assignment."""
-    cost = np.linalg.norm(means[:, None, :] - true_means[None, :, :], axis=-1)
-    row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost)
-    means_matched = means[row_ind]
-    true_means_matched = true_means[col_ind]
-    covs_matched = [covs[i] for i in row_ind]
-    true_covs_matched = [true_covs[j] for j in col_ind]
-    return means_matched, true_means_matched, covs_matched, true_covs_matched
-
-
 def test_gmm_fit_and_sample_2d(synthetic_2d_data, debug=False):
     """Test GMM fitting and sampling on synthetic 2D data."""
     data, true_means, true_covs = synthetic_2d_data
