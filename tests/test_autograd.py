@@ -16,11 +16,13 @@ OTHER_BACKENDS = ["torch", "tensorflow"]  # reference backends for equality chec
 
 @pytest.fixture
 def x_input():
+    """Generate random input tensor for testing."""
     return np.random.rand(5)
 
 
 @pytest.fixture
 def wrapper():
+    """Create an instance of AutoGrad wrapper."""
     return AutoGrad()
 
 
@@ -29,6 +31,8 @@ def wrapper():
     gt_backend=GT_BACKEND,
 )  # no numpy which has no autograd
 def test_gradient_simple(wrapper, x_input):
+    """Test the gradient of a simple function."""
+
     def f(x):
         return keras.ops.sum(x**2)
 
@@ -43,6 +47,8 @@ def test_gradient_simple(wrapper, x_input):
     gt_backend=GT_BACKEND,
 )  # no numpy, which has no autograd
 def test_gradient_and_value_with_aux(wrapper, x_input):
+    """Test the gradient and value of a function with auxiliary outputs."""
+
     def f(x):
         y = x**2
         test_var = y + 1
@@ -65,11 +71,13 @@ def test_gradient_and_value_with_aux(wrapper, x_input):
 
 
 def test_gradient_function_not_set(wrapper, x_input):
+    """Test that an error is raised when the function is not set."""
     with pytest.raises(ValueError):
         wrapper.gradient(x_input)
 
 
 def test_gradient_and_value_function_not_set(wrapper, x_input):
+    """Test that an error is raised when the function is not set."""
     with pytest.raises(ValueError):
         wrapper.gradient_and_value(x_input)
 
