@@ -15,17 +15,15 @@ from usbmd.setup_usbmd import setup_config
 
 
 @pytest.fixture
-def dataset_path(tmp_path):
+def image_dataset_path(tmp_path):
     """Fixture to create a temporary dataset"""
     n_frames = 4
 
     for i in range(2):
         temp_file = tmp_path / f"test{i}.hdf5"
-        raw_data = np.random.rand(n_frames, 4, 10, 10, 1)
         image = np.random.rand(n_frames, 20, 30)
         generate_usbmd_dataset(
             path=temp_file,
-            raw_data=raw_data,
             image=image,
             probe_name="dummy",
             description="dummy dataset",
@@ -43,9 +41,9 @@ def dataset_path(tmp_path):
         (0, np.array([1, 2, 3])),
     ],
 )
-def test_dataset_indexing(file_idx, frame_idx, dataset_path):
+def test_dataset_indexing(file_idx, frame_idx, image_dataset_path):
     """Test ui initialization function"""
-    config = {"data": {"dataset_folder": dataset_path, "dtype": "image"}}
+    config = {"data": {"dataset_folder": image_dataset_path, "dtype": "image"}}
     config = check_config(Config(config))
     dataset = Dataset.from_config(**config.data)
 

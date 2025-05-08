@@ -128,7 +128,8 @@ class File(h5py.File):
 
         # TODO: add test for all options
         assert all(
-            isinstance(idx, (list, tuple, int, slice, range)) for idx in indices
+            isinstance(idx, (list, tuple, int, slice, range, np.ndarray, np.integer))
+            for idx in indices
         ), (
             f"Invalid value for indices: {indices}. "
             "Indices can be a 'all', int or a List[int, tuple, list, slice, range]."
