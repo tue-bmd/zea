@@ -12,11 +12,12 @@ Install additional dependencies for documentation:
 pip install -r docs/docs-requirements.txt
 ```
 
-## 2. Build the HTML documentation (from the project root)
+## 2. Build the HTML documentation (from the docs directory)
 
 Use the Makefile targets to clean, build, and serve the documentation:
 
 ```sh
+cd docs
 make docs-build
 ```
 
