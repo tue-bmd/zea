@@ -476,7 +476,7 @@ class DiffusionModel(DeepGenerativeModel):
         initial_samples=None,
         initial_step: int = 0,
         stochastic_sampling: bool = False,
-        seed: keras.random.SeedGenerator | None = None,
+        seed = None,
         verbose: bool = False,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
         **kwargs,
