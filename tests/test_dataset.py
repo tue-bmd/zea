@@ -5,26 +5,18 @@ import pytest
 
 from usbmd.config import Config
 from usbmd.config.validation import check_config
-from usbmd.data import generate_usbmd_dataset
+from usbmd.data.data_format import generate_example_dataset
 from usbmd.data.datasets import Dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup_config
 
 
 @pytest.fixture
-def image_dataset_path(tmp_path):
+def dataset_path(tmp_path):
     """Fixture to create a temporary dataset"""
-    n_frames = 4
-
     for i in range(2):
         temp_file = tmp_path / f"test{i}.hdf5"
-        image = np.random.rand(n_frames, 20, 30)
-        generate_usbmd_dataset(
-            path=temp_file,
-            image=image,
-            probe_name="dummy",
-            description="dummy dataset",
-        )
+        generate_example_dataset(temp_file, add_optional_dtypes=True, n_frames=4)
 
     yield str(tmp_path)
 
@@ -38,9 +30,9 @@ def image_dataset_path(tmp_path):
         (0, np.array([1, 2, 3])),
     ],
 )
-def test_dataset_indexing(file_idx, frame_idx, image_dataset_path):
+def test_dataset_indexing(file_idx, frame_idx, dataset_path):
     """Test ui initialization function"""
-    config = {"data": {"dataset_folder": image_dataset_path, "dtype": "image"}}
+    config = {"data": {"dataset_folder": dataset_path, "dtype": "image"}}
     config = check_config(Config(config))
     dataset = Dataset.from_config(**config.data)
 
@@ -84,7 +76,7 @@ def test_generate(dtype, to_dtype, filetype, tmp_path, dataset_path):
 
     generator = GenerateDataSet(
         config,
-        destination_folder=tmp_path,
+        destination_folder=tmp_path / "dest",
         to_dtype=to_dtype,
         retain_folder_structure=True,
         filetype=filetype,
