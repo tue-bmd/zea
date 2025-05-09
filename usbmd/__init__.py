@@ -42,7 +42,7 @@ if "KERAS_BACKEND" not in os.environ:
 from .config import Config, load_config_from_yaml
 from .data.dataloader import Dataloader
 from .data.datasets import Dataset
-from .data.file import File
+from .data.file import File, load_usbmd_file
 from .datapaths import set_data_paths
 from .interface import Interface
 from .ops_v2 import Pipeline
