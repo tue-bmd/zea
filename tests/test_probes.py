@@ -31,6 +31,10 @@ def test_get_default_scan_paramters(probe_name):
 
     probe.get_parameters()
 
+    # Because generic probes do not have a geometry, we skip the test for them
+    if probe_name == "generic":
+        return
+
     assert isinstance(
         probe.probe_geometry, np.ndarray
     ), "Element positions must be a numpy array"
