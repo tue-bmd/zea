@@ -168,8 +168,8 @@ def generate_h5_indices(
 def _h5_reopen_on_io_error(
     dataloader_obj,
     indices,
-    exception,  # pylint: disable=unused-argument
     retry_count,
+    **kwargs, # pylint: disable=unused-argument
 ):
     """Reopen the file if an I/O error occurs.
     Also removes the file from the cache and try to close file.
@@ -304,7 +304,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         filenames = []
         for file_name, key, indices in indices_list:
             file = self.get_file(file_name)
-            images.append(self.load(file, key, indices))
+            images.append(self.load(file=file, key=key, indices=indices))
             filenames.append(
                 {
                     "fullpath": file.filename,

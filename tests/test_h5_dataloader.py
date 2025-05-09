@@ -16,6 +16,7 @@ from usbmd.data.augmentations import RandomCircleInclusion
 from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS, Dataloader, H5Generator
 from usbmd.data.file import File
 from usbmd.data.layers import Resizer
+from usbmd.utils import log
 
 CAMUS_DATASET_PATH = (
     "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/train/patient0001"
@@ -409,21 +410,6 @@ def test_ndim_hdf5_dataset(
     next(iter(dataset))
 
 
-def _mock_h5_file_handler(mock_error_count):
-    """Helper to simulate temporary file access issues."""
-    error_count = [0]  # Use list to allow modification in closure
-    original_h5py_file = h5py.File
-
-    def _handler(*args, **kwargs):
-        if error_count[0] < mock_error_count:
-            error_count[0] += 1
-            raise OSError("Temporary file access error")
-        # Call the original h5py.File instead of recursively calling the mock
-        return original_h5py_file(*args, **kwargs)
-
-    return _handler
-
-
 @pytest.mark.parametrize(
     "mock_error_count, expected_retries, should_succeed",
     [
@@ -445,12 +431,25 @@ def test_h5_file_retry_count(
 ):
     """Test that the H5Generator correctly counts retries when files are temporarily unavailable."""
 
-    # Setup mock for h5py.File that preserves the original implementation
-    mock_handler = _mock_h5_file_handler(mock_error_count)
-
     generator = _get_h5_generator(dummy_hdf5, "data", 1, True)
 
-    monkeypatch.setattr(h5py, "File", mock_handler)
+    # Store the original load method
+    original_load_data = File.load_data
+    error_count = [0]  # Use list to allow modification in closure
+
+    # Create a mock load function that fails a specified number of times
+    def mock_load_data(self, dtype, indices):
+        if error_count[0] < mock_error_count:
+            error_count[0] += 1
+            log.debug(
+                f"Simulating I/O error in File.load_data. Error count: {error_count[0]}"
+            )
+            raise OSError(f"Simulated file access error (attempt {error_count[0]})")
+        # After specified failures, call the original method
+        return original_load_data(self, dtype, indices)
+
+    # Apply the monkeypatch to the usbmd.file.File class method
+    monkeypatch.setattr(File, "load_data", mock_load_data)
 
     if should_succeed:
         # Should succeed after retries
