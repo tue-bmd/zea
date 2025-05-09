@@ -29,7 +29,21 @@ class DatasetElement:
     unit: str
 
 
-def generate_example_dataset(path, add_optional_fields=False):
+def generate_example_dataset(
+    path,
+    add_optional_fields=False,
+    add_optional_dtypes=False,
+    n_frames=2,
+    n_ax=2048,
+    n_el=128,
+    n_tx=11,
+    n_ch=1,
+    sound_speed=1540,
+    center_frequency=7e6,
+    sampling_frequency=40e6,
+    n_z=512,
+    n_x=512,
+):
     """Generates an example dataset that contains all the necessary fields.
     Note: This dataset does not contain actual data, but is filled with random
     values.
@@ -38,24 +52,14 @@ def generate_example_dataset(path, add_optional_fields=False):
         path (str): The path to write the dataset to.
         add_optional_fields (bool, optional): Whether to add optional fields to
             the dataset. Defaults to False.
-
-    Returns:
-        (h5py.File): The example dataset.
+        add_optional_dtypes (bool, optional): Whether to add optional dtypes to
+            the dataset. Defaults to False.
     """
-
-    n_ax = 2048
-    n_el = 128
-    n_tx = 11
-    n_ch = 1
-    n_frames = 2
-    sound_speed = 1540
-    center_frequency = 7e6
-    sampling_frequency = 40e6
 
     # creating some fake raw and image data
     raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
     # image data is in dB
-    image = np.ones((n_frames, 512, 512)) * -40
+    image = np.ones((n_frames, n_z, n_x)) * -40
 
     # creating some fake scan parameters
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
@@ -75,9 +79,21 @@ def generate_example_dataset(path, add_optional_fields=False):
         polar_angles = None
         azimuth_angles = None
 
+    if add_optional_dtypes:
+        aligned_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
+        envelope_data = np.ones((n_frames, n_z, n_x))
+        beamformed_data = np.ones((n_frames, n_z, n_x, n_ch))
+    else:
+        aligned_data = None
+        envelope_data = None
+        beamformed_data = None
+
     generate_usbmd_dataset(
         path,
         raw_data=raw_data,
+        aligned_data=aligned_data,
+        envelope_data=envelope_data,
+        beamformed_data=beamformed_data,
         image=image,
         probe_geometry=probe_geometry,
         sampling_frequency=sampling_frequency,
@@ -541,7 +557,7 @@ def generate_usbmd_dataset(
         envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
             shape (n_frames, n_z, n_x).
         beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
-            shape (n_frames, n_z, n_x).
+            shape (n_frames, n_z, n_x, n_ch).
         image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
         image_sc (np.ndarray): The scan converted ultrasound images to be saved
             of shape (n_frames, output_size_z, output_size_x).
@@ -585,9 +601,6 @@ def generate_usbmd_dataset(
             In that case all data should be lists with the same length (number of events).
             The data will be stored under event_i/data and event_i/scan for each event i.
             Instead of just a single data and scan group.
-
-    Returns:
-        (h5py.File): The example dataset.
     """
     # check if all args are lists
     if isinstance(probe_name, list):
