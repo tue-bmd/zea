@@ -257,6 +257,11 @@ def save_to_mp4(images, filename, fps=20):
     images = preprocess_for_saving(images)
 
     filename = str(filename)
+
+    parent_dir = Path(filename).parent
+    if not parent_dir.exists():
+        raise FileNotFoundError(f"Directory '{parent_dir}' does not exist.")
+
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     _, height, width, _ = images.shape
     video_writer = cv2.VideoWriter(filename, fourcc, fps, (width, height))
