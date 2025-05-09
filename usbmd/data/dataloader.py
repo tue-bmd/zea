@@ -417,10 +417,12 @@ class H5Generator(Dataset, keras.utils.PyDataset):
 
 
 class Dataloader(H5Generator):
-    """Dataloader for h5 files."""
+    """Dataloader for h5 files. Can handle video files with multiple frames and iterate over
+    arbitrary axes. Can do resizing, normalization and augmentation. Works nicely with any
+    usbmd dataset.
+    """
 
     # TODO: implement prefetch & shard
-    # TODO: sort the args and kwargs to be more readable
 
     def __init__(
         self,
@@ -456,6 +458,7 @@ class Dataloader(H5Generator):
         frame_axis: int = -1,
         backend: str | None = None,
         device: str | None = None,
+        validate: bool = True,
         **kwargs,
     ):
         """Initialize the dataloader.
@@ -521,6 +524,8 @@ class Dataloader(H5Generator):
                 new dimension to stack frames along.
             backend (str, optional): backend to use. Defaults to None.
             device (str, optional): device to use. Defaults to None.
+            validate (bool, optional): validate if the dataset adheres to the usbmd format.
+                Defaults to False.
         """
         super().__init__(
             file_paths,
