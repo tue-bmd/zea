@@ -235,6 +235,11 @@ class BackendEqualityCheck:
             # Check if the outputs from the individual test functions are equal
             errors = []
             for i, backend in enumerate(backends):
+                # if both outputs are None, skip the check
+                # i.e. we are just checking if it runs, not if produces the same output
+                if output[gt_backend] is None and output[backend] is None:
+                    continue
+
                 try:
                     np.testing.assert_almost_equal(
                         output[gt_backend],

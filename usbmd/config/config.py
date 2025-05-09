@@ -31,17 +31,17 @@ class Config(dict):
     values can be accessed as class attributes.
 
     Other features:
-    - `save_to_yaml` method to save the config to a yaml file.
-    - `copy` method to create a deep copy of the config.
-    - Normal dictionary methods such as `keys`, `values`, `items`, `pop`, `update`, `get`.
-    - Propose similar attribute names if a non-existing attribute is accessed.
-    - Freeze the config object to prevent new attributes from being added.
-    - Load config object from yaml file.
-    - Logs all accessed attributes such that you can check if all attributes have been accessed.
+        - `save_to_yaml` method to save the config to a yaml file.
+        - `copy` method to create a deep copy of the config.
+        - Normal dictionary methods such as `keys`, `values`, `items`, `pop`, `update`, `get`.
+        - Propose similar attribute names if a non-existing attribute is accessed.
+        - Freeze the config object to prevent new attributes from being added.
+        - Load config object from yaml file.
+        - Logs all accessed attributes such that you can check if all attributes have been accessed.
 
     We took inspiration from the following sources:
-    - [EasyDict](https://pypi.org/project/easydict/)
-    - [keras.utils.Config](https://keras.io/api/utils/experiment_management_utils/#config-class)
+        - `EasyDict <https://pypi.org/project/easydict/>`_ # pylint: disable=line-too-long
+        - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_ # pylint: disable=line-too-long
     But this implementation is superior :)
     """
 
@@ -420,11 +420,13 @@ class Config(dict):
 
 def load_config_from_yaml(path, loader=yaml.FullLoader):
     """Load config object from yaml file
+
     Args:
         path (str): path to yaml file.
         loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
             for custom objects, you might want to use yaml.UnsafeLoader.
-    Returns:
+
+    Returns:d
         Config: config object.
     """
     with open(Path(path), "r", encoding="utf-8") as file:
