@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from usbmd.data.file import File, validate_dataset
+from usbmd.data.file import File, validate_file
 from usbmd.utils import first_not_none_item, log
 from usbmd.utils.checks import _DATA_TYPES
 
@@ -137,7 +137,7 @@ def validate_input_data(
         or image_sc is not None
     ), f"At least one of the data types {_DATA_TYPES} must be specified."
 
-    # specific checks for each data type are done in validate_dataset
+    # specific checks for each data type are done in validate_file
 
 
 def _write_datasets(
@@ -723,5 +723,5 @@ def generate_usbmd_dataset(
                 **data_and_parameters,
             )
 
-    validate_dataset(path)
+    validate_file(path)
     log.info(f"USBMD dataset written to {log.yellow(path)}")

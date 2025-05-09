@@ -228,7 +228,7 @@ class File(h5py.File):
         """Reads the probe name from the data file and returns it."""
         assert "probe" in self.attrs, (
             "Probe name not found in file attributes. "
-            "Make sure you are using a USBMD dataset. "
+            "Make sure you are using a USBMD file. "
             f"Found attributes: {list(self.attrs)}"
         )
         probe_name = self.attrs["probe"]
@@ -239,7 +239,7 @@ class File(h5py.File):
         """Reads the description from the data file and returns it."""
         assert "description" in self.attrs, (
             "Description not found in file attributes. "
-            "Make sure you are using a USBMD dataset. "
+            "Make sure you are using a USBMD file. "
             f"Found attributes: {list(self.attrs)}"
         )
         description = self.attrs["description"]
@@ -247,7 +247,7 @@ class File(h5py.File):
 
     def get_parameters(self, event=None):
         """Returns a dictionary of parameters to initialize a scan
-        object that comes with the dataset (stored inside datafile).
+        object that comes with the file (stored inside datafile).
 
         If there are no scan parameters in the hdf5 file, returns
         an empty dictionary.
@@ -292,7 +292,7 @@ class File(h5py.File):
 
     def get_scan_parameters(self, event=None) -> dict:
         """Returns a dictionary of default parameters to initialize a scan
-        object that works with the dataset.
+        object that works with the file.
 
         Returns:
             dict: The default parameters (the keys are identical to the
@@ -328,7 +328,7 @@ class File(h5py.File):
 
     def get_probe_parameters(self, event=None) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe
-        object that comes with the dataset (stored inside datafile).
+        object that comes with the file (stored inside datafile).
 
         Returns:
             dict: The probe parameters.
@@ -403,6 +403,14 @@ class File(h5py.File):
         """
         with cls(path, mode="r") as file:
             return file.shape(key)
+
+    def validate(self):
+        """Validate the file structure.
+
+        Returns:
+            dict: A dictionary with the validation results.
+        """
+        return validate_file(file=self)
 
 
 def load_usbmd_file(
@@ -542,26 +550,26 @@ def print_hdf5_attrs(hdf5_obj, prefix=""):
             print_hdf5_attrs(hdf5_obj[key], new_prefix)
 
 
-def validate_dataset(path: str = None, dataset: File = None):
-    """Reads the hdf5 dataset at the given path and validates its structure.
+def validate_file(path: str = None, file: File = None):
+    """Reads the hdf5 file at the given path and validates its structure.
 
-    Provide either the path or the dataset, but not both.
+    Provide either the path or the file, but not both.
 
     Args:
-        path (str, pathlike): The path to the hdf5 dataset.
-        dataset (File): The hdf5 dataset.
+        path (str, pathlike): The path to the hdf5 file.
+        file (File): The hdf5 file.
 
     """
     assert (path is not None) ^ (
-        dataset is not None
-    ), "Provide either the path or the dataset, but not both."
+        file is not None
+    ), "Provide either the path or the file, but not both."
 
     if path is not None:
         path = Path(path)
-        with File(path, "r") as _dataset:
-            event_structure, num_events = _validate_hdf5_dataset(_dataset)
+        with File(path, "r") as _file:
+            event_structure, num_events = _validate_hdf5_file(_file)
     else:
-        event_structure, num_events = _validate_hdf5_dataset(dataset)
+        event_structure, num_events = _validate_hdf5_file(file)
 
     return {
         "status": "success",
@@ -570,145 +578,145 @@ def validate_dataset(path: str = None, dataset: File = None):
     }
 
 
-def _validate_hdf5_dataset(dataset: File):
-    all_keys = list(dataset.keys())
+def _validate_hdf5_file(file: File):
+    all_keys = list(file.keys())
 
-    if dataset.has_events:
+    if file.has_events:
         num_events = len(all_keys)
         for event_no in range(num_events):
-            assert_key(dataset, f"event_{event_no}")
-            _validate_structure(dataset[f"event_{event_no}"])
+            assert_key(file, f"event_{event_no}")
+            _validate_structure(file[f"event_{event_no}"])
     else:
         num_events = 0
-        _validate_structure(dataset)
+        _validate_structure(file)
 
-    return dataset.has_events, num_events
+    return file.has_events, num_events
 
 
-def _validate_structure(dataset: File):
+def _validate_structure(file: File):
     # Validate the root group
-    assert_key(dataset, "data")
+    assert_key(file, "data")
 
     # Check if there is only image data
     not_only_image_data = (
-        len([i for i in _NON_IMAGE_DATA_TYPES if i in dataset["data"].keys()]) > 0
+        len([i for i in _NON_IMAGE_DATA_TYPES if i in file["data"].keys()]) > 0
     )
 
     # Only check scan group if there is non-image data
     if not_only_image_data:
-        assert_key(dataset, "scan")
+        assert_key(file, "scan")
 
         for key in _REQUIRED_SCAN_KEYS:
-            assert_key(dataset["scan"], key)
+            assert_key(file["scan"], key)
 
     # validate the data group
-    for key in dataset["data"].keys():
+    for key in file["data"].keys():
         assert key in _DATA_TYPES, "The data group contains an unexpected key."
 
         # Validate data shape
-        data_shape = dataset["data"][key].shape
+        data_shape = file["data"][key].shape
         if key == "raw_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
-                data_shape[0] == dataset["scan"]["n_frames"][()]
+                data_shape[0] == file["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of raw_data."
             assert (
-                data_shape[1] == dataset["scan"]["n_tx"][()]
+                data_shape[1] == file["scan"]["n_tx"][()]
             ), "n_tx does not match the second dimension of raw_data."
             assert (
-                data_shape[2] == dataset["scan"]["n_ax"][()]
+                data_shape[2] == file["scan"]["n_ax"][()]
             ), "n_ax does not match the third dimension of raw_data."
             assert (
-                data_shape[3] == dataset["scan"]["n_el"][()]
+                data_shape[3] == file["scan"]["n_el"][()]
             ), "n_el does not match the fourth dimension of raw_data."
         elif key == "aligned_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
-                data_shape[0] == dataset["scan"]["n_frames"][()]
+                data_shape[0] == file["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of aligned_data."
         elif key == "beamformed_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
-                data_shape[0] == dataset["scan"]["n_frames"][()]
+                data_shape[0] == file["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of beamformed_data."
         elif key == "envelope_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
-                data_shape[0] == dataset["scan"]["n_frames"][()]
+                data_shape[0] == file["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of envelope_data."
         elif key == "image":
             get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
-                data_shape[0] == dataset["scan"]["n_frames"][()]
+                data_shape[0] == file["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of image."
         elif key == "image_sc":
             get_check(key)(shape=data_shape, with_batch_dim=True)
             assert (
-                data_shape[0] == dataset["scan"]["n_frames"][()]
+                data_shape[0] == file["scan"]["n_frames"][()]
             ), "n_frames does not match the first dimension of image_sc."
 
     if not_only_image_data:
-        _assert_scan_keys_present(dataset)
+        _assert_scan_keys_present(file)
 
-    _assert_unit_and_description_present(dataset)
+    _assert_unit_and_description_present(file)
 
 
-def _assert_scan_keys_present(dataset):
+def _assert_scan_keys_present(file: File):
     """Ensure that all required keys are present.
 
     Args:
-        dataset (h5py.File): The dataset instance to check.
+        file (h5py.File): The file instance to check.
 
     Raises:
         AssertionError: If a required key is missing or does not have the right shape.
     """
     for required_key in _REQUIRED_SCAN_KEYS:
         assert (
-            required_key in dataset["scan"].keys()
+            required_key in file["scan"].keys()
         ), f"The scan group does not contain the required key {required_key}."
 
     # Ensure that all keys have the correct shape
-    for key in dataset["scan"].keys():
-        if isinstance(dataset["scan"][key], h5py.Group):
-            shape_dataset = None
+    for key in file["scan"].keys():
+        if isinstance(file["scan"][key], h5py.Group):
+            shape_file = None
         else:
-            shape_dataset = dataset["scan"][key].shape
+            shape_file = file["scan"][key].shape
 
         if key == "probe_geometry":
-            correct_shape = (dataset["scan"]["n_el"][()], 3)
+            correct_shape = (file["scan"]["n_el"][()], 3)
 
         elif key == "t0_delays":
             correct_shape = (
-                dataset["scan"]["n_tx"][()],
-                dataset["scan"]["n_el"][()],
+                file["scan"]["n_tx"][()],
+                file["scan"]["n_el"][()],
             )
         elif key == "tx_apodizations":
             correct_shape = (
-                dataset["scan"]["n_tx"][()],
-                dataset["scan"]["n_el"][()],
+                file["scan"]["n_tx"][()],
+                file["scan"]["n_el"][()],
             )
 
         elif key == "focus_distances":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
+            correct_shape = (file["scan"]["n_tx"][()],)
 
         elif key == "polar_angles":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
+            correct_shape = (file["scan"]["n_tx"][()],)
 
         elif key == "azimuth_angles":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
+            correct_shape = (file["scan"]["n_tx"][()],)
 
         elif key == "initial_times":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
+            correct_shape = (file["scan"]["n_tx"][()],)
 
         elif key == "time_to_next_transmit":
             correct_shape = (
-                dataset["scan"]["n_frames"][()],
-                dataset["scan"]["n_tx"][()],
+                file["scan"]["n_frames"][()],
+                file["scan"]["n_tx"][()],
             )
         elif key == "tgc_gain_curve":
-            correct_shape = (dataset["scan"]["n_ax"][()],)
+            correct_shape = (file["scan"]["n_ax"][()],)
         elif key == "tx_waveform_indices":
-            correct_shape = (dataset["scan"]["n_tx"][()],)
+            correct_shape = (file["scan"]["n_tx"][()],)
         elif key in ("waveforms_one_way", "waveforms_two_way"):
             correct_shape = None
 
@@ -726,28 +734,27 @@ def _assert_scan_keys_present(dataset):
             "lens_correction",
         ):
             correct_shape = ()
-            shape_dataset = dataset["scan"][key].shape
+            shape_file = file["scan"][key].shape
 
         else:
             correct_shape = None
             log.warning(f"No validation has been defined for {log.orange(key)}.")
 
         if correct_shape is not None:
-            assert shape_dataset == correct_shape, (
+            assert shape_file == correct_shape, (
                 f"`{key}` does not have the correct shape. "
-                f"Expected shape: {correct_shape}, got shape: {shape_dataset}"
+                f"Expected shape: {correct_shape}, got shape: {shape_file}"
             )
 
 
 def _assert_unit_and_description_present(hdf5_file, _prefix=""):
-    """Checks that all datasets have a unit and description attribute.
+    """Checks that all keys have a unit and description attribute.
 
     Args:
         hdf5_file (h5py.File): The hdf5 file to check.
 
     Raises:
-        AssertionError: If a dataset does not have a unit or description
-            attribute.
+        AssertionError: If a file does not have a unit or description attribute.
     """
     for key in hdf5_file.keys():
         if isinstance(hdf5_file[key], h5py.Group):
@@ -757,7 +764,7 @@ def _assert_unit_and_description_present(hdf5_file, _prefix=""):
         else:
             assert (
                 "unit" in hdf5_file[key].attrs.keys()
-            ), f"The dataset {_prefix}/{key} does not have a unit attribute."
+            ), f"The file {_prefix}/{key} does not have a unit attribute."
             assert (
                 "description" in hdf5_file[key].attrs.keys()
-            ), f"The dataset {_prefix}/{key} does not have a description attribute."
+            ), f"The file {_prefix}/{key} does not have a description attribute."

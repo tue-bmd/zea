@@ -11,7 +11,7 @@ from usbmd.data.data_format import (
     generate_example_dataset,
     generate_usbmd_dataset,
 )
-from usbmd.data.file import File, validate_dataset
+from usbmd.data.file import File, validate_file
 from usbmd.utils.checks import _REQUIRED_SCAN_KEYS
 
 n_frames = 2
@@ -54,10 +54,10 @@ def example_dataset_path(tmp_hdf5_path):
 
 def test_example_dataset(example_dataset_path):
     """Tests the generate_example_dataset function by calling it and then
-    validating it using the validate_dataset function.
+    validating it using the validate_file function.
     """
     # Validate the dataset
-    validate_dataset(example_dataset_path)
+    validate_file(example_dataset_path)
 
     # Check if the dataset can be loaded correctly
     with File(example_dataset_path) as dataset:
