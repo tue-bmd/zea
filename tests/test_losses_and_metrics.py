@@ -82,7 +82,7 @@ def test_sector_reweight_image():
     cube_of_ones = np.ones((3, 3, 3))
 
     # act
-    reweighted_cube = metrics.sector_reweight_image(cube_of_ones, 180, axis=1)
+    reweighted_cube = metrics._sector_reweight_image(cube_of_ones, 180, axis=1)
 
     # assert
     # depths are set at the 'center' of each pixel index
