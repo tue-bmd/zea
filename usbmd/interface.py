@@ -21,7 +21,8 @@ from usbmd.core import DataTypes
 from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
-from usbmd.ops_v2 import Pipeline
+from usbmd.ops import Pipeline
+from usbmd.probes import get_probe
 from usbmd.scan import Scan
 from usbmd.utils import keep_trying, log, save_to_gif, save_to_mp4
 from usbmd.utils.io_lib import (
