@@ -170,7 +170,6 @@ data_schema = Schema(
     {
         "dtype": Or(*_DATA_TYPES),
         "dataset_folder": str,
-        Optional("dataset_name", default="usbmd"): str,
         Optional("resolution", default=None): Or(None, positive_float),
         Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
         Optional("file_path", default=None): Or(None, str, Path),
