@@ -11,7 +11,7 @@ from typing import List
 import h5py
 import numpy as np
 
-from usbmd.probes import get_probe
+from usbmd.probes import Probe
 from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import log
 from usbmd.utils.checks import (
@@ -22,7 +22,7 @@ from usbmd.utils.checks import (
 )
 
 
-def get_shape_hdf5_file(filepath, key):
+def get_shape_hdf5_file(filepath, key) -> tuple:
     """Retrieve the shape of some key in a hdf5 file."""
     with File(filepath, mode="r") as f:
         return f.shape(key)
@@ -100,12 +100,12 @@ class File(h5py.File):
     def _simple_index(self, key):
         return not self.has_events or "event" in key
 
-    def shape(self, key):
+    def shape(self, key) -> tuple:
         """Return shape of some key, or all events."""
         key = self.format_key(key)
 
         if self._simple_index(key):
-            return list(self[key].shape)
+            return self[key].shape
         else:
             raise NotImplementedError
 
@@ -341,7 +341,7 @@ class File(h5py.File):
         """
         file_scan_parameters = self.get_parameters(event)
 
-        sig = inspect.signature(get_probe("generic").__init__)
+        sig = inspect.signature(Probe.from_name("generic").__init__)
         probe_parameters = {
             key: file_scan_parameters[key]
             for key in sig.parameters
@@ -349,7 +349,7 @@ class File(h5py.File):
         }
         return probe_parameters
 
-    def probe(self, event=None) -> "Probe":
+    def probe(self, event=None) -> Probe:
         """Returns a Probe object initialized with the parameters from the file.
 
         Args:
@@ -365,9 +365,9 @@ class File(h5py.File):
         """
         probe_parameters = self.get_probe_parameters(event)
         if self.probe_name == "generic":
-            return get_probe(self.probe_name, **probe_parameters)
+            return Probe.from_name(self.probe_name, **probe_parameters)
         else:
-            probe = get_probe(self.probe_name)
+            probe = Probe.from_name(self.probe_name)
 
             probe_geometry = probe_parameters.get("probe_geometry", None)
             if not np.allclose(probe_geometry, probe.probe_geometry):
