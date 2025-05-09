@@ -82,22 +82,6 @@ usbmd.ops module
    :undoc-members:
    :show-inheritance:
 
-usbmd.ops\_v2 module
---------------------
-
-.. automodule:: usbmd.ops_v2
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-usbmd.postprocessing module
----------------------------
-
-.. automodule:: usbmd.postprocessing
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 usbmd.probes module
 -------------------
 
