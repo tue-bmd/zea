@@ -50,7 +50,7 @@ def test_with_datasets(complex_h5_file):
         assert len(file) == 2
 
         # Get shape of file
-        assert file.shape("data") == (10, 20)
+        assert file.shape("dummy_dataset") == (10, 20)
 
         # Get keys in file
         assert list(file.keys()) == ["dummy_dataset", "dummy_dataset2"]
