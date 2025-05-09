@@ -83,7 +83,7 @@ from usbmd.registry import ops_v2_registry as ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, resample, reshape_axis
-from usbmd.utils import deep_compare, log, translate
+from usbmd.utils import check_architecture, deep_compare, log, translate
 from usbmd.utils.checks import _assert_keys_and_axes
 
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
@@ -2266,6 +2266,240 @@ class BranchedPipeline(Operation):
         config["branches"] = branches
         config["merge_strategy"] = self.merge_strategy
         return config
+
+
+@ops_registry("threshold")
+class Threshold(Operation):
+    """Threshold an array, setting values below/above a threshold to a fill value."""
+
+    def __init__(
+        self,
+        threshold_type="hard",
+        below_threshold=True,
+        fill_value="min",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        if threshold_type not in ("hard", "soft"):
+            raise ValueError("threshold_type must be 'hard' or 'soft'")
+        self.threshold_type = threshold_type
+        self.below_threshold = below_threshold
+        self._fill_value_type = fill_value
+
+        # Define threshold function at init
+        if threshold_type == "hard":
+            if below_threshold:
+                self._threshold_func = lambda data, threshold, fill: ops.where(
+                    data < threshold, fill, data
+                )
+            else:
+                self._threshold_func = lambda data, threshold, fill: ops.where(
+                    data > threshold, fill, data
+                )
+        else:  # soft
+            if below_threshold:
+                self._threshold_func = (
+                    lambda data, threshold, fill: ops.maximum(data - threshold, 0)
+                    + fill
+                )
+            else:
+                self._threshold_func = (
+                    lambda data, threshold, fill: ops.minimum(data - threshold, 0)
+                    + fill
+                )
+
+    def _resolve_fill_value(self, data, threshold):
+        """Get the fill value based on the fill_value_type."""
+        fv = self._fill_value_type
+        if isinstance(fv, (int, float)):
+            return ops.convert_to_tensor(fv, dtype=data.dtype)
+        elif fv == "min":
+            return ops.min(data)
+        elif fv == "max":
+            return ops.max(data)
+        elif fv == "threshold":
+            return threshold
+        else:
+            raise ValueError("Unknown fill_value")
+
+    def call(
+        self,
+        threshold=None,
+        percentile=None,
+        **kwargs,
+    ):
+        """Threshold the input data.
+
+        Args:
+            threshold: Numeric threshold.
+            percentile: Percentile to derive threshold from.
+        Returns:
+            Tensor with thresholding applied.
+        """
+        data = kwargs[self.key]
+        if (threshold is None) == (percentile is None):
+            raise ValueError(
+                "Pass either threshold or percentile, not both or neither."
+            )
+
+        if percentile is not None:
+            # Convert percentile to quantile value (0-1 range)
+            threshold = ops.quantile(data, percentile / 100.0)
+
+        fill_value = self._resolve_fill_value(data, threshold)
+        result = self._threshold_func(data, threshold, fill_value)
+        return {self.output_key: result}
+
+
+@ops_registry("bm3d")
+class BM3DDenoise(Operation):
+    """Block Matching 3D (BM3D) denoising operation."""
+
+    def __init__(self, stage="all_stages", **kwargs):
+        super().__init__(
+            jittable=False,
+            **kwargs,
+        )
+
+        if "arm" in check_architecture():
+            raise ValueError(
+                log.error("BM3D denoiser is not supported on ARM architecture.")
+            )
+
+        # pylint: disable=import-outside-toplevel
+        import bm3d as _bm3d_module
+
+        self._bm3d_module = _bm3d_module
+
+        str_to_stage = {
+            "hard_thresholding": self._bm3d_module.BM3DStages.HARD_THRESHOLDING,
+            "all_stages": self._bm3d_module.BM3DStages.ALL_STAGES,
+        }
+        self.stage = str_to_stage[stage]
+
+    def call(self, sigma=0.1, **kwargs):
+        """BM3D denoising operation.
+
+        Args:
+            sigma: Noise standard deviation.
+
+        Returns:
+            Denoised image(s), same shape as input.
+        """
+        data = kwargs[self.key]
+
+        # Convert to numpy for bm3d (cpu)
+        data_np = ops.convert_to_numpy(data)
+
+        if not self.with_batch_dim:
+            data_np = np.expand_dims(data_np, axis=0)
+
+        denoised = [
+            self._bm3d_module.bm3d(img, sigma, stage_arg=self.stage) for img in data_np
+        ]
+        denoised = np.stack(denoised)
+
+        if not self.with_batch_dim:
+            denoised = np.squeeze(denoised, axis=0)
+
+        result = ops.convert_to_tensor(denoised, dtype=data.dtype)
+        return {self.output_key: result}
+
+
+@ops_registry("anisotropic_diffusion")
+class AnisotropicDiffusion(Operation):
+    """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
+
+    Reference:
+    - https://www.researchgate.net/publication/5602035_Speckle_reducing_anisotropic_diffusion
+    - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
+    """
+
+    def call(self, niter=100, lmbda=0.1, rect=None, eps=1e-6, **kwargs):
+        """Anisotropic diffusion filter.
+
+        Assumes input data is non-negative.
+
+        Args:
+            niter: Number of iterations.
+            lmbda: Lambda parameter.
+            rect: Rectangle [x1, y1, x2, y2] for homogeneous noise (optional).
+            eps: Small epsilon for stability.
+        Returns:
+            Filtered image (2D tensor or batch of images).
+        """
+        data = kwargs[self.key]
+
+        if not self.with_batch_dim:
+            data = ops.expand_dims(data, axis=0)
+
+        batch_size = ops.shape(data)[0]
+
+        results = []
+        for i in range(batch_size):
+            image = data[i]
+            image_out = self._anisotropic_diffusion_single(
+                image, niter, lmbda, rect, eps
+            )
+            results.append(image_out)
+
+        result = ops.stack(results, axis=0)
+
+        if not self.with_batch_dim:
+            result = ops.squeeze(result, axis=0)
+
+        return {self.output_key: result}
+
+    def _anisotropic_diffusion_single(self, image, niter, lmbda, rect, eps):
+        """Apply anisotropic diffusion to a single image (2D)."""
+        image = ops.exp(image)
+        M, N = image.shape
+
+        for _ in range(niter):
+            iN = ops.concatenate(
+                [image[1:], ops.zeros((1, N), dtype=image.dtype)], axis=0
+            )
+            iS = ops.concatenate(
+                [ops.zeros((1, N), dtype=image.dtype), image[:-1]], axis=0
+            )
+            jW = ops.concatenate(
+                [image[:, 1:], ops.zeros((M, 1), dtype=image.dtype)], axis=1
+            )
+            jE = ops.concatenate(
+                [ops.zeros((M, 1), dtype=image.dtype), image[:, :-1]], axis=1
+            )
+
+            if rect is not None:
+                x1, y1, x2, y2 = rect
+                imageuniform = image[x1:x2, y1:y2]
+                q0_squared = (
+                    ops.std(imageuniform) / (ops.mean(imageuniform) + eps)
+                ) ** 2
+
+            dN = iN - image
+            dS = iS - image
+            dW = jW - image
+            dE = jE - image
+
+            G2 = (dN**2 + dS**2 + dW**2 + dE**2) / (image**2 + eps)
+            L = (dN + dS + dW + dE) / (image + eps)
+            num = (0.5 * G2) - ((1 / 16) * (L**2))
+            den = (1 + ((1 / 4) * L)) ** 2
+            q_squared = num / (den + eps)
+
+            if rect is not None:
+                den = (q_squared - q0_squared) / (q0_squared * (1 + q0_squared) + eps)
+            c = 1.0 / (1 + den)
+            cS = ops.concatenate([ops.zeros((1, N), dtype=image.dtype), c[:-1]], axis=0)
+            cE = ops.concatenate(
+                [ops.zeros((M, 1), dtype=image.dtype), c[:, :-1]], axis=1
+            )
+
+            D = (cS * dS) + (c * dN) + (cE * dE) + (c * dW)
+            image = image + (lmbda / 4) * D
+
+        result = ops.log(image)
+        return result
 
 
 def demodulate_not_jitable(
