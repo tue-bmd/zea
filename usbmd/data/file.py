@@ -3,6 +3,7 @@
 - **Author(s)**     : Tristan Stevens, Wessel van Nierop
 """
 
+import enum
 import inspect
 from pathlib import Path
 from typing import List
@@ -161,6 +162,9 @@ class File(h5py.File):
         """Format the key to match the data type."""
         # TODO: support events
 
+        if isinstance(key, enum.Enum):
+            key = key.value
+
         # Return the key if it is in the file
         if key in self.keys():
             return key
@@ -170,8 +174,7 @@ class File(h5py.File):
             key = "data/" + key
 
         assert key in self.keys(), (
-            f"Key {key} or data/{key} not found in file. "
-            f"Available keys: {list(self.keys())}"
+            f"Key {key} not found in file. " f"Available keys: {list(self.keys())}"
         )
 
         return key
