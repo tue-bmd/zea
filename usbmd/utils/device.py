@@ -368,9 +368,9 @@ def init_device(
     Args:
         backend (str): String indicating which backend to use. Can be
             'torch', 'tensorflow', 'jax', 'numpy', `None` or "auto".
-                - When "auto", the function will select the backend based on the
-                `KERAS_BACKEND` environment variable.
-                - For numpy this function will return 'cpu'.
+            - When "auto", the function will select the backend based on the
+            `KERAS_BACKEND` environment variable.
+            - For numpy this function will return 'cpu'.
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
             For more details see: `usbmd.utils.device.get_device`.
