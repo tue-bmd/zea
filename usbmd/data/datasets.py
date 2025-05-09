@@ -127,7 +127,9 @@ def find_h5_files(
 
 
 class Folder:
-    """Group of HDF5 files in a folder that can be validated."""
+    """Group of HDF5 files in a folder that can be validated.
+    Mostly used internally, you might want to use the Dataset class instead.
+    """
 
     def __init__(
         self,
@@ -304,7 +306,7 @@ class Dataset(H5FileHandleCache):
 
     def __init__(
         self,
-        file_paths: List[str],
+        file_paths: List[str] | str,
         key: str,
         search_file_tree_kwargs: dict | None = None,
         validate: bool = True,

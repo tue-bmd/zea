@@ -189,29 +189,31 @@ def _h5_reopen_on_io_error(
 
 
 class H5Generator(Dataset, keras.utils.PyDataset):
-    """Generator from h5 file using provided indices."""
+    """Generator from h5 file using provided indices.
+    Mostly used internally, you might want to use the Dataloader class instead.
+    """
 
     def __init__(
         self,
         file_paths: List[str],
         key: str = "data/image",
         n_frames: int = 1,
-        frame_index_stride: int = 1,
-        frame_axis: int = -1,
-        insert_frame_axis: bool = True,
-        initial_frame_axis: int = 0,
-        return_filename: bool = False,
+        batch_size: int = 1,
         shuffle: bool = True,
-        sort_files: bool = True,
-        overlapping_blocks: bool = False,
+        return_filename: bool = False,
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
         seed: int | None = None,
-        batch_size: int = 1,
         as_tensor: bool = True,
-        additional_axes_iter: tuple | None = None,
         drop_remainder: bool = False,
         caching: bool = False,
+        additional_axes_iter: tuple | None = None,
+        sort_files: bool = True,
+        overlapping_blocks: bool = False,
+        initial_frame_axis: int = 0,
+        insert_frame_axis: bool = True,
+        frame_index_stride: int = 1,
+        frame_axis: int = -1,
         **kwargs,
     ):
         super().__init__(file_paths, key, **kwargs)
@@ -424,17 +426,34 @@ class Dataloader(H5Generator):
         self,
         file_paths: List[str],
         key: str = "data/image",
+        n_frames: int = 1,
+        batch_size: int = 1,
+        shuffle: bool = True,
+        return_filename: bool = False,
+        limit_n_samples: int | None = None,
+        limit_n_frames: int | None = None,
+        seed: int | None = None,
+        as_tensor: bool = True,
+        drop_remainder: bool = False,
         resize_type: str = "center_crop",
+        resize_axes: tuple | None = None,
+        resize_kwargs: dict | None = None,
         image_size: tuple | None = None,
         image_range: tuple | None = None,
         normalization_range: tuple | None = None,
-        resize_axes: tuple | None = None,
-        resize_kwargs: dict | None = None,
+        dataset_repetitions: int = 1,
+        caching: bool = False,
+        additional_axes_iter: tuple | None = None,
+        sort_files: bool = True,
+        overlapping_blocks: bool = False,
         map_fns: list | None = None,
         augmentation: callable = None,
-        dataset_repetitions: int = 1,
         assert_image_range: bool = True,
         clip_image_range: bool = False,
+        initial_frame_axis: int = 0,
+        insert_frame_axis: bool = True,
+        frame_index_stride: int = 1,
+        frame_axis: int = -1,
         backend: str | None = None,
         device: str | None = None,
         **kwargs,
@@ -442,25 +461,28 @@ class Dataloader(H5Generator):
         """Initialize the dataloader.
 
         Args:
-            file_paths (str or list): Path to the folder(s) containing the HDF5 files or a single
-                HDF5 file path.
+            file_paths (str or list): Path(s) to the folder(s) or h5 file(s) to load.
             key (str): The key to access the HDF5 dataset.
-            batch_size (int, optional): batch the dataset. Defaults to None.
-            image_size (tuple, optional): resize images to image_size. Should
-                be of length two (height, width). Defaults to None.
+            n_frames (int, optional): number of frames to load from each hdf5 file.
+            batch_size (int, optional): batch the dataset. Defaults to 1.
             shuffle (bool, optional): shuffle dataset.
-            seed (int, optional): random seed of shuffle.
+            return_filename (bool, optional): return file name with image. Defaults to False.
             limit_n_samples (int, optional): take only a subset of samples.
                 Useful for debuging. Defaults to None.
-            limit_n_frames (int, optional): limit the number of frames to load from each file. This
-                means n_frames per data file will be used. These will be the first frames in
+            limit_n_frames (int, optional): limit the number of frames to load from each file.
+                This means n_frames per data file will be used. These will be the first frames in
                 the file. Defaults to None
+            seed (int, optional): random seed of shuffle.
+            as_tensor (bool, optional): convert to tensor. Defaults to True.
+            drop_remainder (bool, optional): representing whether the last batch should be dropped
             resize_type (str, optional): resize type. Defaults to 'center_crop'.
                 can be 'center_crop', 'random_crop' or 'resize'.
             resize_axes (tuple, optional): axes to resize along. Should be of length 2
                 (height, width) as resizing function only supports 2D resizing / cropping.
                 Should only be set when your data is more than (h, w, c). Defaults to None.
             resize_kwargs (dict, optional): kwargs for the resize function.
+            image_size (tuple, optional): resize images to image_size. Should
+                be of length two (height, width). Defaults to None.
             image_range (tuple, optional): image range. Defaults to (0, 255).
                 will always translate from specified image range to normalization range.
                 if image_range is set to None, no normalization will be done. Note that it does not
@@ -468,43 +490,60 @@ class Dataloader(H5Generator):
                 normalization range!
             normalization_range (tuple, optional): normalization range. Defaults to (0, 1).
                 See image_range for more info!
-            augmentation (keras.Sequential, optional): keras augmentation layer.
             dataset_repetitions (int, optional): repeat dataset. Note that this happens
-                after sharding, so the shard will be repeated. Defaults to None.
-            n_frames (int, optional): number of frames to load from each hdf5 file.
-                Defaults to 1. These frames are stacked along the last axis (channel).
-            insert_frame_axis (bool, optional): if True, new dimension to stack
-                frames along will be created. Defaults to False. In that case
-                frames will be stacked along existing dimension (frame_axis).
-            frame_axis (int, optional): dimension to stack frames along.
-                Defaults to -1. If insert_frame_axis is True, this will be the
-                new dimension to stack frames along.
-            initial_frame_axis (int, optional): axis where in the files the frames are stored.
-                Defaults to 0.
-            frame_index_stride (int, optional): interval between frames to load.
-                Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
+            caching (bool, optional): Cache dataset to RAM.
             additional_axes_iter (tuple, optional): additional axes to iterate over
                 in the dataset. Defaults to None, in that case we only iterate over
                 the first axis (we assume those contain the frames).
+            sort_files (bool, optional): sort files by number. Defaults to True.
             overlapping_blocks (bool, optional): if True, blocks overlap by n_frames - 1.
                 Defaults to False. Has no effect if n_frames = 1.
-            return_filename (bool, optional): return file name with image. Defaults to False.
-            shard_index (int, optional): index which part of the dataset should be selected.
-                Can only be used if num_shards is specified. Defaults to None.
-                See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
-            num_shards (int, optional): this is used to divide the dataset into `num_shards` parts.
-                Sharding happens before all other operations. Defaults to 1.
-                See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
-            search_file_tree_kwargs (dict, optional): kwargs for search_file_tree.
-            drop_remainder (bool, optional): representing whether the last batch should be dropped
-                in the case it has fewer than batch_size elements. Defaults to False.
-            cache (bool or str, optional): cache dataset. If a string is provided, caching will
-                be done to disk with that filename. Defaults to False.
-            prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
-            wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
-                If True, will convert the dataset that returns backend tensors.
+            map_fns (list, optional): list of functions to map over the images.
+                Defaults to None. These functions will be applied after resizing and
+                normalizing the images. They should take a single argument (the image)
+                and return the transformed image.
+            augmentation (keras.Sequential, optional): keras augmentation layer.
+                after sharding, so the shard will be repeated. Defaults to None.
+                Defaults to 1. These frames are stacked along the last axis (channel).
+            assert_image_range (bool, optional): assert that the image range is
+                within the specified image range. Defaults to True.
+            clip_image_range (bool, optional): clip the image range to the specified
+                image range. Defaults to False.
+            initial_frame_axis (int, optional): axis where in the files the frames are stored.
+                Defaults to 0.
+            insert_frame_axis (bool, optional): if True, new dimension to stack
+                frames along will be created. Defaults to False. In that case
+                frames will be stacked along existing dimension (frame_axis).
+            frame_index_stride (int, optional): interval between frames to load.
+                Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
+            frame_axis (int, optional): dimension to stack frames along.
+                Defaults to -1. If insert_frame_axis is True, this will be the
+                new dimension to stack frames along.
+            backend (str, optional): backend to use. Defaults to None.
+            device (str, optional): device to use. Defaults to None.
         """
-        super().__init__(file_paths, key, **kwargs)
+        super().__init__(
+            file_paths,
+            key,
+            n_frames=n_frames,
+            frame_index_stride=frame_index_stride,
+            frame_axis=frame_axis,
+            insert_frame_axis=insert_frame_axis,
+            initial_frame_axis=initial_frame_axis,
+            return_filename=return_filename,
+            shuffle=shuffle,
+            sort_files=sort_files,
+            overlapping_blocks=overlapping_blocks,
+            limit_n_samples=limit_n_samples,
+            limit_n_frames=limit_n_frames,
+            seed=seed,
+            batch_size=batch_size,
+            as_tensor=as_tensor,
+            additional_axes_iter=additional_axes_iter,
+            drop_remainder=drop_remainder,
+            caching=caching,
+            **kwargs,
+        )
         self.resize_type = resize_type
         self.image_size = image_size
         self.image_range = image_range
