@@ -5,7 +5,7 @@ import keras
 import numpy as np
 import pytest
 
-from usbmd import ops_v2 as ops
+from usbmd import ops
 from usbmd.probes import Probe
 from usbmd.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
 

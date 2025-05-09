@@ -1,8 +1,4 @@
-"""Tests for the Operation and Pipeline classes in ops_v2.py.
-
-# TODO: Run tests for all backends
-# TODO: merge with original ops
-"""
+"""Tests for the Operation and Pipeline classes in ops.py"""
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 
@@ -12,11 +8,11 @@ import keras
 import numpy as np
 import pytest
 
-from usbmd import ops_v2 as ops
+from usbmd import ops
 from usbmd.config.config import Config
 from usbmd.core import DataTypes
 from usbmd.probes import Dummy, Probe
-from usbmd.registry import ops_v2_registry as ops_registry
+from usbmd.registry import ops_registry
 from usbmd.scan import Scan, compute_t0_delays_planewave
 
 """Some operations for testing"""
