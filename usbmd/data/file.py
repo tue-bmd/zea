@@ -184,6 +184,22 @@ class File(h5py.File):
         for frame_idx in range(self.num_frames):
             yield self.load_data(key, frame_idx)
 
+    @staticmethod
+    def key_to_dtype(key):
+        """Convert the key to a data type."""
+        dtype = key.split("/")[-1]
+        return dtype
+
+    def load_transmits(self, key, selected_transmits):
+        key = self.format_key(key)
+        dtype = self.key_to_dtype(key)
+        assert dtype in ["raw_data", "aligned_data"], (
+            f"Cannot load transmits for {dtype}. "
+            "Only raw_data and aligned_data are supported."
+        )
+        indices = [slice(None), np.array(selected_transmits)]
+        return self.load_data(key, indices)
+
     def load_data(self, dtype, indices: str | int | List[int] = "all"):
         """Load data from the file.
 

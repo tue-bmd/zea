@@ -82,5 +82,6 @@ def test_generate(dtype, to_dtype, filetype, tmp_path, dataset_path):
         filetype=filetype,
         overwrite=True,
         verbose=False,
+        # jit_options=None, # uncomment for debugging
     )
     generator.generate()

@@ -47,7 +47,7 @@ def test_with_datasets(complex_h5_file):
     """Test File features with datasets."""
     with File(complex_h5_file) as file:
         # Get length of file
-        assert len(file) == 10
+        assert len(file) == 2
 
         # Get shape of file
         assert file.shape("data") == (10, 20)

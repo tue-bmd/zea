@@ -40,6 +40,7 @@ class GenerateDataSet:
         filetype: str = "hdf5",
         overwrite: bool = False,
         verbose: bool = True,
+        jit_options: Union[None, dict] = "ops",
     ):
         """
         Args:
@@ -86,8 +87,7 @@ class GenerateDataSet:
         ), "Pipeline not found in config, please specify pipeline in config."
 
         self.process = Pipeline.from_config(
-            self.config.pipeline,
-            with_batch_dim=False,
+            self.config.pipeline, with_batch_dim=False, jit_options=jit_options
         )
 
         self.destination_folder = Path(destination_folder)
@@ -109,8 +109,12 @@ class GenerateDataSet:
         return parameters
 
     def _process_file(self, file: File, pbar: tqdm.tqdm):
-        data = file.load_data(self.dtype)
         parameters = self.prepare_parameters(file)
+
+        if self.dtype.value in ["raw_data", "aligned_data"]:
+            data = file.load_transmits(self.dtype, parameters["selected_transmits"])
+        else:
+            data = file.load_data(self.dtype)
 
         if self.filetype == "png":
             for i, image in enumerate(data):
