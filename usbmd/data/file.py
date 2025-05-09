@@ -22,8 +22,8 @@ from usbmd.utils.checks import (
 )
 
 
-def assert_key(file, key):
-    """Asserts key is in file."""
+def assert_key(file: h5py.File, key: str):
+    """Asserts key is in a h5py.File."""
     if key not in file.keys():
         raise KeyError(f"{key} not found in file")
 
