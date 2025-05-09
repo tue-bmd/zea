@@ -686,11 +686,6 @@ class USBMDApp(App):
 
     def save_to_file(self, name=None):
         """Save config to file"""
-        if name is None:
-            try:
-                name = self.ui.config.data.dataset_name
-            except:
-                name = None
         super().save_to_file(name)
 
     def load(self, data=None, entries=None):
