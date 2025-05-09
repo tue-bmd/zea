@@ -12,18 +12,21 @@ wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
 
-def test_interface_initialization():
+def test_interface_initialization(dummy_dataset_path):
     """Test interface initialization"""
     config = setup_config("./tests/config_test.yaml")
+    config.update_recursive({"data": {"dataset_folder": dummy_dataset_path}})
 
     interface = Interface(config)
     interface.run()
     interface.run(plot=True)
 
 
-def test_get_data():
+def test_get_data(dummy_dataset_path):
     """Test interface get_data function"""
     config = setup_config("./tests/config_test.yaml")
+    config.update_recursive({"data": {"dataset_folder": dummy_dataset_path}})
+
     interface = Interface(config)
     data = interface.get_data()
     assert data is not None

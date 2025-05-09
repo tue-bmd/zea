@@ -48,11 +48,11 @@ class Interface:
         # intialize dataset
         if dataset_kwargs is None:
             dataset_kwargs = {}
-        self.dataset = File(self.file_path, **dataset_kwargs)
+        self.file = File(self.file_path, **dataset_kwargs)
 
-        self.scan = Scan.merge(self.dataset.get_scan_parameters(), self.config.scan)
+        self.scan = Scan.merge(self.file.get_scan_parameters(), self.config.scan)
 
-        self.probe = self.dataset.probe()
+        self.probe = self.file.probe()
 
         # initialize Pipeline
         assert (
@@ -88,14 +88,14 @@ class Interface:
         if self.plot_lib == "opencv":
             self.image_viewer = ImageViewerOpenCV(
                 self.data_to_display,
-                window_name=self.dataset.name,
+                window_name=self.file.name,
                 num_threads=1,
                 headless=self.headless,
             )
         elif self.plot_lib == "matplotlib":
             self.image_viewer = ImageViewerMatplotlib(
                 self.data_to_display,
-                window_name=self.dataset.name,
+                window_name=self.file.name,
                 num_threads=1,
             )
 
@@ -107,7 +107,7 @@ class Interface:
     @property
     def dataset_folder(self):
         """Path to dataset folder."""
-        return format_data_path(self.config.data.dataset_folder, self.config.user)
+        return format_data_path(self.config.data.dataset_folder, self.config.data.user)
 
     @property
     def file_path(self):
@@ -196,17 +196,17 @@ class Interface:
         if self.frame_no == "all":
             log.info("Will run all frames as `all` was chosen in config...")
         elif self.frame_no is None:
-            if self.dataset.num_frames == 1:
+            if self.file.num_frames == 1:
                 self.frame_no = 0
             else:
                 self.frame_no = keep_trying(
                     lambda: int(
-                        input(f">> Frame number (0 / {self.dataset.num_frames - 1}): ")
+                        input(f">> Frame number (0 / {self.file.num_frames - 1}): ")
                     )
                 )
 
         # get data from dataset
-        data = self.dataset.load_data(self.dtype, self.frame_no)
+        data = self.file.load_data(self.dtype, self.frame_no)
 
         return data
 
@@ -376,7 +376,7 @@ class Interface:
         # Load correct number of frames (needs to get_data first)
         self.frame_no = 0
         self.get_data()
-        n_frames = self.dataset.num_frames
+        n_frames = self.file.num_frames
 
         self.verbose = False
         # pylint: disable=too-many-nested-blocks
