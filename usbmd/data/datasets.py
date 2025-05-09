@@ -7,7 +7,7 @@ ultrasound datasets.
 
 from collections import OrderedDict
 from pathlib import Path
-from typing import Iterable, List
+from typing import List
 
 import tqdm
 
@@ -335,7 +335,7 @@ class Dataset(H5FileHandleCache):
         file_paths = []
         file_shapes = []
 
-        if not isinstance(paths, Iterable):
+        if not isinstance(paths, (list, tuple)):
             paths = [paths]
 
         for file_path in paths:
@@ -356,7 +356,7 @@ class Dataset(H5FileHandleCache):
                             file.validate()
                 else:
                     raise ValueError(f"File {file_path} is not a file or directory.")
-            elif isinstance(file_path, Iterable):
+            elif isinstance(file_path, (list, tuple)):
                 # If the path is a list, recursively call find_files_and_shapes
                 _file_paths, _file_shapes = self.find_files_and_shapes(file_path)
                 file_paths += _file_paths

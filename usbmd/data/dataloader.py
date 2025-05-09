@@ -209,6 +209,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         seed: int | None = None,
         batch_size: int = 1,
         as_tensor: bool = True,
+        additional_axes_iter: tuple | None = None,
         **kwargs,
     ):
         super().__init__(file_paths, key, **kwargs)
@@ -227,6 +228,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.seed = seed
         self.batch_size = batch_size
         self.as_tensor = as_tensor
+        self.additional_axes_iter = additional_axes_iter or []
 
         self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
 
