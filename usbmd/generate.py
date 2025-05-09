@@ -20,6 +20,7 @@ from usbmd.config import Config
 from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.data.datasets import Dataset
 from usbmd.data.file import File
+from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
 from usbmd.ops_v2 import Pipeline
 from usbmd.scan import Scan
@@ -75,6 +76,9 @@ class GenerateDataSet:
 
         # intialize dataset
         self.dataset = Dataset.from_config(**self.config.data)
+        self.path = format_data_path(
+            self.config.data.dataset_folder, self.config.data.user
+        )
 
         # initialize Pipeline
         assert (
@@ -197,7 +201,7 @@ class GenerateDataSet:
         """Simple helper function that return proper path"""
         name = Path(name)
         if self.retain_folder_structure:
-            path = name.relative_to(self.dataset.path)
+            path = name.relative_to(self.path)
         else:
             path = name.name
         path = self.destination_folder / path
