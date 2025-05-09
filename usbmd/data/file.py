@@ -22,12 +22,6 @@ from usbmd.utils.checks import (
 )
 
 
-def get_shape_hdf5_file(filepath, key) -> tuple:
-    """Retrieve the shape of some key in a hdf5 file."""
-    with File(filepath, mode="r") as f:
-        return f.shape(key)
-
-
 def assert_key(file, key):
     """Asserts key is in file."""
     if key not in file.keys():
@@ -395,6 +389,20 @@ class File(h5py.File):
             dict: dictionary with contents of group
         """
         return recursively_load_dict_contents_from_group(self, path, squeeze)
+
+    @classmethod
+    def get_shape(cls, path: str, key: str) -> tuple:
+        """Get the shape of a key in a file.
+
+        Args:
+            path (str): The path to the file.
+            key (str): The key to get the shape of.
+
+        Returns:
+            tuple: The shape of the key.
+        """
+        with cls(path, mode="r") as file:
+            return file.shape(key)
 
 
 def load_usbmd_file(
