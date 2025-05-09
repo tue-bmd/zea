@@ -42,59 +42,6 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     return image
 
 
-def scan_convert_2d_coordinates(
-    image_shape,
-    rho_range: Tuple[float, float],
-    theta_range: Tuple[float, float],
-    resolution: Union[float, None] = None,
-    dtype: str = "float32",
-):
-    """Generate coordinates for 2d scan conversion from polar coordinates"""
-    assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
-    assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
-    assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
-
-    rho = ops.linspace(rho_range[0], rho_range[1], image_shape[-2], dtype=dtype)
-    theta = ops.linspace(theta_range[0], theta_range[1], image_shape[-1], dtype=dtype)
-
-    rho_grid, theta_grid = ops.meshgrid(rho, theta, indexing="ij")
-
-    x_grid, z_grid = frustum_convert_rt2xz(rho_grid, theta_grid)
-
-    x_lim = [ops.min(x_grid), ops.max(x_grid)]
-    z_lim = [ops.min(z_grid), ops.max(z_grid)]
-
-    if resolution is None:
-        d_rho = rho[1] - rho[0]
-        d_theta = theta[1] - theta[0]
-        # arc length along constant phi at 1/4 depth
-        sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
-        # average of arc lengths and radial step
-        resolution = ops.mean([sRT, d_rho])  # mm per pixel
-
-    x_vec = ops.arange(x_lim[0], x_lim[1], resolution)
-    z_vec = ops.arange(z_lim[0], z_lim[1], resolution)
-
-    z_grid, x_grid = ops.meshgrid(z_vec, x_vec)
-
-    rho_grid_interp, theta_grid_interp = frustum_convert_xz2rt(
-        x_grid, z_grid, theta_limits=[theta[0], theta[-1]]
-    )
-
-    # Map rho and theta interpolation points to grid indices
-    rho_min, rho_max = ops.min(rho), ops.max(rho)
-    theta_min, theta_max = ops.min(theta), ops.max(theta)
-    rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image_shape[-2] - 1)
-    theta_idx = (
-        (theta_grid_interp - theta_min)
-        / (theta_max - theta_min)
-        * (image_shape[-1] - 1)
-    )
-
-    # Stack coordinates as required for map_coordinates
-    return ops.stack([rho_idx, theta_idx], axis=0)
-
-
 def compute_scan_convert_2d_coordinates(
     image_shape,
     rho_range: Tuple[float, float],
