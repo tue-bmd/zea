@@ -6,7 +6,6 @@ model:
 
 data:
   file_path: test0.hdf5
-  dataset_name: dummy
   dtype: raw_data
   dynamic_range: [-60, 0]
   dataset_folder: dummy_folder
