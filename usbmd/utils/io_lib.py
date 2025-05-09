@@ -34,7 +34,7 @@ from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
-from usbmd.data.file import get_shape_hdf5_file
+from usbmd.data.file import File
 from usbmd.utils import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
@@ -284,9 +284,7 @@ def search_file_tree(
         if verbose:
             log.info("Getting number of frames in each hdf5 file...")
 
-        get_shape_hdf5_file_partial = functools.partial(
-            get_shape_hdf5_file, key=hdf5_key_for_length
-        )
+        get_shape_partial = functools.partial(File.get_shape, key=hdf5_key_for_length)
         # make sure to call search_file_tree from within a function
         # or use if __name__ == "__main__":
         # to avoid freezing the main process
@@ -296,7 +294,7 @@ def search_file_tree(
                 file_shapes = list(
                     tqdm.tqdm(
                         pool.imap(
-                            get_shape_hdf5_file_partial,
+                            get_shape_partial,
                             absolute_file_paths,
                         ),
                         total=len(file_paths),
@@ -311,7 +309,7 @@ def search_file_tree(
                 desc="Getting number of frames in each hdf5 file",
                 disable=not verbose,
             ):
-                file_shapes.append(get_shape_hdf5_file(file_path, hdf5_key_for_length))
+                file_shapes.append(File.get_shape(file_path, hdf5_key_for_length))
 
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
     if verbose:
