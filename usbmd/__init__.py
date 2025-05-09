@@ -1,6 +1,6 @@
 """usbmd: A Python package for ultrasound image reconstructing using deep learning."""
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 import inspect
 import os
