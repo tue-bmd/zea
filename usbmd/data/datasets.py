@@ -11,7 +11,7 @@ from typing import List
 
 import tqdm
 
-from usbmd.data.file import File, get_shape_hdf5_file, validate_dataset
+from usbmd.data.file import File, validate_dataset
 from usbmd.datapaths import format_data_path
 from usbmd.utils import (
     calculate_file_hash,
@@ -108,7 +108,7 @@ def find_h5_files(
     for path in paths:
         if path.is_file():
             # If the path is a file, get its shape directly
-            file_shapes.append(get_shape_hdf5_file(path, key))
+            file_shapes.append(File.get_shape(path, key))
             file_paths.append(str(path))
             continue
 
