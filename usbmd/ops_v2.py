@@ -2306,6 +2306,7 @@ class Threshold(Operation):
                 )
 
     def _resolve_fill_value(self, data, threshold):
+        """Get the fill value based on the fill_value_type."""
         fv = self._fill_value_type
         if isinstance(fv, (int, float)):
             return ops.convert_to_tensor(fv, dtype=data.dtype)
