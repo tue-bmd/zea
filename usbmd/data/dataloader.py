@@ -169,7 +169,7 @@ def _h5_reopen_on_io_error(
     dataloader_obj,
     indices,
     retry_count,
-    **kwargs, # pylint: disable=unused-argument
+    **kwargs,  # pylint: disable=unused-argument
 ):
     """Reopen the file if an I/O error occurs.
     Also removes the file from the cache and try to close file.
@@ -401,7 +401,7 @@ class Dataloader(H5Generator):
         - normalize
     """
 
-    # TODO: repeat, caching, augmentation, prefetch, shard, drop_remainder, etc.
+    # TODO: caching, augmentation, prefetch, shard, drop_remainder, etc.
     # TODO: order arguments
 
     def __init__(
@@ -416,6 +416,7 @@ class Dataloader(H5Generator):
         resize_kwargs: dict | None = None,
         map_fns: list | None = None,
         augmentation: callable = None,
+        dataset_repetitions: int = 1,
         assert_image_range: bool = True,
         clip_image_range: bool = False,
         backend: str | None = None,
@@ -513,6 +514,7 @@ class Dataloader(H5Generator):
             backend = keras.backend.backend()
         self.backend = backend_utils.DynamicBackend(backend)
         self.device = device
+        self.dataset_repetitions = dataset_repetitions
 
     def map(self, fn):
         """Add a mapping function to the dataloader.
@@ -568,8 +570,16 @@ class Dataloader(H5Generator):
         else:
             return images
 
+    def __len__(self):
+        """Return the total number of batches, accounting for repetitions."""
+        return super().__len__() * self.dataset_repetitions
+
     def __getitem__(self, index):
-        out = super().__getitem__(index)
+        # Repeat the dataset by wrapping the index if dataset_repetitions > 1
+        if index >= len(self) or index < 0:
+            raise IndexError("Index out of range for repeated dataset.")
+        out = super().__getitem__(index % super().__len__())
+
         if self.device is None:
             return self.preprocess(out)
         else:
