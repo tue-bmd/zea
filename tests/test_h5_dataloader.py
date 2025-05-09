@@ -69,12 +69,12 @@ def camus_file():
     return CAMUS_FILE
 
 
-def _get_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis, seed=None):
+def _get_h5_generator(file_path, key, n_frames, insert_frame_axis, seed=None):
     file_paths = [file_path]
     # Create a H5Generator instance
     generator = H5Generator(
         file_paths=file_paths,
-        key=dataset_name,
+        key=key,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
         seed=seed,
@@ -83,7 +83,7 @@ def _get_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis, seed
 
 
 @pytest.mark.parametrize(
-    "file_path, dataset_name, n_frames, insert_frame_axis",
+    "file_path, key, n_frames, insert_frame_axis",
     [
         ("dummy_hdf5", "data", 1, True),
         ("dummy_hdf5", "data", 3, True),
@@ -96,12 +96,12 @@ def _get_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis, seed
         ("camus_file", "data/image_sc", 15, False),
     ],
 )
-def test_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis, request):
+def test_h5_generator(file_path, key, n_frames, insert_frame_axis, request):
     """Test the H5Generator class"""
 
     file_path = request.getfixturevalue(file_path)
 
-    generator = _get_h5_generator(file_path, dataset_name, n_frames, insert_frame_axis)
+    generator = _get_h5_generator(file_path, key, n_frames, insert_frame_axis)
 
     batch_shape = next(generator()).shape
     if insert_frame_axis:
