@@ -16,7 +16,7 @@ import pytest
 from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert
 
-import usbmd.ops as ops
+from usbmd import ops
 from usbmd.ops import Pipeline, Simulate
 from usbmd.probes import Probe
 from usbmd.scan import Scan
