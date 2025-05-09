@@ -73,7 +73,7 @@ import yaml
 from keras import ops
 
 from usbmd.backend import jit
-from usbmd.beamformer import tof_correction_flatgrid
+from usbmd.beamformer import tof_correction
 from usbmd.config.config import Config
 from usbmd.core import STATIC, DataTypes
 from usbmd.core import Object as USBMDObject
@@ -1395,10 +1395,10 @@ class TOFCorrection(Operation):
         }
 
         if not self.with_batch_dim:
-            tof_corrected = tof_correction_flatgrid(raw_data, **kwargs)
+            tof_corrected = tof_correction(raw_data, **kwargs)
         else:
             tof_corrected = ops.map(
-                lambda data: tof_correction_flatgrid(data, **kwargs),
+                lambda data: tof_correction(data, **kwargs),
                 raw_data,
             )
 
