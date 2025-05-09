@@ -1,8 +1,4 @@
-"""
-The official documentation for the Python package `usbmd` - a convenient ultrasound toolbox.
-
-.. include:: ./README.md
-"""
+"""usbmd: A Python package for ultrasound image reconstructing using deep learning."""
 
 __version__ = "2.3.0"
 

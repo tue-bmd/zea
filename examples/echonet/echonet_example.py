@@ -30,12 +30,10 @@ if __name__ == "__main__":
 
     n_imgs = 16
     val_dataset = Dataloader(
-        data_paths.data_root / "USBMD_datasets/CAMUS/val",
-        key="data/image",
+        data_paths.data_root / "USBMD_datasets/echonet_v2025/val",
+        key="data/image_sc",
         batch_size=n_imgs,
         shuffle=True,
-        image_size=[112, 112],
-        resize_type="resize",
         image_range=[-60, 0],
         normalization_range=[-1, 1],
         seed=42,

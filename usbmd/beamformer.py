@@ -1,51 +1,13 @@
-"""Beamformer functions with general ops.
-
-- **Author(s)**     : Ben Luijten, Vincent van de Schaft, Ruud van Sloun
-- **Date**          : Thu Feb 16 2023
-"""
+"""Beamformer functions."""
 
 import numpy as np
 from keras import ops
 
-from usbmd.tensor_ops import patched_map, safe_vectorize
+from usbmd.tensor_ops import safe_vectorize
 from usbmd.utils.lens_correction import calculate_lens_corrected_delays
-from usbmd.utils.utils import deprecated
 
 
-# TODO: can be removed when ops_v1 is removed
-@deprecated(replacement="usbmd.beamformers.tof_correction_flatgrid")
-def tof_correction(data, grid, *args, patches=1, **kwargs):
-    """
-    Time-of-flight correction. The grid can be split into patches to reduce memory.
-    """
-    # Flatten grid to simplify calculations
-    gridshape = ops.shape(grid)
-    flatgrid = ops.reshape(grid, (-1, 3))
-    n_tx = ops.shape(data)[0]
-
-    def tof_correction_patch(grid_patch):
-        tof_corrected = tof_correction_flatgrid(data, grid_patch, *args, **kwargs)
-        tof_corrected = ops.swapaxes(
-            tof_corrected, 1, 0
-        )  # move n_pix to the first dimension for patched_map
-        return tof_corrected
-
-    tof_corrected = patched_map(tof_correction_patch, flatgrid, patches)
-
-    tof_corrected = ops.swapaxes(
-        tof_corrected, 1, 0
-    )  # move n_tx to the first dimension to undo the swapaxes above
-
-    # Reshape to reintroduce the x- and z-dimensions
-    shape = ops.shape(data)[-2:]
-
-    return ops.reshape(
-        tof_corrected,
-        (n_tx, gridshape[0], gridshape[1], *shape),
-    )
-
-
-def tof_correction_flatgrid(
+def tof_correction(
     data,
     flatgrid,
     t0_delays,
@@ -63,7 +25,8 @@ def tof_correction_flatgrid(
     lens_thickness=1e-3,
     lens_sound_speed=1000,
 ):
-    """
+    """Time-of-flight correction for a flat grid.
+
     Args:
         data (ops.Tensor): Input RF/IQ data of shape `(n_tx, n_ax, n_el, n_ch)`.
         flatgrid (ops.Tensor): Pixel locations x, y, z of shape `(n_pix, 3)`
@@ -192,8 +155,7 @@ def calculate_delays(
     # pylint: disable=unused-argument
     **kwargs,
 ):
-    """
-    Calculates the delays in samples to every pixel in the grid.
+    """Calculates the delays in samples to every pixel in the grid.
 
     The delay consists of two components: The transmit delay and the
     receive delay.
@@ -224,10 +186,10 @@ def calculate_delays(
             of shape `(n_tx,)`.
 
     Returns:
-        - transmit_delays (Tensor): The tensor transmit delays to every pixel has shape
-            `(n_pix, n_tx)`.
-        - receive_delays (Tensor): The tensor of receive delays from every pixel back to
-            the transducer element has shape of shape `(n_pix, n_el)`.
+        transmit_delays (Tensor): The tensor of transmit delays to every pixel,
+            shape `(n_pix, n_tx)`.
+        receive_delays (Tensor): The tensor of receive delays from every pixel
+            back to the transducer element, shape `(n_pix, n_el)`.
     """
 
     def _tx_distances(polar_angles, t0_delays, tx_apodizations, focus_distances):
@@ -268,8 +230,7 @@ def calculate_delays(
 
 
 def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
-    """
-    Applies time delays for a single transmit using linear interpolation.
+    """Applies time delays for a single transmit using linear interpolation.
 
     Most delays in d will not be by an integer number of samples, which means
     we have no measurement for that time instant. This function solves this by
@@ -333,13 +294,11 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
 
 
 def _complex_rotate(iq, theta):
-    """
-    Performs a simple phase rotation of I and Q component by complex angle
-    theta.
+    """Performs a simple phase rotation of I and Q component.
 
     Args:
         iq (ops.Tensor): The iq data of shape `(..., 2)`.
-        theta (float): The angle to rotate by.
+        theta (float): The complex angle to rotate by.
 
     Returns:
         Tensor: The rotated tensor of shape `(..., 2)`.
@@ -364,8 +323,8 @@ def _complex_rotate(iq, theta):
 
 
 def distance_Rx(grid, probe_geometry):
-    """
-    Computes distance to user-defined pixels from elements
+    """Computes distance to user-defined pixels from elements.
+
     Expects all inputs to be numpy arrays specified in SI units.
 
     Args:
@@ -390,7 +349,8 @@ def distance_Tx_generic(
     polar_angle,
     sound_speed=1540,
 ):
-    """
+    """Generic transmit distance calculation.
+
     Computes distance to user-defined pixels for generic transmits based on
     the t0_delays.
 
@@ -454,7 +414,8 @@ def distance_Tx_generic(
 
 
 def apod_mask(grid, probe_geometry, f_number):
-    """
+    """Apodization mask for the receive beamformer.
+
     Computes a binary mask to disregard pixels outside of the vision cone of a
     transducer element. Transducer elements can only accurately measure
     signals within some range of incidence angles. Waves coming in from the
