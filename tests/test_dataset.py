@@ -5,20 +5,9 @@ import pytest
 
 from usbmd.config import Config
 from usbmd.config.validation import check_config
-from usbmd.data.data_format import generate_example_dataset
 from usbmd.data.datasets import Dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup_config
-
-
-@pytest.fixture
-def dataset_path(tmp_path):
-    """Fixture to create a temporary dataset"""
-    for i in range(2):
-        temp_file = tmp_path / f"test{i}.hdf5"
-        generate_example_dataset(temp_file, add_optional_dtypes=True, n_frames=4)
-
-    yield str(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -30,9 +19,9 @@ def dataset_path(tmp_path):
         (0, np.array([1, 2, 3])),
     ],
 )
-def test_dataset_indexing(file_idx, frame_idx, dataset_path):
+def test_dataset_indexing(file_idx, frame_idx, dummy_dataset_path):
     """Test ui initialization function"""
-    config = {"data": {"dataset_folder": dataset_path, "dtype": "image"}}
+    config = {"data": {"dataset_folder": dummy_dataset_path, "dtype": "image"}}
     config = check_config(Config(config))
     dataset = Dataset.from_config(**config.data)
 
@@ -56,11 +45,11 @@ def test_dataset_indexing(file_idx, frame_idx, dataset_path):
         ("beamformed_data", "image", "hdf5"),
     ],
 )
-def test_generate(dtype, to_dtype, filetype, tmp_path, dataset_path):
+def test_generate(dtype, to_dtype, filetype, tmp_path, dummy_dataset_path):
     """Test generate class"""
     config = setup_config("./tests/config_test.yaml")
     config.data.dtype = dtype
-    config.data.dataset_folder = dataset_path
+    config.data.dataset_folder = dummy_dataset_path
     config.data.file_path = "test0.hdf5"
 
     config.pipeline.operations = [
