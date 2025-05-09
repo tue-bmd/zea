@@ -188,7 +188,7 @@ def _check_beamformed_data(data=None, shape=None, with_batch_dim=None):
             f"got {shape}"
         )
     assert shape[-1] in [1, 2], (
-        "raw data must have 1 or 2 channels, for RF or IQ data respectively, "
+        "beamformed data must have 1 or 2 channels, for RF or IQ data respectively, "
         f"got {shape[-1]} channels"
     )
 
