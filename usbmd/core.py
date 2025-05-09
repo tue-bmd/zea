@@ -139,11 +139,12 @@ class Object:
         Merge multiple scans into a single scan.
 
         Args:
-            *args: The scans to merge.
+            *args: The scan dictionaries to merge.
 
         Returns:
             A new scan object with the merged parameters.
         """
+        # TODO: support actual scan objects, now we only support dictionaries
         params = update_dictionary(scan1, scan2)
         return cls.safe_initialize(**params)
 

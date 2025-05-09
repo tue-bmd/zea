@@ -426,7 +426,7 @@ def load_usbmd_file(
         data = file.load_data(data_type, indices=frames)
 
         scan["selected_transmits"] = transmits
-        scan = Scan.merge(file.scan(), scan)
+        scan = Scan.merge(file.get_scan_parameters(), scan)
 
         return data, scan, probe
 
