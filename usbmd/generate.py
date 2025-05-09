@@ -22,7 +22,7 @@ from usbmd.core import DataTypes
 from usbmd.data import get_dataset
 from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.display import to_8bit
-from usbmd.ops_v2 import Pipeline
+from usbmd.ops import Pipeline
 from usbmd.probes import get_probe
 from usbmd.utils import get_function_args, log, update_dictionary
 from usbmd.utils.checks import _DATA_TYPES
