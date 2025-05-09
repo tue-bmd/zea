@@ -684,10 +684,6 @@ class USBMDApp(App):
         while self.pause_var is True:
             await asyncio.sleep(0.1)
 
-    def save_to_file(self, name=None):
-        """Save config to file"""
-        super().save_to_file(name)
-
     def load(self, data=None, entries=None):
         """Load in a new config file"""
         log.warning(
