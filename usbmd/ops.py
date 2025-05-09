@@ -403,7 +403,7 @@ class Pipeline:
                 return True
 
     @classmethod
-    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
+    def from_default(cls, num_patches=20, pfield=True, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
         operations = []
 
@@ -413,9 +413,10 @@ class Pipeline:
         # Get beamforming ops
         beamforming = [
             TOFCorrection(apply_phase_rotation=True),
-            PfieldWeighting(),
             DelayAndSum(),
         ]
+        if pfield:
+            beamforming.insert(1, PfieldWeighting())
 
         # Optionally add patching
         if num_patches > 1:
@@ -853,8 +854,11 @@ class Pipeline:
         tensor_kwargs = {}
         for key, value in kwargs.items():
             try:
+                # TODO: maybe some logic of convert_to_tensor is needed
                 if isinstance(value, USBMDObject):
                     tensor_kwargs[key] = value.to_tensor()
+                elif value is None:
+                    tensor_kwargs[key] = None
                 else:
                     tensor_kwargs[key] = ops.convert_to_tensor(value)
             except Exception as e:
