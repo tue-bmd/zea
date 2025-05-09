@@ -86,7 +86,7 @@ import matplotlib.pyplot as plt
 
 from usbmd import setup
 from usbmd.data import load_usbmd_file
-from usbmd.ops_v2 import Pipeline
+from usbmd.ops import Pipeline
 
 # choose your config file
 # all necessary settings should be in the config file
@@ -146,7 +146,7 @@ Custom pipelines are also supported in various ways. One way is to define a pipe
 ```python
 import keras
 from usbmd import Config
-from usbmd.ops_v2 import Pipeline
+from usbmd.ops import Pipeline
 
 config = Config(
     {
