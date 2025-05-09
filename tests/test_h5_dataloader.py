@@ -69,7 +69,9 @@ def camus_file():
     return CAMUS_FILE
 
 
-def _get_h5_generator(file_path, key, n_frames, insert_frame_axis, seed=None):
+def _get_h5_generator(
+    file_path, key, n_frames, insert_frame_axis, seed=None, validate=True
+):
     file_paths = [file_path]
     # Create a H5Generator instance
     generator = H5Generator(
@@ -78,6 +80,7 @@ def _get_h5_generator(file_path, key, n_frames, insert_frame_axis, seed=None):
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
         seed=seed,
+        validate=validate,
     )
     return generator
 
@@ -99,9 +102,12 @@ def _get_h5_generator(file_path, key, n_frames, insert_frame_axis, seed=None):
 def test_h5_generator(file_path, key, n_frames, insert_frame_axis, request):
     """Test the H5Generator class"""
 
+    validate = file_path != "dummy_hdf5"
     file_path = request.getfixturevalue(file_path)
 
-    generator = _get_h5_generator(file_path, key, n_frames, insert_frame_axis)
+    generator = _get_h5_generator(
+        file_path, key, n_frames, insert_frame_axis, validate=validate
+    )
 
     batch_shape = next(generator()).shape
     if insert_frame_axis:
@@ -119,7 +125,9 @@ def test_h5_generator(file_path, key, n_frames, insert_frame_axis, request):
 def test_h5_generator_shuffle(dummy_hdf5):
     """Test the H5Generator class"""
 
-    generator = _get_h5_generator(dummy_hdf5, "data", 10, False, seed=42)
+    generator = _get_h5_generator(
+        dummy_hdf5, "data", 10, False, seed=42, validate=False
+    )
 
     # Test shuffle
     indices = deepcopy(generator.indices)
@@ -221,6 +229,7 @@ def test_h5_dataset_return_filename(
 ):
     """Test the Dataloader class with return_filename=True."""
 
+    validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
     dataset = Dataloader(
@@ -235,6 +244,7 @@ def test_h5_dataset_return_filename(
         return_filename=True,
         resize_type="resize",
         batch_size=1,
+        validate=validate,
     )
 
     batch = next(iter(dataset))
@@ -299,6 +309,7 @@ def test_h5_dataset_return_filename(
 def test_h5_dataset_resize_types(directory, key, image_size, resize_type, request):
     """Test the Dataloader class with different resize types."""
 
+    validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
     dataset = Dataloader(
@@ -312,6 +323,7 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, reques
         return_filename=False,
         resize_type=resize_type,
         assert_image_range=False,
+        validate=validate,
     )
 
     images = next(iter(dataset))
@@ -431,7 +443,7 @@ def test_h5_file_retry_count(
 ):
     """Test that the H5Generator correctly counts retries when files are temporarily unavailable."""
 
-    generator = _get_h5_generator(dummy_hdf5, "data", 1, True)
+    generator = _get_h5_generator(dummy_hdf5, "data", 1, True, validate=False)
 
     # Store the original load method
     original_load_data = File.load_data
@@ -494,6 +506,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
         shuffle=False,
         seed=42,
         augmentation=augmentation,
+        validate=False,
     )
 
     images = next(iter(dataset))
