@@ -7,11 +7,11 @@ ultrasound datasets.
 
 from collections import OrderedDict
 from pathlib import Path
-from typing import List
+from typing import Iterable, List
 
 import tqdm
 
-from usbmd.data.file import File, validate_dataset
+from usbmd.data.file import File, validate_file
 from usbmd.datapaths import format_data_path
 from usbmd.utils import (
     calculate_file_hash,
@@ -126,14 +126,186 @@ def find_h5_files(
     return file_paths, file_shapes
 
 
-class Dataset(H5FileHandleCache):
-    """Read multiple usbmd.File objects from a folder."""
+class Folder:
+    """Group of HDF5 files in a folder that can be validated."""
 
     def __init__(
         self,
-        file_paths: List[str] | str,
+        folder_path: list[str] | list[Path],
         key: str,
-        additional_axes_iter: tuple = None,
+        search_file_tree_kwargs: dict | None = None,
+        validate: bool = True,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.folder_path = folder_path
+        self.key = key
+        self.search_file_tree_kwargs = search_file_tree_kwargs
+        self.validate = validate
+        self.file_paths, self.file_shapes = find_h5_files(
+            folder_path, self.key, self.search_file_tree_kwargs
+        )
+        assert self.n_files > 0, f"No files in folder: {folder_path}"
+        if self.validate:
+            self.validate_folder()
+
+    def __len__(self):
+        """Returns the number of files in the dataset."""
+        return self.n_files
+
+    @property
+    def n_files(self):
+        """Return number of files in dataset."""
+        return len(self.file_paths)
+
+    def validate_folder(self):
+        """Validate dataset contents.
+        Furthermore, it checks if all files in the dataset have the same scan parameters.
+
+        TODO: I don't think it actually checks for the same scan parameters.
+
+        If a validation file exists, it checks if the dataset was validated on the same date.
+        If the validation file was corrupted, it raises an error.
+        If the validation file was not corrupted and validated, it prints a message and returns.
+        """
+
+        validation_file_path = self.folder_path / _VALIDATED_FLAG_FILE
+        # for error logging
+        validation_error_file_path = Path(
+            self.folder_path, get_date_string() + "_validation_errors.log"
+        )
+        validation_error_log = []
+
+        if validation_file_path.is_file():
+            self._assert_validation_file(validation_file_path)
+            return
+
+        if self.n_files > _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE:
+            log.warning(
+                "Checking scan parameters in more than "
+                f"{_CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE} files takes too long. "
+                f"Found {self.n_files} files in dataset. "
+                "Not checking scan parameters."
+            )
+            return
+
+        num_frames_per_file = []
+        validated_succesfully = True
+        for file_path in tqdm.tqdm(
+            self.file_paths,
+            total=self.n_files,
+            desc="Checking dataset files on validity (USBMD format)",
+        ):
+            try:
+                validate_file(file_path)
+            except Exception as e:
+                validation_error_log.append(
+                    f"File {file_path} is not a valid USBMD dataset.\n{e}\n"
+                )
+                # convert into warning
+                log.warning(f"Error in file {file_path}.\n{e}")
+                validated_succesfully = False
+
+        if not validated_succesfully:
+            log.warning(
+                "Not all files in dataset have the same scan parameters. "
+                "Check warnings above for details. No validation file was created. "
+                f"See {validation_error_file_path} for details."
+            )
+            try:
+                with open(validation_error_file_path, "w", encoding="utf-8") as f:
+                    for error in validation_error_log:
+                        f.write(error)
+            except Exception as e:
+                log.error(
+                    f"Could not write validation errors to {validation_error_file_path}."
+                    f"\n{e}"
+                )
+            return
+
+        # Create the validated flag file
+        self._write_validation_file(self.folder_path, num_frames_per_file)
+        log.info(
+            f"{log.green('Dataset validated.')} Check {validation_file_path} for details."
+        )
+
+    @staticmethod
+    def _assert_validation_file(validation_file_path):
+        """Check if validation file exists and is valid."""
+        with open(validation_file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            try:
+                validation_date = lines[1].split(": ")[1].strip()
+                read_validation_file_hash = lines[-1].split(": ")[1].strip()
+            except Exception as exc:
+                raise ValueError(
+                    log.error(
+                        f"Validation file {log.yellow(validation_file_path)} is corrupted. "
+                        "Remove it if you want to redo validation."
+                    )
+                ) from exc
+
+            log.info(
+                "Dataset was validated on "
+                f"{log.green(date_string_to_readable(validation_date))}"
+            )
+            log.info(
+                f"Remove {log.yellow(validation_file_path)} if you want to redo validation."
+            )
+        # check if validation file was corrupted
+        validation_file_hash = calculate_file_hash(
+            validation_file_path, omit_line_str="hash"
+        )
+        assert validation_file_hash == read_validation_file_hash, log.error(
+            f"Validation file {log.yellow(validation_file_path)} was corrupted.\n"
+            f"Remove it if you want to redo validation.\n"
+        )
+
+    @staticmethod
+    def get_data_types(file_path):
+        """Get data types from file."""
+        with File(file_path) as file:
+            if "data" in file:
+                data_types = list(file["data"].keys())
+            else:
+                data_types = list(file["event_0"]["data"].keys())
+        return data_types
+
+    def _write_validation_file(self, path, num_frames_per_file):
+        """Write validation file."""
+        validation_file_path = Path(path, _VALIDATED_FLAG_FILE)
+
+        # Read data types from the first file
+        data_types = self.get_data_types(self.file_paths[0])
+
+        number_of_frames = sum(num_frames_per_file)
+        with open(validation_file_path, "w", encoding="utf-8") as f:
+            f.write(f"Dataset: {path}\n")
+            f.write(f"Validated on: {get_date_string()}\n")
+            f.write(f"Number of files: {self.n_files}\n")
+            f.write(f"Number of frames: {number_of_frames}\n")
+            f.write(f"Data types: {', '.join(data_types)}\n")
+            f.write(f"{'-' * 80}\n")
+            # write all file names (not entire path) with number of frames on a new line
+            for file_path, num_frames in zip(self.file_paths, num_frames_per_file):
+                f.write(f"{file_path.name}: {num_frames}\n")
+            f.write(f"{'-' * 80}\n")
+
+        # Write the hash of the validation file
+        validation_file_hash = calculate_file_hash(validation_file_path)
+        with open(validation_file_path, "a", encoding="utf-8") as f:
+            # *** validation file hash *** (80 total line length)
+            f.write("*** validation file hash ***\n")
+            f.write(f"hash: {validation_file_hash}")
+
+
+class Dataset(H5FileHandleCache):
+    """Iterate over File(s) and Folder(s)."""
+
+    def __init__(
+        self,
+        file_paths: List[str],
+        key: str,
         search_file_tree_kwargs: dict | None = None,
         validate: bool = True,
         **kwargs,
@@ -144,8 +316,6 @@ class Dataset(H5FileHandleCache):
             file_paths (str or list): (list of) path(s) to the folder(s) containing the HDF5 file(s)
                 or list of HDF5 file paths. Can be a mixed list of folders and files.
             key (str): The key to access the HDF5 dataset.
-            additional_axes_iter (list, optional): additional axes to iterate over in the dataset.
-                Defaults to None.
             search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
                 search_file_tree function. These are only used when `file_paths` are directories.
                 Defaults to None.
@@ -153,35 +323,48 @@ class Dataset(H5FileHandleCache):
         """
         super().__init__(**kwargs)
         self.key = key
-        if additional_axes_iter is None:
-            additional_axes_iter = []
-        self.additional_axes_iter = additional_axes_iter
         self.search_file_tree_kwargs = search_file_tree_kwargs
         self.validate = validate
 
-        self.file_paths = file_paths
+        self.file_paths, self.file_shapes = self.find_files_and_shapes(file_paths)
         assert self.n_files > 0, f"No files in file_paths: {file_paths}"
 
-    @property
-    def file_paths(self):
-        """Return file paths."""
-        return self._file_paths
+    def find_files_and_shapes(self, paths):
+        """Find files and shapes in the dataset."""
+        # Initialize file paths and shapes
+        file_paths = []
+        file_shapes = []
 
-    @file_paths.setter
-    def file_paths(self, file_paths):
-        """Set file paths."""
-        self._file_paths, self.file_shapes = find_h5_files(
-            file_paths, self.key, self.search_file_tree_kwargs
-        )
-        assert self.n_files > 0, f"No files in file_paths: {file_paths}"
+        if not isinstance(paths, Iterable):
+            paths = [paths]
 
-        if self.validate:
-            if isinstance(file_paths, (str, Path)):
-                self.validate_dataset(Path(file_paths))
+        for file_path in paths:
+            if isinstance(file_path, (str, Path)):
+                file_path = Path(file_path)
+                if file_path.is_dir():
+                    folder = Folder(
+                        file_path, self.key, self.search_file_tree_kwargs, self.validate
+                    )
+                    file_paths += folder.file_paths
+                    file_shapes += folder.file_shapes
+                    del folder
+                elif file_path.is_file():
+                    file_paths.append(file_path)
+                    with File(file_path) as file:
+                        file_shapes.append(file.shape(self.key))
+                        if self.validate:
+                            file.validate()
+                else:
+                    raise ValueError(f"File {file_path} is not a file or directory.")
+            elif isinstance(file_path, Iterable):
+                # If the path is a list, recursively call find_files_and_shapes
+                _file_paths, _file_shapes = self.find_files_and_shapes(file_path)
+                file_paths += _file_paths
+                file_shapes += _file_shapes
             else:
-                log.warning(
-                    "Can only validate dataset if the file_paths is a single path."
-                )
+                raise ValueError(f"File {file_path} is not a string or Path object.")
+
+        return file_paths, file_shapes
 
     @classmethod
     def from_config(cls, dataset_folder, dtype, user=None, **kwargs):
@@ -225,142 +408,3 @@ class Dataset(H5FileHandleCache):
     def total_frames(self):
         """Return total number of frames in dataset."""
         return sum(self.get_file(file_path).num_frames for file_path in self.file_paths)
-
-    def validate_dataset(self, path):
-        """Validate dataset contents.
-        Furthermore, it checks if all files in the dataset have the same scan parameters.
-
-        TODO: I don't think it actually checks for the same scan parameters.
-
-        If a validation file exists, it checks if the dataset was validated on the same date.
-        If the validation file was corrupted, it raises an error.
-        If the validation file was not corrupted and validated, it prints a message and returns.
-        """
-
-        validation_file_path = path / _VALIDATED_FLAG_FILE
-        # for error logging
-        validation_error_file_path = Path(
-            path, get_date_string() + "_validation_errors.log"
-        )
-        validation_error_log = []
-
-        if validation_file_path.is_file():
-            self._assert_validation_file(validation_file_path)
-            return
-
-        if self.n_files > _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE:
-            log.warning(
-                "Checking scan parameters in more than "
-                f"{_CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE} files takes too long. "
-                f"Found {self.n_files} files in dataset. "
-                "Not checking scan parameters."
-            )
-            return
-
-        num_frames_per_file = []
-        validated_succesfully = True
-        for file_path in tqdm.tqdm(
-            self.file_paths,
-            total=self.n_files,
-            desc="Checking dataset files on validity (USBMD format)",
-        ):
-            try:
-                validate_dataset(file_path)
-            except Exception as e:
-                validation_error_log.append(
-                    f"File {file_path} is not a valid USBMD dataset.\n{e}\n"
-                )
-                # convert into warning
-                log.warning(f"Error in file {file_path}.\n{e}")
-                validated_succesfully = False
-
-        if not validated_succesfully:
-            log.warning(
-                "Not all files in dataset have the same scan parameters. "
-                "Check warnings above for details. No validation file was created. "
-                f"See {validation_error_file_path} for details."
-            )
-            try:
-                with open(validation_error_file_path, "w", encoding="utf-8") as f:
-                    for error in validation_error_log:
-                        f.write(error)
-            except Exception as e:
-                log.error(
-                    f"Could not write validation errors to {validation_error_file_path}."
-                    f"\n{e}"
-                )
-            return
-
-        # Create the validated flag file
-        self._write_validation_file(path, num_frames_per_file)
-        log.info(
-            f"{log.green('Dataset validated.')} Check {validation_file_path} for details."
-        )
-
-    @staticmethod
-    def _assert_validation_file(validation_file_path):
-        """Check if validation file exists and is valid."""
-        with open(validation_file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            try:
-                validation_date = lines[1].split(": ")[1].strip()
-                read_validation_file_hash = lines[-1].split(": ")[1].strip()
-            except Exception as exc:
-                raise ValueError(
-                    log.error(
-                        f"Validation file {log.yellow(validation_file_path)} is corrupted. "
-                        "Remove it if you want to redo validation."
-                    )
-                ) from exc
-
-            log.info(
-                "Dataset was validated on "
-                f"{log.green(date_string_to_readable(validation_date))}"
-            )
-            log.info(
-                f"Remove {log.yellow(validation_file_path)} if you want to redo validation."
-            )
-        # check if validation file was corrupted
-        validation_file_hash = calculate_file_hash(
-            validation_file_path, omit_line_str="hash"
-        )
-        assert validation_file_hash == read_validation_file_hash, log.error(
-            f"Validation file {log.yellow(validation_file_path)} was corrupted.\n"
-            f"Remove it if you want to redo validation.\n"
-        )
-
-    def get_data_types(self, file_path):
-        """Get data types from file."""
-        file = self.get_file(file_path)
-        if "data" in file:
-            data_types = list(file["data"].keys())
-        else:
-            data_types = list(file["event_0"]["data"].keys())
-        return data_types
-
-    def _write_validation_file(self, path, num_frames_per_file):
-        """Write validation file."""
-        validation_file_path = Path(path, _VALIDATED_FLAG_FILE)
-
-        # Read data types from the first file
-        data_types = self.get_data_types(self.file_paths[0])
-
-        number_of_frames = sum(num_frames_per_file)
-        with open(validation_file_path, "w", encoding="utf-8") as f:
-            f.write(f"Dataset: {path}\n")
-            f.write(f"Validated on: {get_date_string()}\n")
-            f.write(f"Number of files: {self.n_files}\n")
-            f.write(f"Number of frames: {number_of_frames}\n")
-            f.write(f"Data types: {', '.join(data_types)}\n")
-            f.write(f"{'-' * 80}\n")
-            # write all file names (not entire path) with number of frames on a new line
-            for file_path, num_frames in zip(self.file_paths, num_frames_per_file):
-                f.write(f"{file_path.name}: {num_frames}\n")
-            f.write(f"{'-' * 80}\n")
-
-        # Write the hash of the validation file
-        validation_file_hash = calculate_file_hash(validation_file_path)
-        with open(validation_file_path, "a", encoding="utf-8") as f:
-            # *** validation file hash *** (80 total line length)
-            f.write("*** validation file hash ***\n")
-            f.write(f"hash: {validation_file_hash}")
