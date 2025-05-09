@@ -191,6 +191,11 @@ class File(h5py.File):
         return dtype
 
     def load_transmits(self, key, selected_transmits):
+        """Load raw_data or aligned_data for a given list of transmits.
+        Args:
+            dtype (str): The type of data to load. Options are 'raw_data' and 'aligned_data'.
+            selected_transmits (list, np.ndarray): The transmits to load.
+        """
         key = self.format_key(key)
         dtype = self.key_to_dtype(key)
         assert dtype in ["raw_data", "aligned_data"], (
