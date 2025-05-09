@@ -597,6 +597,12 @@ def _validate_structure(file: File):
     # Validate the root group
     assert_key(file, "data")
 
+    # Assert file["data"] is a group
+    assert isinstance(file["data"], h5py.Group), (
+        "The data group is not a group. Please check the file structure. "
+        "Maybe this is not a USBMD file?"
+    )
+
     # Check if there is only image data
     not_only_image_data = (
         len([i for i in _NON_IMAGE_DATA_TYPES if i in file["data"].keys()]) > 0
