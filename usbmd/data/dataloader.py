@@ -210,6 +210,8 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         batch_size: int = 1,
         as_tensor: bool = True,
         additional_axes_iter: tuple | None = None,
+        drop_remainder: bool = False,
+        caching: bool = False,
         **kwargs,
     ):
         super().__init__(file_paths, key, **kwargs)
@@ -229,6 +231,8 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.batch_size = batch_size
         self.as_tensor = as_tensor
         self.additional_axes_iter = additional_axes_iter or []
+        self.drop_remainder = drop_remainder
+        self.caching = caching
 
         self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
 
@@ -288,32 +292,49 @@ class H5Generator(Dataset, keras.utils.PyDataset):
             )
             self.indices = self.indices[:limit_n_samples]
 
+        self.shuffled_items = range(len(self.indices))
+
         # Retry count for I/O errors
         self.retry_count = 0
+
+        # Create a cache for the data
+        self.caching = caching
+        self._data_cache = {}
 
     def __repr__(self):
         return f"{self.__class__.__name__} containing {len(self)} batches."
 
-    def __getitem__(self, index):
-        if index == 0 and self.shuffle:
-            self._shuffle()
+    def _get_single_item(self, idx):
+        # Check if the item is already in the cache
+        if self.caching and idx in self._data_cache:
+            return self._data_cache[idx]
 
+        # Get the data
+        file_name, key, indices = self.indices[idx]
+        file = self.get_file(file_name)
+        image = self.load(file, key, indices)
+        file_data = {
+            "fullpath": file.filename,
+            "filename": file.stem,
+            "indices": indices,
+        }
+
+        if self.caching:
+            # Store the image and file data in the cache
+            self._data_cache[idx] = [image, file_data]
+        return image, file_data
+
+    def __getitem__(self, index):
         low = index * self.batch_size
         high = min(low + self.batch_size, len(self.indices))
-        indices_list = self.indices[low:high]
+        shuffled_items_list = self.shuffled_items[low:high]
 
         images = []
         filenames = []
-        for file_name, key, indices in indices_list:
-            file = self.get_file(file_name)
-            images.append(self.load(file=file, key=key, indices=indices))
-            filenames.append(
-                {
-                    "fullpath": file.filename,
-                    "filename": file.stem,
-                    "indices": indices,
-                }
-            )
+        for idx in shuffled_items_list:
+            image, file_data = self._get_single_item(idx)
+            images.append(image)
+            filenames.append(file_data)
 
         if self.batch_size == 1:
             images = images[0]
@@ -374,37 +395,30 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         return images
 
     def _shuffle(self):
-        self.rng.shuffle(self.indices)
+        self.rng.shuffle(self.shuffled_items)
         log.info("H5Generator: Shuffled data.")
 
     def __len__(self):
-        return math.ceil(len(self.indices) / self.batch_size)
+        if self.drop_remainder:
+            return math.floor(len(self.indices) / self.batch_size)
+        else:
+            return math.ceil(len(self.indices) / self.batch_size)
 
     def __iter__(self):
         """
         Generator that yields images from the hdf5 files.
         """
+        if self.shuffle:
+            self._shuffle()
         for idx in range(len(self)):
             yield self[idx]
 
 
 class Dataloader(H5Generator):
-    """Dataloader for h5 files. Can resize images and normalize them.
+    """Dataloader for h5 files."""
 
-    Does the following in order to load a dataset:
-    - Find all .hdf5 files in the directory
-    - Load the dataset from each file using the specified key
-    - Apply the following transformations in order (if specified):
-        - limit_n_samples
-        - add channel dim
-        - shuffle (if cached)
-        - resize
-        - batch
-        - normalize
-    """
-
-    # TODO: caching, augmentation, prefetch, shard, drop_remainder, etc.
-    # TODO: order arguments
+    # TODO: implement prefetch & shard
+    # TODO: sort the args and kwargs to be more readable
 
     def __init__(
         self,
@@ -528,7 +542,7 @@ class Dataloader(H5Generator):
             dataloader = dataloader.map(lambda x: x / 255)
 
         """
-        dl = copy.copy(self)
+        dl = copy.deepcopy(self)
         dl.map_fns.append(fn)
         return dl
 
