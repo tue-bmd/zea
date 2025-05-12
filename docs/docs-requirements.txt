@@ -1,0 +1,17 @@
+sphinx
+sphinx-autobuild
+
+# if using typehints
+sphinx-autodoc-typehints
+
+mock
+autodoc
+
+# for using md
+myst-parser
+
+# https://sphinx-themes.org/sample-sites/sphinx-rtd-theme/
+sphinx-rtd-theme
+
+# install stemmer package
+PyStemmer

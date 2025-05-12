@@ -1,42 +1,93 @@
-"""Deprecated ops module"""
+"""Ops module for processing ultrasound data.
 
-import importlib
-from abc import ABC, abstractmethod
+This module contains two important classes, Operation and Pipeline, which are used to
+process ultrasound data. A pipeline is a sequence of operations that are applied to the data
+in a specific order.
+
+## Stand-alone manual usage
+Operations can be run on their own:
+
+Examples:
+```python
+data = np.random.randn(2000, 128, 1)
+# static arguments are passed in the constructor
+envelope_detect = EnvelopeDetect(axis=-1)
+# other parameters can be passed here along with the data
+envelope_data = envelope_detect(data=data)
+```
+
+## Using a pipeline
+You can initialize with a default pipeline or create your own custom pipeline.
+```python
+pipeline = Pipeline.from_default()
+
+operations = [
+    EnvelopeDetect(),
+    Normalize(),
+    LogCompress(),
+]
+pipeline_custom = Pipeline(operations)
+```
+
+One can also load a pipeline from a config or yaml/json file:
+
+```python
+json_string = '{"operations": ["identity"]}'
+pipeline = Pipeline.from_json(json_string)
+
+yaml_file = "pipeline.yaml"
+pipeline = Pipeline.from_yaml(yaml_file)
+```
+
+Example of a yaml file:
+```yaml
+pipeline:
+  operations:
+    - name: demodulate
+    - name: "patched_grid"
+      params:
+        operations:
+          - name: tof_correction
+            params:
+              apply_phase_rotation: true
+          - name: pfield_weighting
+          - name: delay_and_sum
+        num_patches: 100
+    - name: envelope_detect
+    - name: normalize
+    - name: log_compress
+
+```
+"""
+
+import copy
+import hashlib
+import inspect
+import json
+from typing import Any, Dict, List, Union
 
 import keras
 import numpy as np
+import scipy
+import yaml
 from keras import ops
-from scipy import ndimage
-from scipy.ndimage import gaussian_filter
 
-import usbmd.beamformer as bmf
-from usbmd import display
-from usbmd.config import Config
-from usbmd.ops_v2 import (
-    channels_to_complex,
-    complex_to_channels,
-    demodulate_not_jitable,
-    get_band_pass_filter,
-    get_low_pass_iq_filter,
-    hilbert,
-    upmix,
-)
+from usbmd.backend import jit
+from usbmd.beamformer import tof_correction
+from usbmd.config.config import Config
+from usbmd.core import STATIC, DataTypes
+from usbmd.core import Object as USBMDObject
+from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
+from usbmd.display import scan_convert
 from usbmd.probes import Probe
 from usbmd.registry import ops_registry
 from usbmd.scan import Scan
-from usbmd.tensor_ops import patched_map
-from usbmd.utils import lens_correction, log, pfield, translate
-from usbmd.utils.checks import get_check
+from usbmd.simulator import simulate_rf
+from usbmd.tensor_ops import patched_map, resample, reshape_axis
+from usbmd.utils import check_architecture, deep_compare, log, translate
+from usbmd.utils.checks import _assert_keys_and_axes
 
-# make sure to reload all modules that import keras
-# to be able to set backend properly
-importlib.reload(bmf)
-importlib.reload(pfield)
-importlib.reload(lens_correction)
-importlib.reload(display)
-
-# clear registry upon import
-ops_registry.clear()
+DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
 
 def get_ops(ops_name):
@@ -44,267 +95,514 @@ def get_ops(ops_name):
     return ops_registry[ops_name]
 
 
-class Operation(ABC):
-    """Basic operation class as building block for processing pipeline and standalone operations."""
+class Operation(keras.Operation):
+    """
+    A base abstract class for operations in the pipeline with caching functionality.
+    """
 
     def __init__(
         self,
-        input_data_type=None,
-        output_data_type=None,
-        with_batch_dim=True,
+        input_data_type: Union[DataTypes, None] = None,
+        output_data_type: Union[DataTypes, None] = None,
+        key: Union[str, None] = "data",
+        output_key: Union[str, None] = None,
+        cache_inputs: Union[bool, List[str]] = False,
+        cache_outputs: bool = False,
+        jit_compile: bool = True,
+        with_batch_dim: bool = True,
+        jit_kwargs: dict | None = None,
+        jittable: bool = True,
     ):
-        """Initialize the operation.
-
-        Args:
-            input_data_type (type): The expected data type of the input data.
-            output_data_type (type): The expected data type of the output data.
-            with_batch_dim (bool): Whether the input data has a batch dimension.
         """
+        Args:
+            input_data_type (DataTypes): The data type of the input data
+            output_data_type (DataTypes): The data type of the output data
+            key: The key for the input data (operation will operate on this key)
+                Defaults to "data".
+            output_key: The key for the output data (operation will output to this key)
+                Defaults to the same as the input key. If you want to store intermediate
+                results, you can set this to a different key. But make sure to update the
+                input key of the next operation to match the output key of this operation.
+            cache_inputs: A list of input keys to cache or True to cache all inputs
+            cache_outputs: A list of output keys to cache or True to cache all outputs
+            jit_compile: Whether to JIT compile the 'call' method for faster execution
+            with_batch_dim: Whether operations should expect a batch dimension in the input
+            jit_kwargs: Additional keyword arguments for the JIT compiler
+            jittable: Whether the operation can be JIT compiled
+        """
+        super().__init__()
+
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
+
+        self.key = key  # Key for input data
+        self.output_key = output_key  # Key for output data
+        if self.output_key is None:
+            self.output_key = self.key
+
+        self.inputs = []  # Source(s) of input data (name of a previous operation)
+        self.allow_multiple_inputs = False  # Only single input allowed by default
+
+        self.cache_inputs = cache_inputs
+        self.cache_outputs = cache_outputs
+
+        # Initialize input and output caches
+        self._input_cache = {}
+        self._output_cache = {}
+
+        # Obtain the input signature of the `call` method
+        self._input_signature = None
+        self._valid_keys = None  # Keys valid for the `call` method
+        self._trace_signatures()
+
+        if jit_kwargs is None:
+            # TODO: set static_argnames only for operations that require it
+
+            # Get global static parameters
+            static_params = list(STATIC)
+
+            # Add operation-specific static parameters
+            op_static = list(getattr(self.__class__, "STATIC_PARAMS", []))
+            if op_static:
+                static_params = list(set(static_params + op_static))
+
+            if keras.backend.backend() == "jax":
+                jit_kwargs = {"static_argnames": static_params}
+            else:
+                jit_kwargs = {}
+
+        self.jit_kwargs = jit_kwargs
+
         self.with_batch_dim = with_batch_dim
+        self._jittable = jittable
 
-        self.config = None
-        self.scan = None
-        self.probe = None
+        # Set the jit compilation flag and compile the `call` method
+        self.set_jit(jit_compile)
 
-        # this means that the operation doesn't change the data type
-        if self.input_data_type is not None and self.output_data_type is None:
-            self.output_data_type = self.input_data_type
+    def set_jit(self, jit_compile: bool):
+        """Set the JIT compilation flag and set the `_call` method accordingly."""
+        self._jit_compile = jit_compile
+        if self._jit_compile and self.jittable:
+            self._call = jit(self.call, **self.jit_kwargs)
+        else:
+            self._call = self.call
+
+    def _trace_signatures(self):
+        """
+        Analyze and store the input/output signatures of the `call` method.
+        """
+        self._input_signature = inspect.signature(self.call)
+        self._valid_keys = set(self._input_signature.parameters.keys())
 
     @property
-    def name(self):
-        """Return the name of the registered operation."""
-        names = ops_registry.registry.keys()
-        classes = ops_registry.registry.values()
-        return list(names)[list(classes).index(self.__class__)]
+    def jittable(self):
+        """Check if the operation can be JIT compiled."""
+        return self._jittable
 
-    @abstractmethod
-    def process(self, data):
-        """Process the input data through the operation.
+    # pylint: disable=arguments-differ
+    def call(self, **kwargs):
+        """
+        Abstract method that defines the processing logic for the operation.
+        Subclasses must implement this method.
+        """
+        raise NotImplementedError
+
+    def set_input_cache(self, input_cache: Dict[str, Any]):
+        """
+        Set a cache for inputs, then retrace the function if necessary.
 
         Args:
-            data: The input data to be processed.
-
-        Returns:
-            The processed data.
-
+            input_cache: A dictionary containing cached inputs.
         """
-        return data
+        self._input_cache.update(input_cache)
+        self._trace_signatures()  # Retrace after updating cache to ensure correctness.
 
-    def __call__(self, data, *args, **kwargs):
-        """Call the operation on the input data.
+    def set_output_cache(self, output_cache: Dict[str, Any]):
+        """
+        Set a cache for outputs, then retrace the function if necessary.
 
         Args:
-            data: The input data to be processed.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
+            output_cache: A dictionary containing cached outputs.
+        """
+        self._output_cache.update(output_cache)
+        self._trace_signatures()  # Retrace after updating cache to ensure correctness.
+
+    def clear_cache(self):
+        """
+        Clear the input and output caches.
+        """
+        self._input_cache.clear()
+        self._output_cache.clear()
+
+    def _hash_inputs(self, kwargs: Dict) -> str:
+        """
+        Generate a hash for the given inputs to use as a cache key.
+
+        Args:
+            kwargs: Keyword arguments.
 
         Returns:
-            The processed data.
-
+            A unique hash representing the inputs.
         """
-        if self.input_data_type:
-            check = get_check(self.input_data_type)
-            check(data, with_batch_dim=self.with_batch_dim)
-        return self.process(data, *args, **kwargs)
+        input_json = json.dumps(kwargs, sort_keys=True, default=str)
+        return hashlib.md5(input_json.encode()).hexdigest()
 
-    @property
-    def _ready(self):
-        """Check if the operation is ready to be used.
+    def __call__(self, **kwargs) -> Dict:
+        """
+        Process the input keyword arguments and return the processed results.
+
+        Args:
+            kwargs: Keyword arguments to be processed.
 
         Returns:
-            bool: True if the operation is ready, False otherwise.
-
+            Combined input and output as kwargs.
         """
-        return True
+        # Merge cached inputs with provided ones
+        merged_kwargs = {**self._input_cache, **kwargs}
 
-    def initialize(self):
-        """Initialize the operation."""
-        if not self._ready:
-            raise ValueError(
-                f"Operation {self.__class__.__name__} is not ready to be used, "
-                "please set parameters: "
-                "either using `op.set_params(config, scan, probe)` or "
-                "manually setting the parameters during initialization."
+        # Return cached output if available
+        if self.cache_outputs:
+            cache_key = self._hash_inputs(merged_kwargs)
+            if cache_key in self._output_cache:
+                return {**merged_kwargs, **self._output_cache[cache_key]}
+
+        # Filter kwargs to match the valid keys of the `call` method
+        if not "kwargs" in self._valid_keys:
+            filtered_kwargs = {
+                k: v for k, v in merged_kwargs.items() if k in self._valid_keys
+            }
+        else:
+            filtered_kwargs = merged_kwargs
+
+        # Call the processing function
+        # If you want to jump in with debugger please set `jit_compile=False`
+        # when initializing the pipeline.
+        processed_output = self._call(**filtered_kwargs)
+
+        # Ensure the output is always a dictionary
+        if not isinstance(processed_output, dict):
+            raise TypeError(
+                f"The `call` method must return a dictionary. Got {type(processed_output)}."
             )
 
-    def set_params(self, config: Config, scan: Scan, probe: Probe, override=False):
-        """Set the parameters for the operation.
+        # Merge outputs with inputs
+        combined_kwargs = {**merged_kwargs, **processed_output}
 
-        Parameters are assigned to the operation from the config, scan, and probe
-        and in that order of priority (i.e. config > scan > probe will be assigned
-        for shared parameters between the three).
+        # Cache the result if caching is enabled
+        if self.cache_outputs:
+            if isinstance(self.cache_outputs, list):
+                cached_output = {
+                    k: v for k, v in processed_output.items() if k in self.cache_outputs
+                }
+            else:
+                cached_output = processed_output
+            self._output_cache[cache_key] = cached_output
 
-        Args:
-            config (Config): Configuration parameters for the operation.
-            scan (Scan): Scan parameters for the operation.
-            probe (Probe): Probe parameters for the operation.
-            override (bool): Whether to override parameters if they are already set.
-                Defaults to False, meaning that only unset parameters will be set
-                from the config, scan, and probe.
-        """
-        # combine all params with priority config > scan > probe
-        # combine the dicts
-        params = {}
-        if config is not None:
-            params.update(self._assign_config_params(config))
-        if scan is not None:
-            params.update(self._assign_scan_params(scan))
-        if probe is not None:
-            params.update(self._assign_probe_params(probe))
+        return combined_kwargs
 
-        for attr, value in params.items():
-            if value is None:  # don't override with None values
-                continue
-            # only override if override is True or the attribute is not set yet
-            if override or getattr(self, attr) is None:
-                setattr(self, attr, value)
+    def get_dict(self):
+        """Get the configuration of the operation. Inherit from keras.Operation."""
+        config = {}
+        config.update({"name": ops_registry.get_name(self)})
+        config["params"] = {
+            "key": self.key,
+            "output_key": self.output_key,
+            "cache_inputs": self.cache_inputs,
+            "cache_outputs": self.cache_outputs,
+            "jit_compile": self._jit_compile,
+            "with_batch_dim": self.with_batch_dim,
+            "jit_kwargs": self.jit_kwargs,
+        }
+        return config
 
-    def propagate_params(self, scan: Scan):
-        """Update the parameters for the operation.
+    def __eq__(self, other):
+        """Check equality of two operations based on type and configuration."""
+        if not isinstance(other, Operation):
+            return False
 
-        Args:
-            scan (Scan): Scan class with parameters passed from
-                the previous operation in the pipeline.
+        # Compare the class name and parameters
+        if self.__class__.__name__ != other.__class__.__name__:
+            return False
 
-        """
-        updated_params = self._assign_update_params(scan)
+        # Compare the name assigned to the operation
+        name = ops_registry.get_name(self)
+        other_name = ops_registry.get_name(other)
+        if name != other_name:
+            return False
 
-        for attr, value in updated_params.items():
-            if value is None:
-                continue
-            if not hasattr(scan, attr):
-                log.warning(
-                    f"Parameter {attr} is not part of the scan "
-                    "class and cannot be updated. Please check "
-                    f"{self.__class__.__name__}._assign_update_params for "
-                    "faulty scan parameters."
-                )
-                continue
-            setattr(scan, attr, value)
-        return scan
+        # Compare the parameters of the operations
+        if not deep_compare(self.get_dict(), other.get_dict()):
+            return False
 
-    # pylint: disable=unused-argument
-    def _assign_config_params(self, config: Config):
-        """Return the config parameters for the operation.
-
-        Args:
-            config (Config): Configuration parameters for the operation.
-
-        Returns:
-            dict: The config parameters for the operation.
-
-        """
-        return {}
-
-    # pylint: disable=unused-argument
-    def _assign_scan_params(self, scan: Scan):
-        """Return the scan parameters for the operation.
-
-        Args:
-            scan (Scan): Scan parameters for the operation.
-
-        Returns:
-            dict: The scan parameters for the operation.
-
-        """
-        return {}
-
-    # pylint: disable=unused-argument
-    def _assign_probe_params(self, probe: Probe):
-        """Return the probe parameters for the operation.
-
-        Args:
-            probe (Probe): Probe parameters for the operation.
-
-        Returns:
-            dict: The probe parameters for the operation.
-
-        """
-        return {}
-
-    # pylint: disable=unused-argument
-    def _assign_update_params(self, scan: Scan):
-        """Update the parameters for remaining operations in the pipeline.
-
-        Args:
-            scan (Scan): Scan class with parameters passed from
-                the previous operation in the pipeline.
-
-        """
-        return {}
-
-    def prepare_tensor(self, x, dtype=None):
-        """Convert input array to appropriate tensor type for the operations package.
-
-        Args:
-            x: The input array to be converted.
-            dtype: The desired data type of the converted tensor.
-            device: The desired device for the converted tensor.
-
-        Returns:
-            The converted tensor.
-
-        Raises:
-            ValueError: If the operations package is not supported.
-
-        """
-        return ops.convert_to_tensor(x, dtype=dtype)
-
-    def to_numpy(self, x):
-        """Convert tensor to numpy array.
-
-        Args:
-            x: The input tensor to be converted.
-
-        Returns:
-            The converted numpy array.
-
-        """
-        return ops.convert_to_numpy(x)
+        return True
 
 
+@ops_registry("pipeline")
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
 
-    def __init__(self, operations, with_batch_dim=True, device=None):
+    def __init__(
+        self,
+        operations: List[Operation],
+        with_batch_dim: bool = True,
+        jit_options: Union[str, None] = "ops",
+        jit_kwargs: dict | None = None,
+        name="pipeline",
+        validate=True,
+    ):
         """Initialize a pipeline
 
         Args:
             operations (list): A list of Operation instances representing the operations
                 to be performed.
-            ops (module, str, optional): The type of operations to use. Defaults to "numpy".
-            with_batch_dim (bool, optional): Whether to include batch dimension in the operations.
+            with_batch_dim (bool, optional): Whether operations should expect a batch dimension.
                 Defaults to True.
-            device (str, optional): The device to use for the operations. Defaults to None.
-                Can be `cpu` or `cuda`, `cuda:0`, etc.
+            jit_options (str, optional): The JIT options to use. Must be "pipeline", "ops", or None.
+                - "pipeline" compiles the entire pipeline as a single function.
+                    This may be faster but, does not preserve python control flow, such as caching.
+                - "ops" compiles each operation separately. This preserves python control flow and
+                    caching functionality, but speeds up the operations.
+                - None disables JIT compilation.
+                Defaults to "ops".
+            jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
+            name (str, optional): The name of the pipeline. Defaults to "pipeline".
+            validate (bool, optional): Whether to validate the pipeline. Defaults to True.
         """
+        self._call_pipeline = self.call
+        self.name = name
 
-        self.operations = operations
+        self._pipeline_layers = operations
 
-        self.device = self._check_device(device)
+        if jit_options not in ["pipeline", "ops", None]:
+            raise ValueError("jit_options must be 'pipeline', 'ops', or None")
+
+        self.with_batch_dim = with_batch_dim
+
+        if validate:
+            self.validate()
+        else:
+            log.warning(
+                "Pipeline validation is disabled, make sure to validate manually."
+            )
+
+        # pylint: disable=method-hidden
+        if jit_kwargs is None:
+            if keras.backend.backend() == "jax":
+                jit_kwargs = {"static_argnames": STATIC}
+            else:
+                jit_kwargs = {}
+        self.jit_kwargs = jit_kwargs
+        self.jit_options = jit_options  # will handle the jit compilation
+
+    def needs(self, key):
+        """Check if the pipeline needs a specific key."""
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                return operation.needs(key)
+            if key in operation._valid_keys:
+                return True
+
+    @classmethod
+    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
+        """Create a default pipeline."""
+        operations = []
+
+        # Add the demodulate operation
+        operations.append(Demodulate())
+
+        # Get beamforming ops
+        beamforming = [
+            TOFCorrection(apply_phase_rotation=True),
+            PfieldWeighting(),
+            DelayAndSum(),
+        ]
+
+        # Optionally add patching
+        if num_patches > 1:
+            beamforming = [PatchedGrid(operations=beamforming, num_patches=num_patches)]
+
+        # Add beamforming ops
+        operations += beamforming
+
+        # Add display ops
+        operations += [
+            EnvelopeDetect(),
+            Normalize(),
+            LogCompress(),
+        ]
+        return cls(operations, **kwargs)
+
+    def prepend(self, operation: Operation):
+        """Prepend an operation to the pipeline."""
+        self._pipeline_layers.insert(0, operation)
+        self.reset_jit()
+
+    def append(self, operation: Operation):
+        """Append an operation to the pipeline."""
+        self._pipeline_layers.append(operation)
+        self.reset_jit()
+
+    @property
+    def operations(self):
+        """Alias for self.layers to match the USBMD naming convention"""
+        return self._pipeline_layers
+
+    def call(self, **inputs):
+        """Process input data through the pipeline."""
+        for operation in self._pipeline_layers:
+            outputs = operation(**inputs)
+            inputs = outputs
+        return outputs
+
+    def __call__(self, return_numpy=False, **inputs):
+        """Process input data through the pipeline."""
+
+        if any(key in inputs for key in ["probe", "scan", "config"]):
+            raise ValueError(
+                "Probe, Scan and Config objects should be first processed with "
+                "`Pipeline.prepare_parameters` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
+            )
+
+        if any(isinstance(arg, USBMDObject) for arg in inputs.values()):
+            raise ValueError(
+                "Probe, Scan and Config objects should be first processed with "
+                "`Pipeline.prepare_parameters` before calling the pipeline. "
+                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
+            )
+
+        if any(isinstance(arg, str) for arg in inputs.values()):
+            raise ValueError(
+                "Pipeline does not support string inputs. "
+                "Please ensure all inputs are convertible to tensors."
+            )
+
+        ## PROCESSING
+        outputs = self._call_pipeline(**inputs)
+
+        ## PREPARE OUTPUT
+        if return_numpy:
+            # Convert tensors to numpy arrays but preserve None values
+            outputs = {
+                k: ops.convert_to_numpy(v) if v is ops.is_tensor(v) else v
+                for k, v in outputs.items()
+            }
+
+        return outputs
+
+    def reset_jit(self):
+        """Reset the JIT compilation of the pipeline."""
+        # TODO: kind of hacky...
+        self.jit_options = self._jit_options
+
+    @property
+    def jit_options(self):
+        """Get the jit_options property of the pipeline."""
+        return self._jit_options
+
+    @jit_options.setter
+    def jit_options(self, value: Union[str, None]):
+        """Set the jit_options property of the pipeline."""
+        self._jit_options = value
+        if value == "pipeline":
+            assert self.jittable, log.error(
+                "jit_options 'pipeline' cannot be used as the entire pipeline is not jittable. "
+                "The following operations are not jittable: "
+                f"{self.unjitable_ops}. "
+                "Try setting jit_options to 'ops' or None."
+            )
+            self.jit()
+            return
+        else:
+            self.unjit()
 
         for operation in self.operations:
-            # operation.ops = ops
-            operation.with_batch_dim = with_batch_dim
+            if isinstance(operation, Pipeline):
+                operation.jit_options = value
+            else:
+                if operation.jittable and operation._jit_compile:
+                    operation.set_jit(value == "ops")
 
-        # check if the operations are compatible
-        for i in range(len(self.operations) - 1):
-            if self.operations[i].output_data_type is None:
+    def jit(self):
+        """JIT compile the pipeline."""
+        self._call_pipeline = jit(self.call, **self.jit_kwargs)
+
+    def unjit(self):
+        """Un-JIT compile the pipeline."""
+        self._call_pipeline = self.call
+
+    @property
+    def jittable(self):
+        """Check if all operations in the pipeline are jittable."""
+        return all(operation.jittable for operation in self.operations)
+
+    @property
+    def unjitable_ops(self):
+        """Get a list of operations that are not jittable."""
+        return [operation for operation in self.operations if not operation.jittable]
+
+    @property
+    def with_batch_dim(self):
+        """Get the with_batch_dim property of the pipeline."""
+        return self.operations[0].with_batch_dim
+
+    @with_batch_dim.setter
+    def with_batch_dim(self, value):
+        """Set the with_batch_dim property of the pipeline."""
+        for operation in self.operations:
+            operation.with_batch_dim = value
+
+    @property
+    def input_data_type(self):
+        """Get the input_data_type property of the pipeline."""
+        return self.operations[0].input_data_type
+
+    @property
+    def output_data_type(self):
+        """Get the output_data_type property of the pipeline."""
+        return self.operations[-1].output_data_type
+
+    def validate(self):
+        """Validate the pipeline by checking the compatibility of the operations."""
+        operations = self.operations
+        for i in range(len(operations) - 1):
+            if operations[i].output_data_type is None:
                 continue
-            if self.operations[i + 1].input_data_type is None:
+            if operations[i + 1].input_data_type is None:
                 continue
-            if (
-                self.operations[i].output_data_type
-                != self.operations[i + 1].input_data_type
-            ):
+            if operations[i].output_data_type != operations[i + 1].input_data_type:
                 raise ValueError(
-                    f"Operation {self.operations[i].name} output data type is not compatible "
-                    f"with the input data type of operation {self.operations[i + 1].name}"
+                    f"Operation {operations[i].__class__.__name__} output data type "
+                    f"({operations[i].output_data_type}) is not compatible "
+                    f"with the input data type ({operations[i + 1].input_data_type}) "
+                    f"of operation {operations[i + 1].__class__.__name__}"
                 )
 
-        self._jitted_process = None
+    def set_params(self, **params):
+        """Set parameters for the operations in the pipeline by adding them to the cache."""
+        for operation in self.operations:
+            operation_params = {
+                key: value
+                for key, value in params.items()
+                if key in operation._valid_keys
+            }
+            if operation_params:
+                operation.set_input_cache(operation_params)
+
+    def get_params(self, per_operation: bool = False):
+        """Get a snapshot of the current parameters of the operations in the pipeline.
+
+        Args:
+            per_operation (bool): If True, return a list of dictionaries for each operation.
+                                  If False, return a single dictionary with all parameters combined.
+        """
+        if per_operation:
+            return [operation._input_cache.copy() for operation in self.operations]
+        else:
+            params = {}
+            for operation in self.operations:
+                params.update(operation._input_cache)
+            return params
 
     def __str__(self):
         """String representation of the pipeline.
@@ -366,521 +664,556 @@ class Pipeline:
 
     def __repr__(self):
         """String representation of the pipeline."""
-        operations = [operation.__class__.__name__ for operation in self.operations]
-        return ",".join(operations)
+        operations = []
+        for operation in self.operations:
+            if isinstance(operation, Pipeline):
+                operations.append(repr(operation))
+            else:
+                operations.append(operation.__class__.__name__)
+        return f"<Pipeline {self.name}=({', '.join(operations)})>"
+
+    @classmethod
+    def load(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Load a pipeline from a JSON or YAML file."""
+        if file_path.endswith(".json"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                json_str = f.read()
+            return pipeline_from_json(json_str, **kwargs)
+        elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
+            return pipeline_from_yaml(file_path, **kwargs)
+        else:
+            raise ValueError("File must have extension .json, .yaml, or .yml")
+
+    def get_dict(self) -> dict:
+        """Convert the pipeline to a dictionary."""
+        config = {}
+        config["name"] = ops_registry.get_name(self)
+        config["operations"] = self._pipeline_to_list(self)
+        config["params"] = {
+            "with_batch_dim": self.with_batch_dim,
+            "jit_options": self.jit_options,
+            "jit_kwargs": self.jit_kwargs,
+        }
+        return config
+
+    @staticmethod
+    def _pipeline_to_list(pipeline):
+        """Convert the pipeline to a list of operations."""
+        ops_list = []
+        for op in pipeline.operations:
+            ops_list.append(op.get_dict())
+        return ops_list
+
+    @classmethod
+    def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
+        """Create a pipeline from a dictionary or `usbmd.Config` object.
+
+        Args:
+            config (dict or Config): Configuration dictionary or `usbmd.Config` object.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the a `pipeline` key with a subkey `operations`.
+
+        Example:
+        ```python
+        config = Config({
+            "operations": [
+                "identity",
+            ],
+        })
+        pipeline = Pipeline.from_config(config)
+        """
+        return pipeline_from_config(Config(config), **kwargs)
+
+    @classmethod
+    def from_yaml(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Create a pipeline from a YAML file.
+
+        Args:
+            file_path (str): Path to the YAML file.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the a `pipeline` key with a subkey `operations`.
+
+        Example:
+        ```python
+        pipeline = Pipeline.from_yaml("pipeline.yaml")
+        ```
+        """
+        return pipeline_from_yaml(file_path, **kwargs)
+
+    @classmethod
+    def from_json(cls, json_string: str, **kwargs) -> "Pipeline":
+        """Create a pipeline from a JSON string.
+
+        Args:
+            json_string (str): JSON string representing the pipeline.
+            **kwargs: Additional keyword arguments to be passed to the pipeline.
+
+        Note:
+            Must have the `operations` key.
+
+        Example:
+        ```python
+        json_string = '{"operations": ["identity"]}'
+        pipeline = Pipeline.from_json(json_string)
+        ```
+        """
+        return pipeline_from_json(json_string, **kwargs)
+
+    def to_config(self) -> Config:
+        """Convert the pipeline to a `usbmd.Config` object."""
+        return pipeline_to_config(self)
+
+    def to_json(self) -> str:
+        """Convert the pipeline to a JSON string."""
+        return pipeline_to_json(self)
+
+    def to_yaml(self, file_path: str) -> None:
+        """Convert the pipeline to a YAML file."""
+        pipeline_to_yaml(self, file_path)
+
+    @property
+    def key(self) -> str:
+        """Input key of the pipeline."""
+        return self.operations[0].key
+
+    @property
+    def output_key(self) -> str:
+        """Output key of the pipeline."""
+        return self.operations[-1].output_key
+
+    def __eq__(self, other):
+        """Check if two pipelines are equal."""
+        if not isinstance(other, Pipeline):
+            return False
+
+        # Compare the operations in both pipelines
+        if len(self.operations) != len(other.operations):
+            return False
+
+        for op1, op2 in zip(self.operations, other.operations):
+            if not op1 == op2:
+                return False
+
+        return True
+
+    def prepare_parameters(
+        self,
+        probe: Probe = None,
+        scan: Scan = None,
+        config: Config = None,
+        **kwargs,
+    ):
+        """Prepare Probe, Scan and Config objects for the pipeline.
+
+        Serializes `usbmd.core.Object` instances and converts them to
+        dictionary of tensors.
+
+        Args:
+            probe: Probe object.
+            scan: Scan object.
+            config: Config object.
+            **kwargs: Additional keyword arguments to be included in the inputs.
+
+        Returns:
+            dict: Dictionary of inputs with all values as tensors.
+        """
+        # Initialize dictionaries for probe, scan, and config
+        probe_dict, scan_dict, config_dict = {}, {}, {}
+        other_dicts = {}
+
+        # Process args to extract Probe, Scan, and Config objects
+        if probe is not None:
+            assert isinstance(
+                probe, Probe
+            ), f"Expected an instance of `usbmd.probes.Probe`, got {type(probe)}"
+            probe_dict = probe.to_tensor()
+
+        if scan is not None:
+            assert isinstance(
+                scan, Scan
+            ), f"Expected an instance of `usbmd.scan.Scan`, got {type(scan)}"
+            except_tensors = []
+            for key in scan._on_request:
+                if not self.needs(key):
+                    except_tensors.append(key)
+            scan_dict = scan.to_tensor(except_tensors)
+
+        if config is not None:
+            # TODO: currently nothing...
+            assert isinstance(
+                config, Config
+            ), f"Expected an instance of `usbmd.config.Config`, got {type(config)}"
+            config_dict.update(config.to_tensor())
+
+        # Convert all kwargs to tensors
+        tensor_kwargs = {}
+        for key, value in kwargs.items():
+            try:
+                if isinstance(value, USBMDObject):
+                    tensor_kwargs[key] = value.to_tensor()
+                else:
+                    tensor_kwargs[key] = ops.convert_to_tensor(value)
+            except Exception as e:
+                raise ValueError(
+                    f"Error converting key '{key}' to tensor: {e}. "
+                    f"Please ensure all inputs are convertible to tensors."
+                ) from e
+
+        # combine probe, scan, config and kwargs
+        # explicitly so we know which keys overwrite which
+        # kwargs > config > scan > probe
+        inputs = {
+            **probe_dict,
+            **scan_dict,
+            **config_dict,
+            **other_dicts,
+            **tensor_kwargs,
+        }
+
+        # Dropping str inputs as they are not supported in jax.jit
+        # TODO: will this break any operations?
+        inputs.pop("probe_type", None)
+
+        return inputs
+
+
+def make_operation_chain(
+    operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
+) -> List[Operation]:
+    """Make an operation chain from a custom list of operations.
+    Args:
+        operation_chain (list): List of operations to be performed.
+            Each operation can be:
+            - A string: operation initialized with default parameters
+            - A dictionary: operation initialized with parameters in the dictionary
+            - A Config object: converted to a dictionary and initialized
+            - An Operation/Pipeline instance: used as-is
+    Returns:
+        list: List of operations to be performed.
+    """
+    chain = []
+    for operation in operation_chain:
+        # Handle already instantiated Operation or Pipeline objects
+        if isinstance(operation, (Operation, Pipeline)):
+            chain.append(operation)
+            continue
+
+        assert isinstance(
+            operation, (str, dict, Config)
+        ), f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
+
+        if isinstance(operation, str):
+            operation_instance = get_ops(operation)()
+
+        else:
+            if isinstance(operation, Config):
+                operation = operation.serialize()
+
+            params = operation.get("params", {})
+            op_name = operation.get("name")
+            operation_cls = get_ops(op_name)
+
+            # Handle branches for branched pipeline
+            if op_name == "branched_pipeline" and "branches" in operation:
+                branch_configs = operation.get("branches", {})
+                branches = []
+
+                # Convert each branch configuration to an operation chain
+                for _, branch_config in branch_configs.items():
+                    if isinstance(branch_config, (list, np.ndarray)):
+                        # This is a list of operations
+                        branch = make_operation_chain(branch_config)
+                    elif "operations" in branch_config:
+                        # This is a pipeline-like branch
+                        branch = make_operation_chain(branch_config["operations"])
+                    else:
+                        # This is a single operation branch
+                        branch_op_cls = get_ops(branch_config["name"])
+                        branch_params = branch_config.get("params", {})
+                        branch = branch_op_cls(**branch_params)
+
+                    branches.append(branch)
+
+                # Create the branched pipeline instance
+                operation_instance = operation_cls(branches=branches, **params)
+            # Check for nested operations at the same level as params
+            elif "operations" in operation:
+                nested_operations = make_operation_chain(operation["operations"])
+
+                # Instantiate pipeline-type operations with nested operations
+                if issubclass(operation_cls, Pipeline):
+                    operation_instance = operation_cls(
+                        operations=nested_operations, **params
+                    )
+                else:
+                    operation_instance = operation_cls(
+                        operations=nested_operations, **params
+                    )
+            elif operation["name"] in ["patched_grid"]:
+                nested_operations = make_operation_chain(
+                    operation["params"].pop("operations")
+                )
+                operation_instance = operation_cls(
+                    operations=nested_operations, **params
+                )
+            else:
+                operation_instance = operation_cls(**params)
+
+        chain.append(operation_instance)
+
+    return chain
+
+
+def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a Config object.
+    """
+    assert (
+        "operations" in config
+    ), "Config object must have an 'operations' key for pipeline creation."
+    assert isinstance(
+        config.operations, (list, np.ndarray)
+    ), "Config object must have a list or numpy array of operations for pipeline creation."
+
+    operations = make_operation_chain(config.operations)
+
+    # merge pipeline config without operations with kwargs
+    pipeline_config = copy.deepcopy(config)
+    pipeline_config.pop("operations")
+
+    kwargs = {**pipeline_config, **kwargs}
+    return Pipeline(operations=operations, **kwargs)
+
+
+def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a JSON string.
+    """
+    pipeline_config = Config(json.loads(json_string, cls=USBMDDecoderJSON))
+    return pipeline_from_config(pipeline_config, **kwargs)
+
+
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
+    """
+    Create a Pipeline instance from a YAML file.
+    """
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        pipeline_config = yaml.safe_load(f)
+    operations = pipeline_config["operations"]
+    return pipeline_from_config(Config({"operations": operations}), **kwargs)
+
+
+def pipeline_to_config(pipeline: Pipeline) -> Config:
+    """
+    Convert a Pipeline instance into a Config object.
+    """
+    # TODO: we currently add the full pipeline as 1 operation to the config.
+    # In another PR we should add a "pipeline" entry to the config instead of the "operations"
+    # entry. This allows us to also have non-default pipeline classes as top level op.
+    pipeline_dict = {"operations": [pipeline.get_dict()]}
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
+    return Config(pipeline_dict)
+
+
+def pipeline_to_json(pipeline: Pipeline) -> str:
+    """
+    Convert a Pipeline instance into a JSON string.
+    """
+    pipeline_dict = {"operations": [pipeline.get_dict()]}
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
+    return json.dumps(pipeline_dict, cls=USBMDEncoderJSON, indent=4)
+
+
+def pipeline_to_yaml(pipeline: Pipeline, file_path: str) -> None:
+    """
+    Convert a Pipeline instance into a YAML file.
+    """
+    pipeline_dict = pipeline.get_dict()
+
+    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
+    ops = pipeline_dict["operations"]
+    if ops[0]["name"] == "pipeline" and len(ops) == 1:
+        pipeline_dict = {"operations": ops[0]["operations"]}
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        yaml.dump(pipeline_dict, f, Dumper=yaml.Dumper, indent=4)
+
+
+@ops_registry("patched_grid")
+class PatchedGrid(Pipeline):
+    """
+    With this class you can form a pipeline that will be applied to patches of the grid.
+    This is useful to avoid OOM errors when processing large grids.
+
+    Somethings to NOTE about this class:
+        - The ops have to use flatgrid and flat_pfield as inputs, these will be patched.
+        - Changing anything other than `self.output_data_type` in the dict will not be propagated!
+        - Will be jitted as a single operation, not the individual operations.
+        - This class handles the batching.
+    """
+
+    def __init__(self, *args, num_patches=10, **kwargs):
+        super().__init__(*args, name="patched_grid", **kwargs)
+        self.num_patches = num_patches
+
+        for operation in self.operations:
+            if isinstance(operation, DelayAndSum):
+                operation.reshape_grid = False
+
+        self._jittable_call = self.jittable_call
+
+    @property
+    def jit_options(self):
+        """Get the jit_options property of the pipeline."""
+        return self._jit_options
+
+    @jit_options.setter
+    def jit_options(self, value):
+        """Set the jit_options property of the pipeline."""
+        self._jit_options = value
+        if value in ["pipeline", "ops"]:
+            self.jit()
+        else:
+            self.unjit()
+
+    def jit(self):
+        """JIT compile the pipeline."""
+        self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
+
+    def unjit(self):
+        """Un-JIT compile the pipeline."""
+        self._jittable_call = self.jittable_call
+        self._call_pipeline = self.call
 
     @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
-        return self.operations[0].with_batch_dim
+        return self.pipeline_batched
 
-    def on_device(self, func, data, device=None, return_numpy=False):
-        """On device function for running pipeline on specific device."""
-        backend = keras.backend.backend()
-        if backend == "numpy":
-            return func(data)
-        elif backend == "tensorflow":
-            on_device_tf = importlib.import_module(
-                "usbmd.backend.tensorflow"
-            ).on_device_tf
-            return on_device_tf(func, data, device=device, return_numpy=return_numpy)
-        elif backend == "torch":
-            on_device_torch = importlib.import_module(
-                "usbmd.backend.torch"
-            ).on_device_torch
-            return on_device_torch(func, data, device=device, return_numpy=return_numpy)
-        elif backend == "jax":
-            on_device_jax = importlib.import_module("usbmd.backend.jax").on_device_jax
-            return on_device_jax(func, data, device=device, return_numpy=return_numpy)
-        else:
-            raise ValueError(f"Unsupported operations package {backend}.")
-
-    def set_params(self, config: Config, scan: Scan, probe: Probe, override=False):
-        """Set the parameters for the pipeline. See Operation.set_params for more info."""
-        scan_objects = [scan]
+    @with_batch_dim.setter
+    def with_batch_dim(self, value):
+        """Set the with_batch_dim property of the pipeline.
+        The class handles the batching so the operations have to be set to False."""
+        self.pipeline_batched = value
         for operation in self.operations:
-            # set parameters for each operation using initial scan, config, probe
-            operation.set_params(config, scan, probe, override=override)
-            # also propagate running list of updated parameters to the next operation
-            if scan is not None:
-                scan = operation.propagate_params(scan.copy())
-            else:
-                log.warning(
-                    "Did not provide a scan object to the pipeline, and therefore "
-                    "cannot propagate parameters through the pipeline."
-                )
-            scan_objects.append(scan)
+            operation.with_batch_dim = False
 
-        return scan_objects
+    def call_item(self, inputs):
+        """Process data in patches."""
+        Nx = inputs["Nx"]
+        Nz = inputs["Nz"]
+        flatgrid = inputs.pop("flatgrid")
 
-    def process(self, data, return_numpy=False):
+        # Define a list of keys to look up for patching
+        patch_keys = ["flat_pfield"]
+
+        patch_arrays = {}
+        for key in patch_keys:
+            if key in inputs:
+                patch_arrays[key] = inputs.pop(key)
+
+        def patched_call(flatgrid, **patch_kwargs):
+            patch_args = {k: v for k, v in patch_kwargs.items() if v is not None}
+            out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
+                flatgrid=flatgrid, **patch_args, **inputs
+            )
+            return out[self.output_key]
+
+        out = patched_map(
+            patched_call,
+            flatgrid,
+            self.num_patches,
+            **patch_arrays,
+            jit=bool(self.jit_options),
+        )
+        return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
+
+    def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
-        data = ops.convert_to_tensor(data)
-        if not all(operation._ready for operation in self.operations):
-            operations_not_ready = [
-                operation.name for operation in self.operations if not operation._ready
-            ]
-            raise ValueError(
-                log.error(
-                    f"Operations {operations_not_ready} are not ready to be used, "
-                    "please set parameters using `op.set_params(config, scan, probe)` "
-                    "and initialize them using `op.initialize()`."
-                )
+        if self.pipeline_batched:
+            input_data = inputs.pop(self.key)
+            output = ops.map(
+                lambda x: self.call_item({self.key: x, **inputs}),
+                input_data,
             )
-        if self._jitted_process is None:
-            processing_func = self._process
         else:
-            processing_func = self._jitted_process
+            output = self.call_item(inputs)
 
-        if self.device:
-            return self.on_device(
-                processing_func, data, device=self.device, return_numpy=return_numpy
-            )
-        data_out = processing_func(data)
-        if return_numpy:
-            return ops.convert_to_numpy(data_out)
-        return data_out
+        return {self.output_key: output}
 
-    def _process(self, data):
-        for operation in self.operations:
-            if isinstance(data, list) and operation.__class__.__name__ != "Stack":
-                data = [operation(_data) for _data in data]
-            else:
-                data = operation(data)
-        return data
+    def call(self, **inputs):
+        """Process input data through the pipeline."""
+        output = self._jittable_call(**inputs)
+        inputs.update(output)
+        return inputs
 
-    def initialize(self):
-        """Initialize all operations in the pipeline."""
-        for operation in self.operations:
-            operation.initialize()
+    def get_dict(self):
+        """Get the configuration of the pipeline."""
+        config = super().get_dict()
+        config.update({"name": "patched_grid"})
+        config["params"].update({"num_patches": self.num_patches})
+        return config
 
-    def compile(self, jit=True):
-        """Compile the pipeline using jit."""
-        backend = keras.backend.backend()
-        if not jit:
-            return
-        log.info(f"Compiling pipeline, with backend {backend}.")
-        if backend == "numpy":
-            return
-        elif backend == "tensorflow":
-            tf_function = importlib.import_module("tensorflow").function
 
-            self._jitted_process = tf_function(
-                self._process, jit_compile=jit
-            )  # tf.function
-            return
-        elif backend == "torch":
-            log.warning("JIT compmilation is not yet supported for torch.")
-            return
-        elif backend == "jax":
-            jax_jit = importlib.import_module("jax").jit
-            self._jitted_process = jax_jit(self._process)  # jax.jit
-            return
-
-    def prepare_tensor(self, x, dtype=None, device=None):
-        """Convert input array to appropriate tensor type for the operations package."""
-        if len(self.operations) == 0:
-            return x
-        return self.operations[0].prepare_tensor(x, dtype=dtype, device=device)
-
-    def _check_device(self, device):
-        if device is None:
-            return None
-
-        if device == "cpu":
-            return "cpu"
-
-        backend = keras.backend.backend()
-
-        if backend == "numpy":
-            if device not in [None, "cpu"]:
-                log.warning(
-                    f"Device {device} is not supported for numpy operations, using cpu."
-                )
-            return "cpu"
-
-        else:
-            # assert device to be cpu, cuda, cuda:{int} or int or None
-            assert isinstance(
-                device, (str, int)
-            ), f"device should be a string or int, got {device}"
-            if isinstance(device, str):
-                if backend == "tensorflow":
-                    assert device.startswith(
-                        "gpu"
-                    ), f"device should be 'cpu' or 'gpu:*', got {device}"
-                elif backend == "torch":
-                    assert device.startswith(
-                        "cuda"
-                    ), f"device should be 'cpu' or 'cuda:*', got {device}"
-                elif backend == "jax":
-                    assert device.startswith(
-                        ("gpu", "cuda")
-                    ), f"device should be 'cpu', 'gpu:*', or 'cuda:*', got {device}"
-                else:
-                    raise ValueError(f"Unsupported backend {backend}.")
-            return device
+## Base Operations
 
 
 @ops_registry("identity")
 class Identity(Operation):
     """Identity operation."""
 
-    def process(self, data):
-        return data
+    def call(self, **kwargs) -> Dict:
+        """Returns the input as is."""
+        return kwargs
 
 
-@ops_registry("delay_and_sum")
-class DelayAndSum(Operation):
-    """Sums time-delayed signals along channels and transmits."""
+@ops_registry("merge")
+class Merge(Operation):
+    """Operation that merges sets of input dictionaries."""
 
-    def __init__(self, rx_apo=None, tx_apo=None, patches=1, **kwargs):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.allow_multiple_inputs = True
+
+    def call(self, *args, **kwargs) -> Dict:
         """
-        Args:
-            rx_apo (array, optional): Receive apodization window. Defaults to None.
-            tx_apo (array, optional): Transmit apodization window. Defaults to None.
-            patches (int, optional): Number of patches to split the data into. Defaults to 1.
+        Merges the input dictionaries. Priority is given to the last input.
         """
-        super().__init__(
-            input_data_type=None,
-            output_data_type="beamformed_data",
-            **kwargs,
-        )
-        self.rx_apo = rx_apo
-        self.tx_apo = tx_apo
-        self.patches = patches
+        merged = {}
+        for arg in args:
+            if not isinstance(arg, dict):
+                raise TypeError("All inputs must be dictionaries.")
+            merged.update(arg)
+        return merged
 
-    def initialize(self):
-        if self.rx_apo is None:
-            self.rx_apo = 1.0
 
-        if self.tx_apo is None:
-            self.tx_apo = 1.0
+@ops_registry("split")
+class Split(Operation):
+    """Operation that splits an input dictionary  n copies."""
 
-    def process_patch(self, patch):
-        """Performs DAS beamforming on tof-corrected input.
+    def __init__(self, n: int, **kwargs):
+        super().__init__(**kwargs)
+        self.n = n
 
-        Args:
-            data (ops.Tensor): The TOF corrected input of shape `(n_pix, n_tx, n_el, n_ch)`
-
-        Returns:
-            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
+    def call(self, **kwargs) -> List[Dict]:
         """
-
-        # Sum over the channels, i.e. DAS
-        data = ops.sum(self.rx_apo * patch, -2)
-
-        # Sum over transmits, i.e. Compounding
-        data = self.tx_apo * data
-        data = ops.sum(data, 1)
-
-        return data
-
-    def process_item(self, data):
-        """Performs DAS beamforming on tof-corrected input. Optionally splits the data into patches.
-
-        Args:
-            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
-
-        Returns:
-            list[ops.Tensor]: The beamformed data of shape `(n_z, n_x, n_ch)`
+        Splits the input dictionary into n copies.
         """
-        n_tx, n_z, n_x, n_el, n_ch = data.shape
-
-        # Flatten grid and move n_pix=(n_z * n_x) to the front
-        flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
-        flat_data = ops.moveaxis(flat_data, 1, 0)
-
-        flat_data = patched_map(self.process_patch, flat_data, self.patches)
-
-        # Reshape data back to original shape
-        data = ops.reshape(flat_data, (n_z, n_x, n_ch))
-
-        return data
-
-    def process(self, data):
-        """Performs DAS beamforming on tof-corrected input.
-
-        Args:
-            data (ops.Tensor): The TOF corrected input of shape
-                `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
-
-        Returns:
-            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
-                with optional batch dimension.
-        """
-
-        if not self.with_batch_dim:
-            return self.process_item(data)
-        else:
-            # TODO: could be ops.vectorized_map if enough memory
-            return ops.map(self.process_item, data)
-
-
-@ops_registry("delay_and_sum_multi")
-class DelayAndSumMulti(Operation):
-    """
-    Sums time-delayed signals along channels and transmits for a list of receive apodizations.
-    Each receive apodization in the list will generate a separate output in a list
-    """
-
-    def __init__(self, rx_apo=None, tx_apo=None, patches=1, **kwargs):
-        """
-        Args:
-            rx_apo (list, optional):  Receive apodization windows. Defaults to None.
-            tx_apo (array, optional): Transmit apodization window. Defaults to None.
-            patches (int, optional): Number of patches to split the data into. Defaults to 1.
-        """
-        super().__init__(
-            input_data_type=None,
-            output_data_type="beamformed_data",
-            **kwargs,
-        )
-        self.rx_apo = rx_apo
-        self.tx_apo = tx_apo
-        self.patches = patches
-        self.rx_apo_ind = 0
-
-    def initialize(self):
-        if self.rx_apo is None:
-            self.rx_apo = [
-                1.0,
-            ]  # single branch - standard das
-
-        if self.tx_apo is None:
-            self.tx_apo = 1.0
-
-    def process_patch(self, patch):
-        """Performs DAS beamforming on tof-corrected input.
-
-        Args:
-            data (ops.Tensor): The TOF corrected input of shape `(n_pix, n_tx, n_el, n_ch)`
-
-        Returns:
-            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
-        """
-        # Sum over the channels, i.e. DAS
-        data = ops.sum(self.rx_apo[self.rx_apo_ind] * patch, -2)
-
-        # Sum over transmits, i.e. Compounding
-        data = self.tx_apo * data
-        data = ops.sum(data, 1)
-
-        return data
-
-    def process_item(self, data):
-        """Performs DAS beamforming on tof-corrected input. Optionally splits the data into patches.
-
-        Args:
-            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_z, n_x, n_el, n_ch)`
-
-        Returns:
-            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
-        """
-        n_tx, n_z, n_x, n_el, n_ch = data.shape
-
-        # Flatten grid and move n_pix=(n_z * n_x) to the front
-        flat_data = ops.reshape(data, (n_tx, -1, n_el, n_ch))
-        flat_data = ops.moveaxis(flat_data, 1, 0)
-
-        data = []
-        for i in range(0, len(self.rx_apo)):
-            self.rx_apo_ind = i
-            temp = patched_map(self.process_patch, flat_data, self.patches)
-
-            # Reshape data back to original shape
-            data.append(ops.reshape(temp, (n_z, n_x, n_ch)))
-
-        return data
-
-    def process(self, data):
-        """Performs DAS beamforming on tof-corrected input.
-
-        Args:
-            data (ops.Tensor): The TOF corrected input of shape
-                `(n_tx, n_z, n_x, n_el, n_ch)` with optional batch dimension.
-
-        Returns:
-            ops.Tensor: The beamformed data of shape `(n_z, n_x, n_ch)`
-                with optional batch dimension.
-        """
-
-        if not self.with_batch_dim:
-            return self.process_item(data)
-        else:
-            # TODO: could be ops.vectorized_map if enough memory
-            return ops.map(self.process_item, data)
-
-
-@ops_registry("tof_correction")
-class TOFCorrection(Operation):
-    """Time-of-flight correction operation for ultrasound data."""
-
-    def __init__(
-        self,
-        grid=None,
-        sound_speed=None,
-        polar_angles=None,
-        focus_distances=None,
-        sampling_frequency=None,
-        f_number=None,
-        n_el=None,
-        n_tx=None,
-        n_ax=None,
-        demodulation_frequency=None,
-        t0_delays=None,
-        tx_apodizations=None,
-        initial_times=None,
-        probe_geometry=None,
-        apply_lens_correction=None,
-        lens_thickness=None,
-        lens_sound_speed=None,
-        patches=1,
-    ):
-        super().__init__(
-            input_data_type="raw_data",
-            output_data_type=None,
-        )
-        self.grid = grid
-        self.sound_speed = sound_speed
-        self.polar_angles = polar_angles
-        self.focus_distances = focus_distances
-        self.sampling_frequency = sampling_frequency
-        self.f_number = f_number
-        self.n_el = n_el
-        self.n_tx = n_tx
-        self.n_ax = n_ax
-        self.demodulation_frequency = demodulation_frequency
-        self.t0_delays = t0_delays
-        self.tx_apodizations = tx_apodizations
-        self.initial_times = initial_times
-        self.probe_geometry = probe_geometry
-        self.apply_lens_correction = apply_lens_correction
-        self.lens_thickness = lens_thickness
-        self.lens_sound_speed = lens_sound_speed
-        self.patches = patches
-
-    def initialize(self):
-        self.grid = ops.convert_to_tensor(self.grid, dtype="float32")
-        self.focus_distances = ops.convert_to_tensor(
-            self.focus_distances, dtype="float32"
-        )
-        self.polar_angles = ops.convert_to_tensor(self.polar_angles, dtype="float32")
-        self.t0_delays = ops.convert_to_tensor(self.t0_delays, dtype="float32")
-        self.tx_apodizations = ops.convert_to_tensor(
-            self.tx_apodizations, dtype="float32"
-        )
-        self.initial_times = ops.convert_to_tensor(self.initial_times, dtype="float32")
-        self.probe_geometry = ops.convert_to_tensor(
-            self.probe_geometry, dtype="float32"
-        )
-
-        super().initialize()
-
-    def process_item(self, data):
-        """Perform time-of-flight correction on a single item in the batch."""
-        return bmf.tof_correction(
-            data,
-            grid=self.grid,
-            t0_delays=self.t0_delays,
-            tx_apodizations=self.tx_apodizations,
-            sound_speed=self.sound_speed,
-            probe_geometry=self.probe_geometry,
-            initial_times=self.initial_times,
-            sampling_frequency=self.sampling_frequency,
-            demodulation_frequency=self.demodulation_frequency,
-            fnum=self.f_number,
-            angles=self.polar_angles,
-            vfocus=self.focus_distances,
-            apply_phase_rotation=bool(self.demodulation_frequency),
-            apply_lens_correction=bool(self.apply_lens_correction),
-            lens_thickness=self.lens_thickness,
-            lens_sound_speed=self.lens_sound_speed,
-            patches=self.patches,
-        )
-
-    def process(self, data):
-        """Perform time-of-flight correction on a batch of data."""
-        if not self.with_batch_dim:
-            return self.process_item(data)
-        else:
-            return ops.map(self.process_item, data)
-
-    def _assign_scan_params(self, scan: Scan):
-        return {
-            "grid": scan.grid,
-            "focus_distances": scan.focus_distances,
-            "t0_delays": scan.t0_delays,
-            "tx_apodizations": scan.tx_apodizations,
-            "initial_times": scan.initial_times,
-            "probe_geometry": scan.probe_geometry,
-            "sound_speed": scan.sound_speed,
-            "polar_angles": scan.polar_angles,
-            "sampling_frequency": scan.sampling_frequency,
-            "f_number": scan.f_number,
-            "demodulation_frequency": scan.demodulation_frequency,
-            "apply_lens_correction": scan.apply_lens_correction,
-            "lens_thickness": scan.lens_thickness,
-            "lens_sound_speed": scan.lens_sound_speed,
-        }
-
-    @property
-    def _ready(self):
-        return all(
-            [
-                self.grid is not None,
-                self.focus_distances is not None,
-                self.t0_delays is not None,
-                self.tx_apodizations is not None,
-                self.initial_times is not None,
-                self.probe_geometry is not None,
-                self.sound_speed is not None,
-                self.polar_angles is not None,
-                self.sampling_frequency is not None,
-                self.f_number is not None,
-                self.demodulation_frequency is not None,
-                self.apply_lens_correction is not None,
-                self.lens_thickness is not None or self.apply_lens_correction is False,
-                self.lens_sound_speed is not None
-                or self.apply_lens_correction is False,
-            ]
-        )
-
-
-@ops_registry("pfield_weighting")
-class PfieldWeighting(Operation):
-    """Weighting aligned data with the pressure field."""
-
-    def __init__(self, pfield=None, **kwargs):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-
-        self.pfield = pfield
-
-    def _assign_scan_params(self, scan: Scan):
-        return {
-            "pfield": scan.pfield,
-        }
-
-    @property
-    def _ready(self):
-        return self.pfield is not None
-
-    def process(self, data):
-        # Perform element-wise multiplication with the pressure weight mask
-        # Also add the required dimensions for broadcasting
-        if self.with_batch_dim:
-            pfield = ops.expand_dims(self.pfield, axis=0)
-        else:
-            pfield = self.pfield
-
-        pfield = pfield[..., None, None]
-
-        data_weighted = data * pfield
-        return data_weighted
+        return [kwargs.copy() for _ in range(self.n)]
 
 
 @ops_registry("stack")
@@ -889,312 +1222,349 @@ class Stack(Operation):
     Useful to merge data from parallel pipelines.
     """
 
-    def __init__(self, axis=0, **kwargs):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-        self.axis = axis
+    def __init__(
+        self,
+        keys: Union[str, List[str], None],
+        axes: Union[int, List[int], None],
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
 
-    def process(self, data):
-        return ops.stack(data, axis=self.axis)
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
+
+    def call(self, **kwargs) -> Dict:
+        """
+        Stacks the inputs corresponding to the specified keys along the specified axis.
+        If a list of axes is provided, the length must match the number of keys.
+        """
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
+        return kwargs
 
 
 @ops_registry("mean")
 class Mean(Operation):
     """Take the mean of the input data along a specific axis."""
 
-    def __init__(self, axis=0, **kwargs):
+    def __init__(self, keys, axes, **kwargs):
+        super().__init__(**kwargs)
+
+        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
+
+    def call(self, **kwargs):
+        for key, axis in zip(self.keys, self.axes):
+            kwargs[key] = ops.mean(kwargs[key], axis=axis)
+
+        return kwargs
+
+
+@ops_registry("simulate_rf")
+class Simulate(Operation):
+    """Simulate RF data."""
+
+    # Define operation-specific static parameters
+    STATIC_PARAMS = ["n_ax"]
+
+    def __init__(self, **kwargs):
         super().__init__(
-            input_data_type=None,
-            output_data_type=None,
+            output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
-        self.axis = axis
 
-    def process(self, data):
-        return ops.mean(data, axis=self.axis)
+    # pylint: disable=arguments-differ
+    def call(
+        self,
+        scatterer_positions,
+        scatterer_magnitudes,
+        probe_geometry,
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        n_ax,
+        center_frequency,
+        sampling_frequency,
+        t0_delays,
+        initial_times,
+        element_width,
+        attenuation_coef,
+        tx_apodizations,
+        **kwargs,
+    ):
+        return {
+            self.output_key: simulate_rf(
+                ops.convert_to_tensor(scatterer_positions),
+                ops.convert_to_tensor(scatterer_magnitudes),
+                probe_geometry=probe_geometry,
+                apply_lens_correction=apply_lens_correction,
+                lens_thickness=lens_thickness,
+                lens_sound_speed=lens_sound_speed,
+                sound_speed=sound_speed,
+                n_ax=n_ax,
+                center_frequency=center_frequency,
+                sampling_frequency=sampling_frequency,
+                t0_delays=t0_delays,
+                initial_times=initial_times,
+                element_width=element_width,
+                attenuation_coef=attenuation_coef,
+                tx_apodizations=tx_apodizations,
+            ),
+        }
+
+
+@ops_registry("tof_correction")
+class TOFCorrection(Operation):
+    """Time-of-flight correction operation for ultrasound data."""
+
+    # Define operation-specific static parameters
+    STATIC_PARAMS = [
+        "f_number",
+        "apply_lens_correction",
+        "apply_phase_rotation",
+        "Nx",
+        "Nz",
+    ]
+
+    def __init__(self, apply_phase_rotation=True, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+        self.apply_phase_rotation = apply_phase_rotation
+
+    def call(
+        self,
+        flatgrid=None,
+        sound_speed=None,
+        polar_angles=None,
+        focus_distances=None,
+        sampling_frequency=None,
+        f_number=None,
+        demodulation_frequency=None,
+        t0_delays=None,
+        tx_apodizations=None,
+        initial_times=None,
+        probe_geometry=None,
+        apply_lens_correction=None,
+        lens_thickness=None,
+        lens_sound_speed=None,
+        **kwargs,
+    ):
+        """Perform time-of-flight correction on raw RF data.
+
+        Args:
+            raw_data (ops.Tensor): Raw RF data to correct
+            flatgrid (ops.Tensor): Grid points at which to evaluate the time-of-flight
+            sound_speed (float): Sound speed in the medium
+            polar_angles (ops.Tensor): Polar angles for scan lines
+            focus_distances (ops.Tensor): Focus distances for scan lines
+            sampling_frequency (float): Sampling frequency
+            f_number (float): F-number for apodization
+            demodulation_frequency (float): Demodulation frequency
+            t0_delays (ops.Tensor): T0 delays
+            tx_apodizations (ops.Tensor): Transmit apodizations
+            initial_times (ops.Tensor): Initial times
+            probe_geometry (ops.Tensor): Probe element positions
+            apply_lens_correction (bool): Whether to apply lens correction
+            lens_thickness (float): Lens thickness
+            lens_sound_speed (float): Sound speed in the lens
+
+        Returns:
+            dict: Dictionary containing tof_corrected_data
+        """
+
+        raw_data = kwargs[self.key]
+
+        kwargs = {
+            "flatgrid": flatgrid,
+            "sound_speed": sound_speed,
+            "angles": polar_angles,
+            "vfocus": focus_distances,
+            "sampling_frequency": sampling_frequency,
+            "fnum": f_number,
+            "apply_phase_rotation": self.apply_phase_rotation,
+            "demodulation_frequency": demodulation_frequency,
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "initial_times": initial_times,
+            "probe_geometry": probe_geometry,
+            "apply_lens_correction": apply_lens_correction,
+            "lens_thickness": lens_thickness,
+            "lens_sound_speed": lens_sound_speed,
+        }
+
+        if not self.with_batch_dim:
+            tof_corrected = tof_correction(raw_data, **kwargs)
+        else:
+            tof_corrected = ops.map(
+                lambda data: tof_correction(data, **kwargs),
+                raw_data,
+            )
+
+        return {self.output_key: tof_corrected}
+
+
+@ops_registry("pfield_weighting")
+class PfieldWeighting(Operation):
+    """Weighting aligned data with the pressure field."""
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.ALIGNED_DATA,
+            **kwargs,
+        )
+
+    def call(self, flat_pfield=None, **kwargs):
+        """Weight data with pressure field.
+
+        Args:
+            flat_pfield (ops.Tensor): Pressure field weight mask of shape (n_pix, n_tx)
+
+        Returns:
+            dict: Dictionary containing weighted data
+        """
+        data = kwargs[self.key]
+
+        if flat_pfield is None:
+            return {self.output_key: data}
+
+        # Swap (n_pix, n_tx) to (n_tx, n_pix)
+        flat_pfield = ops.swapaxes(flat_pfield, 0, 1)
+
+        # Perform element-wise multiplication with the pressure weight mask
+        # Also add the required dimensions for broadcasting
+        if self.with_batch_dim:
+            pfield_expanded = ops.expand_dims(flat_pfield, axis=0)
+        else:
+            pfield_expanded = flat_pfield
+
+        pfield_expanded = pfield_expanded[..., None, None]
+        weighted_data = data * pfield_expanded
+
+        return {self.output_key: weighted_data}
 
 
 @ops_registry("sum")
 class Sum(Operation):
-    """Sum the input data along a specific axis."""
+    """Sum data along a specific axis."""
 
-    def __init__(self, axis=0, **kwargs):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
+    def __init__(self, axis, **kwargs):
+        super().__init__(**kwargs)
         self.axis = axis
 
-    def process(self, data):
-        return ops.sum(data, axis=self.axis)
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        return {self.output_key: ops.sum(data, axis=self.axis)}
 
 
-@ops_registry("normalize")
-class Normalize(Operation):
-    """Normalize data to a given range."""
-
-    def __init__(self, output_range=None, input_range=None, **kwargs):
-        """Initialize the Normalize operation.
-
-        Args:
-            output_range (Tuple, optional): Range to which data should be mapped.
-                Defaults to (0, 1).
-            input_range (Tuple, optional): Range of input data. If None, the range
-                of the input data will be computed. Defaults to None.
-        """
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-        self.output_range = output_range
-        self.input_range = input_range
-
-    def process(self, data):
-        if self.output_range is None:
-            self.output_range = (0, 1)
-
-        if self.input_range is None:
-            minimum = ops.min(data)
-            maximum = ops.max(data)
-            self.input_range = (minimum, maximum)
-        else:
-            a_min, a_max = self.input_range
-            data = ops.clip(data, a_min, a_max)
-        return translate(data, self.input_range, self.output_range)
-
-    def _assign_config_params(self, config):
-        return {
-            "input_range": config.data.input_range,
-            "output_range": None,
-        }
-
-
-@ops_registry("log_compress")
-class LogCompress(Operation):
-    """Logarithmic compression of data."""
-
-    def __init__(self, dynamic_range=None, **kwargs):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-        self.dynamic_range = dynamic_range
-
-    def process(self, data):
-        if self.dynamic_range is None:
-            self.dynamic_range = (-60, 0)
-        small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
-        data = ops.where(data == 0, small_number, data)
-        compressed_data = 20 * ops.log10(data)
-        compressed_data = ops.clip(compressed_data, *self.dynamic_range)
-        return compressed_data
-
-    def _assign_config_params(self, config):
-        return {
-            "dynamic_range": config.data.dynamic_range,
-        }
-
-
-@ops_registry("downsample")
-class Downsample(Operation):
-    """Downsample data along a specific axis."""
-
-    def __init__(self, factor: int = None, phase: int = None, axis: int = -1, **kwargs):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-        self.factor = factor
-        self.phase = phase
-        self.axis = axis
-
-    def process(self, data):
-        if self.factor is None:
-            return data
-        length = ops.shape(data)[self.axis]
-        if self.phase is None:
-            self.phase = 0
-        sample_idx = ops.arange(self.phase, length, self.factor)
-
-        return ops.take(data, sample_idx, axis=self.axis)
-
-    def _assign_config_params(self, config):
-        return {
-            "factor": config.scan.downsample,
-        }
-
-
-@ops_registry("interpolate")
-class Interpolate(Operation):
-    """Interpolate data along a specific axis using the downsample factor."""
+@ops_registry("delay_and_sum")
+class DelayAndSum(Operation):
+    """Sums time-delayed signals along channels and transmits."""
 
     def __init__(
-        self, factor: int = None, axis: int = -1, method: str = "bilinear", **kwargs
+        self,
+        reshape_grid=True,
+        **kwargs,
     ):
         super().__init__(
             input_data_type=None,
-            output_data_type=None,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
-        self.factor = factor
-        self.axis = axis
-        self.method = method
+        self.reshape_grid = reshape_grid
 
-    def process(self, data):
-        if self.factor is None or self.factor <= 1:
-            return data  # No interpolation needed if factor is None or <= 1
+    def process_image(self, data, rx_apo, tx_apo):
+        """Performs DAS beamforming on tof-corrected input.
 
-        data_out = self.resize_along_axis(data, self.factor, self.axis, self.method)
-        return data_out
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_pix, n_el, n_ch)`
 
-    @staticmethod
-    def resize_along_axis(data, factor, axis, method):
-        """Resize data along a specific axis using the downsample factor."""
-        shape = ops.shape(data)
-        data_flat = ops.reshape(data, [-1, shape[axis]])
-        # fill to four dimensions for `ops.image.resize` function
-        data_flat = data_flat[..., None, None]
-        data_out = ops.image.resize(
-            data_flat, [shape[axis] * factor, 1], interpolation=method
-        )
-        new_shape = list(shape)
-        new_shape[axis] = shape[axis] * factor
-        data_out = ops.reshape(data_out, new_shape)
-        return data_out
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
+        """
+        # Apply tx_apo
+        data = tx_apo * data
 
+        # Sum over the channels, i.e. DAS
+        data = ops.sum(rx_apo * data, -2)
 
-@ops_registry("companding")
-class Companding(Operation):
-    """Companding according to the A- or μ-law algorithm.
-    Tensorflow versions of companding.
+        # Sum over transmits, i.e. Compounding
+        data = ops.sum(data, 0)
 
-    Invertible compressing operation. Used to compress
-    dynamic range of input data (and subsequently expand).
+        return data
 
-    μ-law companding:
-    https://en.wikipedia.org/wiki/%CE%9C-law_algorithm
-    A-law companding:
-    https://en.wikipedia.org/wiki/A-law_algorithm
+    def call(
+        self,
+        rx_apo=None,
+        tx_apo=None,
+        Nz=None,
+        Nx=None,
+        **kwargs,
+    ):
+        """Performs DAS beamforming on tof-corrected input.
 
-    The μ-law algorithm provides a slightly larger dynamic range
-    than the A-law at the cost of worse proportional distortion
-    for small signals.
+        Args:
+            tof_corrected_data (ops.Tensor): The TOF corrected input of shape
+                `(n_tx, n_z*n_x, n_el, n_ch)` with optional batch dimension.
+            rx_apo (ops.Tensor, optional): Receive apodization window. Defaults to 1.0.
+            tx_apo (ops.Tensor, optional): Transmit apodization window. Defaults to 1.0.
 
-    Args:
-    array (ndarray): input array. expected to be in range [-1, 1].
-        expand (bool, optional): If set to False (default),
-            data is compressed, else expanded.
-        comp_type (str): either `a` or `mu`.
-        mu (float, optional): compression parameter. Defaults to 255.
-        A (float, optional): compression parameter. Defaults to 255.
+        Returns:
+            dict: Dictionary containing beamformed_data of shape `(n_z*n_x, n_ch)`
+                when reshape_grid is False or `(n_z, n_x, n_ch)` when reshape_grid is True,
+                with optional batch dimension.
+        """
+        if rx_apo is None:
+            rx_apo = 1.0
 
-    Returns:
-        ndarray: companded array. has values in range [-1, 1].
-    """
+        if tx_apo is None:
+            tx_apo = 1.0
 
-    def __init__(self, expand=False, comp_type=None, mu=255, A=87.6, **kwargs):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-        self.expand = expand
-        self.comp_type = comp_type
-        self.mu = mu
-        self.A = A
-        self.one = None
+        data = kwargs[self.key]
 
-    def _assign_config_params(self, config):
-        self.expand = config.expand
-        self.comp_type = config.comp_type
-        self.mu = config.mu
-        self.A = config.A
-
-    def process(self, data):
-        self.one = ops.convert_to_tensor(1.0, dtype=data.dtype)
-        self.A = ops.convert_to_tensor(self.A, dtype=data.dtype)
-        self.mu = ops.convert_to_tensor(self.mu, dtype=data.dtype)
-
-        data = ops.clip(data, -1, 1)
-
-        if self.comp_type is None:
-            self.comp_type = "mu"
-        assert self.comp_type.lower() in ["a", "mu"]
-
-        def mu_law_compress(x):
-            y = (
-                ops.sign(x)
-                * ops.log(self.one + self.mu * ops.abs(x))
-                / ops.log(self.one + self.mu)
-            )
-            return y
-
-        def mu_law_expand(y):
-            x = (
-                ops.sign(y)
-                * ((self.one + self.mu) ** (ops.abs(y)) - self.one)
-                / self.mu
-            )
-            return x
-
-        def a_law_compress(x):
-            x_sign = ops.sign(x)
-            x_abs = ops.abs(x)
-            A_log = ops.log(self.A)
-
-            val1 = x_sign * self.A * x_abs / (self.one + A_log)
-            val2 = x_sign * (self.one + ops.log(self.A * x_abs)) / (self.one + A_log)
-
-            y = ops.where((x_abs >= 0) & (x_abs < (self.one / self.A)), val1, val2)
-            return y
-
-        def a_law_expand(y):
-            y_sign = ops.sign(y)
-            y_abs = ops.abs(y)
-            A_log = ops.log(self.A)
-
-            val1 = y_sign * y_abs * (self.one + A_log) / self.A
-            val2 = y_sign * ops.exp(y_abs * (self.one + A_log) - self.one) / self.A
-
-            x = ops.where(
-                (y_abs >= 0) & (y_abs < (self.one / (self.one + A_log))), val1, val2
-            )
-            return x
-
-        if self.comp_type.lower() == "mu":
-            if self.expand:
-                data_out = mu_law_expand(data)
-            else:
-                data_out = mu_law_compress(data)
-        elif self.comp_type.lower() == "a":
-            if self.expand:
-                data_out = a_law_expand(data)
-            else:
-                data_out = a_law_compress(data)
+        if not self.with_batch_dim:
+            beamformed_data = self.process_image(data, rx_apo, tx_apo)
         else:
-            raise ValueError(f"Invalid companding type {self.comp_type}.")
+            # Apply process_image to each item in the batch
+            beamformed_data = ops.map(
+                lambda data: self.process_image(data, rx_apo, tx_apo), data
+            )
 
-        return data_out
+        if self.reshape_grid:
+            beamformed_data = reshape_axis(
+                beamformed_data, (Nz, Nx), axis=int(self.with_batch_dim)
+            )
+
+        return {self.output_key: beamformed_data}
 
 
 @ops_registry("envelope_detect")
 class EnvelopeDetect(Operation):
     """Envelope detection of RF signals."""
 
-    def __init__(self, axis=-3, **kwargs):
+    def __init__(
+        self,
+        axis=-3,
+        **kwargs,
+    ):
         super().__init__(
+            input_data_type=DataTypes.BEAMFORMED_DATA,
+            output_data_type=DataTypes.ENVELOPE_DATA,
             **kwargs,
         )
         self.axis = axis
 
-    def process(self, data):
+    def call(self, **kwargs):
+        """
+        Args:
+            - data (Tensor): The beamformed data of shape (..., n_z, n_x, n_ch).
+        Returns:
+            - envelope_data (Tensor): The envelope detected data of shape (..., n_z, n_x).
+        """
+        data = kwargs[self.key]
+
         if data.shape[-1] == 2:
             data = channels_to_complex(data)
         else:
@@ -1212,71 +1582,8 @@ class EnvelopeDetect(Operation):
         imag = ops.imag(data)
         data = ops.sqrt(real**2 + imag**2)
         data = ops.cast(data, "float32")
-        return data
 
-
-@ops_registry("demodulate")
-class Demodulate(Operation):
-    """Demodulate RF signals to IQ data (complex baseband)."""
-
-    def __init__(
-        self,
-        sampling_frequency=None,
-        center_frequency=None,
-        bandwidth=None,
-        filter_coeff=None,
-        **kwargs,
-    ):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-        self.sampling_frequency = sampling_frequency
-        self.center_frequency = center_frequency
-        self.bandwidth = bandwidth
-        self.filter_coeff = filter_coeff
-        self.warning_produced = False
-
-    def process(self, data):
-
-        if data.shape[-1] == 2:
-            if not self.warning_produced:
-                log.warning("Demodulation is not applicable to IQ data.")
-                self.warning_produced = True
-            return data
-        elif data.shape[-1] == 1:
-            data = ops.squeeze(data, axis=-1)
-
-        data = demodulate_not_jitable(
-            data,
-            self.sampling_frequency,
-            self.center_frequency,
-            self.bandwidth,
-            self.filter_coeff,
-        )
-        data = ops.convert_to_tensor(data)
-        return complex_to_channels(data, axis=-1)
-
-    def _assign_scan_params(self, scan):
-        return {
-            "sampling_frequency": scan.sampling_frequency,
-            "center_frequency": scan.center_frequency,
-            "bandwidth": scan.bandwidth_percent,
-        }
-
-    def _assign_config_params(self, config):
-        return {
-            "sampling_frequency": config.scan.sampling_frequency,
-            "center_frequency": config.scan.center_frequency,
-        }
-
-    # pylint: disable=unused-argument
-    def _assign_update_params(self, scan):
-        return {
-            "demodulation_frequency": self.center_frequency,
-            "n_ch": 2,
-        }
+        return {self.output_key: data}
 
 
 @ops_registry("upmix")
@@ -1285,290 +1592,165 @@ class UpMix(Operation):
 
     def __init__(
         self,
-        sampling_frequency=None,
-        center_frequency=None,
-        upsampling_rate=6,
+        upsampling_rate=1,
         **kwargs,
     ):
         super().__init__(
-            input_data_type=None,
-            output_data_type=None,
             **kwargs,
         )
-        self.sampling_frequency = sampling_frequency
-        self.center_frequency = center_frequency
         self.upsampling_rate = upsampling_rate
 
-    def process(self, data):
+    def call(
+        self,
+        sampling_frequency=None,
+        center_frequency=None,
+        **kwargs,
+    ):
+        data = kwargs[self.key]
+
         if data.shape[-1] == 1:
             log.warning("Upmixing is not applicable to RF data.")
             return data
         elif data.shape[-1] == 2:
             data = channels_to_complex(data)
-        data = upmix(
-            data, self.sampling_frequency, self.center_frequency, self.upsampling_rate
-        )
+
+        data = upmix(data, sampling_frequency, center_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
-        return data
-
-    def _assign_scan_params(self, scan):
-        return {
-            "sampling_frequency": scan.sampling_frequency,
-            "center_frequency": scan.center_frequency,
-        }
-
-    def _assign_config_params(self, config):
-        return {
-            "sampling_frequency": config.scan.sampling_frequency,
-            "center_frequency": config.scan.center_frequency,
-        }
+        return {self.output_key: data}
 
 
-@ops_registry("bandpass_filter")
-class BandPassFilter(Operation):
-    """Band pass filter data."""
+@ops_registry("log_compress")
+class LogCompress(Operation):
+    """Logarithmic compression of data."""
 
     def __init__(
         self,
-        num_taps=None,
-        sampling_frequency=None,
-        center_frequency=None,
-        f1=None,
-        f2=None,
-        axis=-3,
         **kwargs,
     ):
         super().__init__(
-            input_data_type=None,
-            output_data_type=None,
+            input_data_type=DataTypes.ENVELOPE_DATA,
+            output_data_type=DataTypes.IMAGE,
             **kwargs,
         )
-        self.num_taps = num_taps
-        self.sampling_frequency = sampling_frequency
-        self.center_frequency = center_frequency
-        self.f1 = f1
-        self.f2 = f2
-        self.axis = axis
 
-        if self._ready:
-            self.initialize()
+    def call(self, dynamic_range=None, **kwargs):
+        """Apply logarithmic compression to data.
 
-    def initialize(self):
-        super().initialize()
+        Args:
+            dynamic_range (tuple, optional): Dynamic range in dB. Defaults to (-60, 0).
 
-        self.filter = get_band_pass_filter(
-            self.num_taps, self.sampling_frequency, self.f1, self.f2
-        )
+        Returns:
+            dict: Dictionary containing log-compressed data
+        """
+        data = kwargs[self.key]
 
-    @property
-    def _ready(self):
+        if dynamic_range is None:
+            dynamic_range = DEFAULT_DYNAMIC_RANGE
+
+        small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
+        data = ops.where(data == 0, small_number, data)
+        compressed_data = 20 * ops.log10(data)
+        compressed_data = ops.clip(compressed_data, *dynamic_range)
+
+        return {self.output_key: compressed_data}
+
+
+@ops_registry("normalize")
+class Normalize(Operation):
+    """Normalize data to a given range."""
+
+    def __init__(self, output_range=None, input_range=None, **kwargs):
+        super().__init__(**kwargs)
+        self.output_range = self.to_float32(output_range)
+        self.input_range = self.to_float32(input_range)
+        assert output_range is None or len(output_range) == 2
+        assert input_range is None or len(input_range) == 2
+
+    @staticmethod
+    def to_float32(data):
+        """Converts an iterable to float32 and leaves None values as is."""
         return (
-            self.axis is not None
-            and self.num_taps is not None
-            and self.sampling_frequency is not None
-            and self.f1 is not None
-            and self.f2 is not None
+            [np.float32(x) if x is not None else None for x in data]
+            if data is not None
+            else None
         )
 
-    def process(self, data):
-        axis = data.ndim + self.axis if self.axis < 0 else self.axis
+    def call(self, **kwargs):
+        """Normalize data to a given range.
 
-        if data.shape[-1] == 2:
-            data = channels_to_complex(data)
+        Args:
+            output_range (tuple, optional): Range to which data should be mapped.
+                Defaults to (0, 1).
+            input_range (tuple, optional): Range of input data. If None, the range
+                of the input data will be computed. Defaults to None.
 
-        data = ops.convert_to_numpy(data)
-        data = ndimage.convolve1d(data, self.filter, mode="wrap", axis=axis)
-        data = ops.convert_to_tensor(data)
+        Returns:
+            dict: Dictionary containing normalized data
+        """
+        data = kwargs[self.key]
 
-        if data.dtype in ["complex64", "complex128"]:
-            data = complex_to_channels(data, axis=-1)
+        output_range = _set_if_none(self.output_range, default=(0, 1))
+        input_range = _set_if_none(self.input_range, default=(None, None))
 
-        return data
+        a_min, a_max = input_range
+        if a_min is None:
+            a_min = ops.min(data)
+        if a_max is None:
+            a_max = ops.max(data)
+        data = ops.clip(data, a_min, a_max)
+        input_range = (a_min, a_max)
 
-    def _assign_scan_params(self, scan):
-        return {
-            "sampling_frequency": scan.sampling_frequency,
-            "center_frequency": scan.center_frequency,
-        }
+        # Map the data to the output range
+        normalized_data = translate(data, input_range, output_range)
 
-    def _assign_config_params(self, config):
-        return {
-            "sampling_frequency": config.scan.sampling_frequency,
-            "center_frequency": config.scan.center_frequency,
-        }
+        return {self.output_key: normalized_data}
 
 
-@ops_registry("multi_bandpass_filter")
-class MultiBandPassFilter(Operation):
-    """Applies multiply band pass filters on beamformed data.
-
-    Takes average in image domain of differend band passed filtered data if `to_image` set to true.
-    Data is filtered in the RF / IQ domain. This function also can convert to image domain, since
-    the compounding of filtered beamformed data takes place there (incoherent compounding).
-
-    Args:
-        beamformed_data (ndarray): input data, RF / IQ with shape [..., n_ax, n_el, n_ch].
-            filtering is always applied over the n_ax axis.
-        params (dict): dict with parameters for filter.
-            Should include `num_taps`, `sampling_frequency`, `center_frequency` and two lists:
-            `freqs` and `bandwidths` which define the filter characteristics. Lengths of those lists
-            should be the same and is equal to the number of filters applied. Optionally the `units`
-            can be specified, which is for instance `Hz` or `MHz`. Defaults to `Hz`.
-
-    Returns:
-        beamformed_data (list): list of filtered data, each element is filtered data
-            with shape [..., n_ax, n_el, n_ch] for each filter applied.
-
-    Example:
-        >>> params = {
-        >>>     'num_taps': 128,
-        >>>     'sampling_frequency': 50e6,
-        >>>     'center_frequency': 5e6,
-        >>>     'freqs': [-2.5, 0, 2.5],
-        >>>     'bandwidths': [1, 1, 1],
-        >>>     'units': 'MHz'
-        >>> }
-        >>> mbpf = usbmd.ops.MultiBandPassFilter(
-        >>>     params=params, modtype='iq', sampling_frequency=50e6, center_frequency=5e6, axis=-3)
-        >>> filtered_data = mbpf(beamformed_data)
-    """
-
-    def __init__(
-        self,
-        params=None,
-        modtype=None,
-        sampling_frequency=None,
-        center_frequency=None,
-        axis=-3,
-        **kwargs,
-    ):
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
-        )
-        self.params = params
-        self.modtype = modtype
-        self.axis = axis
-        self.sampling_frequency = sampling_frequency
-        self.center_frequency = center_frequency
-
-        assert self.axis != -1, (
-            "Axis of multibandpass filter cannot be the last axis "
-            "as it is used for channels (RF / IQ)."
-        )
-        if self._ready:
-            self.initialize()
-
-    def initialize(self):
-        super().initialize()
-
-        if "units" in self.params:
-            units = ["Hz", "kHz", "MHz", "GHz"]
-            factors = [1, 1e3, 1e6, 1e9]
-            unit_factor = factors[units.index(self.params["units"])]
-        else:
-            unit_factor = 1
-
-        offsets = self.params["freqs"] * unit_factor
-        bandwidths = self.params["bandwidths"] * unit_factor
-        num_taps = self.params["num_taps"]
-        # make sure sampling_frequency is correct for IQ (downsampled)
-        sampling_frequency = self.sampling_frequency * unit_factor
-        center_frequency = (
-            self.center_frequency * unit_factor
-        )  # center_frequency is only used when RF
-
-        if self.modtype == "iq":
-            center_frequency = 0  # center_frequency is automatically set to zero if IQ
-            self.filter_params = [
-                {
-                    "num_taps": num_taps,
-                    "sampling_frequency": sampling_frequency,
-                    "f": center_frequency - offset,
-                    "bw": bw,
-                }
-                for offset, bw in zip(offsets, bandwidths)
-            ]
-        elif self.modtype == "rf":
-            self.filter_params = [
-                {
-                    "num_taps": num_taps,
-                    "sampling_frequency": sampling_frequency,
-                    "f1": center_frequency - offset - bw / 2,
-                    "f2": center_frequency - offset + bw / 2,
-                }
-                for offset, bw in zip(offsets, bandwidths)
-            ]
-        self.filters = []
-        for param in self.filter_params:
-            if self.modtype == "iq":
-                filter_weights = get_low_pass_iq_filter(**param)
-            elif self.modtype == "rf":
-                filter_weights = get_band_pass_filter(**param)
-            else:
-                raise ValueError(
-                    f"Modulation type {self.modtype} is not supported for multibandpass filter."
-                    "Supported types are 'iq' and 'rf'."
-                )
-            self.filters.append(filter_weights)
-
-    @property
-    def _ready(self):
-        return (
-            self.axis is not None
-            and self.modtype is not None
-            and self.params is not None
-            and self.sampling_frequency is not None
-            and self.center_frequency is not None
-        )
-
-    def process(self, data):
-        axis = data.ndim + self.axis if self.axis < 0 else self.axis
-
-        if self.modtype == "iq":
-            assert data.shape[-1] == 2, "IQ data should have 2 channels."
-            data = channels_to_complex(data)
-
-        data_list = []
-        for _filter in self.filters:
-            data = ops.convert_to_numpy(data)
-            _data = ndimage.convolve1d(data, _filter, mode="wrap", axis=axis)
-            _data = ops.convert_to_tensor(_data)
-            if self.modtype == "iq":
-                _data = complex_to_channels(_data, axis=-1)
-            data_list.append(_data)
-
-        return data_list
-
-    def _assign_scan_params(self, scan):
-        return {
-            "sampling_frequency": scan.sampling_frequency,
-            "center_frequency": scan.center_frequency,
-        }
-
-    def _assign_config_params(self, config):
-        return {
-            "sampling_frequency": config.scan.sampling_frequency,
-            "center_frequency": config.scan.center_frequency,
-        }
+def _set_if_none(variable, default):
+    if variable is not None:
+        return variable
+    return default
 
 
 @ops_registry("scan_convert")
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
-    def __init__(
+    def __init__(self, order=1, **kwargs):
+        """Initialize the ScanConvert operation.
+
+        Args:
+            order (int, optional): Interpolation order. Defaults to 1. Currently only
+                GPU support for order=1.
+        """
+        if order > 1:
+            jittable = False
+            log.warning(
+                "GPU support for order > 1 is not available. "
+                + "Disabling jit for ScanConvert."
+            )
+        else:
+            jittable = True
+
+        super().__init__(
+            input_data_type=DataTypes.IMAGE,
+            output_data_type=DataTypes.IMAGE_SC,
+            jittable=jittable,
+            **kwargs,
+        )
+        self.order = order
+
+    def call(
         self,
         rho_range=None,
         theta_range=None,
         phi_range=None,
         resolution=None,
+        coordinates=None,
         fill_value=None,
-        order=1,
         **kwargs,
     ):
-        """Initialize the ScanConvert operation.
+        """Scan convert images to cartesian coordinates.
 
         Args:
             rho_range (Tuple): Range of the rho axis in the polar coordinate system.
@@ -1579,196 +1761,36 @@ class ScanConvert(Operation):
                 Defined in radians.
             resolution (float): Resolution of the output image in meters per pixel.
                 if None, the resolution is computed based on the input data.
+            coordinates (Tensor): Coordinates for scan convertion. If None, will be computed
+                based on rho_range, theta_range, phi_range and resolution. If provided, this
+                operation can be jitted.
             fill_value (float): Value to fill the image with outside the defined region.
-        Returns:
-            image_sc (ndarray): Output image (converted to cartesian coordinates).
 
         """
-        super().__init__(
-            input_data_type=None,
-            output_data_type=None,
-            **kwargs,
+        if fill_value is None:
+            fill_value = np.nan
+
+        data = kwargs[self.key]
+
+        if self._jit_compile and self.jittable:
+            assert coordinates is not None, (
+                "coordinates must be provided to jit scan conversion."
+                "You can set ScanConvert(jit_compile=False) to disable jitting."
+            )
+
+        data_out = scan_convert(
+            data,
+            rho_range,
+            theta_range,
+            phi_range,
+            resolution,
+            coordinates,
+            fill_value,
+            self.order,
+            with_batch_dim=self.with_batch_dim,
         )
-        self.rho_range = rho_range
-        self.theta_range = theta_range
-        self.phi_range = phi_range
-        self.resolution = resolution
-        self.fill_value = fill_value
-        self.order = order
 
-    @property
-    def _ready(self):
-        return self.rho_range is not None and self.theta_range is not None
-
-    def process(self, data):
-        if self.phi_range is not None:
-            data_out = display.scan_convert_3d(
-                data,
-                self.rho_range,
-                self.theta_range,
-                self.phi_range,
-                self.resolution,
-                self.fill_value,
-                order=self.order,
-            )
-        else:
-            data_out = display.scan_convert_2d(
-                data,
-                self.rho_range,
-                self.theta_range,
-                self.resolution,
-                self.fill_value,
-                order=self.order,
-            )
-        return data_out
-
-    def _assign_scan_params(self, scan):
-        return {
-            "rho_range": (ops.min(scan.z_axis), ops.max(scan.z_axis)),
-        }
-
-    def _assign_config_params(self, config):
-        return {
-            "resolution": config.data.resolution,
-            "fill_value": config.data.dynamic_range[0],
-        }
-
-    def _assign_probe_params(self, probe):
-        # TODO: probably want to read coordinates from
-        # usbmd file in the future (i.e. stored in scan class)
-        if hasattr(probe, "angle_deg_axis"):
-            angles = np.deg2rad(probe.angle_deg_axis)
-            theta_range = (
-                ops.min(angles),
-                ops.max(angles),
-            )
-        else:
-            # Probe does not have `angle_deg_axis` defined, using default
-            # values (-45, 45 degree cone) for ScanConvert.
-            theta_range = tuple(np.deg2rad([-45, 45]))
-
-        return {
-            "theta_range": theta_range,
-        }
-
-
-@ops_registry("doppler")
-class Doppler(Operation):
-    """Compute the Doppler velocities from the I/ time series using a slow-time autocorrelator."""
-
-    def __init__(
-        self,
-        PRF: float = None,
-        sampling_frequency: float = None,
-        center_frequency: float = None,
-        c: float = None,
-        M: int = None,
-        lag: int = 1,
-        nargout: int = 1,
-        **kwargs,
-    ) -> None:
-        """
-        Args:
-            center_frequency (float): Center frequency in Hz.
-            c (float): Longitudinal velocity in m/s.
-            PRF (float): Pulse repetition frequency in Hz.
-            M (int, optional): Size of the hamming filter for spatial weighted average.
-                Default is 1.
-            The output Doppler velocity is estimated from M-by-M or M(1)-by-M(2)
-                neighborhood around the corresponding pixel.
-            lag (int, optional): LAG used in the autocorrelator. Default is 1.
-
-        Note:
-            This function is currently limited to use with beamformed data, but it
-            can be modified to receive input_data_type = "raw_data".
-        """
-        super().__init__(
-            input_data_type="beamformed_data",
-            output_data_type=None,
-            **kwargs,
-        )
-        self.PRF = PRF
-        self.sampling_frequency = sampling_frequency
-        self.center_frequency = center_frequency
-        self.c = c
-        self.M = M
-        self.lag = lag
-        self.nargout = nargout
-        self.warning_produced = False
-
-        assert (
-            self.with_batch_dim is True
-        ), "Doppler requires multiple frames to compute"
-
-    def process(self, data):
-
-        assert data.ndim == 4, "Doppler requires multiple frames to compute"
-
-        if data.shape[-1] == 2:
-            data = channels_to_complex(data)
-
-        # frames as last dimension for iq2doppler func
-        data = ops.transpose(data, (1, 2, 0))
-
-        doppler_velocities = self.iq2doppler(data)
-        return doppler_velocities
-
-    def iq2doppler(self, data):
-        """Compute Doppler from packet of I/Q Data.
-
-        Args:
-            data (ndarray): I/Q complex data of shape (n_el, n_ax, n_frames).
-                n_frames corresponds to the ensemble length used to compute
-                the Doppler signal.
-        Returns:
-            doppler_velocities (ndarray): Doppler velocity map of shape (n_el, n_ax).
-
-        """
-        assert data.ndim == 3, "Data must be a 3-D array"
-
-        if self.M is None:
-            self.M = np.array([1, 1])
-        elif np.isscalar(self.M):
-            self.M = np.array([self.M, self.M])
-        assert self.M.all() > 0 and np.all(
-            np.equal(self.M, np.round(self.M))
-        ), "M must contain integers > 0"
-
-        assert (
-            isinstance(self.lag, int) and self.lag >= 0
-        ), "Lag must be a positive integer"
-
-        if self.center_frequency is None:
-            raise ValueError("A center frequency (center_frequency) must be specified")
-        if self.PRF is None:
-            raise ValueError("A pulse repetition frequency or period must be specified")
-
-        # Auto-correlation method
-        IQ1 = data[:, :, : data.shape[-1] - self.lag]
-        IQ2 = data[:, :, self.lag :]
-        AC = ops.sum(IQ1 * ops.conj(IQ2), axis=2)  # Ensemble auto-correlation
-
-        # TODO: add spatial weighted average
-
-        # Doppler velocity
-        nyquist_velocities = self.c * self.PRF / (4 * self.center_frequency * self.lag)
-        doppler_velocities = -nyquist_velocities * ops.imag(ops.log(AC)) / np.pi
-
-        return doppler_velocities
-
-    def _assign_scan_params(self, scan):
-        return {
-            "sampling_frequency": scan.sampling_frequency,
-            "center_frequency": scan.center_frequency,
-            "c": scan.sound_speed,
-            "PRF": 1 / sum(scan.time_to_next_transmit[0]),
-        }
-
-    def _assign_config_params(self, config):
-        return {
-            "sampling_frequency": config.scan.sampling_frequency,
-            "center_frequency": config.scan.center_frequency,
-        }
+        return {self.output_key: data_out}
 
 
 @ops_registry("gaussian_blur")
@@ -1776,10 +1798,6 @@ class GaussianBlur(Operation):
     """
     GaussianBlur is an operation that applies a Gaussian blur to an input image.
     Uses scipy.ndimage.gaussian_filter to create a kernel.
-
-    Src: https://docs.scipy.org/doc/scipy/reference/generated/scipy.ndimage.gaussian_filter.html
-
-    # TODO: use tensor_ops.gaussian_filter
     """
 
     def __init__(
@@ -1792,15 +1810,11 @@ class GaussianBlur(Operation):
     ):
         """
         Args:
-            sigma (float): Standard deviation for Gaussian kernel. The standard deviations of the
-                Gaussian filter are given for each axis as a sequence, or as a single number,
-                in which case it is equal for all axes.
-            kernel_size (int, optional): The size of the kernel to be used. If None, the kernel
+            sigma (float): Standard deviation for Gaussian kernel.
+            kernel_size (int, optional): The size of the kernel. If None, the kernel
                 size is calculated based on the sigma and truncate. Default is None.
             pad_mode (str): Padding mode for the input image. Default is 'symmetric'.
-                See [keras docs](https://www.tensorflow.org/api_docs/python/tf/keras/ops/pad) for
-                all options and [tensoflow docs](https://www.tensorflow.org/api_docs/python/tf/pad)
-                for some examples. Note that the naming differs from scipy.ndimage.gaussian_filter!
+            truncate (float): Truncate the filter at this many standard deviations.
         """
         super().__init__(**kwargs)
         if kernel_size is None:
@@ -1823,14 +1837,15 @@ class GaussianBlur(Operation):
         """
         n = np.zeros((self.kernel_size, self.kernel_size))
         n[self.radius, self.radius] = 1
-        kernel = gaussian_filter(
-            n, sigma=self.sigma, radius=self.radius, mode="constant"
+        kernel = scipy.ndimage.gaussian_filter(
+            n, sigma=self.sigma, mode="constant"
         ).astype(np.float32)
         kernel = kernel[:, :, None, None]
         return ops.convert_to_tensor(kernel)
 
-    def process(self, data):
-        """Blur the input image with a gaussian kernel."""
+    def call(self, **kwargs):
+
+        data = kwargs[self.key]
 
         # Add batch dimension if not present
         if not self.with_batch_dim:
@@ -1850,64 +1865,1047 @@ class GaussianBlur(Operation):
         out = ops.conv(padded, kernel, padding="valid", data_format="channels_last")
 
         # Remove padding
-        out = keras.layers.CenterCrop(
-            data.shape[-2], data.shape[-3], data_format="channels_last"
-        )(out)
+        out = ops.slice(
+            out,
+            [0, 0, 0, 0],
+            [out.shape[0], data.shape[1], data.shape[2], data.shape[3]],
+        )
 
         # Remove batch dimension if it was not present before
         if not self.with_batch_dim:
             out = ops.squeeze(out, axis=0)
 
-        return out
+        return {self.output_key: out}
 
 
+@ops_registry("lee_filter")
 class LeeFilter(Operation):
     """
-    The Lee filter is a speckle reduction filter commonly used insynthetic aperture radar (SAR)
-    image processing. It smooths the image while preserving edges and details. This implementation
-    uses Gaussian filter for local statistics and treats channels independently.
-    Based on: https://stackoverflow.com/questions/39785970/speckle-lee-filter-in-python
+    The Lee filter is a speckle reduction filter commonly used in synthetic aperture radar (SAR)
+    and ultrasound image processing. It smooths the image while preserving edges and details.
+    This implementation uses Gaussian filter for local statistics and treats channels independently.
+
+    Lee, J.S. (1980). Digital image enhancement and noise filtering by use of local statistics.
+    IEEE Transactions on Pattern Analysis and Machine Intelligence, (2), 165-168.
     """
 
     def __init__(self, sigma=3, kernel_size=None, pad_mode="symmetric", **kwargs):
         """
         Args:
-            sigma (float, optional): Standard deviation for Gaussian kernel. Default is 3.
-            kernel_size (int or tuple, optional): Size of the Gaussian kernel. If None,
-                it will be calculated based on sigma. See `GaussianBlur` for more details.
-                Default is None.
-            pad_mode (str, optional): Padding mode to be used before Gaussian blur.
-                Default is "symmetric".
+            sigma (float): Standard deviation for Gaussian kernel. Default is 3.
+            kernel_size (int, optional): Size of the Gaussian kernel. If None,
+                it will be calculated based on sigma.
+            pad_mode (str): Padding mode to be used for Gaussian blur. Default is "symmetric".
         """
-
         super().__init__(**kwargs)
         self.sigma = sigma
         self.kernel_size = kernel_size
+        self.pad_mode = pad_mode
 
-        self.blur = GaussianBlur(
-            kernel_size=self.kernel_size,
+        # Create a GaussianBlur instance for computing local statistics
+        self.gaussian_blur = GaussianBlur(
             sigma=self.sigma,
+            kernel_size=self.kernel_size,
+            pad_mode=self.pad_mode,
             with_batch_dim=self.with_batch_dim,
-            pad_mode=pad_mode,
+            jittable=self._jittable,
+            key=self.key,
         )
 
-    def process(self, data):
-        """
-        Apply Lee filter to the input data.
+    def call(self, **kwargs):
+        data = kwargs[self.key]
 
-        Args:
-            data (Tensor): Input data to be filtered.
+        # Apply Gaussian blur to get local mean
+        img_mean = self.gaussian_blur.call(**kwargs)[self.gaussian_blur.output_key]
 
-        Returns:
-            Tensor: Filtered data.
-        """
-        img_mean = self.blur(data)
-        img_sqr_mean = self.blur(data**2)
+        # Apply Gaussian blur to squared data to get local squared mean
+        data_squared = data**2
+        kwargs[self.gaussian_blur.key] = data_squared
+        img_sqr_mean = self.gaussian_blur.call(**kwargs)[self.gaussian_blur.output_key]
+
+        # Calculate local variance
         img_variance = img_sqr_mean - img_mean**2
 
-        # treating channels independently!
-        overall_variance = ops.var(data, axis=(-2, -3), keepdims=True)
+        # Calculate global variance (per channel)
+        if self.with_batch_dim:
+            overall_variance = ops.var(data, axis=(-3, -2), keepdims=True)
+        else:
+            overall_variance = ops.var(data, axis=(-2, -1), keepdims=True)
 
+        # Calculate adaptive weights
         img_weights = img_variance / (img_variance + overall_variance)
+
+        # Apply Lee filter formula
         img_output = img_mean + img_weights * (data - img_mean)
-        return img_output
+
+        return {self.output_key: img_output}
+
+
+@ops_registry("demodulate")
+class Demodulate(Operation):
+    """Demodulates the input data to baseband."""
+
+    def __init__(self, axis=-3, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.RAW_DATA,
+            jittable=True,
+            **kwargs,
+        )
+        self.axis = axis
+
+    def call(self, center_frequency=None, sampling_frequency=None, **kwargs):
+        data = kwargs[self.key]
+
+        demodulation_frequency = center_frequency
+
+        # Split the complex signal into two channels
+        iq_data_two_channel = demodulate(
+            data=data,
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
+            axis=self.axis,
+        )
+
+        return {
+            self.output_key: iq_data_two_channel,
+            "demodulation_frequency": demodulation_frequency,
+            "n_ch": 2,
+        }
+
+
+@ops_registry("clip")
+class Clip(Operation):
+    """Clip the input data to a given range."""
+
+    def __init__(self, min_value=None, max_value=None, **kwargs):
+        super().__init__(**kwargs)
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        data = ops.clip(data, self.min_value, self.max_value)
+        return {self.output_key: data}
+
+
+@ops_registry("companding")
+class Companding(Operation):
+    """Companding according to the A- or μ-law algorithm.
+
+    Invertible compressing operation. Used to compress
+    dynamic range of input data (and subsequently expand).
+
+    μ-law companding:
+    https://en.wikipedia.org/wiki/%CE%9C-law_algorithm
+    A-law companding:
+    https://en.wikipedia.org/wiki/A-law_algorithm
+
+    Args:
+        expand (bool, optional): If set to False (default),
+            data is compressed, else expanded.
+        comp_type (str): either `a` or `mu`.
+        mu (float, optional): compression parameter. Defaults to 255.
+        A (float, optional): compression parameter. Defaults to 87.6.
+    """
+
+    def __init__(self, expand=False, comp_type="mu", **kwargs):
+        super().__init__(**kwargs)
+        self.expand = expand
+        self.comp_type = comp_type.lower()
+        if self.comp_type not in ["mu", "a"]:
+            raise ValueError("comp_type must be 'mu' or 'a'.")
+
+        if self.comp_type == "mu":
+            self._compand_func = (
+                self._mu_law_expand if self.expand else self._mu_law_compress
+            )
+        else:
+            self._compand_func = (
+                self._a_law_expand if self.expand else self._a_law_compress
+            )
+
+    # pylint: disable=unused-argument
+    @staticmethod
+    def _mu_law_compress(x, mu=255, **kwargs):
+        x = ops.clip(x, -1, 1)
+        return ops.sign(x) * ops.log(1.0 + mu * ops.abs(x)) / ops.log(1.0 + mu)
+
+    # pylint: disable=unused-argument
+    @staticmethod
+    def _mu_law_expand(y, mu=255, **kwargs):
+        y = ops.clip(y, -1, 1)
+        return ops.sign(y) * ((1.0 + mu) ** ops.abs(y) - 1.0) / mu
+
+    # pylint: disable=unused-argument
+    @staticmethod
+    def _a_law_compress(x, A=87.6, **kwargs):
+        x = ops.clip(x, -1, 1)
+        x_sign = ops.sign(x)
+        x_abs = ops.abs(x)
+        A_log = ops.log(A)
+        val1 = x_sign * A * x_abs / (1.0 + A_log)
+        val2 = x_sign * (1.0 + ops.log(A * x_abs)) / (1.0 + A_log)
+        y = ops.where((x_abs >= 0) & (x_abs < (1.0 / A)), val1, val2)
+        return y
+
+    # pylint: disable=unused-argument
+    @staticmethod
+    def _a_law_expand(y, A=87.6, **kwargs):
+        y = ops.clip(y, -1, 1)
+        y_sign = ops.sign(y)
+        y_abs = ops.abs(y)
+        A_log = ops.log(A)
+        val1 = y_sign * y_abs * (1.0 + A_log) / A
+        val2 = y_sign * ops.exp(y_abs * (1.0 + A_log) - 1.0) / A
+        x = ops.where((y_abs >= 0) & (y_abs < (1.0 / (1.0 + A_log))), val1, val2)
+        return x
+
+    def call(self, mu=255, A=87.6, **kwargs):
+        data = kwargs[self.key]
+
+        mu = ops.cast(mu, data.dtype)
+        A = ops.cast(A, data.dtype)
+
+        data_out = self._compand_func(data, mu=mu, A=A)
+        return {self.output_key: data_out}
+
+
+@ops_registry("downsample")
+class Downsample(Operation):
+    """Downsample data along a specific axis."""
+
+    def __init__(self, factor: int = 1, phase: int = 0, axis: int = -3, **kwargs):
+        super().__init__(
+            **kwargs,
+        )
+        self.factor = factor
+        self.phase = phase
+        self.axis = axis
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        length = ops.shape(data)[self.axis]
+        sample_idx = ops.arange(self.phase, length, self.factor)
+        data_downsampled = ops.take(data, sample_idx, axis=self.axis)
+
+        # downsampling also affects the sampling frequency
+        if "sampling_frequency" in kwargs:
+            kwargs["sampling_frequency"] = kwargs["sampling_frequency"] / self.factor
+            kwargs["n_ax"] = kwargs["n_ax"] // self.factor
+        return {
+            self.output_key: data_downsampled,
+            "sampling_frequency": kwargs["sampling_frequency"],
+            "n_ax": kwargs["n_ax"],
+        }
+
+
+@ops_registry("branched_pipeline")
+class BranchedPipeline(Operation):
+    """Operation that processes data through multiple branches.
+
+    This operation takes input data, processes it through multiple parallel branches,
+    and then merges the results from those branches using the specified merge strategy.
+    """
+
+    def __init__(self, branches=None, merge_strategy="nested", **kwargs):
+        """Initialize a branched pipeline.
+
+        Args:
+            branches (List[Union[List, Pipeline, Operation]]): List of branch operations
+            merge_strategy (str or callable): How to merge the outputs from branches:
+                - "nested" (default): Return outputs as a dictionary keyed by branch name
+                - "flatten": Flatten outputs by prefixing keys with the branch name
+                - "suffix": Flatten outputs by suffixing keys with the branch name
+                - callable: A custom merge function that accepts the branch outputs dict
+            **kwargs: Additional arguments for the Operation base class
+        """
+        super().__init__(**kwargs)
+
+        # Convert branch specifications to operation chains
+        if branches is None:
+            branches = []
+
+        self.branches = {}
+        for i, branch in enumerate(branches, start=1):
+            branch_name = f"branch_{i}"
+            # Convert different branch specification types
+            if isinstance(branch, list):
+                # Convert list to operation chain
+                self.branches[branch_name] = make_operation_chain(branch)
+            elif isinstance(branch, (Pipeline, Operation)):
+                # Already a pipeline or operation
+                self.branches[branch_name] = branch
+            else:
+                raise ValueError(
+                    f"Branch must be a list, Pipeline, or Operation, got {type(branch)}"
+                )
+
+        # Set merge strategy
+        self.merge_strategy = merge_strategy
+        if isinstance(merge_strategy, str):
+            if merge_strategy == "nested":
+                self._merge_function = lambda outputs: outputs
+            elif merge_strategy == "flatten":
+                self._merge_function = self.flatten_outputs
+            elif merge_strategy == "suffix":
+                self._merge_function = self.suffix_merge_outputs
+            else:
+                raise ValueError(f"Unknown merge_strategy: {merge_strategy}")
+        elif callable(merge_strategy):
+            self._merge_function = merge_strategy
+        else:
+            raise ValueError("Invalid merge_strategy type provided.")
+
+    def call(self, **kwargs):
+        """Process input through branches and merge results.
+
+        Args:
+            **kwargs: Input keyword arguments
+
+        Returns:
+            dict: Merged outputs from all branches according to merge strategy
+        """
+        branch_outputs = {}
+        for branch_name, branch in self.branches.items():
+            # Each branch gets a fresh copy of kwargs to avoid interference
+            branch_kwargs = kwargs.copy()
+
+            # Process through the branch
+            branch_result = branch(**branch_kwargs)
+
+            # Store branch outputs
+            branch_outputs[branch_name] = branch_result
+
+        # Apply merge strategy to combine outputs
+        merged_outputs = self._merge_function(branch_outputs)
+
+        return merged_outputs
+
+    def flatten_outputs(self, outputs: dict) -> dict:
+        """
+        Flatten a nested dictionary by prefixing keys with the branch name.
+        For each branch, the resulting key is "{branch_name}_{original_key}".
+        """
+        flat = {}
+        for branch_name, branch_dict in outputs.items():
+            for key, value in branch_dict.items():
+                new_key = f"{branch_name}_{key}"
+                if new_key in flat:
+                    raise ValueError(f"Key collision detected for {new_key}")
+                flat[new_key] = value
+        return flat
+
+    def suffix_merge_outputs(self, outputs: dict) -> dict:
+        """
+        Flatten a nested dictionary by suffixing keys with the branch name.
+        For each branch, the resulting key is "{original_key}_{branch_name}".
+        """
+        flat = {}
+        for branch_name, branch_dict in outputs.items():
+            for key, value in branch_dict.items():
+                new_key = f"{key}_{branch_name}"
+                if new_key in flat:
+                    raise ValueError(f"Key collision detected for {new_key}")
+                flat[new_key] = value
+        return flat
+
+    def get_config(self):
+        """Return the config dictionary for serialization."""
+        config = super().get_config()
+
+        # Add branch configurations
+        branch_configs = {}
+        for branch_name, branch in self.branches.items():
+            if isinstance(branch, Pipeline):
+                # Get the operations list from the Pipeline
+                branch_configs[branch_name] = branch.get_config()
+            elif isinstance(branch, list):
+                # Convert list of operations to list of operation configs
+                branch_op_configs = []
+                for op in branch:
+                    branch_op_configs.append(op.get_config())
+                branch_configs[branch_name] = {"operations": branch_op_configs}
+            else:
+                # Single operation
+                branch_configs[branch_name] = branch.get_config()
+
+        # Add merge strategy
+        if isinstance(self.merge_strategy, str):
+            merge_strategy_config = self.merge_strategy
+        else:
+            # For custom functions, use the name if available
+            merge_strategy_config = getattr(self.merge_strategy, "__name__", "custom")
+
+        config.update(
+            {
+                "branches": branch_configs,
+                "merge_strategy": merge_strategy_config,
+            }
+        )
+
+        return config
+
+    def get_dict(self):
+        """Get the configuration of the operation."""
+        config = super().get_dict()
+        config.update({"name": "branched_pipeline"})
+
+        # Add branches (recursively) to the config
+        branches = {}
+        for branch_name, branch in self.branches.items():
+            if isinstance(branch, Pipeline):
+                branches[branch_name] = branch.get_dict()
+            elif isinstance(branch, list):
+                branches[branch_name] = [op.get_dict() for op in branch]
+            else:
+                branches[branch_name] = branch.get_dict()
+        config["branches"] = branches
+        config["merge_strategy"] = self.merge_strategy
+        return config
+
+
+@ops_registry("threshold")
+class Threshold(Operation):
+    """Threshold an array, setting values below/above a threshold to a fill value."""
+
+    def __init__(
+        self,
+        threshold_type="hard",
+        below_threshold=True,
+        fill_value="min",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        if threshold_type not in ("hard", "soft"):
+            raise ValueError("threshold_type must be 'hard' or 'soft'")
+        self.threshold_type = threshold_type
+        self.below_threshold = below_threshold
+        self._fill_value_type = fill_value
+
+        # Define threshold function at init
+        if threshold_type == "hard":
+            if below_threshold:
+                self._threshold_func = lambda data, threshold, fill: ops.where(
+                    data < threshold, fill, data
+                )
+            else:
+                self._threshold_func = lambda data, threshold, fill: ops.where(
+                    data > threshold, fill, data
+                )
+        else:  # soft
+            if below_threshold:
+                self._threshold_func = (
+                    lambda data, threshold, fill: ops.maximum(data - threshold, 0)
+                    + fill
+                )
+            else:
+                self._threshold_func = (
+                    lambda data, threshold, fill: ops.minimum(data - threshold, 0)
+                    + fill
+                )
+
+    def _resolve_fill_value(self, data, threshold):
+        """Get the fill value based on the fill_value_type."""
+        fv = self._fill_value_type
+        if isinstance(fv, (int, float)):
+            return ops.convert_to_tensor(fv, dtype=data.dtype)
+        elif fv == "min":
+            return ops.min(data)
+        elif fv == "max":
+            return ops.max(data)
+        elif fv == "threshold":
+            return threshold
+        else:
+            raise ValueError("Unknown fill_value")
+
+    def call(
+        self,
+        threshold=None,
+        percentile=None,
+        **kwargs,
+    ):
+        """Threshold the input data.
+
+        Args:
+            threshold: Numeric threshold.
+            percentile: Percentile to derive threshold from.
+        Returns:
+            Tensor with thresholding applied.
+        """
+        data = kwargs[self.key]
+        if (threshold is None) == (percentile is None):
+            raise ValueError(
+                "Pass either threshold or percentile, not both or neither."
+            )
+
+        if percentile is not None:
+            # Convert percentile to quantile value (0-1 range)
+            threshold = ops.quantile(data, percentile / 100.0)
+
+        fill_value = self._resolve_fill_value(data, threshold)
+        result = self._threshold_func(data, threshold, fill_value)
+        return {self.output_key: result}
+
+
+@ops_registry("bm3d")
+class BM3DDenoise(Operation):
+    """Block Matching 3D (BM3D) denoising operation."""
+
+    def __init__(self, stage="all_stages", **kwargs):
+        super().__init__(
+            jittable=False,
+            **kwargs,
+        )
+
+        if "arm" in check_architecture():
+            raise ValueError(
+                log.error("BM3D denoiser is not supported on ARM architecture.")
+            )
+
+        # pylint: disable=import-outside-toplevel
+        import bm3d as _bm3d_module
+
+        self._bm3d_module = _bm3d_module
+
+        str_to_stage = {
+            "hard_thresholding": self._bm3d_module.BM3DStages.HARD_THRESHOLDING,
+            "all_stages": self._bm3d_module.BM3DStages.ALL_STAGES,
+        }
+        self.stage = str_to_stage[stage]
+
+    def call(self, sigma=0.1, **kwargs):
+        """BM3D denoising operation.
+
+        Args:
+            sigma: Noise standard deviation.
+
+        Returns:
+            Denoised image(s), same shape as input.
+        """
+        data = kwargs[self.key]
+
+        # Convert to numpy for bm3d (cpu)
+        data_np = ops.convert_to_numpy(data)
+
+        if not self.with_batch_dim:
+            data_np = np.expand_dims(data_np, axis=0)
+
+        denoised = [
+            self._bm3d_module.bm3d(img, sigma, stage_arg=self.stage) for img in data_np
+        ]
+        denoised = np.stack(denoised)
+
+        if not self.with_batch_dim:
+            denoised = np.squeeze(denoised, axis=0)
+
+        result = ops.convert_to_tensor(denoised, dtype=data.dtype)
+        return {self.output_key: result}
+
+
+@ops_registry("anisotropic_diffusion")
+class AnisotropicDiffusion(Operation):
+    """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
+
+    Reference:
+    - https://www.researchgate.net/publication/5602035_Speckle_reducing_anisotropic_diffusion
+    - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
+    """
+
+    def call(self, niter=100, lmbda=0.1, rect=None, eps=1e-6, **kwargs):
+        """Anisotropic diffusion filter.
+
+        Assumes input data is non-negative.
+
+        Args:
+            niter: Number of iterations.
+            lmbda: Lambda parameter.
+            rect: Rectangle [x1, y1, x2, y2] for homogeneous noise (optional).
+            eps: Small epsilon for stability.
+        Returns:
+            Filtered image (2D tensor or batch of images).
+        """
+        data = kwargs[self.key]
+
+        if not self.with_batch_dim:
+            data = ops.expand_dims(data, axis=0)
+
+        batch_size = ops.shape(data)[0]
+
+        results = []
+        for i in range(batch_size):
+            image = data[i]
+            image_out = self._anisotropic_diffusion_single(
+                image, niter, lmbda, rect, eps
+            )
+            results.append(image_out)
+
+        result = ops.stack(results, axis=0)
+
+        if not self.with_batch_dim:
+            result = ops.squeeze(result, axis=0)
+
+        return {self.output_key: result}
+
+    def _anisotropic_diffusion_single(self, image, niter, lmbda, rect, eps):
+        """Apply anisotropic diffusion to a single image (2D)."""
+        image = ops.exp(image)
+        M, N = image.shape
+
+        for _ in range(niter):
+            iN = ops.concatenate(
+                [image[1:], ops.zeros((1, N), dtype=image.dtype)], axis=0
+            )
+            iS = ops.concatenate(
+                [ops.zeros((1, N), dtype=image.dtype), image[:-1]], axis=0
+            )
+            jW = ops.concatenate(
+                [image[:, 1:], ops.zeros((M, 1), dtype=image.dtype)], axis=1
+            )
+            jE = ops.concatenate(
+                [ops.zeros((M, 1), dtype=image.dtype), image[:, :-1]], axis=1
+            )
+
+            if rect is not None:
+                x1, y1, x2, y2 = rect
+                imageuniform = image[x1:x2, y1:y2]
+                q0_squared = (
+                    ops.std(imageuniform) / (ops.mean(imageuniform) + eps)
+                ) ** 2
+
+            dN = iN - image
+            dS = iS - image
+            dW = jW - image
+            dE = jE - image
+
+            G2 = (dN**2 + dS**2 + dW**2 + dE**2) / (image**2 + eps)
+            L = (dN + dS + dW + dE) / (image + eps)
+            num = (0.5 * G2) - ((1 / 16) * (L**2))
+            den = (1 + ((1 / 4) * L)) ** 2
+            q_squared = num / (den + eps)
+
+            if rect is not None:
+                den = (q_squared - q0_squared) / (q0_squared * (1 + q0_squared) + eps)
+            c = 1.0 / (1 + den)
+            cS = ops.concatenate([ops.zeros((1, N), dtype=image.dtype), c[:-1]], axis=0)
+            cE = ops.concatenate(
+                [ops.zeros((M, 1), dtype=image.dtype), c[:, :-1]], axis=1
+            )
+
+            D = (cS * dS) + (c * dN) + (cE * dE) + (c * dW)
+            image = image + (lmbda / 4) * D
+
+        result = ops.log(image)
+        return result
+
+
+def demodulate_not_jitable(
+    rf_data,
+    sampling_frequency=None,
+    center_frequency=None,
+    bandwidth=None,
+    filter_coeff=None,
+):
+    """Demodulates an RF signal to complex base-band (IQ).
+
+    Demodulates the radiofrequency (RF) bandpass signals and returns the
+    Inphase/Quadrature (I/Q) components. IQ is a complex whose real (imaginary)
+    part contains the in-phase (quadrature) component.
+
+    This function operates (i.e. demodulates) on the RF signal over the
+    (fast-) time axis which is assumed to be the last axis.
+
+    Args:
+        rf_data (ndarray): real valued input array of size [..., n_ax, n_el].
+            second to last axis is fast-time axis.
+        sampling_frequency (float): the sampling frequency of the RF signals (in Hz).
+            Only not necessary when filter_coeff is provided.
+        center_frequency (float, optional): represents the center frequency (in Hz).
+            Defaults to None.
+        bandwidth (float, optional): Bandwidth of RF signal in % of center
+            frequency. Defaults to None.
+            The bandwidth in % is defined by:
+            B = Bandwidth_in_% = Bandwidth_in_Hz*(100/center_frequency).
+            The cutoff frequency:
+            Wn = Bandwidth_in_Hz/sampling_frequency, i.e:
+            Wn = B*(center_frequency/100)/sampling_frequency.
+        filter_coeff (list, optional): (b, a), numerator and denominator coefficients
+            of FIR filter for quadratic band pass filter. All other parameters are ignored
+            if filter_coeff are provided. Instead the given filter_coeff is directly used.
+            If not provided, a filter is derived from the other params (sampling_frequency,
+            center_frequency, bandwidth).
+            see https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.lfilter.html
+
+    Returns:
+        iq_data (ndarray): complex valued base-band signal.
+
+    """
+    rf_data = ops.convert_to_numpy(rf_data)
+    assert np.isreal(
+        rf_data
+    ).all(), f"RF must contain real RF signals, got {rf_data.dtype}"
+
+    input_shape = rf_data.shape
+    n_dim = len(input_shape)
+    if n_dim > 2:
+        *_, n_ax, n_el = input_shape
+    else:
+        n_ax, n_el = input_shape
+
+    if filter_coeff is None:
+        assert (
+            sampling_frequency is not None
+        ), "provide sampling_frequency when no filter is given."
+        # Time vector
+        t = np.arange(n_ax) / sampling_frequency
+        t0 = 0
+        t = t + t0
+
+        # Estimate center frequency
+        if center_frequency is None:
+            # Keep a maximum of 100 randomly selected scanlines
+            idx = np.arange(n_el)
+            if n_el > 100:
+                idx = np.random.permutation(idx)[:100]
+            # Power Spectrum
+            P = np.sum(
+                np.abs(np.fft.fft(np.take(rf_data, idx, axis=-1), axis=-2)) ** 2,
+                axis=-1,
+            )
+            P = P[: n_ax // 2]
+            # Carrier frequency
+            idx = np.sum(np.arange(n_ax // 2) * P) / np.sum(P)
+            center_frequency = idx * sampling_frequency / n_ax
+
+        # Normalized cut-off frequency
+        if bandwidth is None:
+            Wn = min(2 * center_frequency / sampling_frequency, 0.5)
+            bandwidth = center_frequency * Wn
+        else:
+            assert np.isscalar(
+                bandwidth
+            ), "The signal bandwidth (in %) must be a scalar."
+            assert (bandwidth > 0) & (
+                bandwidth <= 200
+            ), "The signal bandwidth (in %) must be within the interval of ]0,200]."
+            # bandwidth in Hz
+            bandwidth = center_frequency * bandwidth / 100
+            Wn = bandwidth / sampling_frequency
+        assert (Wn > 0) & (Wn <= 1), (
+            "The normalized cutoff frequency is not within the interval of (0,1). "
+            "Check the input parameters!"
+        )
+
+        # Down-mixing of the RF signals
+        carrier = np.exp(-1j * 2 * np.pi * center_frequency * t)
+        # add the singleton dimensions
+        carrier = np.reshape(carrier, (*[1] * (n_dim - 2), n_ax, 1))
+        iq_data = rf_data * carrier
+
+        # Low-pass filter
+        N = 5
+        b, a = scipy.signal.butter(N, Wn, "low")
+
+        # factor 2: to preserve the envelope amplitude
+        iq_data = scipy.signal.filtfilt(b, a, iq_data, axis=-2) * 2
+
+        # Display a warning message if harmful aliasing is suspected
+        # the RF signal is undersampled
+        if sampling_frequency < (2 * center_frequency + bandwidth):
+            # lower and higher frequencies of the bandpass signal
+            fL = center_frequency - bandwidth / 2
+            fH = center_frequency + bandwidth / 2
+            n = fH // (fH - fL)
+            harmless_aliasing = any(
+                (2 * fH / np.arange(1, n) <= sampling_frequency)
+                & (sampling_frequency <= 2 * fL / np.arange(1, n))
+            )
+            if not harmless_aliasing:
+                log.warning(
+                    "rf2iq:harmful_aliasing Harmful aliasing is present: the aliases"
+                    " are not mutually exclusive!"
+                )
+    else:
+        b, a = filter_coeff
+        iq_data = scipy.signal.lfilter(b, a, rf_data, axis=-2) * 2
+
+    return iq_data
+
+
+def upmix(iq_data, sampling_frequency, center_frequency, upsampling_rate=6):
+    """Upsamples and upmixes complex base-band signals (IQ) to RF.
+
+    Args:
+        iq_data (ndarray): complex valued input array of size [..., n_ax, n_el]. second
+            to last axis is fast-time axis.
+        sampling_frequency (float): the sampling frequency of the input IQ signal (in Hz).
+            resulting sampling_frequency of RF data is upsampling_rate times higher.
+        center_frequency (float, optional): represents the center frequency (in Hz).
+
+    Returns:
+        rf_data (ndarray): output real valued rf data.
+    """
+    assert iq_data.dtype in [
+        "complex64",
+        "complex128",
+    ], "IQ must contain all complex signals."
+
+    input_shape = iq_data.shape
+    n_dim = len(input_shape)
+    if n_dim > 2:
+        *_, n_ax, _ = input_shape
+    else:
+        n_ax, _ = input_shape
+
+    # Time vector
+    n_ax_up = n_ax * upsampling_rate
+    sampling_frequency_up = sampling_frequency * upsampling_rate
+
+    t = ops.arange(n_ax_up, dtype="float32") / sampling_frequency_up
+    t0 = 0
+    t = t + t0
+
+    iq_data_upsampled = resample(
+        iq_data,
+        n_samples=n_ax_up,
+        axis=-2,
+        order=1,
+    )
+
+    # Up-mixing of the IQ signals
+    t = ops.cast(t, dtype="complex64")
+    center_frequency = ops.cast(center_frequency, dtype="complex64")
+    carrier = ops.exp(1j * 2 * np.pi * center_frequency * t)
+    carrier = ops.reshape(carrier, (*[1] * (n_dim - 2), n_ax_up, 1))
+
+    rf_data = iq_data_upsampled * carrier
+    rf_data = ops.real(rf_data) * ops.sqrt(2)
+
+    return ops.cast(rf_data, "float32")
+
+
+def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
+    """Band pass filter
+
+    Args:
+        num_taps (int): number of taps in filter.
+        sampling_frequency (float): sample frequency in Hz.
+        f1 (float): cutoff frequency in Hz of left band edge.
+        f2 (float): cutoff frequency in Hz of right band edge.
+
+    Returns:
+        ndarray: band pass filter
+    """
+    bpf = scipy.signal.firwin(
+        num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency
+    )
+    return bpf
+
+
+def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
+    """Design low pass filter.
+
+    LPF with num_taps points and cutoff at bw / 2
+
+    Args:
+        num_taps (int): number of taps in filter.
+        sampling_frequency (float): sample frequency.
+        f (float): center frequency.
+        bw (float): bandwidth in Hz.
+    Raises:
+        AssertionError: if cutoff frequency (bw / 2) is not within (0, sampling_frequency / 2)
+
+    Returns:
+        ndarray: fx LP filter
+    """
+    assert (bw / 2 > 0) & (bw / 2 < sampling_frequency / 2), log.error(
+        "Cutoff frequency must be within (0, sampling_frequency / 2), "
+        f"got {bw / 2} Hz, must be within (0, {sampling_frequency / 2}) Hz"
+    )
+    t_qbp = np.arange(num_taps) / sampling_frequency
+    lpf = scipy.signal.firwin(
+        num_taps, bw / 2, pass_zero=True, fs=sampling_frequency
+    ) * np.exp(1j * 2 * np.pi * f * t_qbp)
+    return lpf
+
+
+def complex_to_channels(complex_data, axis=-1):
+    """Unroll complex data to separate channels.
+
+    Args:
+        complex_data (complex ndarray): complex input data.
+        axis (int, optional): on which axis to extend. Defaults to -1.
+
+    Returns:
+        ndarray: real array with real and imaginary components
+            unrolled over two channels at axis.
+    """
+    # assert ops.iscomplex(complex_data).any()
+    q_data = ops.imag(complex_data)
+    i_data = ops.real(complex_data)
+
+    i_data = ops.expand_dims(i_data, axis=axis)
+    q_data = ops.expand_dims(q_data, axis=axis)
+
+    iq_data = ops.concatenate((i_data, q_data), axis=axis)
+    return iq_data
+
+
+def channels_to_complex(data):
+    """Convert array with real and imaginary components at
+    different channels to complex data array.
+
+    Args:
+        data (ndarray): input data, with at 0 index of axis
+            real component and 1 index of axis the imaginary.
+
+    Returns:
+        ndarray: complex array with real and imaginary components.
+    """
+    assert data.shape[-1] == 2, "Data must have two channels."
+    data = ops.cast(data, "complex64")
+    return data[..., 0] + 1j * data[..., 1]
+
+
+def hilbert(x, N: int = None, axis=-1):
+    """Manual implementation of the Hilbert transform function. Tje function
+    returns the analytical signal.
+
+    Operated in the Fourier domain.
+
+    Note:
+        THIS IS NOT THE MATHEMATICAL THE HILBERT TRANSFORM as you will find it on
+        wikipedia, but computes the analytical signal. The implementation reproduces
+        the behavior of the `scipy.signal.hilbert` function.
+
+    Args:
+        x (ndarray): input data of any shape.
+        N (int, optional): number of points in the FFT. Defaults to None.
+        axis (int, optional): axis to operate on. Defaults to -1.
+    Returns:
+        x (ndarray): complex iq data of any shape.k
+
+    """
+    input_shape = x.shape
+    n_dim = len(input_shape)
+
+    n_ax = input_shape[axis]
+
+    if axis < 0:
+        axis = n_dim + axis
+
+    if N is not None:
+        if N < n_ax:
+            raise ValueError("N must be greater or equal to n_ax.")
+        # only pad along the axis, use manual padding
+        pad = N - n_ax
+        zeros = ops.zeros(
+            input_shape[:axis] + (pad,) + input_shape[axis + 1 :],
+        )
+
+        x = ops.concatenate((x, zeros), axis=axis)
+    else:
+        N = n_ax
+
+    # Create filter to zero out negative frequencies
+    h = np.zeros(N)
+    if N % 2 == 0:
+        h[0] = h[N // 2] = 1
+        h[1 : N // 2] = 2
+    else:
+        h[0] = 1
+        h[1 : (N + 1) // 2] = 2
+
+    idx = list(range(n_dim))
+    # make sure axis gets to the end for fft (operates on last axis)
+    idx.remove(axis)
+    idx.append(axis)
+    x = ops.transpose(x, idx)
+
+    if x.ndim > 1:
+        ind = [np.newaxis] * x.ndim
+        ind[-1] = slice(None)
+        h = h[tuple(ind)]
+
+    h = ops.convert_to_tensor(h)
+    h = ops.cast(h, "complex64")
+    h = h + 1j * ops.zeros_like(h)
+
+    Xf_r, Xf_i = ops.fft((x, ops.zeros_like(x)))
+
+    Xf_r = ops.cast(Xf_r, "complex64")
+    Xf_i = ops.cast(Xf_i, "complex64")
+
+    Xf = Xf_r + 1j * Xf_i
+    Xf = Xf * h
+
+    # x = np.fft.ifft(Xf)
+    # do manual ifft using fft
+    Xf_r = ops.real(Xf)
+    Xf_i = ops.imag(Xf)
+    Xf_r_inv, Xf_i_inv = ops.fft((Xf_r, -Xf_i))
+
+    Xf_i_inv = ops.cast(Xf_i_inv, "complex64")
+    Xf_r_inv = ops.cast(Xf_r_inv, "complex64")
+
+    x = Xf_r_inv / N
+    x = x + 1j * (-Xf_i_inv / N)
+
+    # switch back to original shape
+    idx = list(range(n_dim))
+    idx.insert(axis, idx.pop(-1))
+    x = ops.transpose(x, idx)
+    return x
+
+
+def demodulate(data, center_frequency, sampling_frequency, axis=-3):
+    """Demodulates the input data to baseband. The function computes the analytical
+    signal (the signal with negative frequencies removed) and then shifts the spectrum
+    of the signal to baseband by multiplying with a complex exponential. Where the
+    spectrum was centered around `center_frequency` before, it is now centered around
+    0 Hz. The baseband IQ data are complex-valued. The real and imaginary parts
+    are stored in two real-valued channels.
+
+    Args:
+        data (ops.Tensor): The input data to demodulate of shape `(..., axis, ..., 1)`.
+        center_frequency (float): The center frequency of the signal.
+        sampling_frequency (float): The sampling frequency of the signal.
+        axis (int, optional): The axis along which to demodulate. Defaults to -3.
+
+    Returns:
+        ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.
+    """
+    # Compute the analytical signal
+    analytical_signal = hilbert(data, axis=axis)
+
+    # Define frequency indices
+    frequency_indices = ops.arange(analytical_signal.shape[axis])
+
+    # Expand the frequency indices to match the shape of the RF data
+    indexing = [None] * data.ndim
+    indexing[axis] = slice(None)
+    indexing = tuple(indexing)
+    frequency_indices_shaped_like_rf = frequency_indices[indexing]
+
+    # Cast to complex64
+    center_frequency = ops.cast(center_frequency, dtype="complex64")
+    sampling_frequency = ops.cast(sampling_frequency, dtype="complex64")
+    frequency_indices_shaped_like_rf = ops.cast(
+        frequency_indices_shaped_like_rf, dtype="complex64"
+    )
+
+    # Shift to baseband
+    phasor_exponent = (
+        -1j
+        * 2
+        * np.pi
+        * center_frequency
+        * frequency_indices_shaped_like_rf
+        / sampling_frequency
+    )
+    iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
+
+    # Split the complex signal into two channels
+    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+
+    return iq_data_two_channel

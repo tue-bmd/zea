@@ -1,4 +1,9 @@
-"""Tests for the processing module."""
+"""Tests for different operations.
+
+Note that in each test, we have to reimport all modules involving keras, such
+that when the backend is switched, the functions inside are reimported with the
+correct backend.
+"""
 
 # pylint: disable=import-outside-toplevel
 # pylint: disable=reimported
@@ -8,10 +13,11 @@ import math
 import keras
 import numpy as np
 import pytest
+from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert
 
-import usbmd.ops_v2 as ops
-from usbmd.ops_v2 import Pipeline, Simulate
+from usbmd import ops
+from usbmd.ops import Pipeline, Simulate
 from usbmd.probes import Probe
 from usbmd.scan import Scan
 
@@ -33,7 +39,7 @@ def test_companding(comp_type, size, parameter_value_range):
 
     import keras
 
-    from usbmd import ops_v2 as ops
+    from usbmd import ops
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
@@ -81,7 +87,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
 
     import keras
 
-    from usbmd import ops_v2 as ops
+    from usbmd import ops
 
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
@@ -127,7 +133,7 @@ def test_normalize(size, output_range, input_range):
 
     import keras
 
-    from usbmd import ops_v2 as ops
+    from usbmd import ops
 
     normalize = ops.Normalize(output_range, input_range)
 
@@ -304,7 +310,7 @@ def test_hilbert_transform():
 
     import keras
 
-    from usbmd import ops_v2 as ops
+    from usbmd import ops
 
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
@@ -328,3 +334,191 @@ def test_hilbert_transform():
     np.testing.assert_almost_equal(reference_data_iq, data_iq, decimal=4)
 
     return data_iq
+
+
+@pytest.fixture(scope="module")
+def spiral_image():
+    """
+    Fixture for generating a synthetic spiral image and noisy variants.
+    Returns:
+        dict: {
+            "spiral": clean spiral image,
+            "noisy": additive Gaussian noise,
+            "speckle": multiplicative speckle noise
+        }
+    """
+    x = np.linspace(-1, 1, 64)
+    y = np.linspace(-1, 1, 64)
+    xv, yv = np.meshgrid(x, y)
+    r = np.sqrt(xv**2 + yv**2)
+    theta = np.arctan2(yv, xv)
+    spiral = np.sin(8 * theta + 8 * r)
+    spiral = (spiral - spiral.min()) / (spiral.max() - spiral.min())
+
+    rng = np.random.default_rng(seed=42)
+    noisy = spiral + 0.2 * rng.normal(size=spiral.shape)
+    noisy = np.clip(noisy, 0, 1)
+    speckle = spiral * (1 + 0.5 * rng.normal(size=spiral.shape))
+    speckle = np.clip(speckle, 0, 1)
+
+    return {
+        "spiral": spiral.astype(np.float32),
+        "noisy": noisy.astype(np.float32),
+        "speckle": speckle.astype(np.float32),
+    }
+
+
+@pytest.mark.parametrize("sigma", [0.5, 1.0, 2.0])
+@backend_equality_check(decimal=4)
+def test_gaussian_blur(sigma, spiral_image):
+    """
+    Test `ops.GaussianBlur against scipy.ndimage.gaussian_filter.`
+    `GaussianBlur` with default args should be equivalent to scipy.
+    """
+    import keras
+
+    from usbmd import ops
+
+    blur = ops.GaussianBlur(sigma=sigma, with_batch_dim=False)
+
+    # Use spiral image for testing
+    image = spiral_image["spiral"]
+    image_tensor = keras.ops.convert_to_tensor(image[..., None])
+
+    blurred_scipy = gaussian_filter(image, sigma=sigma)
+    blurred_usbmd = blur(data=image_tensor)["data"][..., 0]
+
+    blurred_usbmd = keras.ops.convert_to_numpy(blurred_usbmd)
+
+    np.testing.assert_allclose(blurred_scipy, blurred_usbmd, atol=1e-1, rtol=1e-1)
+
+
+@pytest.mark.parametrize("sigma", [1.0, 2.0])
+@backend_equality_check(decimal=4)
+def test_lee_filter(sigma, spiral_image):
+    """
+    Test `ops.LeeFilter`, only checks if variance is reduced.
+    """
+    import keras
+
+    from usbmd import ops
+
+    # Use spiral image for testing
+    image = spiral_image["spiral"]
+
+    lee = ops.LeeFilter(sigma=sigma, with_batch_dim=False)
+
+    image_tensor = keras.ops.convert_to_tensor(image[..., None])
+    filtered = lee(data=image_tensor)["data"][..., 0]
+
+    assert keras.ops.var(filtered) < keras.ops.var(
+        image_tensor
+    ), "LeeFilter should reduce variance of the processed image"
+
+
+@pytest.mark.parametrize(
+    "threshold_type,below_threshold,fill_value,threshold_param",
+    [
+        ("hard", True, "min", {"percentile": 50}),
+        ("hard", False, "max", {"percentile": 75}),
+        ("soft", True, 0.0, {"threshold": 0.5}),
+        ("soft", False, 1.0, {"threshold": 0.3}),
+    ],
+)
+@backend_equality_check()
+def test_threshold_op(
+    spiral_image, threshold_type, below_threshold, fill_value, threshold_param
+):
+    """Test `ops.Threshold` operation on a synthetic spiral image."""
+    import keras
+
+    from usbmd import ops
+
+    spiral = spiral_image["spiral"]
+    spiral_tensor = keras.ops.convert_to_tensor(spiral)
+
+    threshold = ops.Threshold(
+        threshold_type=threshold_type,
+        below_threshold=below_threshold,
+        fill_value=fill_value,
+    )
+
+    # Set the correct parameter (either percentile or threshold) and the other to None
+    percentile = threshold_param.get("percentile", None)
+    threshold_value = threshold_param.get("threshold", None)
+
+    out = threshold(
+        data=spiral_tensor, percentile=percentile, threshold=threshold_value
+    )
+    out_np = keras.ops.convert_to_numpy(out["data"])
+
+    # Quantitative: check that thresholding changes the image
+    assert not np.allclose(spiral, out_np)
+
+    return out_np
+
+
+@pytest.mark.parametrize(
+    "sigma,stage",
+    [
+        (0.1, "all_stages"),
+        (0.2, "all_stages"),
+        (0.2, "hard_thresholding"),
+    ],
+)
+@backend_equality_check()
+def test_bm3d_op(spiral_image, sigma, stage):
+    """Test `ops.BM3DDenoise` operation on a noisy synthetic image."""
+    import keras
+
+    from usbmd import ops
+
+    spiral = spiral_image["spiral"]
+    noisy = spiral_image["noisy"]
+    noisy_tensor = keras.ops.convert_to_tensor(noisy)
+
+    bm3d = ops.BM3DDenoise(stage=stage, with_batch_dim=False)
+    denoised = bm3d(data=noisy_tensor, sigma=sigma)
+    denoised_np = keras.ops.convert_to_numpy(denoised["data"])
+
+    # Quantitative: denoised image should be closer to original than noisy
+    orig_mse = np.mean((spiral - noisy) ** 2)
+    denoised_mse = np.mean((spiral - denoised_np) ** 2)
+    assert (
+        denoised_mse < orig_mse
+    ), f"BM3D with sigma={sigma}, stage={stage} did not improve image quality"
+
+    # Check that noise variance is reduced
+    assert np.var(denoised_np) < np.var(
+        noisy
+    ), f"BM3D with sigma={sigma}, stage={stage} did not reduce variance"
+
+    return denoised_np
+
+
+@pytest.mark.parametrize(
+    "niter,lmbda",
+    [
+        (5, 0.5),
+        (10, 0.25),
+    ],
+)
+def test_anisotropic_diffusion_op(spiral_image, niter, lmbda):
+    """Test `ops.AnisotropicDiffusion` operation on a noisy synthetic image."""
+
+    import keras
+
+    from usbmd import ops
+
+    speckle = spiral_image["speckle"]
+    speckle_tensor = keras.ops.convert_to_tensor(speckle)
+
+    srad = ops.AnisotropicDiffusion(with_batch_dim=False)
+    filtered = srad(data=speckle_tensor, niter=niter, lmbda=lmbda)
+    filtered_np = keras.ops.convert_to_numpy(filtered["data"])
+
+    # Quantitative: variance should be reduced, but mean should be similar
+    assert np.var(filtered_np) < np.var(speckle)
+    assert np.abs(np.mean(filtered_np) - np.mean(speckle)) < 0.1
+
+    return filtered_np

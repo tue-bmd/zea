@@ -1,8 +1,7 @@
-
 <!-- This is the readme for the github page (more complete readme for pdocs can be found in usmbd/README.md) -->
-# usbmd <img src="docs/static/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
+# usbmd <img src="docs/_static/usbmd_logo_v3.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="usbmd Logo" />
 
-The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the full documentation [here](http://131.155.125.142:6001/) (only available within the TU/e network).
+The ultrasound toolbox (usbmd) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the full documentation [here](http://131.155.124.215:6001/) (only available within the TU/e network).
 
 The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox. This repository is being maintained by researchers from the [BM/d lab](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab/) at Eindhoven University of Technology. Currently for [internal](LICENSE) use only.
 
@@ -87,7 +86,7 @@ import matplotlib.pyplot as plt
 
 from usbmd import setup
 from usbmd.data import load_usbmd_file
-from usbmd.ops_v2 import Pipeline
+from usbmd.ops import Pipeline
 
 # choose your config file
 # all necessary settings should be in the config file
@@ -147,7 +146,7 @@ Custom pipelines are also supported in various ways. One way is to define a pipe
 ```python
 import keras
 from usbmd import Config
-from usbmd.ops_v2 import Pipeline
+from usbmd.ops import Pipeline
 
 config = Config(
     {

@@ -1,7 +1,7 @@
 """The datasets module contains classes for loading different types of
 ultrasound datasets.
 
-TODO:
+TODOs
     - Context manager ReadH5
     - Check if legacy datasets are still working
     - Add warnings to legacy datasets and point to USBMD dataset
