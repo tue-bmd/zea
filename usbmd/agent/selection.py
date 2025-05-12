@@ -75,7 +75,6 @@ class GreedyEntropy(LinesActionModel):
         mean: float = 0,
         std_dev: float = 1,
         num_lines_to_update: int = 5,
-        seed=None,
     ):
         """
         Args:
@@ -264,6 +263,10 @@ class GreedyEntropy(LinesActionModel):
 
 @action_selection_registry(name="uniform_random")
 class UniformRandomLines(LinesActionModel):
+    """
+    Creates masks with uniformly randomly sampled lines.
+    """
+
     def __init__(
         self,
         n_actions: int,
@@ -286,7 +289,17 @@ class UniformRandomLines(LinesActionModel):
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
         self.batch_size = batch_size
 
-    def sample(self, seed):
+    def sample(self, seed=None):
+        """
+        Generates or updates an equispaced mask to sweep rightwards by one step across the image.
+
+        Args:
+            seed (int | SeedGenerator | jax.random.key, optional): Seed for random
+                number generation. Defaults to None.
+
+        Returns:
+            Tensor: The mask of shape (batch_size, img_size, img_size)
+        """
         selected_lines_batched = masks.random_uniform_lines(
             n_actions=self.n_actions,
             n_possible_actions=self.n_possible_actions,
