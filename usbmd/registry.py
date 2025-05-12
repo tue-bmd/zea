@@ -37,9 +37,10 @@ dataset = dataset_class()
 
 
 class RegisterDecorator:
-    """Decorator class for registering classes. The docorator registers a name
-    to the class and optionally registers additional values to keys for the
-    class.
+    """Decorator class for registering classes.
+
+    The docorator registers a name to the class and optionally registers
+    additional values to keys for the class.
     """
 
     def __init__(self, items_to_register=None):
@@ -59,10 +60,13 @@ class RegisterDecorator:
             self.additional_registries[reg.lower()] = {}
 
     def __call__(self, name, **kwargs):
-        """The decorator function. The name is the name to register to the
-        class and the kwargs are the additional values to register to the
-        class.
-        Note: All names and keys are converted to lowercase."""
+        """The decorator function.
+
+        The name is the name to register to the class and the kwargs are the
+        additional values to register to the class.
+
+        Note: All names and keys are converted to lowercase.
+        """
         assert isinstance(name, str), "Name must be a string"
         assert name not in self.registry, f"Name {name} already registered"
 
@@ -85,8 +89,11 @@ class RegisterDecorator:
         return _register
 
     def get_parameter(self, cls_or_name, parameter):
-        """Returns the value of the parameter for the class with the given
-        class or name. This value can be a string or a class type."""
+        """Get parameter.
+
+        Returns the value of the parameter for the class with the given
+        class or name. This value can be a string or a class type.
+        """
         if isinstance(cls_or_name, str):
             cls_or_name = self.registry[cls_or_name.lower()]
         # Assert that key is a class type
@@ -96,7 +103,9 @@ class RegisterDecorator:
         return self.additional_registries[parameter.lower()][cls_or_name]
 
     def __str__(self) -> str:
-        """Prints the keys and class names of the registry each on a single
+        """String representation of the registry.
+
+        Prints the keys and class names of the registry each on a single
         line followed by the keys and values of each additional registry.
         """
         string = "registry:\n"
@@ -112,8 +121,10 @@ class RegisterDecorator:
         return string
 
     def __getitem__(self, key):
-        """Returns the class corresponding to the key. The key can be a string
-        or a class type."""
+        """Returns the class corresponding to the key.
+
+        The key can be a string or a class type.
+        """
         assert isinstance(key, str), "Key must be a string"
         try:
             return self.registry[key.lower()]
@@ -163,8 +174,11 @@ class RegisterDecorator:
             self.additional_registries[reg.lower()] = {}
 
     def filter_by_argument(self, argument, value):
-        """Returns a list of names of classes that have the given value for the
-        given argument."""
+        """Filter the registry by the given argument and value.
+
+        Returns a list of names of classes that have the given value for the
+        given argument.
+        """
         return [
             name
             for name, cls in self.registry.items()
@@ -194,7 +208,7 @@ metrics_registry = RegisterDecorator(
 
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
 ops_registry = RegisterDecorator(items_to_register=["name"])
-ops_v2_registry = RegisterDecorator(items_to_register=["name"])
+ops_dep_registry = RegisterDecorator(items_to_register=["name"])
 model_registry = RegisterDecorator(items_to_register=["name"])
 diffusion_guidance_registry = RegisterDecorator(items_to_register=["name"])
 operator_registry = RegisterDecorator(items_to_register=["name"])
