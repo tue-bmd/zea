@@ -2,6 +2,8 @@
 
 import keras
 
+from usbmd.utils import log
+
 
 def tf_function(func=None, jit_compile=False, **kwargs):
     """Applies default tf.function to the given function. Only in TensorFlow backend."""
@@ -62,8 +64,8 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     elif backend == "jax" and not jax:
         return func
     else:
-        print(
+        log.warning(
             f"Unsupported backend: {backend}. Supported backends are 'tensorflow' and 'jax'."
         )
-        print("Falling back to non-compiled mode.")
+        log.warning("Falling back to non-compiled mode.")
         return func

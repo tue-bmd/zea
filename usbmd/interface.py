@@ -20,7 +20,7 @@ from usbmd.config import Config
 from usbmd.core import DataTypes
 from usbmd.data import get_dataset
 from usbmd.display import to_8bit
-from usbmd.ops_v2 import Pipeline
+from usbmd.ops import Pipeline
 from usbmd.probes import get_probe
 from usbmd.utils import (
     log,
@@ -303,8 +303,8 @@ class Interface:
         """Plot image using matplotlib or opencv.
 
         Args:
-        save (bool): whether to save the image to disk.
-            block (bool): whether to block the UI while plotting.
+            save (bool): whether to save the image to disk.
+                block (bool): whether to block the UI while plotting.
         Returns:
             image (np.ndarray): plotted image (grabbed from figure).
         """
