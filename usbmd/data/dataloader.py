@@ -15,6 +15,7 @@ import numpy as np
 from keras import ops
 from keras.src.utils import backend_utils
 
+from usbmd.backend import jit
 from usbmd.data.datasets import Dataset, H5FileHandleCache
 from usbmd.data.file import File
 from usbmd.data.layers import Resizer
@@ -452,6 +453,7 @@ class Dataloader(H5Generator):
         backend: str | None = None,
         device: str | None = None,
         validate: bool = True,
+        jit_compile: bool = False,
         **kwargs,
     ):
         """Initialize the dataloader.
@@ -586,6 +588,15 @@ class Dataloader(H5Generator):
         # Other arguments
         self.dataset_repetitions = dataset_repetitions
 
+        # Jit compile
+        self.jit_compile = jit_compile
+        if self.jit_compile:
+            if self.assert_image_range:
+                raise ValueError(
+                    "assert_image_range is not supported with jit compilation."
+                )
+            self.preprocess = jit(self.preprocess)
+
     def map(self, fn):
         """Add a mapping function to the dataloader.
 
@@ -630,14 +641,18 @@ class Dataloader(H5Generator):
         for map_fn in self.map_fns:
             images = map_fn(images)
 
-        # If nothing converted the images to a tensor yet, do it here
-        images = ops.convert_to_tensor(images)
-
         return images
 
     def __len__(self):
         """Return the total number of batches, accounting for repetitions."""
         return super().__len__() * self.dataset_repetitions
+
+    def on_device(self, func, *args, **kwargs):
+        """Run a function on the specified device."""
+        if self.device is None:
+            return func(*args, **kwargs)
+        else:
+            return on_device(func, *args, device=self.device, **kwargs)
 
     def __getitem__(self, index):
         # Repeat the dataset by wrapping the index if dataset_repetitions > 1
@@ -651,11 +666,8 @@ class Dataloader(H5Generator):
         else:
             images = out
 
-        # Run self.preprocess on some device
-        if self.device is None:
-            images = self.preprocess(images)
-        else:
-            images = on_device(self.preprocess, images, device=self.device)
+        images = self.on_device(ops.convert_to_tensor, images)
+        images = self.on_device(self.preprocess, images)
 
         if self.return_filename:
             return images, filenames
