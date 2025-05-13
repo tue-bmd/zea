@@ -130,9 +130,11 @@ def test_h5_generator_shuffle(dummy_hdf5):
     )
 
     # Test shuffle
-    indices = deepcopy(generator.indices)
+    shuffled_items = deepcopy(generator.shuffled_items)
     generator._shuffle()
-    assert indices != generator.indices, "The generator indices were not shuffled"
+    assert (
+        shuffled_items != generator.shuffled_items
+    ), "The generator indices were not shuffled"
 
 
 @pytest.mark.parametrize(
