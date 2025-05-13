@@ -576,6 +576,12 @@ class Dataloader(H5Generator):
                 seed=self.seed,
                 **self.resize_kwargs,
             )
+
+            # TODO: we could implement resizing for other frame_axis values if needed.
+            assert self.frame_axis == -1, (
+                "Resizing only works with frame_axis = -1. "
+                "Please set frame_axis to -1 or remove the resizing."
+            )
         else:
             self.resizer = None
 
