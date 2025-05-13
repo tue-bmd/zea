@@ -318,7 +318,7 @@ class File(h5py.File):
             log.info(f"Could not find proper scan parameters in {self}.")
         return scan_parameters
 
-    def scan(self, event=None) -> Scan:
+    def scan(self, event=None, **kwargs) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
 
         Args:
@@ -328,11 +328,14 @@ class File(h5py.File):
                     - event_1/scan
                     - ...
                 Defaults to None. In that case no event structure is expected.
+            **kwargs: Additional keyword arguments to pass to the Scan object.
+                These will override the parameters from the file if they are
+                present in the file.
 
         Returns:
             Scan: The scan object.
         """
-        return Scan.safe_initialize(**self.get_scan_parameters(event))
+        return Scan.merge(self.get_scan_parameters(event), kwargs)
 
     def get_probe_parameters(self, event=None) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe
