@@ -503,6 +503,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
         dummy_hdf5,
         key="data",
         image_size=(28, 28),
+        resize_type="center_crop",
         n_frames=1,
         search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=False,
