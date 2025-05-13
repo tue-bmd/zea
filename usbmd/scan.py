@@ -977,7 +977,7 @@ class Scan(Object):
             log.warning("Time to next transmit is not constant")
 
         # Compute fps
-        time = np.sum(self._time_to_next_transmit[0])
+        time = np.mean(np.sum(self._time_to_next_transmit, axis=1))
         fps = 1 / time
         return fps
 
