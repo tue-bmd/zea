@@ -216,9 +216,10 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         insert_frame_axis: bool = True,
         frame_index_stride: int = 1,
         frame_axis: int = -1,
+        validate: bool = True,
         **kwargs,
     ):
-        super().__init__(file_paths, key, **kwargs)
+        super().__init__(file_paths, key, validate=validate, **kwargs)
 
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
@@ -460,6 +461,7 @@ class Dataloader(H5Generator):
         frame_axis: int = -1,
         backend: str | None = None,
         device: str | None = None,
+        validate: bool = True,
         **kwargs,
     ):
         """Initialize the dataloader.
@@ -525,6 +527,8 @@ class Dataloader(H5Generator):
                 new dimension to stack frames along.
             backend (str, optional): backend to use. Defaults to None.
             device (str, optional): device to use. Defaults to None.
+            validate (bool, optional): validate if the dataset adheres to the usbmd format.
+                Defaults to True.
         """
         super().__init__(
             file_paths,
@@ -546,6 +550,7 @@ class Dataloader(H5Generator):
             additional_axes_iter=additional_axes_iter,
             drop_remainder=drop_remainder,
             caching=caching,
+            validate=validate,
             **kwargs,
         )
         self.resize_type = resize_type
