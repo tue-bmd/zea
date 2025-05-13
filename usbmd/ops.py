@@ -1262,6 +1262,20 @@ class Mean(Operation):
         return kwargs
 
 
+@ops_registry("transpose")
+class Transpose(Operation):
+    """Transpose the input data along the specified axes."""
+
+    def __init__(self, axes, **kwargs):
+        super().__init__(**kwargs)
+        self.axes = axes
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        transposed_data = ops.transpose(data, axes=self.axes)
+        return {self.output_key: transposed_data}
+
+
 @ops_registry("simulate_rf")
 class Simulate(Operation):
     """Simulate RF data."""
