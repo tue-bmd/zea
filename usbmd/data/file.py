@@ -112,23 +112,31 @@ class File(h5py.File):
             - list of ints -> indexes first axis (frames)
             - list of list, ranges or slices -> indexes multiple axes
         """
+        _value_error_msg = (
+            f"Invalid value for indices: {indices}. "
+            "Indices can be a 'all', int or a List[int, tuple, list, slice, range]."
+        )
+
+        # Check all options that only index the first axis
         if isinstance(indices, str):
             if indices == "all":
                 return slice(None)
             else:
-                raise ValueError(f"Invalid value for indices: {indices}. ")
+                raise ValueError(_value_error_msg)
 
-        if isinstance(indices, int):
+        if isinstance(indices, range):
+            return list(indices)
+
+        if isinstance(indices, (int, slice, np.integer)):
             return indices
 
-        # TODO: add test for all options
+        # At this point, indices should be a list or tuple
+        assert isinstance(indices, (list, tuple, np.ndarray)), _value_error_msg
+
         assert all(
             isinstance(idx, (list, tuple, int, slice, range, np.ndarray, np.integer))
             for idx in indices
-        ), (
-            f"Invalid value for indices: {indices}. "
-            "Indices can be a 'all', int or a List[int, tuple, list, slice, range]."
-        )
+        ), _value_error_msg
 
         # Convert ranges to lists
         processed_indices = [
