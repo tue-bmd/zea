@@ -193,6 +193,7 @@ def _h5_reopen_on_io_error(
 class H5Generator(Dataset, keras.utils.PyDataset):
     """Generator from h5 file using provided indices.
     Mostly used internally, you might want to use the Dataloader class instead.
+    Always outputs numpy arrays.
     """
 
     def __init__(
@@ -206,7 +207,6 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
         seed: int | None = None,
-        as_tensor: bool = True,
         drop_remainder: bool = False,
         caching: bool = False,
         additional_axes_iter: tuple | None = None,
@@ -234,12 +234,9 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.limit_n_frames = limit_n_frames
         self.seed = seed
         self.batch_size = batch_size
-        self.as_tensor = as_tensor
         self.additional_axes_iter = additional_axes_iter or []
         self.drop_remainder = drop_remainder
         self.caching = caching
-
-        self.maybe_tensor = ops.convert_to_tensor if self.as_tensor else lambda x: x
 
         assert (
             self.frame_index_stride > 0
@@ -350,9 +347,9 @@ class H5Generator(Dataset, keras.utils.PyDataset):
             filenames = filenames[0]
 
         if self.return_filename:
-            return self.maybe_tensor(images), filenames
+            return images, filenames
         else:
-            return self.maybe_tensor(images)
+            return images
 
     @retry_on_io_error(
         max_retries=MAX_RETRY_ATTEMPTS,
@@ -438,7 +435,6 @@ class Dataloader(H5Generator):
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
         seed: int | None = None,
-        as_tensor: bool = True,
         drop_remainder: bool = False,
         resize_type: str | None = None,
         resize_axes: tuple | None = None,
@@ -479,7 +475,6 @@ class Dataloader(H5Generator):
                 This means n_frames per data file will be used. These will be the first frames in
                 the file. Defaults to None
             seed (int, optional): random seed of shuffle.
-            as_tensor (bool, optional): convert to tensor. Defaults to True.
             drop_remainder (bool, optional): representing whether the last batch should be dropped
             resize_type (str, optional): resize type. Defaults to 'center_crop'.
                 can be 'center_crop', 'random_crop' or 'resize'.
@@ -546,7 +541,6 @@ class Dataloader(H5Generator):
             limit_n_frames=limit_n_frames,
             seed=seed,
             batch_size=batch_size,
-            as_tensor=as_tensor,
             additional_axes_iter=additional_axes_iter,
             drop_remainder=drop_remainder,
             caching=caching,
@@ -611,13 +605,8 @@ class Dataloader(H5Generator):
         dl.map_fns.append(fn)
         return dl
 
-    def preprocess(self, out):
+    def preprocess(self, images):
         """Preprocess the images such as resizing and normalizing them."""
-        if self.return_filename:
-            images, filenames = out
-        else:
-            images = out
-
         # add channel dim
         if len(self.shape) != 3:
             images = self.backend.numpy.expand_dims(images, axis=-1)
@@ -646,10 +635,10 @@ class Dataloader(H5Generator):
         for map_fn in self.map_fns:
             images = map_fn(images)
 
-        if self.return_filename:
-            return images, filenames
-        else:
-            return images
+        # If nothing converted the images to a tensor yet, do it here
+        images = ops.convert_to_tensor(images)
+
+        return images
 
     def __len__(self):
         """Return the total number of batches, accounting for repetitions."""
@@ -661,7 +650,19 @@ class Dataloader(H5Generator):
             raise IndexError("Index out of range for repeated dataset.")
         out = super().__getitem__(index % super().__len__())
 
-        if self.device is None:
-            return self.preprocess(out)
+        # Unpack the output
+        if self.return_filename:
+            images, filenames = out
         else:
-            return on_device(self.preprocess, out, self.device)
+            images = out
+
+        # Run self.preprocess on some device
+        if self.device is None:
+            images = self.preprocess(images)
+        else:
+            images = on_device(self.preprocess, images, device=self.device)
+
+        if self.return_filename:
+            return images, filenames
+        else:
+            return images
