@@ -440,7 +440,7 @@ class Dataloader(H5Generator):
         seed: int | None = None,
         as_tensor: bool = True,
         drop_remainder: bool = False,
-        resize_type: str = "center_crop",
+        resize_type: str | None = None,
         resize_axes: tuple | None = None,
         resize_kwargs: dict | None = None,
         image_size: tuple | None = None,
@@ -518,7 +518,7 @@ class Dataloader(H5Generator):
             initial_frame_axis (int, optional): axis where in the files the frames are stored.
                 Defaults to 0.
             insert_frame_axis (bool, optional): if True, new dimension to stack
-                frames along will be created. Defaults to False. In that case
+                frames along will be created. Defaults to True. In that case
                 frames will be stacked along existing dimension (frame_axis).
             frame_index_stride (int, optional): interval between frames to load.
                 Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
@@ -553,31 +553,42 @@ class Dataloader(H5Generator):
             validate=validate,
             **kwargs,
         )
-        self.resize_type = resize_type
-        self.image_size = image_size
+        # Image range / normalization range
         self.image_range = image_range
         if normalization_range is not None:
             assert (
                 self.image_range is not None
             ), "If normalization_range is set, image_range must be set as well."
         self.normalization_range = normalization_range
+        self.assert_image_range = assert_image_range
+        self.clip_image_range = clip_image_range
+
+        # Resize arguments
         self.resize_kwargs = resize_kwargs or {}
-        self.resizer = Resizer(
-            resize_type=resize_type,
-            image_size=image_size,
-            resize_axes=resize_axes,
-            seed=self.seed,
-            **self.resize_kwargs,
-        )
+        self.resize_type = resize_type
+        self.image_size = image_size
+        if self.image_size or self.resize_type:
+            # Let resizer handle the assertions.
+            self.resizer = Resizer(
+                image_size=self.image_size,
+                resize_type=self.resize_type,
+                resize_axes=resize_axes,
+                seed=self.seed,
+                **self.resize_kwargs,
+            )
+        else:
+            self.resizer = None
+
+        # Augmentation
         self.map_fns = map_fns or []
         if augmentation is not None:
             self.map_fns.append(augmentation)
-        self.assert_image_range = assert_image_range
-        self.clip_image_range = clip_image_range
-        if backend is None:
-            backend = keras.backend.backend()
+
+        # Backend
         self.backend = backend_utils.DynamicBackend(backend)
         self.device = device
+
+        # Other arguments
         self.dataset_repetitions = dataset_repetitions
 
     def map(self, fn):
@@ -623,7 +634,7 @@ class Dataloader(H5Generator):
             images = translate(images, self.image_range, self.normalization_range)
 
         # resize
-        if self.image_size is not None:
+        if self.resizer is not None:
             images = self.resizer(images)
 
         for map_fn in self.map_fns:
