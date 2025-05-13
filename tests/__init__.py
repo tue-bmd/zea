@@ -20,3 +20,8 @@ from .helpers import BackendEqualityCheck
 backend_workers = BackendEqualityCheck()
 backend_equality_check = backend_workers.backend_equality_check
 run_in_backend = backend_workers.run_in_backend
+
+# Parameters for dummy dataset
+DUMMY_DATASET_N_FRAMES = 4
+DUMMY_DATASET_N_Z = 512
+DUMMY_DATASET_N_X = 512

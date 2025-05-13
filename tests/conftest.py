@@ -5,7 +5,12 @@ import pytest
 
 from usbmd.data.data_format import generate_example_dataset
 
-from . import backend_workers
+from . import (
+    DUMMY_DATASET_N_FRAMES,
+    DUMMY_DATASET_N_X,
+    DUMMY_DATASET_N_Z,
+    backend_workers,
+)
 
 plt.rcParams["backend"] = "agg"
 
@@ -23,6 +28,12 @@ def dummy_dataset_path(tmp_path):
     """Fixture to create a temporary dataset"""
     for i in range(2):
         temp_file = tmp_path / f"test{i}.hdf5"
-        generate_example_dataset(temp_file, add_optional_dtypes=True, n_frames=4)
+        generate_example_dataset(
+            temp_file,
+            add_optional_dtypes=True,
+            n_frames=DUMMY_DATASET_N_FRAMES,
+            n_z=DUMMY_DATASET_N_Z,
+            n_x=DUMMY_DATASET_N_X,
+        )
 
     yield str(tmp_path)
