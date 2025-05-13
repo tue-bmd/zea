@@ -481,6 +481,7 @@ class Dataloader(H5Generator):
             resize_axes (tuple, optional): axes to resize along. Should be of length 2
                 (height, width) as resizing function only supports 2D resizing / cropping.
                 Should only be set when your data is more than (h, w, c). Defaults to None.
+                Note that it considers the axes after inserting the frame axis.
             resize_kwargs (dict, optional): kwargs for the resize function.
             image_size (tuple, optional): resize images to image_size. Should
                 be of length two (height, width). Defaults to None.
@@ -562,6 +563,12 @@ class Dataloader(H5Generator):
         self.resize_type = resize_type
         self.image_size = image_size
         if self.image_size or self.resize_type:
+            if self.frame_axis != -1:
+                assert resize_axes is not None, (
+                    "Resizing only works with frame_axis = -1. Alternatively, "
+                    "you can specify resize_axes."
+                )
+
             # Let resizer handle the assertions.
             self.resizer = Resizer(
                 image_size=self.image_size,
@@ -569,12 +576,6 @@ class Dataloader(H5Generator):
                 resize_axes=resize_axes,
                 seed=self.seed,
                 **self.resize_kwargs,
-            )
-
-            # TODO: we could implement resizing for other frame_axis values if needed.
-            assert self.frame_axis == -1, (
-                "Resizing only works with frame_axis = -1. "
-                "Please set frame_axis to -1 or remove the resizing."
             )
         else:
             self.resizer = None
