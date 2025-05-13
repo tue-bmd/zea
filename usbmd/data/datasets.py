@@ -71,9 +71,10 @@ class H5FileHandleCache:
 
     def __del__(self):
         """Ensure cached files are closed."""
-        for _, file in self._file_handle_cache.items():
-            file.close()
-        self._file_handle_cache = OrderedDict()
+        if hasattr(self, "_file_handle_cache"):
+            for _, file in self._file_handle_cache.items():
+                file.close()
+            self._file_handle_cache = OrderedDict()
 
 
 def find_h5_files(
