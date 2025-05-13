@@ -91,6 +91,7 @@ def test_print_hdf5_attrs(complex_h5_file, capsys):
 
 
 def test_file_attributes():
+    """Test file attributes."""
     if not Path(DATASET_PATH).exists():
         pytest.skip("The dataset path is unavailable.")
 
