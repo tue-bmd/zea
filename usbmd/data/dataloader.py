@@ -595,7 +595,9 @@ class Dataloader(H5Generator):
                 raise ValueError(
                     "assert_image_range is not supported with jit compilation."
                 )
-            self.preprocess = jit(self.preprocess)
+            self._preprocess = jit(self.preprocess)
+        else:
+            self._preprocess = self.preprocess
 
     def map(self, fn):
         """Add a mapping function to the dataloader.
@@ -667,7 +669,7 @@ class Dataloader(H5Generator):
             images = out
 
         images = self.on_device(ops.convert_to_tensor, images)
-        images = self.on_device(self.preprocess, images)
+        images = self.on_device(self._preprocess, images)
 
         if self.return_filename:
             return images, filenames
