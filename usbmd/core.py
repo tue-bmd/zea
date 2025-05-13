@@ -22,6 +22,7 @@ STATIC = [
     "apply_phase_rotation",
     "Nx",
     "Nz",
+    "fill_value",
 ]
 
 

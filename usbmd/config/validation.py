@@ -74,6 +74,11 @@ pipeline_schema = Schema(
         Optional("operations", default=["identity"]): Or(
             None, [Or(str, {"name": str, "params": dict}, {"name": str})]
         ),
+        Optional("with_batch_dim", default=True): bool,
+        Optional("jit_options", default="ops"): Or(None, "ops", "pipeline"),
+        Optional("jit_kwargs", default=None): Or(None, dict),
+        Optional("name", default="pipeline"): str,
+        Optional("validate", default=True): bool,
     }
 )
 
