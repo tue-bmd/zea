@@ -15,7 +15,7 @@ import numpy as np
 from keras import ops
 from keras.src.utils import backend_utils
 
-from usbmd.data.datasets import Dataset
+from usbmd.data.datasets import Dataset, H5FileHandleCache
 from usbmd.data.file import File
 from usbmd.data.layers import Resizer
 from usbmd.utils import log, map_negative_indices, translate
@@ -166,7 +166,9 @@ def generate_h5_indices(
 
 
 def _h5_reopen_on_io_error(
-    dataloader_obj,
+    dataloader_obj: H5FileHandleCache,
+    file,  # pylint: disable=unused-argument
+    key,  # pylint: disable=unused-argument
     indices,
     retry_count,
     **kwargs,  # pylint: disable=unused-argument
@@ -176,9 +178,9 @@ def _h5_reopen_on_io_error(
     """
     file_name = indices[0]
     try:
-        file = dataloader_obj._file_handle_cache.pop(file_name, None)
-        if file is not None:
-            file.close()
+        file_handle = dataloader_obj._file_handle_cache.pop(file_name, None)
+        if file_handle is not None:
+            file_handle.close()
     except Exception:
         pass
 
@@ -294,7 +296,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
             )
             self.indices = self.indices[:limit_n_samples]
 
-        self.shuffled_items = range(len(self.indices))
+        self.shuffled_items = list(range(len(self.indices)))
 
         # Retry count for I/O errors
         self.retry_count = 0
