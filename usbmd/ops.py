@@ -1720,6 +1720,8 @@ def _set_if_none(variable, default):
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
+    STATIC_PARAMS = ["fill_value"]
+
     def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
 
