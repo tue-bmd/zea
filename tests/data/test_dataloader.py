@@ -1,7 +1,6 @@
 """Test Tensorflow H5 Dataloader functions"""
 
 import hashlib
-import os
 import pickle
 from copy import deepcopy
 from pathlib import Path
@@ -216,16 +215,22 @@ def test_dataloader(
 
 
 @pytest.mark.parametrize(
-    "directory, key, n_frames, insert_frame_axis, image_size",
+    "directory, key, n_frames, insert_frame_axis, image_size, batch_size",
     [
-        ("camus_dataset", "data/image_sc", 1, True, (20, 20)),
-        ("dummy_hdf5", "data", 1, True, (20, 20)),
-        ("camus_dataset", "data/image_sc", 5, False, (20, 20)),
-        ("dummy_hdf5", "data", 5, False, (20, 20)),
+        ("camus_dataset", "data/image_sc", 1, True, (20, 20), 2),
+        ("dummy_hdf5", "data", 1, True, (20, 20), 2),
+        ("camus_dataset", "data/image_sc", 5, False, (20, 20), 1),
+        ("dummy_hdf5", "data", 5, False, (20, 20), 1),
     ],
 )
 def test_h5_dataset_return_filename(
-    directory, key, n_frames, insert_frame_axis, image_size, request
+    directory,
+    key,
+    n_frames,
+    insert_frame_axis,
+    image_size,
+    batch_size,
+    request,
 ):
     """Test the Dataloader class with return_filename=True."""
 
@@ -243,7 +248,7 @@ def test_h5_dataset_return_filename(
         seed=42,
         return_filename=True,
         resize_type="resize",
-        batch_size=1,
+        batch_size=batch_size,
         validate=validate,
     )
 
@@ -254,7 +259,13 @@ def test_h5_dataset_return_filename(
     ), "The batch should contain two elements: images and file names"
 
     _, file_dict = batch
-    # only one file_dict because batch_size=1
+
+    assert (
+        len(file_dict) == batch_size
+    ), "The file_dict should contain the same number of elements as the batch size"
+
+    file_dict = file_dict[0]  # get the first file_dict of the batch
+
     filename = file_dict["filename"]
     assert isinstance(filename, str), "The filename should be a string"
     fullpath = file_dict["fullpath"]
@@ -264,49 +275,56 @@ def test_h5_dataset_return_filename(
 
 
 @pytest.mark.parametrize(
-    "directory, key, image_size, resize_type",
+    "directory, key, image_size, resize_type, batch_size",
     [
-        ("camus_dataset", "data/image_sc", (20, 23), "resize"),
-        ("dummy_hdf5", "data", (20, 23), "resize"),
+        ("camus_dataset", "data/image_sc", (20, 23), "resize", 1),
+        ("dummy_hdf5", "data", (20, 23), "resize", 1),
         (
             "camus_dataset",
             "data/image_sc",
             (20, 23),
             "resize",
+            1,
         ),
-        ("dummy_hdf5", "data", (20, 23), "resize"),
+        ("dummy_hdf5", "data", (20, 23), "resize", 1),
         (
             "camus_dataset",
             "data/image_sc",
             (20, 23),
             "center_crop",
+            3,
         ),
-        ("dummy_hdf5", "data", (20, 23), "center_crop"),
+        ("dummy_hdf5", "data", (20, 23), "center_crop", 3),
         (
             "camus_dataset",
             "data/image_sc",
             (20, 23),
             "center_crop",
+            3,
         ),
-        ("dummy_hdf5", "data", (20, 23), "center_crop"),
+        ("dummy_hdf5", "data", (20, 23), "center_crop", 3),
         (
             "camus_dataset",
             "data/image_sc",
             (20, 23),
             "random_crop",
+            3,
         ),
-        ("dummy_hdf5", "data", (20, 23), "random_crop"),
+        ("dummy_hdf5", "data", (20, 23), "random_crop", 3),
         (
             "camus_dataset",
             "data/image_sc",
             (20, 23),
             "random_crop",
+            1,
         ),
-        ("dummy_hdf5", "data", (20, 23), "random_crop"),
-        ("dummy_hdf5", "data", (32, 32), "crop_or_pad"),
+        ("dummy_hdf5", "data", (20, 23), "random_crop", 1),
+        ("dummy_hdf5", "data", (32, 32), "crop_or_pad", 1),
     ],
 )
-def test_h5_dataset_resize_types(directory, key, image_size, resize_type, request):
+def test_h5_dataset_resize_types(
+    directory, key, image_size, resize_type, batch_size, request
+):
     """Test the Dataloader class with different resize types."""
 
     validate = directory != "dummy_hdf5"
@@ -319,6 +337,7 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, reques
         n_frames=1,
         search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=True,
+        batch_size=batch_size,
         seed=42,
         return_filename=False,
         resize_type=resize_type,
@@ -328,9 +347,12 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, reques
 
     images = next(iter(dataset))
 
+    expected_shape = (batch_size, *image_size)
+    dataset_shape = images.shape[:-1]
+
     assert (
-        images.shape[:-1] == image_size
-    ), f"The images should be resized to {image_size}, but got {images.shape[:-1]}"
+        expected_shape == dataset_shape
+    ), f"The images should be resized to {expected_shape}, but got {dataset_shape}"
 
 
 def test_crop_or_pad():
@@ -348,7 +370,8 @@ def test_crop_or_pad():
 @pytest.mark.parametrize(
     (
         "key, n_frames, insert_frame_axis, additional_axes_iter, "
-        "frame_axis, initial_frame_axis, frame_index_stride, resize_type, image_size"
+        "frame_axis, initial_frame_axis, frame_index_stride, "
+        "resize_type, image_size, batch_size"
     ),
     [
         (
@@ -361,6 +384,7 @@ def test_crop_or_pad():
             1,
             "resize",
             (20, 20),
+            1,
         ),
         (
             "data",
@@ -372,6 +396,7 @@ def test_crop_or_pad():
             2,
             "center_crop",
             (20, 20),
+            2,
         ),
         (
             "data",
@@ -383,6 +408,7 @@ def test_crop_or_pad():
             1,
             "random_crop",
             (20, 20),
+            2,
         ),
     ],
 )
@@ -397,6 +423,7 @@ def test_ndim_hdf5_dataset(
     frame_index_stride,
     resize_type,
     image_size,
+    batch_size,
 ):
     """Test the Dataloader class with an n-dimensional HDF5 dataset."""
 
@@ -409,6 +436,7 @@ def test_ndim_hdf5_dataset(
         frame_axis=frame_axis,
         initial_frame_axis=initial_frame_axis,
         frame_index_stride=frame_index_stride,
+        batch_size=batch_size,
         additional_axes_iter=additional_axes_iter,
         search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=True,
