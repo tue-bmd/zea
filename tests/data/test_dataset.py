@@ -9,33 +9,61 @@ from usbmd.data.datasets import Dataset
 from usbmd.generate import GenerateDataSet
 from usbmd.setup_usbmd import setup_config
 
+from .. import DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_X, DUMMY_DATASET_N_Z
+
 
 @pytest.mark.parametrize(
-    "file_idx, frame_idx",
+    "file_idx, idx, expected_shape",
     [
-        (0, "all"),
-        (-1, (1, 2, 3)),
-        (0, [1, 2, 3]),
-        (0, np.array([1, 2, 3])),
+        (
+            0,
+            "all",
+            (DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+        ),
+        (
+            -1,
+            (1, 2, 3),
+            (3, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+        ),
+        (
+            0,
+            [1, 2, 3],
+            (3, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+        ),
+        (
+            -1,
+            np.array([1, 2, 3]),
+            (3, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+        ),
+        (
+            0,
+            slice(1, 3),
+            (2, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+        ),
+        (
+            -1,
+            [0, range(5)],
+            (5, DUMMY_DATASET_N_X),
+        ),
+        (
+            0,
+            (np.array([1, 2]), slice(10)),
+            (2, 10, DUMMY_DATASET_N_X),
+        ),
     ],
 )
-def test_dataset_indexing(file_idx, frame_idx, dummy_dataset_path):
+def test_dataset_indexing(file_idx, idx, expected_shape, dummy_dataset_path):
     """Test ui initialization function"""
     config = {"data": {"dataset_folder": dummy_dataset_path, "dtype": "image"}}
     config = check_config(Config(config))
     dataset = Dataset.from_config(**config.data)
 
     file = dataset[file_idx]
-    data = file.load_data(config.data.dtype, frame_idx)
+    data = file.load_data(config.data.dtype, idx)
 
-    if isinstance(frame_idx, (list, tuple, np.ndarray)):
-        assert data.shape[0] == len(
-            frame_idx
-        ), f"Data length {data.shape} does not match frame_idx length {len(frame_idx)}"
-    elif frame_idx == "all":
-        assert (
-            data.shape[0] == file.num_frames
-        ), f"Data length {data.shape} does not match file length {file.num_frames}"
+    assert (
+        data.shape == expected_shape
+    ), f"Data shape {data.shape} does not match expected shape {expected_shape}"
 
 
 @pytest.mark.parametrize(
