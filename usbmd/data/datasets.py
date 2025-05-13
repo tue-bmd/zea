@@ -22,7 +22,7 @@ from usbmd.utils import (
 from usbmd.utils.io_lib import search_file_tree
 from usbmd.utils.utils import reduce_to_signature
 
-_CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE = 10000
+_CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
 FILE_HANDLE_CACHE_CAPACITY = 128
 FILE_TYPES = [".hdf5", ".h5"]
@@ -162,9 +162,6 @@ class Folder:
 
     def validate_folder(self):
         """Validate dataset contents.
-        Furthermore, it checks if all files in the dataset have the same scan parameters.
-
-        TODO: I don't think it actually checks for the same scan parameters.
 
         If a validation file exists, it checks if the dataset was validated on the same date.
         If the validation file was corrupted, it raises an error.
@@ -182,12 +179,11 @@ class Folder:
             self._assert_validation_file(validation_file_path)
             return
 
-        if self.n_files > _CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE:
+        if self.n_files > _CHECK_MAX_DATASET_SIZE:
             log.warning(
-                "Checking scan parameters in more than "
-                f"{_CHECK_SCAN_PARAMETERS_MAX_DATASET_SIZE} files takes too long. "
+                "Checking dataset in more than "
+                f"{_CHECK_MAX_DATASET_SIZE} files takes too long. "
                 f"Found {self.n_files} files in dataset. "
-                "Not checking scan parameters."
             )
             return
 
