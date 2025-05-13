@@ -17,7 +17,7 @@ from usbmd import Dataloader, init_device, log, set_data_paths
 from usbmd.agent.selection import EquispacedLines
 from usbmd.models.diffusion import DiffusionModel
 from usbmd.models.echonet import INFERENCE_SIZE
-from usbmd.ops_v2 import Pipeline, ScanConvert
+from usbmd.ops import Pipeline, ScanConvert
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
