@@ -38,6 +38,7 @@ if __name__ == "__main__":
         resize_type="resize",
         image_range=[-60, 0],
         normalization_range=[-1, 1],
+        assert_image_range=False,
         seed=42,
     )
     batch = next(iter(val_dataset))
