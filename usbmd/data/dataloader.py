@@ -338,13 +338,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
             images.append(image)
             filenames.append(file_data)
 
-        if self.batch_size == 1:
-            images = images[0]
-        else:
-            images = np.stack(images)
-
-        if self.batch_size == 1:
-            filenames = filenames[0]
+        images = np.stack(images)
 
         if self.return_filename:
             return images, filenames
