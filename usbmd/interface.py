@@ -22,7 +22,6 @@ from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
 from usbmd.ops import Pipeline
-from usbmd.scan import Scan
 from usbmd.utils import keep_trying, log, save_to_gif, save_to_mp4
 from usbmd.utils.io_lib import (
     ImageViewerMatplotlib,
@@ -41,18 +40,27 @@ class Interface:
     # TODO: maybe we can refactor such that it is clear what needs to be in config.
     """
 
-    def __init__(self, config=None, verbose=True, dataset_kwargs=None):
+    def __init__(
+        self, config: Config = None, verbose: bool = True, validate_file: bool = True
+    ):
+        """Initialize Interface.
+
+        Args:
+            config (Config): Configuration object.
+            verbose (bool): Whether to print verbose output.
+            validate_file (bool): Whether to validate the file.
+        """
         self.config = Config(config)
         self.verbose = verbose
 
-        # intialize dataset
-        if dataset_kwargs is None:
-            dataset_kwargs = {}
-        self.file = File(self.file_path, **dataset_kwargs)
+        self.file = File(self.file_path)
 
-        self.scan = Scan.merge(self.file.get_scan_parameters(), self.config.scan)
+        if validate_file:
+            self.file.validate()
 
+        # get probe and scan from file
         self.probe = self.file.probe()
+        self.scan = self.file.scan(**self.config.scan)
 
         # initialize Pipeline
         assert (
@@ -471,9 +479,9 @@ class Interface:
             else:
                 filename = self.file_path.stem + tag
 
-            path = Path("./figures", filename).with_suffix(
-                self.config.plot.image_extension
-            )
+            ext = f".{self.config.plot.image_extension.lstrip('.')}"
+
+            path = Path("./figures", filename).with_suffix(ext)
             Path("./figures").mkdir(parents=True, exist_ok=True)
 
         if isinstance(fig, plt.Figure):
