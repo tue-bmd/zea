@@ -371,6 +371,7 @@ class File(h5py.File):
                     "match the probe geometry of the probe. The probe "
                     "geometry has been updated to match the data file."
                 )
+        return probe
 
     def recursively_load_dict_contents_from_group(
         self, path: str, squeeze: bool = False
