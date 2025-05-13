@@ -1,9 +1,22 @@
 """Tests for the File module."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from usbmd.data.file import File
+from usbmd.probes import Probe
+from usbmd.scan import Scan
+
+from . import data_root
+
+DATASET_PATH = f"{data_root}/USBMD_datasets/2024_USBMD_cardiac_S51/HDF5"
+FILE_NAME = "20240701_P1_A4CH_0000.hdf5"
+FILE_PATH = DATASET_PATH + "/" + FILE_NAME
+FILE_HAS_EVENTS = False
+FILE_NUM_FRAMES = 100
+FILE_PROBE_NAME = "generic"
 
 
 @pytest.fixture
@@ -75,3 +88,20 @@ def test_print_hdf5_attrs(complex_h5_file, capsys):
 
     captured = capsys.readouterr()
     assert "dummy_attr" in captured.out
+
+
+def test_file_attributes():
+    if not Path(DATASET_PATH).exists():
+        pytest.skip("The dataset path is unavailable.")
+
+    # Test the file attributes
+    with File(FILE_PATH) as file:
+        assert file.name == FILE_NAME
+        assert file.path == Path(FILE_PATH)
+        assert file.has_events == FILE_HAS_EVENTS
+        assert file.num_frames == FILE_NUM_FRAMES
+        assert file.probe_name == FILE_PROBE_NAME
+        assert isinstance(file.probe(), Probe)
+        assert isinstance(file.scan(), Scan)
+
+        file.validate()

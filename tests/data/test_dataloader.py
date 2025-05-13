@@ -18,11 +18,9 @@ from usbmd.data.file import File
 from usbmd.data.layers import Resizer
 from usbmd.utils import log
 
-CAMUS_DATASET_PATH = (
-    "Z:/Ultrasound-BMd/data/USBMD_datasets/CAMUS/train/patient0001"
-    if os.name == "nt"
-    else "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/train/patient0001"
-)
+from . import data_root
+
+CAMUS_DATASET_PATH = f"{data_root}/USBMD_datasets/CAMUS/train/patient0001"
 CAMUS_FILE = CAMUS_DATASET_PATH + "/patient0001_2CH_half_sequence.hdf5"
 DUMMY_IMAGE_SHAPE = (28, 28)
 
