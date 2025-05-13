@@ -334,7 +334,11 @@ def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value
         return ops.convert_to_tensor(out)
     else:
         return ops.image.map_coordinates(
-            inputs, coordinates, order=order, fill_mode=fill_mode, fill_value=fill_value
+            inputs,
+            coordinates,
+            order=order,
+            fill_mode=fill_mode,
+            fill_value=fill_value,
         )
 
 
