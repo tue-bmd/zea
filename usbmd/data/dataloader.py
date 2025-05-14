@@ -1,39 +1,18 @@
 """
 H5 dataloader for loading images from USBMD datasets.
-
-This module can be used with any backend.
 """
 
-import copy
-import math
 import re
 from itertools import product
 from typing import List
 
-import keras
 import numpy as np
-from keras import ops
-from keras.src.utils import backend_utils
 
-from usbmd.backend import jit
 from usbmd.data.datasets import Dataset, H5FileHandleCache
 from usbmd.data.file import File
-from usbmd.data.layers import Resizer
-from usbmd.utils import log, map_negative_indices, translate
+from usbmd.data.utils import json_dumps
+from usbmd.utils import log, map_negative_indices
 from usbmd.utils.io_lib import retry_on_io_error
-
-if keras.backend.backend() == "jax":
-    from usbmd.backend.jax import on_device_jax as on_device
-elif keras.backend.backend() == "tensorflow":
-    from usbmd.backend.tensorflow import on_device_tf as on_device
-elif keras.backend.backend() == "torch":
-    from usbmd.backend.torch import on_device_torch as on_device
-else:
-
-    def on_device(func, *args, **kwargs):
-        """Dummy function for non-backend specific code."""
-        return func(*args, **kwargs)
-
 
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 MAX_RETRY_ATTEMPTS = 3
@@ -191,10 +170,10 @@ def _h5_reopen_on_io_error(
     )
 
 
-class H5Generator(Dataset, keras.utils.PyDataset):
+class H5Generator(Dataset):
     """Generator from h5 file using provided indices.
     Mostly used internally, you might want to use the Dataloader class instead.
-    Always outputs numpy arrays.
+    Loads one item at a time. Always outputs numpy arrays.
     """
 
     def __init__(
@@ -202,14 +181,12 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         file_paths: List[str],
         key: str = "data/image",
         n_frames: int = 1,
-        batch_size: int = 1,
         shuffle: bool = True,
         return_filename: bool = False,
         limit_n_samples: int | None = None,
         limit_n_frames: int | None = None,
         seed: int | None = None,
-        drop_remainder: bool = False,
-        caching: bool = False,
+        cache: bool = False,
         additional_axes_iter: tuple | None = None,
         sort_files: bool = True,
         overlapping_blocks: bool = False,
@@ -234,10 +211,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.limit_n_samples = limit_n_samples
         self.limit_n_frames = limit_n_frames
         self.seed = seed
-        self.batch_size = batch_size
         self.additional_axes_iter = additional_axes_iter or []
-        self.drop_remainder = drop_remainder
-        self.caching = caching
 
         assert (
             self.frame_index_stride > 0
@@ -301,7 +275,7 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         self.retry_count = 0
 
         # Create a cache for the data
-        self.caching = caching
+        self.cache = cache
         self._data_cache = {}
 
     def __repr__(self):
@@ -309,42 +283,34 @@ class H5Generator(Dataset, keras.utils.PyDataset):
 
     def _get_single_item(self, idx):
         # Check if the item is already in the cache
-        if self.caching and idx in self._data_cache:
+        if self.cache and idx in self._data_cache:
             return self._data_cache[idx]
 
         # Get the data
         file_name, key, indices = self.indices[idx]
         file = self.get_file(file_name)
         image = self.load(file, key, indices)
-        file_data = {
-            "fullpath": file.filename,
-            "filename": file.stem,
-            "indices": indices,
-        }
+        file_data = json_dumps(
+            {
+                "fullpath": file.filename,
+                "filename": file.stem,
+                "indices": indices,
+            }
+        )
 
-        if self.caching:
+        if self.cache:
             # Store the image and file data in the cache
             self._data_cache[idx] = [image, file_data]
+
         return image, file_data
 
     def __getitem__(self, index):
-        low = index * self.batch_size
-        high = min(low + self.batch_size, len(self.indices))
-        shuffled_items_list = self.shuffled_items[low:high]
-
-        images = []
-        filenames = []
-        for idx in shuffled_items_list:
-            image, file_data = self._get_single_item(idx)
-            images.append(image)
-            filenames.append(file_data)
-
-        images = np.stack(images)
+        image, file_data = self._get_single_item(self.shuffled_items[index])
 
         if self.return_filename:
-            return images, filenames
+            return image, file_data
         else:
-            return images
+            return image
 
     @retry_on_io_error(
         max_retries=MAX_RETRY_ATTEMPTS,
@@ -396,282 +362,17 @@ class H5Generator(Dataset, keras.utils.PyDataset):
         log.info("H5Generator: Shuffled data.")
 
     def __len__(self):
-        if self.drop_remainder:
-            return math.floor(len(self.indices) / self.batch_size)
-        else:
-            return math.ceil(len(self.indices) / self.batch_size)
+        return len(self.indices)
+
+    def iterator(self):
+        """Generator that yields images from the hdf5 files."""
+        if self.shuffle:
+            self._shuffle()
+        for idx in range(len(self)):  # pylint: disable=consider-using-enumerate
+            yield self[idx]
 
     def __iter__(self):
         """
         Generator that yields images from the hdf5 files.
         """
-        if self.shuffle:
-            self._shuffle()
-        for idx in range(len(self)):
-            yield self[idx]
-
-
-class Dataloader(H5Generator):
-    """Dataloader for h5 files. Can handle video files with multiple frames and iterate over
-    arbitrary axes. Can do resizing, normalization and augmentation. Works nicely with any
-    usbmd dataset.
-    """
-
-    # TODO: implement prefetch & shard
-
-    def __init__(
-        self,
-        file_paths: List[str],
-        key: str = "data/image",
-        n_frames: int = 1,
-        batch_size: int = 1,
-        shuffle: bool = True,
-        return_filename: bool = False,
-        limit_n_samples: int | None = None,
-        limit_n_frames: int | None = None,
-        seed: int | None = None,
-        drop_remainder: bool = False,
-        resize_type: str | None = None,
-        resize_axes: tuple | None = None,
-        resize_kwargs: dict | None = None,
-        image_size: tuple | None = None,
-        image_range: tuple | None = None,
-        normalization_range: tuple | None = None,
-        dataset_repetitions: int = 1,
-        caching: bool = False,
-        additional_axes_iter: tuple | None = None,
-        sort_files: bool = True,
-        overlapping_blocks: bool = False,
-        map_fns: list | None = None,
-        augmentation: callable = None,
-        assert_image_range: bool = True,
-        clip_image_range: bool = False,
-        initial_frame_axis: int = 0,
-        insert_frame_axis: bool = True,
-        frame_index_stride: int = 1,
-        frame_axis: int = -1,
-        backend: str | None = None,
-        device: str | None = None,
-        validate: bool = True,
-        jit_compile: bool = False,
-        **kwargs,
-    ):
-        """Initialize the dataloader.
-
-        Args:
-            file_paths (str or list): Path(s) to the folder(s) or h5 file(s) to load.
-            key (str): The key to access the HDF5 dataset.
-            n_frames (int, optional): number of frames to load from each hdf5 file.
-            batch_size (int, optional): batch the dataset. Defaults to 1.
-            shuffle (bool, optional): shuffle dataset.
-            return_filename (bool, optional): return file name with image. Defaults to False.
-            limit_n_samples (int, optional): take only a subset of samples.
-                Useful for debuging. Defaults to None.
-            limit_n_frames (int, optional): limit the number of frames to load from each file.
-                This means n_frames per data file will be used. These will be the first frames in
-                the file. Defaults to None
-            seed (int, optional): random seed of shuffle.
-            drop_remainder (bool, optional): representing whether the last batch should be dropped
-            resize_type (str, optional): resize type. Defaults to 'center_crop'.
-                can be 'center_crop', 'random_crop' or 'resize'.
-            resize_axes (tuple, optional): axes to resize along. Should be of length 2
-                (height, width) as resizing function only supports 2D resizing / cropping.
-                Should only be set when your data is more than (h, w, c). Defaults to None.
-                Note that it considers the axes after inserting the frame axis.
-            resize_kwargs (dict, optional): kwargs for the resize function.
-            image_size (tuple, optional): resize images to image_size. Should
-                be of length two (height, width). Defaults to None.
-            image_range (tuple, optional): image range. Defaults to (0, 255).
-                will always translate from specified image range to normalization range.
-                if image_range is set to None, no normalization will be done. Note that it does not
-                clip to the image range, so values outside the image range will be outside the
-                normalization range!
-            normalization_range (tuple, optional): normalization range. Defaults to (0, 1).
-                See image_range for more info!
-            dataset_repetitions (int, optional): repeat dataset. Note that this happens
-            caching (bool, optional): Cache dataset to RAM.
-            additional_axes_iter (tuple, optional): additional axes to iterate over
-                in the dataset. Defaults to None, in that case we only iterate over
-                the first axis (we assume those contain the frames).
-            sort_files (bool, optional): sort files by number. Defaults to True.
-            overlapping_blocks (bool, optional): if True, blocks overlap by n_frames - 1.
-                Defaults to False. Has no effect if n_frames = 1.
-            map_fns (list, optional): list of functions to map over the images.
-                Defaults to None. These functions will be applied after resizing and
-                normalizing the images. They should take a single argument (the image)
-                and return the transformed image.
-            augmentation (keras.Sequential, optional): keras augmentation layer.
-                after sharding, so the shard will be repeated. Defaults to None.
-                Defaults to 1. These frames are stacked along the last axis (channel).
-            assert_image_range (bool, optional): assert that the image range is
-                within the specified image range. Defaults to True.
-            clip_image_range (bool, optional): clip the image range to the specified
-                image range. Defaults to False.
-            initial_frame_axis (int, optional): axis where in the files the frames are stored.
-                Defaults to 0.
-            insert_frame_axis (bool, optional): if True, new dimension to stack
-                frames along will be created. Defaults to True. In that case
-                frames will be stacked along existing dimension (frame_axis).
-            frame_index_stride (int, optional): interval between frames to load.
-                Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
-            frame_axis (int, optional): dimension to stack frames along.
-                Defaults to -1. If insert_frame_axis is True, this will be the
-                new dimension to stack frames along.
-            backend (str, optional): backend to use. Defaults to None.
-            device (str, optional): device to use. Defaults to None.
-            validate (bool, optional): validate if the dataset adheres to the usbmd format.
-                Defaults to True.
-        """
-        super().__init__(
-            file_paths,
-            key,
-            n_frames=n_frames,
-            frame_index_stride=frame_index_stride,
-            frame_axis=frame_axis,
-            insert_frame_axis=insert_frame_axis,
-            initial_frame_axis=initial_frame_axis,
-            return_filename=return_filename,
-            shuffle=shuffle,
-            sort_files=sort_files,
-            overlapping_blocks=overlapping_blocks,
-            limit_n_samples=limit_n_samples,
-            limit_n_frames=limit_n_frames,
-            seed=seed,
-            batch_size=batch_size,
-            additional_axes_iter=additional_axes_iter,
-            drop_remainder=drop_remainder,
-            caching=caching,
-            validate=validate,
-            **kwargs,
-        )
-        # Image range / normalization range
-        self.image_range = image_range
-        if normalization_range is not None:
-            assert (
-                self.image_range is not None
-            ), "If normalization_range is set, image_range must be set as well."
-        self.normalization_range = normalization_range
-        self.assert_image_range = assert_image_range
-        self.clip_image_range = clip_image_range
-
-        # Resize arguments
-        self.resize_kwargs = resize_kwargs or {}
-        self.resize_type = resize_type
-        self.image_size = image_size
-        if self.image_size or self.resize_type:
-            if self.frame_axis != -1:
-                assert resize_axes is not None, (
-                    "Resizing only works with frame_axis = -1. Alternatively, "
-                    "you can specify resize_axes."
-                )
-
-            # Let resizer handle the assertions.
-            self.resizer = Resizer(
-                image_size=self.image_size,
-                resize_type=self.resize_type,
-                resize_axes=resize_axes,
-                seed=self.seed,
-                **self.resize_kwargs,
-            )
-        else:
-            self.resizer = None
-
-        # Augmentation
-        self.map_fns = map_fns or []
-        if augmentation is not None:
-            self.map_fns.append(augmentation)
-
-        # Backend
-        self.backend = backend_utils.DynamicBackend(backend)
-        self.device = device
-
-        # Other arguments
-        self.dataset_repetitions = dataset_repetitions
-
-        # Jit compile
-        self.jit_compile = jit_compile
-        if self.jit_compile:
-            if self.assert_image_range:
-                raise ValueError(
-                    "assert_image_range is not supported with jit compilation."
-                )
-            self._preprocess = jit(self.preprocess)
-        else:
-            self._preprocess = self.preprocess
-
-    def map(self, fn):
-        """Add a mapping function to the dataloader.
-
-        Args:
-            fn (callable): Function to map over the images.
-
-        Example usage:
-            dataloader = dataloader.map(lambda x: x / 255)
-
-        """
-        dl = copy.deepcopy(self)
-        dl.map_fns.append(fn)
-        return dl
-
-    def preprocess(self, images):
-        """Preprocess the images such as resizing and normalizing them."""
-        # add channel dim
-        if len(self.shape) != 3:
-            images = self.backend.numpy.expand_dims(images, axis=-1)
-
-        # Check if there are outliers in the image range
-        if self.assert_image_range and self.image_range is not None:
-            minval = self.backend.numpy.min(images)
-            maxval = self.backend.numpy.max(images)
-            assert self.image_range[0] <= minval and maxval <= self.image_range[1], (
-                f"Image range {self.image_range} is not in the range of the data "
-                f"{minval} - {maxval}"
-            )
-
-        # Clip to image range
-        if self.clip_image_range and self.image_range is not None:
-            images = self.backend.numpy.clip(images, *self.image_range[0])
-
-        # Translate to normalization range
-        if self.normalization_range is not None:
-            images = translate(images, self.image_range, self.normalization_range)
-
-        # resize
-        if self.resizer is not None:
-            images = self.resizer(images)
-
-        for map_fn in self.map_fns:
-            images = map_fn(images)
-
-        return images
-
-    def __len__(self):
-        """Return the total number of batches, accounting for repetitions."""
-        return super().__len__() * self.dataset_repetitions
-
-    def on_device(self, func, *args, **kwargs):
-        """Run a function on the specified device."""
-        if self.device is None:
-            return func(*args, **kwargs)
-        else:
-            return on_device(func, *args, device=self.device, **kwargs)
-
-    def __getitem__(self, index):
-        # Repeat the dataset by wrapping the index if dataset_repetitions > 1
-        if index >= len(self) or index < 0:
-            raise IndexError("Index out of range for repeated dataset.")
-        out = super().__getitem__(index % super().__len__())
-
-        # Unpack the output
-        if self.return_filename:
-            images, filenames = out
-        else:
-            images = out
-
-        images = self.on_device(ops.convert_to_tensor, images)
-        images = self.on_device(self._preprocess, images)
-
-        if self.return_filename:
-            return images, filenames
-        else:
-            return images
+        return self.iterator()

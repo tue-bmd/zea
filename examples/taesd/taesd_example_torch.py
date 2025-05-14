@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import torch
 from keras import ops
 
-from usbmd import Dataloader, init_device, log, set_data_paths
+from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.utils import get_date_string
 from usbmd.utils.visualize import plot_image_grid
 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
     n_imgs = 10
     dtype = torch.float32
-    val_dataset = Dataloader(
+    val_dataset = make_dataloader(
         data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,

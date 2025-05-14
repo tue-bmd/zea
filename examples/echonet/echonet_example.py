@@ -17,7 +17,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import Dataloader, init_device, log, set_data_paths
+from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.models.echonet import EchoNetDynamic
 from usbmd.utils import translate
 from usbmd.utils.selection_tool import add_shape_from_mask
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     init_device()
 
     n_imgs = 16
-    val_dataset = Dataloader(
+    val_dataset = make_dataloader(
         data_paths.data_root / "USBMD_datasets/echonet_v2025/val",
         key="data/image_sc",
         batch_size=n_imgs,
