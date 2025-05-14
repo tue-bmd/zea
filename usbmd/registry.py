@@ -196,8 +196,6 @@ tf_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework
 
 torch_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
 
-post_processing_registry = RegisterDecorator(items_to_register=["name", "framework"])
-
 metrics_registry = RegisterDecorator(
     items_to_register=["name", "framework", "supervised"]
 )
