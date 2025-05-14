@@ -1,4 +1,4 @@
-"""Test Tensorflow H5 Dataloader functions"""
+"""Test Tensorflow H5 dataloader functions"""
 
 import hashlib
 import pickle
@@ -11,10 +11,12 @@ import numpy as np
 import pytest
 from keras import ops
 
+from usbmd.backend.tensorflow.dataloader import make_dataloader
 from usbmd.data.augmentations import RandomCircleInclusion
-from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS, Dataloader, H5Generator
+from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS, H5Generator
 from usbmd.data.file import File
 from usbmd.data.layers import Resizer
+from usbmd.data.utils import json_loads
 from usbmd.utils import log
 
 from . import data_root
@@ -165,7 +167,7 @@ def test_dataloader(
     total_samples,
     request,
 ):
-    """Test the Dataloader class.
+    """Test the dataloader.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
 
     if directory == "fake_directory":
@@ -184,7 +186,7 @@ def test_dataloader(
     else:
         raise ValueError("Invalid directory for testing")
 
-    dataset = Dataloader(
+    dataset = make_dataloader(
         directory,
         key=key,
         n_frames=n_frames,
@@ -244,12 +246,12 @@ def test_h5_dataset_return_filename(
     batch_size,
     request,
 ):
-    """Test the Dataloader class with return_filename=True."""
+    """Test the dataloader with return_filename=True."""
 
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
-    dataset = Dataloader(
+    dataset = make_dataloader(
         directory,
         key=key,
         image_size=image_size,
@@ -277,6 +279,7 @@ def test_h5_dataset_return_filename(
     ), "The file_dict should contain the same number of elements as the batch size"
 
     file_dict = file_dict[0]  # get the first file_dict of the batch
+    file_dict = json_loads(file_dict.numpy())
 
     filename = file_dict["filename"]
     assert isinstance(filename, str), "The filename should be a string"
@@ -337,12 +340,12 @@ def test_h5_dataset_return_filename(
 def test_h5_dataset_resize_types(
     directory, key, image_size, resize_type, batch_size, request
 ):
-    """Test the Dataloader class with different resize types."""
+    """Test the dataloader with different resize types."""
 
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
-    dataset = Dataloader(
+    dataset = make_dataloader(
         directory,
         key=key,
         image_size=image_size,
@@ -437,9 +440,9 @@ def test_ndim_hdf5_dataset(
     image_size,
     batch_size,
 ):
-    """Test the Dataloader class with an n-dimensional HDF5 dataset."""
+    """Test the dataloader with an n-dimensional HDF5 dataset."""
 
-    dataset = Dataloader(
+    dataset = make_dataloader(
         ndim_hdf5_dataset_path,
         key=key,
         image_size=image_size,
@@ -521,7 +524,7 @@ def test_h5_file_retry_count(
 
 @pytest.mark.usefixtures("dummy_hdf5")
 def test_random_circle_inclusion_augmentation(dummy_hdf5):
-    """Test RandomCircleInclusion augmentation with Dataloader."""
+    """Test RandomCircleInclusion augmentation with dataloader."""
 
     # 2D case: use as dataloader augmentation (must not return centers)
     augmentation = keras.Sequential(
@@ -537,7 +540,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
         ]
     )
 
-    dataset = Dataloader(
+    dataset = make_dataloader(
         dummy_hdf5,
         key="data",
         image_size=(28, 28),
@@ -567,10 +570,10 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
 
 
 def test_resize_with_different_shapes(multi_shape_dataset):
-    """Test the Dataloader class with different image shapes in a batch."""
+    """Test the dataloader class with different image shapes in a batch."""
 
-    # Create a Dataloader instance with different image shapes
-    dataset = Dataloader(
+    # Create a dataloader instance with different image shapes
+    dataset = make_dataloader(
         multi_shape_dataset,
         key="data",
         image_size=(16, 16),

@@ -261,7 +261,7 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 from keras import ops
 import matplotlib.pyplot as plt
 
-from usbmd import init_device, log, set_data_paths, Dataloader
+from usbmd import init_device, log, set_data_paths, make_dataloader
 from usbmd.models.echonet import EchoNetDynamic
 from usbmd.utils.selection_tool import add_shape_from_mask
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
@@ -269,7 +269,7 @@ from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 data_paths = set_data_paths()
 init_device()
 
-val_dataset = Dataloader(
+val_dataset = make_dataloader(
     data_paths.data_root / "USBMD_datasets/CAMUS/val",
     key="data/image",
     batch_size=16,
