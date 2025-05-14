@@ -268,56 +268,56 @@ class Parameter:
         return f"{self.__class__.__name__}(\n{param_str}\n)"
 
 
-class ScanTestClass(Parameter):
-    """Represents an ultrasound scan configuration with computed properties.
+class DummyParameters(Parameter):
+    """A simple test class with parameters and computed properties.
 
-    This class manages parameters related to ultrasound scanning and provides
-    computed properties that depend on these parameters.
+    This class is used for testing the Parameter framework with simple
+    dependencies between properties.
 
     Args:
-        Nx: Number of samples in the x-direction (lateral).
-        Nz: Number of samples in the z-direction (axial).
-        sound_speed: Speed of sound in the medium in m/s. Defaults to 1540.0.
-        sampling_frequency: Sampling frequency in Hz.
-        center_frequency: Optional. Center frequency of the transducer in Hz.
-        elevational_focus: Optional. Focal length in the elevational direction in m.
+        param1: First parameter (equivalent to Nx in the original)
+        param2: Second parameter (equivalent to Nz in the original)
+        param3: Third parameter with default value (like sound_speed)
+        param4: Fourth parameter (like sampling_frequency)
+        param5: Optional fifth parameter
+        param6: Optional sixth parameter
 
     Attributes:
-        grid: Meshgrid of x and z coordinates.
-        grid_spacing: Spacing between samples in x and z directions.
-        wavelength: Wavelength of sound at the sampling frequency.
+        computed1: A computed property depending on param1 and param2
+        computed2: A computed property depending on computed1
+        computed3: A computed property depending on param3 and param4
     """
 
     VALID_PARAMS = {
-        "Nx": {"type": int, "default": None},
-        "Nz": {"type": int, "default": None},
-        "sound_speed": {"type": float, "default": 1540.0},
-        "sampling_frequency": {"type": float, "default": None},
-        "center_frequency": {"type": float, "default": None},
-        "elevational_focus": {"type": float, "default": None},
+        "param1": {"type": int, "default": None},
+        "param2": {"type": int, "default": None},
+        "param3": {"type": float, "default": 1540.0},
+        "param4": {"type": float, "default": None},
+        "param5": {"type": float, "default": None},
+        "param6": {"type": float, "default": None},
     }
 
     def _timestamp(self):
         return time.time()
 
-    @cache_with_dependencies("Nx", "Nz")
-    def grid(self):
-        self._grid_called = self._timestamp()
-        Nx, Nz = self.Nx, self.Nz
-        return np.meshgrid(np.arange(Nx), np.arange(Nz), indexing="ij")
+    @cache_with_dependencies("param1", "param2")
+    def computed1(self):
+        self._computed1_called = self._timestamp()
+        p1, p2 = self.param1, self.param2
+        return np.meshgrid(np.arange(p1), np.arange(p2), indexing="ij")
 
-    @cache_with_dependencies("grid")
-    def grid_spacing(self):
-        self._grid_spacing_called = self._timestamp()
-        x, z = self.grid
+    @cache_with_dependencies("computed1")
+    def computed2(self):
+        self._computed2_called = self._timestamp()
+        x, z = self.computed1
         dx = np.mean(np.diff(x[:, 0]))
         dz = np.mean(np.diff(z[0, :]))
         return dx, dz
 
-    @cache_with_dependencies("sound_speed", "sampling_frequency")
-    def wavelength(self):
-        self._wavelength_called = self._timestamp()
-        return self.sound_speed / self.sampling_frequency
+    @cache_with_dependencies("param3", "param4")
+    def computed3(self):
+        self._computed3_called = self._timestamp()
+        return self.param3 / self.param4
 
 
 class Scan(Parameter):
@@ -670,58 +670,113 @@ class Scan(Parameter):
 
 
 def test_chain_dependency_grid_spacing():
-    s = ScanTestClass(Nx=10, Nz=20)
-    _ = s.grid_spacing
-    assert hasattr(s, "_grid_called")
-    assert hasattr(s, "_grid_spacing_called")
+    s = DummyParameters(param1=10, param2=20)
+    _ = s.computed2
+    assert hasattr(s, "_computed1_called")
+    assert hasattr(s, "_computed2_called")
 
 
 def test_recursive_error_message_is_clear():
-    s = ScanTestClass()
+    s = DummyParameters()
     try:
-        _ = s.grid_spacing
+        _ = s.computed2
     except AttributeError as e:
-        assert "Nx" in str(e) and "Nz" in str(e), f"Expected Nx/Nz in error, got: {e}"
+        assert "param1" in str(e) and "param2" in str(
+            e
+        ), f"Expected param1/param2 in error, got: {e}"
 
 
 def test_no_recompute_if_dependencies_unchanged():
-    s = ScanTestClass(Nx=5, Nz=5)
-    _ = s.grid
-    first_call_time = s._grid_called
+    s = DummyParameters(param1=5, param2=5)
+    _ = s.computed1
+    first_call_time = s._computed1_called
     time.sleep(0.01)
-    _ = s.grid
-    assert s._grid_called == first_call_time
+    _ = s.computed1
+    assert s._computed1_called == first_call_time
 
 
 def test_recompute_if_dependency_changed():
-    s = ScanTestClass(Nx=5, Nz=5)
-    _ = s.grid
-    old_time = s._grid_called
+    s = DummyParameters(param1=5, param2=5)
+    _ = s.computed1
+    old_time = s._computed1_called
     time.sleep(0.01)
-    s.Nx = 6
-    _ = s.grid
-    assert s._grid_called > old_time
+    s.param1 = 6
+    _ = s.computed1
+    assert s._computed1_called > old_time
 
 
 def test_to_tensor_computes_chain():
-    s = ScanTestClass(Nx=5, Nz=5, sound_speed=1500.0, sampling_frequency=5e6)
+    s = DummyParameters(param1=5, param2=5, param3=1500.0, param4=5e6)
     tensors = s.to_tensor(compute_missing=True)
-    assert "grid" in tensors
-    assert "grid_spacing" in tensors
-    assert "wavelength" in tensors
-    assert tensors["wavelength"] == keras.ops.convert_to_tensor(1500.0 / 5e6)
+    assert "computed1" in tensors
+    assert "computed2" in tensors
+    assert "computed3" in tensors
+    assert tensors["computed3"] == keras.ops.convert_to_tensor(1500.0 / 5e6)
 
 
 def test_invalid_param_raises_error():
     try:
-        s = ScanTestClass(Nx=5, Nz=5, invalid_param=10)
+        s = DummyParameters(param1=5, param2=5, invalid_param=10)
     except ValueError as e:
         assert "Invalid parameter: invalid_param" in str(e), str(e)
 
     try:
-        s = ScanTestClass(Nx=5, Nz=5, sound_speed=1500.0, sampling_frequency="fast")
+        s = DummyParameters(param1=5, param2=5, param3=1500.0, param4="fast")
     except TypeError as e:
-        assert "Parameter 'sampling_frequency' expected type float" in str(e), str(e)
+        assert "Parameter 'param4' expected type float" in str(e), str(e)
+
+
+def test_set_invalid_param_after_init():
+    """Test that assigning invalid parameters after initialization raises errors."""
+    s = DummyParameters(param1=5, param2=5)
+
+    # Test setting a valid parameter works
+    s.param3 = 1600.0
+    assert s.param3 == 1600.0
+
+    # Test setting invalid parameter raises error
+    try:
+        s.invalid_param = 10
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Invalid parameter: invalid_param" in str(e), str(e)
+
+    # Test setting wrong type raises error
+    try:
+        s.param3 = "fast"
+        assert False, "Should have raised TypeError"
+    except TypeError as e:
+        assert "Parameter 'param3' expected type float" in str(e)
+
+
+def test_tensor_parameter_count():
+    """Test that to_tensor includes the correct number of parameters."""
+    s = DummyParameters(param1=5, param2=5, param3=1500.0, param4=5e6)
+
+    # Before accessing any computed properties
+    tensors_before = s.to_tensor(compute_missing=False)
+    assert len(tensors_before) == 4  # param1, param2, param3, param4
+
+    # Access a computed property to trigger caching
+    _ = s.computed2
+
+    # After accessing computed properties but without compute_missing
+    tensors_after = s.to_tensor(compute_missing=False)
+    assert len(tensors_after) > len(tensors_before)
+    assert "computed1" in tensors_after
+    assert "computed2" in tensors_after
+
+    # With compute_missing=True, should compute computed3 additionally
+    tensors_all = s.to_tensor(compute_missing=True)
+    assert "computed3" in tensors_all
+    assert len(tensors_all) >= len(tensors_after)
+
+    # Direct check for specific counts
+    # Initial params + computed1 + computed2 + computed3
+    expected_count = 4 + 3  # 4 direct params + 3 computed properties
+    assert (
+        len(tensors_all) == expected_count
+    ), f"Expected {expected_count} parameters, got {len(tensors_all)}"
 
 
 ## Tests for the actual Scan class
@@ -872,59 +927,6 @@ def test_scan_to_tensor():
     wavelength_tensor = float(keras.ops.convert_to_numpy(tensors["wavelength"]))
     wavelength_expected = 1500.0 / 5e6
     assert np.isclose(wavelength_tensor, wavelength_expected)
-
-
-def test_set_invalid_param_after_init():
-    """Test that assigning invalid parameters after initialization raises errors."""
-    s = ScanTestClass(Nx=5, Nz=5)
-
-    # Test setting a valid parameter works
-    s.sound_speed = 1600.0
-    assert s.sound_speed == 1600.0
-
-    # Test setting invalid parameter raises error
-    try:
-        s.invalid_param = 10
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "Invalid parameter: invalid_param" in str(e), str(e)
-
-    # Test setting wrong type raises error
-    try:
-        s.sound_speed = "fast"
-        assert False, "Should have raised TypeError"
-    except TypeError as e:
-        assert "Parameter 'sound_speed' expected type float" in str(e)
-
-
-def test_tensor_parameter_count():
-    """Test that to_tensor includes the correct number of parameters."""
-    s = ScanTestClass(Nx=5, Nz=5, sound_speed=1500.0, sampling_frequency=5e6)
-
-    # Before accessing any computed properties
-    tensors_before = s.to_tensor(compute_missing=False)
-    assert len(tensors_before) == 4  # Nx, Nz, sound_speed, sampling_frequency
-
-    # Access a computed property to trigger caching
-    _ = s.grid_spacing
-
-    # After accessing computed properties but without compute_missing
-    tensors_after = s.to_tensor(compute_missing=False)
-    assert len(tensors_after) > len(tensors_before)
-    assert "grid" in tensors_after
-    assert "grid_spacing" in tensors_after
-
-    # With compute_missing=True, should compute wavelength additionally
-    tensors_all = s.to_tensor(compute_missing=True)
-    assert "wavelength" in tensors_all
-    assert len(tensors_all) >= len(tensors_after)
-
-    # Direct check for specific counts
-    # Initial params + grid + grid_spacing + wavelength
-    expected_count = 4 + 3  # 4 direct params + 3 computed properties
-    assert (
-        len(tensors_all) == expected_count
-    ), f"Expected {expected_count} parameters, got {len(tensors_all)}"
 
 
 if __name__ == "__main__":
