@@ -171,7 +171,7 @@ def _h5_reopen_on_io_error(
 
 
 class H5Generator(Dataset):
-    """Generator from h5 file using provided indices.
+    """H5Generator class for iterating over hdf5 files in an advanced way.
     Mostly used internally, you might want to use the Dataloader class instead.
     Loads one item at a time. Always outputs numpy arrays.
     """
