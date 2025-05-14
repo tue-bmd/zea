@@ -35,6 +35,18 @@ def dummy_hdf5(tmp_path):
 
 
 @pytest.fixture
+def multi_shape_dataset(tmp_path):
+    """Fixture to create and clean up a dummy hdf5 file."""
+    with h5py.File(tmp_path / "dummy_data_1.hdf5", "w") as f:
+        data = np.random.rand(1, 28, 28)
+        f.create_dataset("data", data=data)
+    with h5py.File(tmp_path / "dummy_data_2.hdf5", "w") as f:
+        data = np.random.rand(1, 32, 32)
+        f.create_dataset("data", data=data)
+    return tmp_path
+
+
+@pytest.fixture
 def ndim_hdf5_dataset_path(tmp_path):
     """Fixture to create and clean up a dummy hdf5 dataset with
     files having data with n dimensions."""
@@ -552,3 +564,31 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
     assert np.any(
         np.isclose(images_np, 1.0)
     ), "Augmentation did not set any pixels to fill_value=1.0 as expected"
+
+
+def test_resize_with_different_shapes(multi_shape_dataset):
+    """Test the Dataloader class with different image shapes in a batch."""
+
+    # Create a Dataloader instance with different image shapes
+    dataset = Dataloader(
+        multi_shape_dataset,
+        key="data",
+        image_size=(16, 16),
+        resize_type="resize",
+        n_frames=1,
+        search_file_tree_kwargs={"parallel": False, "verbose": False},
+        shuffle=False,
+        seed=42,
+        validate=False,
+        batch_size=2,
+    )
+
+    # Get the first batch
+    images = next(iter(dataset))
+    images_np = np.array(images)
+
+    # Output shape should match input shape
+    assert images_np.shape[-3:-1] == (
+        16,
+        16,
+    ), f"Output shape {images_np.shape} does not match expected (16, 16)"
