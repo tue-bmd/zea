@@ -1,3 +1,35 @@
+"""
+Parameter System for Ultrasound Imaging
+
+This module provides a parameter management system designed for ultrasound imaging applications,
+with transparent dependency tracking, lazy computation, and efficient caching.
+
+Key Features:
+- Property-based computation with automatic dependency tracking
+- Lazy computation of expensive properties
+- Caching of computed results with automatic invalidation
+- Type validation for parameters
+- Dependency tree resolution to ensure proper computation order
+- Tensor conversion for machine learning integration
+
+The Parameter base class implements the core functionality:
+- Automatic type checking of inputs
+- Property-based access to parameters with caching
+- Dependency tracking to avoid unnecessary recomputation
+- Ability to convert parameters to tensors for neural network use
+
+The cache_with_dependencies decorator allows defining properties that:
+1. Automatically compute when accessed
+2. Cache their results to avoid redundant computation
+3. Invalidate when their dependencies change
+4. Track dependencies for proper resolution order
+
+The Scan class is a concrete implementation specifically for ultrasound
+imaging configuration, defining specific parameters and their relationships
+for ultrasound scan geometry, beam characteristics, and timing information.
+
+"""
+
 import functools
 import hashlib
 import time
@@ -106,6 +138,26 @@ class Parameter:
         if key.startswith("_"):
             super().__setattr__(key, value)
         else:
+            # Validate that parameter is in VALID_PARAMS
+            if key not in self.VALID_PARAMS:
+                raise ValueError(
+                    f"Invalid parameter: {key}. "
+                    f"Valid parameters are: {list(self.VALID_PARAMS.keys())}"
+                )
+
+            # Validate parameter type
+            expected_type = self.VALID_PARAMS[key]["type"]
+            if (
+                expected_type is not None
+                and value is not None
+                and not isinstance(value, expected_type)
+            ):
+                raise TypeError(
+                    f"Parameter '{key}' expected type {expected_type.__name__}, "
+                    f"got {type(value).__name__}"
+                )
+
+            # Set the parameter and invalidate dependencies
             self._params[key] = value
             self._invalidate_dependents(key)
 
@@ -172,8 +224,7 @@ class Parameter:
                             val = getattr(self, name)
                             if val is not None:
                                 tensor_dict[name] = keras.ops.convert_to_tensor(val)
-                                # Make sure it's in the cache for future use
-                                if name not in the self._cache:
+                                if name not in self._cache:
                                     self._cache[name] = val
                                     self._computed.add(name)
                         except Exception as e:
@@ -185,6 +236,36 @@ class Parameter:
                 tensor_dict[key] = keras.ops.convert_to_tensor(val)
 
         return tensor_dict
+
+    def __repr__(self):
+        param_lines = []
+        for k, v in self._params.items():
+            if v is None:
+                continue
+
+            # Handle arrays by showing their shape instead of content
+            if isinstance(v, np.ndarray):
+                param_lines.append(f"{k}=array(shape={v.shape})")
+            else:
+                param_lines.append(f"{k}={repr(v)}")
+
+        param_str = ", ".join(param_lines)
+        return f"{self.__class__.__name__}({param_str})"
+
+    def __str__(self):
+        param_lines = []
+        for k, v in self._params.items():
+            if v is None:
+                continue
+
+            # Handle arrays by showing their shape instead of content
+            if isinstance(v, np.ndarray):
+                param_lines.append(f"    {k}=array(shape={v.shape})")
+            else:
+                param_lines.append(f"    {k}={v}")
+
+        param_str = ",\n".join(param_lines)
+        return f"{self.__class__.__name__}(\n{param_str}\n)"
 
 
 class ScanTestClass(Parameter):
@@ -295,16 +376,18 @@ class Scan(Parameter):
     }
 
     def __init__(self, **kwargs):
-        # Apply defaults for parameters not provided
-
-        # Initialize selected_transmits before calling super().__init__
-        self._selected_transmits = None
+        # Store the current selection state before initialization
+        selected_transmits_input = kwargs.pop("selected_transmits", None)
 
         # Initialize parent class
         super().__init__(**kwargs)
 
-        # Set selected_transmits after parameters are initialized
-        self.selected_transmits = kwargs.get("selected_transmits", None)
+        # Initialize selection to None
+        self._selected_transmits = None
+
+        # Apply selection from input if provided
+        if selected_transmits_input is not None:
+            self.set_transmits(selected_transmits_input)
 
     def _timestamp(self):
         return time.time()
@@ -357,53 +440,40 @@ class Scan(Parameter):
         """The beamforming grid of shape (Nz*Nx, 3)."""
         return self.grid.reshape(-1, 3)
 
-    @property
+    @cache_with_dependencies()
     def selected_transmits(self):
         """Get the currently selected transmit indices.
 
         Returns:
-            list or None: The list of selected transmit indices, or None if not set.
-            If None and n_tx is available, all transmits are used.
+            list: The list of selected transmit indices. If none were explicitly
+            selected and n_tx is available, all transmits are used.
         """
-        if self._selected_transmits is None and self._params.get("n_tx") is not None:
-            # Default to all transmits if none selected
-            return list(range(self._params["n_tx"]))
+        # Return all transmits if none explicitly selected
+        if self._selected_transmits is None:
+            if "n_tx" in self._params:
+                return list(range(self._params["n_tx"]))
+            return []
         return self._selected_transmits
 
-    @selected_transmits.setter
-    def selected_transmits(self, value):
-        """Set the selected transmits directly.
+    @property
+    def n_tx_total(self):
+        """The total number of transmits in the full dataset."""
+        if "n_tx" not in self._params:
+            raise ValueError("n_tx must be set first")
+        return self._params["n_tx"]
 
-        This only accepts a list of indices or None. For more advanced selection
-        options, use the set_transmits() method.
+    @property
+    def n_tx(self):
+        """The number of currently selected transmits."""
+        return len(self.selected_transmits)
 
-        Args:
-            value: A list of transmit indices or None to use all transmits.
-        """
-        if value is None:
-            self._selected_transmits = None
-            return
-
-        # Only accept list-like objects for direct setting
-        if not isinstance(value, (list, np.ndarray)):
-            raise ValueError(
-                f"selected_transmits only accepts a list of indices or None. "
-                f"Got {type(value)}. Use set_transmits() for more options."
-            )
-
-        # Convert numpy array to list
-        if isinstance(value, np.ndarray):
-            value = value.tolist()
-
-        # Validate indices
-        n_tx = self._params.get("n_tx")
-        if n_tx is not None:
-            if any(idx >= n_tx for idx in value):
-                raise ValueError(
-                    f"Selected transmit indices {value} exceed available transmits {n_tx}"
-                )
-
-        self._selected_transmits = value
+    def _invalidate_selected_transmits(self):
+        """Explicitly invalidate the selected_transmits cache."""
+        if "selected_transmits" in self._cache:
+            self._cache.pop("selected_transmits")
+            self._computed.discard("selected_transmits")
+            # Also explicitly invalidate all dependents
+            self._invalidate_dependents("selected_transmits")
 
     def set_transmits(self, selection):
         """Select which transmit events to use.
@@ -424,64 +494,73 @@ class Scan(Parameter):
         Raises:
             ValueError: If the selection is invalid or incompatible with the scan.
         """
-        n_tx = self._params.get("n_tx")
+        n_tx_total = self._params.get("n_tx")
+        if n_tx_total is None:
+            raise ValueError("n_tx must be set before calling set_transmits")
 
-        # Handle None - use all transmits
-        if selection is None:
+        # Handle None and "all" - use all transmits
+        if selection is None or selection == "all":
             self._selected_transmits = None
+            self._invalidate_selected_transmits()
             return self
 
-        # Convert numpy array to list or single integer
-        if isinstance(selection, np.ndarray):
-            if len(np.shape(selection)) == 0:
-                selection = int(selection)
-            elif len(np.shape(selection)) == 1:
-                self.selected_transmits = selection.tolist()
-                return self
-            else:
-                raise ValueError(f"Invalid shape for selection: {np.shape(selection)}.")
+        # Handle "center" - use center transmit
+        if selection == "center":
+            self._selected_transmits = [n_tx_total // 2]
+            self._invalidate_selected_transmits()
+            return self
 
-        # Handle string options
-        if isinstance(selection, str):
-            if selection == "all":
-                self._selected_transmits = None
-                return self
-            elif selection == "center":
-                if n_tx is None:
-                    raise ValueError(
-                        "Cannot select 'center' transmit when n_tx is not set."
-                    )
-                self.selected_transmits = [n_tx // 2]
-                return self
-            else:
+        # Handle integer - select evenly spaced transmits
+        if isinstance(selection, (int, np.integer)):
+            selection = int(selection)  # Convert numpy integer to Python int
+            if selection <= 0:
                 raise ValueError(
-                    f"Invalid string value for selection: {selection}. "
-                    f"Valid options are 'all' or 'center'."
+                    f"Number of transmits must be positive, got {selection}"
                 )
 
-        # Handle integer - select this many evenly spaced transmits
-        if isinstance(selection, int):
-            if n_tx is None:
+            if selection > n_tx_total:
                 raise ValueError(
-                    "Cannot select transmits by count when n_tx is not set."
-                )
-
-            if selection > n_tx:
-                raise ValueError(
-                    f"Requested {selection} transmits exceeds available transmits ({n_tx})."
+                    f"Requested {selection} transmits exceeds available transmits ({n_tx_total})"
                 )
 
             if selection == 1:
-                self.selected_transmits = [n_tx // 2]
+                self._selected_transmits = [n_tx_total // 2]
             else:
                 # Compute evenly spaced indices
-                tx_indices = np.linspace(0, n_tx - 1, selection)
-                self.selected_transmits = list(np.rint(tx_indices).astype(int))
+                tx_indices = np.linspace(0, n_tx_total - 1, selection)
+                self._selected_transmits = list(np.rint(tx_indices).astype(int))
+
+            self._invalidate_selected_transmits()
             return self
 
-        # For list-like objects, delegate to the property setter
-        self.selected_transmits = selection
-        return self
+        # Handle array-like - convert to list of indices
+        if isinstance(selection, np.ndarray):
+            if len(selection.shape) == 0:
+                # Handle scalar numpy array
+                return self.set_transmits(int(selection))
+            elif len(selection.shape) == 1:
+                selection = selection.tolist()
+            else:
+                raise ValueError(f"Invalid array shape: {selection.shape}")
+
+        # Handle list of indices
+        if isinstance(selection, list):
+            # Validate indices
+            if not all(isinstance(i, (int, np.integer)) for i in selection):
+                raise ValueError("All transmit indices must be integers")
+
+            if any(i < 0 or i >= n_tx_total for i in selection):
+                raise ValueError(
+                    f"Transmit indices must be between 0 and {n_tx_total-1}"
+                )
+
+            self._selected_transmits = [
+                int(i) for i in selection
+            ]  # Convert numpy integers to Python ints
+            self._invalidate_selected_transmits()
+            return self
+
+        raise ValueError(f"Unsupported selection type: {type(selection)}")
 
     @property
     def demodulation_frequency(self):
@@ -495,136 +574,99 @@ class Scan(Parameter):
         # Default behavior based on n_ch
         return self.center_frequency if self.n_ch == 2 else 0.0
 
-    # Array parameters with dependency on selected_transmits
     @cache_with_dependencies("selected_transmits")
-    def polar_angles_selected(self):
-        """The polar angles of transmits in radians for selected transmits."""
+    def polar_angles(self):
+        """The polar angles of transmits in radians."""
         value = self._params.get("polar_angles")
         if value is None:
             return None
 
-        n_tx = self._params.get("n_tx", 0)
-        if len(value) != n_tx:
-            return value  # Return unfiltered if shape doesn't match n_tx
+        # Always filter based on selected_transmits if value matches n_tx shape
+        selected = self.selected_transmits
+        if len(value) == self._params.get("n_tx", 0):
+            return value[selected]
 
-        return value[self.selected_transmits]
-
-    @property
-    def polar_angles(self):
-        """The polar angles of transmits in radians."""
-        return self.polar_angles_selected
+        return value
 
     @cache_with_dependencies("selected_transmits")
-    def azimuth_angles_selected(self):
-        """The azimuth angles of transmits in radians for selected transmits."""
+    def azimuth_angles(self):
+        """The azimuth angles of transmits in radians."""
         value = self._params.get("azimuth_angles")
         if value is None:
             return None
 
+        selected = self.selected_transmits
         n_tx = self._params.get("n_tx", 0)
         if len(value) != n_tx:
             return value  # Return unfiltered if shape doesn't match n_tx
 
-        return value[self.selected_transmits]
-
-    @property
-    def azimuth_angles(self):
-        """The azimuth angles of transmits in radians."""
-        return self.azimuth_angles_selected
+        return value[selected]
 
     @cache_with_dependencies("selected_transmits")
-    def t0_delays_selected(self):
-        """The transmit delays in seconds for selected transmits."""
+    def t0_delays(self):
+        """The transmit delays in seconds."""
         value = self._params.get("t0_delays")
         if value is None:
             return None
 
+        selected = self.selected_transmits
         n_tx = self._params.get("n_tx", 0)
         if len(value) != n_tx:
             return value  # Return unfiltered if shape doesn't match n_tx
 
-        return value[self.selected_transmits]
-
-    @property
-    def t0_delays(self):
-        """The transmit delays in seconds."""
-        return self.t0_delays_selected
+        return value[selected]
 
     @cache_with_dependencies("selected_transmits")
-    def tx_apodizations_selected(self):
-        """The transmit apodizations for selected transmits."""
+    def tx_apodizations(self):
+        """The transmit apodizations."""
         value = self._params.get("tx_apodizations")
         if value is None:
             return None
 
+        selected = self.selected_transmits
         n_tx = self._params.get("n_tx", 0)
         if len(value) != n_tx:
             return value  # Return unfiltered if shape doesn't match n_tx
 
-        return value[self.selected_transmits]
-
-    @property
-    def tx_apodizations(self):
-        """The transmit apodizations."""
-        return self.tx_apodizations_selected
+        return value[selected]
 
     @cache_with_dependencies("selected_transmits")
-    def focus_distances_selected(self):
-        """The focus distances in meters for selected transmits."""
+    def focus_distances(self):
+        """The focus distances in meters."""
         value = self._params.get("focus_distances")
         if value is None:
             return None
 
+        selected = self.selected_transmits
         n_tx = self._params.get("n_tx", 0)
         if len(value) != n_tx:
             return value  # Return unfiltered if shape doesn't match n_tx
 
-        return value[self.selected_transmits]
-
-    @property
-    def focus_distances(self):
-        """The focus distances in meters."""
-        return self.focus_distances_selected
+        return value[selected]
 
     @cache_with_dependencies("selected_transmits")
-    def initial_times_selected(self):
-        """The initial times in seconds for selected transmits."""
+    def initial_times(self):
+        """The initial times in seconds."""
         value = self._params.get("initial_times")
         if value is None:
             return None
 
+        selected = self.selected_transmits
         n_tx = self._params.get("n_tx", 0)
         if len(value) != n_tx:
             return value  # Return unfiltered if shape doesn't match n_tx
 
-        return value[self.selected_transmits]
-
-    @property
-    def initial_times(self):
-        """The initial times in seconds."""
-        return self.initial_times_selected
+        return value[selected]
 
     @cache_with_dependencies("selected_transmits")
-    def time_to_next_transmit_selected(self):
-        """Time between transmit events for selected transmits."""
+    def time_to_next_transmit(self):
+        """Time between transmit events."""
         value = self._params.get("time_to_next_transmit")
         if value is None:
             return None
 
-        return value[:, self.selected_transmits]
-
-    @property
-    def time_to_next_transmit(self):
-        """Time between transmit events."""
-        return self.time_to_next_transmit_selected
-
-    def get_scan_parameters(self):
-        """Returns a dictionary with all the parameters of the scan."""
-        return {
-            param: getattr(self, param)
-            for param in self.VALID_PARAMS.keys()
-            if hasattr(self, param)
-        }
+        selected = self.selected_transmits
+        return value[:, selected]
 
 
 def test_chain_dependency_grid_spacing():
@@ -738,13 +780,22 @@ def test_scan_selected_transmits():
         sampling_frequency=20e6,
     )
 
+    # Default should be all transmits
+    assert len(s.selected_transmits) == n_tx
+    assert len(s.polar_angles) == n_tx
+
     # Test selecting a subset of transmits
-    s.selected_transmits = 3  # Select 3 evenly spaced transmits
+    s.set_transmits(3)  # Select 3 evenly spaced transmits
+    # Print debug info
+    print(
+        f"Selected transmits: {s.selected_transmits}, length: {len(s.selected_transmits)}"
+    )
+    print(f"Polar angles: {s.polar_angles}, length: {len(s.polar_angles)}")
     assert len(s.selected_transmits) == 3
     assert len(s.polar_angles) == 3
 
     # Test selecting specific transmits
-    s.selected_transmits = [0, 3, 9]
+    s.set_transmits([0, 3, 9])
     assert s.selected_transmits == [0, 3, 9]
     assert len(s.polar_angles) == 3
     assert np.isclose(s.polar_angles[0], polar_angles[0])
@@ -752,9 +803,19 @@ def test_scan_selected_transmits():
     assert np.isclose(s.polar_angles[2], polar_angles[9])
 
     # Test 'center' transmit selection
-    s.selected_transmits = "center"
+    s.set_transmits("center")
     assert s.selected_transmits == [n_tx // 2]
     assert len(s.polar_angles) == 1
+
+    # Test 'all' transmits selection
+    s.set_transmits("all")
+    assert len(s.selected_transmits) == n_tx
+    assert len(s.polar_angles) == n_tx
+
+    # Test method chaining
+    result = s.set_transmits(2)
+    assert result is s
+    assert len(s.selected_transmits) == 2
 
 
 def test_scan_wavelength():
@@ -813,6 +874,59 @@ def test_scan_to_tensor():
     assert np.isclose(wavelength_tensor, wavelength_expected)
 
 
+def test_set_invalid_param_after_init():
+    """Test that assigning invalid parameters after initialization raises errors."""
+    s = ScanTestClass(Nx=5, Nz=5)
+
+    # Test setting a valid parameter works
+    s.sound_speed = 1600.0
+    assert s.sound_speed == 1600.0
+
+    # Test setting invalid parameter raises error
+    try:
+        s.invalid_param = 10
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Invalid parameter: invalid_param" in str(e), str(e)
+
+    # Test setting wrong type raises error
+    try:
+        s.sound_speed = "fast"
+        assert False, "Should have raised TypeError"
+    except TypeError as e:
+        assert "Parameter 'sound_speed' expected type float" in str(e)
+
+
+def test_tensor_parameter_count():
+    """Test that to_tensor includes the correct number of parameters."""
+    s = ScanTestClass(Nx=5, Nz=5, sound_speed=1500.0, sampling_frequency=5e6)
+
+    # Before accessing any computed properties
+    tensors_before = s.to_tensor(compute_missing=False)
+    assert len(tensors_before) == 4  # Nx, Nz, sound_speed, sampling_frequency
+
+    # Access a computed property to trigger caching
+    _ = s.grid_spacing
+
+    # After accessing computed properties but without compute_missing
+    tensors_after = s.to_tensor(compute_missing=False)
+    assert len(tensors_after) > len(tensors_before)
+    assert "grid" in tensors_after
+    assert "grid_spacing" in tensors_after
+
+    # With compute_missing=True, should compute wavelength additionally
+    tensors_all = s.to_tensor(compute_missing=True)
+    assert "wavelength" in tensors_all
+    assert len(tensors_all) >= len(tensors_after)
+
+    # Direct check for specific counts
+    # Initial params + grid + grid_spacing + wavelength
+    expected_count = 4 + 3  # 4 direct params + 3 computed properties
+    assert (
+        len(tensors_all) == expected_count
+    ), f"Expected {expected_count} parameters, got {len(tensors_all)}"
+
+
 if __name__ == "__main__":
     test_chain_dependency_grid_spacing()
     test_recursive_error_message_is_clear()
@@ -820,14 +934,15 @@ if __name__ == "__main__":
     test_recompute_if_dependency_changed()
     test_to_tensor_computes_chain()
     test_invalid_param_raises_error()
+    test_set_invalid_param_after_init()
+    test_tensor_parameter_count()
 
-    # New tests for Scan class
     test_scan_grid_creation()
     test_scan_array_params()
-    test_scan_selected_transmits()
     test_scan_wavelength()
     test_scan_demodulation_frequency()
     test_scan_flatgrid()
     test_scan_to_tensor()
+    test_scan_selected_transmits()
 
     print("All tests passed!")
