@@ -7,6 +7,12 @@ import os
 
 os.environ["KERAS_BACKEND"] = "jax"
 
+
+if __name__ == "__main__":
+    from usbmd import init_device
+
+    init_device("auto:1")
+
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import subprocess
@@ -24,7 +30,6 @@ from usbmd.data.convert.echonet import H5Processor, segment
 from usbmd.utils.io_lib import load_video
 from usbmd.utils.utils import translate
 from usbmd.data import generate_usbmd_dataset
-from usbmd import init_device
 
 
 def get_args():
@@ -46,7 +51,18 @@ def get_args():
         "--use_hyperthreading", action="store_true", help="Enable hyperthreading"
     )
     parser.add_argument(
-        "--batch", type=str, help="Specify which BatchX directory to process"
+        "--batch",
+        type=str,
+        help="Specify which BatchX directory to process, e.g. --batch=Batch2",
+    )
+    # if neither is specified, both will be converted
+    parser.add_argument(
+        "--convert_measurements",
+        action="store_true",
+        help="Only convert measurements CSV file",
+    )
+    parser.add_argument(
+        "--convert_images", action="store_true", help="Only convert image files"
     )
     return parser.parse_args()
 
@@ -320,54 +336,161 @@ class LVHProcessor(H5Processor):
         return generate_usbmd_dataset(**usbmd_dataset)
 
 
+def transform_measurement_coordinates(row):
+    """Transform measurement coordinates according to the cropping scheme.
+
+    Args:
+        row: A pandas Series containing measurement data with X1,X2,Y1,Y2 coordinates
+
+    Returns:
+        A new row with transformed coordinates, or None if shape is unexpected
+    """
+    H, W = row["Height"], row["Width"]
+
+    # Define cropping parameters for each image size
+    crop_params = {
+        (768, 1024): {"top": 86, "bottom": 50, "left": 78, "right": 78},
+        (600, 800): {"top": 70, "bottom": 40, "left": 60, "right": 60},
+        (384, 512): {"top": 20, "bottom": 20, "left": 30, "right": 30},
+        (300, 400): {"top": 18, "bottom": 15, "left": 22, "right": 22},
+        (480, 640): {"top": 90, "bottom": 28, "left": 85, "right": 40},
+        (576, 1024): {"top": 50, "bottom": 26, "left": 175, "right": 165},
+        (708, 1016): {"top": 70, "bottom": 50, "left": 100, "right": 100},
+        (768, 1040): {"top": 50, "bottom": 65, "left": 15, "right": 160},
+    }
+
+    # Get cropping parameters for this image size
+    params = crop_params.get((H, W))
+    if params is None:
+        print(
+            f"Warning: Skipping file {row['HashedFileName']} due to unexpected image shape: ({H}, {W})"
+        )
+        return None
+
+    # Transform coordinates
+    new_row = row.copy()
+    new_row["X1"] = row["X1"] - params["left"]
+    new_row["X2"] = row["X2"] - params["left"]
+    new_row["Y1"] = row["Y1"] - params["top"]
+    new_row["Y2"] = row["Y2"] - params["top"]
+
+    return new_row
+
+
+def convert_measurements_csv(source_csv, output_csv):
+    """Convert measurements CSV file with updated coordinates.
+
+    Args:
+        source_csv: Path to source CSV file
+        output_csv: Path to output CSV file
+    """
+    try:
+        # Read the CSV file
+        df = pd.read_csv(source_csv)
+
+        # Apply coordinate transformation and track skipped rows
+        transformed_rows = []
+        skipped_files = set()
+
+        for _, row in df.iterrows():
+            try:
+                transformed_row = transform_measurement_coordinates(row)
+                if transformed_row is not None:
+                    transformed_rows.append(transformed_row)
+                else:
+                    skipped_files.add(row["HashedFileName"])
+            except Exception as e:
+                print(
+                    f"Error processing row for file {row['HashedFileName']}: {str(e)}"
+                )
+                skipped_files.add(row["HashedFileName"])
+
+        # Create new dataframe from transformed rows
+        df_transformed = pd.DataFrame(transformed_rows)
+
+        # Save to new CSV file
+        df_transformed.to_csv(output_csv, index=False)
+
+        # Print summary
+        print(f"\nConversion Summary:")
+        print(f"Total rows processed: {len(df)}")
+        print(f"Rows successfully converted: {len(df_transformed)}")
+        print(f"Rows skipped: {len(df) - len(df_transformed)}")
+        if skipped_files:
+            print("\nSkipped files:")
+            for filename in sorted(skipped_files):
+                print(f"  - {filename}")
+        print(f"\nConverted measurements saved to {output_csv}")
+
+    except Exception as e:
+        print(f"Error processing CSV file: {str(e)}")
+        raise
+
+
 if __name__ == "__main__":
     args = get_args()
-    init_device([7])
 
-    source_path = Path(args.source)
-    splits = load_splits(source_path)
+    # If no specific conversion is requested, convert both
+    if not (args.convert_measurements or args.convert_images):
+        args.convert_measurements = True
+        args.convert_images = True
 
-    files_to_process = []
-    for split_files in splits.values():
-        for hdf5_file in split_files:
-            avi_file = find_avi_file(
-                args.source, hdf5_file[:-5], batch=args.batch
-            )  # Pass batch arg
-            if avi_file:
-                files_to_process.append(avi_file)
-            else:
-                print(
-                    f"Warning: Could not find AVI file for {hdf5_file} in batch {args.batch if args.batch else 'any'}"
-                )
+    # Convert measurements if requested
+    if args.convert_measurements:
+        source_path = Path(args.source)
+        measurements_csv = source_path / "MeasurementsList.csv"
+        if measurements_csv.exists():
+            output_csv = Path(args.output) / "MeasurementsList.csv"
+            convert_measurements_csv(measurements_csv, output_csv)
+        else:
+            print("Warning: MeasurementsList.csv not found in source directory")
 
-    # List files that have already been processed
-    files_done = []
-    for _, _, filenames in os.walk(args.output):
-        for filename in filenames:
-            files_done.append(filename.replace(".hdf5", ""))
+    # Convert images if requested
+    if args.convert_images:
+        source_path = Path(args.source)
+        splits = load_splits(source_path)
 
-    # Filter out already processed files
-    files_to_process = [f for f in files_to_process if f.stem not in files_done]
-    print(f"Files left to process: {len(files_to_process)}")
+        files_to_process = []
+        for split_files in splits.values():
+            for hdf5_file in split_files:
+                avi_file = find_avi_file(
+                    args.source, hdf5_file[:-5], batch=args.batch
+                )  # Pass batch arg
+                if avi_file:
+                    files_to_process.append(avi_file)
+                else:
+                    print(
+                        f"Warning: Could not find AVI file for {hdf5_file} in batch {args.batch if args.batch else 'any'}"
+                    )
 
-    # Initialize processor with splits
-    processor = LVHProcessor(
-        path_out_h5=args.output,
-        path_out=args.output_numpy,
-        splits=splits,
-    )
+        # List files that have already been processed
+        files_done = []
+        for _, _, filenames in os.walk(args.output):
+            for filename in filenames:
+                files_done.append(filename.replace(".hdf5", ""))
 
-    print("Starting the conversion process.")
+        # Filter out already processed files
+        files_to_process = [f for f in files_to_process if f.stem not in files_done]
+        print(f"Files left to process: {len(files_to_process)}")
 
-    if args.use_hyperthreading:
-        with ProcessPoolExecutor() as executor:
-            futures = {
-                executor.submit(processor, file): file for file in files_to_process
-            }
-            for future in tqdm(as_completed(futures), total=len(files_to_process)):
-                future.result()
-    else:
-        for file in tqdm(files_to_process):
-            processor(file)
+        # Initialize processor with splits
+        processor = LVHProcessor(
+            path_out_h5=args.output,
+            path_out=args.output_numpy,
+            splits=splits,
+        )
 
-    print("All tasks are completed.")
+        print("Starting the conversion process.")
+
+        if args.use_hyperthreading:
+            with ProcessPoolExecutor() as executor:
+                futures = {
+                    executor.submit(processor, file): file for file in files_to_process
+                }
+                for future in tqdm(as_completed(futures), total=len(files_to_process)):
+                    future.result()
+        else:
+            for file in tqdm(files_to_process):
+                processor(file)
+
+        print("All tasks are completed.")
