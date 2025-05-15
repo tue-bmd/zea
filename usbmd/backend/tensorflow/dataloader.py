@@ -184,10 +184,10 @@ def make_dataloader(
 
     Args:
         file_paths (str or list): Path(s) to the folder(s) or h5 file(s) to load.
+        batch_size (int): Batch the dataset.
         key (str): The key to access the HDF5 dataset.
         n_frames (int, optional): number of frames to load from each hdf5 file.
             Defaults to 1. These frames are stacked along the last axis (channel).
-        batch_size (int, optional): batch the dataset. Defaults to 1.
         shuffle (bool, optional): shuffle dataset.
         return_filename (bool, optional): return file name with image. Defaults to False.
         limit_n_samples (int, optional): take only a subset of samples.
