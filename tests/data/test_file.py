@@ -15,7 +15,7 @@ DATASET_PATH = f"{data_root}/USBMD_datasets/2024_USBMD_cardiac_S51/HDF5"
 FILE_NAME = "20240701_P1_A4CH_0000.hdf5"
 FILE_PATH = DATASET_PATH + "/" + FILE_NAME
 FILE_HAS_EVENTS = False
-FILE_NUM_FRAMES = 100
+FILE_N_FRAMES = 100
 FILE_PROBE_NAME = "generic"
 
 
@@ -100,7 +100,7 @@ def test_file_attributes():
         assert file.name == FILE_NAME
         assert file.path == Path(FILE_PATH)
         assert file.has_events == FILE_HAS_EVENTS
-        assert file.num_frames == FILE_NUM_FRAMES
+        assert file.n_frames == FILE_N_FRAMES
         assert file.probe_name == FILE_PROBE_NAME
         assert isinstance(file.probe(), Probe)
         assert isinstance(file.scan(), Scan)
