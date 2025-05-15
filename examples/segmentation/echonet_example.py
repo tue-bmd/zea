@@ -28,6 +28,11 @@ if __name__ == "__main__":
     data_paths = set_data_paths()
     init_device()
 
+    presets = list(EchoNetDynamic.presets.keys())
+    log.info(f"Available built-in usbmd presets for EchoNetDynamic: {presets}")
+
+    model = EchoNetDynamic.from_preset("echonet-dynamic")
+
     n_imgs = 16
     val_dataset = make_dataloader(
         data_paths.data_root / "USBMD_datasets/echonet_v2025/val",
@@ -38,11 +43,6 @@ if __name__ == "__main__":
         normalization_range=[-1, 1],
         seed=42,
     )
-
-    presets = list(EchoNetDynamic.presets.keys())
-    log.info(f"Available built-in usbmd presets for EchoNetDynamic: {presets}")
-
-    model = EchoNetDynamic.from_preset("echonet-dynamic")
 
     batch = next(iter(val_dataset))
     rgb_batch = ops.concatenate([batch, batch, batch], axis=-1)  # grayscale to RGB

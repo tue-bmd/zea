@@ -208,7 +208,6 @@ class Folder:
 
         if not validated_succesfully:
             log.warning(
-                "Not all files in dataset have the same scan parameters. "
                 "Check warnings above for details. No validation file was created. "
                 f"See {validation_error_file_path} for details."
             )
