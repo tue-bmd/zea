@@ -64,9 +64,10 @@ def compute_scan_convert_2d_coordinates(
     x_lim = [ops.min(x_grid), ops.max(x_grid)]
     z_lim = [ops.min(z_grid), ops.max(z_grid)]
 
+    d_rho = rho[1] - rho[0]
+    d_theta = theta[1] - theta[0]
+
     if resolution is None:
-        d_rho = rho[1] - rho[0]
-        d_theta = theta[1] - theta[0]
         # arc length along constant phi at 1/4 depth
         sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
         # average of arc lengths and radial step
@@ -92,7 +93,16 @@ def compute_scan_convert_2d_coordinates(
     )
     # Stack coordinates as required for map_coordinates
     coordinates = ops.stack([rho_idx, theta_idx], axis=0)
-    return coordinates
+    parameters = {
+        "resolution": resolution,
+        "x_lim": x_lim,
+        "z_lim": z_lim,
+        "rho_range": rho_range,
+        "theta_range": theta_range,
+        "d_rho": d_rho,
+        "d_theta": d_theta,
+    }
+    return coordinates, parameters
 
 
 def scan_convert_2d(
@@ -130,6 +140,8 @@ def scan_convert_2d(
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
             Has dimensions (n_z, n_x). Coordinates outside the input image
             ranges are filled with NaNs.
+        parameters (dict): A dictionary containing information about the scan conversion.
+            Contains the resolution, x, and z limits, rho and theta ranges.
 
     Note:
         Polar grid is inferred from the input image shape and the supplied
@@ -139,8 +151,9 @@ def scan_convert_2d(
     """
     assert "float" in ops.dtype(image), "Image must be float type"
 
+    parameters = {}
     if coordinates is None:
-        coordinates = compute_scan_convert_2d_coordinates(
+        coordinates, parameters = compute_scan_convert_2d_coordinates(
             image.shape, rho_range, theta_range, resolution, dtype=image.dtype
         )
 
@@ -151,7 +164,7 @@ def scan_convert_2d(
     # swap axis to match z, x
     images_sc = ops.swapaxes(images_sc, -1, -2)
 
-    return images_sc
+    return images_sc, parameters
 
 
 def compute_scan_convert_3d_coordinates(
@@ -180,11 +193,11 @@ def compute_scan_convert_3d_coordinates(
     y_lim = [ops.min(y_grid), ops.max(y_grid)]
     z_lim = [ops.min(z_grid), ops.max(z_grid)]
 
-    if resolution is None:
-        d_rho = rho[1] - rho[0]
-        d_theta = theta[1] - theta[0]
-        d_phi = phi[1] - phi[0]
+    d_rho = rho[1] - rho[0]
+    d_theta = theta[1] - theta[0]
+    d_phi = phi[1] - phi[0]
 
+    if resolution is None:
         # arc length along constant phi at 1/4 depth
         sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
         # arc length along constant theta at 1/4 depth
@@ -219,7 +232,20 @@ def compute_scan_convert_3d_coordinates(
     phi_idx = (phi_grid_interp - phi_min) / (phi_max - phi_min) * (image_shape[-1] - 1)
 
     # Stack coordinates as required for map_coordinates
-    return ops.stack([rho_idx, theta_idx, phi_idx], axis=0)
+    coordinates = ops.stack([rho_idx, theta_idx, phi_idx], axis=0)
+    parameters = {
+        "resolution": resolution,
+        "x_lim": x_lim,
+        "y_lim": y_lim,
+        "z_lim": z_lim,
+        "rho_range": rho_range,
+        "theta_range": theta_range,
+        "phi_range": phi_range,
+        "d_rho": d_rho,
+        "d_theta": d_theta,
+        "d_phi": d_phi,
+    }
+    return coordinates, parameters
 
 
 def scan_convert_3d(
@@ -259,6 +285,8 @@ def scan_convert_3d(
         ndarray: The scan-converted 3D ultrasound image in Cartesian coordinates.
             Has dimensions (n_z, n_x, n_y). Coordinates outside the input image
             ranges are filled with NaNs.
+        parameters (dict): A dictionary containing information about the scan conversion.
+            Contains the resolution, x, y, and z limits, rho, theta, and phi ranges.
 
     Note:
         Polar grid is inferred from the input image shape and the supplied
@@ -267,8 +295,9 @@ def scan_convert_3d(
     """
     assert "float" in ops.dtype(image), "Image must be float type"
 
+    parameters = {}
     if coordinates is None:
-        coordinates = compute_scan_convert_3d_coordinates(
+        coordinates, parameters = compute_scan_convert_3d_coordinates(
             image.shape,
             rho_range,
             theta_range,
@@ -281,7 +310,7 @@ def scan_convert_3d(
 
     # swap axis to match z, x, y
     images_sc = ops.swapaxes(images_sc, -2, -3)
-    return images_sc
+    return images_sc, parameters
 
 
 def scan_convert(
