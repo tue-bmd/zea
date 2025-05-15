@@ -5,8 +5,7 @@ model:
     sum_transmits: true
 
 data:
-  file_path: dummy_file_1.hdf5
-  dataset_name: dummy
+  file_path: test0.hdf5
   dtype: raw_data
   dynamic_range: [-60, 0]
   dataset_folder: dummy_folder
