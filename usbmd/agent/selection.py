@@ -254,7 +254,7 @@ class GreedyEntropy(LinesActionModel):
 
         selected_lines_k_hot = ops.cast(
             ops.any(ops.one_hot(all_selected_lines, self.n_possible_actions), axis=0),
-            "uint8",
+            "bool",
         )
         return selected_lines_k_hot, masks.lines_to_im_size(
             selected_lines_k_hot, (self.img_height, self.img_width)
@@ -306,7 +306,7 @@ class UniformRandomLines(LinesActionModel):
             n_masks=self.batch_size,
             seed=seed,
         )
-        selected_lines_batched = ops.cast(selected_lines_batched, "uint8")
+        selected_lines_batched = ops.cast(selected_lines_batched, "bool")
         mask_batched = masks.lines_to_im_size(
             selected_lines_batched, (self.img_height, self.img_width)
         )
