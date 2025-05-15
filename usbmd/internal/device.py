@@ -373,7 +373,7 @@ def init_device(
             - For numpy this function will return 'cpu'.
         device (str/int/list): device(s) to select.
             Examples: 'cuda:1', 'gpu:2', 'auto:-1', 'cpu', 0, or [0,1,2,3].
-            For more details see: `usbmd.utils.device.get_device`.
+            For more details see: `get_device`.
         hide_devices (int/list): device(s) to hide from the system.
             Examples: 0, or [0,1,2,3]. Can be useful when some GPUs have too
             little tensor cores to be useful for training, or when some GPUs

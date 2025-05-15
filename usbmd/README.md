@@ -77,7 +77,7 @@ Make sure that before using any GPU enabled functionality (importing torch / ten
 
 ```python
 # import the init_device function
-from usbmd.utils.device import init_device
+from usbmd import init_device
 import keras
 
 # initialize device manually
