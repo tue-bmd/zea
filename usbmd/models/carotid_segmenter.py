@@ -28,6 +28,8 @@ INFERENCE_SIZE = 256
 
 @model_registry(name="carotid-segmenter")
 class CarotidSegmenter(BaseModel):
+    """Carotid segmentation model."""
+
     def __init__(
         self,
         image_shape=(INFERENCE_SIZE, INFERENCE_SIZE, 1),
