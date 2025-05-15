@@ -71,11 +71,9 @@ def main():
 
     from usbmd.generate import GenerateDataSet
     from usbmd.interface import Interface
+    from usbmd.internal.checks import _DATA_TYPES
     from usbmd.setup_usbmd import setup
     from usbmd.utils import keep_trying, strtobool
-    from usbmd.internal.checks import _DATA_TYPES
-    from usbmd.utils.gui import USBMDApp
-    from usbmd.internal.io_lib import start_async_app
 
     config = setup(args.config)
 
@@ -86,31 +84,7 @@ def main():
         )
 
         log.info(f"Using {keras.backend.backend()} backend")
-
-        if args.gui:
-            log.warning(
-                "GUI is very much in beta, please report any bugs to "
-                "https://github.com/tue-bmd/ultrasound-toolbox."
-            )
-            try:
-                asyncio.run(
-                    start_async_app(
-                        USBMDApp,
-                        title="USBMD GUI",
-                        ui=ui,
-                        resolution=(600, 300),
-                        verbose=True,
-                        config=config,
-                    )
-                )
-            except RuntimeError as e:
-                # probably a better way to handle this...
-                if str(e) == "Event loop stopped before Future completed.":
-                    log.info("GUI closed.")
-                else:
-                    raise e
-        else:
-            ui.run(plot=True)
+        ui.run(plot=True)
 
     elif args.task == "generate":
         destination_folder = keep_trying(
