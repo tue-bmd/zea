@@ -930,7 +930,7 @@ class Scan(Object):
 
         # If phi_range is set, use 3D scan conversion
         if self.phi_range is not None:
-            self._coordinates = compute_scan_convert_3d_coordinates(
+            self._coordinates, _ = compute_scan_convert_3d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
@@ -940,7 +940,7 @@ class Scan(Object):
 
         # If phi_range is not set, use 2D scan conversion
         else:
-            self._coordinates = compute_scan_convert_2d_coordinates(
+            self._coordinates, _ = compute_scan_convert_2d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
