@@ -73,7 +73,7 @@ users_paths = "users.yaml"
 config = setup(config_path, users_paths, create_user=True)
 
 # initialize the Interface class with your config
-interface = Interface(config)
+interface = Interface(config, validate_file=False)
 image = interface.run(plot=True)
 ```
 
@@ -84,9 +84,7 @@ We do this by manually loading a single usbmd file with `load_usbmd_file` and pr
 import keras
 import matplotlib.pyplot as plt
 
-from usbmd import setup
-from usbmd.data import load_usbmd_file
-from usbmd.ops import Pipeline
+from usbmd import setup, load_usbmd_file, Pipeline
 
 # choose your config file
 # all necessary settings should be in the config file
@@ -145,8 +143,7 @@ Custom pipelines are also supported in various ways. One way is to define a pipe
 
 ```python
 import keras
-from usbmd import Config
-from usbmd.ops import Pipeline
+from usbmd import Config, Pipeline
 
 config = Config(
     {
@@ -196,15 +193,10 @@ You can also make use of the `USBMDDataSet` class to load and process multiple f
 We will have to manually initialize the `Scan` and `Probe` classes and pass them to the `Process` class. This was done automatically in the `Interface` in the first example.
 
 ```python
+import keras
 import matplotlib.pyplot as plt
 
-import usbmd
-from usbmd import setup
-from usbmd.data import USBMDDataSet
-from usbmd.probes import Probe
-from usbmd.scan import Scan
-from usbmd.utils import update_dictionary, safe_initialize_class
-from usbmd.utils.device import init_device
+from usbmd import Dataset, Pipeline, init_device, setup
 
 device = init_device()
 
@@ -216,36 +208,25 @@ config_path = "configs/config_picmus_rf.yaml"
 users_paths = "users.yaml"
 config = setup(config_path, users_paths, create_user=True)
 
-# intialize the dataset
-dataset = USBMDDataSet(config.data)
+# initialize the dataset
+dataset = Dataset.from_config(**config.data)
 
-# get scan and probe parameters from the dataset and config
-file_scan_params = dataset.get_scan_parameters_from_file()
-file_probe_params = dataset.get_probe_parameters_from_file()
-config_scan_params = config.scan
+# get the first file in the dataset and the scan and probe
+file = dataset[0]
+scan = file.scan(**config.scan)
+probe = file.probe()
 
-# merging of manual config and dataset scan parameters
-scan_params = update_dictionary(file_scan_params, config_scan_params)
-scan = safe_initialize_class(Scan, **scan_params)
-probe = Probe(**file_probe_params)
+# load the data (all frames, but for picmus only one frame is available)
+data = file.load_data(dtype=config.data.dtype, indices="all")
 
-# pick a frame from the dataset
-file_idx = 0
-# the following are now all valid `frame_idx` examples
-frame_idx = 1 # just asking for a single frame
-frame_idx = (0, 1, 2, 3) # asking for multiple frames
-frame_idx = 'all' # return all frames of the file specified with `file_idx` in the dataset
-data = dataset[(file_idx, frame_idx)]
-
-# initiate a pipeline now with batch processing
-pipeline = Pipeline.from_default(with_batch_dim=False)
+# initiate a pipeline (now with batch processing)
+pipeline = Pipeline.from_default()
 parameters = pipeline.prepare_parameters(probe, scan, config)
 image = pipeline(data=data, **parameters)["data"]
-image = keras.ops.convert_to_numpy(image)
 
-# plot the image
+# take the first frame and plot it
 plt.figure()
-plt.imshow(image, cmap="gray")
+plt.imshow(image[0], cmap="gray")
 ```
 
 ## Models
