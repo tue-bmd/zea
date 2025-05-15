@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from usbmd.utils.visualize import plot_biplanes, plot_frustum_vertices, plot_quadrants
+from usbmd.visualize import plot_biplanes, plot_frustum_vertices, plot_quadrants
 
 
 @pytest.fixture

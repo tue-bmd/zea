@@ -9,7 +9,7 @@ import keras
 import numpy as np
 from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
-from usbmd.utils.utils import map_negative_indices
+from usbmd.utils import map_negative_indices
 
 # pylint: disable=arguments-differ
 

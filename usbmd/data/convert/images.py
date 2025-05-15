@@ -11,7 +11,7 @@ from itertools import groupby
 import numpy as np
 
 from usbmd.data.data_format import generate_usbmd_dataset
-from usbmd.utils.io_lib import load_image, _SUPPORTED_IMG_TYPES
+from usbmd.internal.io_lib import load_image, _SUPPORTED_IMG_TYPES
 
 
 def img_dir_to_h5_dir(

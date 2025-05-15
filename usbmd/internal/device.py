@@ -5,7 +5,7 @@ import shutil
 import subprocess as sp
 from typing import Union
 
-from usbmd.utils import log
+from usbmd import log
 
 
 def check_nvidia_smi():

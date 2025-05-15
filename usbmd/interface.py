@@ -21,9 +21,10 @@ from usbmd.core import DataTypes
 from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
+from usbmd import log
 from usbmd.ops import Pipeline
-from usbmd.utils import keep_trying, log, save_to_gif, save_to_mp4
-from usbmd.utils.io_lib import (
+from usbmd.utils import keep_trying, save_to_gif, save_to_mp4
+from usbmd.internal.io_lib import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
     filename_from_window_dialog,

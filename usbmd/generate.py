@@ -22,9 +22,10 @@ from usbmd.data.datasets import Dataset
 from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
+from usbmd import log
 from usbmd.ops import Pipeline
-from usbmd.utils import get_function_args, log
-from usbmd.utils.checks import _DATA_TYPES
+from usbmd.utils import get_function_args
+from usbmd.internal.checks import _DATA_TYPES
 
 
 class GenerateDataSet:

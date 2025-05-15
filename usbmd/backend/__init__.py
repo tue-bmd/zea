@@ -2,7 +2,7 @@
 
 import keras
 
-from usbmd.utils import log
+from usbmd import log
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):

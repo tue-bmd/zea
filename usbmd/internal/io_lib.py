@@ -35,7 +35,7 @@ from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
 from usbmd.data.file import File
-from usbmd.utils import log
+from usbmd import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
