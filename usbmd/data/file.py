@@ -20,6 +20,7 @@ from usbmd.utils.checks import (
     _REQUIRED_SCAN_KEYS,
     get_check,
 )
+from usbmd.utils.utils import reduce_to_signature
 
 
 def assert_key(file: h5py.File, key: str):
@@ -308,12 +309,7 @@ class File(h5py.File):
         """
         file_scan_parameters = self.get_parameters(event)
 
-        sig = inspect.signature(Scan.__init__)
-        scan_parameters = {
-            key: file_scan_parameters[key]
-            for key in sig.parameters
-            if key in file_scan_parameters
-        }
+        scan_parameters = reduce_to_signature(Scan.__init__, file_scan_parameters)
         if len(scan_parameters) == 0:
             log.info(f"Could not find proper scan parameters in {self}.")
         return scan_parameters
@@ -346,12 +342,9 @@ class File(h5py.File):
         """
         file_scan_parameters = self.get_parameters(event)
 
-        sig = inspect.signature(Probe.from_name("generic").__init__)
-        probe_parameters = {
-            key: file_scan_parameters[key]
-            for key in sig.parameters
-            if key in file_scan_parameters
-        }
+        probe_parameters = reduce_to_signature(
+            Probe.from_name("generic").__init__, file_scan_parameters
+        )
         return probe_parameters
 
     def probe(self, event=None) -> Probe:
