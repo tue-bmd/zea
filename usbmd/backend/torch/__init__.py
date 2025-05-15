@@ -54,7 +54,8 @@ def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
     if hasattr(func, "to"):
         func = func.to(device)
 
-    outputs = func(inputs, **kwargs)
+    with torch.device(device):
+        outputs = func(inputs, **kwargs)
 
     if isinstance(outputs, dict):
         # depends a bit how flexible we want to be...

@@ -14,9 +14,6 @@ sys.path = [str(p) if isinstance(p, PosixPath) else p for p in sys.path]
 
 import tensorflow as tf
 
-# pylint: disable=unused-import
-from usbmd.backend.tensorflow.models.lista import UnfoldingModel
-
 
 def on_device_tf(func, inputs, device, return_numpy=False, **kwargs):
     """Compute func on device.

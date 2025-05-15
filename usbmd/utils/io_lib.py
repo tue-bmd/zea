@@ -22,7 +22,6 @@ from tkinter.filedialog import askopenfilename
 from typing import Callable, Optional
 
 import cv2
-import h5py
 import imageio
 import matplotlib
 import matplotlib.pyplot as plt
@@ -35,6 +34,7 @@ from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
+from usbmd.data.file import File
 from usbmd.utils import log
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
@@ -175,12 +175,6 @@ def load_image(filename, grayscale=True, color_order="RGB"):
     return image
 
 
-def _get_shape_hdf5_file(filepath, key):
-    """Retrieve the length of a dataset in an hdf5 file."""
-    with h5py.File(filepath, "r", locking=False) as f:
-        return list(f[key].shape)
-
-
 def search_file_tree(
     directory,
     filetypes=None,
@@ -237,15 +231,18 @@ def search_file_tree(
     )
 
     if (directory / dataset_info_filename).is_file() and not redo:
-        if verbose:
-            log.info(
-                "Using pregenerated dataset info file: "
-                f"{log.yellow(directory / dataset_info_filename)} ..."
-            )
-            log.info(f"...for reading file paths in {log.yellow(directory)}")
         with open(directory / dataset_info_filename, "r", encoding="utf-8") as file:
             dataset_info = yaml.load(file, Loader=yaml.FullLoader)
-        return dataset_info
+
+        # Check if the file_shapes key is present in the dataset_info, otherwise redo the search
+        if "file_shapes" in dataset_info:
+            if verbose:
+                log.info(
+                    "Using pregenerated dataset info file: "
+                    f"{log.yellow(directory / dataset_info_filename)} ..."
+                )
+                log.info(f"...for reading file paths in {log.yellow(directory)}")
+            return dataset_info
 
     if redo and verbose:
         log.info(
@@ -265,8 +262,8 @@ def search_file_tree(
         assert isinstance(
             hdf5_key_for_length, str
         ), "hdf5_key_for_length must be a string"
-        assert all(ext in {".hdf5", ".h5"} for ext in filetypes), (
-            "hdf5_key_for_length only works with filetypes set to "
+        assert set(filetypes).issubset({".hdf5", ".h5"}), (
+            "hdf5_key_for_length only works with when filetypes is set to "
             f"`.hdf5` or `.h5`, got {filetypes}"
         )
 
@@ -287,9 +284,7 @@ def search_file_tree(
         if verbose:
             log.info("Getting number of frames in each hdf5 file...")
 
-        _get_shape_hdf5_file_partial = functools.partial(
-            _get_shape_hdf5_file, key=hdf5_key_for_length
-        )
+        get_shape_partial = functools.partial(File.get_shape, key=hdf5_key_for_length)
         # make sure to call search_file_tree from within a function
         # or use if __name__ == "__main__":
         # to avoid freezing the main process
@@ -299,7 +294,7 @@ def search_file_tree(
                 file_shapes = list(
                     tqdm.tqdm(
                         pool.imap(
-                            _get_shape_hdf5_file_partial,
+                            get_shape_partial,
                             absolute_file_paths,
                         ),
                         total=len(file_paths),
@@ -314,7 +309,7 @@ def search_file_tree(
                 desc="Getting number of frames in each hdf5 file",
                 disable=not verbose,
             ):
-                file_shapes.append(_get_shape_hdf5_file(file_path, hdf5_key_for_length))
+                file_shapes.append(File.get_shape(file_path, hdf5_key_for_length))
 
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
     if verbose:
