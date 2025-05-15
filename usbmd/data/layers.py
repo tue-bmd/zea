@@ -7,13 +7,13 @@ import keras
 import numpy as np
 from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
-import usbmd
-from usbmd.utils.utils import map_negative_indices
+from usbmd.ops import Pad as PadOp
+from usbmd.utils import map_negative_indices
 
 # pylint: disable=arguments-differ
 
 
-class Pad(usbmd.ops.Pad):
+class Pad(PadOp):
     """Pad layer for padding tensors to a specified shape which can be used in tf.data pipelines."""
 
     __call__ = TFDataLayer.__call__
