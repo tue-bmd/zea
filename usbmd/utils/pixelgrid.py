@@ -129,11 +129,9 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
         dirs (np.ndarray): Steering direction of each ray in azimuth, in units of
             radians (nrays, 2)
 
-    # nr = Number of radial pixels = len(r)
-
     Returns:
         grid (np.ndarray): Pixel grid of size (nr, nrays, 3) in
-            Cartesian coordinates (x, y, z)
+            Cartesian coordinates (x, y, z), with nr being the number of radial pixels.
     """
     # Get focusing positions in rho-theta coordinates
     r = np.arange(rlims[0], rlims[1] + eps, dr)  # Depth rho
