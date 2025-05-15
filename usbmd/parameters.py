@@ -69,7 +69,7 @@ def cache_with_dependencies(*deps):
     return decorator
 
 
-class Parameter:
+class Parameters:
     """Base class for parameters with dependencies."""
 
     VALID_PARAMS = None
@@ -78,7 +78,7 @@ class Parameter:
 
         if self.VALID_PARAMS is None:
             raise NotImplementedError(
-                "VALID_PARAMS must be defined in subclasses of Parameter."
+                "VALID_PARAMS must be defined in subclasses of Parameters."
             )
 
         for param, config in self.VALID_PARAMS.items():
@@ -268,7 +268,7 @@ class Parameter:
         return f"{self.__class__.__name__}(\n{param_str}\n)"
 
 
-class DummyParameters(Parameter):
+class DummyParameters(Parameters):
     """A simple test class with parameters and computed properties.
 
     This class is used for testing the Parameter framework with simple
@@ -320,7 +320,7 @@ class DummyParameters(Parameter):
         return self.param3 / self.param4
 
 
-class Scan(Parameter):
+class Scan(Parameters):
     """Represents an ultrasound scan configuration with computed properties.
 
     This class manages parameters related to ultrasound scanning and provides
