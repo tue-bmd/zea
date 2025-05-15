@@ -9,6 +9,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import List
 
+import numpy as np
 import tqdm
 
 from usbmd.data.file import File, validate_file
@@ -297,6 +298,15 @@ class Folder:
             f.write("*** validation file hash ***\n")
             f.write(f"hash: {validation_file_hash}")
 
+    def __repr__(self):
+        return (
+            f"<usbmd.data.datasets.Folder at 0x{id(self):x}: "
+            f"{self.n_files} files, key='{self.key}', folder='{self.folder_path}'>"
+        )
+
+    def __str__(self):
+        return f"Folder with {self.n_files} files in '{self.folder_path}' (key='{self.key}')"
+
 
 class Dataset(H5FileHandleCache):
     """Iterate over File(s) and Folder(s)."""
@@ -307,6 +317,7 @@ class Dataset(H5FileHandleCache):
         key: str,
         search_file_tree_kwargs: dict | None = None,
         validate: bool = True,
+        directory_splits: list | None = None,
         **kwargs,
     ):
         """Initializes the Dataset.
@@ -319,6 +330,10 @@ class Dataset(H5FileHandleCache):
                 search_file_tree function. These are only used when `file_paths` are directories.
                 Defaults to None.
             validate (bool, optional): Whether to validate the dataset. Defaults to True.
+            directory_splits (list, optional): List of directory split by. Is a list of floats
+                between 0 and 1, with the same length as the number of file_paths given. If none, all
+                files in file_paths are used.
+
         """
         super().__init__(**kwargs)
         self.key = key
@@ -326,6 +341,16 @@ class Dataset(H5FileHandleCache):
         self.validate = validate
 
         self.file_paths, self.file_shapes = self.find_files_and_shapes(file_paths)
+
+        if directory_splits is not None:
+            # Split the files according to their parent directories
+            self.file_paths, self.file_shapes = split_files_by_directory(
+                self.file_paths,
+                self.file_shapes,
+                directory_list=file_paths,
+                directory_splits=directory_splits,
+            )
+
         assert self.n_files > 0, f"No files in file_paths: {file_paths}"
 
     def find_files_and_shapes(self, paths):
@@ -407,3 +432,105 @@ class Dataset(H5FileHandleCache):
     def total_frames(self):
         """Return total number of frames in dataset."""
         return sum(self.get_file(file_path).num_frames for file_path in self.file_paths)
+
+    def __repr__(self):
+        return (
+            f"<usbmd.data.datasets.Dataset at 0x{id(self):x}: "
+            f"{self.n_files} files, key='{self.key}'>"
+        )
+
+    def __str__(self):
+        return f"Dataset with {self.n_files} files (key='{self.key}')"
+
+
+def split_files_by_directory(file_names, file_shapes, directory_list, directory_splits):
+    """Split files according to their parent directories and given split ratios.
+
+    Args:
+        file_names (list): List of file paths.
+        file_shapes (list): List of shapes for each file.
+        directory_list (list): List of directory paths to split by.
+        directory_splits (list): List of split ratios (0-1) for each directory.
+
+    Returns:
+        tuple: (split_file_names, split_file_shapes)
+    """
+    if isinstance(directory_list, str):
+        directory_list = [directory_list]
+    if isinstance(directory_splits, (float, int)):
+        directory_splits = [directory_splits]
+
+    assert len(directory_splits) == len(
+        directory_list
+    ), "Number of directory splits must be equal to the number of directories."
+    assert all(
+        0 <= split <= 1 for split in directory_splits
+    ), "Directory splits must be between 0 and 1."
+
+    # Get directory sizes using the new count function implementation
+    directory_counts = count_samples_per_directory(file_names, directory_list)
+    directory_sizes = [directory_counts[str(dir_path)] for dir_path in directory_list]
+
+    # take percentage of the files from each directory
+    split_indices = [
+        int(split * size) for split, size in zip(directory_splits, directory_sizes)
+    ]
+
+    # offset split indices by each total number of files
+    start_datasets = [0] + list(np.cumsum(directory_sizes))
+    split_indices = [
+        (start_datasets[i], start_datasets[i] + split)
+        for i, split in enumerate(split_indices)
+    ]
+
+    # split the files
+    split_file_names = []
+    split_file_shapes = []
+
+    for start, end in split_indices:
+        split_file_names.extend(file_names[start:end])
+        split_file_shapes.extend(file_shapes[start:end])
+
+    # verify the split size
+    expected_size = sum((d * s) for d, s in zip(directory_sizes, directory_splits))
+    expected_size = int(expected_size)
+    assert len(split_file_names) == expected_size, (
+        "Number of files in split directories does not match the expected number. "
+        "Please check the directory splits."
+    )
+
+    return split_file_names, split_file_shapes
+
+
+def count_samples_per_directory(file_names, directories):
+    """Count number of samples per directory.
+
+    Args:
+        file_names (list): List of file paths
+        directories (str or list): Directory or list of directories
+
+    Returns:
+        dict: Dictionary with directory paths as keys and sample counts as values
+    """
+    if not isinstance(directories, list):
+        directories = [directories]
+
+    # Convert all paths to strings with normalized separators
+    dir_paths = [str(Path(d)) for d in directories]
+
+    file_paths = [str(Path(f)) for f in file_names]
+
+    # Count files per directory using string matching
+    counts = {
+        dir_path: sum(1 for f in file_paths if f.startswith(dir_path))
+        for dir_path in dir_paths
+    }
+
+    # Assert that the total counts match the number of files
+    total_count = sum(counts.values())
+    assert total_count == len(file_paths), (
+        f"Total count of files ({total_count}) does not match the number of files provided "
+        f"({len(file_paths)}). Some files may not belong to any of the specified directories."
+    )
+
+    return counts
