@@ -331,8 +331,8 @@ class Dataset(H5FileHandleCache):
                 Defaults to None.
             validate (bool, optional): Whether to validate the dataset. Defaults to True.
             directory_splits (list, optional): List of directory split by. Is a list of floats
-                between 0 and 1, with the same length as the number of file_paths given. If none, all
-                files in file_paths are used.
+                between 0 and 1, with the same length as the number of file_paths given.
+                If none, all files in file_paths are used.
 
         """
         super().__init__(**kwargs)
