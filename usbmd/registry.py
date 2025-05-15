@@ -186,10 +186,6 @@ class RegisterDecorator:
         ]
 
 
-# The registry for the datasets linking each dataset to
-# a probe_name and a scan_class.
-dataset_registry = RegisterDecorator(items_to_register=["probe_name", "scan_class"])
-
 # The registry for the probes.
 probe_registry = RegisterDecorator()
 
@@ -199,8 +195,6 @@ probe_registry = RegisterDecorator()
 tf_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
 
 torch_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
-
-post_processing_registry = RegisterDecorator(items_to_register=["name", "framework"])
 
 metrics_registry = RegisterDecorator(
     items_to_register=["name", "framework", "supervised"]
