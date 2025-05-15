@@ -13,14 +13,11 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import matplotlib.pyplot as plt
-import numpy as np
 from keras import ops
-from PIL import Image
 
 from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.models.carotid_segmenter import CarotidSegmenter
-from usbmd.utils import translate
 from usbmd.utils.selection_tool import add_shape_from_mask
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
