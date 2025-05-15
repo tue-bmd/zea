@@ -18,7 +18,7 @@ from usbmd.display import (
     compute_scan_convert_2d_coordinates,
     compute_scan_convert_3d_coordinates,
 )
-from usbmd.utils import log
+from usbmd import log
 from usbmd.utils.pfield import compute_pfield
 from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
 
