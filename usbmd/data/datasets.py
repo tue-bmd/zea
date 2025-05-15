@@ -431,7 +431,7 @@ class Dataset(H5FileHandleCache):
     @property
     def total_frames(self):
         """Return total number of frames in dataset."""
-        return sum(self.get_file(file_path).num_frames for file_path in self.file_paths)
+        return sum(self.get_file(file_path).n_frames for file_path in self.file_paths)
 
     def __repr__(self):
         return (
