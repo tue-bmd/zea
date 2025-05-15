@@ -188,6 +188,7 @@ def test_dataloader(
 
     dataset = make_dataloader(
         directory,
+        batch_size=1,
         key=key,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
