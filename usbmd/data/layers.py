@@ -4,6 +4,7 @@
 """
 
 import keras
+import numpy as np
 from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
 import usbmd

@@ -64,6 +64,7 @@ import copy
 import hashlib
 import inspect
 import json
+from functools import partial
 from typing import Any, Dict, List, Union
 
 import keras
@@ -1995,6 +1996,21 @@ class Demodulate(Operation):
             "demodulation_frequency": demodulation_frequency,
             "n_ch": 2,
         }
+
+
+@ops_registry("lambda")
+class Lambda(Operation):
+    """Use any funcion as an operation."""
+
+    def __init__(self, func, func_kwargs=None, **kwargs):
+        super().__init__(**kwargs)
+        func_kwargs = func_kwargs or {}
+        self.func = partial(func, **func_kwargs)
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        data = self.func(data)
+        return {self.output_key: data}
 
 
 @ops_registry("clip")
