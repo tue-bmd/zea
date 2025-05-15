@@ -532,9 +532,9 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
             RandomCircleInclusion(
                 radius=5,
                 fill_value=1.0,
-                circle_axes=(0, 1),
+                circle_axes=(1, 2),
                 return_centers=True,
-                with_batch_dim=False,
+                with_batch_dim=True,
                 seed=keras.random.SeedGenerator(42),
             )
         ]
@@ -542,6 +542,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
 
     dataset = make_dataloader(
         dummy_hdf5,
+        batch_size=4,
         key="data",
         image_size=(28, 28),
         resize_type="center_crop",
@@ -557,10 +558,12 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
     images_np = np.array(images)
 
     # Output shape should match input shape
-    assert images_np.shape[-3:-1] == (
+    assert images_np.shape == (
+        4,
         28,
         28,
-    ), f"Output shape {images_np.shape} does not match expected (28, 28)"
+        1,
+    ), f"Output shape {images_np.shape} does not match expected (4, 28, 28, 1)"
 
     # Since input is random and augmentation sets a circle to fill_value=1.0,
     # there should be some pixels exactly 1.0
