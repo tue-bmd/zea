@@ -135,18 +135,10 @@ class Object:
         return cls(**reduced_params)
 
     @classmethod
-    def merge(cls, scan1, scan2):
-        """
-        Merge multiple scans into a single scan.
-
-        Args:
-            *args: The scan dictionaries to merge.
-
-        Returns:
-            A new scan object with the merged parameters.
-        """
-        # TODO: support actual scan objects, now we only support dictionaries
-        params = update_dictionary(scan1, scan2)
+    def merge(cls, obj1: dict, obj2: dict):
+        """Merge multiple objects and safely initialize a new object."""
+        # TODO: support actual usbmd.core.Objects, now we only support dictionaries
+        params = update_dictionary(obj1, obj2)
         return cls.safe_initialize(**params)
 
     @classmethod
