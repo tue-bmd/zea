@@ -120,9 +120,9 @@ def _assert_image_range(images, image_range):
 
 def make_dataloader(
     file_paths: List[str],
+    batch_size: int,
     key: str = "data/image",
     n_frames: int = 1,
-    batch_size: int = 1,
     shuffle: bool = True,
     return_filename: bool = False,
     limit_n_samples: int | None = None,
