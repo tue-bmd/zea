@@ -4,6 +4,7 @@ Will segment the images and convert them to polar coordinates.
 """
 
 import os
+import pickle
 
 os.environ["KERAS_BACKEND"] = "jax"
 
@@ -23,13 +24,14 @@ import numpy as np
 from tqdm import tqdm
 
 import jax.numpy as jnp
-from jax import jit, vmap, pmap
+from jax import jit, vmap, pmap, lax
 from jax.scipy.ndimage import map_coordinates
 
 from usbmd.data.convert.echonet import H5Processor, segment
 from usbmd.utils.io_lib import load_video
 from usbmd.utils.utils import translate
 from usbmd.data import generate_usbmd_dataset
+from usbmd.utils.fit_scan_cone import fit_scan_cone
 
 
 def get_args():
@@ -54,6 +56,12 @@ def get_args():
         "--batch",
         type=str,
         help="Specify which BatchX directory to process, e.g. --batch=Batch2",
+    )
+    parser.add_argument(
+        "--max_files",
+        type=int,
+        default=None,
+        help="Maximum number of files to process (for testing)",
     )
     # if neither is specified, both will be converted
     parser.add_argument(
@@ -100,49 +108,49 @@ def find_avi_file(source_dir, hashed_filename, batch=None):
         return None
 
 
-def manual_crop(sequence):
-    """Manually crop sequence to remove zero padding for two known shapes."""
+# def manual_crop(sequence):
+#     """Manually crop sequence to remove zero padding for two known shapes."""
 
-    """
-    File shape counts:
-    Unique (Height, Width) pairs with counts and example HashedFileNames:
-    (300, 400.0) — 7 files
-    (384, 512.0) — 26 files
-    (480, 640.0) — 6 files
-    (576, 1024.0) — 1 files
-    (600, 800.0) — 3532 files --> TODO: there are at least 2 views here, we need to account for this
-    (708, 1016.0) — 1 files
-    (768, 1024.0) — 8417 files
-    (768, 1040.0) — 10 files    
-    """
+#     """
+#     File shape counts:
+#     Unique (Height, Width) pairs with counts and example HashedFileNames:
+#     (300, 400.0) — 7 files
+#     (384, 512.0) — 26 files
+#     (480, 640.0) — 6 files
+#     (576, 1024.0) — 1 files
+#     (600, 800.0) — 3532 files --> TODO: there are at least 2 views here, we need to account for this
+#     (708, 1016.0) — 1 files
+#     (768, 1024.0) — 8417 files
+#     (768, 1040.0) — 10 files
+#     """
 
-    F, H, W = sequence.shape
-    # full scan, new size = [632, 868]
-    if (H, W) == (768, 1024):
-        return sequence[:, 86:-50, 78:-78]
-    # full scan, new size = [490, 680]
-    elif (H, W) == (600, 800):
-        return sequence[:, 70:-40, 60:-60]
-    # scan cropped ~15% on all sides, new size = [344, 452]
-    elif (H, W) == (384, 512):
-        return sequence[:, 20:-20, 30:-30]
-    # scan cropped ~15% on all sides, new size = [267, 356]
-    elif (H, W) == (300, 400):
-        return sequence[:, 18:-15, 22:-22]
-    # full scan, new size = [362, 514]
-    elif (H, W) == (480, 640):
-        return sequence[:, 90:-28, 85:-40]
-    # full scan, new size = [500, 684]
-    elif (H, W) == (576, 1024):
-        return sequence[:, 50:-26, 175:-165]
-    # almost full scan, cropped ~5% at top. new size = [588, 816]
-    elif (H, W) == (708, 1016):
-        return sequence[:, 70:-50, 100:-100]
-    # this one is quite whacky, likely an outlier, new size = [653, 865]
-    elif (H, W) == (768, 1040):
-        return sequence[:, 50:-65, 15:-160]
-    else:
-        raise ValueError(f"Unexpected image shape: {sequence.shape}")
+#     F, H, W = sequence.shape
+#     # full scan, new size = [632, 868]
+#     if (H, W) == (768, 1024):
+#         return sequence[:, 86:-50, 78:-78]
+#     # full scan, new size = [490, 680]
+#     elif (H, W) == (600, 800):
+#         return sequence[:, 70:-40, 60:-60]
+#     # scan cropped ~15% on all sides, new size = [344, 452]
+#     elif (H, W) == (384, 512):
+#         return sequence[:, 20:-20, 30:-30]
+#     # scan cropped ~15% on all sides, new size = [267, 356]
+#     elif (H, W) == (300, 400):
+#         return sequence[:, 18:-15, 22:-22]
+#     # full scan, new size = [362, 514]
+#     elif (H, W) == (480, 640):
+#         return sequence[:, 90:-28, 85:-40]
+#     # full scan, new size = [500, 684]
+#     elif (H, W) == (576, 1024):
+#         return sequence[:, 50:-26, 175:-165]
+#     # almost full scan, cropped ~5% at top. new size = [588, 816]
+#     elif (H, W) == (708, 1016):
+#         return sequence[:, 70:-50, 100:-100]
+#     # this one is quite whacky, likely an outlier, new size = [653, 865]
+#     elif (H, W) == (768, 1040):
+#         return sequence[:, 50:-65, 15:-160]
+#     else:
+#         raise ValueError(f"Unexpected image shape: {sequence.shape}")
 
 
 def adaptive_segment(tensor, number_erasing=0, min_clip=0):
@@ -306,6 +314,14 @@ class LVHProcessor(H5Processor):
         super().__init__(*args, **kwargs)
         self.cart2pol_jit = jit(adaptive_cartesian_to_polar)
         self.cart2pol_batched = vmap(self.cart2pol_jit)
+        # Store cone parameters for each processed file (one per file, not per frame)
+        self.cone_parameters = {}
+
+        # Create JIT-compiled cropping function
+        self.crop_frame_jit = jit(self._crop_single_frame_with_params)
+        self.crop_sequence_jit = jit(
+            vmap(self._crop_single_frame_with_params, in_axes=(0, None))
+        )
 
     def get_split(self, hdf5_file: str, sequence):
         for split, files in self.splits.items():
@@ -313,13 +329,143 @@ class LVHProcessor(H5Processor):
                 return split
         raise UserWarning("Unknown split for file: " + hdf5_file)
 
+    @staticmethod
+    def _crop_single_frame_with_params(frame, cone_params_array):
+        """JAX-optimized function to crop a single frame with cone parameters.
+
+        Args:
+            frame: JAX array of shape (H, W)
+            cone_params_array: JAX array containing [crop_left, crop_right, crop_top, crop_bottom,
+                              apex_x, left_padding, right_padding, top_padding, crop_height, crop_width]
+        """
+        (
+            crop_left,
+            crop_right,
+            crop_top,
+            crop_bottom,
+            apex_x,
+            left_padding,
+            right_padding,
+            top_padding,
+            crop_height,
+            crop_width,
+        ) = cone_params_array
+
+        # Convert to integers
+        crop_left = jnp.int32(crop_left)
+        crop_right = jnp.int32(crop_right)
+        crop_top = jnp.int32(crop_top)
+        crop_bottom = jnp.int32(crop_bottom)
+        left_padding = jnp.int32(left_padding)
+        right_padding = jnp.int32(right_padding)
+        top_padding = jnp.int32(top_padding)
+        crop_height = jnp.int32(crop_height)
+        crop_width = jnp.int32(crop_width)
+
+        # Handle negative crop_top by using max(0, crop_top)
+        actual_crop_top = jnp.maximum(0, crop_top)
+
+        # Use dynamic_slice for JAX-compatible cropping
+        # dynamic_slice expects (start_indices, slice_sizes)
+        start_indices = (actual_crop_top, crop_left)
+        slice_sizes = (crop_height, crop_width)
+        cropped = lax.dynamic_slice(frame, start_indices, slice_sizes)
+
+        # Apply top padding if needed
+        def apply_top_padding(cropped):
+            top_pad = jnp.zeros((top_padding, cropped.shape[1]), dtype=cropped.dtype)
+            return jnp.concatenate([top_pad, cropped], axis=0)
+
+        cropped = lax.cond(top_padding > 0, apply_top_padding, lambda x: x, cropped)
+
+        # Apply horizontal padding if needed
+        def apply_left_padding(cropped):
+            left_pad = jnp.zeros((cropped.shape[0], left_padding), dtype=cropped.dtype)
+            return jnp.concatenate([left_pad, cropped], axis=1)
+
+        def apply_right_padding(cropped):
+            right_pad = jnp.zeros(
+                (cropped.shape[0], right_padding), dtype=cropped.dtype
+            )
+            return jnp.concatenate([cropped, right_pad], axis=1)
+
+        cropped = lax.cond(left_padding > 0, apply_left_padding, lambda x: x, cropped)
+
+        cropped = lax.cond(right_padding > 0, apply_right_padding, lambda x: x, cropped)
+
+        return cropped
+
+    def prepare_cone_params_for_jax(self, cone_params):
+        """Convert cone parameters to JAX-compatible format for GPU processing."""
+        crop_left = cone_params["crop_left"]
+        crop_right = cone_params["crop_right"]
+        crop_top = cone_params["crop_top"]
+        crop_bottom = cone_params["crop_bottom"]
+        apex_x = cone_params["apex_x"]
+
+        # Calculate padding parameters
+        apex_x_in_crop = apex_x - crop_left
+        original_width = crop_right - crop_left
+        target_center_x = original_width / 2
+        left_padding_needed = target_center_x - apex_x_in_crop
+
+        left_padding = max(0, int(left_padding_needed))
+        right_padding = max(0, int(-left_padding_needed))
+        top_padding = max(0, -crop_top) if crop_top < 0 else 0
+
+        # Calculate actual crop dimensions for dynamic_slice
+        crop_height = crop_bottom - max(0, crop_top)
+        crop_width = crop_right - crop_left
+
+        # Return as JAX array for efficient GPU transfer
+        return jnp.array(
+            [
+                crop_left,
+                crop_right,
+                crop_top,
+                crop_bottom,
+                apex_x,
+                left_padding,
+                right_padding,
+                top_padding,
+                crop_height,
+                crop_width,
+            ],
+            dtype=jnp.float32,
+        )
+
+    def crop_sequence_with_cone_params_jax(self, sequence, cone_params):
+        """JAX-optimized version of sequence cropping."""
+        # Prepare cone parameters for JAX
+        cone_params_array = self.prepare_cone_params_for_jax(cone_params)
+
+        # Apply cropping to all frames using vectorized JAX operations
+        cropped_sequence = self.crop_sequence_jit(sequence, cone_params_array)
+
+        return cropped_sequence
+
     def __call__(self, avi_file):
         print(avi_file)
         hdf5_file = avi_file.stem + ".hdf5"
         sequence = jnp.array(load_video(avi_file))
 
         sequence = translate(sequence, self.range_from, self._process_range)
-        sequence = manual_crop(sequence)
+
+        # Fit cone parameters on the first frame only (keep on CPU since it uses OpenCV)
+        try:
+            first_frame_np = np.array(sequence[0])
+            _, cone_params = fit_scan_cone(first_frame_np, return_params=True)
+
+            # Apply the same cropping to all frames using JAX (GPU-optimized)
+            sequence = self.crop_sequence_with_cone_params_jax(sequence, cone_params)
+
+            # Store cone parameters for this file
+            self.cone_parameters[hdf5_file] = cone_params
+
+        except ValueError as e:
+            print(f"Warning: Cone detection failed for {hdf5_file}: {e}")
+            # If cone detection fails, use original sequence
+            self.cone_parameters[hdf5_file] = None
 
         split = self.get_split(hdf5_file, sequence)
         out_h5 = self.path_out_h5 / split / hdf5_file
@@ -335,58 +481,99 @@ class LVHProcessor(H5Processor):
         }
         return generate_usbmd_dataset(**usbmd_dataset)
 
+    def save_cone_parameters(self, output_path):
+        """Save cone parameters to a pickle file for use in measurement coordinate transformation."""
+        cone_params_file = Path(output_path) / "cone_parameters.pkl"
+        with open(cone_params_file, "wb") as f:
+            pickle.dump(self.cone_parameters, f)
+        print(f"Saved cone parameters to {cone_params_file}")
 
-def transform_measurement_coordinates(row):
-    """Transform measurement coordinates according to the cropping scheme.
+
+def transform_measurement_coordinates_with_cone_params(row, cone_params):
+    """Transform measurement coordinates using cone parameters from fit_scan_cone.
 
     Args:
         row: A pandas Series containing measurement data with X1,X2,Y1,Y2 coordinates
+        cone_params: Dictionary containing cone parameters from fit_scan_cone
 
     Returns:
-        A new row with transformed coordinates, or None if shape is unexpected
+        A new row with transformed coordinates, or None if cone_params is None
     """
-    H, W = row["Height"], row["Width"]
-
-    # Define cropping parameters for each image size
-    crop_params = {
-        (768, 1024): {"top": 86, "bottom": 50, "left": 78, "right": 78},
-        (600, 800): {"top": 70, "bottom": 40, "left": 60, "right": 60},
-        (384, 512): {"top": 20, "bottom": 20, "left": 30, "right": 30},
-        (300, 400): {"top": 18, "bottom": 15, "left": 22, "right": 22},
-        (480, 640): {"top": 90, "bottom": 28, "left": 85, "right": 40},
-        (576, 1024): {"top": 50, "bottom": 26, "left": 175, "right": 165},
-        (708, 1016): {"top": 70, "bottom": 50, "left": 100, "right": 100},
-        (768, 1040): {"top": 50, "bottom": 65, "left": 15, "right": 160},
-    }
-
-    # Get cropping parameters for this image size
-    params = crop_params.get((H, W))
-    if params is None:
-        print(
-            f"Warning: Skipping file {row['HashedFileName']} due to unexpected image shape: ({H}, {W})"
-        )
+    if cone_params is None:
+        print(f"Warning: No cone parameters for file {row['HashedFileName']}")
         return None
 
-    # Transform coordinates
     new_row = row.copy()
-    new_row["X1"] = row["X1"] - params["left"]
-    new_row["X2"] = row["X2"] - params["left"]
-    new_row["Y1"] = row["Y1"] - params["top"]
-    new_row["Y2"] = row["Y2"] - params["top"]
+
+    # Apply cropping offset
+    crop_left = cone_params["crop_left"]
+    crop_top = cone_params["crop_top"]
+
+    # Transform coordinates
+    new_row["X1"] = row["X1"] - crop_left
+    new_row["X2"] = row["X2"] - crop_left
+    new_row["Y1"] = row["Y1"] - crop_top
+    new_row["Y2"] = row["Y2"] - crop_top
+
+    # Apply horizontal centering offset
+    apex_x_in_crop = cone_params["apex_x"] - crop_left
+    original_width = cone_params["crop_right"] - cone_params["crop_left"]
+    target_center_x = original_width / 2
+    left_padding_needed = target_center_x - apex_x_in_crop
+    left_padding = max(0, int(left_padding_needed))
+
+    # Adjust x coordinates for horizontal padding
+    new_row["X1"] = new_row["X1"] + left_padding
+    new_row["X2"] = new_row["X2"] + left_padding
+
+    # Apply top padding offset if crop_top was negative
+    if cone_params["crop_top"] < 0:
+        top_padding = -cone_params["crop_top"]
+        new_row["Y1"] = new_row["Y1"] + top_padding
+        new_row["Y2"] = new_row["Y2"] + top_padding
+
+    # Check if coordinates are within the final image bounds
+    final_width = cone_params["new_width"]
+    final_height = cone_params["new_height"]
+
+    if (
+        new_row["X1"] < 0
+        or new_row["X2"] < 0
+        or new_row["Y1"] < 0
+        or new_row["Y2"] < 0
+        or new_row["X1"] >= final_width
+        or new_row["X2"] >= final_width
+        or new_row["Y1"] >= final_height
+        or new_row["Y2"] >= final_height
+    ):
+        print(
+            f"Warning: Transformed coordinates out of bounds for file {row['HashedFileName']}"
+        )
 
     return new_row
 
 
-def convert_measurements_csv(source_csv, output_csv):
-    """Convert measurements CSV file with updated coordinates.
+def convert_measurements_csv(source_csv, output_csv, cone_params_file=None):
+    """Convert measurements CSV file with updated coordinates using cone parameters.
 
     Args:
         source_csv: Path to source CSV file
         output_csv: Path to output CSV file
+        cone_params_file: Path to pickle file with cone parameters
     """
     try:
         # Read the CSV file
         df = pd.read_csv(source_csv)
+
+        # Load cone parameters if available
+        cone_parameters = {}
+        if cone_params_file and Path(cone_params_file).exists():
+            with open(cone_params_file, "rb") as f:
+                cone_parameters = pickle.load(f)
+        else:
+            print(
+                "Warning: No cone parameters file found. Measurements will not be transformed."
+            )
 
         # Apply coordinate transformation and track skipped rows
         transformed_rows = []
@@ -394,7 +581,14 @@ def convert_measurements_csv(source_csv, output_csv):
 
         for _, row in df.iterrows():
             try:
-                transformed_row = transform_measurement_coordinates(row)
+                hdf5_file = row["HashedFileName"] + ".hdf5"
+
+                # Get cone parameters for this file (no longer need frame-specific params)
+                cone_params = cone_parameters.get(hdf5_file, None)
+
+                transformed_row = transform_measurement_coordinates_with_cone_params(
+                    row, cone_params
+                )
                 if transformed_row is not None:
                     transformed_rows.append(transformed_row)
                 else:
@@ -435,16 +629,6 @@ if __name__ == "__main__":
         args.convert_measurements = True
         args.convert_images = True
 
-    # Convert measurements if requested
-    if args.convert_measurements:
-        source_path = Path(args.source)
-        measurements_csv = source_path / "MeasurementsList.csv"
-        if measurements_csv.exists():
-            output_csv = Path(args.output) / "MeasurementsList.csv"
-            convert_measurements_csv(measurements_csv, output_csv)
-        else:
-            print("Warning: MeasurementsList.csv not found in source directory")
-
     # Convert images if requested
     if args.convert_images:
         source_path = Path(args.source)
@@ -471,6 +655,11 @@ if __name__ == "__main__":
 
         # Filter out already processed files
         files_to_process = [f for f in files_to_process if f.stem not in files_done]
+
+        # Limit files if max_files is specified
+        if args.max_files is not None:
+            files_to_process = files_to_process[: args.max_files]
+
         print(f"Files left to process: {len(files_to_process)}")
 
         # Initialize processor with splits
@@ -493,4 +682,20 @@ if __name__ == "__main__":
             for file in tqdm(files_to_process):
                 processor(file)
 
-        print("All tasks are completed.")
+        # Save cone parameters for measurement coordinate transformation
+        processor.save_cone_parameters(args.output)
+
+        print("All image conversion tasks are completed.")
+
+    # Convert measurements if requested (must be done after images to use cone parameters)
+    if args.convert_measurements:
+        source_path = Path(args.source)
+        measurements_csv = source_path / "MeasurementsList.csv"
+        if measurements_csv.exists():
+            output_csv = Path(args.output) / "MeasurementsList.csv"
+            cone_params_file = Path(args.output) / "cone_parameters.pkl"
+            convert_measurements_csv(measurements_csv, output_csv, cone_params_file)
+        else:
+            print("Warning: MeasurementsList.csv not found in source directory")
+
+    print("All tasks are completed.")
