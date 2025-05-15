@@ -12,7 +12,9 @@ from usbmd.utils.utils import map_negative_indices
 # pylint: disable=arguments-differ
 
 
-class Pad(usbmd.ops.Pad, TFDataLayer):
+class Pad(usbmd.ops.Pad):
+    """Pad layer for padding tensors to a specified shape which can be used in tf.data pipelines."""
+
     __call__ = TFDataLayer.__call__
 
     def call(self, inputs):
@@ -25,7 +27,7 @@ class Pad(usbmd.ops.Pad, TFDataLayer):
 class Resizer(TFDataLayer):
     """
     Resize layer for resizing images. Can deal with N-dimensional images.
-    Can do resize, center_crop and random_crop.
+    Can do resize, center_crop, random_crop and crop_or_pad.
 
     Can be used in tf.data pipelines.
     """
