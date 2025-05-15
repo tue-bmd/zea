@@ -71,6 +71,7 @@ import numpy as np
 import scipy
 import yaml
 from keras import ops
+from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
 from usbmd.backend import jit
 from usbmd.beamformer import tof_correction
@@ -1992,7 +1993,7 @@ class Clip(Operation):
 
 
 @ops_registry("pad")
-class Pad(Operation):
+class Pad(Operation, TFDataLayer):
     """Pad layer for padding tensors to a specified shape."""
 
     def __init__(
