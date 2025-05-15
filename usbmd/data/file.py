@@ -38,10 +38,6 @@ class File(h5py.File):
             kwargs["locking"] = False
         super().__init__(*args, **kwargs)
 
-    def print(self):
-        """Print the contents of the file."""
-        print_hdf5_attrs(self)
-
     @property
     def path(self):
         """Return the path of the file."""
@@ -416,6 +412,19 @@ class File(h5py.File):
             dict: A dictionary with the validation results.
         """
         return validate_file(file=self)
+
+    def __repr__(self):
+        return (
+            f"<usbmd.data.file.File at 0x{id(self):x} "
+            f'("{Path(self.filename).name}" mode={self.mode})>'
+        )
+
+    def __str__(self):
+        return f"usbmd HDF5 File: '{self.path.name}' (mode={self.mode})"
+
+    def summary(self):
+        """Print the contents of the file."""
+        print_hdf5_attrs(self)
 
 
 def load_usbmd_file(
