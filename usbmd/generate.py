@@ -104,7 +104,7 @@ class GenerateDataSet:
 
     def prepare_parameters(self, file: File):
         """Prepare parameters for processing based on the file and config."""
-        scan = Scan.merge(file.get_scan_parameters(), self.config.scan)
+        scan = file.scan(**self.config.scan)
         probe = file.probe()
         parameters = self.process.prepare_parameters(probe, scan, self.config)
         return parameters
