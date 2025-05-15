@@ -41,6 +41,7 @@ class GenerateDataSet:
         overwrite: bool = False,
         verbose: bool = True,
         jit_options: Union[None, dict] = "ops",
+        **kwargs,
     ):
         """
         Args:
@@ -76,7 +77,7 @@ class GenerateDataSet:
         self.verbose = verbose
 
         # intialize dataset
-        self.dataset = Dataset.from_config(**self.config.data)
+        self.dataset = Dataset.from_config(**self.config.data, **kwargs)
         self.path = format_data_path(
             self.config.data.dataset_folder, self.config.data.user
         )
