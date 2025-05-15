@@ -1,8 +1,18 @@
-""" This file contains fixtures that are used by all tests in the tests directory. """
+"""This file contains fixtures that are used by all tests in the tests directory."""
 
+import matplotlib.pyplot as plt
 import pytest
 
-from . import backend_workers
+from usbmd.data.data_format import generate_example_dataset
+
+from . import (
+    DUMMY_DATASET_N_FRAMES,
+    DUMMY_DATASET_N_X,
+    DUMMY_DATASET_N_Z,
+    backend_workers,
+)
+
+plt.rcParams["backend"] = "agg"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -11,3 +21,19 @@ def run_once_after_all_tests():
     yield
     print("Stopping workers")
     backend_workers.stop_workers()
+
+
+@pytest.fixture
+def dummy_dataset_path(tmp_path):
+    """Fixture to create a temporary dataset"""
+    for i in range(2):
+        temp_file = tmp_path / f"test{i}.hdf5"
+        generate_example_dataset(
+            temp_file,
+            add_optional_dtypes=True,
+            n_frames=DUMMY_DATASET_N_FRAMES,
+            n_z=DUMMY_DATASET_N_Z,
+            n_x=DUMMY_DATASET_N_X,
+        )
+
+    yield str(tmp_path)
