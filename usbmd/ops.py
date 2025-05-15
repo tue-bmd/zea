@@ -1778,7 +1778,7 @@ class ScanConvert(Operation):
                 "You can set ScanConvert(jit_compile=False) to disable jitting."
             )
 
-        data_out = scan_convert(
+        data_out, parameters = scan_convert(
             data,
             rho_range,
             theta_range,
@@ -1790,7 +1790,7 @@ class ScanConvert(Operation):
             with_batch_dim=self.with_batch_dim,
         )
 
-        return {self.output_key: data_out}
+        return {self.output_key: data_out, **parameters}
 
 
 @ops_registry("gaussian_blur")
