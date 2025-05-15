@@ -13,12 +13,11 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
+from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.agent.selection import EquispacedLines
-from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
 from usbmd.models.diffusion import DiffusionModel
 from usbmd.models.echonet import INFERENCE_SIZE
-from usbmd.ops_v2 import Pipeline, ScanConvert
+from usbmd.ops import Pipeline, ScanConvert
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
@@ -30,7 +29,7 @@ if __name__ == "__main__":
 
     ## Dataset
     n_imgs = 8
-    val_dataset = h5_dataset_from_directory(
+    val_dataset = make_dataloader(
         data_paths.data_root / "USBMD_datasets/echonet/val",
         key="data/image",
         batch_size=n_imgs,
@@ -39,6 +38,7 @@ if __name__ == "__main__":
         resize_type="resize",
         image_range=[-60, 0],
         normalization_range=[-1, 1],
+        assert_image_range=False,
         seed=42,
     )
     batch = next(iter(val_dataset))
