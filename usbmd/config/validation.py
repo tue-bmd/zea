@@ -74,6 +74,11 @@ pipeline_schema = Schema(
         Optional("operations", default=["identity"]): Or(
             None, [Or(str, {"name": str, "params": dict}, {"name": str})]
         ),
+        Optional("with_batch_dim", default=True): bool,
+        Optional("jit_options", default="ops"): Or(None, "ops", "pipeline"),
+        Optional("jit_kwargs", default=None): Or(None, dict),
+        Optional("name", default="pipeline"): str,
+        Optional("validate", default=True): bool,
     }
 )
 
@@ -170,7 +175,6 @@ data_schema = Schema(
     {
         "dtype": Or(*_DATA_TYPES),
         "dataset_folder": str,
-        Optional("dataset_name", default="usbmd"): str,
         Optional("resolution", default=None): Or(None, positive_float),
         Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
         Optional("file_path", default=None): Or(None, str, Path),
