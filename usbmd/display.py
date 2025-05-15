@@ -33,9 +33,9 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
     if dynamic_range is None:
         dynamic_range = (-60, 0)
 
-    image = ops.clip(image, *dynamic_range)
-    image = translate(image, dynamic_range, (0, 255))
     image = ops.convert_to_numpy(image)
+    image = np.clip(image, *dynamic_range)
+    image = translate(image, dynamic_range, (0, 255))
     image = image.astype(np.uint8)
     if pillow:
         image = Image.fromarray(image)
@@ -363,11 +363,15 @@ def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value
         return ops.convert_to_tensor(out)
     else:
         return ops.image.map_coordinates(
-            inputs, coordinates, order=order, fill_mode=fill_mode, fill_value=fill_value
+            inputs,
+            coordinates,
+            order=order,
+            fill_mode=fill_mode,
+            fill_value=fill_value,
         )
 
 
-def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
+def _interpolate_batch(images, coordinates, fill_value=0.0, order=1, vectorize=True):
     """Interpolate a batch of images."""
     image_shape = images.shape
     num_image_dims = coordinates.shape[0]
@@ -387,6 +391,8 @@ def _interpolate_batch(images, coordinates, fill_value=0.0, order=1):
     if order > 1:
         # cpu bound
         images_sc = ops.stack(list(map(map_coordinates_fn, images)))
+    elif not vectorize:
+        images_sc = ops.map(map_coordinates_fn, images)
     else:
         # gpu bound
         images_sc = ops.vectorized_map(map_coordinates_fn, images)
