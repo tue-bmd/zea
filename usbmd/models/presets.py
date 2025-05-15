@@ -84,3 +84,17 @@ diffusion_model_presets = {
         "hf_handle": "hf://usbmd/diffusion-echonet-dynamic",
     },
 }
+
+carotid_segmenter_presets = {
+    "carotid-segmenter": {
+        "metadata": {
+            "description": (
+                "Carotid segmentation model based on U-Net architecture. "
+                "Trained on labeled simulated data and unlabeled invivo data."
+            ),
+            "params": 848461,
+            "path": "carotid_segmenter",
+        },
+        "hf_handle": "hf://usbmd/carotid-segmenter",
+    },
+}
