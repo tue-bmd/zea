@@ -64,7 +64,7 @@ class File(h5py.File):
         # return self.attrs.get("event_structure", False)
 
     @property
-    def num_frames(self):
+    def n_frames(self):
         """Return number of frames in a file."""
 
         if "scan" in self.file:
@@ -179,7 +179,7 @@ class File(h5py.File):
 
     def to_iterator(self, key):
         """Convert the data to an iterator over all frames."""
-        for frame_idx in range(self.num_frames):
+        for frame_idx in range(self.n_frames):
             yield self.load_data(key, frame_idx)
 
     @staticmethod
