@@ -403,7 +403,7 @@ class Pipeline:
                 return True
 
     @classmethod
-    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
+    def from_default(cls, num_patches=20, pfield=True, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
         operations = []
 
@@ -413,9 +413,10 @@ class Pipeline:
         # Get beamforming ops
         beamforming = [
             TOFCorrection(apply_phase_rotation=True),
-            PfieldWeighting(),
             DelayAndSum(),
         ]
+        if pfield:
+            beamforming.insert(1, PfieldWeighting())
 
         # Optionally add patching
         if num_patches > 1:
@@ -853,8 +854,11 @@ class Pipeline:
         tensor_kwargs = {}
         for key, value in kwargs.items():
             try:
+                # TODO: maybe some logic of convert_to_tensor is needed
                 if isinstance(value, USBMDObject):
                     tensor_kwargs[key] = value.to_tensor()
+                elif value is None:
+                    tensor_kwargs[key] = None
                 else:
                     tensor_kwargs[key] = ops.convert_to_tensor(value)
             except Exception as e:
@@ -1256,6 +1260,20 @@ class Mean(Operation):
             kwargs[key] = ops.mean(kwargs[key], axis=axis)
 
         return kwargs
+
+
+@ops_registry("transpose")
+class Transpose(Operation):
+    """Transpose the input data along the specified axes."""
+
+    def __init__(self, axes, **kwargs):
+        super().__init__(**kwargs)
+        self.axes = axes
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        transposed_data = ops.transpose(data, axes=self.axes)
+        return {self.output_key: transposed_data}
 
 
 @ops_registry("simulate_rf")
@@ -1661,6 +1679,8 @@ class Normalize(Operation):
 
     def __init__(self, output_range=None, input_range=None, **kwargs):
         super().__init__(**kwargs)
+        if output_range is None:
+            output_range = (0, 1)
         self.output_range = self.to_float32(output_range)
         self.input_range = self.to_float32(input_range)
         assert output_range is None or len(output_range) == 2
@@ -1689,32 +1709,36 @@ class Normalize(Operation):
         """
         data = kwargs[self.key]
 
-        output_range = _set_if_none(self.output_range, default=(0, 1))
-        input_range = _set_if_none(self.input_range, default=(None, None))
+        # If input_range is not provided, try to get it from kwargs
+        # This allows you to normalize based on the first frame in a sequence:
+        # Example: https://github.com/tue-bmd/ultrasound-toolbox/pull/662
+        if self.input_range is None:
+            maxval = kwargs.get("maxval", None)
+            minval = kwargs.get("minval", None)
+        # If input_range is provided, use it
+        else:
+            minval, maxval = self.input_range
 
-        a_min, a_max = input_range
-        if a_min is None:
-            a_min = ops.min(data)
-        if a_max is None:
-            a_max = ops.max(data)
-        data = ops.clip(data, a_min, a_max)
-        input_range = (a_min, a_max)
+        # If input_range is still not provided, compute it from the data
+        if minval is None:
+            minval = ops.min(data)
+        if maxval is None:
+            maxval = ops.max(data)
+
+        # Clip the data to the input range
+        data = ops.clip(data, minval, maxval)
 
         # Map the data to the output range
-        normalized_data = translate(data, input_range, output_range)
+        normalized_data = translate(data, (minval, maxval), self.output_range)
 
-        return {self.output_key: normalized_data}
-
-
-def _set_if_none(variable, default):
-    if variable is not None:
-        return variable
-    return default
+        return {self.output_key: normalized_data, "minval": minval, "maxval": maxval}
 
 
 @ops_registry("scan_convert")
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
+
+    STATIC_PARAMS = ["fill_value"]
 
     def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
@@ -1778,7 +1802,7 @@ class ScanConvert(Operation):
                 "You can set ScanConvert(jit_compile=False) to disable jitting."
             )
 
-        data_out = scan_convert(
+        data_out, parameters = scan_convert(
             data,
             rho_range,
             theta_range,
@@ -1790,7 +1814,7 @@ class ScanConvert(Operation):
             with_batch_dim=self.with_batch_dim,
         )
 
-        return {self.output_key: data_out}
+        return {self.output_key: data_out, **parameters}
 
 
 @ops_registry("gaussian_blur")

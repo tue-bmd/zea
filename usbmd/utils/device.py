@@ -296,7 +296,7 @@ def backend_cuda_available(backend):
             import tensorflow as tf  # pylint: disable=import-outside-toplevel
         except:
             return False
-        return tf.test.is_gpu_available()
+        return bool(tf.config.list_physical_devices("GPU"))
     if backend == "jax":
         try:
             import jax  # pylint: disable=import-outside-toplevel
