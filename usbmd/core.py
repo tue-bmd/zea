@@ -8,6 +8,8 @@ from copy import deepcopy
 import keras
 import numpy as np
 
+from usbmd.utils.utils import reduce_to_signature, update_dictionary
+
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_PRECISION = "float32"
 
@@ -20,6 +22,7 @@ STATIC = [
     "apply_phase_rotation",
     "Nx",
     "Nz",
+    "fill_value",
 ]
 
 
@@ -124,6 +127,21 @@ class Object:
         return object_to_tensor(self, except_tensors)
 
     @classmethod
+    def safe_initialize(cls, **kwargs):
+        """Safely initialize a class by removing any invalid arguments."""
+        # NOTE: we have the usbmd.utils.safe_initialize_class function, but do not use that here
+        # as pylint will not be able to detect the class type
+        reduced_params = reduce_to_signature(cls.__init__, kwargs)
+        return cls(**reduced_params)
+
+    @classmethod
+    def merge(cls, obj1: dict, obj2: dict):
+        """Merge multiple objects and safely initialize a new object."""
+        # TODO: support actual usbmd.core.Objects, now we only support dictionaries
+        params = update_dictionary(obj1, obj2)
+        return cls.safe_initialize(**params)
+
+    @classmethod
     def _tree_unflatten(cls, aux, children):  # pylint: disable=unused-argument
         if cls is not Object:
             raise NotImplementedError(f"{cls.__name__} must implement _tree_unflatten.")
@@ -182,6 +200,9 @@ def object_to_tensor(obj: Object, except_tensors=None):
             value = getattr(obj, key)
         except ValueError:
             continue
+
+        if value is None:
+            snapshot[key] = None
 
         if callable(value):
             continue
