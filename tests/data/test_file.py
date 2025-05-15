@@ -84,7 +84,7 @@ def test_print_hdf5_attrs(complex_h5_file, capsys):
     """Test printing HDF5 attributes."""
 
     with File(complex_h5_file) as file:
-        file.print()
+        file.summary()
 
     captured = capsys.readouterr()
     assert "dummy_attr" in captured.out
