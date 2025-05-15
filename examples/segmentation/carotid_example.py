@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from keras import ops
 
 from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
+from usbmd.backend.tensorflow.dataloader import make_dataloader
 from usbmd.models.carotid_segmenter import CarotidSegmenter
 from usbmd.utils.selection_tool import add_shape_from_mask
 from usbmd.utils.visualize import plot_image_grid, set_mpl_style
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     model = CarotidSegmenter.from_preset("carotid-segmenter")
 
     n_imgs = 4
-    val_dataset = h5_dataset_from_directory(
+    val_dataset = make_dataloader(
         data_paths.data_root / "USBMD_datasets/2023_USBMD_carotid/HDF5",
         key="data/image",
         batch_size=n_imgs,
