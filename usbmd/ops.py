@@ -406,7 +406,7 @@ class Pipeline:
                 return True
 
     @classmethod
-    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
+    def from_default(cls, num_patches=20, pfield=True, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
         operations = []
 
@@ -416,9 +416,10 @@ class Pipeline:
         # Get beamforming ops
         beamforming = [
             TOFCorrection(apply_phase_rotation=True),
-            PfieldWeighting(),
             DelayAndSum(),
         ]
+        if pfield:
+            beamforming.insert(1, PfieldWeighting())
 
         # Optionally add patching
         if num_patches > 1:
@@ -856,8 +857,11 @@ class Pipeline:
         tensor_kwargs = {}
         for key, value in kwargs.items():
             try:
+                # TODO: maybe some logic of convert_to_tensor is needed
                 if isinstance(value, USBMDObject):
                     tensor_kwargs[key] = value.to_tensor()
+                elif value is None:
+                    tensor_kwargs[key] = None
                 else:
                     tensor_kwargs[key] = ops.convert_to_tensor(value)
             except Exception as e:
@@ -1259,6 +1263,20 @@ class Mean(Operation):
             kwargs[key] = ops.mean(kwargs[key], axis=axis)
 
         return kwargs
+
+
+@ops_registry("transpose")
+class Transpose(Operation):
+    """Transpose the input data along the specified axes."""
+
+    def __init__(self, axes, **kwargs):
+        super().__init__(**kwargs)
+        self.axes = axes
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        transposed_data = ops.transpose(data, axes=self.axes)
+        return {self.output_key: transposed_data}
 
 
 @ops_registry("simulate_rf")
@@ -1718,6 +1736,8 @@ def _set_if_none(variable, default):
 @ops_registry("scan_convert")
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
+
+    STATIC_PARAMS = ["fill_value"]
 
     def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.

@@ -131,7 +131,7 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
 
     Returns:
         grid (np.ndarray): Pixel grid of size (nr, nrays, 3) in
-            Cartesian coordinates (x, y, z)
+            Cartesian coordinates (x, y, z), with nr being the number of radial pixels.
     """
     # Get focusing positions in rho-theta coordinates
     r = np.arange(rlims[0], rlims[1] + eps, dr)  # Depth rho
