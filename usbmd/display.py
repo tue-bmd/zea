@@ -64,9 +64,10 @@ def compute_scan_convert_2d_coordinates(
     x_lim = [ops.min(x_grid), ops.max(x_grid)]
     z_lim = [ops.min(z_grid), ops.max(z_grid)]
 
+    d_rho = rho[1] - rho[0]
+    d_theta = theta[1] - theta[0]
+
     if resolution is None:
-        d_rho = rho[1] - rho[0]
-        d_theta = theta[1] - theta[0]
         # arc length along constant phi at 1/4 depth
         sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
         # average of arc lengths and radial step
@@ -192,11 +193,11 @@ def compute_scan_convert_3d_coordinates(
     y_lim = [ops.min(y_grid), ops.max(y_grid)]
     z_lim = [ops.min(z_grid), ops.max(z_grid)]
 
-    if resolution is None:
-        d_rho = rho[1] - rho[0]
-        d_theta = theta[1] - theta[0]
-        d_phi = phi[1] - phi[0]
+    d_rho = rho[1] - rho[0]
+    d_theta = theta[1] - theta[0]
+    d_phi = phi[1] - phi[0]
 
+    if resolution is None:
         # arc length along constant phi at 1/4 depth
         sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
         # arc length along constant theta at 1/4 depth
