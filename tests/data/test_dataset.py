@@ -101,6 +101,7 @@ def test_generate(dtype, to_dtype, filetype, tmp_path, dummy_dataset_path):
         filetype=filetype,
         overwrite=True,
         verbose=False,
+        search_file_tree_kwargs={"parallel": False, "verbose": False},
         # jit_options=None, # uncomment for debugging
     )
     generator.generate()
