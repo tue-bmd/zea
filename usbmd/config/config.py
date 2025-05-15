@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from usbmd.core import object_to_tensor
-from usbmd.utils import log
+from usbmd import log
 
 
 def path_to_str(path):

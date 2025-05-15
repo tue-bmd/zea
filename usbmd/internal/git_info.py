@@ -9,7 +9,7 @@ Data          : January 27th, 2023
 import subprocess
 import sys
 
-from usbmd.utils import log
+from usbmd import log
 
 
 def get_git_commit_hash():

@@ -14,14 +14,14 @@ import tqdm
 
 from usbmd.data.file import File, validate_file
 from usbmd.datapaths import format_data_path
+from usbmd import log
 from usbmd.utils import (
     calculate_file_hash,
     date_string_to_readable,
     get_date_string,
-    log,
 )
-from usbmd.utils.io_lib import search_file_tree
-from usbmd.utils.utils import reduce_to_signature
+from usbmd.internal.io_lib import search_file_tree
+from usbmd.utils import reduce_to_signature
 
 _CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"

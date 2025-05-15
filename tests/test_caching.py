@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from usbmd.core import Object
-from usbmd.utils.cache import (
+from usbmd.internal.cache import (
     _CACHE_DIR,
     cache_output,
     cache_summary,

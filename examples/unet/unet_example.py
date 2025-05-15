@@ -17,7 +17,7 @@ from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.agent.masks import random_uniform_lines
 from usbmd.models.lpips import LPIPS
 from usbmd.models.unet import UNet
-from usbmd.utils.visualize import plot_image_grid, set_mpl_style
+from usbmd.visualize import plot_image_grid, set_mpl_style
 
 
 def plot_unet_example(

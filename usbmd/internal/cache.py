@@ -33,7 +33,7 @@ from pathlib import Path
 import joblib
 import keras
 
-from usbmd.utils import log
+from usbmd import log
 
 # Default cache directory
 _CACHE_DIR = Path.home() / ".usbmd_cache"

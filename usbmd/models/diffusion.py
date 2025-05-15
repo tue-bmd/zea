@@ -24,7 +24,7 @@ from usbmd.registry import (
     operator_registry,
 )
 from usbmd.tensor_ops import L2, fori_loop, split_seed
-from usbmd.utils.operators import Operator
+from usbmd.internal.operators import Operator
 
 
 @model_registry(name="diffusion")

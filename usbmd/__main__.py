@@ -15,6 +15,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
+from usbmd import log
+
 
 def get_args():
     """Command line argument parser"""
@@ -70,10 +72,10 @@ def main():
     from usbmd.generate import GenerateDataSet
     from usbmd.interface import Interface
     from usbmd.setup_usbmd import setup
-    from usbmd.utils import keep_trying, log, strtobool
-    from usbmd.utils.checks import _DATA_TYPES
+    from usbmd.utils import keep_trying, strtobool
+    from usbmd.internal.checks import _DATA_TYPES
     from usbmd.utils.gui import USBMDApp
-    from usbmd.utils.io_lib import start_async_app
+    from usbmd.internal.io_lib import start_async_app
 
     config = setup(args.config)
 

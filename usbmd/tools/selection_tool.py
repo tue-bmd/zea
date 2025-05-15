@@ -22,8 +22,9 @@ from scipy.interpolate import interp1d
 from skimage import measure
 from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
-from usbmd.utils import log, translate
-from usbmd.utils.io_lib import (
+from usbmd import log
+from usbmd.utils import translate
+from usbmd.internal.io_lib import (
     _SUPPORTED_VID_TYPES,
     filename_from_window_dialog,
     get_matplotlib_figure_props,
@@ -31,7 +32,7 @@ from usbmd.utils.io_lib import (
     load_video,
     move_matplotlib_figure,
 )
-from usbmd.utils.metrics import get_metric
+from usbmd.metrics import get_metric
 
 
 def crop_array(array, value=None):
