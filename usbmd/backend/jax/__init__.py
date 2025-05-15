@@ -7,7 +7,6 @@ Initialize modules for registries.
 """
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 
 
@@ -52,6 +51,7 @@ def on_device_jax(func, inputs, device, return_numpy=False, **kwargs):
         device_type, device_number = device
         device_number = int(device_number)
     else:
+        # if no device number is specified, use the first device
         device_type = device[0]
         device_number = 0
 
@@ -63,10 +63,8 @@ def on_device_jax(func, inputs, device, return_numpy=False, **kwargs):
 
     jax_device = jax.devices(device_type)[device_number]
 
-    inputs = jnp.array(inputs)
-    inputs = jax.device_put(inputs, jax_device)
-
-    outputs = func(inputs, **kwargs)
+    with jax.default_device(jax_device):
+        outputs = func(inputs, **kwargs)
 
     if isinstance(outputs, dict):
         outputs = list(outputs.values())[0]

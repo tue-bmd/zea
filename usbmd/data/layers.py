@@ -154,42 +154,47 @@ class Resizer(TFDataLayer):
         """
         # pylint enable=line-too-long
         super().__init__()
+
+        assert (
+            isinstance(image_size, (tuple, list, np.ndarray)) and len(image_size) == 2
+        ), f"image_size must be of length 2, got: {image_size}"
+        assert isinstance(
+            resize_type, str
+        ), f"resize_type must be a string, got: {resize_type}"
+
         self.image_size = image_size
 
-        if image_size is not None:
-            if resize_type == "resize":
-                self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
-            elif resize_type == "center_crop":
-                self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
-            elif resize_type == "random_crop":
-                self.resizer = keras.layers.RandomCrop(
-                    *image_size, seed=seed, **resize_kwargs
-                )
-            elif resize_type == "crop_or_pad":
-                pad_kwargs = {}
-                if "constant_values" in resize_kwargs:
-                    pad_kwargs["constant_values"] = resize_kwargs.pop("constant_values")
-                if "mode" in resize_kwargs:
-                    pad_kwargs["mode"] = resize_kwargs.pop("mode")
-                self.resizer = keras.layers.Pipeline(
-                    [
-                        Pad(
-                            image_size,
-                            axis=(-3, -2),
-                            uniform=True,
-                            fail_on_bigger_shape=False,
-                            **pad_kwargs,
-                        ),
-                        keras.layers.CenterCrop(*image_size, **resize_kwargs),
-                    ]
-                )
-            else:
-                raise ValueError(
-                    f"Unsupported resize type: {resize_type}. "
-                    "Supported types are 'center_crop', 'random_crop', 'resize'."
-                )
+        if resize_type == "resize":
+            self.resizer = keras.layers.Resizing(*image_size, **resize_kwargs)
+        elif resize_type == "center_crop":
+            self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
+        elif resize_type == "random_crop":
+            self.resizer = keras.layers.RandomCrop(
+                *image_size, seed=seed, **resize_kwargs
+            )
+        elif resize_type == "crop_or_pad":
+            pad_kwargs = {}
+            if "constant_values" in resize_kwargs:
+                pad_kwargs["constant_values"] = resize_kwargs.pop("constant_values")
+            if "mode" in resize_kwargs:
+                pad_kwargs["mode"] = resize_kwargs.pop("mode")
+            self.resizer = keras.layers.Pipeline(
+                [
+                    Pad(
+                        image_size,
+                        axis=(-3, -2),
+                        uniform=True,
+                        fail_on_bigger_shape=False,
+                        **pad_kwargs,
+                    ),
+                    keras.layers.CenterCrop(*image_size, **resize_kwargs),
+                ]
+            )
         else:
-            self.resizer = None
+            raise ValueError(
+                f"Unsupported resize type: {resize_type}. "
+                "Supported types are 'center_crop', 'random_crop', 'resize'."
+            )
 
         self.resize_axes = resize_axes
         if resize_axes is not None:
@@ -236,9 +241,6 @@ class Resizer(TFDataLayer):
         """
         Resize the input tensor.
         """
-        if self.resizer is None:
-            return inputs
-
         ndim = self.backend.numpy.ndim(inputs)
 
         if self.resize_axes is None:

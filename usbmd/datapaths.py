@@ -541,5 +541,18 @@ def create_new_user(user_config_path: str = None, local: bool = None):
     return data_paths
 
 
+def format_data_path(path, user):
+    """If the path is not absolute, prepend the data_root to it."""
+    path = Path(path)
+    if path.is_absolute():
+        return path
+    else:
+        assert user is not None, (
+            "The dataset folder is absolute, but no user is provided. "
+            "Please provide a user to load the dataset."
+        )
+    return Path(user.data_root) / path
+
+
 if __name__ == "__main__":
     create_new_user("users.yaml", local=None)
