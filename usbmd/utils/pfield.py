@@ -37,13 +37,14 @@ def compute_pfield(
             Default is 10. Higher is faster but less accurate.
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
-        alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Default is 1.
-        perc (int, optional): minium percentile threshold to keep in the weighting
+        alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
+            Default is 1.
+        perc (int, optional): minimum percentile threshold to keep in the weighting
             Higher is more aggressive) Default is 10.
         norm (bool, optional): per pixel normalization (True) or unnormalized (False)
 
     Returns:
-        ops.array: The normalized pressure field (across tx events).
+        ops.array: The normalized pressure field (across tx events) of shape (n_tx, Nz, Nx).
     """
     # medium params
     alpha_dB = 0  # currently we ignore attenuation in the compounding
@@ -87,6 +88,7 @@ def compute_pfield(
 
     siz_orig = ops.shape(x_orig)
 
+    # Nearest-neighbor downsampling the grid
     x = x_orig[::downsample, ::downsample]
     z = z_orig[::downsample, ::downsample]
     siz0 = ops.shape(x)
@@ -285,7 +287,8 @@ def normalize(P_arr, alpha=1, perc=10):
 
     Args:
         P_arr (array): Sequence of intensity arrays.
-        alpha (float, optional): Shape factor to tighten the beams. Default is 1.
+        alpha (float, optional): Shape factor to tighten the beams. Higher is sharper.
+            Default is 1.
         perc (int, optional): Percentile to keep. Default is 10.
 
     Returns:

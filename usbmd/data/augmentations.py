@@ -206,18 +206,30 @@ class RandomCircleInclusion(layers.Layer):
         seed = seed if seed is not None else self.seed
 
         if self.with_batch_dim:
-            batch_size = ops.shape(x)[0]
-
-            if self.randomize_location_across_batch:
-                seeds = split_seed(seed, batch_size)
-                if all(seed is seeds[0] for seed in seeds):
-                    imgs, centers = ops.map(lambda arg: self._call(arg, seeds[0]), x)
+            x_is_symbolic_tensor = not isinstance(ops.shape(x)[0], int)
+            if x_is_symbolic_tensor:
+                if self.randomize_location_across_batch:
+                    imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
                 else:
-                    imgs, centers = ops.map(
-                        lambda args: self._call(args[0], args[1]), (x, seeds)
+                    raise NotImplementedError(
+                        "You cannot fix circle locations across while using"
+                        + "RandomCircleInclusion as a dataset augmentation, "
+                        + "since samples in a batch are handled independently."
                     )
             else:
-                imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
+                if self.randomize_location_across_batch:
+                    batch_size = ops.shape(x)[0]
+                    seeds = split_seed(seed, batch_size)
+                    if all(seed is seeds[0] for seed in seeds):
+                        imgs, centers = ops.map(
+                            lambda arg: self._call(arg, seeds[0]), x
+                        )
+                    else:
+                        imgs, centers = ops.map(
+                            lambda args: self._call(args[0], args[1]), (x, seeds)
+                        )
+                else:
+                    imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
         else:
             imgs, centers = self._call(x, seed)
 
