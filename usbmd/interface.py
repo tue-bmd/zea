@@ -204,12 +204,12 @@ class Interface:
         if self.frame_no == "all":
             log.info("Will run all frames as `all` was chosen in config...")
         elif self.frame_no is None:
-            if self.file.num_frames == 1:
+            if self.file.n_frames == 1:
                 self.frame_no = 0
             else:
                 self.frame_no = keep_trying(
                     lambda: int(
-                        input(f">> Frame number (0 / {self.file.num_frames - 1}): ")
+                        input(f">> Frame number (0 / {self.file.n_frames - 1}): ")
                     )
                 )
 
@@ -384,7 +384,7 @@ class Interface:
         # Load correct number of frames (needs to get_data first)
         self.frame_no = 0
         self.get_data()
-        n_frames = self.file.num_frames
+        n_frames = self.file.n_frames
 
         self.verbose = False
         # pylint: disable=too-many-nested-blocks
