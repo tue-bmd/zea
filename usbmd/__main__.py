@@ -9,7 +9,6 @@ Or do not pass a config file to open a file dialog to choose a config file.
 
 # pylint: disable=import-outside-toplevel
 import argparse
-import asyncio
 import sys
 from pathlib import Path
 
