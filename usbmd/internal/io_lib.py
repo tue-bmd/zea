@@ -34,8 +34,8 @@ from PIL import Image
 from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
-from usbmd.data.file import File
 from usbmd import log
+from usbmd.data.file import File
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
@@ -544,7 +544,7 @@ class ImageViewerOpenCV(ImageViewer):
 
     Example:
         >>> import numpy as np
-        >>> from usbmd.utils.io_lib import ImageViewerOpenCV
+        >>> from usbmd.internal.io_lib import ImageViewerOpenCV
         >>> def generate_frame():
         >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
         >>> image_viewer = ImageViewerOpenCV(generate_frame, threading=True, num_threads=1)
@@ -621,7 +621,7 @@ class ImageViewerMatplotlib(ImageViewer):
 
     Example:
         >>> import numpy as np
-        >>> from usbmd.utils.io_lib import ImageViewerMatplotlib, plt_window_has_been_closed
+        >>> from usbmd.internal.io_lib import ImageViewerMatplotlib, plt_window_has_been_closed
         >>> def generate_frame():
         >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
         >>> image_viewer = ImageViewerMatplotlib(generate_frame, threading=True, num_threads=1)
@@ -725,23 +725,6 @@ class ImageViewerMatplotlib(ImageViewer):
     def has_been_closed(self):
         """Returns True if the window has been closed."""
         return plt_window_has_been_closed(self.fig)
-
-
-async def start_async_app(app: Tk, *args, **kwargs):
-    """
-    Starts the asynchronous app.
-
-    Args:
-        app (Tk): The Tkinter app object.
-
-    Raises:
-        AssertionError: If the app is not an instance of Tk or does not have the "show" attribute.
-
-    Returns:
-        MyWindow: The instance of MyWindow.
-    """
-    my_app = app(asyncio.get_event_loop(), *args, **kwargs)
-    await my_app.show()
 
 
 def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):

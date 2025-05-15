@@ -136,7 +136,7 @@ def get_function_source(func):
             called_func = func.__globals__.get(called_func_name)
             if (
                 inspect.isfunction(called_func)
-                and called_func.__module__ != "usbmd.utils.cache"
+                and called_func.__module__ != "usbmd.interal.cache"
             ):
                 nested_source = get_function_source(called_func)
                 if nested_source is None:
