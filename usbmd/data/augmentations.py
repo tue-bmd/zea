@@ -212,8 +212,9 @@ class RandomCircleInclusion(layers.Layer):
                     imgs, centers = ops.map(lambda arg: self._call(arg, seed), x)
                 else:
                     raise NotImplementedError(
-                        "You cannot fix circle locations across while using RandomCircleInclusion"
-                        + " as a dataset augmentation, since samples in a batch are handled independently."
+                        "You cannot fix circle locations across while using"
+                        + "RandomCircleInclusion as a dataset augmentation, "
+                        + "since samples in a batch are handled independently."
                     )
             else:
                 if self.randomize_location_across_batch:
