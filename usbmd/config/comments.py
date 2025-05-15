@@ -69,10 +69,6 @@ DESCRIPTIONS = {
             f"The modulation type of the data ({allows_type_to_str(_MOD_TYPES)})"
         ),
         "local": "true: use local data on this device, false: use data from NAS",
-        "dataset_name": (
-            "Determines the dataset class that is initialized, most likely will be `usbmd`, else "
-            "one of the legacy datasets (picmus, verasonics, abledata, vsms2020, vsms2022, dummy)"
-        ),
         "dtype": (
             "The form of data to load (raw_data, rf_data, iq_data, beamformed_data, "
             "envelope_data, image, image_sc)"

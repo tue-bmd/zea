@@ -503,6 +503,7 @@ def test_bm3d_op(spiral_image, sigma, stage):
         (10, 0.25),
     ],
 )
+@backend_equality_check()
 def test_anisotropic_diffusion_op(spiral_image, niter, lmbda):
     """Test `ops.AnisotropicDiffusion` operation on a noisy synthetic image."""
 
