@@ -4,11 +4,12 @@ H5 dataloader for loading images from USBMD datasets.
 
 import re
 from itertools import product
+from pathlib import Path
 from typing import List
 
 import numpy as np
 
-from usbmd.data.datasets import Dataset, H5FileHandleCache
+from usbmd.data.datasets import Dataset, H5FileHandleCache, count_samples_per_directory
 from usbmd.data.file import File
 from usbmd.data.utils import json_dumps
 from usbmd.utils import log, map_negative_indices
@@ -278,9 +279,6 @@ class H5Generator(Dataset):
         self.cache = cache
         self._data_cache = {}
 
-    def __repr__(self):
-        return f"{self.__class__.__name__} containing {len(self)} batches."
-
     def _get_single_item(self, idx):
         # Check if the item is already in the cache
         if self.cache and idx in self._data_cache:
@@ -376,3 +374,30 @@ class H5Generator(Dataset):
         Generator that yields images from the hdf5 files.
         """
         return self.iterator()
+
+    def __repr__(self):
+        return (
+            f"<{self.__class__.__name__} at 0x{id(self):x}: "
+            f"{len(self)} batches, n_frames={self.n_frames}, key='{self.key}', "
+            f"shuffle={self.shuffle}, file_paths={len(self.file_paths)}>"
+        )
+
+    def __str__(self):
+        return (
+            f"H5Generator with {len(self)} batches from {len(self.file_paths)} files "
+            f"(key='{self.key}')"
+        )
+
+    def summary(self):
+        """Return a string with dataset statistics and per-directory breakdown."""
+        total_samples = len(self.indices)
+        file_names = [idx[0] for idx in self.indices]
+        # Try to infer directories from file_names
+        directories = sorted({str(Path(f).parent) for f in file_names})
+        samples_per_dir = count_samples_per_directory(file_names, directories)
+
+        parts = [f"H5Generator with {total_samples} total samples:"]
+        for dir_path, count in samples_per_dir.items():
+            percentage = (count / total_samples) * 100 if total_samples else 0
+            parts.append(f"  {dir_path}: {count} samples ({percentage:.1f}%)")
+        print("\n".join(parts))
