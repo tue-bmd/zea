@@ -1688,9 +1688,11 @@ class Normalize(Operation):
             dict: Dictionary containing normalized data
         """
         data = kwargs[self.key]
+        maxval = kwargs.get("maxval", None)
+        minval = kwargs.get("minval", None)
 
         output_range = _set_if_none(self.output_range, default=(0, 1))
-        input_range = _set_if_none(self.input_range, default=(None, None))
+        input_range = _set_if_none(self.input_range, default=(minval, maxval))
 
         a_min, a_max = input_range
         if a_min is None:
@@ -1703,7 +1705,7 @@ class Normalize(Operation):
         # Map the data to the output range
         normalized_data = translate(data, input_range, output_range)
 
-        return {self.output_key: normalized_data}
+        return {self.output_key: normalized_data, "maxval": a_max, "minval": a_min}
 
 
 def _set_if_none(variable, default):
