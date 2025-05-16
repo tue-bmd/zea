@@ -1,14 +1,6 @@
 usbmd.backend.torch package
 ===========================
 
-Subpackages
------------
-
-.. toctree::
-   :maxdepth: 4
-
-   usbmd.backend.torch.utils
-
 Submodules
 ----------
 
