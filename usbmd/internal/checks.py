@@ -7,7 +7,7 @@
 import importlib.util
 
 from usbmd.core import DataTypes, ModTypes
-from usbmd.registry import checks_registry
+from usbmd.internal.registry import checks_registry
 
 _DATA_TYPES = [member.value for member in DataTypes]
 _MOD_TYPES = [member.value for member in ModTypes]
