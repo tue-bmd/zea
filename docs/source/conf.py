@@ -18,11 +18,14 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinx.ext.coverage",
+    "sphinx_copybutton",  # for copy button in code blocks
+    "sphinx.ext.viewcode",  # for links to source code
+    "sphinx.ext.autosummary",  # for generating API documentation
     "sphinx.ext.intersphinx",  # for cross-project links
     "myst_parser",  # for markdown support
 ]
 
-autosummary_generate = True
+# autosummary_generate = True
 autodoc_default_options = {
     "members": True,
     "undoc-members": True,
@@ -33,9 +36,14 @@ templates_path = ["_templates"]
 exclude_patterns = []
 
 # -- Options for HTML output -------------------------------------------------
-html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
-html_favicon = "_static/usbmd_logo_v3.svg"
+html_theme = "furo"
+html_theme_options = {
+    "light_logo": "usbmd_logo_v3.svg",
+    "dark_logo": "usbmd_logo_v3.svg",
+}
+html_static_path = ["../_static"]
+# standard docs favicon
+# html_favicon = "../_static/usbmd_logo_v3.svg"
 
 # for index
 modindex_common_prefix = ["usbmd."]

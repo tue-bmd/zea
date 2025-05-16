@@ -10,8 +10,8 @@ autodoc
 # for using md
 myst-parser
 
-# https://sphinx-themes.org/sample-sites/sphinx-rtd-theme/
-sphinx-rtd-theme
+# theme: https://github.com/pradyunsg/furo
+furo
 
 # install stemmer package
 PyStemmer
