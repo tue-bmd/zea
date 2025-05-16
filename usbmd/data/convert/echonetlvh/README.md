@@ -6,4 +6,4 @@
 - Next, `convert_raw_to_usbmd.py` can be run to convert the dataset to usbmd format,
   with cropping and scan conversion. The measurement locations stored in `MeasurementsList.csv`
   are also updated to match the new cropping / padding coordinates.
-- You can save the video and measurement plots for a converted video using `plot_sample.py`.
+- You can save the video and measurement plots for a converted video using `examples/echonetlvh/plot_sample.py`.
