@@ -8,7 +8,7 @@ import abc
 
 from keras import ops
 
-from usbmd.core import Object
+from usbmd.internal.core import Object
 from usbmd.internal.registry import operator_registry
 
 
