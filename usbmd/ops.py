@@ -1683,6 +1683,8 @@ class Normalize(Operation):
 
     def __init__(self, output_range=None, input_range=None, **kwargs):
         super().__init__(**kwargs)
+        if output_range is None:
+            output_range = (0, 1)
         self.output_range = self.to_float32(output_range)
         self.input_range = self.to_float32(input_range)
         assert output_range is None or len(output_range) == 2
@@ -1711,27 +1713,29 @@ class Normalize(Operation):
         """
         data = kwargs[self.key]
 
-        output_range = _set_if_none(self.output_range, default=(0, 1))
-        input_range = _set_if_none(self.input_range, default=(None, None))
+        # If input_range is not provided, try to get it from kwargs
+        # This allows you to normalize based on the first frame in a sequence:
+        # Example: https://github.com/tue-bmd/ultrasound-toolbox/pull/662
+        if self.input_range is None:
+            maxval = kwargs.get("maxval", None)
+            minval = kwargs.get("minval", None)
+        # If input_range is provided, use it
+        else:
+            minval, maxval = self.input_range
 
-        a_min, a_max = input_range
-        if a_min is None:
-            a_min = ops.min(data)
-        if a_max is None:
-            a_max = ops.max(data)
-        data = ops.clip(data, a_min, a_max)
-        input_range = (a_min, a_max)
+        # If input_range is still not provided, compute it from the data
+        if minval is None:
+            minval = ops.min(data)
+        if maxval is None:
+            maxval = ops.max(data)
+
+        # Clip the data to the input range
+        data = ops.clip(data, minval, maxval)
 
         # Map the data to the output range
-        normalized_data = translate(data, input_range, output_range)
+        normalized_data = translate(data, (minval, maxval), self.output_range)
 
-        return {self.output_key: normalized_data}
-
-
-def _set_if_none(variable, default):
-    if variable is not None:
-        return variable
-    return default
+        return {self.output_key: normalized_data, "minval": minval, "maxval": maxval}
 
 
 @ops_registry("scan_convert")
@@ -1802,7 +1806,7 @@ class ScanConvert(Operation):
                 "You can set ScanConvert(jit_compile=False) to disable jitting."
             )
 
-        data_out = scan_convert(
+        data_out, parameters = scan_convert(
             data,
             rho_range,
             theta_range,
@@ -1814,7 +1818,7 @@ class ScanConvert(Operation):
             with_batch_dim=self.with_batch_dim,
         )
 
-        return {self.output_key: data_out}
+        return {self.output_key: data_out, **parameters}
 
 
 @ops_registry("gaussian_blur")
