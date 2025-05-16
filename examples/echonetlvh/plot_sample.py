@@ -10,8 +10,6 @@ import numpy as np
 import pandas as pd
 import h5py
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from matplotlib import cm
 import imageio
 
 
