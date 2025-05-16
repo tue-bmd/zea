@@ -74,6 +74,7 @@ import copy
 import hashlib
 import inspect
 import json
+from functools import partial
 from typing import Any, Dict, List, Union
 
 import keras
@@ -81,6 +82,7 @@ import numpy as np
 import scipy
 import yaml
 from keras import ops
+from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
 from usbmd import log
 from usbmd.backend import jit
@@ -96,7 +98,12 @@ from usbmd.probes import Probe
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, resample, reshape_axis
-from usbmd.utils import check_architecture, deep_compare, translate
+from usbmd.utils import (
+    check_architecture,
+    deep_compare,
+    map_negative_indices,
+    translate,
+)
 
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
@@ -123,6 +130,7 @@ class Operation(keras.Operation):
         with_batch_dim: bool = True,
         jit_kwargs: dict | None = None,
         jittable: bool = True,
+        **kwargs,
     ):
         """
         Args:
@@ -141,7 +149,7 @@ class Operation(keras.Operation):
             jit_kwargs: Additional keyword arguments for the JIT compiler
             jittable: Whether the operation can be JIT compiled
         """
-        super().__init__()
+        super().__init__(**kwargs)
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
@@ -2010,6 +2018,21 @@ class Demodulate(Operation):
         }
 
 
+@ops_registry("lambda")
+class Lambda(Operation):
+    """Use any funcion as an operation."""
+
+    def __init__(self, func, func_kwargs=None, **kwargs):
+        super().__init__(**kwargs)
+        func_kwargs = func_kwargs or {}
+        self.func = partial(func, **func_kwargs)
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        data = self.func(data)
+        return {self.output_key: data}
+
+
 @ops_registry("clip")
 class Clip(Operation):
     """Clip the input data to a given range."""
@@ -2023,6 +2046,114 @@ class Clip(Operation):
         data = kwargs[self.key]
         data = ops.clip(data, self.min_value, self.max_value)
         return {self.output_key: data}
+
+
+@ops_registry("pad")
+class Pad(Operation, TFDataLayer):
+    """Pad layer for padding tensors to a specified shape."""
+
+    def __init__(
+        self,
+        target_shape: list | tuple,
+        uniform: bool = True,
+        axis: Union[int, List[int]] = None,
+        fail_on_bigger_shape: bool = True,
+        pad_kwargs: dict = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.target_shape = target_shape
+        self.uniform = uniform
+        self.axis = axis
+        self.pad_kwargs = pad_kwargs or {}
+        self.fail_on_bigger_shape = fail_on_bigger_shape
+
+    @staticmethod
+    def _format_target_shape(shape_array, target_shape, axis):
+        if isinstance(axis, int):
+            axis = [axis]
+        assert len(axis) == len(
+            target_shape
+        ), "The length of axis must be equal to the length of target_shape."
+        axis = map_negative_indices(axis, len(shape_array))
+
+        target_shape = [
+            target_shape[axis.index(i)] if i in axis else shape_array[i]
+            for i in range(len(shape_array))
+        ]
+        return target_shape
+
+    def pad(
+        self,
+        z,
+        target_shape: list | tuple,
+        uniform: bool = True,
+        axis: Union[int, List[int]] = None,
+        fail_on_bigger_shape: bool = True,
+        **kwargs,
+    ):
+        """
+        Pads the input tensor `z` to the specified shape.
+
+        Parameters:
+            z (tensor): The input tensor to be padded.
+            target_shape (list or tuple): The target shape to pad the tensor to.
+            uniform (bool, optional): If True, ensures that padding is uniform (even on both sides).
+                Default is False.
+            axis (int or list of int, optional): The axis or axes along which `target_shape` was
+                specified. If None, `len(target_shape) == `len(ops.shape(z))` must hold.
+                Default is None.
+            fail_on_bigger_shape (bool, optional): If True (default), raises an error if any target
+                dimension is smaller than the input shape; if False, pads only where the
+                target shape exceeds the input shape and leaves other dimensions unchanged.
+            kwargs: Additional keyword arguments to pass to the padding function.
+
+        Returns:
+            tensor: The padded tensor with the specified shape.
+        """
+        shape_array = self.backend.shape(z)
+
+        # When axis is provided, convert target_shape
+        if axis is not None:
+            target_shape = self._format_target_shape(shape_array, target_shape, axis)
+
+        if not fail_on_bigger_shape:
+            target_shape = [
+                max(target_shape[i], shape_array[i]) for i in range(len(shape_array))
+            ]
+
+        # Compute the padding required for each dimension
+        pad_shape = np.array(target_shape) - shape_array
+
+        # Create the paddings array
+        if uniform:
+            # if odd, pad more on the left, same as:
+            # https://keras.io/api/layers/preprocessing_layers/image_preprocessing/center_crop/
+            right_pad = pad_shape // 2
+            left_pad = pad_shape - right_pad
+            paddings = np.stack([right_pad, left_pad], axis=1)
+        else:
+            paddings = np.stack([np.zeros_like(pad_shape), pad_shape], axis=1)
+
+        if np.any(paddings < 0):
+            raise ValueError(
+                f"Target shape {target_shape} must be greater than or equal "
+                f"to the input shape {shape_array}."
+            )
+
+        return self.backend.numpy.pad(z, paddings, **kwargs)
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        padded_data = self.pad(
+            data,
+            self.target_shape,
+            self.uniform,
+            self.axis,
+            self.fail_on_bigger_shape,
+            **self.pad_kwargs,
+        )
+        return {self.output_key: padded_data}
 
 
 @ops_registry("companding")
@@ -2940,6 +3071,21 @@ def demodulate(data, center_frequency, sampling_frequency, axis=-3):
         / sampling_frequency
     )
     iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
+
+    # Split the complex signal into two channels
+    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+
+    return iq_data_two_channel
+
+    # Split the complex signal into two channels
+    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+
+    return iq_data_two_channel
+
+    # Split the complex signal into two channels
+    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+
+    return iq_data_two_channel
 
     # Split the complex signal into two channels
     iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
