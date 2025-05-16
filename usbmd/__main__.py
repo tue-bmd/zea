@@ -12,9 +12,8 @@ import argparse
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-
 from usbmd import log
+from usbmd.visualize import set_mpl_style
 
 
 def get_args():
@@ -56,7 +55,7 @@ def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
 
-    plt.style.use(str(Path(__file__).parent / "usbmd_darkmode.mplstyle"))
+    set_mpl_style()
 
     if args.backend:
         from usbmd.setup_usbmd import set_backend

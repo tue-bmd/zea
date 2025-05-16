@@ -4,7 +4,7 @@
 - **Date**          : 5/11/2024
 """
 
-from pathlib import Path
+import importlib.resources
 from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -25,7 +25,7 @@ def set_mpl_style(style: str = None) -> None:
 
     """
     if style is None:
-        style = Path(__file__).parents[1] / "usbmd_darkmode.mplstyle"
+        style = importlib.resources.files("usbmd") / "usbmd_darkmode.mplstyle"
     plt.style.use(style)
 
 
