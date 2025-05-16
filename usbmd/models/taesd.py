@@ -20,7 +20,7 @@ from usbmd.models.presets import (
     taesdxl_encoder_presets,
     taesdxl_presets,
 )
-from usbmd.registry import model_registry
+from usbmd.internal.registry import model_registry
 
 
 @model_registry(name="taesdxl")

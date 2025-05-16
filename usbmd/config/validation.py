@@ -20,7 +20,7 @@ from schema import And, Optional, Or, Regex, Schema
 
 import usbmd.metrics  # pylint: disable=unused-import
 from usbmd.config import Config
-from usbmd.registry import metrics_registry
+from usbmd.internal.registry import metrics_registry
 from usbmd import log
 from usbmd.internal.checks import _DATA_TYPES, _MOD_TYPES
 
