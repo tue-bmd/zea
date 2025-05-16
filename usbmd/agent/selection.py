@@ -252,9 +252,11 @@ class GreedyEntropy(LinesActionModel):
             )
             all_selected_lines.append(max_entropy_line)
 
-        selected_lines_k_hot = ops.cast(
-            ops.any(ops.one_hot(all_selected_lines, self.n_possible_actions), axis=0),
-            "bool",
+        selected_lines_k_hot = ops.any(
+            ops.one_hot(
+                all_selected_lines, self.n_possible_actions, dtype=masks._DEFAULT_DTYPE
+            ),
+            axis=0,
         )
         return selected_lines_k_hot, masks.lines_to_im_size(
             selected_lines_k_hot, (self.img_height, self.img_width)
@@ -306,7 +308,6 @@ class UniformRandomLines(LinesActionModel):
             n_masks=self.batch_size,
             seed=seed,
         )
-        selected_lines_batched = ops.cast(selected_lines_batched, "bool")
         mask_batched = masks.lines_to_im_size(
             selected_lines_batched, (self.img_height, self.img_width)
         )
@@ -476,11 +477,12 @@ class CovarianceSamplingLines(LinesActionModel):
 
         # Generate random lines [n_masks, batch_size, n_possible_actions]
         lines = self.random_uniform_lines(batch_size, seed=seed)
-        bool_lines = ops.cast(lines, "bool")
 
         # Make matrix masks [n_masks, batch_size, n_possible_actions, n_possible_actions]
-        bool_lines = ops.repeat(bool_lines[..., None], self.n_possible_actions, axis=-1)
-        bool_masks = ops.logical_and(bool_lines, ops.swapaxes(bool_lines, -1, -2))
+        reshaped_lines = ops.repeat(lines[..., None], self.n_possible_actions, axis=-1)
+        bool_masks = ops.logical_and(
+            reshaped_lines, ops.swapaxes(reshaped_lines, -1, -2)
+        )
 
         # Subsample the covariance matrix with random lines
         def subsample_with_mask(mask):
