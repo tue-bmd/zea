@@ -24,12 +24,12 @@ from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
 
 from usbmd import log
-from usbmd.internal.io_lib import _SUPPORTED_VID_TYPES, load_image, load_video
 from usbmd.internal.viewer import (
     filename_from_window_dialog,
     get_matplotlib_figure_props,
     move_matplotlib_figure,
 )
+from usbmd.io_lib import _SUPPORTED_VID_TYPES, load_image, load_video
 from usbmd.metrics import get_metric
 from usbmd.utils import translate
 
