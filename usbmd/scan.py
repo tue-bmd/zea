@@ -930,7 +930,7 @@ class Scan(Object):
 
         # If phi_range is set, use 3D scan conversion
         if self.phi_range is not None:
-            self._coordinates = compute_scan_convert_3d_coordinates(
+            self._coordinates, _ = compute_scan_convert_3d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
@@ -940,7 +940,7 @@ class Scan(Object):
 
         # If phi_range is not set, use 2D scan conversion
         else:
-            self._coordinates = compute_scan_convert_2d_coordinates(
+            self._coordinates, _ = compute_scan_convert_2d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
@@ -973,10 +973,11 @@ class Scan(Object):
 
         # Check if fps is constant
         uniq = np.unique(self._time_to_next_transmit, axis=0)  # frame axis
-        assert uniq.shape[0] == 1, "Time to next transmit is not constant"
+        if uniq.shape[0] != 1:
+            log.warning("Time to next transmit is not constant")
 
         # Compute fps
-        time = np.sum(self._time_to_next_transmit[0])
+        time = np.mean(np.sum(self._time_to_next_transmit, axis=1))
         fps = 1 / time
         return fps
 
@@ -1110,6 +1111,8 @@ class PlaneWaveScan(Scan):
                 of transmits is selected as homogeneously as possible. If set to a list
                 of integers, then the transmits with those indices are selected. If set
                 to None, then all transmits are used. Defaults to None.
+            time_to_next_transmit (np.ndarray, optional): The time between
+                subsequent transmit events of shape (n_frames, n_tx). Defaults to None.
 
         Raises:
             ValueError: If selected_transmits has an invalid value.

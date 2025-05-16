@@ -12,10 +12,8 @@ from keras.layers import Add, Conv2D, UpSampling2D
 from tensorflow.python.keras.layers import Layer
 
 from usbmd.backend.tensorflow.layers.utils import get_activation
-from usbmd.registry import post_processing_registry
 
 
-@post_processing_registry(name="lista", framework="tensorflow")
 def UnfoldingModel(
     input_dim,
     activation=None,
