@@ -21,7 +21,8 @@ def get_args():
     parser.add_argument(
         "--input_h5",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonetlvh_v2025/train/0X1017398D3C3F5FF9.hdf5",
+        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonetlvh_v2025/train/"
+        "0X1017398D3C3F5FF9.hdf5",
         help="Path to input HDF5 file",
     )
     parser.add_argument(
@@ -155,7 +156,7 @@ def create_measurement_overlays(frames, measurements, output_dir):
                     x2, y2 = row["X2"], row["Y2"]
 
                     # Draw line
-                    line = ax_image.plot(
+                    ax_image.plot(
                         [x1, x2], [y1, y2], "r-", linewidth=2, label=f"{row['Calc']}"
                     )
                     ax_image.plot([x1], [y1], "go", markersize=5)  # Start point
@@ -222,6 +223,15 @@ def create_measurement_overlays(frames, measurements, output_dir):
 
 
 def main():
+    """
+    Main function to process and visualize EchoNet-LVH dataset samples.
+
+    This function:
+    1. Loads video frames from an HDF5 file
+    2. Creates a GIF of the video
+    3. Finds measurements for the video
+    4. Creates measurement overlay images with side panels
+    """
     args = get_args()
 
     try:
