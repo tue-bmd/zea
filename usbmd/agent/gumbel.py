@@ -1,5 +1,5 @@
-"""
-Gumbel-Softmax trick implemented with the multi-backend `keras.ops`.
+"""Gumbel-Softmax trick implemented with the multi-backend `keras.ops`.
+
 TODO: implement tests for these functions.
 """
 
@@ -16,17 +16,16 @@ else:
 
 
 class SubsetOperator:
-    """
-    SubsetOperator applies the Gumbel-Softmax trick to perform continuous top-k selection.
+    """ubsetOperator applies the Gumbel-Softmax trick for continuous top-k selection.
 
     Args:
         k (int): The number of elements to select.
         tau (float, optional): The temperature parameter for Gumbel-Softmax. Defaults to 1.0.
-    hard (bool, optional): Whether to use straight-through Gumbel-Softmax. Defaults to False.
+        hard (bool, optional): Whether to use straight-through Gumbel-Softmax. Defaults to False.
 
     Sources:
-        - [Reparameterizable Subset Sampling via Continuous Relaxations](https://github.com/ermongroup/subsets)   # pylint: disable=line-too-long
-        - [Sampling Subsets with Gumbel-Top Relaxations](https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/subsets.html)  # pylint: disable=line-too-long
+        - `Reparameterizable Subset Sampling via Continuous Relaxations <https://github.com/ermongroup/subsets>`_ # pylint: disable=line-too-long
+        - `Sampling Subsets with Gumbel-Top Relaxations <https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/subsets.html>`_ # pylint: disable=line-too-long
     """
 
     def __init__(self, k, tau=1.0, hard=False, n_value_dims=1):
@@ -66,8 +65,8 @@ class SubsetOperator:
 
 
 def hard_straight_through(khot_orig, k, n_value_dims=1):
-    """
-    Applies the hard straight-through estimator to the given k-hot encoded tensor.
+    """Applies the hard straight-through estimator to the given k-hot encoded tensor.
+
     Args:
         khot_orig (Tensor): The original k-hot encoded tensor.
         k (int): The number of top elements to select.
