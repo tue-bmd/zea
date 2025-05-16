@@ -25,7 +25,7 @@ from usbmd.datapaths import create_new_user, set_data_paths
 from usbmd import log
 from usbmd.internal.device import init_device
 from usbmd.internal.git_info import get_git_summary
-from usbmd.internal.io_lib import filename_from_window_dialog
+from usbmd.internal.viewer import filename_from_window_dialog
 
 
 def reload_module(name):
