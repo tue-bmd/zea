@@ -1,13 +1,39 @@
+# pylint: disable=ungrouped-imports
 """
 Script to convert the EchoNet-LVH database to USBMD format.
 Will segment the images and convert them to polar coordinates.
 """
 
 import os
-import pickle
+
+os.environ["KERAS_BACKEND"] = "jax"
+
+
+if __name__ == "__main__":
+    from usbmd import (
+        init_device,
+    )  # pylint: disable=import-outside-toplevel
+
+    init_device("auto:1")
+
 import csv
-import json
+import sys
 import argparse
+from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+import numpy as np
+import pandas as pd
+import jax.numpy as jnp
+from jax import jit, vmap
+from jax.scipy.ndimage import map_coordinates
+from tqdm import tqdm
+
+# USBMD imports
+from usbmd.data.convert.echonet import H5Processor
+from usbmd.utils.io_lib import load_video
+from usbmd.utils.utils import translate
+from usbmd.data import generate_usbmd_dataset
 
 
 def get_args():
@@ -49,31 +75,6 @@ def get_args():
         "--convert_images", action="store_true", help="Only convert image files"
     )
     return parser.parse_args()
-
-
-os.environ["KERAS_BACKEND"] = "jax"
-
-if __name__ == "__main__":
-    from usbmd import init_device
-
-    init_device("auto:1")
-
-
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from pathlib import Path
-import pandas as pd
-
-from tqdm import tqdm
-
-import numpy as np
-import jax.numpy as jnp
-from jax import jit, vmap
-from jax.scipy.ndimage import map_coordinates
-
-from usbmd.data.convert.echonet import H5Processor
-from usbmd.utils.io_lib import load_video
-from usbmd.utils.utils import translate
-from usbmd.data import generate_usbmd_dataset
 
 
 def load_splits(source_dir):
@@ -125,14 +126,14 @@ def load_cone_parameters(csv_path):
     """
     cone_params = {}
 
-    with open(csv_path, "r") as csvfile:
+    with open(csv_path, "r", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
             if row["status"] == "success":
                 # Convert string values to appropriate types
                 params = {}
                 for key, value in row.items():
-                    if key == "avi_filename" or key == "status":
+                    if key in ("avi_filename", "status"):
                         params[key] = value
                     elif key == "apex_above_image":
                         params[key] = value.lower() == "true"
@@ -223,16 +224,21 @@ def rotate_coordinates(coords, angle_deg):
 def cartesian_to_polar_matrix_jax(
     cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="linear"
 ):
+    """
+    Convert cartesian coordinates to polar coordinates using JAX.
+
+    Args:
+        cartesian_matrix: Input image matrix
+        tip: Tuple of (x, y) coordinates for the tip
+        r_max: Maximum radius for polar conversion
+        angle: Angle range for polar conversion
+        interpolation: Interpolation method ('linear' or 'nearest')
+
+    Returns:
+        Polar coordinate matrix
+    """
     rows, cols = cartesian_matrix.shape
     center_x, center_y = tip
-
-    # Create cartesian coordinate grid
-    x = jnp.linspace(-center_x, cols - center_x - 1, cols)
-    y = jnp.linspace(-center_y, rows - center_y - 1, rows)
-    x_grid, y_grid = jnp.meshgrid(x, y)
-
-    # Flatten and rotate coordinates
-    coords = jnp.column_stack((x_grid.ravel(), y_grid.ravel()))
 
     # Interpolation grid in polar coordinates
     r = jnp.linspace(0, r_max, rows)
@@ -295,7 +301,17 @@ class LVHProcessor(H5Processor):
         # Store the pre-computed cone parameters
         self.cone_parameters = cone_params or {}
 
-    def get_split(self, avi_file: str, sequence):
+    def get_split(self, avi_file: str, sequence):  # pylint: disable=arguments-renamed
+        """
+        Get the split (train/val/test) for a given AVI file.
+
+        Args:
+            avi_file: Path to the AVI file
+            sequence: Video sequence (unused)
+
+        Returns:
+            String indicating the split ('train', 'val', or 'test')
+        """
         # Extract base filename without extension
         filename = Path(avi_file).stem + ".avi"
 
@@ -387,7 +403,8 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
     final_width = cone_params["new_width"]
     final_height = cone_params["new_height"]
 
-    if (
+    # Check if coordinates are out of bounds
+    is_out_of_bounds = (
         new_row["X1"] < 0
         or new_row["X2"] < 0
         or new_row["Y1"] < 0
@@ -396,7 +413,9 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
         or new_row["X2"] >= final_width
         or new_row["Y1"] >= final_height
         or new_row["Y2"] >= final_height
-    ):
+    )
+
+    if is_out_of_bounds:
         print(
             f"Warning: Transformed coordinates out of bounds for file {row['HashedFileName']}"
         )
@@ -456,7 +475,7 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
         df_transformed.to_csv(output_csv, index=False)
 
         # Print summary
-        print(f"\nConversion Summary:")
+        print("\nConversion Summary:")
         print(f"Total rows processed: {len(df)}")
         print(f"Rows successfully converted: {len(df_transformed)}")
         print(f"Rows skipped: {len(df) - len(df_transformed)}")
@@ -481,7 +500,7 @@ if __name__ == "__main__":
         print(
             "Please run precompute_echonetlvh_crop.py first to generate the parameters."
         )
-        exit(1)
+        sys.exit(1)
 
     # If no specific conversion is requested, convert both
     if not (args.convert_measurements or args.convert_images):
@@ -509,7 +528,8 @@ if __name__ == "__main__":
                     files_to_process.append(avi_file)
                 else:
                     print(
-                        f"Warning: Could not find AVI file for {base_filename} in batch {args.batch if args.batch else 'any'}"
+                        f"Warning: Could not find AVI file for {base_filename} in batch "
+                        f"{args.batch if args.batch else 'any'}"
                     )
 
         # List files that have already been processed
