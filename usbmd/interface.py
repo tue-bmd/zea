@@ -22,11 +22,11 @@ from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
 from usbmd.internal.core import DataTypes
-from usbmd.internal.io_lib import (
+from usbmd.internal.io_lib import matplotlib_figure_to_numpy
+from usbmd.internal.viewer import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
     filename_from_window_dialog,
-    matplotlib_figure_to_numpy,
     running_in_notebook,
 )
 from usbmd.ops import Pipeline

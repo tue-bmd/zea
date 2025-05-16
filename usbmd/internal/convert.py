@@ -13,7 +13,7 @@ import numpy as np
 import scipy.io as sio
 
 from usbmd.data.file import recursively_load_dict_contents_from_group
-from usbmd.internal.io_lib import filename_from_window_dialog
+from usbmd.internal.viewer import filename_from_window_dialog
 
 
 def load_mat(filename):
