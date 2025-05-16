@@ -7,6 +7,8 @@ polar coordinates.
 from keras import ops
 import cv2
 import numpy as np  # Only needed for OpenCV interface
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 def filter_edge_points_by_boundary(
@@ -453,43 +455,131 @@ def fit_scan_cone(
         return cropped_image
 
 
-# Convenience function for batch processing
-def fit_scan_cone_batch(image_batch, min_cone_half_angle_deg=20, threshold=15):
+def visualize_scan_cone(image, cone_params, output_dir="output"):
     """
-    Apply scan cone fitting to a batch of images.
+    Create visualization plots for the scan cone detection.
 
     Args:
-        image_batch: Keras tensor of shape (batch_size, height, width) or
-            (batch_size, height, width, 1)
-        min_cone_half_angle_deg: Minimum expected half-angle of the
-            cone in degrees (default: 20)
-        threshold: Threshold for binary image (default: 15)
-
-    Returns:
-        List of Keras tensors (cropped and centered images - shapes may vary)
-
-    Note:
-        This returns a list of tensors since cropped images may have different sizes.
-        Use with caution in training pipelines.
+        image: Original grayscale image
+        cone_params: Dictionary of cone parameters
+        output_dir: Directory to save output plots
     """
-    # Handle both (B, H, W) and (B, H, W, 1) inputs
-    if len(ops.shape(image_batch)) == 4 and ops.shape(image_batch)[-1] == 1:
-        image_batch = ops.squeeze(image_batch, axis=-1)
-    elif len(ops.shape(image_batch)) != 3:
-        raise ValueError(f"Expected 3D or 4D input, got shape {ops.shape(image_batch)}")
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    cropped_images = []
+    # Convert image to numpy if it's a tensor
+    if hasattr(image, "numpy"):
+        image = image.numpy()
 
-    for i in range(ops.shape(image_batch)[0]):
-        try:
-            cropped = fit_scan_cone(
-                image_batch[i],
-                min_cone_half_angle_deg=min_cone_half_angle_deg,
-                threshold=threshold,
-            )
-            cropped_images.append(cropped)
-        except ValueError:
-            # If cone detection fails, return zero tensor of same size as input
-            cropped_images.append(ops.zeros_like(image_batch[i]))
+    # Create figure with subplots
+    fig = plt.figure(figsize=(15, 10))
 
-    return cropped_images
+    # Original image with cone overlay
+    ax1 = fig.add_subplot(221)
+    ax1.imshow(image, cmap="gray")
+    ax1.set_title("Original Image with Cone Overlay")
+
+    # Draw cone boundaries
+    y = np.linspace(0, image.shape[0] - 1, 100)
+    left_x = cone_params["left_intercept"] + cone_params["left_slope"] * y
+    right_x = cone_params["right_intercept"] + cone_params["right_slope"] * y
+
+    # Draw left boundary
+    valid_left = (left_x >= 0) & (left_x < image.shape[1])
+    ax1.plot(left_x[valid_left], y[valid_left], "r-", linewidth=2)
+
+    # Draw right boundary
+    valid_right = (right_x >= 0) & (right_x < image.shape[1])
+    ax1.plot(right_x[valid_right], y[valid_right], "r-", linewidth=2)
+
+    # Draw apex
+    ax1.plot(cone_params["apex_x"], cone_params["apex_y"], "go", markersize=10)
+
+    # Draw bottom circle
+    circle = plt.Circle(
+        (cone_params["circle_center_x"], cone_params["circle_center_y"]),
+        cone_params["circle_radius"],
+        fill=False,
+        color="b",
+        linewidth=2,
+    )
+    ax1.add_patch(circle)
+
+    # Draw crop rectangle
+    rect = plt.Rectangle(
+        (cone_params["crop_left"], cone_params["crop_top"]),
+        cone_params["crop_right"] - cone_params["crop_left"],
+        cone_params["crop_bottom"] - cone_params["crop_top"],
+        fill=False,
+        color="g",
+        linewidth=2,
+    )
+    ax1.add_patch(rect)
+
+    # Cropped and centered image
+    ax2 = fig.add_subplot(222)
+    cropped = crop_and_center_cone(ops.convert_to_tensor(image), cone_params)
+    ax2.imshow(cropped.numpy(), cmap="gray")
+    ax2.set_title("Cropped and Centered Image")
+
+    # Parameters text
+    ax3 = fig.add_subplot(223)
+    ax3.axis("off")
+    param_text = (
+        f"Cone Parameters:\n"
+        f"Apex: ({cone_params['apex_x']:.1f}, {cone_params['apex_y']:.1f})\n"
+        f"Opening Angle: {np.degrees(cone_params['opening_angle']):.1f}°\n"
+        f"Cone Height: {cone_params['cone_height']:.1f}\n"
+        f"Symmetry Ratio: {cone_params['symmetry_ratio']:.2f}\n"
+        f"Data Coverage: {cone_params['data_coverage']:.2%}\n"
+        f"Crop Region: ({cone_params['crop_left']}, {cone_params['crop_top']}) to "
+        f"({cone_params['crop_right']}, {cone_params['crop_bottom']})\n"
+        f"Final Size: {cone_params['new_width']}x{cone_params['new_height']}"
+    )
+    ax3.text(0.1, 0.9, param_text, fontsize=10, verticalalignment="top")
+
+    # Save the figure
+    plt.tight_layout()
+    plt.savefig(
+        output_path / "scan_cone_visualization.png", dpi=300, bbox_inches="tight"
+    )
+    plt.close()
+
+
+def main(avi_path):
+    """Demonstrate scan cone fitting on a sample AVI file."""
+
+    # Load first frame
+    cap = cv2.VideoCapture(avi_path)
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret:
+        print(f"Failed to read video file: {avi_path}")
+        return
+
+    # Convert to grayscale
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Convert to tensor
+    frame_tensor = ops.convert_to_tensor(frame)
+
+    try:
+        # Fit scan cone
+        cropped_image, cone_params = fit_scan_cone(
+            frame_tensor, min_cone_half_angle_deg=20, threshold=15, return_params=True
+        )
+
+        # Create visualization
+        visualize_scan_cone(frame, cone_params)
+        print("Visualization saved to output/scan_cone_visualization.png")
+
+    except ValueError as e:
+        print(f"Error fitting scan cone: {e}")
+
+
+if __name__ == "__main__":
+
+    SAMPLE_INPUT_FILE = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh/Batch1/0X1A0EA15E24B40C14.avi"
+    main(SAMPLE_INPUT_FILE)
