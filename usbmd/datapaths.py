@@ -18,7 +18,8 @@ from typing import Union
 import yaml
 
 from usbmd.config import Config
-from usbmd.utils import log, strtobool
+from usbmd import log
+from usbmd.utils import strtobool
 
 DEFAULT_DATA_ROOT = {
     "windows": "Z:/Ultrasound-BMd/data",

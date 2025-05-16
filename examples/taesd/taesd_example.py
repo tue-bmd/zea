@@ -16,7 +16,7 @@ from keras import ops
 from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.models.taesd import TinyAutoencoder
 from usbmd.utils import get_date_string
-from usbmd.utils.visualize import plot_image_grid
+from usbmd.visualize import plot_image_grid
 
 if __name__ == "__main__":
     # Set up data paths and device

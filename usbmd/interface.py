@@ -16,20 +16,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
+from usbmd import log
 from usbmd.config import Config
-from usbmd.core import DataTypes
 from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
-from usbmd.ops import Pipeline
-from usbmd.utils import keep_trying, log, save_to_gif, save_to_mp4
-from usbmd.utils.io_lib import (
+from usbmd.internal.core import DataTypes
+from usbmd.internal.viewer import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
     filename_from_window_dialog,
-    matplotlib_figure_to_numpy,
     running_in_notebook,
 )
+from usbmd.io_lib import matplotlib_figure_to_numpy
+from usbmd.ops import Pipeline
+from usbmd.utils import keep_trying, save_to_gif, save_to_mp4
 
 
 class Interface:
