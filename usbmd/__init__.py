@@ -40,19 +40,17 @@ if "KERAS_BACKEND" not in os.environ:
             "at top of your script before importing usbmd or any other library."
         )
 
-from . import visualize
-
 # Main (isort: split)
 from .config import Config, load_config_from_yaml
 from .data.datasets import Dataset
 from .data.file import File, load_usbmd_file
 from .datapaths import set_data_paths
 from .interface import Interface
+from .internal.device import init_device
 from .ops import Pipeline
 from .probes import Probe
 from .scan import Scan
 from .setup_usbmd import set_backend, setup, setup_config
-from .internal.device import init_device
 
 try:
     from .backend.tensorflow.dataloader import make_dataloader
