@@ -1,8 +1,4 @@
-"""Utility functions
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : October 25th, 2022
-"""
+"""General utility functions."""
 
 import collections.abc
 import datetime

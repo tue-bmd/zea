@@ -1,6 +1,4 @@
-"""
-Module for action selection strategies.
-"""
+"""Action selection strategies."""
 
 import keras
 from keras import ops

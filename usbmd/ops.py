@@ -1,7 +1,4 @@
-"""
-====================================
-usbmd.ops - Operations and Pipelines
-====================================
+"""Operations and Pipelines for ultrasound data processing.
 
 This module contains two important classes, :class:`Operation` and :class:`Pipeline`,
 which are used to process ultrasound data. A pipeline is a sequence of operations
