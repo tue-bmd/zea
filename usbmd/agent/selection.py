@@ -7,6 +7,7 @@ from keras import ops
 
 from usbmd import tensor_ops
 from usbmd.agent import masks
+from usbmd.registry import action_selection_registry
 
 
 class MaskActionModel:
@@ -56,6 +57,7 @@ class LinesActionModel(MaskActionModel):
         self.stack_n_cols = int(stack_n_cols)
 
 
+@action_selection_registry(name="greedy_entropy")
 class GreedyEntropy(LinesActionModel):
     """
     Selects the max entropy line and reweights the entropy values around it,
@@ -73,7 +75,6 @@ class GreedyEntropy(LinesActionModel):
         mean: float = 0,
         std_dev: float = 1,
         num_lines_to_update: int = 5,
-        seed=42,
     ):
         """
         Args:
@@ -87,7 +88,6 @@ class GreedyEntropy(LinesActionModel):
                 to update. Must be odd.
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
-        self.seed = keras.random.SeedGenerator(seed)
 
         # Number of samples must be odd so that the entropy
         # of the selected line is set to 0 once it's been selected.
@@ -238,7 +238,9 @@ class GreedyEntropy(LinesActionModel):
             particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
 
         Returns:
-            Tensor: Batch of masks of shape (batch_size, height, width)
+           Tuple[Tensor, Tensor]:
+                - Newly selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
         """
         entropy_per_line = self.compute_gmm_entropy_per_line(particles)
 
@@ -250,15 +252,69 @@ class GreedyEntropy(LinesActionModel):
             )
             all_selected_lines.append(max_entropy_line)
 
-        def selected_lines_to_line_mask(selected_lines):
-            mask = masks.make_line_mask(
-                selected_lines, (self.img_height, self.img_width, 1)
-            )
-            return ops.squeeze(mask, axis=-1)
+        selected_lines_k_hot = ops.any(
+            ops.one_hot(
+                all_selected_lines, self.n_possible_actions, dtype=masks._DEFAULT_DTYPE
+            ),
+            axis=0,
+        )
+        return selected_lines_k_hot, masks.lines_to_im_size(
+            selected_lines_k_hot, (self.img_height, self.img_width)
+        )
 
-        return ops.vectorized_map(selected_lines_to_line_mask, all_selected_lines)
+
+@action_selection_registry(name="uniform_random")
+class UniformRandomLines(LinesActionModel):
+    """
+    Creates masks with uniformly randomly sampled lines.
+    """
+
+    def __init__(
+        self,
+        n_actions: int,
+        n_possible_actions: int,
+        img_width: int,
+        img_height: int,
+        batch_size: int = 1,
+    ):
+        """
+        Args:
+            n_actions (int): The number of actions the agent can take.
+            n_possible_actions (int): The number of possible actions.
+            img_width (int): The width of the input image.
+            img_height (int): The height of the input image.
+            batch_size (int): Number of masks to generate in parallel
+
+        Raises:
+            AssertionError: If image width is not divisible by n_possible_actions.
+        """
+        super().__init__(n_actions, n_possible_actions, img_width, img_height)
+        self.batch_size = batch_size
+
+    def sample(self, seed=None):
+        """
+        Generates or updates an equispaced mask to sweep rightwards by one step across the image.
+
+        Args:
+            seed (int | SeedGenerator | jax.random.key, optional): Seed for random
+                number generation. Defaults to None.
+
+        Returns:
+            Tensor: The mask of shape (batch_size, img_size, img_size)
+        """
+        selected_lines_batched = masks.random_uniform_lines(
+            n_actions=self.n_actions,
+            n_possible_actions=self.n_possible_actions,
+            n_masks=self.batch_size,
+            seed=seed,
+        )
+        mask_batched = masks.lines_to_im_size(
+            selected_lines_batched, (self.img_height, self.img_width)
+        )
+        return selected_lines_batched, mask_batched
 
 
+@action_selection_registry(name="equispaced")
 class EquispacedLines(LinesActionModel):
     """
     Creates masks with equispaced lines that sweep across
@@ -347,6 +403,7 @@ class EquispacedLines(LinesActionModel):
         )
 
 
+@action_selection_registry(name="covariance")
 class CovarianceSamplingLines(LinesActionModel):
     """
     This class models the line-to-line correlation to select the mask with the highest entropy.
@@ -420,11 +477,12 @@ class CovarianceSamplingLines(LinesActionModel):
 
         # Generate random lines [n_masks, batch_size, n_possible_actions]
         lines = self.random_uniform_lines(batch_size, seed=seed)
-        bool_lines = ops.cast(lines, "bool")
 
         # Make matrix masks [n_masks, batch_size, n_possible_actions, n_possible_actions]
-        bool_lines = ops.repeat(bool_lines[..., None], self.n_possible_actions, axis=-1)
-        bool_masks = ops.logical_and(bool_lines, ops.swapaxes(bool_lines, -1, -2))
+        reshaped_lines = ops.repeat(lines[..., None], self.n_possible_actions, axis=-1)
+        bool_masks = ops.logical_and(
+            reshaped_lines, ops.swapaxes(reshaped_lines, -1, -2)
+        )
 
         # Subsample the covariance matrix with random lines
         def subsample_with_mask(mask):
