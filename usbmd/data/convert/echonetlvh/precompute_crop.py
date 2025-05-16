@@ -9,9 +9,8 @@ import json
 import argparse
 from pathlib import Path
 import pandas as pd
-import numpy as np
-from tqdm import tqdm
 import cv2
+from tqdm import tqdm
 
 # Set Keras backend to numpy for best CPU performance
 os.environ["KERAS_BACKEND"] = "numpy"
@@ -151,7 +150,8 @@ def precompute_cone_parameters(args):
                 files_to_process.append((avi_file, avi_filename))
             else:
                 print(
-                    f"Warning: Could not find AVI file for {base_filename} in batch {args.batch if args.batch else 'any'}"
+                    f"Warning: Could not find AVI file for {base_filename} in batch "
+                    f"{args.batch if args.batch else 'any'}"
                 )
 
     # Limit files if max_files is specified
@@ -180,7 +180,7 @@ def precompute_cone_parameters(args):
     ]
 
     # Open CSV file for writing
-    with open(cone_params_csv, "w", newline="") as csvfile:
+    with open(cone_params_csv, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -231,7 +231,7 @@ def precompute_cone_parameters(args):
                 writer.writerow(failure_record)
 
     # Also save as JSON for easier programmatic access
-    with open(cone_params_json, "w") as jsonfile:
+    with open(cone_params_json, "w", encoding="utf-8") as jsonfile:
         json.dump(all_cone_params, jsonfile)
 
     print(f"Cone parameters saved to {cone_params_csv} and {cone_params_json}")
