@@ -9,12 +9,12 @@ from typing import List
 
 import numpy as np
 
+from usbmd import log
 from usbmd.data.datasets import Dataset, H5FileHandleCache, count_samples_per_directory
 from usbmd.data.file import File
 from usbmd.data.utils import json_dumps
-from usbmd import log
+from usbmd.io_lib import retry_on_io_error
 from usbmd.utils import map_negative_indices
-from usbmd.internal.io_lib import retry_on_io_error
 
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
 MAX_RETRY_ATTEMPTS = 3
