@@ -12,6 +12,14 @@ usbmd.tools.hf module
    :undoc-members:
    :show-inheritance:
 
+usbmd.tools.selection\_tool module
+----------------------------------
+
+.. automodule:: usbmd.tools.selection_tool
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 usbmd.tools.wndb module
 -----------------------
 

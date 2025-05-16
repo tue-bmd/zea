@@ -1,5 +1,5 @@
 usbmd
-=====
+=========
 
 .. toctree::
    :maxdepth: 4

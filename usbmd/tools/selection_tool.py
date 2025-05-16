@@ -1,8 +1,35 @@
-"""Selection tools for interactively selecting part of an array
-displayed as an image with matplotlib.
+"""
+=========================================================
+usbmd.tools.selection_tool — Interactive Selection Tools
+=========================================================
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 24/02/2023
+This module provides interactive tools for selecting regions of interest (ROIs)
+from 2D arrays or images displayed with matplotlib. It is designed for use in
+ultrasound and image processing workflows where manual or semi-automatic selection
+of regions is required.
+
+Key Features
+------------
+- Interactive selection using rectangle or lasso tools via matplotlib widgets.
+- Support for cropping, masking, and extracting selected regions from images.
+- Polygon and rectangle extraction, interpolation, and mask reconstruction.
+- Utilities for batch selection, mask interpolation across frames, and animation.
+- Integration with tkinter dialogs for user-friendly selection and confirmation.
+- Metric computation (e.g., GCNR) on selected patches.
+
+
+Example
+-------
+.. code-block:: python
+
+    import matplotlib.pyplot as plt
+    from usbmd.tools.selection_tool import interactive_selector
+
+    image = ...  # Load your 2D image array
+    fig, ax = plt.subplots()
+    ax.imshow(image, cmap="gray")
+    patches, masks = interactive_selector(image, ax, selector="rectangle")
+
 """
 
 import tkinter as tk

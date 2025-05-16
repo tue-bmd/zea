@@ -12,6 +12,14 @@ usbmd.models.base module
    :undoc-members:
    :show-inheritance:
 
+usbmd.models.carotid\_segmenter module
+--------------------------------------
+
+.. automodule:: usbmd.models.carotid_segmenter
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 usbmd.models.dense module
 -------------------------
 
