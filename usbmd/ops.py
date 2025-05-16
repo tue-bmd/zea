@@ -3,9 +3,9 @@
 usbmd.ops - Operations and Pipelines
 ====================================
 
-This module contains two important classes, :class:`Operation` and :class:`Pipeline`, which are used to
-process ultrasound data. A pipeline is a sequence of operations that are applied to the data
-in a specific order.
+This module contains two important classes, :class:`Operation` and :class:`Pipeline`,
+which are used to process ultrasound data. A pipeline is a sequence of operations
+that are applied to the data in a specific order.
 
 Stand-alone manual usage
 -----------------------
@@ -3071,21 +3071,6 @@ def demodulate(data, center_frequency, sampling_frequency, axis=-3):
         / sampling_frequency
     )
     iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
-
-    # Split the complex signal into two channels
-    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
-
-    return iq_data_two_channel
-
-    # Split the complex signal into two channels
-    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
-
-    return iq_data_two_channel
-
-    # Split the complex signal into two channels
-    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
-
-    return iq_data_two_channel
 
     # Split the complex signal into two channels
     iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
