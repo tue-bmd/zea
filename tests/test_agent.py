@@ -10,15 +10,15 @@ from usbmd.agent.masks import equispaced_lines
 
 def test_equispaced_lines():
     """Test equispaced_lines."""
-    expected_lines = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    expected_lines = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
     lines = equispaced_lines(n_actions=5, n_possible_actions=10)
     assert ops.all(lines == expected_lines)
 
-    expected_lines = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+    expected_lines = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
     lines = equispaced_lines(n_actions=5, n_possible_actions=10, previous_mask=lines)
     assert ops.all(lines == expected_lines)
 
-    expected_lines = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    expected_lines = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
     lines = equispaced_lines(n_actions=5, n_possible_actions=10, previous_mask=lines)
     assert ops.all(lines == expected_lines)
 
