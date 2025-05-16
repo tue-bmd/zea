@@ -58,7 +58,7 @@ def main():
     set_mpl_style()
 
     if args.backend:
-        from usbmd.setup_usbmd import set_backend
+        from usbmd.internal.setup_usbmd import set_backend
 
         set_backend(args.backend)
 
@@ -70,7 +70,7 @@ def main():
     from usbmd.generate import GenerateDataSet
     from usbmd.interface import Interface
     from usbmd.internal.checks import _DATA_TYPES
-    from usbmd.setup_usbmd import setup
+    from usbmd.internal.setup_usbmd import setup
     from usbmd.utils import keep_trying, strtobool
 
     config = setup(args.config)
