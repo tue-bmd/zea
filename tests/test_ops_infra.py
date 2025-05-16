@@ -10,9 +10,9 @@ import pytest
 
 from usbmd import ops
 from usbmd.config.config import Config
-from usbmd.core import DataTypes
-from usbmd.probes import Dummy, Probe
+from usbmd.internal.core import DataTypes
 from usbmd.internal.registry import ops_registry
+from usbmd.probes import Dummy, Probe
 from usbmd.scan import Scan, compute_t0_delays_planewave
 
 """Some operations for testing"""

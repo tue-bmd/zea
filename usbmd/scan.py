@@ -16,11 +16,11 @@ from keras import ops
 from usbmd import log
 from usbmd.beamform.pfield import compute_pfield
 from usbmd.beamform.pixelgrid import check_for_aliasing, get_grid
-from usbmd.core import STATIC, Object
 from usbmd.display import (
     compute_scan_convert_2d_coordinates,
     compute_scan_convert_3d_coordinates,
 )
+from usbmd.internal.core import STATIC, Object
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
