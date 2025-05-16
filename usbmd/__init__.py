@@ -1,10 +1,6 @@
-"""
-The official documentation for the Python package `usbmd` - a convenient ultrasound toolbox.
+"""usbmd: A Python package for ultrasound image reconstructing using deep learning."""
 
-.. include:: ./README.md
-"""
-
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 import inspect
 import os
@@ -44,12 +40,18 @@ if "KERAS_BACKEND" not in os.environ:
 
 # Main (isort: split)
 from .config import Config, load_config_from_yaml
-from .data.datasets import USBMDDataSet
+from .data.datasets import Dataset
+from .data.file import File, load_usbmd_file
 from .datapaths import set_data_paths
 from .interface import Interface
-from .ops_v2 import Pipeline
+from .ops import Pipeline
 from .probes import Probe
 from .scan import Scan
 from .setup_usbmd import set_backend, setup, setup_config
 from .utils import log, visualize
 from .utils.device import init_device
+
+try:
+    from .backend.tensorflow.dataloader import make_dataloader
+except ImportError:
+    log.warning("TensorFlow not installed. `make_dataloader` will not be available.")

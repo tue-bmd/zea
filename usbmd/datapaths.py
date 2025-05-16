@@ -202,46 +202,40 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     """Get data paths (absolute paths to location of data).
 
     Args:
-        user_config (str or dict): Path that points to yaml file with user info.
-            Defaults to None. In that case `./users.yaml` is taken
-            as default file. If not string, could also be a dictionary.
-            Should be structured like example below.
+        user_config (str or dict, optional): Path to a YAML file with user info.
+            If None, uses ``./users.yaml`` as the default file. Can also be a dictionary
+            structured as shown below.
+        local (bool, optional): Use local dataset or get from NAS.
 
-        local (bool): Use local dataset or get from NAS.
+    Example YAML structure::
 
-    ```yaml
-    data_root: ...
-    output: ...
-    ```
+        data_root: ...
+        output: ...
 
-    you can also specify different `data_root` for different users and machines:
+    You can also specify different ``data_root`` for different users and machines::
 
-    ```yaml
-    my_username:
-        my_hostname:
+        my_username:
+          my_hostname:
             system: windows
             data_root: ...
             output: ...
-        other_hostname:
+          other_hostname:
             system: linux
             data_root:
-                local: ...
-                remote: ...
-        # if both my_hostname and other_hostname are not matching, fallback to:
-        system: linux
-        data_root: ...
+              local: ...
+              remote: ...
+          # If both my_hostname and other_hostname are not matching, fallback to:
+          system: linux
+          data_root: ...
 
-    other_username:
-        data_root: ...
-    ```
+        other_username:
+          data_root: ...
 
-    These will take precedence over the `data_root` that is userless and machineless.
+    These will take precedence over the ``data_root`` that is userless and machineless.
 
     Returns:
-        data_path (dict): absolute paths to location of data. Stores the following
-            parameters:
-                `data_root`, `repo_root`, `output`,
-                `system`, `username`, `hostname`
+        dict: Absolute paths to location of data. Stores the following parameters:
+            ``data_root``, ``repo_root``, ``output``, ``system``, ``username``, ``hostname``
 
     """
     username = getpass.getuser()
@@ -545,6 +539,19 @@ def create_new_user(user_config_path: str = None, local: bool = None):
                 log.success("Profile updated successfully.")
 
     return data_paths
+
+
+def format_data_path(path, user):
+    """If the path is not absolute, prepend the data_root to it."""
+    path = Path(path)
+    if path.is_absolute():
+        return path
+    else:
+        assert user is not None, (
+            "The dataset folder is absolute, but no user is provided. "
+            "Please provide a user to load the dataset."
+        )
+    return Path(user.data_root) / path
 
 
 if __name__ == "__main__":
