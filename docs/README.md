@@ -12,6 +12,12 @@ Install additional dependencies for documentation:
 pip install -r docs/docs-requirements.txt
 ```
 
+Optionally, you need to install the following (necessary in clean Docker images):
+```shell
+apt-get install -y make
+export LC_ALL=C.UTF-8
+```
+
 ## 2. Build the HTML documentation (from the docs directory)
 
 Use the Makefile targets to clean, build, and serve the documentation:
