@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from usbmd.probes import Probe
-from usbmd.registry import probe_registry
+from usbmd.internal.registry import probe_registry
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())

@@ -81,7 +81,7 @@ from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
 from usbmd.display import scan_convert
 from usbmd import log
 from usbmd.probes import Probe
-from usbmd.registry import ops_registry
+from usbmd.internal.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, resample, reshape_axis

@@ -18,7 +18,7 @@ from usbmd.models.preset_utils import register_presets
 from usbmd.models.presets import diffusion_model_presets
 from usbmd.models.unet import get_time_conditional_unetwork
 from usbmd.models.utils import LossTrackerWrapper
-from usbmd.registry import (
+from usbmd.internal.registry import (
     diffusion_guidance_registry,
     model_registry,
     operator_registry,

@@ -26,7 +26,7 @@ import tqdm
 
 from usbmd.backend.tensorflow.layers.beamformers import BeamSumming
 from usbmd.backend.tensorflow.utils.gpu_config import get_device
-from usbmd.registry import tf_beamformer_registry
+from usbmd.internal.registry import tf_beamformer_registry
 from usbmd import log
 
 
