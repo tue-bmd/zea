@@ -1,32 +1,50 @@
-.. image:: usbmd_logo_v3.svg
-   :alt: usbmd logo
-   :align: right
-   :width: 150px
-
-usbmd documentation
+usbmd
 ===================
 
 Welcome to the documentation for the **usbmd** package: a Python toolbox for ultrasound signal processing, image reconstruction, and deep learning.
 
-.. admonition:: Quick links
+Currently usbmd offers:
 
-   - `GitHub Repository <https://github.com/tue-bmd/ultrasound-toolbox>`__
-   - `Full README <https://github.com/tue-bmd/ultrasound-toolbox/blob/main/README.md>`__
-   - `Installation Guide <https://github.com/tue-bmd/ultrasound-toolbox/blob/main/Install.md>`__
+- Complete ultrasound signal processing and image reconstruction `pipeline <https://github.com/tue-bmd/ultrasound-toolbox/blob/main/usbmd/ops.py>`_.
+- A collection of `models <https://github.com/tue-bmd/ultrasound-toolbox/tree/main/usbmd/models>`_ for ultrasound image and signal processing.
+- Multi-Backend Support via `Keras3 <https://keras.io/keras_3/>`_: You can use `PyTorch <https://github.com/pytorch/pytorch>`_, `TensorFlow <https://github.com/tensorflow/tensorflow>`_, or `JAX <https://github.com/google/jax>`_.
+
+.. admonition:: Beta!
+   :class: warning
+
+   This package is highly experimental and under active development. It is mainly used to support our research and as a basis for our publications. Please use at your own risk.
+
 
 .. toctree::
+   :caption: User Guide
    :maxdepth: 2
-   :caption: Contents:
+   :hidden:
 
-   modules
+   getting-started
+   installation
    examples
+
+.. toctree::
+   :caption: Development
+   :hidden:
+
    contributing
 
-.. include:: ../../README.md
-   :parser: markdown
-   :start-line: 4
+.. toctree::
+   :caption: Reference
+   :maxdepth: 2
+   :hidden:
 
-.. rubric:: Additional Resources
+   _autosummary/usbmd
 
-- :doc:`examples`
-- :doc:`contributing`
+   .. autosummary::
+      :toctree: _autosummary
+      :recursive:
+      usbmd
+
+.. toctree::
+   :caption: Project Links
+   :maxdepth: 1
+   :hidden:
+
+   GitHub Project <https://github.com/tue-bmd/ultrasound-toolbox>
