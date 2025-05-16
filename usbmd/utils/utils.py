@@ -21,7 +21,37 @@ import yaml
 from PIL import Image
 
 from usbmd.utils import log
-from usbmd.utils.checks import _assert_uint8_images
+
+
+def _assert_uint8_images(images: np.ndarray):
+    """
+    Asserts that the input images have the correct properties.
+
+    Args:
+        images (np.ndarray): The input images.
+
+    Raises:
+        AssertionError: If the dtype of images is not uint8.
+        AssertionError: If the shape of images is not (n_frames, height, width, channels)
+            or (n_frames, height, width) for grayscale images.
+        AssertionError: If images have anything other than 1 (grayscale),
+            3 (rgb) or 4 (rgba) channels.
+    """
+    assert (
+        images.dtype == np.uint8
+    ), f"dtype of images should be uint8, got {images.dtype}"
+
+    assert images.ndim in (3, 4), (
+        "images must have shape (n_frames, height, width, channels),"
+        f" or (n_frames, height, width) for grayscale images. Got {images.shape}"
+    )
+
+    if images.ndim == 4:
+        assert images.shape[-1] in (1, 3, 4), (
+            "Grayscale images must have 1 channel, "
+            "RGB images must have 3 channels, and RGBA images must have 4 channels. "
+            f"Got shape: {images.shape}, channels: {images.shape[-1]}"
+        )
 
 
 def translate(array, range_from, range_to):
@@ -227,6 +257,11 @@ def save_to_mp4(images, filename, fps=20):
     images = preprocess_for_saving(images)
 
     filename = str(filename)
+
+    parent_dir = Path(filename).parent
+    if not parent_dir.exists():
+        raise FileNotFoundError(f"Directory '{parent_dir}' does not exist.")
+
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     _, height, width, _ = images.shape
     video_writer = cv2.VideoWriter(filename, fourcc, fps, (width, height))
@@ -510,13 +545,22 @@ def keep_trying(fn, args=None, required_set=None):
             print(e)
 
 
+def reduce_to_signature(func, kwargs):
+    """Reduce the kwargs to the signature of the function."""
+    # Retrieve the argument names of the function
+    sig = inspect.signature(func)
+
+    # Filter out the arguments that are not part of the function
+    reduced_params = {key: kwargs[key] for key in sig.parameters if key in kwargs}
+
+    return reduced_params
+
+
 def safe_initialize_class(cls, **kwargs):
     """Safely initialize a class by removing any invalid arguments."""
-    # Retrieve the argument names of the Scan class
-    sig = inspect.signature(cls.__init__)
 
     # Filter out the arguments that are not part of the Scan class
-    reduced_params = {key: kwargs[key] for key in sig.parameters if key in kwargs}
+    reduced_params = reduce_to_signature(cls.__init__, kwargs)
 
     return cls(**reduced_params)
 

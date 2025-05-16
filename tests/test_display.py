@@ -9,16 +9,17 @@ from . import backend_equality_check
 
 
 @pytest.mark.parametrize(
-    "size, resolution",
+    "size, resolution, order",
     [
-        ((128, 32), None),
-        ((512, 512), 0.1),
-        ((40, 20, 20), None),
-        ((40, 20, 20), 0.5),
+        ((128, 32), None, 1),
+        ((512, 512), 0.1, 1),
+        ((40, 20, 20), None, 1),
+        ((40, 20, 20), 0.5, 1),
+        ((112, 112), None, 3),
     ],
 )
 @backend_equality_check(decimal=[0, 2], backends=["torch", "jax"])
-def test_scan_conversion(size, resolution):
+def test_scan_conversion(size, resolution, order):
     """
     Tests the scan_conversion function with random data.
 
@@ -26,10 +27,12 @@ def test_scan_conversion(size, resolution):
     Therefore tensorflow is not included in the backends. Maybe in the future we can check
     if the error is fixed with a new keras or tensorflow version.
     """
-    data = np.random.random(size)
     from keras import ops  # pylint: disable=reimported,import-outside-toplevel
 
     from usbmd import display  # pylint: disable=reimported,import-outside-toplevel
+
+    rng = np.random.default_rng(42)
+    data = rng.random(size).astype(np.float32)
 
     rho_range = (0, 100)
     theta_range = (-45, 45)
@@ -38,20 +41,29 @@ def test_scan_conversion(size, resolution):
     if len(size) == 3:
         phi_range = (-20, 20)
         phi_range = np.deg2rad(phi_range)
-        out = display.scan_convert_3d(
+        out, params = display.scan_convert_3d(
             data,
             rho_range,
             theta_range,
             phi_range,
             resolution=resolution,
+            order=order,
         )
     else:
-        out = display.scan_convert_2d(
+        out, params = display.scan_convert_2d(
             data,
             rho_range,
             theta_range,
             resolution=resolution,
+            order=order,
         )
+
+    assert isinstance(params, dict), "params is not a dict"
+
+    # Check that dtype was not changed
+    assert ops.dtype(out) == ops.dtype(
+        data
+    ), "output dtype is not the same as input dtype"
 
     out = ops.convert_to_numpy(out)
 
@@ -112,7 +124,7 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     rho_range = (0, 100)
     theta_range = np.deg2rad((-45, 45))
 
-    cartesian_data = display.scan_convert_2d(polar_data, rho_range, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
     cartesian_data = ops.convert_to_numpy(cartesian_data)
     cartesian_data_inv = display.transform_sc_image_to_polar(
         cartesian_data, output_size=polar_data.shape
