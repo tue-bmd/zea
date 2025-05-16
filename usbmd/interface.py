@@ -22,13 +22,13 @@ from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
 from usbmd.internal.core import DataTypes
-from usbmd.internal.io_lib import matplotlib_figure_to_numpy
 from usbmd.internal.viewer import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
     filename_from_window_dialog,
     running_in_notebook,
 )
+from usbmd.io_lib import matplotlib_figure_to_numpy
 from usbmd.ops import Pipeline
 from usbmd.utils import keep_trying, save_to_gif, save_to_mp4
 

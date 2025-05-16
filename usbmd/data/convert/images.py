@@ -5,13 +5,13 @@ or sequences of images to USBMD format.
 
 import os
 import re
-from pathlib import Path
 from itertools import groupby
+from pathlib import Path
 
 import numpy as np
 
 from usbmd.data.data_format import generate_usbmd_dataset
-from usbmd.internal.io_lib import load_image, _SUPPORTED_IMG_TYPES
+from usbmd.io_lib import _SUPPORTED_IMG_TYPES, load_image
 
 
 def img_dir_to_h5_dir(
