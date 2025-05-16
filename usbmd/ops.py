@@ -2087,9 +2087,9 @@ class Pad(Operation, TFDataLayer):
             axis (int or list of int, optional): The axis or axes along which `target_shape` was
                 specified. If None, `len(target_shape) == `len(ops.shape(z))` must hold.
                 Default is None.
-            fail_on_bigger_shape (bool, optional): If True, raises an error if the target shape is
-                bigger than the input shape. If False, will pad to match the target shape wherever
-                needed. Default is True.
+            fail_on_bigger_shape (bool, optional): If True (default), raises an error if any target
+                dimension is smaller than the input shape; if False, pads only where the
+                target shape exceeds the input shape and leaves other dimensions unchanged.
             kwargs: Additional keyword arguments to pass to the padding function.
 
         Returns:
@@ -2118,6 +2118,12 @@ class Pad(Operation, TFDataLayer):
             paddings = np.stack([right_pad, left_pad], axis=1)
         else:
             paddings = np.stack([np.zeros_like(pad_shape), pad_shape], axis=1)
+
+        if np.any(paddings < 0):
+            raise ValueError(
+                f"Target shape {target_shape} must be greater than or equal "
+                f"to the input shape {shape_array}."
+            )
 
         return self.backend.numpy.pad(z, paddings, **kwargs)
 
