@@ -459,8 +459,10 @@ def fit_scan_cone_batch(image_batch, min_cone_half_angle_deg=20, threshold=15):
     Apply scan cone fitting to a batch of images.
 
     Args:
-        image_batch: Keras tensor of shape (batch_size, height, width) or (batch_size, height, width, 1)
-        min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees (default: 20)
+        image_batch: Keras tensor of shape (batch_size, height, width) or
+            (batch_size, height, width, 1)
+        min_cone_half_angle_deg: Minimum expected half-angle of the
+            cone in degrees (default: 20)
         threshold: Threshold for binary image (default: 15)
 
     Returns:
