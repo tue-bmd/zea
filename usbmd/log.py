@@ -1,13 +1,18 @@
-"""Wrapper around python logging module to provide a simple interface for logging both
+"""Custom usbmd python logging module.
+
+Wrapper around python logging module to provide a simple interface for logging both
 to the console and to a file with color support.
 
-## Example usage
-```python
-from usbmd import log
+Example usage
+-------------
 
-log.info("This is an info message")
-path = "data/datafile.hdf5"
-log.info(f"Saved to {log.yellow(path)}")
+.. code-block:: python
+
+    from usbmd import log
+
+    log.info("This is an info message")
+    path = "data/datafile.hdf5"
+    log.info(f"Saved to {log.yellow(path)}")
 
 """
 

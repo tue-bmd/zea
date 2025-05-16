@@ -1,9 +1,6 @@
-"""Input/output functions
+"""Input/output functions.
 
 Use to quickly read and write files or interact with file system.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : October 12th, 2023
 """
 
 import functools
