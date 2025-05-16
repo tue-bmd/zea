@@ -16,7 +16,7 @@ from keras import backend, ops
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
 from usbmd.models.presets import echonet_dynamic_presets
-from usbmd.registry import model_registry
+from usbmd.internal.registry import model_registry
 
 INFERENCE_SIZE = 112
 

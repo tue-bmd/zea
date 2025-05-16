@@ -8,8 +8,8 @@ import abc
 
 from keras import ops
 
-from usbmd.core import Object
-from usbmd.registry import operator_registry
+from usbmd.internal.core import Object
+from usbmd.internal.registry import operator_registry
 
 
 class Operator(abc.ABC, Object):

@@ -1,11 +1,15 @@
-usbmd package
-=============
+.. currentmodule:: usbmd
+
+Overview
+--------
+
+usbmd is organized into several subpackages and submodules:
 
 Subpackages
------------
+^^^^^^^^^^^
 
 .. toctree::
-   :maxdepth: 4
+   :maxdepth: 2
 
    usbmd.agent
    usbmd.backend
@@ -13,127 +17,118 @@ Subpackages
    usbmd.data
    usbmd.models
    usbmd.tools
-   usbmd.utils
 
 Submodules
-----------
+^^^^^^^^^^
 
-usbmd.beamformer module
------------------------
+- :mod:`usbmd.datapaths`
+- :mod:`usbmd.display`
+- :mod:`usbmd.generate`
+- :mod:`usbmd.interface`
+- :mod:`usbmd.io_lib`
+- :mod:`usbmd.log`
+- :mod:`usbmd.metrics`
+- :mod:`usbmd.ops`
+- :mod:`usbmd.ops_dep`
+- :mod:`usbmd.probes`
+- :mod:`usbmd.scan`
+- :mod:`usbmd.simulator`
+- :mod:`usbmd.tensor_ops`
+- :mod:`usbmd.utils`
+- :mod:`usbmd.visualize`
 
-.. automodule:: usbmd.beamformer
-   :members:
-   :undoc-members:
-   :show-inheritance:
+API
+--------
 
-usbmd.core module
------------------
+The most important entry points for using usbmd are:
 
-.. automodule:: usbmd.core
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. autosummary::
+   :toctree: _autosummary
+   :nosignatures:
 
-usbmd.datapaths module
-----------------------
+   usbmd.Config
+   usbmd.load_config_from_yaml
+   usbmd.Dataset
+   usbmd.File
+   usbmd.load_usbmd_file
+   usbmd.set_data_paths
+   usbmd.Interface
+   usbmd.init_device
+   usbmd.Pipeline
+   usbmd.Probe
+   usbmd.Scan
 
 .. automodule:: usbmd.datapaths
    :members:
    :undoc-members:
    :show-inheritance:
 
-usbmd.display module
---------------------
-
 .. automodule:: usbmd.display
    :members:
    :undoc-members:
    :show-inheritance:
-
-usbmd.generate module
----------------------
 
 .. automodule:: usbmd.generate
    :members:
    :undoc-members:
    :show-inheritance:
 
-usbmd.initialization module
----------------------------
-
-.. automodule:: usbmd.initialization
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-usbmd.interface module
-----------------------
-
 .. automodule:: usbmd.interface
    :members:
    :undoc-members:
    :show-inheritance:
 
-usbmd.ops module
-----------------
+.. automodule:: usbmd.io_lib
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: usbmd.log
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: usbmd.metrics
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 .. automodule:: usbmd.ops
    :members:
    :undoc-members:
    :show-inheritance:
 
-usbmd.probes module
--------------------
+.. automodule:: usbmd.ops_dep
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 .. automodule:: usbmd.probes
    :members:
    :undoc-members:
    :show-inheritance:
 
-usbmd.registry module
----------------------
-
-.. automodule:: usbmd.registry
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-usbmd.scan module
------------------
-
 .. automodule:: usbmd.scan
    :members:
    :undoc-members:
    :show-inheritance:
-
-usbmd.setup\_usbmd module
--------------------------
-
-.. automodule:: usbmd.setup_usbmd
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-usbmd.simulator module
-----------------------
 
 .. automodule:: usbmd.simulator
    :members:
    :undoc-members:
    :show-inheritance:
 
-usbmd.tensor\_ops module
-------------------------
-
 .. automodule:: usbmd.tensor_ops
    :members:
    :undoc-members:
    :show-inheritance:
 
-Module contents
----------------
+.. automodule:: usbmd.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. automodule:: usbmd
+.. automodule:: usbmd.visualize
    :members:
    :undoc-members:
    :show-inheritance:

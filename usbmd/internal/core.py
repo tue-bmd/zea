@@ -8,7 +8,7 @@ from copy import deepcopy
 import keras
 import numpy as np
 
-from usbmd.utils.utils import reduce_to_signature, update_dictionary
+from usbmd.utils import reduce_to_signature, update_dictionary
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_PRECISION = "float32"

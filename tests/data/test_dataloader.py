@@ -17,7 +17,7 @@ from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS, H5Generator
 from usbmd.data.file import File
 from usbmd.data.layers import Resizer
 from usbmd.data.utils import json_loads
-from usbmd.utils import log
+from usbmd import log
 
 from . import data_root
 

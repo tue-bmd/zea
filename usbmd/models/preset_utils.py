@@ -13,7 +13,7 @@ import keras
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import usbmd
-from usbmd.registry import model_registry
+from usbmd.internal.registry import model_registry
 
 HF_PREFIX = "hf://"
 

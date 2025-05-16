@@ -77,7 +77,7 @@ Make sure that before using any GPU enabled functionality (importing torch / ten
 
 ```python
 # import the init_device function
-from usbmd.utils.device import init_device
+from usbmd import init_device
 import keras
 
 # initialize device manually
@@ -91,7 +91,7 @@ Alternatively, you can use the `setup` function using a config file, which will 
 
 ```python
 # import the setup function
-from usbmd.setup_usbmd import setup
+from usbmd import setup
 config = setup("configs/config_picmus_rf.yaml")
 ```
 
