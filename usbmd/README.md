@@ -91,7 +91,7 @@ Alternatively, you can use the `setup` function using a config file, which will 
 
 ```python
 # import the setup function
-from usbmd.setup_usbmd import setup
+from usbmd import setup
 config = setup("configs/config_picmus_rf.yaml")
 ```
 
