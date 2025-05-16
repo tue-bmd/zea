@@ -33,7 +33,7 @@ from pathlib import Path
 import joblib
 import keras
 
-from usbmd.utils import log
+from usbmd import log
 
 # Default cache directory
 _CACHE_DIR = Path.home() / ".usbmd_cache"
@@ -136,7 +136,7 @@ def get_function_source(func):
             called_func = func.__globals__.get(called_func_name)
             if (
                 inspect.isfunction(called_func)
-                and called_func.__module__ != "usbmd.utils.cache"
+                and called_func.__module__ != "usbmd.internal.cache"
             ):
                 nested_source = get_function_source(called_func)
                 if nested_source is None:
@@ -190,12 +190,11 @@ def cache_output(*arg_names, verbose=False):
             try:
                 cache_key = generate_cache_key(func, args, kwargs, arg_names)
             except Exception as e:
-                if verbose:
-                    log.warning(
-                        f"Could not cache result for {func.__qualname__}: {e}. "
-                        "Running the function without caching. "
-                        "Often happens for a function wrapped with jax.jit or tf.function."
-                    )
+                log.warning(
+                    f"Could not cache result for {func.__qualname__}: {e}. "
+                    "Running the function without caching. "
+                    "Often happens for a function wrapped with jax.jit or tf.function."
+                )
                 return func(*args, **kwargs)
             if cache_key is None:
                 return func(*args, **kwargs)  # Run function without caching

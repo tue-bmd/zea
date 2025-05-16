@@ -27,9 +27,10 @@ help:
 # Find all .rst files except index.rst and delete them
 # Remove any generated folder and build files
 docs-clean:
-	find $(SOURCEDIR) -type f -name '*.rst' ! -name 'index.rst' ! -path '*/\.*' -exec rm -f {} \;
+	find $(SOURCEDIR) -type f -name 'usbmd.*.rst' ! -name 'index.rst' ! -path '*/\.*' -exec rm -f {} \;
 	rm -rf $(SOURCEDIR)/generated
 	rm -rf $(BUILDDIR)
+
 
 # Regenerate .rst files using sphinx-apidoc
 docs-apidoc:

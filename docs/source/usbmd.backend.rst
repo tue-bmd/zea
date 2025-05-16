@@ -11,6 +11,17 @@ Subpackages
    usbmd.backend.tensorflow
    usbmd.backend.torch
 
+Submodules
+----------
+
+usbmd.backend.autograd module
+-----------------------------
+
+.. automodule:: usbmd.backend.autograd
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Module contents
 ---------------
 

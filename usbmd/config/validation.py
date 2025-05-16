@@ -18,11 +18,11 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-import usbmd.utils.metrics  # pylint: disable=unused-import
+import usbmd.metrics  # pylint: disable=unused-import
 from usbmd.config import Config
-from usbmd.registry import metrics_registry
-from usbmd.utils import log
-from usbmd.utils.checks import _DATA_TYPES, _MOD_TYPES
+from usbmd.internal.registry import metrics_registry
+from usbmd import log
+from usbmd.internal.checks import _DATA_TYPES, _MOD_TYPES
 
 _BEAMFORMER_TYPES = ["das"]  # TODO: hardcoded for now
 

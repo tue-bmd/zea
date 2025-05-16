@@ -1,63 +1,73 @@
-"""Ops module for processing ultrasound data.
+"""
+====================================
+usbmd.ops - Operations and Pipelines
+====================================
 
-This module contains two important classes, Operation and Pipeline, which are used to
-process ultrasound data. A pipeline is a sequence of operations that are applied to the data
-in a specific order.
+This module contains two important classes, :class:`Operation` and :class:`Pipeline`,
+which are used to process ultrasound data. A pipeline is a sequence of operations
+that are applied to the data in a specific order.
 
-## Stand-alone manual usage
+Stand-alone manual usage
+-----------------------
+
 Operations can be run on their own:
 
-Examples:
-```python
-data = np.random.randn(2000, 128, 1)
-# static arguments are passed in the constructor
-envelope_detect = EnvelopeDetect(axis=-1)
-# other parameters can be passed here along with the data
-envelope_data = envelope_detect(data=data)
-```
+Examples
+^^^^^^^^
+.. code-block:: python
 
-## Using a pipeline
+    data = np.random.randn(2000, 128, 1)
+    # static arguments are passed in the constructor
+    envelope_detect = EnvelopeDetect(axis=-1)
+    # other parameters can be passed here along with the data
+    envelope_data = envelope_detect(data=data)
+
+Using a pipeline
+----------------
+
 You can initialize with a default pipeline or create your own custom pipeline.
-```python
-pipeline = Pipeline.from_default()
 
-operations = [
-    EnvelopeDetect(),
-    Normalize(),
-    LogCompress(),
-]
-pipeline_custom = Pipeline(operations)
-```
+.. code-block:: python
+
+    pipeline = Pipeline.from_default()
+
+    operations = [
+        EnvelopeDetect(),
+        Normalize(),
+        LogCompress(),
+    ]
+    pipeline_custom = Pipeline(operations)
 
 One can also load a pipeline from a config or yaml/json file:
 
-```python
-json_string = '{"operations": ["identity"]}'
-pipeline = Pipeline.from_json(json_string)
+.. code-block:: python
 
-yaml_file = "pipeline.yaml"
-pipeline = Pipeline.from_yaml(yaml_file)
-```
+    json_string = '{"operations": ["identity"]}'
+    pipeline = Pipeline.from_json(json_string)
+
+    yaml_file = "pipeline.yaml"
+    pipeline = Pipeline.from_yaml(yaml_file)
 
 Example of a yaml file:
-```yaml
-pipeline:
-  operations:
-    - name: demodulate
-    - name: "patched_grid"
-      params:
-        operations:
-          - name: tof_correction
-            params:
-              apply_phase_rotation: true
-          - name: pfield_weighting
-          - name: delay_and_sum
-        num_patches: 100
-    - name: envelope_detect
-    - name: normalize
-    - name: log_compress
 
-```
+.. code-block:: yaml
+
+    pipeline:
+      operations:
+        - name: demodulate
+        - name: "patched_grid"
+          params:
+            operations:
+              - name: tof_correction
+                params:
+                  apply_phase_rotation: true
+              - name: pfield_weighting
+              - name: delay_and_sum
+            num_patches: 100
+        - name: envelope_detect
+        - name: normalize
+        - name: log_compress
+
 """
 
 import copy
@@ -74,21 +84,26 @@ import yaml
 from keras import ops
 from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
+from usbmd import log
 from usbmd.backend import jit
-from usbmd.beamformer import tof_correction
+from usbmd.beamform.beamformer import tof_correction
 from usbmd.config.config import Config
-from usbmd.core import STATIC, DataTypes
-from usbmd.core import Object as USBMDObject
-from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
 from usbmd.display import scan_convert
+from usbmd.internal.checks import _assert_keys_and_axes
+from usbmd.internal.core import STATIC, DataTypes
+from usbmd.internal.core import Object as USBMDObject
+from usbmd.internal.core import USBMDDecoderJSON, USBMDEncoderJSON
+from usbmd.internal.registry import ops_registry
 from usbmd.probes import Probe
-from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, resample, reshape_axis
-from usbmd.utils import check_architecture, deep_compare, log, translate
-from usbmd.utils.checks import _assert_keys_and_axes
-from usbmd.utils.utils import map_negative_indices
+from usbmd.utils import (
+    check_architecture,
+    deep_compare,
+    map_negative_indices,
+    translate,
+)
 
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
@@ -728,6 +743,7 @@ class Pipeline:
             ],
         })
         pipeline = Pipeline.from_config(config)
+        ```
         """
         return pipeline_from_config(Config(config), **kwargs)
 

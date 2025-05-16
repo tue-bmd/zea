@@ -12,7 +12,7 @@ from usbmd.data.data_format import (
     generate_usbmd_dataset,
 )
 from usbmd.data.file import File, validate_file
-from usbmd.utils.checks import _REQUIRED_SCAN_KEYS
+from usbmd.internal.checks import _REQUIRED_SCAN_KEYS
 
 n_frames = 2
 n_tx = 4

@@ -6,8 +6,7 @@ import keras
 import numpy as np
 import pytest
 
-from usbmd.core import Object
-from usbmd.utils.cache import (
+from usbmd.internal.cache import (
     _CACHE_DIR,
     cache_output,
     cache_summary,
@@ -15,6 +14,7 @@ from usbmd.utils.cache import (
     get_function_source,
     set_cache_dir,
 )
+from usbmd.internal.core import Object
 
 # Global variable for the expected duration of the expensive operation
 EXPECTED_DURATION = 0.05
