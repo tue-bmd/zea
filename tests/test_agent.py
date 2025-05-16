@@ -10,15 +10,15 @@ from usbmd.agent.masks import equispaced_lines
 
 def test_equispaced_lines():
     """Test equispaced_lines."""
-    expected_lines = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    expected_lines = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
     lines = equispaced_lines(n_actions=5, n_possible_actions=10)
     assert ops.all(lines == expected_lines)
 
-    expected_lines = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+    expected_lines = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
     lines = equispaced_lines(n_actions=5, n_possible_actions=10, previous_mask=lines)
     assert ops.all(lines == expected_lines)
 
-    expected_lines = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    expected_lines = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
     lines = equispaced_lines(n_actions=5, n_possible_actions=10, previous_mask=lines)
     assert ops.all(lines == expected_lines)
 
@@ -73,17 +73,21 @@ def test_greedy_entropy():
 
     n_actions = 1
     agent = selection.GreedyEntropy(n_actions, w, h, w)
-    mask = agent.sample(particles)
+    selected_lines, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
     assert np.count_nonzero(first_row) == n_actions
+    assert np.count_nonzero(selected_lines[0]) == n_actions
 
     n_actions = 2
     agent = selection.GreedyEntropy(n_actions, w, h, w)
-    mask = agent.sample(particles)
+    selected_lines, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
     assert np.count_nonzero(first_row) == n_actions
+    assert np.count_nonzero(selected_lines[0]) == n_actions
 
 
 def test_covariance_sampling_lines():
@@ -123,10 +127,12 @@ def test_single_action():
     particles = np.random.rand(2, 1, h, w).astype(np.float32)
 
     agent = selection.GreedyEntropy(1, w, h, w)
-    mask = agent.sample(particles)
+    selected_lines, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
     assert np.count_nonzero(first_row) == 1
+    assert np.count_nonzero(selected_lines[0]) == 1
 
     agent = selection.CovarianceSamplingLines(1, w, h, w, n_masks=200)
     mask = agent.sample(particles)
@@ -142,10 +148,12 @@ def test_maximum_actions():
     particles = np.random.rand(2, 1, h, w).astype(np.float32)
 
     agent = selection.GreedyEntropy(w, w, h, w)
-    mask = agent.sample(particles)
+    selected_lines, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
     assert np.count_nonzero(first_row) == w
+    assert np.count_nonzero(selected_lines[0]) == w
 
     agent = selection.CovarianceSamplingLines(w, w, h, w, n_masks=200)
     mask = agent.sample(particles)
@@ -203,6 +211,55 @@ def test_equispaced_lines_class():
     # Test with non-divisible actions (should raise AssertionError)
     with pytest.raises(AssertionError):
         selection.EquispacedLines(3, 10, h, w, batch_size=b)
+
+
+def test_uniform_random_lines():
+    """Test UniformRandomLines action selection."""
+    np.random.seed(2)
+    h, w = 8, 8
+    batch_size = 3
+
+    # Test with single action
+    n_actions = 1
+    agent = selection.UniformRandomLines(n_actions, w, h, w, batch_size=batch_size)
+    selected_lines, mask = agent.sample()
+    assert mask.shape == (batch_size, h, w)
+    assert selected_lines.shape == (batch_size, w)
+
+    # Check each batch has correct number of actions
+    for b in range(batch_size):
+        first_row = mask[b, 0]
+        assert np.count_nonzero(first_row) == n_actions
+        assert np.count_nonzero(selected_lines[b]) == n_actions
+
+    # Test with multiple actions
+    n_actions = 2
+    agent = selection.UniformRandomLines(n_actions, w, h, w, batch_size=batch_size)
+    selected_lines, mask = agent.sample()
+    assert mask.shape == (batch_size, h, w)
+    assert selected_lines.shape == (batch_size, w)
+
+    # Check each batch has correct number of actions
+    for b in range(batch_size):
+        first_row = mask[b, 0]
+        assert np.count_nonzero(first_row) == n_actions
+        assert np.count_nonzero(selected_lines[b]) == n_actions
+
+    # Test with maximum actions
+    agent = selection.UniformRandomLines(w, w, h, w, batch_size=batch_size)
+    selected_lines, mask = agent.sample()
+    assert mask.shape == (batch_size, h, w)
+    assert selected_lines.shape == (batch_size, w)
+
+    # Check each batch has correct number of actions
+    for b in range(batch_size):
+        first_row = mask[b, 0]
+        assert np.count_nonzero(first_row) == w
+        assert np.count_nonzero(selected_lines[b]) == w
+
+    # Test with non-divisible actions (should raise AssertionError)
+    with pytest.raises(AssertionError):
+        selection.UniformRandomLines(3, 10, h, w, batch_size=batch_size)
 
 
 if __name__ == "__main__":
