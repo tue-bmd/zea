@@ -319,7 +319,7 @@ class Operation(keras.Operation):
             "key": self.key,
             "output_key": self.output_key,
             "cache_inputs": self.cache_inputs,
-            "cache_outputs": self.cacheOutputs,
+            "cache_outputs": self.cache_outputs,
             "jit_compile": self._jit_compile,
             "with_batch_dim": self.with_batch_dim,
             "jit_kwargs": self.jit_kwargs,
