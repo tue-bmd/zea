@@ -37,11 +37,6 @@ Currently usbmd offers:
 
    _autosummary/usbmd
 
-   .. autosummary::
-      :toctree: _autosummary
-      :recursive:
-      usbmd
-
 .. toctree::
    :caption: Project Links
    :maxdepth: 1
