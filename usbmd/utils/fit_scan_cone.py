@@ -529,7 +529,7 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
                 color="#00FF00",  # Bright green
                 linestyle="--",
                 linewidth=2,
-                label="Bottom boundary",
+                label="Sector arc",
             )
 
     # Draw apex as a star
