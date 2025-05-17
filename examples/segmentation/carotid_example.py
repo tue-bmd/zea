@@ -18,8 +18,8 @@ from keras import ops
 from usbmd import init_device, log, set_data_paths
 from usbmd.backend.tensorflow.dataloader import make_dataloader
 from usbmd.models.carotid_segmenter import CarotidSegmenter
-from usbmd.utils.selection_tool import add_shape_from_mask
-from usbmd.utils.visualize import plot_image_grid, set_mpl_style
+from usbmd.tools.selection_tool import add_shape_from_mask
+from usbmd.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
     # Set up data paths and device

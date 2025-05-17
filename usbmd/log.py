@@ -3,7 +3,7 @@ to the console and to a file with color support.
 
 ## Example usage
 ```python
-from usbmd.utils import log
+from usbmd import log
 
 log.info("This is an info message")
 path = "data/datafile.hdf5"

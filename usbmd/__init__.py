@@ -5,6 +5,8 @@ __version__ = "2.4.0"
 import inspect
 import os
 
+from . import log
+
 
 def _imported_from_main():
     """Check if the module was imported from __main__.py
@@ -44,12 +46,11 @@ from .data.datasets import Dataset
 from .data.file import File, load_usbmd_file
 from .datapaths import set_data_paths
 from .interface import Interface
+from .internal.device import init_device
 from .ops import Pipeline
 from .probes import Probe
 from .scan import Scan
-from .setup_usbmd import set_backend, setup, setup_config
-from .utils import log, visualize
-from .utils.device import init_device
+from .internal.setup_usbmd import set_backend, setup, setup_config
 
 try:
     from .backend.tensorflow.dataloader import make_dataloader

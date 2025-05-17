@@ -9,11 +9,11 @@ Or do not pass a config file to open a file dialog to choose a config file.
 
 # pylint: disable=import-outside-toplevel
 import argparse
-import asyncio
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+from usbmd import log
+from usbmd.visualize import set_mpl_style
 
 
 def get_args():
@@ -55,10 +55,10 @@ def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
 
-    plt.style.use(str(Path(__file__).parent / "usbmd_darkmode.mplstyle"))
+    set_mpl_style()
 
     if args.backend:
-        from usbmd.setup_usbmd import set_backend
+        from usbmd.internal.setup_usbmd import set_backend
 
         set_backend(args.backend)
 
@@ -69,11 +69,9 @@ def main():
 
     from usbmd.generate import GenerateDataSet
     from usbmd.interface import Interface
-    from usbmd.setup_usbmd import setup
-    from usbmd.utils import keep_trying, log, strtobool
-    from usbmd.utils.checks import _DATA_TYPES
-    from usbmd.utils.gui import USBMDApp
-    from usbmd.utils.io_lib import start_async_app
+    from usbmd.internal.checks import _DATA_TYPES
+    from usbmd.internal.setup_usbmd import setup
+    from usbmd.utils import keep_trying, strtobool
 
     config = setup(args.config)
 
@@ -84,31 +82,7 @@ def main():
         )
 
         log.info(f"Using {keras.backend.backend()} backend")
-
-        if args.gui:
-            log.warning(
-                "GUI is very much in beta, please report any bugs to "
-                "https://github.com/tue-bmd/ultrasound-toolbox."
-            )
-            try:
-                asyncio.run(
-                    start_async_app(
-                        USBMDApp,
-                        title="USBMD GUI",
-                        ui=ui,
-                        resolution=(600, 300),
-                        verbose=True,
-                        config=config,
-                    )
-                )
-            except RuntimeError as e:
-                # probably a better way to handle this...
-                if str(e) == "Event loop stopped before Future completed.":
-                    log.info("GUI closed.")
-                else:
-                    raise e
-        else:
-            ui.run(plot=True)
+        ui.run(plot=True)
 
     elif args.task == "generate":
         destination_folder = keep_trying(

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import yaml
 
-from usbmd.core import object_to_tensor
-from usbmd.utils import log
+from usbmd import log
+from usbmd.internal.core import object_to_tensor
 
 
 def path_to_str(path):

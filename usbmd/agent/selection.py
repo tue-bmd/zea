@@ -7,7 +7,7 @@ from keras import ops
 
 from usbmd import tensor_ops
 from usbmd.agent import masks
-from usbmd.registry import action_selection_registry
+from usbmd.internal.registry import action_selection_registry
 
 
 class MaskActionModel:

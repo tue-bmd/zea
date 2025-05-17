@@ -12,14 +12,14 @@ import numpy as np
 
 from usbmd.probes import Probe
 from usbmd.scan import Scan, cast_scan_parameters
-from usbmd.utils import log
-from usbmd.utils.checks import (
+from usbmd import log
+from usbmd.internal.checks import (
     _DATA_TYPES,
     _NON_IMAGE_DATA_TYPES,
     _REQUIRED_SCAN_KEYS,
     get_check,
 )
-from usbmd.utils.utils import reduce_to_signature
+from usbmd.utils import reduce_to_signature
 
 
 def assert_key(file: h5py.File, key: str):
