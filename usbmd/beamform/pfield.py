@@ -8,8 +8,8 @@ import keras
 import numpy as np
 from keras import ops
 
-from usbmd.utils import log
-from usbmd.utils.cache import cache_output
+from usbmd import log
+from usbmd.internal.cache import cache_output
 
 
 @cache_output(verbose=True)

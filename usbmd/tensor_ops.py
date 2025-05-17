@@ -9,8 +9,8 @@ from keras import ops
 from scipy.ndimage import _ni_support
 from scipy.ndimage._filters import _gaussian_kernel1d
 
-from usbmd.utils import log
-from usbmd.utils.utils import map_negative_indices
+from usbmd import log
+from usbmd.utils import map_negative_indices
 
 
 def split_seed(seed, n):

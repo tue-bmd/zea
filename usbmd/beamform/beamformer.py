@@ -3,8 +3,8 @@
 import numpy as np
 from keras import ops
 
+from usbmd.beamform.lens_correction import calculate_lens_corrected_delays
 from usbmd.tensor_ops import safe_vectorize
-from usbmd.utils.lens_correction import calculate_lens_corrected_delays
 
 
 def tof_correction(

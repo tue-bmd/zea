@@ -9,7 +9,7 @@ import importlib
 import keras
 from keras.src.saving.serialization_lib import record_object_after_deserialization
 
-from usbmd.core import classproperty
+from usbmd.internal.core import classproperty
 from usbmd.models.preset_utils import (
     builtin_presets,
     get_preset_loader,

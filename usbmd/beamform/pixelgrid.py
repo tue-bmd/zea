@@ -6,7 +6,7 @@
 
 import numpy as np
 
-from usbmd.utils import log
+from usbmd import log
 
 eps = 1e-10
 

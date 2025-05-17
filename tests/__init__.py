@@ -9,7 +9,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
 if os.environ.get("CUDA_VISIBLE_DEVICES", "") != "":
     # Selecting a device for the tests, can be cpu or gpu
-    from usbmd.utils.device import init_device
+    from usbmd.internal.device import init_device
 
     init_device()
 

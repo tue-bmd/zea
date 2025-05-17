@@ -6,7 +6,7 @@
 
 import numpy as np
 
-from usbmd.registry import metrics_registry
+from usbmd.internal.registry import metrics_registry
 
 
 def get_metric(name):

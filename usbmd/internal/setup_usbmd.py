@@ -22,10 +22,10 @@ import yaml
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.datapaths import create_new_user, set_data_paths
-from usbmd.utils import log
-from usbmd.utils.device import init_device
-from usbmd.utils.git_info import get_git_summary
-from usbmd.utils.io_lib import filename_from_window_dialog
+from usbmd import log
+from usbmd.internal.device import init_device
+from usbmd.internal.git_info import get_git_summary
+from usbmd.internal.viewer import filename_from_window_dialog
 
 
 def reload_module(name):

@@ -20,7 +20,7 @@ import numpy as np
 import yaml
 from PIL import Image
 
-from usbmd.utils import log
+from usbmd import log
 
 
 def _assert_uint8_images(images: np.ndarray):

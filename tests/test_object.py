@@ -1,10 +1,10 @@
-""" Tests for the core Object class."""
+"""Tests for the core Object class."""
 
 import timeit
 
 import numpy as np
 
-from usbmd.core import Object
+from usbmd.internal.core import Object
 
 
 class SomeObj(Object):
