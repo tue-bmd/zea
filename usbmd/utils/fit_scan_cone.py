@@ -4,11 +4,20 @@ is at the top center of the image. In this form, it can be scan converted to
 polar coordinates.
 """
 
+import os
+
+if __name__ == "__main__":
+    os.environ["KERAS_BACKEND"] = (
+        "numpy"  # recommend using numpy for this since some line fitting is performed on CPU
+    )
+
+import keras
 from keras import ops
 import cv2
 import numpy as np  # Only needed for OpenCV interface
 import matplotlib.pyplot as plt
 from pathlib import Path
+from usbmd import log
 
 
 def filter_edge_points_by_boundary(
@@ -178,43 +187,22 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     right_angle = ops.arctan(right_b)  # angle of right line from horizontal
     opening_angle = ops.abs(left_angle - right_angle)
 
-    # Find the circular bottom boundary more robustly
-    # Find bottom-most non-zero pixels for each column in the data region
-    bottom_points = []
-    min_x_np = int(ops.convert_to_numpy(min_x))
-    max_x_np = int(ops.convert_to_numpy(max_x))
+    min_non_zero_pixel_idx = (0, 0)
+    for i in reversed(range(0, thresh_np.shape[0])):
+        row = thresh_np[i]
+        non_zero_pixel_col = np.where(row > 0)[0]
+        if np.any(non_zero_pixel_col):
+            min_non_zero_pixel_idx = (i, non_zero_pixel_col[0])
+            break
 
-    # Sample points across the width, not every single column (for efficiency)
-    sample_x = np.linspace(
-        min_x_np, max_x_np, min(100, max_x_np - min_x_np + 1), dtype=int
-    )
-
-    for x in sample_x:
-        col = thresh_np[:, x]
-        non_zero_y = np.where(col > 0)[0]
-        if len(non_zero_y) > 0:
-            bottom_y = non_zero_y[-1]  # Last (bottom-most) non-zero pixel
-            bottom_points.append([x, bottom_y])
-
-    if len(bottom_points) < 5:
-        # Fallback: estimate from cone geometry
-        circle_radius = float(ops.convert_to_numpy(cone_height))
-        circle_center_x = float(ops.convert_to_numpy(apex_x))
-        circle_center_y = float(ops.convert_to_numpy(apex_y))
-    else:
-        # Calculate circle parameters from bottom points
-        bottom_points = np.array(bottom_points)
-        # Use the actual bottom-most y coordinate
-        actual_bottom_y = bottom_points[np.argmax(bottom_points[:, 1])]
-
-        circle_radius = float(
-            np.sqrt(
-                (actual_bottom_y[0] - ops.convert_to_numpy(apex_x)) ** 2
-                + (actual_bottom_y[1] - ops.convert_to_numpy(apex_y)) ** 2
-            )
+    circle_radius = float(
+        np.sqrt(
+            (min_non_zero_pixel_idx[1] - ops.convert_to_numpy(apex_x)) ** 2
+            + (min_non_zero_pixel_idx[0] - ops.convert_to_numpy(apex_y)) ** 2
         )
-        circle_center_x = float(ops.convert_to_numpy(apex_x))
-        circle_center_y = float(ops.convert_to_numpy(apex_y))
+    )
+    circle_center_x = float(ops.convert_to_numpy(apex_x))
+    circle_center_y = float(ops.convert_to_numpy(apex_y))
 
     # Calculate where the circle intersects with the cone lines
     # For line: x = a + b*y and circle: (x - cx)^2 + (y - cy)^2 = r^2
@@ -430,6 +418,11 @@ def fit_scan_cone(
     Raises:
         ValueError: If cone detection fails or image is not 2D
     """
+    if keras.backend.backend() != "numpy":
+        log.info(
+            f"❗️ It is recommended to use {log.blue('numpy')} backend for `fit_scan_cone()`."
+        )
+
     # Ensure image is 2D
     if len(ops.shape(image_tensor)) != 2:
         raise ValueError(
@@ -468,43 +461,88 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Convert image to numpy if it's a tensor
-    if hasattr(image, "numpy"):
-        image = image.numpy()
+    # Create figure
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    ax.imshow(image, cmap="gray" if len(image.shape) == 2 else None)
 
-    # Create figure with subplots
-    fig = plt.figure(figsize=(15, 10))
+    # Extract parameters
+    apex_x, apex_y = cone_params["apex_x"], cone_params["apex_y"]
+    left_a = cone_params["left_intercept"]
+    left_b = cone_params["left_slope"]
+    right_a = cone_params["right_intercept"]
+    right_b = cone_params["right_slope"]
 
-    # Original image with cone overlay
-    ax1 = fig.add_subplot(221)
-    ax1.imshow(image, cmap="gray")
-    ax1.set_title("Original Image with Cone Overlay")
+    # Get bottom intersection points
+    bottom_y = image.shape[0] - 1
+    left_x_bottom = left_a + left_b * bottom_y
+    right_x_bottom = right_a + right_b * bottom_y
 
-    # Draw cone boundaries
-    y = np.linspace(0, image.shape[0] - 1, 100)
-    left_x = cone_params["left_intercept"] + cone_params["left_slope"] * y
-    right_x = cone_params["right_intercept"] + cone_params["right_slope"] * y
-
-    # Draw left boundary
-    valid_left = (left_x >= 0) & (left_x < image.shape[1])
-    ax1.plot(left_x[valid_left], y[valid_left], "r-", linewidth=2)
-
-    # Draw right boundary
-    valid_right = (right_x >= 0) & (right_x < image.shape[1])
-    ax1.plot(right_x[valid_right], y[valid_right], "r-", linewidth=2)
-
-    # Draw apex
-    ax1.plot(cone_params["apex_x"], cone_params["apex_y"], "go", markersize=10)
-
-    # Draw bottom circle
-    circle = plt.Circle(
-        (cone_params["circle_center_x"], cone_params["circle_center_y"]),
-        cone_params["circle_radius"],
-        fill=False,
-        color="b",
+    # Draw cone lines
+    ax.plot(
+        [apex_x, left_x_bottom],
+        [apex_y, bottom_y],
+        color="#FF0000",  # Bright red
+        linewidth=2,
+        label="Cone boundary",
+    )
+    ax.plot(
+        [apex_x, right_x_bottom],
+        [apex_y, bottom_y],
+        color="#FF0000",  # Bright red
         linewidth=2,
     )
-    ax1.add_patch(circle)
+
+    # Draw circular arc between the fitted lines
+    if "circle_center_x" in cone_params:
+        circle_center_x = cone_params["circle_center_x"]
+        circle_center_y = cone_params["circle_center_y"]
+        circle_radius = cone_params["circle_radius"]
+
+        # Calculate angles for left and right intersection points
+        left_angle = np.arctan2(
+            left_x_bottom - circle_center_x, bottom_y - circle_center_y
+        )
+        right_angle = np.arctan2(
+            right_x_bottom - circle_center_x, bottom_y - circle_center_y
+        )
+
+        # Ensure angles are in the correct order
+        if right_angle < left_angle:
+            right_angle += 2 * np.pi
+
+        # Create arc points
+        theta = np.linspace(left_angle, right_angle, 100)
+        arc_x = circle_center_x + circle_radius * np.sin(theta)
+        arc_y = circle_center_y + circle_radius * np.cos(theta)
+
+        # Only draw the part that's visible in the image
+        visible_mask = (
+            (arc_y >= 0)
+            & (arc_y < image.shape[0])
+            & (arc_x >= 0)
+            & (arc_x < image.shape[1])
+        )
+        if np.any(visible_mask):
+            ax.plot(
+                arc_x[visible_mask],
+                arc_y[visible_mask],
+                color="#00FF00",  # Bright green
+                linestyle="--",
+                linewidth=2,
+                label="Bottom boundary",
+            )
+
+    # Draw apex as a star
+    ax.plot(
+        apex_x,
+        apex_y,
+        marker="*",  # Star marker
+        markersize=15,
+        color="#FFD700",  # Gold
+        # markeredgecolor="white",
+        markeredgewidth=2,
+        label="Cone apex",
+    )
 
     # Draw crop rectangle
     rect = plt.Rectangle(
@@ -512,37 +550,63 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
         cone_params["crop_right"] - cone_params["crop_left"],
         cone_params["crop_bottom"] - cone_params["crop_top"],
         fill=False,
-        color="g",
+        color="#00FFFF",  # Cyan
         linewidth=2,
+        label="Crop region",
+        linestyle="dotted",
     )
-    ax1.add_patch(rect)
+    ax.add_patch(rect)
 
-    # Cropped and centered image
-    ax2 = fig.add_subplot(222)
-    cropped = crop_and_center_cone(ops.convert_to_tensor(image), cone_params)
-    ax2.imshow(cropped.numpy(), cmap="gray")
-    ax2.set_title("Cropped and Centered Image")
+    # Add info text
+    opening_angle_deg = np.degrees(cone_params["opening_angle"])
+    info_text = (
+        f"Opening Angle: {opening_angle_deg:.1f}°\n"
+        f'Symmetry Ratio: {cone_params.get("symmetry_ratio", 0.0):.3f}'
+    )
 
-    # Parameters text
-    ax3 = fig.add_subplot(223)
-    ax3.axis("off")
-    param_text = (
-        f"Cone Parameters:\n"
-        f"Apex: ({cone_params['apex_x']:.1f}, {cone_params['apex_y']:.1f})\n"
-        f"Opening Angle: {np.degrees(cone_params['opening_angle']):.1f}°\n"
-        f"Cone Height: {cone_params['cone_height']:.1f}\n"
-        f"Symmetry Ratio: {cone_params['symmetry_ratio']:.2f}\n"
-        f"Data Coverage: {cone_params['data_coverage']:.2%}\n"
-        f"Crop Region: ({cone_params['crop_left']}, {cone_params['crop_top']}) to "
+    if "circle_radius" in cone_params:
+        info_text += f'\nCircle Radius: {cone_params["circle_radius"]:.1f} px'
+
+    ax.text(
+        0.02,
+        0.98,
+        info_text,
+        transform=ax.transAxes,
+        fontsize=11,
+        va="top",
+        bbox=dict(boxstyle="round", facecolor="#FFFF00", alpha=0.9),  # Bright yellow
+    )
+
+    # Add crop info
+    crop_info = (
+        f"Crop: ({cone_params['crop_left']}, {cone_params['crop_top']}) to "
         f"({cone_params['crop_right']}, {cone_params['crop_bottom']})\n"
-        f"Final Size: {cone_params['new_width']}x{cone_params['new_height']}"
+        f"Final Size: {cone_params['new_width']} x {cone_params['new_height']}"
     )
-    ax3.text(0.1, 0.9, param_text, fontsize=10, verticalalignment="top")
 
-    # Save the figure
+    ax.text(
+        0.02,
+        0.02,
+        crop_info,
+        transform=ax.transAxes,
+        fontsize=11,
+        va="bottom",
+        bbox=dict(boxstyle="round", facecolor="#00FFFF", alpha=0.9),  # Cyan
+    )
+
+    # Set up the plot
+    ax.set_xlim(0, image.shape[1])
+    ax.set_ylim(image.shape[0], 0)
+    ax.legend(loc="upper right")
+    ax.set_title("Scan Cone Detection", fontsize=16)
+    ax.axis("off")
+
     plt.tight_layout()
     plt.savefig(
-        output_path / "scan_cone_visualization.png", dpi=300, bbox_inches="tight"
+        output_path / "scan_cone_visualization.png",
+        dpi=300,
+        bbox_inches="tight",
+        pad_inches=0.5,
     )
     plt.close()
 
@@ -581,5 +645,5 @@ def main(avi_path):
 
 if __name__ == "__main__":
 
-    SAMPLE_INPUT_FILE = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh/Batch1/0X1A0EA15E24B40C14.avi"
+    SAMPLE_INPUT_FILE = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
     main(SAMPLE_INPUT_FILE)
