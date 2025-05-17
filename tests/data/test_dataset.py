@@ -7,7 +7,7 @@ from usbmd.config import Config
 from usbmd.config.validation import check_config
 from usbmd.data.datasets import Dataset
 from usbmd.generate import GenerateDataSet
-from usbmd.setup_usbmd import setup_config
+from usbmd.internal.setup_usbmd import setup_config
 
 from .. import DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_X, DUMMY_DATASET_N_Z
 

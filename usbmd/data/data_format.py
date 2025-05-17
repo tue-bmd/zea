@@ -9,8 +9,9 @@ from pathlib import Path
 import numpy as np
 
 from usbmd.data.file import File, validate_file
-from usbmd.utils import first_not_none_item, log
-from usbmd.utils.checks import _DATA_TYPES
+from usbmd import log
+from usbmd.utils import first_not_none_item
+from usbmd.internal.checks import _DATA_TYPES
 
 
 @dataclass

@@ -10,7 +10,7 @@ from usbmd.models.base import BaseModel
 from usbmd.models.layers import DownBlock, ResidualBlock, UpBlock, sinusoidal_embedding
 from usbmd.models.preset_utils import register_presets
 from usbmd.models.presets import unet_presets
-from usbmd.registry import model_registry
+from usbmd.internal.registry import model_registry
 
 
 @model_registry(name="unet")

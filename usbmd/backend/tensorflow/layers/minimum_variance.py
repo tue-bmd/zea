@@ -19,7 +19,7 @@ SEE `usbmd.beamformer` instead.
 import tensorflow as tf
 
 from usbmd.backend.tensorflow.layers.beamformers import BeamSumming
-from usbmd.registry import tf_beamformer_registry
+from usbmd.internal.registry import tf_beamformer_registry
 
 
 @tf_beamformer_registry(name="mv", framework="tensorflow")

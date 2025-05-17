@@ -12,6 +12,14 @@ Subpackages
 Submodules
 ----------
 
+usbmd.data.augmentations module
+-------------------------------
+
+.. automodule:: usbmd.data.augmentations
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 usbmd.data.data\_format module
 ------------------------------
 
@@ -36,6 +44,14 @@ usbmd.data.datasets module
    :undoc-members:
    :show-inheritance:
 
+usbmd.data.file module
+----------------------
+
+.. automodule:: usbmd.data.file
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 usbmd.data.layers module
 ------------------------
 
@@ -44,10 +60,10 @@ usbmd.data.layers module
    :undoc-members:
    :show-inheritance:
 
-usbmd.data.read\_h5 module
---------------------------
+usbmd.data.utils module
+-----------------------
 
-.. automodule:: usbmd.data.read_h5
+.. automodule:: usbmd.data.utils
    :members:
    :undoc-members:
    :show-inheritance:
