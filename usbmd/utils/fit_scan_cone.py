@@ -5,6 +5,7 @@ polar coordinates.
 """
 
 import os
+from pathlib import Path
 
 if __name__ == "__main__":
     os.environ["KERAS_BACKEND"] = (
@@ -16,7 +17,6 @@ from keras import ops
 import cv2
 import numpy as np  # Only needed for OpenCV interface
 import matplotlib.pyplot as plt
-from pathlib import Path
 from usbmd import log
 
 
@@ -104,8 +104,6 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
     min_y = ops.min(non_zero_indices[:, 0])
     max_y = ops.max(non_zero_indices[:, 0])
-    min_x = ops.min(non_zero_indices[:, 1])
-    max_x = ops.max(non_zero_indices[:, 1])
 
     # Collect left and right edge points
     left_edge_points = []
@@ -462,7 +460,7 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Create figure
-    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    _, ax = plt.subplots(1, 1, figsize=(12, 10))
     ax.imshow(image, cmap="gray" if len(image.shape) == 2 else None)
 
     # Extract parameters
@@ -574,7 +572,11 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
         transform=ax.transAxes,
         fontsize=11,
         va="top",
-        bbox=dict(boxstyle="round", facecolor="#FFFF00", alpha=0.9),  # Bright yellow
+        bbox={
+            "boxstyle": "round",
+            "facecolor": "#FFFF00",
+            "alpha": 0.9,
+        },  # Bright yellow
     )
 
     # Add crop info
@@ -591,7 +593,11 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
         transform=ax.transAxes,
         fontsize=11,
         va="bottom",
-        bbox=dict(boxstyle="round", facecolor="#00FFFF", alpha=0.9),  # Cyan
+        bbox={
+            "boxstyle": "round",
+            "facecolor": "#00FFFF",
+            "alpha": 0.9,
+        },
     )
 
     # Set up the plot
@@ -631,7 +637,7 @@ def main(avi_path):
 
     try:
         # Fit scan cone
-        cropped_image, cone_params = fit_scan_cone(
+        _, cone_params = fit_scan_cone(
             frame_tensor, min_cone_half_angle_deg=20, threshold=15, return_params=True
         )
 
@@ -645,5 +651,7 @@ def main(avi_path):
 
 if __name__ == "__main__":
 
-    SAMPLE_INPUT_FILE = "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
+    SAMPLE_INPUT_FILE = Path(
+        "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
+    )
     main(SAMPLE_INPUT_FILE)
