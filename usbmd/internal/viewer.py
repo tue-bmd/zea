@@ -1,20 +1,12 @@
-"""Input/output functions
-
-Use to quickly read and write files or interact with file system.
+"""Functions for displaying images and videos using OpenCV or Matplotlib.
 
 - **Author(s)**     : Tristan Stevens
 - **Date**          : October 12th, 2023
 """
 
 import abc
-import asyncio
-import functools
-import multiprocessing
-import os
 import sys
-import time
 from collections import deque
-from io import BytesIO
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from tkinter import Tk
@@ -22,24 +14,13 @@ from tkinter.filedialog import askopenfilename
 from typing import Callable, Optional
 
 import cv2
-import imageio
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import pydicom
-import tqdm
-import yaml
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from PIL import Image
-from pydicom.pixel_data_handlers import convert_color_space
 from PyQt5.QtCore import QRect
 
-from usbmd.data.file import File
-from usbmd.utils import log
-
-_SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
-_SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
-_SUPPORTED_USBMD_TYPES = [".hdf5", ".h5"]
+from usbmd import log
 
 
 def running_in_notebook():
@@ -95,241 +76,6 @@ def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=Non
         return Path(filename)
     else:
         raise ValueError("No file selected.")
-
-
-def load_video(filename):
-    """Load a video file and return a numpy array of frames.
-
-    Supported file types: avi, mp4, gif, dcm.
-
-    Args:
-        filename (str): The path to the video file.
-
-    Returns:
-        numpy.ndarray: A numpy array of frames.
-    Raises:
-        ValueError: If the file extension is not supported.
-    """
-    filename = Path(filename)
-    assert Path(filename).exists(), f"File {filename} does not exist"
-    extension = filename.suffix
-    assert (
-        extension in _SUPPORTED_VID_TYPES
-    ), f"File extension {extension} not supported"
-
-    if extension in [".avi", ".mp4"]:
-        cap = cv2.VideoCapture(filename)
-        frames = []
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frames.append(frame)
-        cap.release()
-    elif extension == ".gif":
-        frames = imageio.mimread(filename)
-    elif extension == "":
-        ds = pydicom.dcmread(filename)
-        frames = convert_color_space(ds.pixel_array, "YBR_FULL", "RGB")
-    else:
-        raise ValueError("Unsupported file extension")
-    frames = [cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) for frame in frames]
-    return np.array(frames)
-
-
-def load_image(filename, grayscale=True, color_order="RGB"):
-    """Load an image file and return a numpy array.
-
-    Supported file types: jpg, png.
-
-    Args:
-        filename (str): The path to the image file.
-        grayscale (bool, optional): Whether to convert the image to grayscale. Defaults to True.
-        color_order (str, optional): The desired color channel ordering. Defaults to 'RGB'.
-
-    Returns:
-        numpy.ndarray: A numpy array of the image.
-
-    Raises:
-        ValueError: If the file extension is not supported.
-    """
-    filename = Path(filename)
-    assert Path(filename).exists(), f"File {filename} does not exist"
-    extension = filename.suffix
-    assert (
-        extension in _SUPPORTED_IMG_TYPES
-    ), f"File extension {extension} not supported"
-
-    image = cv2.imread(str(filename))
-
-    if grayscale and len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-
-    if color_order == "BGR":
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    elif color_order == "RGB":
-        pass
-    else:
-        raise ValueError(f"Unsupported color order: {color_order}")
-
-    return image
-
-
-def search_file_tree(
-    directory,
-    filetypes=None,
-    write=True,
-    dataset_info_filename="dataset_info.yaml",
-    hdf5_key_for_length=None,
-    redo=False,
-    parallel=True,
-    verbose=True,
-):
-    """Lists all files in directory and sub-directories.
-
-    If dataset_info.yaml is detected in the directory, that file is read and used
-    to deduce the file paths. If not, the file paths are searched for in the
-    directory and written to a dataset_info.yaml file.
-
-    Args:
-        directory (str): path to base directory to start file search
-        filetypes (str, list, optional): filetypes to look for in directory
-            Defaults to image types (.png etc.). make sure to include the dot.
-        write (bool, optional): Whether to write to dataset_info.yaml file.
-            Defaults to True. If False, the file paths are not written to file
-            and simply returned.
-        dataset_info_filename (str, optional): name of dataset info file.
-            Defaults to "dataset_info.yaml", but can be changed to any name.
-        hdf5_key_for_length (str, optional): key to use for getting length of hdf5 files.
-            Defaults to None. If set, the number of frames in each hdf5 file is
-            calculated and stored in the dataset_info.yaml file. This is extra
-            functionality of `search_file_tree` and only works with hdf5 files.
-        redo (bool, optional): Whether to redo the search and overwrite the dataset_info.yaml file.
-
-    Returns:
-        dict: dictionary containing file paths and total number of files.
-            has the following structure:
-                {
-                    "file_paths": list of file paths,
-                    "total_num_files": total number of files
-                    "file_lengths": list of number of frames in each hdf5 file
-                    "file_shapes": list of shapes of each image file
-                    "total_num_frames": total number of frames in all hdf5 files
-                }
-
-    """
-    directory = Path(directory)
-    if not directory.is_dir():
-        raise ValueError(
-            log.error(
-                f"Directory {directory} does not exist. Please provide a valid directory."
-            )
-        )
-    assert Path(dataset_info_filename).suffix == ".yaml", (
-        "Currently only YAML files are supported for dataset info file when "
-        f"using `search_file_tree`, got {dataset_info_filename}"
-    )
-
-    if (directory / dataset_info_filename).is_file() and not redo:
-        with open(directory / dataset_info_filename, "r", encoding="utf-8") as file:
-            dataset_info = yaml.load(file, Loader=yaml.FullLoader)
-
-        # Check if the file_shapes key is present in the dataset_info, otherwise redo the search
-        if "file_shapes" in dataset_info:
-            if verbose:
-                log.info(
-                    "Using pregenerated dataset info file: "
-                    f"{log.yellow(directory / dataset_info_filename)} ..."
-                )
-                log.info(f"...for reading file paths in {log.yellow(directory)}")
-            return dataset_info
-
-    if redo and verbose:
-        log.info(
-            f"Overwriting dataset info file: {log.yellow(directory / dataset_info_filename)}"
-        )
-
-    # set default file type
-    if filetypes is None:
-        filetypes = _SUPPORTED_IMG_TYPES + _SUPPORTED_VID_TYPES + _SUPPORTED_USBMD_TYPES
-
-    file_paths = []
-
-    if isinstance(filetypes, str):
-        filetypes = [filetypes]
-
-    if hdf5_key_for_length is not None:
-        assert isinstance(
-            hdf5_key_for_length, str
-        ), "hdf5_key_for_length must be a string"
-        assert set(filetypes).issubset({".hdf5", ".h5"}), (
-            "hdf5_key_for_length only works with when filetypes is set to "
-            f"`.hdf5` or `.h5`, got {filetypes}"
-        )
-
-    # Traverse file tree to index all files from filetypes
-    if verbose:
-        log.info(f"Searching {log.yellow(directory)} for {filetypes} files...")
-    for dirpath, _, filenames in os.walk(directory):
-        for file in filenames:
-            # Append to file_paths if it is a filetype file
-            if Path(file).suffix in filetypes:
-                file_path = Path(dirpath) / file
-                file_path = file_path.relative_to(directory)
-                file_paths.append(str(file_path))
-
-    if hdf5_key_for_length is not None:
-        # using multiprocessing to speed up reading hdf5 files
-        # and getting the number of frames in each file
-        if verbose:
-            log.info("Getting number of frames in each hdf5 file...")
-
-        get_shape_partial = functools.partial(File.get_shape, key=hdf5_key_for_length)
-        # make sure to call search_file_tree from within a function
-        # or use if __name__ == "__main__":
-        # to avoid freezing the main process
-        absolute_file_paths = [directory / file for file in file_paths]
-        if parallel:
-            with multiprocessing.Pool() as pool:
-                file_shapes = list(
-                    tqdm.tqdm(
-                        pool.imap(
-                            get_shape_partial,
-                            absolute_file_paths,
-                        ),
-                        total=len(file_paths),
-                        desc="Getting number of frames in each hdf5 file",
-                        disable=not verbose,
-                    )
-                )
-        else:
-            file_shapes = []
-            for file_path in tqdm.tqdm(
-                absolute_file_paths,
-                desc="Getting number of frames in each hdf5 file",
-                disable=not verbose,
-            ):
-                file_shapes.append(File.get_shape(file_path, hdf5_key_for_length))
-
-    assert len(file_paths) > 0, f"No image files were found in: {directory}"
-    if verbose:
-        log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
-        log.info(
-            f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}"
-        )
-
-    dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
-    if len(file_shapes) > 0:
-        dataset_info["file_shapes"] = file_shapes
-        file_lengths = [shape[0] for shape in file_shapes]
-        dataset_info["file_lengths"] = file_lengths
-        dataset_info["total_num_frames"] = sum(file_lengths)
-
-    if write:
-        with open(directory / dataset_info_filename, "w", encoding="utf-8") as file:
-            yaml.dump(dataset_info, file)
-
-    return dataset_info
 
 
 def move_matplotlib_figure(figure, position, size=None):
@@ -424,25 +170,6 @@ def raise_matplotlib_window(figname=None):
     elif backend == "TkAgg":
         cfm.window.attributes("-topmost", True)
         cfm.window.attributes("-topmost", False)
-
-
-def matplotlib_figure_to_numpy(fig):
-    """Convert matplotlib figure to numpy array.
-
-    Args:
-        fig (matplotlib.figure.Figure): figure to convert.
-
-    Returns:
-        np.ndarray: numpy array of figure.
-
-    """
-    buf = BytesIO()
-    fig.savefig(buf, format="png")
-    buf.seek(0)
-    image = Image.open(buf).convert("RGB")
-    image = np.array(image)[..., :3]
-    buf.close()
-    return image
 
 
 class DummyTask:
@@ -544,7 +271,7 @@ class ImageViewerOpenCV(ImageViewer):
 
     Example:
         >>> import numpy as np
-        >>> from usbmd.utils.io_lib import ImageViewerOpenCV
+        >>> from usbmd.internal.io_lib import ImageViewerOpenCV
         >>> def generate_frame():
         >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
         >>> image_viewer = ImageViewerOpenCV(generate_frame, threading=True, num_threads=1)
@@ -621,7 +348,7 @@ class ImageViewerMatplotlib(ImageViewer):
 
     Example:
         >>> import numpy as np
-        >>> from usbmd.utils.io_lib import ImageViewerMatplotlib, plt_window_has_been_closed
+        >>> from usbmd.internal.io_lib import ImageViewerMatplotlib, plt_window_has_been_closed
         >>> def generate_frame():
         >>>     return np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
         >>> image_viewer = ImageViewerMatplotlib(generate_frame, threading=True, num_threads=1)
@@ -725,79 +452,3 @@ class ImageViewerMatplotlib(ImageViewer):
     def has_been_closed(self):
         """Returns True if the window has been closed."""
         return plt_window_has_been_closed(self.fig)
-
-
-async def start_async_app(app: Tk, *args, **kwargs):
-    """
-    Starts the asynchronous app.
-
-    Args:
-        app (Tk): The Tkinter app object.
-
-    Raises:
-        AssertionError: If the app is not an instance of Tk or does not have the "show" attribute.
-
-    Returns:
-        MyWindow: The instance of MyWindow.
-    """
-    my_app = app(asyncio.get_event_loop(), *args, **kwargs)
-    await my_app.show()
-
-
-def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
-    """Decorator to retry functions on I/O errors with exponential backoff.
-
-    Args:
-        max_retries: Maximum number of retry attempts
-        initial_delay: Initial delay between retries in seconds
-        retry_action: Optional function to call before each retry attempt
-            If decorating a method: retry_action(self, exception, attempt, *args, **kwargs)
-            If decorating a function: retry_action(exception, attempt, *args, **kwargs)
-
-    Returns:
-        Decorated function with retry logic
-
-    """
-
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            delay = initial_delay
-            last_exception = None
-
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except (OSError, IOError) as e:
-                    last_exception = e
-
-                    # if args exist and first arg is a class, update retry count of that method
-                    if args and hasattr(args[0], "retry_count"):
-                        args[0].retry_count = attempt + 1
-
-                    if attempt < max_retries - 1:
-                        # Execute custom retry action if provided
-                        if retry_action:
-                            # Pass all original arguments to retry_action
-                            retry_action(
-                                *args,
-                                exception=e,
-                                retry_count=attempt,
-                                **kwargs,
-                            )
-
-                        time.sleep(delay)
-
-                    else:
-                        # Last attempt failed
-                        log.error(f"Failed after {max_retries} attempts: {e}")
-
-            # If we've exhausted all retries
-            raise ValueError(
-                f"Failed to complete operation after {max_retries} attempts. "
-                f"Last error: {last_exception}"
-            )
-
-        return wrapper
-
-    return decorator

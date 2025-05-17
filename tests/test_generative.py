@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 
 from usbmd import log
+from usbmd.io_lib import matplotlib_figure_to_numpy
 from usbmd.models.diffusion import DiffusionModel
 from usbmd.models.gmm import GaussianMixtureModel, match_means_covariances
-from usbmd.utils.io_lib import matplotlib_figure_to_numpy
-from usbmd.utils.utils import save_to_gif
+from usbmd.utils import save_to_gif
 
 
 @pytest.fixture(params=[2, 3])
