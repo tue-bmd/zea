@@ -3,119 +3,32 @@
 - **Date**          : 12/02/2025
 """
 
-from typing import List, Union
-
 import keras
 import numpy as np
 from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
-from usbmd.utils.utils import map_negative_indices
+from usbmd.ops import Pad as PadOp
+from usbmd.utils import map_negative_indices
 
 # pylint: disable=arguments-differ
 
 
-class Pad(TFDataLayer):
-    """Pad layer for padding tensors to a specified shape."""
+class Pad(PadOp):
+    """Pad layer for padding tensors to a specified shape which can be used in tf.data pipelines."""
 
-    def __init__(
-        self,
-        target_shape: list | tuple,
-        uniform: bool = True,
-        axis: Union[int, List[int]] = None,
-        fail_on_bigger_shape: bool = True,
-        **kwargs,
-    ):
-        super().__init__()
-        self.target_shape = target_shape
-        self.uniform = uniform
-        self.axis = axis
-        self.kwargs = kwargs
-        self.fail_on_bigger_shape = fail_on_bigger_shape
-
-    @staticmethod
-    def _format_target_shape(shape_array, target_shape, axis):
-        if isinstance(axis, int):
-            axis = [axis]
-        assert len(axis) == len(
-            target_shape
-        ), "The length of axis must be equal to the length of target_shape."
-        axis = map_negative_indices(axis, len(shape_array))
-
-        target_shape = [
-            target_shape[axis.index(i)] if i in axis else shape_array[i]
-            for i in range(len(shape_array))
-        ]
-        return target_shape
-
-    def pad(
-        self,
-        z,
-        target_shape: list | tuple,
-        uniform: bool = True,
-        axis: Union[int, List[int]] = None,
-        fail_on_bigger_shape: bool = True,
-        **kwargs,
-    ):
-        """
-        Pads the input tensor `z` to the specified shape.
-
-        Parameters:
-            z (tensor): The input tensor to be padded.
-            target_shape (list or tuple): The target shape to pad the tensor to.
-            uniform (bool, optional): If True, ensures that padding is uniform (even on both sides).
-                Default is False.
-            axis (int or list of int, optional): The axis or axes along which `target_shape` was
-                specified. If None, `len(target_shape) == `len(ops.shape(z))` must hold.
-                Default is None.
-            fail_on_bigger_shape (bool, optional): If True, raises an error if the target shape is
-                bigger than the input shape. If False, will pad to match the target shape wherever
-                needed. Default is True.
-            kwargs: Additional keyword arguments to pass to the padding function.
-
-        Returns:
-            tensor: The padded tensor with the specified shape.
-        """
-        shape_array = self.backend.shape(z)
-
-        # When axis is provided, convert target_shape
-        if axis is not None:
-            target_shape = self._format_target_shape(shape_array, target_shape, axis)
-
-        if not fail_on_bigger_shape:
-            target_shape = [
-                max(target_shape[i], shape_array[i]) for i in range(len(shape_array))
-            ]
-
-        # Compute the padding required for each dimension
-        pad_shape = np.array(target_shape) - shape_array
-
-        # Create the paddings array
-        if uniform:
-            # if odd, pad more on the left, same as:
-            # https://keras.io/api/layers/preprocessing_layers/image_preprocessing/center_crop/
-            right_pad = pad_shape // 2
-            left_pad = pad_shape - right_pad
-            paddings = np.stack([right_pad, left_pad], axis=1)
-        else:
-            paddings = np.stack([np.zeros_like(pad_shape), pad_shape], axis=1)
-
-        return self.backend.numpy.pad(z, paddings, **kwargs)
+    __call__ = TFDataLayer.__call__
 
     def call(self, inputs):
-        return self.pad(
-            inputs,
-            self.target_shape,
-            self.uniform,
-            self.axis,
-            self.fail_on_bigger_shape,
-            **self.kwargs,
-        )
+        """
+        Pad the input tensor.
+        """
+        return super().call(data=inputs)["data"]
 
 
 class Resizer(TFDataLayer):
     """
     Resize layer for resizing images. Can deal with N-dimensional images.
-    Can do resize, center_crop and random_crop.
+    Can do resize, center_crop, random_crop and crop_or_pad.
 
     Can be used in tf.data pipelines.
     """

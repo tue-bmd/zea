@@ -24,7 +24,7 @@ from keras.regularizers import l2
 
 from usbmd.backend.tensorflow.layers.beamformers import BeamSumming
 from usbmd.backend.tensorflow.losses import SMSLE
-from usbmd.registry import tf_beamformer_registry
+from usbmd.internal.registry import tf_beamformer_registry
 
 
 def NormalizeLayer():

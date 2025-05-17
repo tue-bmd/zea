@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from usbmd.backend.tensorflow.losses import SMSLE
-from usbmd.registry import metrics_registry
-from usbmd.utils import metrics
+from usbmd.internal.registry import metrics_registry
+from usbmd import metrics
 
 
 def test_smsle():

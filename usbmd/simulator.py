@@ -3,7 +3,7 @@
 import numpy as np
 from keras import ops
 
-from usbmd.utils.lens_correction import compute_lens_corrected_travel_times
+from usbmd.beamform.lens_correction import compute_lens_corrected_travel_times
 
 PI = np.pi
 
