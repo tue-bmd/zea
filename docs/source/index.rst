@@ -36,6 +36,8 @@ Currently usbmd offers:
    :hidden:
 
    _autosummary/usbmd
+   data-acquisition
+   parameters
 
 .. toctree::
    :caption: Project Links

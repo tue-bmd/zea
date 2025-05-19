@@ -7,7 +7,7 @@ Make sure you always use a virtual environment such as ``miniconda`` or ``venv``
 Backend installation
 -------------------
 
-First, install one machine learning backend of choice. Note that usbmd can run with a numpy backend, but it is not recommended. Also, using the `Docker image`_ will automatically install all compatible backends, so in that case you can skip this step.
+First, install one machine learning backend of choice. Note that usbmd can run with a numpy backend, but it is not recommended. Also, using the `Docker`_ image will automatically install all compatible backends, so in that case you can skip this step.
 
 - `Install JAX <https://jax.readthedocs.io/en/latest/installation.html>`__
 - `Install PyTorch <https://pytorch.org/get-started/locally/>`__
