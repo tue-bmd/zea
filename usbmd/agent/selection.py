@@ -53,7 +53,7 @@ class LinesActionModel(MaskActionModel):
         stack_n_cols = self.img_width / self.n_possible_actions
         assert (
             stack_n_cols.is_integer()
-        ), "Image size must be divisible by n_possible_actions."
+        ), "Image width must be divisible by n_possible_actions."
         self.stack_n_cols = int(stack_n_cols)
 
 
@@ -220,7 +220,9 @@ class GreedyEntropy(LinesActionModel):
         # Create the re-weighting vector
         reweighting = ops.ones_like(padded_entropy_per_line)
         reweighting = ops.slice_update(
-            reweighting, (start_index,), self.upside_down_gaussian
+            reweighting,
+            (start_index,),
+            ops.cast(self.upside_down_gaussian, dtype=reweighting.dtype),
         )
 
         # Apply re-weighting to entropy values
@@ -300,7 +302,9 @@ class UniformRandomLines(LinesActionModel):
                 number generation. Defaults to None.
 
         Returns:
-            Tensor: The mask of shape (batch_size, img_size, img_size)
+            Tuple[Tensor, Tensor]:
+                - Newly selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
         """
         selected_lines_batched = masks.random_uniform_lines(
             n_actions=self.n_actions,
