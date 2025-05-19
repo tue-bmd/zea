@@ -1,6 +1,6 @@
 .. _contributing:
 
-Contribution Guidelines
+Contributing
 =======================
 
 Style conventions
