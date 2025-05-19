@@ -1,6 +1,6 @@
 .. _data-acquisition:
 
-Data Acquisition and Data Format
+Data
 ================================
 
 This page provides a comprehensive overview of how ultrasound data is acquired, structured, and managed within the **usbmd** toolbox.
@@ -8,7 +8,7 @@ For a quick start, see :doc:`Getting Started <getting-started>`.
 For a full reference of all config parameters, see :doc:`Parameters <parameters>`.
 
 -------------------------------
-usbmd Data Format
+usbmd data format
 -------------------------------
 
 The **usbmd** toolbox uses a custom data format based on the HDF5 standard to ensure consistency, reproducibility, and ease of use across different projects and platforms.
@@ -94,9 +94,11 @@ The **usbmd** toolbox uses a custom data format based on the HDF5 standard to en
      - All acquisition and processing parameters required to interpret the data (e.g., reconstruction settings, system configuration).
 
 **Tips:**
-- Use ``usbmd.File.summary()`` to inspect datasets.
-- Use ``usbmd.data.data_format.generate_usbmd_dataset()`` to create new datasets in the correct format.
-- HDFView (https://www.hdfgroup.org/downloads/hdfview/) can be used for manual inspection.
+
+- Use :py:meth:`usbmd.File.summary` to inspect datasets.
+- Use :py:func:`usbmd.data.data_format.generate_usbmd_dataset` to create new datasets in the correct format.
+- `HDFView <https://www.hdfgroup.org/downloads/hdfview/>`__ can be used for manual inspection.
+
 
 -------------------------------
 Supported Datasets & Conversion
@@ -114,7 +116,9 @@ The **usbmd** toolbox supports several public and research ultrasound datasets. 
 **Conversion Scripts:**
 - Scripts are provided in the ``usbmd/data/convert/`` directory to automate downloading and conversion.
 - Example usage:
-  ::
+
+  .. code-block:: bash
+
       python usbmd/data/convert/echonet.py --output-dir <your_data_dir>
       python usbmd/data/convert/camus.py --output-dir <your_data_dir>
       python usbmd/data/convert/picmus.py --output-dir <your_data_dir>
@@ -132,7 +136,9 @@ The **usbmd** toolbox is designed to work with data from multiple ultrasound acq
 - Save entire workspace to a `.mat` file.
 - Use ``usbmd/data/convert/matlab.py`` to convert the MATLAB workspace files to usbmd format.
 - Example:
-  ::
+
+  .. code-block:: bash
+
       python usbmd/data/convert/matlab.py --input <verasonics_mat_file> --output <usbmd_hdf5_file>
 
 **us4us**

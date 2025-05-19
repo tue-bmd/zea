@@ -1,6 +1,6 @@
 .. _parameters:
 
-usbmd Configuration Parameters
+Parameters
 =============================
 
 This page provides a comprehensive overview of all configuration parameters available in usbmd.
