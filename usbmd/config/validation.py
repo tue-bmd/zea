@@ -9,8 +9,6 @@ missing (if optional) parameters to default values. When adding functionality
 that needs parameters from the config file, make sure to add those paremeters here.
 Also if that parameter is optional, add a default value.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 31/01/2023
 """
 
 from pathlib import Path
