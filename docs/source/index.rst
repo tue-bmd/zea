@@ -35,7 +35,7 @@ Currently usbmd offers:
    :maxdepth: 2
    :hidden:
 
-   _autosummary/usbmd
+   usbmd
    data-acquisition
    parameters
    pipeline
