@@ -70,8 +70,10 @@ Parameters Reference
      - The range of the input data in db (null, [min, max])
    * - ``data.local``
      - true: use local data on this device, false: use data from NAS
-   * - ``data.modtype``
-     - The modulation type of the data (rf, iq, null)
+   * - ``data.output_range``
+     - The output range to which the data should be mapped (e.g. [0, 1]).
+   * - ``data.resolution``
+     - The spatial resolution of the data in meters per pixel (float, optional).
    * - ``data.subset``
      - ?
    * - ``data.to_dtype``
@@ -80,30 +82,30 @@ Parameters Reference
      - The user to use when loading data (null, dict)
    * - ``device``
      - The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)
-   * - ``model``
-     - The model section contains the parameters for the model.
-   * - ``model.batch_size``
-     - The number of frames to process in a batch
-   * - ``model.beamformer``
-     - Settings used to configure the beamformer.
-   * - ``model.beamformer.auto_pressure_weighting``
-     - True: enables automatic field-based weighting of Tx events in compounding.False: disables automatic field-based weighting of Tx events in compounding.
-   * - ``model.beamformer.proxtype``
-     - The type of proximal operator to use (null, wavelet, softthres, fourier, neural)
-   * - ``model.beamformer.type``
-     - The beamforming method to use (das,)
-   * - ``model.patch_shape``
-     - The shape of the patches to use for training the model. e.g. [8, 8] for 8x8 patches.
+   * - ``git``
+     - The git commit hash or branch for reproducibility (string, optional).
+   * - ``hide_devices``
+     - List of device indices to hide from selection (list of int, optional).
    * - ``pipeline``
      - This section contains the necessary parameters for building the pipeline.
+   * - ``pipeline.jit_kwargs``
+     - Additional keyword arguments for the JIT compiler. Defaults to None.
+   * - ``pipeline.jit_options``
+     - The JIT options to use. Must be 'pipeline', 'ops', or None. 'pipeline' compiles the entire pipeline as a single function. 'ops' compiles each operation separately. None disables JIT compilation. Defaults to 'ops'.
+   * - ``pipeline.name``
+     - The name of the pipeline. Defaults to 'pipeline'.
    * - ``pipeline.operations``
      - The operations to perform on the data. This is a list of dictionaries, where each dictionary contains the parameters for a single operation.
-   * - ``pipeline.params``
-     - Optional parameters to pass to the initializaion of the pipeline. e.g. `jit_options`, etc.
+   * - ``pipeline.validate``
+     - Whether to validate the pipeline. Defaults to True.
+   * - ``pipeline.with_batch_dim``
+     - Whether operations should expect a batch dimension in the input. Defaults to True.
    * - ``plot``
      - Settings pertaining to plotting when running the UI (`usbmd --config <path-to-config.yaml>`)
    * - ``plot.fliplr``
      - Set to true to flip the image left to right
+   * - ``plot.fps``
+     - Frames per second for video output.
    * - ``plot.headless``
      - Set to true to run the UI in headless mode
    * - ``plot.image_extension``
@@ -112,6 +114,10 @@ Parameters Reference
      - The plotting library to use (opencv, matplotlib)
    * - ``plot.save``
      - Set to true to save the plots to disk, false to only display them in the UI
+   * - ``plot.selector``
+     - Type of selector to use for ROI selection in the UI ('rectangle', 'lasso', or None).
+   * - ``plot.selector_metric``
+     - Metric to use for evaluating selected regions (e.g., 'gcnr').
    * - ``plot.tag``
      - The name for the plot
    * - ``plot.video_extension``
@@ -130,16 +136,30 @@ Parameters Reference
      - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
    * - ``scan.downsample``
      - The decimation factor to use for downsampling the data from rf to iq. If 1, no downsampling is performed.
+   * - ``scan.f_number``
+     - The receive f-number for apodization. Set to zero to disable masking. The f-number is the ratio between the distance from the transducer and the size of the aperture.
+   * - ``scan.fill_value``
+     - Value to fill the image with outside the defined region (float, default 0.0).
    * - ``scan.lens_sound_speed``
      - The speed of sound in the lens in m/s. Usually around 1000 m/s
    * - ``scan.lens_thickness``
      - The thickness of the lens in meters
+   * - ``scan.n_ax``
+     - The number of samples in a receive recording per channel.
    * - ``scan.n_ch``
      - The number of channels in the raw data (1 for rf data, 2 for iq data)
+   * - ``scan.phi_range``
+     - The range of phi values in radians for 3D scan conversion (null, [min, max]).
+   * - ``scan.resolution``
+     - The resolution for scan conversion in meters per pixel (float, optional).
+   * - ``scan.rho_range``
+     - The range of rho values in meters for scan conversion (null, [min, max]).
    * - ``scan.sampling_frequency``
      - The sampling frequency of the data in Hz
    * - ``scan.selected_transmits``
      - The number of transmits in a frame. Can be 'all' for all transmits, an integer for a specific number of transmits selected evenly from the transmits in the frame, or a list of integers for specific transmits to select from the frame.
+   * - ``scan.theta_range``
+     - The range of theta values in radians for scan conversion (null, [min, max]).
    * - ``scan.xlims``
      - The limits of the x-axis in the scan in meters (null, [min, max])
    * - ``scan.ylims``

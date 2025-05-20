@@ -48,25 +48,6 @@ _ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
 
 # optional sub schemas go here, to allow for nested defaults
 
-# model
-model_schema = Schema(
-    {
-        Optional("batch_size", default=1): positive_integer,
-        Optional("patch_shape", default=None): Or(None, list_of_size_two),
-        Optional("beamformer", default={}): {
-            Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
-            Optional("folds", default=1): positive_integer,
-            Optional("end_with_prox", default=False): bool,
-            Optional("proxtype", default="softthres"): Or(*_ALLOWED_KEYS_PROXTYPE),
-            Optional("kernel_size", default=3): positive_integer,
-            Optional("aux_inputs", default=None): Or(None, list),
-            Optional("patches", default=1): positive_integer,
-            Optional("jit", default=False): bool,
-            Optional("sum_transmits", default=False): bool,
-            Optional("auto_pressure_weighting", default=False): bool,
-        },
-    }
-)
 
 # pipeline / operations
 pipeline_schema = Schema(
@@ -179,16 +160,11 @@ data_schema = Schema(
         Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
         Optional("file_path", default=None): Or(None, str, Path),
         Optional("local", default=True): bool,
-        Optional("subset", default=None): Or(None, str),
         Optional("frame_no", default=None): Or(None, "all", int),
         Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
         Optional("input_range", default=None): Or(None, list_of_size_two),
         Optional("output_range", default=None): Or(None, list_of_size_two),
         Optional("apodization", default=None): Or(None, str),
-        Optional("modtype", default=None): Or(*_MOD_TYPES),  # ONLY FOR LEGACY DATASET
-        Optional("from_modtype", default=None): Or(
-            *_MOD_TYPES
-        ),  # ONLY FOR LEGACY DATASET
         Optional("user", default=None): Or(None, dict),
     }
 )
@@ -198,7 +174,6 @@ config_schema = Schema(
     {
         "data": data_schema,
         Optional("plot", default=plot_schema.validate({})): plot_schema,
-        Optional("model", default=model_schema.validate({})): model_schema,
         Optional("pipeline", default=pipeline_schema.validate({})): pipeline_schema,
         Optional("scan", default=scan_schema.validate({})): scan_schema,
         Optional("device", default="auto:1"): Or(

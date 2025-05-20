@@ -15,26 +15,6 @@ def allows_type_to_str(allowed_types):
 
 
 PARAMETER_DESCRIPTIONS = {
-    "model": {
-        "description": "The model section contains the parameters for the model.",
-        "batch_size": "The number of frames to process in a batch",
-        "patch_shape": (
-            "The shape of the patches to use for training the model. e.g. [8, 8] for "
-            "8x8 patches."
-        ),
-        "beamformer": {
-            "description": "Settings used to configure the beamformer.",
-            "type": "The beamforming method to use (das,)",
-            "auto_pressure_weighting": (
-                "True: enables automatic field-based weighting of Tx events in compounding."
-                "False: disables automatic field-based weighting of Tx events in compounding."
-            ),
-            "proxtype": (
-                "The type of proximal operator to use "
-                f"({allows_type_to_str(_ALLOWED_KEYS_PROXTYPE)})"
-            ),
-        },
-    },
     "data": {
         "description": "The data section contains the parameters for the data.",
         "dataset_folder": (
@@ -48,12 +28,14 @@ PARAMETER_DESCRIPTIONS = {
             "The path of the file to load when running the UI (either an absolute path "
             "or one relative to the dataset folder)"
         ),
-        "subset": "?",
         "frame_no": "The frame number to load when running the UI (null, int, 'all')",
         "input_range": "The range of the input data in db (null, [min, max])",
         "apodization": "The receive apodization to use.",
-        "modtype": (
-            f"The modulation type of the data ({allows_type_to_str(_MOD_TYPES)})"
+        "output_range": (
+            "The output range to which the data should be mapped (e.g. [0, 1])."
+        ),
+        "resolution": (
+            "The spatial resolution of the data in meters per pixel (float, optional)."
         ),
         "local": "true: use local data on this device, false: use data from NAS",
         "dtype": (
@@ -80,6 +62,7 @@ PARAMETER_DESCRIPTIONS = {
         "Nx": "The number of pixels in the beamforming grid in the x-direction",
         "Nz": "The number of pixels in the beamforming grid in the z-direction",
         "n_ch": "The number of channels in the raw data (1 for rf data, 2 for iq data)",
+        "n_ax": "The number of samples in a receive recording per channel.",
         "xlims": "The limits of the x-axis in the scan in meters (null, [min, max])",
         "ylims": "The limits of the y-axis in the scan in meters (null, [min, max])",
         "zlims": "The limits of the z-axis in the scan in meters (null, [min, max])",
@@ -97,6 +80,26 @@ PARAMETER_DESCRIPTIONS = {
         "lens_sound_speed": (
             "The speed of sound in the lens in m/s. Usually around 1000 m/s"
         ),
+        "f_number": (
+            "The receive f-number for apodization. Set to zero to disable masking. "
+            "The f-number is the ratio between the distance from the transducer and the "
+            "size of the aperture."
+        ),
+        "fill_value": (
+            "Value to fill the image with outside the defined region (float, default 0.0)."
+        ),
+        "phi_range": (
+            "The range of phi values in radians for 3D scan conversion (null, [min, max])."
+        ),
+        "theta_range": (
+            "The range of theta values in radians for scan conversion (null, [min, max])."
+        ),
+        "rho_range": (
+            "The range of rho values in meters for scan conversion (null, [min, max])."
+        ),
+        "resolution": (
+            "The resolution for scan conversion in meters per pixel (float, optional)."
+        ),
     },
     "pipeline": {
         "description": "This section contains the necessary parameters for building the pipeline.",
@@ -104,12 +107,21 @@ PARAMETER_DESCRIPTIONS = {
             "The operations to perform on the data. This is a list of dictionaries, "
             "where each dictionary contains the parameters for a single operation."
         ),
-        "params": (
-            (
-                "Optional parameters to pass to the initializaion of the pipeline. e.g. "
-                "`jit_options`, etc."
-            )
+        "with_batch_dim": (
+            "Whether operations should expect a batch dimension in the input. "
+            "Defaults to True."
         ),
+        "jit_options": (
+            "The JIT options to use. Must be 'pipeline', 'ops', or None. "
+            "'pipeline' compiles the entire pipeline as a single function. "
+            "'ops' compiles each operation separately. None disables JIT compilation. "
+            "Defaults to 'ops'."
+        ),
+        "jit_kwargs": (
+            "Additional keyword arguments for the JIT compiler. " "Defaults to None."
+        ),
+        "name": ("The name of the pipeline. Defaults to 'pipeline'."),
+        "validate": ("Whether to validate the pipeline. Defaults to True."),
     },
     "device": "The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)",
     "plot": {
@@ -123,10 +135,21 @@ PARAMETER_DESCRIPTIONS = {
         "plot_lib": (
             f"The plotting library to use ({allows_type_to_str(_ALLOWED_PLOT_LIBS)})"
         ),
+        "fps": "Frames per second for video output.",
         "tag": "The name for the plot",
         "fliplr": "Set to true to flip the image left to right",
         "image_extension": "The file extension to use when saving the image (png, jpg)",
         "video_extension": "The file extension to use when saving the video (mp4, gif)",
         "headless": "Set to true to run the UI in headless mode",
+        "selector": (
+            "Type of selector to use for ROI selection in the UI ('rectangle', 'lasso', or None)."
+        ),
+        "selector_metric": (
+            "Metric to use for evaluating selected regions (e.g., 'gcnr')."
+        ),
     },
+    "git": "The git commit hash or branch for reproducibility (string, optional).",
+    "hide_devices": (
+        "List of device indices to hide from selection (list of int, optional)."
+    ),
 }
