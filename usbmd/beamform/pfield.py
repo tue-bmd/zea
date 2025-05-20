@@ -133,6 +133,7 @@ def compute_pfield(
 
     d2 = dxi**2 + (z_expanded - zi_expanded - ze_expanded) ** 2
     r = ops.sqrt(d2)
+    r_flat = ops.reshape(r, (-1,))
 
     # Angle between the normal to the transducer and the line joining
     # the point and the transducer
@@ -184,7 +185,6 @@ def compute_pfield(
         # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
         # Therefore: df < 1/(r/c + delay).
 
-        r_flat = ops.reshape(r, (-1,))
         delaysTX_flat = ops.reshape(delaysTX, (-1,))
 
         df = 1 / (ops.max(r_flat / c) + ops.max(delaysTX_flat))
@@ -208,7 +208,6 @@ def compute_pfield(
         IDX = GdB > dBThresh
 
         f = f[IDX]
-        nSampling = len(f)
 
         pulseSPECT = pulseSpectrum(2 * np.pi * f)  # % pulse spectrum
         probeSPECT = probeSpectrum(2 * np.pi * f)  # % probe response
@@ -245,13 +244,11 @@ def compute_pfield(
             c,
             delaysTX,
             TXapodization,
-            M,
             EXP,
             EXPdf,
             pulseSPECT,
             probeSPECT,
             z,
-            nSampling,
         )
 
         # % RMS acoustic pressure
@@ -311,8 +308,46 @@ def normalize(P_arr, alpha=1, perc=10):
     return P_norm
 
 
+def pfield_freq_step(
+    k, f, c, delaysTX, TXapodization, EXP, EXPdf, pulseSPECT, probeSPECT, z
+):
+    """
+    Calculates the pressure field for a single frequency step.
+
+    Args:
+        k (int): Frequency index.
+        f (array): Frequencies.
+        c (float): Speed of sound.
+        delaysTX (array): Transmit delays.
+        TXapodization (array): Transmit apodization (complex64)
+        M (int): Number of elements.
+        EXP (array): Complex exponentials.
+        pulseSPECT (array): Pulse spectrum.
+        probeSPECT (array): Probe spectrum (complex64)
+        z (array): z-coordinates.
+
+    Returns:
+        RPk (Tensor): Pressure field for this frequency.
+    """
+    kw = 2 * np.pi * f[k] / c
+    RPmono = ops.mean(EXP * EXPdf**k, axis=1)
+
+    DELAPOD = ops.exp(1j * ops.cast(kw * c * delaysTX, "complex64")) * TXapodization
+    RPk = ops.matmul(RPmono, DELAPOD) * pulseSPECT[k] * probeSPECT[k]
+    RPk = ops.where(z < 0, 0, RPk)
+    return ops.abs(RPk) ** 2
+
+
 def pfield_freq_loop(
-    f, c, delaysTX, TXapodization, M, EXP, EXPdf, pulseSPECT, probeSPECT, z, nSampling
+    f,
+    c,
+    delaysTX,
+    TXapodization,
+    EXP,
+    EXPdf,
+    pulseSPECT,
+    probeSPECT,
+    z,
 ):
     """
     Calculates the pressure field using frequency loop method.
@@ -328,37 +363,17 @@ def pfield_freq_loop(
         pulseSPECT (list): List of pulse spectra.
         probeSPECT (list): List of probe spectra.
         z (list): List of z-coordinates.
-        nSampling (int): Number of samples.
 
     Returns:
-        RP (Tensor): Pressure field.
-
+        (Tensor): Pressure field.
     """
 
-    RP = 0
-    kw = 2 * np.pi * f / c
-
-    for k in range(nSampling):
-        if k > 0:
-            EXP *= EXPdf
-
-        if M > 1:
-            RPmono = ops.mean(EXP, axis=1)
-        else:
-            RPmono = ops.squeeze(EXP)
-
-        TXapodization = ops.cast(TXapodization, "complex64")
-
-        DELAPOD = (
-            ops.exp(1j * ops.cast(kw[k] * c * delaysTX, "complex64")) * TXapodization
-        )
-        RPk = ops.matmul(RPmono, DELAPOD)
-
-        RPk *= pulseSPECT[k] * ops.cast(probeSPECT[k], "complex64")
-
-        isOUT = z < 0
-        RPk = ops.where(isOUT, 0, RPk)
-
-        RP += ops.abs(RPk) ** 2
-
-    return RP
+    TXapodization = ops.cast(TXapodization, "complex64")
+    probeSPECT = ops.cast(probeSPECT, "complex64")
+    stacked = ops.vectorized_map(
+        lambda k: pfield_freq_step(
+            k, f, c, delaysTX, TXapodization, EXP, EXPdf, pulseSPECT, probeSPECT, z
+        ),
+        np.arange(0, len(f), dtype="int32"),
+    )
+    return ops.sum(stacked, axis=0)

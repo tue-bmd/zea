@@ -2,50 +2,32 @@
 Test the pytorch implementation of the beamformers.
 """
 
-# pylint: disable=no-member
-import sys
-from pathlib import Path
-
 import numpy as np
-import pytest
 
 from usbmd.probes import Verasonics_l11_4v
 from usbmd.scan import PlaneWaveScan
 
-# Add project folder to path to find config files
-wd = Path(__file__).parent.parent
-sys.path.append(str(wd))
 
-
-@pytest.mark.parametrize("scantype", ["pw"])
-def test_pfield(scantype, debug=False):
+def test_pfield(debug=False):
     """Performs field computation on a scan object to verify that no errors occur. Does
-    not check correctness of the output.
+    not check correctness of the output. Only test with PlaneWaveScan for now.
 
     Args:
-        scantype ("pw"): For now only "pw" is accepted.
         debug (bool, optional): Set to True to enable debugging options (plotting). Defaults to
         False.
     """
 
     probe = Verasonics_l11_4v()
-    probe_parameters = probe.get_parameters()
     scan = PlaneWaveScan(
         probe_geometry=probe.probe_geometry,
         n_tx=1,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
         n_ax=2047,
-        sampling_frequency=probe_parameters["sampling_frequency"],
-        center_frequency=probe_parameters["center_frequency"],
-        angles=np.array(
-            [
-                0,
-            ]
-        ),
+        sampling_frequency=probe.sampling_frequency,
+        center_frequency=probe.center_frequency,
+        angles=np.array([0]),
     )
-
-    assert scantype == "pw", "Only pw testing supported"
 
     scan._focus_distances = np.array([np.inf])
 
