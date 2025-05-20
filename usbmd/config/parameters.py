@@ -1,11 +1,6 @@
 """Parameter descriptions for the config file."""
 
-from usbmd.config.validation import (
-    _ALLOWED_KEYS_PROXTYPE,
-    _ALLOWED_PLOT_LIBS,
-    _DATA_TYPES,
-    _MOD_TYPES,
-)
+from usbmd.config.validation import _ALLOWED_PLOT_LIBS, _DATA_TYPES
 
 
 def allows_type_to_str(allowed_types):

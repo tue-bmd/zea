@@ -21,11 +21,8 @@ from schema import And, Optional, Or, Regex, Schema
 import usbmd.metrics  # pylint: disable=unused-import
 from usbmd import log
 from usbmd.config import Config
-from usbmd.internal.checks import _DATA_TYPES, _MOD_TYPES
+from usbmd.internal.checks import _DATA_TYPES
 from usbmd.internal.registry import metrics_registry
-
-_BEAMFORMER_TYPES = ["das"]  # TODO: hardcoded for now
-
 
 # predefined checks, later used in schema to check validity of parameter
 any_number = Or(
@@ -42,12 +39,7 @@ list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
 list_of_positive_integers = And(list, lambda l: all(_l >= 0 for _l in l))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
 
-_ALLOWED_KEYS_PROXTYPE = (None, "wavelet", "softthres", "fourier", "neural")
-_ALLOWED_DEMODULATION = ("manual", "hilbert", "gabor")
 _ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
-
-# optional sub schemas go here, to allow for nested defaults
-
 
 # pipeline / operations
 pipeline_schema = Schema(

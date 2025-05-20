@@ -1,4 +1,4 @@
-.. _models::
+.. _models:
 
 Models
 ========
@@ -7,3 +7,4 @@ Models
    :no-members:
    :no-inherited-members:
    :no-special-members:
+   :no-index:

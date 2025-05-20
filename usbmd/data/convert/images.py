@@ -91,7 +91,7 @@ def convert_image_dataset(
     group_pattern=re.compile(r"(.*)\..*"),
     sort_pattern=None,
 ):
-    """Converts an existing dataset of images or sequences of images to USBMD format.
+    r"""Converts an existing dataset of images or sequences of images to USBMD format.
 
     Maps an image dataset to a hdf5 dataset containing those images, preserving directory structure.
     Can also be used to map a video dataset to hdf5 if the videos are stored as sequences on images.
