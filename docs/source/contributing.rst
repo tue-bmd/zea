@@ -172,9 +172,9 @@ Make sure to follow the instructions in the ``post-release.sh`` script. This scr
 Adding models
 -------------
 
-Please see the :doc:`usbmd.models README <../usbmd/models/README>` for instructions on how to add new models to the repository.
+Please see the :doc:`models` section for more information on how to add new models to usbmd.`
 
 Adding ops
 ----------
 
-TBA
+Please see the :doc:`pipeline` section for more information on how to add new ops to usbmd.
