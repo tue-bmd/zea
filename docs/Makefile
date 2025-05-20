@@ -7,6 +7,7 @@ SPHINXBUILD   ?= sphinx-build
 SPHINXAUTOBUILD ?= sphinx-autobuild
 SOURCEDIR     = source
 BUILDDIR      = _build
+REMOVE_LIST   = ["usbmd.ops_dep.rst", "modules.rst"]
 
 .PHONY: help Makefile docs-clean docs-build docs-serve docs-parameters
 
@@ -27,6 +28,12 @@ docs-autosummary:
 	@if [ -f source/_autosummary/usbmd.rst ]; then cp source/_autosummary/usbmd.rst source/_autosummary/usbmd.rst.bak; fi
 	sphinx-apidoc -o source/_autosummary ../usbmd --force --separate
 	@if [ -f source/_autosummary/usbmd.rst.bak ]; then mv source/_autosummary/usbmd.rst.bak source/_autosummary/usbmd.rst; fi
+	@for i in $(REMOVE_LIST); do \
+		if [ -f $(SOURCEDIR)/_autosummary/$$i ]; then \
+			echo "Removing $(SOURCEDIR)/_autosummary/$$i"; \
+			rm $(SOURCEDIR)/_autosummary/$$i; \
+		fi; \
+	done
 
 # Build docs cleanly (parameters.rst and autosummary must be up to date)
 docs-build: docs-parameters docs-autosummary
