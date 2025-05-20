@@ -25,6 +25,7 @@ from usbmd.models.presets import diffusion_model_presets
 from usbmd.models.unet import get_time_conditional_unetwork
 from usbmd.models.utils import LossTrackerWrapper
 from usbmd.tensor_ops import L2, fori_loop, split_seed
+from usbmd.utils import fn_requires_argument
 
 
 @model_registry(name="diffusion")
@@ -111,6 +112,13 @@ class DiffusionModel(DeepGenerativeModel):
                 self.operator = operator
             elif isinstance(operator, dict):
                 operator_class = operator_registry[operator["name"]]
+                if "params" not in operator:
+                    operator["params"] = {}
+                if (
+                    fn_requires_argument(operator_class.__init__, "image_range")
+                    and "image_range" not in operator["params"]
+                ):
+                    operator["params"]["image_range"] = self.input_range
                 self.operator = operator_class(**operator["params"])
             else:
                 raise ValueError(
