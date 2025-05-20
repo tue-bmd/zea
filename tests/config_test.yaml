@@ -1,9 +1,3 @@
-model:
-  batch_size: 1
-  beamformer:
-    type: das
-    sum_transmits: true
-
 data:
   file_path: test0.hdf5
   dtype: raw_data
