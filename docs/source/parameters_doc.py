@@ -7,6 +7,7 @@ Also generates a reStructuredText (RST) file for sphinx documentation.
 
 import os
 import re
+import sys
 from pathlib import Path
 
 from schema import And, Optional, Or, Schema
@@ -183,25 +184,14 @@ def add_comments_to_yaml(file_path, descriptions):
 
 
 def check_parameter_descriptions(descriptions, schema):
-    """Check for missing or extra parameter descriptions (ignoring 'description' keys)."""
+    """Check for missing or extra parameter descriptions (ignoring 'description' keys).
+    Returns (missing, extra) as sets.
+    """
     rst_keys = flatten_dict_keys(descriptions)
     schema_keys = flatten_schema_keys(schema)
     missing = sorted(schema_keys - rst_keys)
     extra = sorted(rst_keys - schema_keys)
-    if missing:
-        log.warning(
-            "\nWARNING: The following config parameters are missing descriptions in PARAMETER_DESCRIPTIONS:"
-        )
-        for k in missing:
-            log.warning(f"  - {k}")
-    if extra:
-        log.warning(
-            "\nWARNING: The following parameters are described in PARAMETER_DESCRIPTIONS but do not exist in the config schema:"
-        )
-        for k in extra:
-            log.warning(f"  - {k}")
-    if not missing and not extra:
-        log.info("All config parameters are documented in PARAMETER_DESCRIPTIONS.")
+    return missing, extra
 
 
 def dict_to_rst_table(param_dict):
@@ -305,7 +295,24 @@ if __name__ == "__main__":
     from usbmd.config.validation import config_schema
 
     # 1. Check parameter descriptions
-    check_parameter_descriptions(PARAMETER_DESCRIPTIONS, config_schema)
+    missing, extra = check_parameter_descriptions(PARAMETER_DESCRIPTIONS, config_schema)
+    if missing:
+        log.warning(
+            "The following config parameters are missing descriptions in PARAMETER_DESCRIPTIONS:"
+        )
+        for k in missing:
+            print(f"- {k}")
+    if extra:
+        log.warning(
+            "The following parameters are described in PARAMETER_DESCRIPTIONS but do not exist in the config schema:"
+        )
+        for k in extra:
+            print(f"- {k}")
+    if missing or extra:
+        log.error("Parameter description check failed. Please fix the above issues.")
+        sys.exit(1)
+    else:
+        log.info("All config parameters are documented in PARAMETER_DESCRIPTIONS.")
 
     # 2. Generate parameters.rst
     create_parameters_rst(PARAMETER_DESCRIPTIONS)
