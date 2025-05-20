@@ -26,15 +26,10 @@ docs-parameters:
 # force means that it will overwrite existing files
 # separate means that it will create a separate file for each module
 docs-autosummary:
-	@if [ -f source/_autosummary/usbmd.rst ]; then cp source/_autosummary/usbmd.rst source/_autosummary/usbmd.rst.bak; fi
-	sphinx-apidoc -o source/_autosummary ../usbmd --force --separate
-	@if [ -f source/_autosummary/usbmd.rst.bak ]; then mv source/_autosummary/usbmd.rst.bak source/_autosummary/usbmd.rst; fi
-	@for i in $(REMOVE_LIST); do \
-		if [ -f $(SOURCEDIR)/_autosummary/$$i ]; then \
-			echo "Removing $(SOURCEDIR)/_autosummary/$$i"; \
-			rm $(SOURCEDIR)/_autosummary/$$i; \
-		fi; \
-	done
+	@if [ -f $(SOURCEDIR)/_autosummary/usbmd.rst ]; then cp $(SOURCEDIR)/_autosummary/usbmd.rst $(SOURCEDIR)/_autosummary/usbmd.rst.bak; fi
+	sphinx-apidoc -o $(SOURCEDIR)/_autosummary ../usbmd --force --separate
+	@if [ -f $(SOURCEDIR)/_autosummary/usbmd.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/usbmd.rst.bak $(SOURCEDIR)/_autosummary/usbmd.rst; fi
+	@rm -f $(SOURCEDIR)/_autosummary/usbmd.ops_dep.rst $(SOURCEDIR)/_autosummary/modules.rst
 
 # Build docs cleanly (parameters.rst and autosummary must be up to date)
 docs-build: docs-parameters docs-autosummary
