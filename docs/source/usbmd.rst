@@ -23,7 +23,6 @@
    metrics
    models
    ops
-   ops_dep
    probes
    scan
    simulator
