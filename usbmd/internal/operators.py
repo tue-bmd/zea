@@ -10,6 +10,7 @@ from keras import ops
 
 from usbmd.internal.core import Object
 from usbmd.internal.registry import operator_registry
+from usbmd.utils import translate
 
 
 class Operator(abc.ABC, Object):
@@ -71,3 +72,25 @@ class InpaintingOperator(Operator):
 
     def __str__(self):
         return "y = Ax + n, where A = I * M"
+
+
+@operator_registry(name="soft_inpainting")
+class SoftInpaintingOperator(Operator):
+    def __init__(self, image_range, mask_range=None):
+        self.image_range = tuple(image_range)
+        assert len(self.image_range) == 2
+
+        if mask_range is None:
+            mask_range = (0.0, 1.0)
+        self.mask_range = tuple(mask_range)
+        assert len(self.mask_range) == 2
+        assert self.mask_range[0] == 0.0, "mask_range[0] must be 0.0"
+
+    def forward(self, data, mask):
+        data1 = translate(data, self.image_range, self.mask_range)
+        data2 = mask * data1
+        data3 = translate(data2, self.mask_range, self.image_range)
+        return data3
+
+    def __str__(self):
+        return "SoftInpaintingOperator"
