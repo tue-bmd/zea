@@ -16,7 +16,7 @@ else:
 
 
 class SubsetOperator:
-    """ubsetOperator applies the Gumbel-Softmax trick for continuous top-k selection.
+    """SubsetOperator applies the Gumbel-Softmax trick for continuous top-k selection.
 
     Args:
         k (int): The number of elements to select.
