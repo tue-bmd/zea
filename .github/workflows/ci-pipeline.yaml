@@ -178,8 +178,12 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "pip install -e .. && pip install -r docs-requirements.txt && export PATH=\"/tmp/.local/bin:\$PATH\" && make docs-build SPHINXOPTS='-W --keep-going'"
-
+            sh -c "\
+              pip install -e .. && \
+              pip install -r docs-requirements.txt && \
+              export PATH=\"/tmp/.local/bin:\$PATH\" && \
+              make docs-build SPHINXOPTS='-W --keep-going' \
+            "
       # - name: Upload built docs as artifact
       #   uses: actions/upload-artifact@v4
       #   with:
