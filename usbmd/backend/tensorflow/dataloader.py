@@ -1,9 +1,6 @@
-"""H5 dataloader.
+"""HDF5 Tensorflow dataloader.
 
 Convenient way of loading data from hdf5 files in a ML pipeline.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : Thu Nov 18 2021
 """
 
 from functools import partial
@@ -23,7 +20,8 @@ METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
 
 
 class TFDatasetToKeras(TFDatasetAdapter):
-    """
+    """Tensorflow Dataset to Keras Dataset.
+
     This class wraps a tf.data.Dataset object and allows it to be used with Keras backends.
     """
 
