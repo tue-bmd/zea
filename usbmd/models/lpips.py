@@ -3,17 +3,16 @@
 See original code: https://github.com/richzhang/PerceptualSimilarity
 As well as the paper: https://arxiv.org/abs/1801.03924
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 20/01/2025
 """
 
 import keras
 from keras import ops
 from keras.api.layers import Conv2D, Dropout, Input
+
+from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
 from usbmd.models.presets import lpips_presets
-from usbmd.internal.registry import model_registry
 
 
 @model_registry(name="lpips")

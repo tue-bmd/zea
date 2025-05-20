@@ -1,8 +1,5 @@
 """Config utilities.
 Load settings from yaml files and access them as objects / dicts.
-
-- **Author(s)**     : Tristan Stevens, Wessel van Nierop
-- **Date**          : 14-09-2021
 """
 
 import copy
