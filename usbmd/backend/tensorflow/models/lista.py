@@ -107,6 +107,17 @@ class Prox(Layer):
     def call(
         self, inputs, *args, **kwargs
     ):  # pylint: disable=arguments-differ, unused-argument, missing-function-docstring
+        """
+        Apply the proximal operator.
+
+        Args:
+            inputs (Tensor): Input tensor.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Tensor: Output after applying the proximal operator.
+        """
         return ops.sign(inputs) * ops.relu(ops.abs(inputs) - ops.softplus(self.alpha))
 
     def compute_output_shape(self, input_shape):

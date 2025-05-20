@@ -122,28 +122,33 @@ def search_file_tree(
     directory and written to a dataset_info.yaml file.
 
     Args:
-        directory (str): path to base directory to start file search
-        filetypes (str, list, optional): filetypes to look for in directory
-            Defaults to image types (.png etc.). make sure to include the dot.
+        directory (str): Path to base directory to start file search.
+        filetypes (str or list, optional): Filetypes to look for in directory.
+            Defaults to image types (.png etc.). Make sure to include the dot.
         write (bool, optional): Whether to write to dataset_info.yaml file.
             Defaults to True. If False, the file paths are not written to file
             and simply returned.
-        dataset_info_filename (str, optional): name of dataset info file.
+        dataset_info_filename (str, optional): Name of dataset info file.
             Defaults to "dataset_info.yaml", but can be changed to any name.
-        hdf5_key_for_length (str, optional): key to use for getting length of hdf5 files.
+        hdf5_key_for_length (str, optional): Key to use for getting length of hdf5 files.
             Defaults to None. If set, the number of frames in each hdf5 file is
             calculated and stored in the dataset_info.yaml file. This is extra
-            functionality of `search_file_tree` and only works with hdf5 files.
+            functionality of ``search_file_tree`` and only works with hdf5 files.
         redo (bool, optional): Whether to redo the search and overwrite the dataset_info.yaml file.
+        parallel (bool, optional): Whether to use multiprocessing for hdf5 shape reading.
+        verbose (bool, optional): Whether to print progress and info.
 
     Returns:
-        dict: dictionary containing file paths and total number of files.
-            has the following structure:
+        dict: Dictionary containing file paths and total number of files.
+            Has the following structure:
+
+            .. code-block:: python
+
                 {
                     "file_paths": list of file paths,
-                    "total_num_files": total number of files
-                    "file_lengths": list of number of frames in each hdf5 file
-                    "file_shapes": list of shapes of each image file
+                    "total_num_files": total number of files,
+                    "file_lengths": list of number of frames in each hdf5 file,
+                    "file_shapes": list of shapes of each image file,
                     "total_num_frames": total number of frames in all hdf5 files
                 }
 
@@ -285,14 +290,14 @@ def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
     """Decorator to retry functions on I/O errors with exponential backoff.
 
     Args:
-        max_retries: Maximum number of retry attempts
-        initial_delay: Initial delay between retries in seconds
-        retry_action: Optional function to call before each retry attempt
-            If decorating a method: retry_action(self, exception, attempt, *args, **kwargs)
-            If decorating a function: retry_action(exception, attempt, *args, **kwargs)
+        max_retries (int): Maximum number of retry attempts.
+        initial_delay (float): Initial delay between retries in seconds.
+        retry_action (callable, optional): Optional function to call before each retry attempt.
+            If decorating a method: ``retry_action(self, exception, attempt, *args, **kwargs)``
+            If decorating a function: ``retry_action(exception, attempt, *args, **kwargs)``
 
     Returns:
-        Decorated function with retry logic
+        callable: Decorated function with retry logic.
 
     """
 
