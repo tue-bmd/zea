@@ -150,3 +150,38 @@ jobs:
             -e LOGNAME=$(id -un) \
             usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
+
+  build-docs:
+    needs: [build-full-image, set-tag]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - name: Pull full Docker image
+        run: |
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
+            echo "Image tag not set!" && exit 1
+          fi
+          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+
+      - name: Build documentation with Sphinx (fail on warnings)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/ultrasound-toolbox" \
+            -w /ultrasound-toolbox/docs \
+            -u $(id -u):$(id -g) \
+            -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
+            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
+            sh -c "pip install -e .. && pip install -r docs-requirements.txt && export PATH=\"/tmp/.local/bin:\$PATH\" && make docs-build SPHINXOPTS='-W --keep-going'"
+
+      # - name: Upload built docs as artifact
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: docs-html
+      #     path: docs/_build/html
