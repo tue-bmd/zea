@@ -1,14 +1,9 @@
-"""Model and constructor for unfolded convolutional ISTA
-
-Author(s)     : Ruud van Sloun
-Modified by   : Nishith Chennakeshava
-Date          : 03/02/2022
-"""
+"""Model and constructor for unfolded convolutional ISTA"""
 
 # pylint: disable=abstract-method
 import keras
 from keras import Input, ops
-from keras.layers import Add, Conv2D, UpSampling2D
+from keras.api.layers import Add, Conv2D, UpSampling2D
 from tensorflow.python.keras.layers import Layer
 
 from usbmd.backend.tensorflow.layers.utils import get_activation
@@ -107,8 +102,7 @@ class Prox(Layer):
     def call(
         self, inputs, *args, **kwargs
     ):  # pylint: disable=arguments-differ, unused-argument, missing-function-docstring
-        """
-        Apply the proximal operator.
+        """Apply the proximal operator.
 
         Args:
             inputs (Tensor): Input tensor.
