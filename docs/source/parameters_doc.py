@@ -21,6 +21,7 @@ PROBES_YAML = "probes.yaml"
 
 # Determine if we are running from the docs directory or project root
 def get_project_paths():
+    """Get the project paths for configs and parameters.rst based on the current working directory."""
     cwd = Path.cwd().resolve()
     # If we're in docs or docs/source, adjust accordingly
     if "docs" in cwd.parts:
@@ -81,7 +82,7 @@ def flatten_schema_keys(schema, prefix=""):
                         keys |= flatten_schema_keys(opt, full)
                 else:
                     keys.add(full)
-            elif isinstance(v, Schema) or isinstance(v, dict):
+            elif isinstance(v, (Schema, dict)):
                 keys |= flatten_schema_keys(v, full)
             else:
                 keys.add(full)

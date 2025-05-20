@@ -1,16 +1,16 @@
 Getting Started
-==============
+===============
 
 Installation
------------
+------------
 
 Preferred Install Method via Docker
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The recommended way to install and run usbmd is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in :doc:`Install </Install>`.
+The recommended way to install and run usbmd is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in :doc:`installation`.
 
 Alternative - Editable Install using Git
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you prefer not to use Docker, you can install usbmd in editable mode from PyPI by checking out the repository and running:
 
@@ -24,10 +24,10 @@ If you prefer not to use Docker, you can install usbmd in editable mode from PyP
 
 .. important::
 
-   You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the `Jax installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_. The easiest way to set up your environment is through the provided docker image (see :doc:`Install </Install>`), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running ``pip install usbmd[jax]`` although this is not extensively tested (yet).
+   You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the `Jax installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_. The easiest way to set up your environment is through the provided docker image (see :doc:`installation`), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running ``pip install usbmd[jax]`` although this is not extensively tested (yet).
 
 Example usage
-------------
+--------------
 
 .. tip::
 
@@ -55,7 +55,6 @@ After setting the backend you can simply import ``usbmd``
 The easiest way to get started is to use the Interface class
 
 .. code-block:: python
-   :doctest:
 
    import matplotlib.pyplot as plt
 
@@ -75,7 +74,7 @@ The easiest way to get started is to use the Interface class
    image = interface.run(plot=True)
 
 Loading a single file
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 The ``Interface`` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
 We do this by manually loading a single usbmd file with ``load_usbmd_file`` and processing it with the ``Process`` class.
@@ -139,7 +138,7 @@ We do this by manually loading a single usbmd file with ``load_usbmd_file`` and 
    plt.imshow(image, cmap="gray")
 
 Custom pipeline
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 Custom pipelines are also supported in various ways. One way is to define a pipeline in a dictionary format. Pipelines can be nested, and operations can be referenced in a list by using just their name, or by using a dictionary with the name and parameters.
 
@@ -190,7 +189,7 @@ Custom pipelines are also supported in various ways. One way is to define a pipe
 
 
 Handling multiple files (i.e. datasets)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can also make use of the ``USBMDDataSet`` class to load and process multiple files at once.
 We will have to manually initialize the ``Scan`` and ``Probe`` classes and pass them to the ``Process`` class. This was done automatically in the ``Interface`` in the first example.
@@ -235,7 +234,7 @@ We will have to manually initialize the ``Scan`` and ``Probe`` classes and pass 
 Models
 ------
 
-``usbmd`` also contains a collection of models that can be used for various tasks. An example of how to use the ``EchoNetDynamic`` model is shown below. Simply use the ``from_preset`` method to load a model with a specific preset. All models can be found in the ``usbmd.models`` module. See the :doc:`models README </usbmd/models/README>` for more information.
+``usbmd`` also contains a collection of models that can be used for various tasks. An example of how to use the :class:`usbmd.models.echonet.EchoNetDynamic` model is shown below. Simply use the :meth:`from_preset` method to load a model with a specific preset. All models can be found in the :mod:`usbmd.models` module. See the :doc:`models` documentation for more information.
 
 .. code-block:: python
 
