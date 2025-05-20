@@ -17,8 +17,8 @@ from typing import Union
 
 import yaml
 
-from usbmd.config import Config
 from usbmd import log
+from usbmd.config import Config
 from usbmd.utils import strtobool
 
 DEFAULT_DATA_ROOT = {
@@ -151,9 +151,8 @@ def _verify_user_config_and_get_paths(config, system, local):
 
 def _verify_paths(data_path):
     """Verify that the paths exist and are directories."""
-    for key, path in data_path.items():
-        if key not in ["data_root", "output"]:
-            continue
+    for key in {"data_root", "output"}:
+        path = data_path[key]
         if not Path(path).is_dir():
             log.warning(
                 f"{key} path `{path}` does not exist, please update your "
@@ -199,7 +198,9 @@ def _load_users_yaml(user_config, local, username, hostname):
     return config
 
 
-def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> dict:
+def set_data_paths(
+    user_config: Union[str, dict] = None, local: bool = True, verify: bool = True
+) -> dict:
     """Get data paths (absolute paths to location of data).
 
     Args:
@@ -207,6 +208,8 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
             If None, uses ``./users.yaml`` as the default file. Can also be a dictionary
             structured as shown below.
         local (bool, optional): Use local dataset or get from NAS.
+        verify (bool, optional): Verify that the paths exist and are directories.
+            Default is True.
 
     Example YAML structure::
 
@@ -293,7 +296,8 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
         "hostname": hostname,
     }
 
-    _verify_paths(data_path)
+    if verify:
+        _verify_paths(data_path)
 
     return Config(data_path)
 
