@@ -5,7 +5,7 @@ This document describes how to install the usbmd package and how to use it in a 
 Make sure you always use a virtual environment such as ``miniconda`` or ``venv`` to avoid conflicts with other packages!
 
 Backend installation
--------------------
+--------------------
 
 First, install one machine learning backend of choice. Note that usbmd can run with a numpy backend, but it is not recommended. Also, using the `Docker`_ image will automatically install all compatible backends, so in that case you can skip this step.
 
@@ -210,7 +210,7 @@ Using git
 Ensure that the ssh-agent is running and your SSH key is added. The local (or remote) ssh-agent is shared with the container upon attaching. More information can be found `here <https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials>`_.
 
 Installing More Packages
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you need to install additional packages after the image has been built and you are in the container as your user, use ``sudo``:
 

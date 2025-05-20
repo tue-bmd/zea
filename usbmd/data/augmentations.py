@@ -1,9 +1,10 @@
 """Augmentation layers for ultrasound data."""
 
-import numpy as np
 import keras
+import numpy as np
 from keras import layers, ops
-from usbmd.tensor_ops import split_seed, is_jax_prng_key
+
+from usbmd.tensor_ops import is_jax_prng_key, split_seed
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 
@@ -20,9 +21,9 @@ class RandomCircleInclusion(layers.Layer):
     and whether the circles should be located randomly across that batch.
 
     For example, if you have a batch of videos, e.g. of shape [batch, frame, height, width],
-    then you might want to specify ``circle_axes=(2, 3)``, and ``randomize_location_across_batch=True``.
-    This would result in a circle that is located in the same place per video, but
-    different locations for different videos.
+    then you might want to specify ``circle_axes=(2, 3)``, and
+    ``randomize_location_across_batch=True``. This would result in a circle that is located
+    in the same place per video, but different locations for different videos.
 
     Once your method has recovered the circles, you can evaluate them using
     the ``evaluate_recovered_circle_accuracy()`` method, which will expect an input

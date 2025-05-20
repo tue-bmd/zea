@@ -34,7 +34,8 @@ class Config(dict):
 
         - ``save_to_yaml`` method to save the config to a yaml file.
         - ``copy`` method to create a deep copy of the config.
-        - Normal dictionary methods such as ``keys``, ``values``, ``items``, ``pop``, ``update``, ``get``.
+        - Normal dictionary methods such as
+            ``keys``, ``values``, ``items``, ``pop``, ``update``, ``get``.
         - Propose similar attribute names if a non-existing attribute is accessed.
         - Freeze the config object to prevent new attributes from being added.
         - Load config object from yaml file.
@@ -43,7 +44,7 @@ class Config(dict):
     We took inspiration from the following sources:
 
         - `EasyDict <https://pypi.org/project/easydict/>`_
-        - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_
+        - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_ # pylint: disable=line-too-long
 
     But this implementation is superior :)
     """
