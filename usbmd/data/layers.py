@@ -1,7 +1,4 @@
-"""Keras layers for data preprocessing.
-- **Author(s)**     : Wessel van Nierop
-- **Date**          : 12/02/2025
-"""
+"""Keras layers for data preprocessing."""
 
 import keras
 import numpy as np

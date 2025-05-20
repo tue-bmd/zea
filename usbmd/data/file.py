@@ -1,7 +1,4 @@
-"""USBMD H5 file functionality.
-
-- **Author(s)**     : Tristan Stevens, Wessel van Nierop
-"""
+"""USBMD H5 file functionality."""
 
 import enum
 from pathlib import Path

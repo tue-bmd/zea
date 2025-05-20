@@ -1,8 +1,4 @@
-"""Ops module for computing lens corrected delays.
-
-- **Author(s)**     : Vincent van de Schaft
-- **Date**          : 10/10/2024
-"""
+"""Ops module for computing lens corrected delays."""
 
 from keras import ops
 

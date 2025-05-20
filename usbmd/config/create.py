@@ -1,8 +1,4 @@
-"""Create a new config file by asking the user for input.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 29/02/2024
-"""
+"""Create a new config file by asking the user for input."""
 
 import sys
 from pathlib import Path
