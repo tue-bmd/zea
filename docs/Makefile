@@ -21,8 +21,13 @@ docs-parameters:
 	python $(SOURCEDIR)/parameters_doc.py
 
 # Generate autosummary .rst files for API documentation
+# force means that it will overwrite existing files
+# separate means that it will create a separate file for each module
+# We also copy the generated usbmd.rst file to the source directory
+# as we have a custom template for it
 docs-autosummary:
-	sphinx-apidoc -o source/_autosummary ../usbmd
+	sphinx-apidoc -o source/_autosummary ../usbmd --force --separate
+	cp source/usbmd.rst source/_autosummary/usbmd.rst
 
 # Build docs cleanly (parameters.rst and autosummary must be up to date)
 docs-build: docs-parameters docs-autosummary

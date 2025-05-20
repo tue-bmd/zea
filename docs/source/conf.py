@@ -34,7 +34,6 @@ autodoc_default_options = {
 }
 
 templates_path = ["_templates"]
-exclude_patterns = []
 
 # -- Options for HTML output -------------------------------------------------
 html_theme = "furo"
