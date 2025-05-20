@@ -30,9 +30,6 @@ from usbmd.data import dataset_registry
 dataset_class = dataset_registry['picmus']
 dataset = dataset_class()
 ```
-
-- **Author(s)**     : Vincent van de Schaft, Tristan Stevens
-- **Date**          : 14/03/2023
 """
 
 
