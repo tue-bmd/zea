@@ -33,9 +33,8 @@ Currently usbmd offers:
 .. toctree::
    :caption: Reference
    :maxdepth: 2
-   :hidden:
 
-   usbmd
+   _autosummary/usbmd
    data-acquisition
    parameters
    pipeline

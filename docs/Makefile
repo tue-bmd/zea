@@ -23,11 +23,10 @@ docs-parameters:
 # Generate autosummary .rst files for API documentation
 # force means that it will overwrite existing files
 # separate means that it will create a separate file for each module
-# We also copy the generated usbmd.rst file to the source directory
-# as we have a custom template for it
 docs-autosummary:
+	@if [ -f source/_autosummary/usbmd.rst ]; then cp source/_autosummary/usbmd.rst source/_autosummary/usbmd.rst.bak; fi
 	sphinx-apidoc -o source/_autosummary ../usbmd --force --separate
-	cp source/usbmd.rst source/_autosummary/usbmd.rst
+	@if [ -f source/_autosummary/usbmd.rst.bak ]; then mv source/_autosummary/usbmd.rst.bak source/_autosummary/usbmd.rst; fi
 
 # Build docs cleanly (parameters.rst and autosummary must be up to date)
 docs-build: docs-parameters docs-autosummary
@@ -35,7 +34,10 @@ docs-build: docs-parameters docs-autosummary
 
 # Serve docs locally with sphinx-autobuild (auto-reloads on changes)
 docs-serve: docs-parameters docs-autosummary
-	$(SPHINXAUTOBUILD) "$(SOURCEDIR)" "$(BUILDDIR)/html"
+	@PORT=8000; \
+	while lsof -i :$$PORT >/dev/null 2>&1; do PORT=$$((PORT+1)); done; \
+	echo "Using port $$PORT"; \
+	$(SPHINXAUTOBUILD) --port=$$PORT "$(SOURCEDIR)" "$(BUILDDIR)/html"
 
 docs-test: docs-parameters
 	$(SPHINXBUILD) -b doctest "$(SOURCEDIR)" "$(BUILDDIR)/doctest" $(SPHINXOPTS)
