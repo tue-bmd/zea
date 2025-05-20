@@ -1,5 +1,6 @@
+"""Parameter descriptions for the config file."""
+
 from usbmd.config.validation import (
-    _ALLOWED_DEMODULATION,
     _ALLOWED_KEYS_PROXTYPE,
     _ALLOWED_PLOT_LIBS,
     _DATA_TYPES,
@@ -104,7 +105,10 @@ PARAMETER_DESCRIPTIONS = {
             "where each dictionary contains the parameters for a single operation."
         ),
         "params": (
-            "Optional parameters to pass to the initializaion of the pipeline. e.g. `jit_options`, etc."
+            (
+                "Optional parameters to pass to the initializaion of the pipeline. e.g. "
+                "`jit_options`, etc."
+            )
         ),
     },
     "device": "The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)",
