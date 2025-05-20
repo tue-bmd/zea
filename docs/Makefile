@@ -1,4 +1,5 @@
 export LC_ALL=C.UTF-8
+export KERAS_BACKEND=numpy
 # Minimal makefile for Sphinx documentation
 #
 

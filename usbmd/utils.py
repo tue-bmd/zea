@@ -171,19 +171,20 @@ def preprocess_for_saving(images):
 
 
 def save_to_gif(images, filename, fps=20, shared_color_palette=False):
-    """Saves a sequence of images to .gif file.
+    """Saves a sequence of images to a GIF file.
+
     Args:
-        images: list of images (numpy arrays). Must have shape
+        images (list or np.ndarray): List or array of images. Must have shape
             (n_frames, height, width, channels) or (n_frames, height, width).
             If channel axis is not present, or is 1, grayscale image is assumed,
             which is then converted to RGB. Images should be uint8.
-        filename: string containing filename to which data should be written.
-        fps: frames per second of rendered format.
-        shared_color_palette (bool, optional): if True, creates a global
+        filename (str or Path): Filename to which data should be written.
+        fps (int): Frames per second of rendered format.
+        shared_color_palette (bool, optional): If True, creates a global
             color palette across all frames, ensuring consistent colors
             throughout the GIF. Defaults to False, which is default behavior
-            of PIL.Image.save.
-            Note: `True` can cause slow saving for longer sequences.
+            of PIL.Image.save. Note: True can cause slow saving for longer sequences.
+
     """
     assert isinstance(
         filename, (str, Path)
@@ -234,18 +235,23 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
         interlace=False,
         optimize=False,
     )
-    return log.success(f"Succesfully saved GIF to -> {log.yellow(filename)}")
+    log.success(f"Succesfully saved GIF to -> {log.yellow(filename)}")
 
 
 def save_to_mp4(images, filename, fps=20):
-    """Saves a sequence of images to .mp4 file.
+    """Saves a sequence of images to an MP4 file.
+
     Args:
-        images: list of images (numpy arrays). Must have shape
+        images (list or np.ndarray): List or array of images. Must have shape
             (n_frames, height, width, channels) or (n_frames, height, width).
             If channel axis is not present, or is 1, grayscale image is assumed,
             which is then converted to RGB. Images should be uint8.
-        filename: string containing filename to which data should be written.
-        fps: frames per second of rendered format.
+        filename (str or Path): Filename to which data should be written.
+        fps (int): Frames per second of rendered format.
+
+    Returns:
+        str: Success message.
+
     """
     assert isinstance(
         filename, (str, Path)
@@ -475,13 +481,16 @@ def deprecated(replacement=None):
 
 def calculate_file_hash(file_path, omit_line_str=None):
     """Calculates the hash of a file.
+
     Args:
         file_path (str): Path to file.
-        omit_line_str (str): If this string is found in a line, the line will
+        omit_line_str (str, optional): If this string is found in a line, the line will
             be omitted when calculating the hash. This is useful for example
             when the file contains the hash itself.
+
     Returns:
         str: The hash of the file.
+
     """
     hash_object = hashlib.sha256()
     with open(file_path, "rb") as f:
@@ -524,11 +533,16 @@ def find_methods_with_return_type(cls, return_type_hint):
 
 def keep_trying(fn, args=None, required_set=None):
     """Keep trying to run a function until it succeeds.
+
     Args:
-        fn (function): function to run
-        args (dict, optional): arguments to pass to function
-        required_set (set, optional): set of required outputs
-            if output is not in required_set, function will be rerun
+        fn (callable): Function to run.
+        args (dict, optional): Arguments to pass to function.
+        required_set (set, optional): Set of required outputs.
+            If output is not in required_set, function will be rerun.
+
+    Returns:
+        Any: The output of the function if successful.
+
     """
     while True:
         try:

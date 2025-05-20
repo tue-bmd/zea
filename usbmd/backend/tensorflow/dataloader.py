@@ -152,9 +152,9 @@ def make_dataloader(
     wrap_in_keras: bool = True,
     **kwargs,
 ) -> tf.data.Dataset:
-    """Creates a `tf.data.Dataset` from .hdf5 files in the specified directory or directories.
+    """Creates a ``tf.data.Dataset`` from .hdf5 files in the specified directory or directories.
 
-    Mimicks the native TF function `tf.keras.utils.image_dataset_from_directory`
+    Mimics the native TF function ``tf.keras.utils.image_dataset_from_directory``
     but for .hdf5 files.
 
     Saves a dataset_info.yaml file in the directory with information about the dataset.
@@ -162,90 +162,96 @@ def make_dataloader(
     of the dataset for very large datasets.
 
     Does the following in order to load a dataset:
-    - Find all .hdf5 files in the director(ies)
-    - Load the data from each file using the specified key
-    - Apply the following transformations in order (if specified):
-        - limit_n_samples
-        - cache
-        - shuffle
-        - shard
-        - add channel dim
-        - assert_image_range
-        - clip_image_range
-        - resize
-        - repeat
-        - batch
-        - normalize
-        - augmentation
-        - prefetch
-        - tf -> keras tensor
+
+        - Find all .hdf5 files in the director(ies)
+        - Load the data from each file using the specified key
+        - Apply the following transformations in order (if specified):
+
+            - limit_n_samples
+            - cache
+            - shuffle
+            - shard
+            - add channel dim
+            - assert_image_range
+            - clip_image_range
+            - resize
+            - repeat
+            - batch
+            - normalize
+            - augmentation
+            - prefetch
+            - tf -> keras tensor
 
     Args:
         file_paths (str or list): Path(s) to the folder(s) or h5 file(s) to load.
         batch_size (int): Batch the dataset.
         key (str): The key to access the HDF5 dataset.
-        n_frames (int, optional): number of frames to load from each hdf5 file.
+        n_frames (int, optional): Number of frames to load from each hdf5 file.
             Defaults to 1. These frames are stacked along the last axis (channel).
-        shuffle (bool, optional): shuffle dataset.
-        return_filename (bool, optional): return file name with image. Defaults to False.
-        limit_n_samples (int, optional): take only a subset of samples.
-            Useful for debuging. Defaults to None.
-        limit_n_frames (int, optional): limit the number of frames to load from each file.
+        shuffle (bool, optional): Shuffle dataset.
+        return_filename (bool, optional): Return file name with image. Defaults to False.
+        limit_n_samples (int, optional): Take only a subset of samples.
+            Useful for debugging. Defaults to None.
+        limit_n_frames (int, optional): Limit the number of frames to load from each file.
             This means n_frames per data file will be used. These will be the first frames in
-            the file. Defaults to None
-        seed (int, optional): random seed of shuffle.
-        drop_remainder (bool, optional): representing whether the last batch should be dropped
-        resize_type (str, optional): resize type. Defaults to 'center_crop'.
-            can be 'center_crop', 'random_crop' or 'resize'.
-        resize_axes (tuple, optional): axes to resize along. Should be of length 2
+            the file. Defaults to None.
+        seed (int, optional): Random seed of shuffle.
+        drop_remainder (bool, optional): Whether the last batch should be dropped.
+        resize_type (str, optional): Resize type. Defaults to 'center_crop'.
+            Can be 'center_crop', 'random_crop' or 'resize'.
+        resize_axes (tuple, optional): Axes to resize along. Should be of length 2
             (height, width) as resizing function only supports 2D resizing / cropping.
             Should only be set when your data is more than (h, w, c). Defaults to None.
             Note that it considers the axes after inserting the frame axis.
-        resize_kwargs (dict, optional): kwargs for the resize function.
-        image_size (tuple, optional): resize images to image_size. Should
+        resize_kwargs (dict, optional): Kwargs for the resize function.
+        image_size (tuple, optional): Resize images to image_size. Should
             be of length two (height, width). Defaults to None.
-        image_range (tuple, optional): image range. Defaults to (0, 255).
-            will always translate from specified image range to normalization range.
-            if image_range is set to None, no normalization will be done. Note that it does not
+        image_range (tuple, optional): Image range. Defaults to (0, 255).
+            Will always translate from specified image range to normalization range.
+            If image_range is set to None, no normalization will be done. Note that it does not
             clip to the image range, so values outside the image range will be outside the
             normalization range!
-        normalization_range (tuple, optional): normalization range. Defaults to (0, 1).
+        normalization_range (tuple, optional): Normalization range. Defaults to (0, 1).
             See image_range for more info!
-        dataset_repetitions (int, optional): repeat dataset. Note that this happens
+        dataset_repetitions (int, optional): Repeat dataset. Note that this happens
             after sharding, so the shard will be repeated. Defaults to None.
         cache (bool, optional): Cache dataset to RAM.
-        additional_axes_iter (tuple, optional): additional axes to iterate over
+        additional_axes_iter (tuple, optional): Additional axes to iterate over
             in the dataset. Defaults to None, in that case we only iterate over
             the first axis (we assume those contain the frames).
-        sort_files (bool, optional): sort files by number. Defaults to True.
-        overlapping_blocks (bool, optional): if True, blocks overlap by n_frames - 1.
+        sort_files (bool, optional): Sort files by number. Defaults to True.
+        overlapping_blocks (bool, optional): If True, blocks overlap by n_frames - 1.
             Defaults to False. Has no effect if n_frames = 1.
-        augmentation (keras.Sequential, optional): keras augmentation layer.
-        assert_image_range (bool, optional): assert that the image range is
+        augmentation (keras.Sequential, optional): Keras augmentation layer.
+        assert_image_range (bool, optional): Assert that the image range is
             within the specified image range. Defaults to True.
-        clip_image_range (bool, optional): clip the image range to the specified
+        clip_image_range (bool, optional): Clip the image range to the specified
             image range. Defaults to False.
-        initial_frame_axis (int, optional): axis where in the files the frames are stored.
+        initial_frame_axis (int, optional): Axis where in the files the frames are stored.
             Defaults to 0.
-        insert_frame_axis (bool, optional): if True, new dimension to stack
+        insert_frame_axis (bool, optional): If True, new dimension to stack
             frames along will be created. Defaults to True. In that case
             frames will be stacked along existing dimension (frame_axis).
-        frame_index_stride (int, optional): interval between frames to load.
+        frame_index_stride (int, optional): Interval between frames to load.
             Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
-        frame_axis (int, optional): dimension to stack frames along.
+        frame_axis (int, optional): Dimension to stack frames along.
             Defaults to -1. If insert_frame_axis is True, this will be the
             new dimension to stack frames along.
-        validate (bool, optional): validate if the dataset adheres to the usbmd format.
+        validate (bool, optional): Validate if the dataset adheres to the usbmd format.
             Defaults to True.
-        prefetch (bool, optional): prefetch the dataset. Defaults to True.
-        shard_index (int, optional): index which part of the dataset should be selected.
+        prefetch (bool, optional): Prefetch the dataset. Defaults to True.
+        shard_index (int, optional): Index which part of the dataset should be selected.
             Can only be used if num_shards is specified. Defaults to None.
             See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
-        num_shards (int, optional): this is used to divide the dataset into `num_shards` parts.
+        num_shards (int, optional): This is used to divide the dataset into ``num_shards`` parts.
             Sharding happens before all other operations. Defaults to 1.
             See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
-        wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
+        wrap_in_keras (bool, optional): Wrap dataset in TFDatasetToKeras. Defaults to True.
             If True, will convert the dataset that returns backend tensors.
+
+    Returns:
+        tf.data.Dataset: The constructed dataset.
+
     """
     # Setup
     if normalization_range is not None:

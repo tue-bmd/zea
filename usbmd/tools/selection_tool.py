@@ -384,12 +384,15 @@ def extract_rectangle_from_mask(image):
 
 def reconstruct_mask_from_rectangle(corner_points, image_shape):
     """Reconstruct a binary mask from corner points of a rectangle.
+
     Args:
-        corner_points (tuple): Tuple of the form ((x1, y1), (x2, y2))
+        corner_points (tuple): Tuple of the form ``((x1, y1), (x2, y2))``
             with the corner points of the rectangle.
         image_shape (tuple): Size of the image (height, width).
+
     Returns:
-        np.ndarray (height, width): 2D boolean mask.
+        np.ndarray: 2D boolean mask of shape (height, width).
+
     """
     image = np.zeros(image_shape, dtype=bool)
     x1, y1 = corner_points[0]
@@ -400,11 +403,13 @@ def reconstruct_mask_from_rectangle(corner_points, image_shape):
 
 def interpolate_rectangles(rectangles, x_indices, y_indices):
     """Interpolate between arbitrary number of rectangles.
+
     Args:
         rectangles (list): List with any number of rectangles as tuples of the form
             ((x1, y1), (x2, y2)). Size of the list must be equal to the number of x indices.
         x_indices (np.ndarray): Array with x indices for interpolation.
         y_indices (np.ndarray): Array with y indices for interpolation.
+
     Returns:
         List with interpolated rectangles as tuples of the form ((x1, y1), (x2, y2)).
             Size of the list is equal to the number of y indices.

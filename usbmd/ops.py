@@ -5,7 +5,7 @@ which are used to process ultrasound data. A pipeline is a sequence of operation
 that are applied to the data in a specific order.
 
 Stand-alone manual usage
------------------------
+------------------------
 
 Operations can be run on their own:
 
@@ -723,24 +723,24 @@ class Pipeline:
 
     @classmethod
     def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
-        """Create a pipeline from a dictionary or `usbmd.Config` object.
+        """Create a pipeline from a dictionary or ``usbmd.Config`` object.
 
         Args:
-            config (dict or Config): Configuration dictionary or `usbmd.Config` object.
+            config (dict or Config): Configuration dictionary or ``usbmd.Config`` object.
             **kwargs: Additional keyword arguments to be passed to the pipeline.
 
         Note:
-            Must have the a `pipeline` key with a subkey `operations`.
+            Must have a ``pipeline`` key with a subkey ``operations``.
 
         Example:
-        ```python
-        config = Config({
-            "operations": [
-                "identity",
-            ],
-        })
-        pipeline = Pipeline.from_config(config)
-        ```
+            .. code-block:: python
+
+                config = Config({
+                    "operations": [
+                        "identity",
+                    ],
+                })
+                pipeline = Pipeline.from_config(config)
         """
         return pipeline_from_config(Config(config), **kwargs)
 
@@ -906,6 +906,7 @@ def make_operation_chain(
     operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
 ) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
+
     Args:
         operation_chain (list): List of operations to be performed.
             Each operation can be:
@@ -913,8 +914,18 @@ def make_operation_chain(
             - A dictionary: operation initialized with parameters in the dictionary
             - A Config object: converted to a dictionary and initialized
             - An Operation/Pipeline instance: used as-is
+
     Returns:
         list: List of operations to be performed.
+
+    Example:
+        .. code-block:: python
+
+            chain = make_operation_chain([
+                "envelope_detect",
+                {"name": "normalize", "params": {"output_range": (0, 1)}},
+                SomeCustomOperation(),
+            ])
     """
     chain = []
     for operation in operation_chain:
