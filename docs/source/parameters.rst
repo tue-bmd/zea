@@ -74,8 +74,6 @@ Parameters Reference
      - The output range to which the data should be mapped (e.g. [0, 1]).
    * - ``data.resolution``
      - The spatial resolution of the data in meters per pixel (float, optional).
-   * - ``data.subset``
-     - ?
    * - ``data.to_dtype``
      - The type of data to convert to (raw_data, aligned_data, beamformed_data, envelope_data, image, image_sc)
    * - ``data.user``
