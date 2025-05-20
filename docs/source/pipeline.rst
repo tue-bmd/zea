@@ -1,4 +1,4 @@
-.. _pipeline::
+.. _pipeline:
 
 Pipeline
 ========
@@ -7,3 +7,4 @@ Pipeline
    :no-members:
    :no-inherited-members:
    :no-special-members:
+   :no-index:
