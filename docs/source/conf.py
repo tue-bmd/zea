@@ -26,7 +26,8 @@ extensions = [
     "sphinx.ext.doctest",  # for testing code snippets in the documentation
 ]
 
-autosummary_generate = True
+# autosummary_generate = ["_autosummary"]
+
 autodoc_default_options = {
     "members": True,
     "undoc-members": True,
