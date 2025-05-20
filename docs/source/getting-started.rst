@@ -55,6 +55,7 @@ After setting the backend you can simply import ``usbmd``
 The easiest way to get started is to use the Interface class
 
 .. code-block:: python
+   :doctest:
 
    import matplotlib.pyplot as plt
 
