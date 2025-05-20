@@ -214,7 +214,12 @@ def keras_to_usbmd_registry(keras_name, usbmd_registry):
     for registry_name, entry in usbmd_registry.registry.items():
         if entry.__name__ == keras_name:
             return registry_name
-    return None
+    raise ValueError(
+        f"Class {keras_name} not found in USBMD registry. "
+        "Make sure to register any custom classes with `usbmd.registry.model_registry()`. "
+        "Currently, the USBMD registry contains: "
+        f"{usbmd_registry.registry.items()}"
+    )
 
 
 class PresetLoader:
