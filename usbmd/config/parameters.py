@@ -40,9 +40,6 @@ PARAMETER_DESCRIPTIONS = {
             "The path of the folder to load data files from (relative to the user data "
             "root as set in users.yaml)"
         ),
-        "output_size": (
-            "The size of the output data (e.g. the number of pixels in the image)"
-        ),
         "to_dtype": (
             f"The type of data to convert to ({allows_type_to_str(_DATA_TYPES)})"
         ),
@@ -100,54 +97,15 @@ PARAMETER_DESCRIPTIONS = {
             "The speed of sound in the lens in m/s. Usually around 1000 m/s"
         ),
     },
-    "preprocess": {
-        "description": (
-            "The preprocess section contains the parameters for the preprocessing."
+    "pipeline": {
+        "description": "This section contains the necessary parameters for building the pipeline.",
+        "operations": (
+            "The operations to perform on the data. This is a list of dictionaries, "
+            "where each dictionary contains the parameters for a single operation."
         ),
-        "elevation_compounding": (
-            "The method to use for elevation compounding (null, int, max, mean)"
+        "params": (
+            "Optional parameters to pass to the initializaion of the pipeline. e.g. `jit_options`, etc."
         ),
-        "multi_bpf": {
-            "description": "Settings for the multi bandpass filter.",
-            "num_taps": "The number of taps in the filter",
-            "freqs": "The center frequencies of the filter bands",
-            "bandwidths": "The bandwidths of the filter bands",
-            "units": (
-                "The units of the frequencies and bandwidths (Hz, kHz, MHz, GHz)"
-            ),
-        },
-        "demodulation": (
-            "The demodulation method to use "
-            f"({allows_type_to_str(_ALLOWED_DEMODULATION)})"
-        ),
-    },
-    "postprocess": {
-        "description": (
-            "The postprocess section contains the parameters for the postprocessing."
-        ),
-        "contrast_boost": {
-            "description": "Settings for the contrast boost.",
-            "k_p": "The positive contrast boost factor",
-            "k_n": "The negative contrast boost factor",
-            "threshold": "The threshold for the contrast boost",
-        },
-        "thresholding": {
-            "description": "Settings for the thresholding.",
-            "percentile": "The percentile to use for thresholding",
-            "threshold": "The threshold to use for thresholding",
-            "fill_value": (
-                "The value to fill the data with when thresholding (min, max, threshold, "
-                "any_number)"
-            ),
-            "below_threshold": "Set to true to threshold below the threshold",
-            "threshold_type": "The type of thresholding to use (soft, hard)",
-        },
-        "lista": "Set to true to use the lista algorithm",
-        "bm3d": {
-            "description": "Settings for the bm3d algorithm.",
-            "sigma": "The sigma value for the bm3d algorithm",
-            "stage": "The stage of the bm3d algorithm to use (all_stages, hard_thresholding)",
-        },
     },
     "device": "The device to run on ('cpu', 'gpu:0', 'gpu:1', ...)",
     "plot": {
