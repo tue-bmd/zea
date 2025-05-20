@@ -62,8 +62,16 @@ def generate_h5_indices(
         .. code-block:: python
 
             [
-                ('/folder/path_to_file.hdf5', 'data/image', [range(0, 1), slice(None, 256, None), slice(None, 256, None)]),
-                ('/folder/path_to_file.hdf5', 'data/image', [range(1, 2), slice(None, 256, None), slice(None, 256, None)]),
+                (
+                    '/folder/path_to_file.hdf5',
+                    'data/image',
+                    [range(0, 1), slice(None, 256, None), slice(None, 256, None)]
+                ),
+                (
+                    '/folder/path_to_file.hdf5',
+                    'data/image',
+                    [range(1, 2), slice(None, 256, None), slice(None, 256, None)]
+                ),
                 ...
             ]
     """
