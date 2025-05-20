@@ -38,6 +38,8 @@ Currently usbmd offers:
    _autosummary/usbmd
    data-acquisition
    parameters
+   pipeline
+   models
 
 .. toctree::
    :caption: Project Links
