@@ -3,9 +3,10 @@ sphinx-autobuild
 
 # if using typehints
 sphinx-autodoc-typehints
+# for copy button
+sphinx-copybutton
 
 mock
-autodoc
 
 # for using md
 myst-parser
