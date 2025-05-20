@@ -107,8 +107,7 @@ class Prox(Layer):
     def call(
         self, inputs, *args, **kwargs
     ):  # pylint: disable=arguments-differ, unused-argument, missing-function-docstring
-        """
-        Apply the proximal operator.
+        """Apply the proximal operator.
 
         Args:
             inputs (Tensor): Input tensor.
