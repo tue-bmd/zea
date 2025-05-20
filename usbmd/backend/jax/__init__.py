@@ -1,10 +1,4 @@
-"""Jax Ultrasound Beamforming Library.
-
-Initialize modules for registries.
-
-- **Author(s)**: Tristan Stevens
-- **Date**: 25/10/2024
-"""
+"""Jax utilities for usbmd."""
 
 import jax
 import numpy as np

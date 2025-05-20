@@ -1,8 +1,4 @@
-"""Functions for displaying images and videos using OpenCV or Matplotlib.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : October 12th, 2023
-"""
+"""Functions for displaying images and videos using OpenCV or Matplotlib."""
 
 import abc
 import sys
