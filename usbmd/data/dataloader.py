@@ -39,30 +39,41 @@ def generate_h5_indices(
     is the length of the extracted dataset.
 
     Args:
-        file_paths (list): list of file paths.
-        file_shapes (list): list of file shapes.
-        n_frames (int): number of frames to load from each hdf5 file.
-        frame_index_stride (int): interval between frames to load.
-        key (str, optional): key of hdf5 dataset to grab data from. Defaults to "data/image".
-        initial_frame_axis (int, optional): axis to iterate over. Defaults to 0.
-        additional_axes_iter (list, optional): additional axes to iterate over in the dataset.
+        file_paths (list): List of file paths.
+        file_shapes (list): List of file shapes.
+        n_frames (int): Number of frames to load from each hdf5 file.
+        frame_index_stride (int): Interval between frames to load.
+        key (str, optional): Key of hdf5 dataset to grab data from. Defaults to "data/image".
+        initial_frame_axis (int, optional): Axis to iterate over. Defaults to 0.
+        additional_axes_iter (list, optional): Additional axes to iterate over in the dataset.
             Defaults to None.
-        sort_files (bool, optional): sort files by number. Defaults to True.
-        overlapping_blocks (bool, optional): will take n_frames from sequence, then move by 1.
+        sort_files (bool, optional): Sort files by number. Defaults to True.
+        overlapping_blocks (bool, optional): Will take n_frames from sequence, then move by 1.
             Defaults to False.
-        limit_n_frames (int, optional): limit the number of frames to load from each file. This
+        limit_n_frames (int, optional): Limit the number of frames to load from each file. This
             means n_frames per data file will be used. These will be the first frames in the file.
-            Defaults to None
+            Defaults to None.
 
     Returns:
-        list: list of tuples with indices to extract images from hdf5 files.
+        list: List of tuples with indices to extract images from hdf5 files.
             (file_name, key, indices) with indices being a tuple of slices.
-            example: [
-                ('/folder/path_to_file.hdf5', 'data/image', [range(0, 1), slice(None, 256, None), slice(None, 256, None)]), # pylint: disable=line-too-long
-                ('/folder/path_to_file.hdf5', 'data/image', [range(1, 2), slice(None, 256, None), slice(None, 256, None)]), # pylint: disable=line-too-long
+
+    Example:
+        .. code-block:: python
+
+            [
+                (
+                    '/folder/path_to_file.hdf5',
+                    'data/image',
+                    [range(0, 1), slice(None, 256, None), slice(None, 256, None)]
+                ),
+                (
+                    '/folder/path_to_file.hdf5',
+                    'data/image',
+                    [range(1, 2), slice(None, 256, None), slice(None, 256, None)]
+                ),
                 ...
             ]
-
     """
     if not limit_n_frames:
         limit_n_frames = np.inf
