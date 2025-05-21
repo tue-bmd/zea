@@ -1,45 +1,46 @@
+export LC_ALL=C.UTF-8
+export KERAS_BACKEND=numpy
 # Minimal makefile for Sphinx documentation
 #
 
-# You can set these variables from the command line, and also
-# from the environment for the first two.
 SPHINXOPTS    ?=
 SPHINXBUILD   ?= sphinx-build
-# The docs folder where source .rst files are located
+SPHINXAUTOBUILD ?= sphinx-autobuild
 SOURCEDIR     = source
-# The folder where the generated documentation will be placed
 BUILDDIR      = _build
+REMOVE_LIST   = ["usbmd.ops_dep.rst", "modules.rst"]
 
-# Put it first so that "make" without argument is like "make help".
+.PHONY: help Makefile docs-clean docs-build docs-serve docs-parameters
+
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: help Makefile docs-clean docs-build docs-serve
-
-# Catch-all target: route all unknown targets to Sphinx using the new
-# "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
 %: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-# Custom commands
+# Generate parameters.rst from PARAMETER_DESCRIPTIONS
+docs-parameters:
+	python $(SOURCEDIR)/parameters_doc.py
 
-# Clean generated rst files (except index.rst) and built html
-# Find all .rst files except index.rst and delete them
-# Remove any generated folder and build files
-docs-clean:
-	find $(SOURCEDIR) -type f -name 'usbmd.*.rst' ! -name 'index.rst' ! -path '*/\.*' -exec rm -f {} \;
-	rm -rf $(SOURCEDIR)/generated
-	rm -rf $(BUILDDIR)
+# Generate autosummary .rst files for API documentation
+# force means that it will overwrite existing files
+# separate means that it will create a separate file for each module
+docs-autosummary:
+	@if [ -f $(SOURCEDIR)/_autosummary/usbmd.rst ]; then cp $(SOURCEDIR)/_autosummary/usbmd.rst $(SOURCEDIR)/_autosummary/usbmd.rst.bak; fi
+	sphinx-apidoc -o $(SOURCEDIR)/_autosummary ../usbmd --force --separate
+	@if [ -f $(SOURCEDIR)/_autosummary/usbmd.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/usbmd.rst.bak $(SOURCEDIR)/_autosummary/usbmd.rst; fi
+	@rm -f $(SOURCEDIR)/_autosummary/usbmd.ops_dep.rst $(SOURCEDIR)/_autosummary/modules.rst
 
-
-# Regenerate .rst files using sphinx-apidoc
-docs-apidoc:
-	sphinx-apidoc -o $(SOURCEDIR) ../usbmd
-
-# Build docs cleanly
-docs-build: docs-clean docs-apidoc
+# Build docs cleanly (parameters.rst and autosummary must be up to date)
+docs-build: docs-parameters docs-autosummary
 	$(SPHINXBUILD) -b html "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
 
-# Serve docs locally
-docs-serve: docs-build
-	cd $(BUILDDIR)/html && python3 -m http.server 8000
+# Serve docs locally with sphinx-autobuild (auto-reloads on changes)
+docs-serve: docs-parameters docs-autosummary
+	@PORT=8000; \
+	while lsof -i :$$PORT >/dev/null 2>&1; do PORT=$$((PORT+1)); done; \
+	echo "Using port $$PORT"; \
+	$(SPHINXAUTOBUILD) --port=$$PORT "$(SOURCEDIR)" "$(BUILDDIR)/html"
+
+docs-test: docs-parameters
+	$(SPHINXBUILD) -b doctest "$(SOURCEDIR)" "$(BUILDDIR)/doctest" $(SPHINXOPTS)

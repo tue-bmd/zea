@@ -1,8 +1,6 @@
 """This module contains functionality for converting between hdf5, mat and
 dictionary.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : October 3th, 2022
 """
 
 import argparse

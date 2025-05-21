@@ -3,8 +3,6 @@ Example script for using the EchoNetDynamic model to generate masks for ultrasou
 
 https://echonet.github.io/dynamic/
 
-- **Author(s)**: Tristan Stevens
-- **Date**: 20/12/2024
 """
 
 import os
@@ -19,8 +17,8 @@ from keras import ops
 
 from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.models.echonet import EchoNetDynamic
-from usbmd.utils import translate
 from usbmd.tools.selection_tool import add_shape_from_mask
+from usbmd.utils import translate
 from usbmd.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
