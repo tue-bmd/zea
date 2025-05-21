@@ -17,6 +17,12 @@
     const auth = getAuth(app);
     const provider = new GithubAuthProvider();
 
+    // Get redirect param from URL
+    function getRedirectParam() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('redirect') || '/';
+    }
+
     document.getElementById('github-login').addEventListener('click', async () => {
       try {
         const result = await signInWithPopup(auth, provider);
@@ -31,7 +37,8 @@
         });
 
         if (response.ok) {
-          window.location.reload(); // Or redirect to your protected area
+          // Redirect to original page after login
+          window.location.href = getRedirectParam();
         } else {
           alert('Failed to establish a session.');
         }
