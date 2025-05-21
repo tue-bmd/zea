@@ -21,14 +21,13 @@ def get_args():
     parser.add_argument(
         "--input_h5",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonetlvh_v2025/train/"
-        "0X1017398D3C3F5FF9.hdf5",
+        required=True,  # e.g. {data_root}/USBMD_datasets/echonetlvh_v2025/train/0X1017398D3C3F5FF9.hdf5
         help="Path to input HDF5 file",
     )
     parser.add_argument(
         "--measurements_csv",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonetlvh_v2025/MeasurementsList.csv",
+        required=True,  # e.g. {data_root}/USBMD_datasets/echonetlvh_v2025/MeasurementsList.csv
         help="Path to measurements CSV file",
     )
     parser.add_argument(

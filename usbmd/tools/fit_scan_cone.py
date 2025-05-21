@@ -17,7 +17,7 @@ from keras import ops
 import cv2
 import numpy as np  # Only needed for OpenCV interface
 import matplotlib.pyplot as plt
-from usbmd import log
+from usbmd import log, set_data_paths
 
 
 def filter_edge_points_by_boundary(
@@ -653,8 +653,9 @@ def main(avi_path):
 
 
 if __name__ == "__main__":
-
+    data_paths = set_data_paths(local=False)
     SAMPLE_INPUT_FILE = Path(
-        "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
+        data_paths.data_root
+        / "USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
     )
     main(SAMPLE_INPUT_FILE)
