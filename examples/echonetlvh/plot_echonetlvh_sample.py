@@ -11,6 +11,7 @@ import pandas as pd
 import h5py
 import matplotlib.pyplot as plt
 import imageio
+from usbmd.utils import save_to_gif, translate
 
 
 def get_args():
@@ -84,34 +85,6 @@ def find_measurements(csv_path, video_id):
         print(f"Warning: No measurements found for {video_basename}")
 
     return measurements
-
-
-def save_video_as_gif(frames, output_path, fps=10):
-    """
-    Save video frames as GIF.
-
-    Args:
-        frames: Numpy array of video frames
-        output_path: Path to save the GIF
-        fps: Frames per second
-    """
-    # Create output directory if not exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    # Normalize frames for better visualization
-    normalized_frames = []
-    for frame in frames:
-        # Adjust normalization based on your data range
-        vmin, vmax = np.percentile(frame, (1, 99))
-        normalized = np.clip((frame - vmin) / (vmax - vmin + 1e-6), 0, 1)
-        normalized_frames.append(normalized)
-
-    # Convert to uint8 for GIF
-    uint8_frames = [np.uint8(frame * 255) for frame in normalized_frames]
-
-    # Save as GIF
-    imageio.mimsave(output_path, uint8_frames, fps=fps)
-    print(f"GIF saved to {output_path}")
 
 
 def create_measurement_overlays(frames, measurements, output_dir):
@@ -244,7 +217,8 @@ def main():
 
         # Save as GIF
         gif_path = os.path.join(args.output_dir, f"{Path(args.input_h5).stem}.gif")
-        save_video_as_gif(frames, gif_path, fps=args.fps)
+        frames_as_img = translate(frames, (-60, 0), (0, 255)).astype(np.uint8)
+        save_to_gif(frames_as_img, gif_path, fps=args.fps)
 
         # Find measurements
         print(f"Looking for measurements in {args.measurements_csv}")
