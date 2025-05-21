@@ -23,6 +23,7 @@ Currently usbmd offers:
    getting-started
    installation
    examples
+   updog
 
 .. toctree::
    :caption: Development
