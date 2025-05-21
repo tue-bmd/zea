@@ -31,9 +31,10 @@ from tqdm import tqdm
 
 # USBMD imports
 from usbmd.data.convert.echonet import H5Processor
-from usbmd.utils.io_lib import load_video
-from usbmd.utils.utils import translate
+from usbmd.io_lib import load_video
+from usbmd.utils import translate
 from usbmd.data import generate_usbmd_dataset
+from usbmd.display import cartesian_to_polar_matrix
 
 
 def get_args():
@@ -44,11 +45,7 @@ def get_args():
         type=str,
         default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh",
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonetlvh_v2025",
-    )
+    parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--output_numpy", type=str, default=None)
     parser.add_argument("--file_list", type=str, help="Optional path to list of files")
     parser.add_argument(
@@ -209,86 +206,78 @@ def crop_sequence_with_params(sequence, cone_params):
     return crop_sequence(sequence)
 
 
-def rotate_coordinates(coords, angle_deg):
-    """Rotate (x, y) coordinates by a given angle in degrees."""
-    angle_rad = jnp.deg2rad(angle_deg)
-    rotation_matrix = jnp.array(
-        [
-            [jnp.cos(angle_rad), -jnp.sin(angle_rad)],
-            [jnp.sin(angle_rad), jnp.cos(angle_rad)],
-        ]
-    )
-    return coords @ rotation_matrix.T
+# def rotate_coordinates(coords, angle_deg):
+#     """Rotate (x, y) coordinates by a given angle in degrees."""
+#     angle_rad = jnp.deg2rad(angle_deg)
+#     rotation_matrix = jnp.array(
+#         [
+#             [jnp.cos(angle_rad), -jnp.sin(angle_rad)],
+#             [jnp.sin(angle_rad), jnp.cos(angle_rad)],
+#         ]
+#     )
+#     return coords @ rotation_matrix.T
 
 
-def cartesian_to_polar_matrix_jax(
-    cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="linear"
-):
-    """
-    Convert cartesian coordinates to polar coordinates using JAX.
+# def cartesian_to_polar_matrix_jax(
+#     cartesian_matrix,
+#     tip=None,
+#     r_max=None,
+#     angle=jnp.deg2rad(42),
+#     interpolation="linear",
+# ):
+#     """
+#     Convert cartesian coordinates to polar coordinates using JAX.
 
-    Args:
-        cartesian_matrix: Input image matrix
-        tip: Tuple of (x, y) coordinates for the tip
-        r_max: Maximum radius for polar conversion
-        angle: Angle range for polar conversion
-        interpolation: Interpolation method ('linear' or 'nearest')
+#     Args:
+#         cartesian_matrix: Input image matrix
+#         tip: Tuple of (x, y) coordinates for the tip
+#         r_max: Maximum radius for polar conversion
+#         angle: Angle range for polar conversion
+#         interpolation: Interpolation method ('linear' or 'nearest')
 
-    Returns:
-        Polar coordinate matrix
-    """
-    rows, cols = cartesian_matrix.shape
-    center_x, center_y = tip
+#     Returns:
+#         Polar coordinate matrix
+#     """
+#     rows, cols = cartesian_matrix.shape
+#     if tip is None:
+#         # assume tip is at center top
+#         center_x = cols // 2
+#         tip_y = 0
+#         tip = (center_x, tip_y)
 
-    # Interpolation grid in polar coordinates
-    r = jnp.linspace(0, r_max, rows)
-    theta = jnp.linspace(-angle, angle, cols)
-    r_grid, theta_grid = jnp.meshgrid(r, theta)
+#     if r_max is None:
+#         r_max = rows
 
-    x_polar = r_grid * jnp.cos(theta_grid)
-    y_polar = r_grid * jnp.sin(theta_grid)
+#     center_x, center_y = tip
 
-    # Inverse rotation to match original orientation
-    polar_coords = jnp.stack([x_polar.ravel(), y_polar.ravel()], axis=0)
-    polar_coords_rotated = rotate_coordinates(polar_coords.T, 90).T
+#     # Interpolation grid in polar coordinates
+#     r = jnp.linspace(0, r_max, rows)
+#     theta = jnp.linspace(-angle, angle, cols)
+#     r_grid, theta_grid = jnp.meshgrid(r, theta)
 
-    # Shift to image indices
-    yq = polar_coords_rotated[1, :] + center_y
-    xq = polar_coords_rotated[0, :] + center_x
-    coords_for_interp = jnp.stack([yq, xq])
+#     x_polar = r_grid * jnp.cos(theta_grid)
+#     y_polar = r_grid * jnp.sin(theta_grid)
 
-    order = 0 if interpolation == "nearest" else 1
-    polar_values = map_coordinates(
-        cartesian_matrix,
-        coords_for_interp,
-        order=order,
-        mode="constant",
-        cval=0.0,
-    )
+#     # Inverse rotation to match original orientation
+#     polar_coords = jnp.stack([x_polar.ravel(), y_polar.ravel()], axis=0)
+#     polar_coords_rotated = rotate_coordinates(polar_coords.T, 90).T
 
-    polar_matrix = jnp.rot90(polar_values.reshape(cols, rows), k=-1)
-    return polar_matrix
+#     # Shift to image indices
+#     yq = polar_coords_rotated[1, :] + center_y
+#     xq = polar_coords_rotated[0, :] + center_x
+#     coords_for_interp = jnp.stack([yq, xq])
 
+#     order = 0 if interpolation == "nearest" else 1
+#     polar_values = map_coordinates(
+#         cartesian_matrix,
+#         coords_for_interp,
+#         order=order,
+#         mode="constant",
+#         cval=0.0,
+#     )
 
-def adaptive_cartesian_to_polar(cartesian_matrix, angle=jnp.deg2rad(42)):
-    """Converts cartesian image to polar coordinates adaptively using JAX.
-
-    Args:
-        cartesian_matrix (ndarray): Input image with shape (H, W)
-    """
-    H, W = cartesian_matrix.shape
-    # assume tip is at center top
-    center_x = W // 2
-    tip_y = 0
-
-    # Use JAX-based polar conversion with adapted parameters
-    polar_jax = cartesian_to_polar_matrix_jax(
-        cartesian_matrix,
-        tip=(center_x, tip_y),
-        r_max=H,
-        angle=angle,
-    )
-    return polar_jax  # Convert back to numpy for downstream compatibility
+#     polar_matrix = jnp.rot90(polar_values.reshape(cols, rows), k=-1)
+#     return polar_matrix
 
 
 class LVHProcessor(H5Processor):
@@ -296,7 +285,8 @@ class LVHProcessor(H5Processor):
 
     def __init__(self, *args, cone_params=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.cart2pol_jit = jit(adaptive_cartesian_to_polar)
+        # self.cart2pol_jit = jit(cartesian_to_polar_matrix_jax)
+        self.cart2pol_jit = jit(cartesian_to_polar_matrix)
         self.cart2pol_batched = vmap(self.cart2pol_jit)
         # Store the pre-computed cone parameters
         self.cone_parameters = cone_params or {}
@@ -497,9 +487,7 @@ if __name__ == "__main__":
     cone_params_csv = Path(args.output) / "cone_parameters.csv"
     if not cone_params_csv.exists():
         print(f"Error: Cone parameters not found at {cone_params_csv}")
-        print(
-            "Please run precompute_echonetlvh_crop.py first to generate the parameters."
-        )
+        print("Please run precompute_crop.py first to generate the parameters.")
         sys.exit(1)
 
     # If no specific conversion is requested, convert both
