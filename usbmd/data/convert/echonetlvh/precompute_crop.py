@@ -26,12 +26,12 @@ def get_args():
     parser.add_argument(
         "--source",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/echonetlvh",
+        required=True,  # e.g. {data_root}/USBMD_datasets/_RAW/echonetlvh",
     )
     parser.add_argument(
         "--output",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/echonetlvh_v2025",
+        required=True,  # e.g. {data_root}/USBMD_datasets/echonetlvh/",
     )
     parser.add_argument(
         "--batch",
