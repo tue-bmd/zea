@@ -10,6 +10,8 @@ mock
 
 # for using md
 myst-parser
+# for using notebooks
+nbsphinx
 
 # theme: https://github.com/pradyunsg/furo
 furo

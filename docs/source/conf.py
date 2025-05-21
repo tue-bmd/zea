@@ -24,9 +24,8 @@ extensions = [
     "sphinx.ext.intersphinx",  # for cross-project links
     "myst_parser",  # for markdown support
     "sphinx.ext.doctest",  # for testing code snippets in the documentation
+    "nbsphinx",  # for Jupyter notebook support
 ]
-
-# autosummary_generate = ["_autosummary"]
 
 autodoc_default_options = {
     "members": True,
