@@ -1,8 +1,4 @@
-"""Generative models for usbmd.
-
-- **Author(s)**: Tristan Stevens
-- **Date**: 24/01/2025
-"""
+"""Generative models for usbmd."""
 
 import abc
 

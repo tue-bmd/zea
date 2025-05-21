@@ -17,8 +17,6 @@
 > `USBMD_CACHE_DIR` to a custom directory or `USBMD_DISABLE_CACHE` to `1` or `true`.
 > Otherwise, the cache will be stored in `~/.usbmd_cache` by default, which can pile up over time.
 
-- **Author(s)**     : Tristan Stevens, Wessel van Nierop
-- **Date**          : October 11th, 2024
 """
 
 import ast

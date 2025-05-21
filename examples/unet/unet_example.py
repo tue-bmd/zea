@@ -1,9 +1,4 @@
-"""
-Example script for using a UNet model to inpaint ultrasound images (EchoNet dataset).
-
-- **Author(s)**: Tristan Stevens
-- **Date**: 23/01/2025
-"""
+"""Example script for using a UNet model to inpaint ultrasound images (EchoNet dataset)."""
 
 import os
 

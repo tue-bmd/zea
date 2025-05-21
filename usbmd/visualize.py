@@ -1,8 +1,4 @@
-"""Module with visualization functions for 2D and 3D ultrasound data.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 5/11/2024
-"""
+"""Visualization functions for 2D and 3D ultrasound data."""
 
 import importlib.resources
 from typing import List, Optional, Tuple, Union
