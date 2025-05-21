@@ -1,10 +1,4 @@
-"""Display functionality for USBMD.
-
-All functionality related to displaying ultrasound images.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 02/11/2023
-"""
+"""Display functionality."""
 
 from functools import partial
 from typing import Tuple, Union

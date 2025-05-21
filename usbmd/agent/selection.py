@@ -1,6 +1,4 @@
-"""
-Module for action selection strategies.
-"""
+"""Action selection strategies."""
 
 import keras
 from keras import ops
@@ -11,12 +9,11 @@ from usbmd.internal.registry import action_selection_registry
 
 
 class MaskActionModel:
-    """
-    Base class for any action selection method that does masking.
-    """
+    """Base class for any action selection method that does masking."""
 
     def apply(self, action, observation):
-        """
+        """Apply the action to the observation.
+
         Args:
             action (Tensor): The mask to be applied.
             observation (Tensor): The observation to which the action is applied.
@@ -33,7 +30,8 @@ class LinesActionModel(MaskActionModel):
     def __init__(
         self, n_actions: int, n_possible_actions: int, img_width: int, img_height: int
     ):
-        """
+        """Initialize the LinesActionModel.
+
         Args:
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
@@ -59,7 +57,8 @@ class LinesActionModel(MaskActionModel):
 
 @action_selection_registry(name="greedy_entropy")
 class GreedyEntropy(LinesActionModel):
-    """
+    """Greedy entropy action selection.
+
     Selects the max entropy line and reweights the entropy values around it,
     approximating the decrease in entropy that would occur from observing that line.
 
@@ -76,7 +75,8 @@ class GreedyEntropy(LinesActionModel):
         std_dev: float = 1,
         num_lines_to_update: int = 5,
     ):
-        """
+        """Initialize the GreedyEntropy action selection model.
+
         Args:
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
@@ -112,7 +112,8 @@ class GreedyEntropy(LinesActionModel):
     def compute_pairwise_pixel_gaussian_error(
         particles, stack_n_cols=1, n_possible_actions=None, entropy_sigma=1
     ):
-        """
+        """Compute the pairwise pixelwise Gaussian error.
+
         This function computes the Gaussian error between each pair of pixels in the
         set of particles provided. This can be used to approximate the entropy of
         a Gaussian mixture model, where the particles are the means of the Gaussians.
@@ -158,7 +159,8 @@ class GreedyEntropy(LinesActionModel):
         return gaussian_error_per_pixel_stacked
 
     def compute_gmm_entropy_per_line(self, particles):
-        """
+        """Compute the entropy for each line using a Gaussian Mixture Model.
+
         This function computes the entropy for each line using a Gaussian Mixture Model
         approximation of the posterior distribution.
         For more details see Section 4 here: https://arxiv.org/abs/2406.14388
@@ -187,7 +189,8 @@ class GreedyEntropy(LinesActionModel):
         return entropy_per_line
 
     def select_line_and_reweight_entropy(self, entropy_per_line):
-        """
+        """Select the line with maximum entropy and reweight the entropies.
+
         Selected the max entropy line and reweights the entropy values around it,
         approximating the decrease in entropy that would occur from observing that line.
 
@@ -233,7 +236,8 @@ class GreedyEntropy(LinesActionModel):
         return max_entropy_line, updated_entropy_per_line
 
     def sample(self, particles):
-        """
+        """Sample the action using the greedy entropy method.
+
         Args:
             particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
 
@@ -265,7 +269,8 @@ class GreedyEntropy(LinesActionModel):
 
 @action_selection_registry(name="uniform_random")
 class UniformRandomLines(LinesActionModel):
-    """
+    """Uniform random lines action selection.
+
     Creates masks with uniformly randomly sampled lines.
     """
 
@@ -277,7 +282,8 @@ class UniformRandomLines(LinesActionModel):
         img_height: int,
         batch_size: int = 1,
     ):
-        """
+        """Initialize the UniformRandomLines action selection model.
+
         Args:
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
@@ -292,7 +298,8 @@ class UniformRandomLines(LinesActionModel):
         self.batch_size = batch_size
 
     def sample(self, seed=None):
-        """
+        """Sample the action using the uniform random method.
+
         Generates or updates an equispaced mask to sweep rightwards by one step across the image.
 
         Args:
@@ -316,7 +323,8 @@ class UniformRandomLines(LinesActionModel):
 
 @action_selection_registry(name="equispaced")
 class EquispacedLines(LinesActionModel):
-    """
+    """Equispaced lines action selection.
+
     Creates masks with equispaced lines that sweep across
     the image.
     """
@@ -345,7 +353,8 @@ class EquispacedLines(LinesActionModel):
         self.batch_size = batch_size
 
     def sample(self):
-        """
+        """Sample the action using the equispaced method.
+
         Generates or updates an equispaced mask to sweep rightwards by one step across the image.
 
         Returns:
@@ -358,7 +367,8 @@ class EquispacedLines(LinesActionModel):
         return masks
 
     def initial_sample_stateless(self):
-        """
+        """Initial sample stateless.
+
         Generates a batch of initial equispaced line masks.
 
         Returns:
@@ -380,7 +390,8 @@ class EquispacedLines(LinesActionModel):
         self,
         current_lines,
     ):
-        """
+        """Sample stateless.
+
         Updates an existing equispaced mask to sweep rightwards by one step across the image.
 
         Args:
@@ -405,7 +416,8 @@ class EquispacedLines(LinesActionModel):
 
 @action_selection_registry(name="covariance")
 class CovarianceSamplingLines(LinesActionModel):
-    """
+    """Covariance sampling action selection.
+
     This class models the line-to-line correlation to select the mask with the highest entropy.
     """
 
@@ -418,7 +430,8 @@ class CovarianceSamplingLines(LinesActionModel):
         seed: int = 42,
         n_masks: int = 200,
     ):
-        """
+        """Initialize the CovarianceSamplingLines action selection model.
+
         Args:
             n_actions (int): The number of actions the agent can take.
             n_possible_actions (int): The number of possible actions.
@@ -445,7 +458,8 @@ class CovarianceSamplingLines(LinesActionModel):
         return ops.reshape(lines, [self.n_masks, batch_size, self.n_possible_actions])
 
     def sample(self, particles, seed=None):
-        """
+        """Sample the action using the covariance sampling method.
+
         Args:
             particles (Tensor): Particles of shape (n_particles, batch_size, h, w)
             seed (int | SeedGenerator | jax.random.key, optional): Seed for random number
@@ -486,9 +500,7 @@ class CovarianceSamplingLines(LinesActionModel):
 
         # Subsample the covariance matrix with random lines
         def subsample_with_mask(mask):
-            """
-            Subsample the covariance matrix with a single mask
-            """
+            """Subsample the covariance matrix with a single mask."""
             subsampled_cov_matrix = tensor_ops.boolean_mask(
                 cov_matrix, mask, size=batch_size * self.n_actions**2
             )
