@@ -1,13 +1,16 @@
-"""Generate ultrasound dataset from any data type to another and save to disk.
+"""
+Generate ultrasound dataset and save to disk.
 
-Supports both saving to png and hdf5. saving to png is only supported for image data.
+Supports both saving to PNG and HDF5. Saving to PNG is only supported for image data.
 
-Example:
-    Run from command line to generate PICMUS dataset:
-    >>> usbmd -c configs/config_picmus_rf.yaml -t generate
+Example
+-------
+Run from command line to generate PICMUS dataset:
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : November 18th, 2021
+.. code-block:: bash
+
+    usbmd -c configs/config_picmus_rf.yaml -t generate
+
 """
 
 from pathlib import Path
@@ -16,16 +19,16 @@ from typing import Union
 import numpy as np
 import tqdm
 
+from usbmd import log
 from usbmd.config import Config
 from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.data.datasets import Dataset
 from usbmd.data.file import File
 from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
-from usbmd import log
+from usbmd.internal.checks import _DATA_TYPES
 from usbmd.ops import Pipeline
 from usbmd.utils import get_function_args
-from usbmd.internal.checks import _DATA_TYPES
 
 
 class GenerateDataSet:

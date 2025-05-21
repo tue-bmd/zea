@@ -1,8 +1,4 @@
-"""Set custom, user specific data paths in this file.
-
-- **Author(s)**     : Tristan Stevens, Frits de Bruijn
-- **Date**          : -
-"""
+"""Utility functions for handling data paths."""
 
 import copy
 import getpass
@@ -17,8 +13,8 @@ from typing import Union
 
 import yaml
 
-from usbmd.config import Config
 from usbmd import log
+from usbmd.config import Config
 from usbmd.utils import strtobool
 
 DEFAULT_DATA_ROOT = {

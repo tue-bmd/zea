@@ -1,8 +1,6 @@
 """
 Example script for using the LPIPS model to compute perceptual similarity between images.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 20/01/2025
 """
 
 import os

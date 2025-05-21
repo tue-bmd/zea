@@ -3,8 +3,6 @@
 Run as `usbmd --config path/to/config.yaml` to start the USBMD GUI.
 Or do not pass a config file to open a file dialog to choose a config file.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : November 18th, 2021
 """
 
 # pylint: disable=import-outside-toplevel

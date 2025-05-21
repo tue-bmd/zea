@@ -1,16 +1,13 @@
-"""Dense models and architectures
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 23/04/2025
-"""
+"""Dense models and architectures"""
 
 import keras
 from keras import layers
 
+from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
 from usbmd.models.layers import sinusoidal_embedding
 from usbmd.models.preset_utils import register_presets
 from usbmd.models.presets import dense_presets
-from usbmd.internal.registry import model_registry
 
 
 @model_registry(name="dense")
