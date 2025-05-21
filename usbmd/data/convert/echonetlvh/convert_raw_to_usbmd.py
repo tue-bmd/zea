@@ -1,7 +1,13 @@
 # pylint: disable=ungrouped-imports
 """
 Script to convert the EchoNet-LVH database to USBMD format.
-Will segment the images and convert them to polar coordinates.
+
+Each video is cropped so that the scan cone is centered
+without padding, such that it can be converted to polar domain.
+
+This cropping requires first computing scan cone parameters
+using `data/convert/echonetlvh/precompute_crop.py`, which
+are then passed to this script.
 """
 
 import os
@@ -26,7 +32,6 @@ import numpy as np
 import pandas as pd
 import jax.numpy as jnp
 from jax import jit, vmap
-from jax.scipy.ndimage import map_coordinates
 from tqdm import tqdm
 
 # USBMD imports
@@ -204,80 +209,6 @@ def crop_sequence_with_params(sequence, cone_params):
     """
     crop_sequence = vmap(lambda frame: crop_frame_with_params(frame, cone_params))
     return crop_sequence(sequence)
-
-
-# def rotate_coordinates(coords, angle_deg):
-#     """Rotate (x, y) coordinates by a given angle in degrees."""
-#     angle_rad = jnp.deg2rad(angle_deg)
-#     rotation_matrix = jnp.array(
-#         [
-#             [jnp.cos(angle_rad), -jnp.sin(angle_rad)],
-#             [jnp.sin(angle_rad), jnp.cos(angle_rad)],
-#         ]
-#     )
-#     return coords @ rotation_matrix.T
-
-
-# def cartesian_to_polar_matrix_jax(
-#     cartesian_matrix,
-#     tip=None,
-#     r_max=None,
-#     angle=jnp.deg2rad(42),
-#     interpolation="linear",
-# ):
-#     """
-#     Convert cartesian coordinates to polar coordinates using JAX.
-
-#     Args:
-#         cartesian_matrix: Input image matrix
-#         tip: Tuple of (x, y) coordinates for the tip
-#         r_max: Maximum radius for polar conversion
-#         angle: Angle range for polar conversion
-#         interpolation: Interpolation method ('linear' or 'nearest')
-
-#     Returns:
-#         Polar coordinate matrix
-#     """
-#     rows, cols = cartesian_matrix.shape
-#     if tip is None:
-#         # assume tip is at center top
-#         center_x = cols // 2
-#         tip_y = 0
-#         tip = (center_x, tip_y)
-
-#     if r_max is None:
-#         r_max = rows
-
-#     center_x, center_y = tip
-
-#     # Interpolation grid in polar coordinates
-#     r = jnp.linspace(0, r_max, rows)
-#     theta = jnp.linspace(-angle, angle, cols)
-#     r_grid, theta_grid = jnp.meshgrid(r, theta)
-
-#     x_polar = r_grid * jnp.cos(theta_grid)
-#     y_polar = r_grid * jnp.sin(theta_grid)
-
-#     # Inverse rotation to match original orientation
-#     polar_coords = jnp.stack([x_polar.ravel(), y_polar.ravel()], axis=0)
-#     polar_coords_rotated = rotate_coordinates(polar_coords.T, 90).T
-
-#     # Shift to image indices
-#     yq = polar_coords_rotated[1, :] + center_y
-#     xq = polar_coords_rotated[0, :] + center_x
-#     coords_for_interp = jnp.stack([yq, xq])
-
-#     order = 0 if interpolation == "nearest" else 1
-#     polar_values = map_coordinates(
-#         cartesian_matrix,
-#         coords_for_interp,
-#         order=order,
-#         mode="constant",
-#         cval=0.0,
-#     )
-
-#     polar_matrix = jnp.rot90(polar_values.reshape(cols, rows), k=-1)
-#     return polar_matrix
 
 
 class LVHProcessor(H5Processor):
