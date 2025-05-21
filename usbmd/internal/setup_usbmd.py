@@ -5,9 +5,6 @@ used together for ease of use.
 setup_config: Setup function for config. Retrieves config file and checks for validity.
 setup: General setup function for usbmd. Runs setup_config, sets data paths and
     initializes gpu if available.
-
-Author(s): Tristan Stevens
-Date: 25/09/2023
 """
 
 import copy
@@ -19,10 +16,10 @@ from typing import Union
 import keras
 import yaml
 
+from usbmd import log
 from usbmd.config import load_config_from_yaml
 from usbmd.config.validation import check_config
 from usbmd.datapaths import create_new_user, set_data_paths
-from usbmd import log
 from usbmd.internal.device import init_device
 from usbmd.internal.git_info import get_git_summary
 from usbmd.internal.viewer import filename_from_window_dialog
