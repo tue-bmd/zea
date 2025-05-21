@@ -1,0 +1,54 @@
+name: Build & Deploy Sphinx Docs to Firebase
+
+on:
+  push:
+    branches:
+      - main   # or your deploy branch
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - name: Pull full Docker image
+        run: |
+          docker pull usbmd/all:latest
+
+      - name: Build documentation with Sphinx (fail on warnings)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/ultrasound-toolbox" \
+            -w /ultrasound-toolbox/docs \
+            -u $(id -u):$(id -g) \
+            -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
+            usbmd/all:latest \
+            sh -c "\
+              pip install -e .. && \
+              pip install -r docs-requirements.txt && \
+              export PATH=\"/tmp/.local/bin:\$PATH\" && \
+              make docs-build SPHINXOPTS='-W --keep-going' \
+            "
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy to Firebase Hosting & Functions
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          cd docs
+          firebase deploy --only hosting,functions --token "$FIREBASE_TOKEN"
