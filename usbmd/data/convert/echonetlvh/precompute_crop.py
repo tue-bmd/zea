@@ -15,7 +15,7 @@ from tqdm import tqdm
 # Set Keras backend to numpy for best CPU performance
 os.environ["KERAS_BACKEND"] = "numpy"
 
-from usbmd.utils.fit_scan_cone import fit_scan_cone
+from usbmd.tools.fit_scan_cone import fit_scan_cone
 
 
 def get_args():

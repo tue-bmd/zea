@@ -260,8 +260,8 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     )  # this is the coordinate on the unpadded image
 
     # Calculate crop boundaries (can be negative)
-    padding_x = 5
-    padding_y = 5
+    padding_x = 0
+    padding_y = 0
 
     crop_left = int(left_x_bottom) - padding_x
     crop_right = int(right_x_bottom) + padding_x
@@ -395,7 +395,7 @@ def crop_and_center_cone(image, cone_params):
     return cropped
 
 
-def fit_scan_cone(
+def fit_and_crop_around_scan_cone(
     image_tensor, min_cone_half_angle_deg=20, threshold=15, return_params=False
 ):
     """
@@ -613,6 +613,9 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
         dpi=300,
         bbox_inches="tight",
         pad_inches=0.5,
+    )
+    log.info(
+        f"Saved cone visualization to {log.yellow(output_path / 'scan_cone_visualization.png')}"
     )
     plt.close()
 

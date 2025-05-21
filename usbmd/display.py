@@ -16,6 +16,8 @@ from PIL import Image
 from skimage.transform import resize
 
 from usbmd.utils import find_first_nonzero_index, translate
+from usbmd.tools.fit_scan_cone import fit_and_crop_around_scan_cone
+from usbmd import log
 
 
 def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True):
@@ -411,107 +413,118 @@ def cart2pol(x, y):
     return (theta, rho)
 
 
-def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
+def rotate_coordinates(coords, angle_deg):
+    """Rotate (x, y) coordinates by a given angle in degrees."""
+    angle_rad = np.deg2rad(angle_deg)
+    rotation_matrix = ops.array(
+        [
+            [ops.cos(angle_rad), -ops.sin(angle_rad)],
+            [ops.sin(angle_rad), ops.cos(angle_rad)],
+        ]
+    )
+    return coords @ rotation_matrix.T
+
+
+def cartesian_to_polar_matrix(
+    cartesian_matrix,
+    fill_value=0.0,
+    polar_shape=None,
+    tip=None,
+    r_max=None,
+    angle=np.deg2rad(45),
+    interpolation_order=1,
+):
     """
-    Transform a scan converted input image (cone) into square
-        using radial stretching and downsampling. Note that it assumes the background to be zero!
-        Please verify if your results make sense, especially if the image contains black parts
-        at the edges. This function is not perfect by any means, but it works for most cases.
+    Convert cartesian coordinates to polar coordinates using JAX.
 
     Args:
-        image (numpy.ndarray): Input image as a 2D numpy array (height, width).
-        output_size (tuple, optional): Output size of the image as a tuple.
-            Defaults to image_sc.shape.
-        fit_outline (bool, optional): Whether to fit a polynomial the outline of the image.
-            Defaults to True. If this is set to False, and the ultrasound image contains
-            some black parts at the edges, weird artifacts can occur, because the jagged outline
-            is stretched to the desired width.
+        cartesian_matrix: Input image matrix
+        tip: Tuple of (x, y) coordinates for the tip
+        r_max: Maximum radius for polar conversion
+        angle: Angle range for polar conversion
+        interpolation: Interpolation method ('linear' or 'nearest')
 
     Returns:
-        numpy.ndarray: Squared image as a 2D numpy array (height, width).
+        Polar coordinate matrix
     """
-    assert len(image_sc.shape) == 2, "function only allows for 2D data"
-
-    # Default output size is the input size
-    if output_size is None:
-        output_size = image_sc.shape
-
-    # Initialize an empty target array for polar_image
-    polar_image = np.zeros_like(image_sc)
-
-    # Flip along the x axis (such that curve of image_sc is pointing up)
-    flipped_image = np.flip(image_sc, axis=0)
-
-    # Find index of first non zero element along y axis (for every vertical line)
-    non_zeros_flipped = find_first_nonzero_index(flipped_image, 0)
-
-    # Remove any black vertical lines (columns) that do not contain image data
-    remove_vertical_lines = np.where(non_zeros_flipped == -1)[0]
-    polar_image = np.delete(polar_image, remove_vertical_lines, axis=1)
-    non_zeros_flipped = np.delete(non_zeros_flipped, remove_vertical_lines)
-
-    if fit_outline:
-        model_fitted_bottom = np.poly1d(
-            np.polyfit(range(len(non_zeros_flipped)), non_zeros_flipped, 4)
+    if ops.dtype(cartesian_matrix) != "float32":
+        log.info(
+            f"Cartesian matrix with dtype {ops.dtype(cartesian_matrix)} has been cast to float32."
         )
-        non_zeros_flipped = model_fitted_bottom(range(len(non_zeros_flipped)))
-        non_zeros_flipped = non_zeros_flipped.round().astype(np.int64)
-        non_zeros_flipped = np.clip(non_zeros_flipped, 0, None)
+        cartesian_matrix = ops.cast(cartesian_matrix, "float32")
 
-    non_zeros = polar_image.shape[0] - non_zeros_flipped
+    # Assume that polar grid is same shape as cartesian grid unless specified
+    cartesian_rows, cartesian_cols = ops.shape(cartesian_matrix)
+    if polar_shape is None:
+        polar_rows, polar_cols = cartesian_rows, cartesian_cols
+    else:
+        polar_rows, polar_cols = polar_shape
 
-    # Find the middle of the width of the image
-    width = polar_image.shape[1]
-    width_middle = round(width / 2)
+    # assume tip is at center top unless specified
+    if tip is None:
+        center_x = cartesian_cols // 2
+        tip_y = 0
+        tip = (center_x, tip_y)
 
-    # For every vertical line in the image
-    for x_i in range(width):
-        # Move the flipped first non-zero element to the bottom of the image
-        polar_image[non_zeros_flipped[x_i] :, x_i] = image_sc[: non_zeros[x_i], x_i]
+    # assume r_max is the total height of the input image unless specified
+    if r_max is None:
+        r_max = cartesian_rows
 
-    # Find indices of first and last non-zero element along x axis (for every horizontal line)
-    non_zeros_left = find_first_nonzero_index(polar_image, 1)
-    non_zeros_right = width - find_first_nonzero_index(
-        np.flip(polar_image, 1), 1, width_middle
+    center_x, center_y = tip
+
+    # Interpolation grid in polar coordinates
+    r = ops.linspace(0, r_max, polar_rows, dtype="float32")
+    theta = ops.linspace(-angle, angle, polar_cols, dtype="float32")
+    r_grid, theta_grid = ops.meshgrid(r, theta)
+
+    # convert discretized radii and angle intervals to polar coordinates
+    x_polar = r_grid * ops.cos(theta_grid)
+    y_polar = r_grid * ops.sin(theta_grid)
+
+    # Inverse rotation to match original orientation
+    polar_coords = ops.stack([ops.ravel(x_polar), ops.ravel(y_polar)], axis=0)
+    polar_coords_rotated = ops.transpose(
+        rotate_coordinates(ops.transpose(polar_coords), 90)
     )
 
-    # Remove any black horizontal lines (rows) that do not contain image data
-    remove_horizontal_lines = np.max(np.where(non_zeros_left == -1)) + 1
-    polar_image = polar_image[remove_horizontal_lines:, :]
-    non_zeros_left = non_zeros_left[remove_horizontal_lines:]
-    non_zeros_right = non_zeros_right[remove_horizontal_lines:]
+    # Shift to image indices
+    yq = polar_coords_rotated[1, :] + center_y
+    xq = polar_coords_rotated[0, :] + center_x
+    coords_for_interp = ops.stack([yq, xq])
 
-    if fit_outline:
-        model_fitted_left = np.poly1d(
-            np.polyfit(range(len(non_zeros_left)), non_zeros_left, 2)
-        )
-        non_zeros_left = model_fitted_left(range(len(non_zeros_left)))
-        non_zeros_left = non_zeros_left.round().astype(np.int64)
+    polar_values = map_coordinates(
+        cartesian_matrix,
+        coords_for_interp,
+        order=interpolation_order,
+        fill_mode="constant",
+        fill_value=fill_value,
+    )
 
-        model_fitted_right = np.poly1d(
-            np.polyfit(range(len(non_zeros_right)), non_zeros_right, 2)
-        )
-        non_zeros_right = model_fitted_right(range(len(non_zeros_right)))
-        non_zeros_right = non_zeros_right.round().astype(np.int64)
+    polar_matrix = ops.rot90(ops.reshape(polar_values, (polar_cols, polar_rows)), k=-1)
+    return polar_matrix
 
-    # For every horizontal line in the image
-    for y_i in range(polar_image.shape[0]):
-        small_array = polar_image[y_i, non_zeros_left[y_i] : non_zeros_right[y_i]]
 
-        if len(small_array) <= 1:
-            # If the array is too small for interpolation, set it to the middle value.
-            polar_image[y_i, :] = polar_image[y_i, width_middle]
-        else:
-            # Perform linear interpolation to stretch the line to the desired width.
-            array_interp = scipy.interpolate.interp1d(
-                np.arange(small_array.size), small_array
-            )
-            polar_image[y_i, :] = array_interp(
-                np.linspace(0, small_array.size - 1, width)
-            )
-
-    # Resize image to output_size
-    return resize(polar_image, output_size, preserve_range=True)
+def inverse_scan_convert_2d(
+    cartesian_image,
+    fill_value=0.0,
+    angle=np.deg2rad(45),
+    output_size=None,
+    interpolation_order=1,
+    find_scan_cone=True,
+):
+    """
+    find_scan_cone can be False if the cartesian image is already cropped and centered.
+    """
+    if find_scan_cone:
+        cartesian_image = fit_and_crop_around_scan_cone(cartesian_image)
+    polar_image = cartesian_to_polar_matrix(
+        cartesian_image,
+        fill_value=fill_value,
+        angle=angle,
+        polar_shape=output_size,
+        interpolation_order=interpolation_order,
+    )
+    return polar_image
 
 
 def frustum_convert_rtp2xyz(rho, theta, phi):
