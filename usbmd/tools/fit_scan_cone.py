@@ -1,7 +1,19 @@
 """
-Identifies the scan cone of an image and crops it such that the apex of the cone
-is at the top center of the image. In this form, it can be scan converted to
-polar coordinates.
+Identifies the scan cone of an ultrasound image and crops it such that the apex of the cone
+is at the top center of the image. In this form, it can be scan converted to polar coordinates.
+
+This module provides functionality to:
+1. Detect the scan cone boundaries in ultrasound images
+2. Fit lines to the cone edges
+3. Calculate cone parameters (apex position, opening angle, etc.)
+4. Crop and center the image around the cone
+5. Visualize the detected cone and its parameters
+
+Example:
+    >>> import numpy as np
+    >>> from usbmd.tools.fit_scan_cone import fit_and_crop_around_scan_cone
+    >>> image = np.random.rand(512, 512)  # Example ultrasound image
+    >>> cropped_image = fit_and_crop_around_scan_cone(image)
 """
 
 import os
@@ -15,7 +27,7 @@ if __name__ == "__main__":
 import keras
 from keras import ops
 import cv2
-import numpy as np  # Only needed for OpenCV interface
+import numpy as np
 import matplotlib.pyplot as plt
 from usbmd import log
 
@@ -24,8 +36,16 @@ def filter_edge_points_by_boundary(
     edge_points, is_left=True, min_cone_half_angle_deg=20
 ):
     """
-    Filter edge points to keep only those that form the actual boundary.
-    Enforces minimum cone angle constraint.
+    Filter edge points to keep only those that form the actual boundary of the scan cone.
+    Enforces minimum cone angle constraint to ensure valid cone shapes.
+
+    Args:
+        edge_points: Tensor of shape (N, 2) containing (x, y) coordinates of edge points
+        is_left: Boolean indicating whether these are left (True) or right (False) edge points
+        min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees
+
+    Returns:
+        Tensor of shape (M, 2) containing filtered edge points that satisfy the boundary constraints
     """
     if ops.shape(edge_points)[0] == 0:
         return edge_points
@@ -75,13 +95,30 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     """
     Detect the ultrasound cone parameters from a grayscale image.
 
+    This function performs the following steps:
+    1. Thresholds the image to create a binary mask
+    2. Detects left and right edge points of the cone
+    3. Filters edge points to ensure physical constraints
+    4. Fits lines to the cone boundaries
+    5. Calculates cone parameters including apex position, opening angle, and crop boundaries
+
     Args:
         image: 2D Keras tensor (grayscale image)
         min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees
         threshold: Threshold for binary image (pixels above this are considered data)
 
     Returns:
-        Dictionary with cone parameters, or None if detection failed
+        Dictionary containing cone parameters including:
+        - apex_x, apex_y: Coordinates of the cone apex
+        - crop_left, crop_right, crop_top, crop_bottom: Crop boundaries
+        - cone_height: Height of the cone
+        - opening_angle: Opening angle of the cone
+        - symmetry_ratio: Measure of cone symmetry
+        - data_coverage: Fraction of crop region containing data
+        - And other geometric parameters
+
+    Raises:
+        ValueError: If input image is not 2D or cone detection fails
     """
     if len(ops.shape(image)) != 2:
         raise ValueError("Input image must be 2D (grayscale)")
@@ -342,6 +379,18 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 def crop_and_center_cone(image, cone_params):
     """
     Crop the image to the sector bounding box and pad as needed to center the apex.
+
+    This function:
+    1. Crops the image to the detected cone boundaries
+    2. Adds padding if the apex is above the image
+    3. Centers the apex horizontally in the final image
+
+    Args:
+        image: 2D Keras tensor (grayscale image)
+        cone_params: Dictionary of cone parameters from detect_cone_parameters()
+
+    Returns:
+        Keras tensor of the cropped and centered image with the cone apex at the top center
     """
     # Get crop boundaries
     crop_left = cone_params["crop_left"]
@@ -452,8 +501,10 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
 
     Args:
         image: Original grayscale image
-        cone_params: Dictionary of cone parameters
-        output_dir: Directory to save output plots
+        cone_params: Dictionary of cone parameters from detect_cone_parameters()
+        output_dir: Directory to save output plots (default: "output")
+
+    The visualization is saved as 'scan_cone_visualization.png' in the output directory.
     """
     # Create output directory
     output_path = Path(output_dir)
@@ -640,7 +691,7 @@ def main(avi_path):
 
     try:
         # Fit scan cone
-        _, cone_params = fit_scan_cone(
+        _, cone_params = fit_and_crop_around_scan_cone(
             frame_tensor, min_cone_half_angle_deg=20, threshold=15, return_params=True
         )
 

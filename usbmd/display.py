@@ -13,9 +13,8 @@ import numpy as np
 import scipy
 from keras import ops
 from PIL import Image
-from skimage.transform import resize
 
-from usbmd.utils import find_first_nonzero_index, translate
+from usbmd.utils import translate
 from usbmd.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 from usbmd import log
 
@@ -435,17 +434,24 @@ def cartesian_to_polar_matrix(
     interpolation_order=1,
 ):
     """
-    Convert cartesian coordinates to polar coordinates using JAX.
+    Convert a Cartesian image matrix to a polar coordinate representation.
 
     Args:
-        cartesian_matrix: Input image matrix
-        tip: Tuple of (x, y) coordinates for the tip
-        r_max: Maximum radius for polar conversion
-        angle: Angle range for polar conversion
-        interpolation: Interpolation method ('linear' or 'nearest')
+        cartesian_matrix (tensor): Input 2D image array in Cartesian coordinates.
+        fill_value (float): Value to use for points sampled outside the input image.
+        polar_shape (tuple, optional): Desired shape of the polar output (rows, cols).
+            Defaults to the shape of the input image.
+        tip (tuple, optional): (x, y) coordinates of the origin for the polar
+            transformation (typically the probe tip). Defaults to the center-top of the image.
+        r_max (float, optional): Maximum radius to consider in the polar transform.
+            Defaults to the height of the input image.
+        angle (float): Total angular field of view (in radians) centered at 0.
+            The polar grid spans from -angle to +angle.
+        interpolation_order (int): Order of interpolation to use (0 = nearest-neighbor,
+            1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
 
     Returns:
-        Polar coordinate matrix
+        polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`.
     """
     if ops.dtype(cartesian_matrix) != "float32":
         log.info(
@@ -513,7 +519,29 @@ def inverse_scan_convert_2d(
     find_scan_cone=True,
 ):
     """
-    find_scan_cone can be False if the cartesian image is already cropped and centered.
+    Convert a Cartesian-format ultrasound image to a polar representation.
+
+    This function can be used to recover a sector-shaped scan (polar format)
+    from a Cartesian representation of an image.
+    Optionally, it can detect and crop around the scan cone before conversion.
+
+    Args:
+        cartesian_image (tensor): 2D image array in Cartesian coordinates.
+        fill_value (float): Value used to fill regions outside the original image
+            during interpolation.
+        angle (float): Angular field of view (in radians) used for the polar transformation.
+            The polar output will span from -angle to +angle.
+        output_size (tuple, optional): Shape (rows, cols) of the resulting polar image.
+            If None, the shape of the input image is used.
+        interpolation_order (int): Order of interpolation used in resampling
+            (0 = nearest-neighbor, 1 = linear, etc.).
+        find_scan_cone (bool): If True, automatically detects and crops around the scan cone
+            in the Cartesian image before polar conversion, ensuring that the scan cone is
+            centered without padding. Can be set to False if the image is already cropped
+            and centered.
+
+    Returns:
+        polar_image (Array): 2D image in polar coordinates (sector-shaped scan).
     """
     if find_scan_cone:
         cartesian_image = fit_and_crop_around_scan_cone(cartesian_image)
