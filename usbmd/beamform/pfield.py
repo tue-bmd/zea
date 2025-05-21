@@ -316,15 +316,15 @@ def pfield_freq_step(
 
     Args:
         k (int): Frequency index.
-        f (array): Frequencies.
+        f (list): List of frequencies.
         c (float): Speed of sound.
-        delaysTX (array): Transmit delays.
-        TXapodization (array): Transmit apodization (complex64)
-        M (int): Number of elements.
-        EXP (array): Complex exponentials.
-        pulseSPECT (array): Pulse spectrum.
-        probeSPECT (array): Probe spectrum (complex64)
-        z (array): z-coordinates.
+        delaysTX (list): List of transmit delays.
+        TXapodization (list): List of transmit apodization values (complex64).
+        EXP (list): List of complex exponentials.
+        EXPdf (list): List of complex exponential frequency shifts.
+        pulseSPECT (list): List of pulse spectra.
+        probeSPECT (list): List of probe spectra (complex64).
+        z (list): List of z-coordinates.
 
     Returns:
         RPk (Tensor): Pressure field for this frequency.
@@ -357,7 +357,6 @@ def pfield_freq_loop(
         c (float): Speed of sound.
         delaysTX (list): List of transmit delays.
         TXapodization (list): List of transmit apodization values.
-        M (int): Number of elements in the array.
         EXP (list): List of complex exponentials.
         EXPdf (list): List of complex exponential frequency shifts.
         pulseSPECT (list): List of pulse spectra.
