@@ -1,8 +1,5 @@
 """
 Example Diffusion Model to generate synthetic echocardiograms
-
-- **Author(s)**: Tristan Stevens
-- **Date**: 24/04/2025
 """
 
 import os
