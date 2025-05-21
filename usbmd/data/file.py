@@ -1,7 +1,4 @@
-"""USBMD H5 file functionality.
-
-- **Author(s)**     : Tristan Stevens, Wessel van Nierop
-"""
+"""USBMD H5 file functionality."""
 
 import enum
 from pathlib import Path
@@ -10,8 +7,6 @@ from typing import List
 import h5py
 import numpy as np
 
-from usbmd.probes import Probe
-from usbmd.scan import Scan, cast_scan_parameters
 from usbmd import log
 from usbmd.internal.checks import (
     _DATA_TYPES,
@@ -19,6 +14,8 @@ from usbmd.internal.checks import (
     _REQUIRED_SCAN_KEYS,
     get_check,
 )
+from usbmd.probes import Probe
+from usbmd.scan import Scan, cast_scan_parameters
 from usbmd.utils import reduce_to_signature
 
 
@@ -257,12 +254,13 @@ class File(h5py.File):
         an empty dictionary.
 
         Args:
-            file (h5py or mat): File container.
-            event (int, optional): Event number. When specified an event structure
-                is expected as follows:
-                    - event_0/scan
-                    - event_1/scan
-                    - ...
+            event (int, optional): Event number. When specified, an event structure
+                is expected as follows::
+
+                    event_0/scan
+                    event_1/scan
+                    ...
+
                 Defaults to None. In that case no event structure is expected.
 
         Returns:
@@ -313,11 +311,13 @@ class File(h5py.File):
         """Returns a Scan object initialized with the parameters from the file.
 
         Args:
-            event (int, optional): Event number. When specified an event structure
-                is expected as follows:
-                    - event_0/scan
-                    - event_1/scan
-                    - ...
+            event (int, optional): Event number. When specified, an event structure
+                is expected as follows::
+
+                    event_0/scan
+                    event_1/scan
+                    ...
+
                 Defaults to None. In that case no event structure is expected.
             **kwargs: Additional keyword arguments to pass to the Scan object.
                 These will override the parameters from the file if they are
@@ -346,12 +346,14 @@ class File(h5py.File):
         """Returns a Probe object initialized with the parameters from the file.
 
         Args:
-            event (int, optional): Event number. When specified an event structure
-                is expected as follows:
-                    - event_0/scan
-                    - event_1/scan
-                    - ...
-                Defaults to None. In that case no event structure is expected.
+            event (int, optional): Event number. When specified, an event structure
+                is expected as follows::
+
+                    event_0/scan
+                    event_1/scan
+                    ...
+
+                Defaults to None. In that case, no event structure is expected.
 
         Returns:
             Probe: The probe object.
