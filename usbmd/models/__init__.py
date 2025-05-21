@@ -30,7 +30,7 @@ You can list all available presets using the :attr:`presets` attribute:
 
 
 usbmd generative models
-========================
+=======================
 
 In addition to models, usbmd provides both classical and deep generative models for tasks such as image generation, inpainting, and denoising. These models inherit from :class:`usbmd.models.generative.GenerativeModel` or :class:`usbmd.models.deepgenerative.DeepGenerativeModel`.
 Typically, these models have some additional methods, such as:
@@ -43,7 +43,7 @@ Typically, these models have some additional methods, such as:
 The following generative models are currently available:
 
 - :class:`usbmd.models.diffusion.DiffusionModel`: A deep generative diffusion model for ultrasound image generation.
-- :class:`usbmd.models.gmm.GMM`: A Gaussian Mixture Model.
+- :class:`usbmd.models.gmm.GaussianMixtureModel`: A Gaussian Mixture Model.
 
 An example of how to use the :class:`usbmd.models.diffusion.DiffusionModel` is shown below:
 
@@ -55,7 +55,7 @@ An example of how to use the :class:`usbmd.models.diffusion.DiffusionModel` is s
 
 
 Contributing and adding new models
-----------------------------------
+==================================
 
 Please follow the guidelines in the :ref:`contributing` page if you would like to contribute a new model to usbmd.
 
