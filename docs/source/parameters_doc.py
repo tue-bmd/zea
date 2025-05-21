@@ -232,7 +232,9 @@ Parameters
 This page provides a comprehensive overview of all configuration parameters available in usbmd.
 These parameters are used in the YAML config files to control data loading, preprocessing, model settings, scan parameters, and more.
 
-You can use these configs to, for instance, initialize :doc:`usbmd.Models <usbmd.models>` or :doc:`usbmd.Pipeline <usbmd.pipeline>`
+.. note::
+  You can use these configs to, for instance, initialize :doc:`usbmd.Models <models>` or :doc:`usbmd.Pipeline <pipeline>`.
+
 Configs are written in YAML format and can be loaded, edited, and saved using the usbmd API.
 
 -------------------------------
