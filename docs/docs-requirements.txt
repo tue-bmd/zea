@@ -12,10 +12,12 @@ mock
 myst-parser
 # for using notebooks
 nbsphinx
-pandoc
 
 # theme: https://github.com/pradyunsg/furo
 furo
 
 # install stemmer package
 PyStemmer
+
+# system dependency required for nbsphinx (install with: sudo apt-get install pandoc)
+# pandoc
