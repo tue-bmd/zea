@@ -12,6 +12,7 @@ mock
 myst-parser
 # for using notebooks
 nbsphinx
+pandoc
 
 # theme: https://github.com/pradyunsg/furo
 furo
