@@ -330,7 +330,7 @@ def pfield_freq_step(
         RPk (Tensor): Pressure field for this frequency.
     """
     kw = 2 * np.pi * f[k] / c
-    RPmono = ops.mean(EXP * EXPdf**k, axis=1)
+    RPmono = ops.mean(EXP * ops.power(EXPdf, k), axis=1)
 
     DELAPOD = ops.exp(1j * ops.cast(kw * c * delaysTX, "complex64")) * TXapodization
     RPk = ops.matmul(RPmono, DELAPOD) * pulseSPECT[k] * probeSPECT[k]
