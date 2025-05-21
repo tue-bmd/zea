@@ -232,7 +232,7 @@ Parameters
 This page provides a comprehensive overview of all configuration parameters available in usbmd.
 These parameters are used in the YAML config files to control data loading, preprocessing, model settings, scan parameters, and more.
 
-You can use these configs to run the pipeline, UI, or training scripts.
+You can use these configs to, for instance, initialize :doc:`usbmd.Models <usbmd.models>` or :doc:`usbmd.Pipeline <usbmd.pipeline>`
 Configs are written in YAML format and can be loaded, edited, and saved using the usbmd API.
 
 -------------------------------
@@ -244,13 +244,17 @@ Here is a minimal example of how to load and save a config file using usbmd:
 .. code-block:: python
 
    from usbmd import Config
+   from usbmd.config.validation import check_config
 
    # Load a config from file
    config = Config.from_yaml("configs/config_picmus_rf.yaml")
 
+   # We can check if the config has valid parameters (usbmd compliance)
+   config = check_config(config)
+
    # Access parameters
-   print(config.model.batch_size)
-   config.model.batch_size = 8
+   print(config.scan.sampling_frequency)
+   config.scan.sampling_frequency = 8e6
 
    # Save the config back to file
    config.to_yaml("configs/config_picmus_rf_modified.yaml")
