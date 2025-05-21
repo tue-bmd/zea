@@ -3,13 +3,14 @@
 usbmd models
 ============
 
-usbmd contains a collection of models that can be used for various tasks. All models are found in the :mod:`usbmd.models` package.
+usbmd contains a collection of models for various tasks, all located in the :mod:`usbmd.models` package.
 
-Currently, the following models are available:
+Currently, the following models are available (all inherited from :class:`usbmd.models.base.Model`):
 
+- :class:`usbmd.models.echonet.EchoNetDynamic`: A model for echocardiography segmentation.
+- :class:`usbmd.models.carotid_segmenter.CarotidSegmenter`: A model for carotid artery segmentation.
 - :class:`usbmd.models.unet.UNet`: A simple U-Net implementation.
 - :class:`usbmd.models.lpips.LPIPS`: A model implementing the perceptual similarity metric.
-- :class:`usbmd.models.echonet.EchoNetDynamic`: A model for echocardiography segmentation.
 
 Presets for these models can be found in :mod:`usbmd.models.presets`.
 
@@ -27,6 +28,32 @@ You can list all available presets using the :attr:`presets` attribute:
     presets = list(UNet.presets.keys())
     print(f"Available built-in usbmd presets for UNet: {presets}")
 
+
+usbmd generative models
+========================
+
+In addition to models, usbmd provides both classical and deep generative models for tasks such as image generation, inpainting, and denoising. These models inherit from :class:`usbmd.models.generative.GenerativeModel` or :class:`usbmd.models.deepgenerative.DeepGenerativeModel`.
+Typically, these models have some additional methods, such as:
+
+- :meth:`fit` for training the model on data
+- :meth:`sample` for generating new samples from the learned distribution
+- :meth:`posterior_sample` for drawing samples from the posterior given measurements
+- :meth:`log_density` for computing the log-probability of data under the model
+
+The following generative models are currently available:
+
+- :class:`usbmd.models.diffusion.DiffusionModel`: A deep generative diffusion model for ultrasound image generation.
+- :class:`usbmd.models.gmm.GMM`: A Gaussian Mixture Model.
+
+An example of how to use the :class:`usbmd.models.diffusion.DiffusionModel` is shown below:
+
+.. code-block:: python
+
+    from usbmd.models import DiffusionModel
+    model = DiffusionModel.from_preset('diffusion-echonet-dynamic')
+    samples = model.sample(n_samples=4)
+
+
 Contributing and adding new models
 ----------------------------------
 
@@ -35,7 +62,7 @@ Please follow the guidelines in the :ref:`contributing` page if you would like t
 The following steps are recommended when adding a new model:
 
 1. Create a new module in the :mod:`usbmd.models` package for your model: ``usbmd.models.mymodel``.
-2. Add a model class that inherits from :class:`usbmd.models.base.Model`. Make sure you implement the :meth:`call` method.
+2. Add a model class that inherits from :class:`usbmd.models.base.Model`. For generative models, inherit from :class:`usbmd.models.generative.GenerativeModel` or :class:`usbmd.models.deepgenerative.DeepGenerativeModel` as appropriate. Make sure you implement the :meth:`call` method.
 3. Upload the pretrained model weights to `our Hugging Face <https://huggingface.co/usbmd>`_. Should be a ``config.json`` and a ``model.weights.h5`` file. See `Keras documentation <https://keras.io/guides/serialization_and_saving/>`_ how those can be saved from your model. Simply drag and drop the files to the Hugging Face website to upload them.
 
    .. tip::
