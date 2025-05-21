@@ -1,9 +1,4 @@
-"""Class structures containing parameters defining an ultrasound scan and the
-beamforming grid.
-
-- **Author(s)**     : Vincent van de Schaft, Tristan Stevens
-- **Date**          : Wed Feb 15 2024
-"""
+"""Structure containing parameters defining an ultrasound scan."""
 
 # pylint: disable=too-many-public-methods
 

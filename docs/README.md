@@ -1,4 +1,3 @@
-
 # Building the Documentation
 
 To build the documentation for the `usbmd` package, follow these steps:
@@ -12,44 +11,40 @@ Install additional dependencies for documentation:
 pip install -r docs/docs-requirements.txt
 ```
 
-Optionally, you need to install the following (necessary in clean Docker images):
-```shell
+If you are using a clean Docker image, you may also need:
+
+```sh
 apt-get install -y make
 export LC_ALL=C.UTF-8
 ```
 
-## 2. Build the HTML documentation (from the docs directory)
+## 2. Build the HTML documentation
 
-Use the Makefile targets to clean, build, and serve the documentation:
+From the `docs` directory, run:
 
 ```sh
-cd docs
 make docs-build
 ```
 
-This will:
-- Clean old generated `.rst` files and build artifacts.
-- Build the latest HTML documentation into the `docs/_build/html` directory.
+This will generate the HTML documentation in `docs/_build/html`.
 
 ## 3. View the documentation
 
-To view the generated documentation, open the `index.html` in your browser:
+Open the generated documentation in your browser:
 
 ```sh
 docs/_build/html/index.html
 ```
 
-Or, if you want a live preview:
+## 4. Live preview with auto-reload
 
-## 4. (Optional) Live preview with auto-reload (from the project root)
-
-If you'd like to preview changes live as you edit the docs, use the `docs-serve` target to spin up a local server:
+For a live preview that automatically reloads on changes, use:
 
 ```sh
 make docs-serve
 ```
 
-Then, open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser to view the docs with live reload.
+This uses `sphinx-autobuild` to serve the docs at [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
 ---
 

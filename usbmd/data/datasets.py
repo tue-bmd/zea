@@ -1,8 +1,5 @@
 """The datasets module contains classes for loading different types of
 ultrasound datasets.
-
-- **Author(s)**     : Tristan Stevens, Wessel van Nierop
-- **Date**          : November 18th, 2021
 """
 
 from collections import OrderedDict

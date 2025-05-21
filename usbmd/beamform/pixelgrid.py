@@ -1,8 +1,4 @@
-"""Pixel grid calculation for beamforming
-
-- **Author(s)**     : Dongwoon Hyun, Ben Luijten
-- **Date**          : 2020-04-03
-"""
+"""Pixel grid calculation for beamforming"""
 
 import numpy as np
 
