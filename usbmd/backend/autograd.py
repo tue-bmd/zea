@@ -1,8 +1,4 @@
-"""Allow different backends for autograd.
-
-Author(s): Tristan Stevens, Oisín Nolan
-Date: 22/01/2024
-"""
+"""Allow different backends for autograd."""
 
 import functools
 

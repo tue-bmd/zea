@@ -1,8 +1,4 @@
-"""Automatic pressure field computation used for compounding multiple Tx events
-
-- **Author(s)**     : Ruud van Sloun (initial code), Tristan Stevens (transferred to keras)
-- **Date**          : 2024-07-24, 2024-10-09
-"""
+"""Automatic pressure field computation used for compounding multiple Tx events"""
 
 import keras
 import numpy as np

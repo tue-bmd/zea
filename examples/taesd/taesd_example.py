@@ -1,9 +1,4 @@
-"""
-TAESD model from: https://github.com/madebyollin/taesd
-
-- **Author(s)**: Wessel van Nierop
-- **Date**: 20/11/2024
-"""
+"""TAESD model from: https://github.com/madebyollin/taesd"""
 
 import os
 
