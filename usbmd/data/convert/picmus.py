@@ -17,9 +17,9 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from usbmd.data.data_format import generate_usbmd_dataset
-from usbmd.scan import compute_t0_delays_planewave
 from usbmd import log
+from usbmd.beamform.delays import compute_t0_delays_planewave
+from usbmd.data.data_format import generate_usbmd_dataset
 
 
 def convert_picmus(source_path, output_path, overwrite=False):
