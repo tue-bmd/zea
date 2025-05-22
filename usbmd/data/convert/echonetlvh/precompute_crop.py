@@ -15,7 +15,7 @@ from tqdm import tqdm
 # Set Keras backend to numpy for best CPU performance
 os.environ["KERAS_BACKEND"] = "numpy"
 
-from usbmd.tools.fit_scan_cone import fit_scan_cone
+from usbmd.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
 def get_args():
@@ -193,7 +193,9 @@ def precompute_cone_parameters(args):
                 first_frame = load_first_frame(avi_file)
 
                 # Detect cone parameters
-                _, full_cone_params = fit_scan_cone(first_frame, return_params=True)
+                _, full_cone_params = fit_and_crop_around_scan_cone(
+                    first_frame, return_params=True
+                )
 
                 # Extract only the essential parameters
                 essential_params = {
