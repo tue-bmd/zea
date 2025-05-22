@@ -1,31 +1,34 @@
-"""Generate ultrasound dataset from any data type to another and save to disk.
+"""
+Generate ultrasound dataset and save to disk.
 
-Supports both saving to png and hdf5. saving to png is only supported for image data.
+Supports both saving to PNG and HDF5. Saving to PNG is only supported for image data.
 
-Example:
-    Run from command line to generate PICMUS dataset:
-    >>> usbmd -c configs/config_picmus_rf.yaml -t generate
+Example
+-------
+Run from command line to generate PICMUS dataset:
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : November 18th, 2021
+.. code-block:: bash
+
+    usbmd -c configs/config_picmus_rf.yaml -t generate
+
 """
 
-import inspect
 from pathlib import Path
 from typing import Union
 
 import numpy as np
 import tqdm
 
+from usbmd import log
 from usbmd.config import Config
-from usbmd.core import DataTypes
-from usbmd.data import get_dataset
 from usbmd.data.data_format import generate_usbmd_dataset
+from usbmd.data.datasets import Dataset
+from usbmd.data.file import File
+from usbmd.datapaths import format_data_path
 from usbmd.display import to_8bit
+from usbmd.internal.checks import _DATA_TYPES
 from usbmd.ops import Pipeline
-from usbmd.probes import get_probe
-from usbmd.utils import get_function_args, log, update_dictionary
-from usbmd.utils.checks import _DATA_TYPES
+from usbmd.utils import get_function_args
 
 
 class GenerateDataSet:
@@ -34,22 +37,21 @@ class GenerateDataSet:
     def __init__(
         self,
         config,
-        to_dtype: str = "image",
-        destination_folder: Union[None, str] = None,
+        to_dtype: str,
+        destination_folder: Union[None, str],
         retain_folder_structure: bool = True,
         filetype: str = "hdf5",
         overwrite: bool = False,
         verbose: bool = True,
+        jit_options: Union[None, dict] = "ops",
+        **kwargs,
     ):
         """
         Args:
             config (object): Config object.
             to_dtype (str): output dtype, default is `image`.
             destination_folder (bool, optional): Folder to which dataset should
-                be saved. Defaults to None. If None, new folder with dtype suffix
-                is created in the parent folder of the original dataset folder.
-                If relative path, folder will be created in parent folder
-                of source dataset.
+                be saved.
             retain_folder_structure (bool, optional): Whether to exactly copy
                 the folder structure of the original dataset or put all output
                 files in one folder. Defaults to True.
@@ -78,42 +80,10 @@ class GenerateDataSet:
         self.verbose = verbose
 
         # intialize dataset
-        self.dataset = get_dataset(self.config.data)
-
-        # Initialize scan based on dataset (if it can find proper scan parameters)
-        scan_class = self.dataset.get_scan_class()
-        file_scan_params = self.dataset.get_scan_parameters_from_file()
-        file_probe_params = self.dataset.get_probe_parameters_from_file()
-
-        if len(file_scan_params) == 0:
-            log.info(
-                f"Could not find proper scan parameters in {self.dataset} at "
-                f"{log.yellow(str(self.dataset.datafolder))}."
-            )
-            log.info("Proceeding without scan class.")
-
-            self.scan = None
-        else:
-            config_scan_params = self.config.scan
-            # dict merging of manual config and dataset default scan parameters
-            scan_params = update_dictionary(file_scan_params, config_scan_params)
-            # Retrieve the argument names of the Scan class
-            sig = inspect.signature(scan_class.__init__)
-
-            # Filter out the arguments that are not part of the Scan class
-            reduced_scan_params = {
-                key: scan_params[key] for key in sig.parameters if key in scan_params
-            }
-
-            self.scan = scan_class(**reduced_scan_params)
-
-        # initialize probe
-        probe_name = self.dataset.get_probe_name()
-
-        if probe_name == "generic":
-            self.probe = get_probe(probe_name, **file_probe_params)
-        else:
-            self.probe = get_probe(probe_name)
+        self.dataset = Dataset.from_config(**self.config.data, **kwargs)
+        self.path = format_data_path(
+            self.config.data.dataset_folder, self.config.data.user
+        )
 
         # initialize Pipeline
         assert (
@@ -121,27 +91,10 @@ class GenerateDataSet:
         ), "Pipeline not found in config, please specify pipeline in config."
 
         self.process = Pipeline.from_config(
-            self.config.pipeline,
-            with_batch_dim=False,
-        )
-        self.parameters = self.process.prepare_parameters(
-            self.probe, self.scan, self.config
+            self.config.pipeline, with_batch_dim=False, jit_options=jit_options
         )
 
-        if self.dataset.datafolder is None:
-            self.dataset.datafolder = Path(".")
-
-        if destination_folder is None:
-            self.destination_folder = (
-                self.dataset.datafolder.parent
-                / f"{self.dataset.config.dataset_name}_{to_dtype}"
-            )
-        else:
-            self.destination_folder = Path(destination_folder)
-            if not self.destination_folder.is_absolute():
-                self.destination_folder = (
-                    self.dataset.datafolder.parent / self.destination_folder
-                )
+        self.destination_folder = Path(destination_folder)
 
         if self.destination_folder.exists():
             if self.overwrite:
@@ -152,77 +105,87 @@ class GenerateDataSet:
                 )
                 input()
 
+    def prepare_parameters(self, file: File):
+        """Prepare parameters for processing based on the file and config."""
+        scan = file.scan(**self.config.scan)
+        probe = file.probe()
+        parameters = self.process.prepare_parameters(probe, scan, self.config)
+        return parameters
+
+    def _process_file(self, file: File, pbar: tqdm.tqdm):
+        parameters = self.prepare_parameters(file)
+
+        if self.dtype.value in ["raw_data", "aligned_data"]:
+            data = file.load_transmits(self.dtype, parameters["selected_transmits"])
+        else:
+            data = file.load_data(self.dtype)
+
+        if self.filetype == "png":
+            for i, image in enumerate(data):
+                name = file.path.parent / file.stem / str(i)
+
+                path = self.get_path_from_name(name, ".png")
+                if self.skip_path(path):
+                    pbar.update(1)
+                    return
+
+                image = self.process_data(image, parameters)
+
+                self.save_image(np.squeeze(image), path)
+                pbar.update(1)
+
+        elif self.filetype == "hdf5":
+            path = self.get_path_from_name(file.path, ".hdf5")
+            if self.skip_path(path):
+                pbar.update(data.shape[0])
+                return
+
+            data_list = []
+            for d in data:
+                d = self.process_data(d, parameters)
+                data_list.append(d)
+                pbar.update(1)
+            data = np.stack(data_list, axis=0)
+
+            self.save_data(
+                data,
+                path,
+                file.get_scan_parameters(),
+                file.probe_name,
+                file.description,
+            )
+
     def generate(self):
         """Generate the dataset.
 
         Generates a dataset based on `filetype` that is being set during initalization.
         Either a `png` or `hdf5` dataset.
-
-        Returns:
-            bool: if succesfull returns `True`.
-
         """
-        total_num_frames = self.dataset.total_num_frames
         pbar = tqdm.tqdm(
-            total=total_num_frames,
+            total=self.dataset.total_frames,
             desc=f"Generating dataset ({self.to_dtype}, {self.filetype})",
             disable=not self.verbose,
         )
-        for idx in range(len(self.dataset)):
+        for file in iter(self.dataset):
             try:
-                frame_no = "all"
-                data = self.dataset[(idx, frame_no)]
+                self._process_file(file, pbar)
 
-                base_name = self.dataset.file_paths[idx]
-
-                if self.filetype == "png":
-                    for i, image in enumerate(data):
-                        name = base_name.parent / base_name.stem / str(i)
-
-                        path = self.get_path_from_name(name, ".png")
-                        if self.skip_path(path):
-                            pbar.update(1)
-                            continue
-
-                        image = self.process_data(image)
-
-                        self.save_image(np.squeeze(image), path)
-                        pbar.update(1)
-
-                elif self.filetype == "hdf5":
-                    path = self.get_path_from_name(base_name, ".hdf5")
-                    if self.skip_path(path):
-                        pbar.update(data.shape[0])
-                        continue
-
-                    data_list = []
-                    for d in data:
-                        d = self.process_data(d)
-                        data_list.append(d)
-                        pbar.update(1)
-                    data = np.stack(data_list, axis=0)
-                    self.save_data(data, path)
             except Exception as e:
-                log.error(f"Error processing {base_name}: {e}")
+                log.error(f"Error processing {file.path}: {e}")
                 raise
 
         log.success(f"Created dataset in {self.destination_folder}")
-        return True
 
-    def process_data(self, data):
+    @property
+    def dtype(self):
+        """Get the input data type of the pipeline"""
+        return self.process.operations[0].input_data_type
+
+    def process_data(self, data, parameters):
         """Small wrapper for processing data with the pipeline"""
-        data_type = self.process.operations[0].input_data_type
-        if data_type in [DataTypes.RAW_DATA, DataTypes.ALIGNED_DATA]:
-            n_tx = data.shape[0]
-            assert len(self.scan.selected_transmits) <= n_tx, (
-                f"Number of selected transmits {len(self.scan.selected_transmits)} "
-                f"exceeds number of transmits in raw data {n_tx}"
-            )
-            data = np.take(data, self.scan.selected_transmits, axis=0)
-
         inputs = {self.process.key: data}
 
-        outputs = self.process(**inputs, **self.parameters)
+        outputs = self.process(**inputs, **parameters)
 
         image = outputs[self.process.output_key]
 
@@ -246,7 +209,7 @@ class GenerateDataSet:
         """Simple helper function that return proper path"""
         name = Path(name)
         if self.retain_folder_structure:
-            path = name.relative_to(self.dataset.datafolder)
+            path = name.relative_to(self.path)
         else:
             path = name.name
         path = self.destination_folder / path
@@ -265,20 +228,19 @@ class GenerateDataSet:
         image = to_8bit(image)
         image.save(path)
 
-    def save_data(self, data, path):
+    def save_data(self, data, path, scan_parameters, probe_name, description):
         """Save data to disk in hdf5 format
 
         Args:
             image (ndarray): input data
             path (str): file path
         """
-        file_scan_parameters = self.scan.get_scan_parameters()
 
         gen_kwargs = {
             str(self.to_dtype): data,
-            **file_scan_parameters,
-            "probe_name": self.dataset.file.attrs["probe"],
-            "description": self.dataset.file.attrs["description"],
+            **scan_parameters,
+            "probe_name": probe_name,
+            "description": description,
         }
 
         # automatically get correct gen_kwargs for generate_usbmd_dataset function
@@ -288,7 +250,4 @@ class GenerateDataSet:
         gen_kwargs = {
             key: value for key, value in gen_kwargs.items() if key in func_args
         }
-        generate_usbmd_dataset(
-            path=path,
-            **gen_kwargs,
-        )
+        generate_usbmd_dataset(path=path, **gen_kwargs)

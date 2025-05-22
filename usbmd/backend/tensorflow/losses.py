@@ -1,8 +1,4 @@
-"""Container for custom loss functions.
-
-- **Author(s)**     : Ben Luijten
-- **Date**          : -
-"""
+"""Container for custom loss functions."""
 
 import keras
 from keras import ops

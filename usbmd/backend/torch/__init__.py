@@ -8,39 +8,39 @@ import torch
 
 
 def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
-    """Compute func on device.
+    """Applies a Torch function to inputs on a specified device.
 
     Args:
-        func (function): function to apply to the input data
-        inputs (ndarray): input array
-        device (str): cuda / gpu / cpu
+        func (function): Function to apply to the input data.
+        inputs (ndarray): Input array.
+        device (str): Device string, e.g. ``'cuda'``, ``'gpu'``, or ``'cpu'``.
         return_numpy (bool, optional): Whether to convert output
             data back to numpy. Defaults to False.
-        **kwargs: Additional keyword arguments to be passed to the `func`.
+        **kwargs: Additional keyword arguments to be passed to the ``func``.
 
     Returns:
         torch.Tensor or ndarray: The output data.
 
     Raises:
-        AssertionError: If `func` is not a function from the torch library.
+        AssertionError: If ``func`` is not a function from the torch library.
 
     Note:
-        This function converts the `inputs` array to a torch.Tensor and moves it to
-            the specified `device`.
-        It then applies the `func` function to the inputs and returns the output data.
-        If the output is a dictionary, it extracts the first value from the dictionary.
-        If `return_numpy` is True, it converts the output data back to a numpy array
-            before returning.
+        This function converts the ``inputs`` array to a torch.Tensor and moves it to
+        the specified ``device``. It then applies the ``func`` function to the inputs and
+        returns the output data. If the output is a dictionary, it extracts the first value
+        from the dictionary. If ``return_numpy`` is True, it converts the output data back to a
+        numpy array before returning.
 
     Example:
-        >>> import torch
-        >>> def square(x):
-        ...     return x ** 2
-        >>> inputs = [1, 2, 3, 4, 5]
-        >>> device = 'cuda'
-        >>> output = on_device_torch(square, inputs, device)
-        >>> print(output)
-        tensor([ 1,  4,  9, 16, 25], device='cuda:0')
+        .. code-block:: python
+
+            import torch
+            def square(x):
+                return x ** 2
+            inputs = [1, 2, 3, 4, 5]
+            device = 'cuda'
+            output = on_device_torch(square, inputs, device)
+            print(output)
     """
     device = device.replace("gpu", "cuda")
 
@@ -54,7 +54,8 @@ def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
     if hasattr(func, "to"):
         func = func.to(device)
 
-    outputs = func(inputs, **kwargs)
+    with torch.device(device):
+        outputs = func(inputs, **kwargs)
 
     if isinstance(outputs, dict):
         # depends a bit how flexible we want to be...

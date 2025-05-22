@@ -1,16 +1,13 @@
-"""UNet models and architectures
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 23/01/2025
-"""
+"""UNet models and architectures"""
 
 import keras
 from keras import layers
 
+from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
 from usbmd.models.layers import DownBlock, ResidualBlock, UpBlock, sinusoidal_embedding
 from usbmd.models.preset_utils import register_presets
 from usbmd.models.presets import unet_presets
-from usbmd.registry import model_registry
 
 
 @model_registry(name="unet")

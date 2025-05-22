@@ -1,30 +1,10 @@
-"""H5 dataloader.
+"""HDF5 Tensorflow dataloader.
 
 Convenient way of loading data from hdf5 files in a ML pipeline.
-
-Allows for flexible indexing and stacking of dimensions. There are a few important parameters:
-
-- `directory` can be a single file or a list of directories. If it is a directory, all hdf5 files
-    in the directory will be loaded. If it is a list of directories, all hdf5 files in all
-    directories will be loaded.
-- `key` is the key of the dataset in the hdf5 file that will be used. For example `data/image`.
-    It is assumed that the dataset contains a multidimensional array.
-- `n_frames`: One of the axis of the multidimensional array is designated as the `frame_axis`.
-    We will iterate over this axis and stack `n_frames` frames together.
-- `frame_index_stride`: additionally this parameter can be used to skip frames at a regular
-    interval. This can be useful to simulate a higher frame rates.
-- `additional_axes_iter`: additional axes to iterate over in the dataset. This can be useful
-    if you have additional dimensions in the dataset that you want to iterate over. For example,
-    if you have a 3D dataset but want to train on 2D slices.
-- `insert_frame_axis`: if True, a new dimension to stack frames along will be created. If False,
-    frames will be stacked along an existing dimension.
-- `frame_axis`: dimension to stack frames along. If `insert_frame_axis` is True, this will be
-    the new dimension to stack frames along. Else, this will be the existing dimension to
-    stack frames along.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : Thu Nov 18 2021
 """
+
+from functools import partial
+from typing import List
 
 import keras
 import tensorflow as tf
@@ -32,50 +12,16 @@ from keras.src.trainers.data_adapters import TFDatasetAdapter
 
 from usbmd.data.dataloader import H5Generator
 from usbmd.data.layers import Resizer
-from usbmd.utils import find_methods_with_return_type, log, translate
+from usbmd.utils import find_methods_with_return_type, translate
 
 METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
     tf.data.Dataset, "DatasetV2"
 )
 
 
-class H5GeneratorTF(H5Generator):
-    """Adds a tensorflow dtype property and output_signature to the H5Generator class."""
-
-    @property
-    def tensorflow_dtype(self):
-        """
-        Extracts one image from the dataset to get the dtype. Converts it to a tensorflow dtype.
-        """
-        out = next(iter(self))
-        if self.return_filename:
-            out = out[0]
-        dtype = out.dtype
-        if "float" in str(dtype):
-            dtype = tf.float32
-        elif "complex" in str(dtype):
-            dtype = tf.complex64
-        else:
-            raise ValueError(f"Unsupported dtype: {dtype}")
-        return dtype
-
-    @property
-    def output_signature(self):
-        """
-        Get the output signature of the generator as a tensorflow `TensorSpec`.
-        This is useful for creating a `tf.data.Dataset` from the generator.
-        """
-        output_signature = tf.TensorSpec(shape=self.shape, dtype=self.tensorflow_dtype)
-        if self.return_filename:
-            output_signature = (
-                output_signature,
-                tf.TensorSpec(shape=(), dtype=tf.string),
-            )
-        return output_signature
-
-
 class TFDatasetToKeras(TFDatasetAdapter):
-    """
+    """Tensorflow Dataset to Keras Dataset.
+
     This class wraps a tf.data.Dataset object and allows it to be used with Keras backends.
     """
 
@@ -114,42 +60,101 @@ class TFDatasetToKeras(TFDatasetAdapter):
             return getattr(self._dataset, name)
 
 
-def h5_dataset_from_directory(
-    directory,
-    key: str,
-    batch_size: int | None = None,
-    image_size: tuple | None = None,
-    shuffle: bool = None,
-    seed: int | None = None,
+class H5GeneratorTF(H5Generator):
+    """Adds a tensorflow dtype property and output_signature to the H5Generator class."""
+
+    @property
+    def tensorflow_dtype(self):
+        """
+        Extracts one image from the dataset to get the dtype. Converts it to a tensorflow dtype.
+        """
+        out = next(self.iterator())
+        if self.return_filename:
+            out = out[0]
+        dtype = out.dtype
+        if "float" in str(dtype):
+            dtype = tf.float32
+        elif "complex" in str(dtype):
+            dtype = tf.complex64
+        else:
+            raise ValueError(f"Unsupported dtype: {dtype}")
+        return dtype
+
+    @property
+    def output_signature(self):
+        """
+        Get the output signature of the generator as a tensorflow `TensorSpec`.
+        This is useful for creating a `tf.data.Dataset` from the generator.
+        """
+        output_signature = tf.TensorSpec(shape=self.shape, dtype=self.tensorflow_dtype)
+        if self.return_filename:
+            output_signature = (
+                output_signature,
+                tf.TensorSpec(shape=(), dtype=tf.string),
+            )
+        return output_signature
+
+
+def _assert_image_range(images, image_range):
+    # Check if there are outliers in the image range
+    minval = tf.reduce_min(images)
+    maxval = tf.reduce_max(images)
+    _msg = (
+        f"Image range {image_range} is not in the range of the data "
+        f"{minval} - {maxval}"
+    )
+    tf.debugging.assert_greater_equal(
+        minval,
+        tf.cast(image_range[0], minval.dtype),
+        message=_msg,
+    )
+    tf.debugging.assert_less_equal(
+        maxval,
+        tf.cast(image_range[1], maxval.dtype),
+        message=_msg,
+    )
+    return images
+
+
+def make_dataloader(
+    file_paths: List[str],
+    batch_size: int,
+    key: str = "data/image",
+    n_frames: int = 1,
+    shuffle: bool = True,
+    return_filename: bool = False,
     limit_n_samples: int | None = None,
     limit_n_frames: int | None = None,
-    resize_type: str = "center_crop",
+    seed: int | None = None,
+    drop_remainder: bool = False,
+    resize_type: str | None = None,
     resize_axes: tuple | None = None,
     resize_kwargs: dict | None = None,
-    image_range: tuple = (0, 255),
-    normalization_range: tuple = (0, 1),
-    augmentation: keras.Sequential | None = None,
+    image_size: tuple | None = None,
+    image_range: tuple | None = None,
+    normalization_range: tuple | None = None,
     dataset_repetitions: int | None = None,
-    n_frames: int = 1,
-    insert_frame_axis: bool = True,
-    frame_axis: int = -1,
-    initial_frame_axis: int = 0,
-    frame_index_stride: int = 1,
+    cache: bool = False,
     additional_axes_iter: tuple | None = None,
+    sort_files: bool = True,
     overlapping_blocks: bool = False,
-    return_filename: bool = False,
+    augmentation: callable = None,
+    assert_image_range: bool = True,
+    clip_image_range: bool = False,
+    initial_frame_axis: int = 0,
+    insert_frame_axis: bool = True,
+    frame_index_stride: int = 1,
+    frame_axis: int = -1,
+    validate: bool = True,
+    prefetch: bool = True,
     shard_index: int | None = None,
     num_shards: int = 1,
-    search_file_tree_kwargs: dict | None = None,
-    drop_remainder: bool = False,
-    cache: bool | str = False,
-    prefetch: bool = True,
     wrap_in_keras: bool = True,
     **kwargs,
-):
-    """Creates a `tf.data.Dataset` from .hdf5 files in a directory.
+) -> tf.data.Dataset:
+    """Creates a ``tf.data.Dataset`` from .hdf5 files in the specified directory or directories.
 
-    Mimicks the native TF function `tf.keras.utils.image_dataset_from_directory`
+    Mimics the native TF function ``tf.keras.utils.image_dataset_from_directory``
     but for .hdf5 files.
 
     Saves a dataset_info.yaml file in the directory with information about the dataset.
@@ -157,113 +162,128 @@ def h5_dataset_from_directory(
     of the dataset for very large datasets.
 
     Does the following in order to load a dataset:
-    - Find all .hdf5 files in the directory
-    - Load the dataset from each file using the specified key
-    - Apply the following transformations in order (if specified):
-        - limit_n_samples
-        - shuffle (if not cached)
-        - shard
-        - add channel dim
-        - cache
-        - shuffle (if cached)
-        - resize
-        - repeat
-        - batch
-        - normalize
-        - augmentation
-        - prefetch
+
+        - Find all .hdf5 files in the director(ies)
+        - Load the data from each file using the specified key
+        - Apply the following transformations in order (if specified):
+
+            - limit_n_samples
+            - cache
+            - shuffle
+            - shard
+            - add channel dim
+            - assert_image_range
+            - clip_image_range
+            - resize
+            - repeat
+            - batch
+            - normalize
+            - augmentation
+            - prefetch
+            - tf -> keras tensor
 
     Args:
-        directory (str or list): Directory where the data is located.
-            can also be a list of directories. Works recursively.
-        key (str): key of hdf5 dataset to grab data from.
-        batch_size (int, optional): batch the dataset. Defaults to None.
-        image_size (tuple, optional): resize images to image_size. Should
+        file_paths (str or list): Path(s) to the folder(s) or h5 file(s) to load.
+        batch_size (int): Batch the dataset.
+        key (str): The key to access the HDF5 dataset.
+        n_frames (int, optional): Number of frames to load from each hdf5 file.
+            Defaults to 1. These frames are stacked along the last axis (channel).
+        shuffle (bool, optional): Shuffle dataset.
+        return_filename (bool, optional): Return file name with image. Defaults to False.
+        limit_n_samples (int, optional): Take only a subset of samples.
+            Useful for debugging. Defaults to None.
+        limit_n_frames (int, optional): Limit the number of frames to load from each file.
+            This means n_frames per data file will be used. These will be the first frames in
+            the file. Defaults to None.
+        seed (int, optional): Random seed of shuffle.
+        drop_remainder (bool, optional): Whether the last batch should be dropped.
+        resize_type (str, optional): Resize type. Defaults to 'center_crop'.
+            Can be 'center_crop', 'random_crop' or 'resize'.
+        resize_axes (tuple, optional): Axes to resize along. Should be of length 2
+            (height, width) as resizing function only supports 2D resizing / cropping.
+            Should only be set when your data is more than (h, w, c). Defaults to None.
+            Note that it considers the axes after inserting the frame axis.
+        resize_kwargs (dict, optional): Kwargs for the resize function.
+        image_size (tuple, optional): Resize images to image_size. Should
             be of length two (height, width). Defaults to None.
-        shuffle (bool, optional): shuffle dataset.
-        seed (int, optional): random seed of shuffle.
-        limit_n_samples (int, optional): take only a subset of samples.
-            Useful for debuging. Defaults to None.
-        limit_n_frames (int, optional): limit the number of frames to load from each file. This
-            means n_frames per data file will be used. These will be the first frames in the file.
-            Defaults to None
-        resize_type (str, optional): resize type. Defaults to 'center_crop'.
-            can be 'center_crop', 'random_crop' or 'resize'.
-        resize_axes (tuple, optional): axes to resize along. Should be of length 2
-            (height, width) as resizing function only supports 2D resizing / cropping. Should only
-            be set when your data is more than (h, w, c). Defaults to None.
-        resize_kwargs (dict, optional): kwargs for the resize function.
-        image_range (tuple, optional): image range. Defaults to (0, 255).
-            will always translate from specified image range to normalization range.
-            if image_range is set to None, no normalization will be done. Note that it does not
+        image_range (tuple, optional): Image range. Defaults to (0, 255).
+            Will always translate from specified image range to normalization range.
+            If image_range is set to None, no normalization will be done. Note that it does not
             clip to the image range, so values outside the image range will be outside the
             normalization range!
-        normalization_range (tuple, optional): normalization range. Defaults to (0, 1).
+        normalization_range (tuple, optional): Normalization range. Defaults to (0, 1).
             See image_range for more info!
-        augmentation (keras.Sequential, optional): keras augmentation layer.
-        dataset_repetitions (int, optional): repeat dataset. Note that this happens
+        dataset_repetitions (int, optional): Repeat dataset. Note that this happens
             after sharding, so the shard will be repeated. Defaults to None.
-        n_frames (int, optional): number of frames to load from each hdf5 file.
-            Defaults to 1. These frames are stacked along the last axis (channel).
-        insert_frame_axis (bool, optional): if True, new dimension to stack
-            frames along will be created. Defaults to False. In that case
-            frames will be stacked along existing dimension (frame_axis).
-        frame_axis (int, optional): dimension to stack frames along.
-            Defaults to -1. If insert_frame_axis is True, this will be the
-            new dimension to stack frames along.
-        initial_frame_axis (int, optional): axis where in the files the frames are stored.
-            Defaults to 0.
-        frame_index_stride (int, optional): interval between frames to load.
-            Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
-        additional_axes_iter (tuple, optional): additional axes to iterate over
+        cache (bool, optional): Cache dataset to RAM.
+        additional_axes_iter (tuple, optional): Additional axes to iterate over
             in the dataset. Defaults to None, in that case we only iterate over
             the first axis (we assume those contain the frames).
-        overlapping_blocks (bool, optional): if True, blocks overlap by n_frames - 1.
+        sort_files (bool, optional): Sort files by number. Defaults to True.
+        overlapping_blocks (bool, optional): If True, blocks overlap by n_frames - 1.
             Defaults to False. Has no effect if n_frames = 1.
-        return_filename (bool, optional): return file name with image. Defaults to False.
-        shard_index (int, optional): index which part of the dataset should be selected.
+        augmentation (keras.Sequential, optional): Keras augmentation layer.
+        assert_image_range (bool, optional): Assert that the image range is
+            within the specified image range. Defaults to True.
+        clip_image_range (bool, optional): Clip the image range to the specified
+            image range. Defaults to False.
+        initial_frame_axis (int, optional): Axis where in the files the frames are stored.
+            Defaults to 0.
+        insert_frame_axis (bool, optional): If True, new dimension to stack
+            frames along will be created. Defaults to True. In that case
+            frames will be stacked along existing dimension (frame_axis).
+        frame_index_stride (int, optional): Interval between frames to load.
+            Defaults to 1. If n_frames > 1, a lower frame rate can be simulated.
+        frame_axis (int, optional): Dimension to stack frames along.
+            Defaults to -1. If insert_frame_axis is True, this will be the
+            new dimension to stack frames along.
+        validate (bool, optional): Validate if the dataset adheres to the usbmd format.
+            Defaults to True.
+        prefetch (bool, optional): Prefetch the dataset. Defaults to True.
+        shard_index (int, optional): Index which part of the dataset should be selected.
             Can only be used if num_shards is specified. Defaults to None.
             See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
-        num_shards (int, optional): this is used to divide the dataset into `num_shards` parts.
+        num_shards (int, optional): This is used to divide the dataset into ``num_shards`` parts.
             Sharding happens before all other operations. Defaults to 1.
             See for info: https://www.tensorflow.org/api_docs/python/tf/data/Dataset#shard
-        search_file_tree_kwargs (dict, optional): kwargs for search_file_tree.
-        drop_remainder (bool, optional): representing whether the last batch should be dropped
-            in the case it has fewer than batch_size elements. Defaults to False.
-        cache (bool or str, optional): cache dataset. If a string is provided, caching will
-            be done to disk with that filename. Defaults to False.
-        prefetch (bool, optional): prefetch elements from dataset. Defaults to True.
-        wrap_in_keras (bool, optional): wrap dataset in TFDatasetToKeras. Defaults to True.
+        wrap_in_keras (bool, optional): Wrap dataset in TFDatasetToKeras. Defaults to True.
             If True, will convert the dataset that returns backend tensors.
-        **kwargs: additional kwargs for H5Generator.
 
     Returns:
-        tf.data.Dataset: dataset
-    """
-    tf_data_shuffle = shuffle and cache  # shuffle after caching
-    generator_shuffle = shuffle  # shuffle on the generator level
+        tf.data.Dataset: The constructed dataset.
 
-    if tf_data_shuffle:
-        log.warning("Will shuffle on the image level, this can be slower.")
+    """
+    # Setup
+    if normalization_range is not None:
+        assert (
+            image_range is not None
+        ), "If normalization_range is set, image_range must be set as well."
+
+    resize_kwargs = resize_kwargs or {}
+
+    if num_shards > 1:
+        assert shard_index is not None, "shard_index must be specified"
+        assert shard_index < num_shards, "shard_index must be less than num_shards"
+        assert shard_index >= 0, "shard_index must be greater than or equal to 0"
 
     image_extractor = H5GeneratorTF(
-        directory,
-        key=key,
+        file_paths,
+        key,
         n_frames=n_frames,
         frame_index_stride=frame_index_stride,
         frame_axis=frame_axis,
         insert_frame_axis=insert_frame_axis,
         initial_frame_axis=initial_frame_axis,
         return_filename=return_filename,
-        additional_axes_iter=additional_axes_iter,
+        shuffle=shuffle,
+        sort_files=sort_files,
         overlapping_blocks=overlapping_blocks,
         limit_n_samples=limit_n_samples,
         limit_n_frames=limit_n_frames,
-        sort_files=True,
-        shuffle=generator_shuffle,
         seed=seed,
-        as_tensor=False,
-        search_file_tree_kwargs=search_file_tree_kwargs,
+        additional_axes_iter=additional_axes_iter,
+        cache=cache,
+        validate=validate,
         **kwargs,
     )
 
@@ -279,9 +299,6 @@ def h5_dataset_from_directory(
 
     # Shard dataset
     if num_shards > 1:
-        assert shard_index is not None, "shard_index must be specified"
-        assert shard_index < num_shards, "shard_index must be less than num_shards"
-        assert shard_index >= 0, "shard_index must be greater than or equal to 0"
         dataset = dataset.shard(num_shards, shard_index)
 
     # Define helper function to apply map function to dataset
@@ -299,28 +316,37 @@ def h5_dataset_from_directory(
     if len(image_extractor.shape) != 3:
         dataset = dataset_map(dataset, lambda x: tf.expand_dims(x, axis=-1))
 
-    # If cache is a string, caching will be done to disk with that filename
-    # Otherwise caching will be done in memory
-    if cache:
-        filename = cache if isinstance(cache, str) else ""
-        dataset = dataset.cache(filename)
+    # Check if there are outliers in the image range
+    if assert_image_range and image_range is not None:
+        dataset = dataset_map(
+            dataset, partial(_assert_image_range, image_range=image_range)
+        )
 
-    if num_shards > 1 and shuffle:
-        log.warning("Shuffling after sharding, so the shard will be shuffled.")
+    # Clip to image range
+    if clip_image_range and image_range is not None:
+        dataset = dataset_map(
+            dataset,
+            partial(
+                tf.clip_by_value,
+                clip_value_min=image_range[0],
+                clip_value_max=image_range[1],
+            ),
+        )
 
-    # Shuffle after caching for random order every epoch
-    if tf_data_shuffle:
-        buffer_size = len(image_extractor) if len(image_extractor) < 1000 else 1000
-        dataset = dataset.shuffle(buffer_size, seed=seed)
+    if image_size or resize_type:
+        if frame_axis != -1:
+            assert resize_axes is not None, (
+                "Resizing only works with frame_axis = -1. Alternatively, "
+                "you can specify resize_axes."
+            )
 
-    if image_size is not None:
-        assert (
-            len(image_size) == 2
-        ), f"image_size must be of length 2 (height, width), got {image_size}"
-
-        resize_kwargs = resize_kwargs or {}
+        # Let resizer handle the assertions.
         resizer = Resizer(
-            image_size, resize_type, resize_axes, seed=seed, **resize_kwargs
+            image_size=image_size,
+            resize_type=resize_type,
+            resize_axes=resize_axes,
+            seed=seed,
+            **resize_kwargs,
         )
         dataset = dataset_map(dataset, resizer)
 
@@ -333,9 +359,10 @@ def h5_dataset_from_directory(
         dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
 
     # normalize
-    if image_range is not None:
+    if normalization_range is not None:
         dataset = dataset_map(
-            dataset, lambda x: translate(x, image_range, normalization_range)
+            dataset,
+            lambda x: translate(x, image_range, normalization_range),
         )
 
     # augmentation

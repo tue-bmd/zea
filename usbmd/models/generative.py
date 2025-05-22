@@ -1,8 +1,4 @@
-"""Generative models for usbmd.
-
-- **Author(s)**: Tristan Stevens
-- **Date**: 24/01/2025
-"""
+"""Generative models for usbmd."""
 
 import abc
 
@@ -33,11 +29,11 @@ class GenerativeModel(abc.ABC):
         """
         raise NotImplementedError("sample() must be implemented in subclasses.")
 
-    def posterior_sample(self, data, **kwargs):
-        r"""Draw samples $z \sim p(z \mid x)$ from the posterior given data.
+    def posterior_sample(self, measurements, **kwargs):
+        r"""Draw samples $z \sim p(z \mid x)$ from the posterior given measurements.
 
         Args:
-            data: The data $x$ to condition the posterior on.
+            measurements: The measurements $x$ to condition the posterior on.
             **kwargs: Additional arguments to pass to the sampling procedure.
 
         Returns:

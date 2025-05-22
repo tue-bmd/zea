@@ -1,7 +1,4 @@
-"""Layers used in usbmd.models
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 23/01/2025
-"""
+"""Layers used in usbmd.models"""
 
 import math
 

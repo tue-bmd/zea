@@ -19,7 +19,7 @@ import numpy as np
 
 from usbmd.data.data_format import generate_usbmd_dataset
 from usbmd.scan import compute_t0_delays_planewave
-from usbmd.utils import log
+from usbmd import log
 
 
 def convert_picmus(source_path, output_path, overwrite=False):

@@ -1,8 +1,4 @@
-"""Set custom, user specific data paths in this file.
-
-- **Author(s)**     : Tristan Stevens, Frits de Bruijn
-- **Date**          : -
-"""
+"""Utility functions for handling data paths."""
 
 import copy
 import getpass
@@ -17,8 +13,9 @@ from typing import Union
 
 import yaml
 
+from usbmd import log
 from usbmd.config import Config
-from usbmd.utils import log, strtobool
+from usbmd.utils import strtobool
 
 DEFAULT_DATA_ROOT = {
     "windows": "Z:/Ultrasound-BMd/data",
@@ -539,6 +536,19 @@ def create_new_user(user_config_path: str = None, local: bool = None):
                 log.success("Profile updated successfully.")
 
     return data_paths
+
+
+def format_data_path(path, user):
+    """If the path is not absolute, prepend the data_root to it."""
+    path = Path(path)
+    if path.is_absolute():
+        return path
+    else:
+        assert user is not None, (
+            "The dataset folder is absolute, but no user is provided. "
+            "Please provide a user to load the dataset."
+        )
+    return Path(user.data_root) / path
 
 
 if __name__ == "__main__":
