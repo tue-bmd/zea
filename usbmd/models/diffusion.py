@@ -487,6 +487,7 @@ class DiffusionModel(DeepGenerativeModel):
         seed=None,
         verbose: bool = False,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
+        disable_jit=False,
         **kwargs,
     ):
         """Reverse diffusion process conditioned on some measurement.
@@ -584,7 +585,7 @@ class DiffusionModel(DeepGenerativeModel):
                 seed,
             ),
             # can't jit this with progbar or tracking intermediate values
-            disable_jit=verbose or track_progress_type,
+            disable_jit=verbose or track_progress_type or disable_jit,
         )
 
         return pred_images
