@@ -1,9 +1,10 @@
 """Augmentation layers for ultrasound data."""
 
-import numpy as np
 import keras
+import numpy as np
 from keras import layers, ops
-from usbmd.tensor_ops import split_seed, is_jax_prng_key
+
+from usbmd.tensor_ops import is_jax_prng_key, split_seed
 
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 
@@ -13,20 +14,20 @@ class RandomCircleInclusion(layers.Layer):
     Adds a circular inclusion to the image, optionally at random locations.
 
     Since this can accept N-dimensional inputs, you'll need to specify your
-    'circle_axes' -- these are the axes onto which a circle will be drawn.
+    ``circle_axes`` -- these are the axes onto which a circle will be drawn.
     This circle will then be broadcast along the remaining dimensions.
 
     You can then optionally specify whether there is a batch dim,
     and whether the circles should be located randomly across that batch.
 
     For example, if you have a batch of videos, e.g. of shape [batch, frame, height, width],
-    then you might want to specify circle_axes=(2, 3), and randomize_location_across_batch=True.
-    This would result in a circle that is located in the same place _per video_, but
-    different locations for different videos.
+    then you might want to specify ``circle_axes=(2, 3)``, and
+    ``randomize_location_across_batch=True``. This would result in a circle that is located
+    in the same place per video, but different locations for different videos.
 
     Once your method has recovered the circles, you can evaluate them using
-    the evaluate_recovered_circle_accuracy() method, which will expect an input
-    shape matching your inputs to call().
+    the ``evaluate_recovered_circle_accuracy()`` method, which will expect an input
+    shape matching your inputs to ``call()``.
     """
 
     def __init__(
