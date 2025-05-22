@@ -9,11 +9,12 @@ import numpy as np
 import pytest
 
 from usbmd import ops
+from usbmd.beamform.delays import compute_t0_delays_planewave
 from usbmd.config.config import Config
 from usbmd.internal.core import DataTypes
 from usbmd.internal.registry import ops_registry
 from usbmd.probes import Dummy, Probe
-from usbmd.scan import Scan, compute_t0_delays_planewave
+from usbmd.scan import Scan
 
 """Some operations for testing"""
 
