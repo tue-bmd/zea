@@ -1,8 +1,4 @@
-"""Check functions for data types and shapes.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : October 30 2023
-"""
+"""Check functions for data types and shapes."""
 
 import importlib.util
 

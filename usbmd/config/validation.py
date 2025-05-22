@@ -9,8 +9,6 @@ missing (if optional) parameters to default values. When adding functionality
 that needs parameters from the config file, make sure to add those paremeters here.
 Also if that parameter is optional, add a default value.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 31/01/2023
 """
 
 from pathlib import Path
@@ -19,13 +17,10 @@ from typing import Union
 from schema import And, Optional, Or, Regex, Schema
 
 import usbmd.metrics  # pylint: disable=unused-import
-from usbmd.config import Config
-from usbmd.internal.registry import metrics_registry
 from usbmd import log
-from usbmd.internal.checks import _DATA_TYPES, _MOD_TYPES
-
-_BEAMFORMER_TYPES = ["das"]  # TODO: hardcoded for now
-
+from usbmd.config import Config
+from usbmd.internal.checks import _DATA_TYPES
+from usbmd.internal.registry import metrics_registry
 
 # predefined checks, later used in schema to check validity of parameter
 any_number = Or(
@@ -42,31 +37,7 @@ list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
 list_of_positive_integers = And(list, lambda l: all(_l >= 0 for _l in l))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
 
-_ALLOWED_KEYS_PROXTYPE = (None, "wavelet", "softthres", "fourier", "neural")
-_ALLOWED_DEMODULATION = ("manual", "hilbert", "gabor")
 _ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
-
-# optional sub schemas go here, to allow for nested defaults
-
-# model
-model_schema = Schema(
-    {
-        Optional("batch_size", default=1): positive_integer,
-        Optional("patch_shape", default=None): Or(None, list_of_size_two),
-        Optional("beamformer", default={}): {
-            Optional("type", default=None): Or(None, *_BEAMFORMER_TYPES),
-            Optional("folds", default=1): positive_integer,
-            Optional("end_with_prox", default=False): bool,
-            Optional("proxtype", default="softthres"): Or(*_ALLOWED_KEYS_PROXTYPE),
-            Optional("kernel_size", default=3): positive_integer,
-            Optional("aux_inputs", default=None): Or(None, list),
-            Optional("patches", default=1): positive_integer,
-            Optional("jit", default=False): bool,
-            Optional("sum_transmits", default=False): bool,
-            Optional("auto_pressure_weighting", default=False): bool,
-        },
-    }
-)
 
 # pipeline / operations
 pipeline_schema = Schema(
@@ -179,16 +150,11 @@ data_schema = Schema(
         Optional("to_dtype", default="image"): Or(*_DATA_TYPES),
         Optional("file_path", default=None): Or(None, str, Path),
         Optional("local", default=True): bool,
-        Optional("subset", default=None): Or(None, str),
         Optional("frame_no", default=None): Or(None, "all", int),
         Optional("dynamic_range", default=[-60, 0]): list_of_size_two,
         Optional("input_range", default=None): Or(None, list_of_size_two),
         Optional("output_range", default=None): Or(None, list_of_size_two),
         Optional("apodization", default=None): Or(None, str),
-        Optional("modtype", default=None): Or(*_MOD_TYPES),  # ONLY FOR LEGACY DATASET
-        Optional("from_modtype", default=None): Or(
-            *_MOD_TYPES
-        ),  # ONLY FOR LEGACY DATASET
         Optional("user", default=None): Or(None, dict),
     }
 )
@@ -198,7 +164,6 @@ config_schema = Schema(
     {
         "data": data_schema,
         Optional("plot", default=plot_schema.validate({})): plot_schema,
-        Optional("model", default=model_schema.validate({})): model_schema,
         Optional("pipeline", default=pipeline_schema.validate({})): pipeline_schema,
         Optional("scan", default=scan_schema.validate({})): scan_schema,
         Optional("device", default="auto:1"): Or(

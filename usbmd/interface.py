@@ -1,9 +1,4 @@
-"""The interface module runs a complete ultrasound beamforming pipeline and displays
-the results in a GUI.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : November 18th, 2021
-"""
+"""Convenience interface for loading and displaying ultrasound data."""
 
 import asyncio
 import time
