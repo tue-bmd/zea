@@ -1,9 +1,6 @@
 """Echonet-Dynamic segmentation model for cardiac ultrasound segmentation.
 Link below does not work it seems, this is slightly different but does have some info:
 https://github.com/bryanhe/dynamic
-
-- **Author(s)**     : Tristan Stevens, adapted from https://echonet.github.io/dynamic/
-- **Date**          : 20/11/2023
 """
 
 from pathlib import Path
@@ -13,10 +10,10 @@ import tensorflow as tf
 import wget
 from keras import backend, ops
 
+from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
 from usbmd.models.presets import echonet_dynamic_presets
-from usbmd.registry import model_registry
 
 INFERENCE_SIZE = 112
 

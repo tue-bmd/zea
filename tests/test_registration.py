@@ -2,7 +2,7 @@
 
 import pytest
 
-from usbmd.registry import RegisterDecorator
+from usbmd.internal.registry import RegisterDecorator
 
 
 def test_names():

@@ -3,17 +3,15 @@
 Run as `usbmd --config path/to/config.yaml` to start the USBMD GUI.
 Or do not pass a config file to open a file dialog to choose a config file.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : November 18th, 2021
 """
 
 # pylint: disable=import-outside-toplevel
 import argparse
-import asyncio
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+from usbmd import log
+from usbmd.visualize import set_mpl_style
 
 
 def get_args():
@@ -40,10 +38,10 @@ def get_args():
         ),
     )
     parser.add_argument(
-        "--skip_validate_dataset",
+        "--skip_validate_file",
         default=False,
         action="store_true",
-        help="Skip dataset integrity checks. Useful for large datasets. Use with caution.",
+        help="Skip usbmd file integrity checks. Use with caution.",
     )
     # pylint: disable=no-member
     parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
@@ -55,10 +53,10 @@ def main():
     """main entrypoint for UI script USBMD"""
     args = get_args()
 
-    plt.style.use(str(Path(__file__).parent / "usbmd_darkmode.mplstyle"))
+    set_mpl_style()
 
     if args.backend:
-        from usbmd.setup_usbmd import set_backend
+        from usbmd.internal.setup_usbmd import set_backend
 
         set_backend(args.backend)
 
@@ -69,55 +67,24 @@ def main():
 
     from usbmd.generate import GenerateDataSet
     from usbmd.interface import Interface
-    from usbmd.setup_usbmd import setup
-    from usbmd.utils import keep_trying, log, strtobool
-    from usbmd.utils.checks import _DATA_TYPES
-    from usbmd.utils.gui import USBMDApp
-    from usbmd.utils.io_lib import start_async_app
+    from usbmd.internal.checks import _DATA_TYPES
+    from usbmd.internal.setup_usbmd import setup
+    from usbmd.utils import keep_trying, strtobool
 
     config = setup(args.config)
 
     if args.task == "run":
         ui = Interface(
             config,
-            dataset_kwargs={
-                "validate": not args.skip_validate_dataset,
-            },
+            validate_file=not args.skip_validate_file,
         )
 
         log.info(f"Using {keras.backend.backend()} backend")
-
-        if args.gui:
-            log.warning(
-                "GUI is very much in beta, please report any bugs to "
-                "https://github.com/tue-bmd/ultrasound-toolbox."
-            )
-            try:
-                asyncio.run(
-                    start_async_app(
-                        USBMDApp,
-                        title="USBMD GUI",
-                        ui=ui,
-                        resolution=(600, 300),
-                        verbose=True,
-                        config=config,
-                    )
-                )
-            except RuntimeError as e:
-                # probably a better way to handle this...
-                if str(e) == "Event loop stopped before Future completed.":
-                    log.info("GUI closed.")
-                else:
-                    raise e
-        else:
-            ui.run(plot=True)
+        ui.run(plot=True)
 
     elif args.task == "generate":
         destination_folder = keep_trying(
-            lambda: input(
-                ">> Give destination folder path"
-                + " (if relative path, will be relative to the original dataset): "
-            )
+            lambda: input(">> Give absolute destination folder path")
         )
         to_dtype = keep_trying(
             lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),

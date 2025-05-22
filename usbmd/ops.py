@@ -1,69 +1,77 @@
-"""Ops module for processing ultrasound data.
+"""Operations and Pipelines for ultrasound data processing.
 
-This module contains two important classes, Operation and Pipeline, which are used to
-process ultrasound data. A pipeline is a sequence of operations that are applied to the data
-in a specific order.
+This module contains two important classes, :class:`Operation` and :class:`Pipeline`,
+which are used to process ultrasound data. A pipeline is a sequence of operations
+that are applied to the data in a specific order.
 
-## Stand-alone manual usage
+Stand-alone manual usage
+------------------------
+
 Operations can be run on their own:
 
-Examples:
-```python
-data = np.random.randn(2000, 128, 1)
-# static arguments are passed in the constructor
-envelope_detect = EnvelopeDetect(axis=-1)
-# other parameters can be passed here along with the data
-envelope_data = envelope_detect(data=data)
-```
+Examples
+^^^^^^^^
+.. code-block:: python
 
-## Using a pipeline
+    data = np.random.randn(2000, 128, 1)
+    # static arguments are passed in the constructor
+    envelope_detect = EnvelopeDetect(axis=-1)
+    # other parameters can be passed here along with the data
+    envelope_data = envelope_detect(data=data)
+
+Using a pipeline
+----------------
+
 You can initialize with a default pipeline or create your own custom pipeline.
-```python
-pipeline = Pipeline.from_default()
 
-operations = [
-    EnvelopeDetect(),
-    Normalize(),
-    LogCompress(),
-]
-pipeline_custom = Pipeline(operations)
-```
+.. code-block:: python
+
+    pipeline = Pipeline.from_default()
+
+    operations = [
+        EnvelopeDetect(),
+        Normalize(),
+        LogCompress(),
+    ]
+    pipeline_custom = Pipeline(operations)
 
 One can also load a pipeline from a config or yaml/json file:
 
-```python
-json_string = '{"operations": ["identity"]}'
-pipeline = Pipeline.from_json(json_string)
+.. code-block:: python
 
-yaml_file = "pipeline.yaml"
-pipeline = Pipeline.from_yaml(yaml_file)
-```
+    json_string = '{"operations": ["identity"]}'
+    pipeline = Pipeline.from_json(json_string)
+
+    yaml_file = "pipeline.yaml"
+    pipeline = Pipeline.from_yaml(yaml_file)
 
 Example of a yaml file:
-```yaml
-pipeline:
-  operations:
-    - name: demodulate
-    - name: "patched_grid"
-      params:
-        operations:
-          - name: tof_correction
-            params:
-              apply_phase_rotation: true
-          - name: pfield_weighting
-          - name: delay_and_sum
-        num_patches: 100
-    - name: envelope_detect
-    - name: normalize
-    - name: log_compress
 
-```
+.. code-block:: yaml
+
+    pipeline:
+      operations:
+        - name: demodulate
+        - name: "patched_grid"
+          params:
+            operations:
+              - name: tof_correction
+                params:
+                  apply_phase_rotation: true
+              - name: pfield_weighting
+              - name: delay_and_sum
+            num_patches: 100
+        - name: envelope_detect
+        - name: normalize
+        - name: log_compress
+
 """
 
 import copy
 import hashlib
 import inspect
 import json
+from functools import partial
 from typing import Any, Dict, List, Union
 
 import keras
@@ -71,21 +79,28 @@ import numpy as np
 import scipy
 import yaml
 from keras import ops
+from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 
+from usbmd import log
 from usbmd.backend import jit
-from usbmd.beamformer import tof_correction
+from usbmd.beamform.beamformer import tof_correction
 from usbmd.config.config import Config
-from usbmd.core import STATIC, DataTypes
-from usbmd.core import Object as USBMDObject
-from usbmd.core import USBMDDecoderJSON, USBMDEncoderJSON
 from usbmd.display import scan_convert
+from usbmd.internal.checks import _assert_keys_and_axes
+from usbmd.internal.core import STATIC, DataTypes
+from usbmd.internal.core import Object as USBMDObject
+from usbmd.internal.core import USBMDDecoderJSON, USBMDEncoderJSON
+from usbmd.internal.registry import ops_registry
 from usbmd.probes import Probe
-from usbmd.registry import ops_registry
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, resample, reshape_axis
-from usbmd.utils import check_architecture, deep_compare, log, translate
-from usbmd.utils.checks import _assert_keys_and_axes
+from usbmd.utils import (
+    check_architecture,
+    deep_compare,
+    map_negative_indices,
+    translate,
+)
 
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
@@ -112,6 +127,7 @@ class Operation(keras.Operation):
         with_batch_dim: bool = True,
         jit_kwargs: dict | None = None,
         jittable: bool = True,
+        **kwargs,
     ):
         """
         Args:
@@ -130,7 +146,7 @@ class Operation(keras.Operation):
             jit_kwargs: Additional keyword arguments for the JIT compiler
             jittable: Whether the operation can be JIT compiled
         """
-        super().__init__()
+        super().__init__(**kwargs)
 
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
@@ -403,7 +419,7 @@ class Pipeline:
                 return True
 
     @classmethod
-    def from_default(cls, num_patches=20, **kwargs) -> "Pipeline":
+    def from_default(cls, num_patches=20, pfield=True, **kwargs) -> "Pipeline":
         """Create a default pipeline."""
         operations = []
 
@@ -413,9 +429,10 @@ class Pipeline:
         # Get beamforming ops
         beamforming = [
             TOFCorrection(apply_phase_rotation=True),
-            PfieldWeighting(),
             DelayAndSum(),
         ]
+        if pfield:
+            beamforming.insert(1, PfieldWeighting())
 
         # Optionally add patching
         if num_patches > 1:
@@ -706,23 +723,24 @@ class Pipeline:
 
     @classmethod
     def from_config(cls, config: Dict, **kwargs) -> "Pipeline":
-        """Create a pipeline from a dictionary or `usbmd.Config` object.
+        """Create a pipeline from a dictionary or ``usbmd.Config`` object.
 
         Args:
-            config (dict or Config): Configuration dictionary or `usbmd.Config` object.
+            config (dict or Config): Configuration dictionary or ``usbmd.Config`` object.
             **kwargs: Additional keyword arguments to be passed to the pipeline.
 
         Note:
-            Must have the a `pipeline` key with a subkey `operations`.
+            Must have a ``pipeline`` key with a subkey ``operations``.
 
         Example:
-        ```python
-        config = Config({
-            "operations": [
-                "identity",
-            ],
-        })
-        pipeline = Pipeline.from_config(config)
+            .. code-block:: python
+
+                config = Config({
+                    "operations": [
+                        "identity",
+                    ],
+                })
+                pipeline = Pipeline.from_config(config)
         """
         return pipeline_from_config(Config(config), **kwargs)
 
@@ -853,8 +871,11 @@ class Pipeline:
         tensor_kwargs = {}
         for key, value in kwargs.items():
             try:
+                # TODO: maybe some logic of convert_to_tensor is needed
                 if isinstance(value, USBMDObject):
                     tensor_kwargs[key] = value.to_tensor()
+                elif value is None:
+                    tensor_kwargs[key] = None
                 else:
                     tensor_kwargs[key] = ops.convert_to_tensor(value)
             except Exception as e:
@@ -885,6 +906,7 @@ def make_operation_chain(
     operation_chain: List[Union[str, Dict, Config, Operation, Pipeline]],
 ) -> List[Operation]:
     """Make an operation chain from a custom list of operations.
+
     Args:
         operation_chain (list): List of operations to be performed.
             Each operation can be:
@@ -892,8 +914,18 @@ def make_operation_chain(
             - A dictionary: operation initialized with parameters in the dictionary
             - A Config object: converted to a dictionary and initialized
             - An Operation/Pipeline instance: used as-is
+
     Returns:
         list: List of operations to be performed.
+
+    Example:
+        .. code-block:: python
+
+            chain = make_operation_chain([
+                "envelope_detect",
+                {"name": "normalize", "params": {"output_range": (0, 1)}},
+                SomeCustomOperation(),
+            ])
     """
     chain = []
     for operation in operation_chain:
@@ -1256,6 +1288,20 @@ class Mean(Operation):
             kwargs[key] = ops.mean(kwargs[key], axis=axis)
 
         return kwargs
+
+
+@ops_registry("transpose")
+class Transpose(Operation):
+    """Transpose the input data along the specified axes."""
+
+    def __init__(self, axes, **kwargs):
+        super().__init__(**kwargs)
+        self.axes = axes
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        transposed_data = ops.transpose(data, axes=self.axes)
+        return {self.output_key: transposed_data}
 
 
 @ops_registry("simulate_rf")
@@ -1661,6 +1707,8 @@ class Normalize(Operation):
 
     def __init__(self, output_range=None, input_range=None, **kwargs):
         super().__init__(**kwargs)
+        if output_range is None:
+            output_range = (0, 1)
         self.output_range = self.to_float32(output_range)
         self.input_range = self.to_float32(input_range)
         assert output_range is None or len(output_range) == 2
@@ -1689,32 +1737,36 @@ class Normalize(Operation):
         """
         data = kwargs[self.key]
 
-        output_range = _set_if_none(self.output_range, default=(0, 1))
-        input_range = _set_if_none(self.input_range, default=(None, None))
+        # If input_range is not provided, try to get it from kwargs
+        # This allows you to normalize based on the first frame in a sequence:
+        # Example: https://github.com/tue-bmd/ultrasound-toolbox/pull/662
+        if self.input_range is None:
+            maxval = kwargs.get("maxval", None)
+            minval = kwargs.get("minval", None)
+        # If input_range is provided, use it
+        else:
+            minval, maxval = self.input_range
 
-        a_min, a_max = input_range
-        if a_min is None:
-            a_min = ops.min(data)
-        if a_max is None:
-            a_max = ops.max(data)
-        data = ops.clip(data, a_min, a_max)
-        input_range = (a_min, a_max)
+        # If input_range is still not provided, compute it from the data
+        if minval is None:
+            minval = ops.min(data)
+        if maxval is None:
+            maxval = ops.max(data)
+
+        # Clip the data to the input range
+        data = ops.clip(data, minval, maxval)
 
         # Map the data to the output range
-        normalized_data = translate(data, input_range, output_range)
+        normalized_data = translate(data, (minval, maxval), self.output_range)
 
-        return {self.output_key: normalized_data}
-
-
-def _set_if_none(variable, default):
-    if variable is not None:
-        return variable
-    return default
+        return {self.output_key: normalized_data, "minval": minval, "maxval": maxval}
 
 
 @ops_registry("scan_convert")
 class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
+
+    STATIC_PARAMS = ["fill_value"]
 
     def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
@@ -1778,7 +1830,7 @@ class ScanConvert(Operation):
                 "You can set ScanConvert(jit_compile=False) to disable jitting."
             )
 
-        data_out = scan_convert(
+        data_out, parameters = scan_convert(
             data,
             rho_range,
             theta_range,
@@ -1790,7 +1842,7 @@ class ScanConvert(Operation):
             with_batch_dim=self.with_batch_dim,
         )
 
-        return {self.output_key: data_out}
+        return {self.output_key: data_out, **parameters}
 
 
 @ops_registry("gaussian_blur")
@@ -1974,6 +2026,21 @@ class Demodulate(Operation):
         }
 
 
+@ops_registry("lambda")
+class Lambda(Operation):
+    """Use any funcion as an operation."""
+
+    def __init__(self, func, func_kwargs=None, **kwargs):
+        super().__init__(**kwargs)
+        func_kwargs = func_kwargs or {}
+        self.func = partial(func, **func_kwargs)
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        data = self.func(data)
+        return {self.output_key: data}
+
+
 @ops_registry("clip")
 class Clip(Operation):
     """Clip the input data to a given range."""
@@ -1987,6 +2054,114 @@ class Clip(Operation):
         data = kwargs[self.key]
         data = ops.clip(data, self.min_value, self.max_value)
         return {self.output_key: data}
+
+
+@ops_registry("pad")
+class Pad(Operation, TFDataLayer):
+    """Pad layer for padding tensors to a specified shape."""
+
+    def __init__(
+        self,
+        target_shape: list | tuple,
+        uniform: bool = True,
+        axis: Union[int, List[int]] = None,
+        fail_on_bigger_shape: bool = True,
+        pad_kwargs: dict = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.target_shape = target_shape
+        self.uniform = uniform
+        self.axis = axis
+        self.pad_kwargs = pad_kwargs or {}
+        self.fail_on_bigger_shape = fail_on_bigger_shape
+
+    @staticmethod
+    def _format_target_shape(shape_array, target_shape, axis):
+        if isinstance(axis, int):
+            axis = [axis]
+        assert len(axis) == len(
+            target_shape
+        ), "The length of axis must be equal to the length of target_shape."
+        axis = map_negative_indices(axis, len(shape_array))
+
+        target_shape = [
+            target_shape[axis.index(i)] if i in axis else shape_array[i]
+            for i in range(len(shape_array))
+        ]
+        return target_shape
+
+    def pad(
+        self,
+        z,
+        target_shape: list | tuple,
+        uniform: bool = True,
+        axis: Union[int, List[int]] = None,
+        fail_on_bigger_shape: bool = True,
+        **kwargs,
+    ):
+        """
+        Pads the input tensor `z` to the specified shape.
+
+        Parameters:
+            z (tensor): The input tensor to be padded.
+            target_shape (list or tuple): The target shape to pad the tensor to.
+            uniform (bool, optional): If True, ensures that padding is uniform (even on both sides).
+                Default is False.
+            axis (int or list of int, optional): The axis or axes along which `target_shape` was
+                specified. If None, `len(target_shape) == `len(ops.shape(z))` must hold.
+                Default is None.
+            fail_on_bigger_shape (bool, optional): If True (default), raises an error if any target
+                dimension is smaller than the input shape; if False, pads only where the
+                target shape exceeds the input shape and leaves other dimensions unchanged.
+            kwargs: Additional keyword arguments to pass to the padding function.
+
+        Returns:
+            tensor: The padded tensor with the specified shape.
+        """
+        shape_array = self.backend.shape(z)
+
+        # When axis is provided, convert target_shape
+        if axis is not None:
+            target_shape = self._format_target_shape(shape_array, target_shape, axis)
+
+        if not fail_on_bigger_shape:
+            target_shape = [
+                max(target_shape[i], shape_array[i]) for i in range(len(shape_array))
+            ]
+
+        # Compute the padding required for each dimension
+        pad_shape = np.array(target_shape) - shape_array
+
+        # Create the paddings array
+        if uniform:
+            # if odd, pad more on the left, same as:
+            # https://keras.io/api/layers/preprocessing_layers/image_preprocessing/center_crop/
+            right_pad = pad_shape // 2
+            left_pad = pad_shape - right_pad
+            paddings = np.stack([right_pad, left_pad], axis=1)
+        else:
+            paddings = np.stack([np.zeros_like(pad_shape), pad_shape], axis=1)
+
+        if np.any(paddings < 0):
+            raise ValueError(
+                f"Target shape {target_shape} must be greater than or equal "
+                f"to the input shape {shape_array}."
+            )
+
+        return self.backend.numpy.pad(z, paddings, **kwargs)
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        padded_data = self.pad(
+            data,
+            self.target_shape,
+            self.uniform,
+            self.axis,
+            self.fail_on_bigger_shape,
+            **self.pad_kwargs,
+        )
+        return {self.output_key: padded_data}
 
 
 @ops_registry("companding")

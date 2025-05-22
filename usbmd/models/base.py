@@ -1,7 +1,6 @@
 """Base model class for all USBMD Keras models.
 
-- **Author(s)**: Tristan Stevens
-- **Date**: 20/12/2024
+This module provides the `BaseModel` class for all USBMD Keras models.
 """
 
 import importlib
@@ -9,7 +8,7 @@ import importlib
 import keras
 from keras.src.saving.serialization_lib import record_object_after_deserialization
 
-from usbmd.core import classproperty
+from usbmd.internal.core import classproperty
 from usbmd.models.preset_utils import (
     builtin_presets,
     get_preset_loader,
@@ -18,20 +17,34 @@ from usbmd.models.preset_utils import (
 
 
 class BaseModel(keras.models.Model):
-    """Class class for all USBMD Keras models.
+    """Base class for all USBMD Keras models.
 
-    A `BaseModel` is the basic model.
+    A ``BaseModel`` is the basic model for USBMD.
     """
 
     @classmethod
     def from_config(cls, config):  # pylint: disable=arguments-differ
-        # The default `from_config()` for functional models will return a
-        # vanilla `keras.Model`. We override it to get a subclass instance back.
+        """Create a model instance from a configuration dictionary.
+
+        The default ``from_config()`` for functional models will return a
+        vanilla ``keras.Model``. This override ensures a subclass instance is returned.
+
+        Args:
+            config (dict): Configuration dictionary.
+
+        Returns:
+            BaseModel: An instance of the model subclass.
+
+        """
         return cls(**config)
 
     @classproperty
     def presets(cls):  # pylint: disable=no-self-argument
-        """List built-in presets for a `BaseModel` subclass."""
+        """List built-in presets for a ``BaseModel`` subclass.
+
+        Returns:
+            dict: Dictionary of available built-in presets.
+        """
         return builtin_presets(cls)
 
     @classmethod
@@ -41,46 +54,50 @@ class BaseModel(keras.models.Model):
         load_weights=True,
         **kwargs,
     ):
-        """Instantiate a `keras_hub.models.Backbone` from a model preset.
+        """Instantiate a model from a preset.
 
-        A preset is a directory of configs, weights and other file assets used
-        to save and load a pre-trained model. The `preset` can be passed as a
-        one of:
+        A preset is a directory of configs, weights, and other file assets used
+        to save and load a pre-trained model. The ``preset`` can be passed as one of:
 
-        1. a built-in preset identifier like `'bert_base_en'`
-        2. a Kaggle Models handle like `'kaggle://user/bert/keras/bert_base_en'`
-        3. a Hugging Face handle like `'hf://user/bert_base_en'`
-        4. a path to a local preset directory like `'./bert_base_en'`
+            1. a built-in preset identifier like ``'bert_base_en'``
+            2. a Kaggle Models handle like ``'kaggle://user/bert/keras/bert_base_en'``
+            3. a Hugging Face handle like ``'hf://user/bert_base_en'``
+            4. a path to a local preset directory like ``'./bert_base_en'``
 
-        This constructor can be called in one of two ways. Either from the base
-        class like `keras_hub.models.Backbone.from_preset()`, or from
-        a model class like `keras_hub.models.GemmaBackbone.from_preset()`.
+        This constructor can be called in one of two ways: either from the base
+        class like ``keras_hub.models.Backbone.from_preset()``, or from
+        a model class like ``keras_hub.models.GemmaBackbone.from_preset()``.
         If calling from the base class, the subclass of the returning object
         will be inferred from the config in the preset directory.
 
-        For any `Backbone` subclass, you can run `cls.presets.keys()` to list
+        For any ``Backbone`` subclass, you can run ``cls.presets.keys()`` to list
         all built-in presets available on the class.
 
         Args:
-            preset: string. A built-in preset identifier, a Kaggle Models
+            preset (str): A built-in preset identifier, a Kaggle Models
                 handle, a Hugging Face handle, or a path to a local directory.
-            load_weights: bool. If `True`, the weights will be loaded into the
-                model architecture. If `False`, the weights will be randomly
+            load_weights (bool): If ``True``, the weights will be loaded into the
+                model architecture. If ``False``, the weights will be randomly
                 initialized.
+            **kwargs: Additional keyword arguments.
 
         Examples:
-        ```python
-        # Load a Gemma backbone with pre-trained weights.
-        model = keras_hub.models.Backbone.from_preset(
-            "gemma_2b_en",
-        )
+            .. code-block:: python
 
-        # Load a Bert backbone with a pre-trained config and random weights.
-        model = keras_hub.models.Backbone.from_preset(
-            "bert_base_en",
-            load_weights=False,
-        )
-        ```
+                # Load a Gemma backbone with pre-trained weights.
+                model = keras_hub.models.Backbone.from_preset(
+                    "gemma_2b_en",
+                )
+
+                # Load a Bert backbone with a pre-trained config and random weights.
+                model = keras_hub.models.Backbone.from_preset(
+                    "bert_base_en",
+                    load_weights=False,
+                )
+
+        Returns:
+            BaseModel: The loaded model instance.
+
         """
         loader = get_preset_loader(preset)
         model_cls = loader.check_model_class()

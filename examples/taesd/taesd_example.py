@@ -1,9 +1,4 @@
-"""
-TAESD model from: https://github.com/madebyollin/taesd
-
-- **Author(s)**: Wessel van Nierop
-- **Date**: 20/11/2024
-"""
+"""TAESD model from: https://github.com/madebyollin/taesd"""
 
 import os
 
@@ -13,11 +8,10 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
+from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.models.taesd import TinyAutoencoder
 from usbmd.utils import get_date_string
-from usbmd.utils.visualize import plot_image_grid
+from usbmd.visualize import plot_image_grid
 
 if __name__ == "__main__":
     # Set up data paths and device
@@ -25,7 +19,7 @@ if __name__ == "__main__":
     init_device()
 
     n_imgs = 10
-    val_dataset = h5_dataset_from_directory(
+    val_dataset = make_dataloader(
         data_paths.data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,

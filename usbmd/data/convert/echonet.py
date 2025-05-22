@@ -17,8 +17,8 @@ from tqdm import tqdm
 
 from usbmd.config import Config
 from usbmd.data import generate_usbmd_dataset
-from usbmd.utils.io_lib import load_video
-from usbmd.utils.utils import translate
+from usbmd.io_lib import load_video
+from usbmd.utils import translate
 
 
 def get_args():

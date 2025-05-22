@@ -1,9 +1,4 @@
-"""Class structures containing parameters defining an ultrasound scan and the
-beamforming grid.
-
-- **Author(s)**     : Vincent van de Schaft, Tristan Stevens
-- **Date**          : Wed Feb 15 2024
-"""
+"""Structure containing parameters defining an ultrasound scan."""
 
 # pylint: disable=too-many-public-methods
 
@@ -13,14 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from keras import ops
 
-from usbmd.core import STATIC, Object
+from usbmd import log
+from usbmd.beamform.pfield import compute_pfield
+from usbmd.beamform.pixelgrid import check_for_aliasing, get_grid
 from usbmd.display import (
     compute_scan_convert_2d_coordinates,
     compute_scan_convert_3d_coordinates,
 )
-from usbmd.utils import log
-from usbmd.utils.pfield import compute_pfield
-from usbmd.utils.pixelgrid import check_for_aliasing, get_grid
+from usbmd.internal.core import STATIC, Object
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -729,7 +724,7 @@ class Scan(Object):
         beamforming grid.
 
         If None, the number of pixels is calculated based on the
-        `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
+        `pixels_per_wavelength` parameter. See `usbmd.beamform.pixelgrid.get_grid`.
         """
         _ = self.grid  # Ensure grid is initialized
         return int(self._Nx) if self._Nx is not None else None
@@ -745,7 +740,7 @@ class Scan(Object):
         beamforming grid.
 
         If None, the number of pixels is calculated based on the
-        `pixels_per_wavelength` parameter. See `usbmd.utils.pixel_grid.get_grid`.
+        `pixels_per_wavelength` parameter. See `usbmd.beamform.pixelgrid.get_grid`.
         """
         _ = self.grid  # Ensure grid is initialized
         return int(self._Nz) if self._Nz is not None else None
@@ -930,7 +925,7 @@ class Scan(Object):
 
         # If phi_range is set, use 3D scan conversion
         if self.phi_range is not None:
-            self._coordinates = compute_scan_convert_3d_coordinates(
+            self._coordinates, _ = compute_scan_convert_3d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
@@ -940,7 +935,7 @@ class Scan(Object):
 
         # If phi_range is not set, use 2D scan conversion
         else:
-            self._coordinates = compute_scan_convert_2d_coordinates(
+            self._coordinates, _ = compute_scan_convert_2d_coordinates(
                 (self.Nz, self.Nx),
                 self.rho_range,
                 self.theta_range,
