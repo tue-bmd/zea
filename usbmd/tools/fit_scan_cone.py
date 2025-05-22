@@ -20,6 +20,7 @@ if __name__ == "__main__":
 
 import keras
 from keras import ops
+import argparse
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -697,12 +698,20 @@ def main(avi_path):
         print(f"Error fitting scan cone: {e}")
 
 
-if __name__ == "__main__":
-    from usbmd import set_data_paths  # pylint: disable=import-outside-toplevel
-
-    data_paths = set_data_paths(local=False)
-    SAMPLE_INPUT_FILE = Path(
-        data_paths.data_root
-        / "USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
+def get_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Precompute cone parameters for EchoNet-LVH dataset"
     )
-    main(SAMPLE_INPUT_FILE)
+    parser.add_argument(
+        "--input_file",
+        type=str,
+        # e.g. {data_root}/USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
+        required=True,
+    )
+
+
+if __name__ == "__main__":
+    args = get_args()
+    input_file = args.input_file
+    main(input_file)
