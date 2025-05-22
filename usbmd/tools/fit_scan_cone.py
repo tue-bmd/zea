@@ -452,10 +452,8 @@ def fit_and_crop_around_scan_cone(
         return_params: If True, also return cone parameters (default: False)
 
     Returns:
-        If return_params is False:
-            Keras tensor (cropped and padded image with apex at center)
-        If return_params is True:
-            Tuple of (cropped_tensor, cone_parameters_dict)
+        - If return_params is False: Keras tensor (cropped and padded image with apex at center)
+        - If return_params is True: Tuple of (cropped_tensor, cone_parameters_dict)
 
     Raises:
         ValueError: If cone detection fails or image is not 2D
