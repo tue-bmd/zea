@@ -48,6 +48,11 @@ jobs:
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
 
+      - name: Install Firebase Hosting dependencies
+        run: |
+          cd docs
+          npm install
+
       - name: Install Firebase Functions dependencies
         run: |
           cd docs/functions
