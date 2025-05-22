@@ -1,4 +1,25 @@
-"""Automatic pressure field computation used for compounding multiple Tx events"""
+"""
+Pressure Field Computation for Ultrasound Imaging
+=================================================
+
+This module provides routines for automatic computation of the acoustic pressure field
+used for compounding multiple transmit (Tx) events in ultrasound imaging.
+
+The pressure field is computed by simulating the acoustic response of the probe and
+medium for each transmit event. The computation involves:
+
+- Subdividing each probe element into sub-elements to satisfy the Fraunhofer approximation.
+- Calculating the distances and angles between each grid point and each sub-element.
+- Computing the frequency response of the probe and the pulse spectrum.
+- Summing the contributions from all relevant frequencies, taking into account
+  transmit delays, apodization, and directivity.
+- Optionally normalizing and thresholding the resulting field for use in
+  transmit compounding or adaptive beamforming.
+
+The main entry point is :func:`compute_pfield`, which returns a normalized pressure
+field array for all transmit events.
+
+"""
 
 import keras
 import numpy as np
@@ -16,7 +37,7 @@ def compute_pfield(
     downsample=10,
     downmix=4,
     alpha=1,
-    perc=10,
+    percentile=10,
     norm=True,
     verbose=True,
 ):
@@ -34,7 +55,7 @@ def compute_pfield(
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
             Default is 1.
-        perc (int, optional): minimum percentile threshold to keep in the weighting
+        percentile (int, optional): minimum percentile threshold to keep in the weighting
             Higher is more aggressive) Default is 10.
         norm (bool, optional): per pixel normalization (True) or unnormalized (False)
         verbose (bool, optional): Whether to print progress.
@@ -222,7 +243,7 @@ def compute_pfield(
         exp_arr = exp_arr * ops.cast(directivity, "complex64")
 
         # Render pressure field for all relevant frequencies and sum them up
-        rp = pfield_freq_loop(
+        rp = _pfield_freq_loop(
             freq,
             sound_speed,
             delays_tx,
@@ -253,21 +274,21 @@ def compute_pfield(
     )  # TODO: this is necessary for Jax / TF somehow. not sure why (not for torch)
 
     if norm:
-        p_norm = normalize(p_arr, alpha=alpha, perc=perc)
+        p_norm = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
     else:
         p_norm = p_arr
 
     return p_norm
 
 
-def normalize(p_arr, alpha=1, perc=10):
+def normalize_pressure_field(p_arr, alpha=1, percentile=10):
     """Normalize the input array of intensities.
 
     Args:
         p_arr (array): Sequence of intensity arrays.
         alpha (float, optional): Shape factor to tighten the beams. Higher is sharper.
             Default is 1.
-        perc (int, optional): Percentile to keep. Default is 10.
+        percentile (int, optional): Percentile to keep. Default is 10.
 
     Returns:
         ops.array: Normalized intensity array.
@@ -280,7 +301,7 @@ def normalize(p_arr, alpha=1, perc=10):
     # Flatten the last two dimensions, sort, and reshape back
     p_flat = ops.reshape(p_arr, (p_arr.shape[0], -1))
     p_sorted = ops.sort(p_flat, axis=1)
-    perc_value = p_sorted[:, int(p_arr.shape[1] * p_arr.shape[2] * perc / 100)]
+    perc_value = p_sorted[:, int(p_arr.shape[1] * p_arr.shape[2] * percentile / 100)]
     p_arr = ops.where(p_arr < perc_value[:, None, None], 0, p_arr)
 
     p_arr = ops.convert_to_tensor(p_arr) ** alpha
@@ -289,7 +310,7 @@ def normalize(p_arr, alpha=1, perc=10):
     return p_norm
 
 
-def pfield_freq_step(
+def _pfield_freq_step(
     k,
     freq,
     sound_speed,
@@ -331,7 +352,7 @@ def pfield_freq_step(
     return ops.abs(rp_k) ** 2
 
 
-def pfield_freq_loop(
+def _pfield_freq_loop(
     freq,
     sound_speed,
     delays_tx,
@@ -362,7 +383,7 @@ def pfield_freq_loop(
     tx_apodization = ops.cast(tx_apodization, "complex64")
     probe_spect = ops.cast(probe_spect, "complex64")
     stacked = ops.vectorized_map(
-        lambda k: pfield_freq_step(
+        lambda k: _pfield_freq_step(
             k,
             freq,
             sound_speed,
