@@ -726,6 +726,7 @@ class DiffusionModel(DeepGenerativeModel):
                 "max_t": self.max_t,
             }
         )
+        return config
 
 
 register_presets(diffusion_model_presets, DiffusionModel)
