@@ -1,8 +1,6 @@
 """
 Example script for using the LPIPS model to compute perceptual similarity between images.
 
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 20/01/2025
 """
 
 import os
@@ -15,10 +13,9 @@ import numpy as np
 import torch
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
+from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.models.lpips import LPIPS
-from usbmd.utils.visualize import plot_image_grid, set_mpl_style
+from usbmd.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
     TEST_WITH_TORCH = False  # set to True to test with torch variant
@@ -27,7 +24,7 @@ if __name__ == "__main__":
     device = init_device()
 
     n_imgs = 9
-    val_dataset = h5_dataset_from_directory(
+    val_dataset = make_dataloader(
         data_paths.data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,

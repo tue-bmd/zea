@@ -1,8 +1,5 @@
 """Config utilities.
 Load settings from yaml files and access them as objects / dicts.
-
-- **Author(s)**     : Tristan Stevens, Wessel van Nierop
-- **Date**          : 14-09-2021
 """
 
 import copy
@@ -13,8 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from usbmd.core import object_to_tensor
-from usbmd.utils import log
+from usbmd import log
+from usbmd.internal.core import object_to_tensor
 
 
 def path_to_str(path):
@@ -31,17 +28,21 @@ class Config(dict):
     values can be accessed as class attributes.
 
     Other features:
-        - `save_to_yaml` method to save the config to a yaml file.
-        - `copy` method to create a deep copy of the config.
-        - Normal dictionary methods such as `keys`, `values`, `items`, `pop`, `update`, `get`.
+
+        - ``save_to_yaml`` method to save the config to a yaml file.
+        - ``copy`` method to create a deep copy of the config.
+        - Normal dictionary methods such as
+            ``keys``, ``values``, ``items``, ``pop``, ``update``, ``get``.
         - Propose similar attribute names if a non-existing attribute is accessed.
         - Freeze the config object to prevent new attributes from being added.
         - Load config object from yaml file.
         - Logs all accessed attributes such that you can check if all attributes have been accessed.
 
     We took inspiration from the following sources:
-        - `EasyDict <https://pypi.org/project/easydict/>`_ # pylint: disable=line-too-long
+
+        - `EasyDict <https://pypi.org/project/easydict/>`_
         - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_ # pylint: disable=line-too-long
+
     But this implementation is superior :)
     """
 

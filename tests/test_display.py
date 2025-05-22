@@ -41,7 +41,7 @@ def test_scan_conversion(size, resolution, order):
     if len(size) == 3:
         phi_range = (-20, 20)
         phi_range = np.deg2rad(phi_range)
-        out = display.scan_convert_3d(
+        out, params = display.scan_convert_3d(
             data,
             rho_range,
             theta_range,
@@ -50,13 +50,15 @@ def test_scan_conversion(size, resolution, order):
             order=order,
         )
     else:
-        out = display.scan_convert_2d(
+        out, params = display.scan_convert_2d(
             data,
             rho_range,
             theta_range,
             resolution=resolution,
             order=order,
         )
+
+    assert isinstance(params, dict), "params is not a dict"
 
     # Check that dtype was not changed
     assert ops.dtype(out) == ops.dtype(
@@ -122,7 +124,7 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     rho_range = (0, 100)
     theta_range = np.deg2rad((-45, 45))
 
-    cartesian_data = display.scan_convert_2d(polar_data, rho_range, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
     cartesian_data = ops.convert_to_numpy(cartesian_data)
     cartesian_data_inv = display.transform_sc_image_to_polar(
         cartesian_data, output_size=polar_data.shape

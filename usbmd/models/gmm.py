@@ -156,8 +156,8 @@ class GaussianMixtureModel(GenerativeModel):
         samples = means + eps * ops.sqrt(vars_)
         return samples
 
-    def posterior_sample(self, data, seed=None, **kwargs):
-        X = ops.convert_to_tensor(data, dtype="float32")
+    def posterior_sample(self, measurements, seed=None, **kwargs):
+        X = ops.convert_to_tensor(measurements, dtype="float32")
         gamma = self._e_step(X)
         comp_idx = keras.random.categorical(ops.log(gamma), 1, seed=seed)
         comp_idx = ops.squeeze(comp_idx, axis=-1)

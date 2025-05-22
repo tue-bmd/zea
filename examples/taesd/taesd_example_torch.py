@@ -2,8 +2,6 @@
 TAESD model from: https://github.com/madebyollin/taesd
 run: `pip install diffusers`
 
-- **Author(s)**: Wessel van Nierop
-- **Date**: 20/11/2024
 """
 
 import importlib
@@ -13,10 +11,9 @@ import matplotlib.pyplot as plt
 import torch
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import h5_dataset_from_directory
+from usbmd import init_device, log, make_dataloader, set_data_paths
 from usbmd.utils import get_date_string
-from usbmd.utils.visualize import plot_image_grid
+from usbmd.visualize import plot_image_grid
 
 if __name__ == "__main__":
     if importlib.util.find_spec("diffusers") is None:
@@ -34,7 +31,7 @@ if __name__ == "__main__":
 
     n_imgs = 10
     dtype = torch.float32
-    val_dataset = h5_dataset_from_directory(
+    val_dataset = make_dataloader(
         data_root / "USBMD_datasets/CAMUS/val",
         key="data/image",
         batch_size=n_imgs,

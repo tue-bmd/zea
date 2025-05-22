@@ -7,15 +7,19 @@ from keras import ops
 
 from usbmd.agent.gumbel import hard_straight_through
 
+_DEFAULT_DTYPE = "bool"
+
 
 def random_uniform_lines(
     n_actions: int,
     n_possible_actions: int,
     n_masks: int,
     seed: int | keras.random.SeedGenerator = None,
+    dtype=_DEFAULT_DTYPE,
 ):
-    """
-    Will generate a mask with random lines. Guarantees precisely n_actions.
+    """Will generate a mask with random lines.
+
+    Guarantees precisely n_actions.
 
     Args:
         n_actions (int): Number of actions to be selected.
@@ -32,30 +36,32 @@ def random_uniform_lines(
         [n_masks, n_possible_actions], seed=seed, dtype="float32"
     )
     masks = hard_straight_through(masks, n_actions)
-    return masks
+    return ops.cast(masks, dtype=dtype)
 
 
-def get_initial_equispaced_lines(n_actions, n_possible_actions):
-    """
-    Generates and initial equispaced k-hot line mask.
-    e.g.
-        if n_actions=2, n_possible_actions=6
-        then initial_mask=[1, 0, 0, 1, 0, 0]
+def get_initial_equispaced_lines(n_actions, n_possible_actions, dtype=_DEFAULT_DTYPE):
+    """Generate an initial equispaced k-hot line mask.
+
+    For example, if ``n_actions=2`` and ``n_possible_actions=6``,
+    then ``initial_mask=[1, 0, 0, 1, 0, 0]``.
 
     Args:
         n_actions (int): Number of actions to be selected.
         n_possible_actions (int): Number of possible actions.
+        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
 
     Returns:
         Tensor: k-hot-encoded line vector of shape (n_possible_actions).
-                Needs to be converted to image size.
+            Needs to be converted to image size.
     """
     selected_indices = ops.arange(
         0, n_possible_actions, n_possible_actions // n_actions
     )
-    masks = ops.zeros(n_possible_actions)
+    masks = ops.zeros(n_possible_actions, dtype=dtype)
     return ops.scatter_update(
-        masks, ops.expand_dims(selected_indices, axis=1), ops.ones(n_actions)
+        masks,
+        ops.expand_dims(selected_indices, axis=1),
+        ops.ones(n_actions, dtype=dtype),
     )
 
 
@@ -63,25 +69,30 @@ def equispaced_lines(
     n_actions: int,
     n_possible_actions: int,
     previous_mask=None,
+    dtype=_DEFAULT_DTYPE,
 ):
-    """
-    Generates equispaced k-hot line mask.
-    If a previous mask is provided, will shift the mask by one.
+    """Generates equispaced k-hot line mask.
+
+    If a previous mask is provided, the mask will be shifted by one.
 
     Args:
         n_actions (int): Number of actions to be selected.
         n_possible_actions (int): Number of possible actions.
-        previous_actions (Tensor, optional): Previous actions. Defaults to None.
+        previous_mask (Tensor, optional): Previous mask to shift. Defaults to None.
+        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
 
     Returns:
         Tensor: k-hot-encoded line vector of shape (n_possible_actions).
-                Needs to be converted to image size.
+            Needs to be converted to image size.
+
+    Raises:
+        AssertionError: If n_possible_actions is not divisible by n_actions.
     """
     assert (
         n_possible_actions % n_actions == 0
     ), "Number of actions must divide evenly into possible actions to use equispaced sampling."
     if previous_mask is None:
-        return get_initial_equispaced_lines(n_actions, n_possible_actions)
+        return get_initial_equispaced_lines(n_actions, n_possible_actions, dtype)
     else:
         return ops.roll(previous_mask, shift=1)
 
@@ -117,7 +128,7 @@ def make_line_mask(
     line_indices: List[int],
     image_shape: List[int],
     line_width: int = 1,
-    dtype="float32",
+    dtype=_DEFAULT_DTYPE,
 ):
     """
     Creates a mask with vertical (i.e. second axis) lines at specified indices.
@@ -155,7 +166,7 @@ def make_line_mask(
 
     indices = ops.stack([rows, columns, channel_indices], axis=-1)
     indices = ops.reshape(indices, (-1, 3))
-    updates = ops.ones((height * num_columns * channels,), dtype="float32")
+    updates = ops.ones((height * num_columns * channels,), dtype=dtype)
 
     mask = ops.scatter_update(mask, indices, updates)
     return mask

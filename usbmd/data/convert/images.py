@@ -5,16 +5,16 @@ or sequences of images to USBMD format.
 
 import os
 import re
-from pathlib import Path
 from itertools import groupby
+from pathlib import Path
 
 import numpy as np
 
 from usbmd.data.data_format import generate_usbmd_dataset
-from usbmd.utils.io_lib import load_image, _SUPPORTED_IMG_TYPES
+from usbmd.io_lib import _SUPPORTED_IMG_TYPES, load_image
 
 
-def img_dir_to_h5_dir(
+def _img_dir_to_h5_dir(
     existing_dataset_root,
     new_dataset_root,
     current_dir,
@@ -23,19 +23,19 @@ def img_dir_to_h5_dir(
     group_pattern=re.compile(r"(.*)\..*"),
     sort_pattern=None,
 ):
-    """
-    (This function is intended to be used as a subroutine by convert_image_to_dataset,
-    see below for details.)
+    """Internal function to convert a directory of images to hdf5 format.
+    This function is intended to be used as a subroutine by ``convert_image_to_dataset``,
+    see below for details.
 
-    Params:
-        existing_dataset_root (str): path to the root directory of your image dataset
-        new_dataset_root (str): path to the directory which will be the root of your new dataset
-        current_dir (str): path to directory containing 'files'
-        files (list[str]): list of file paths in 'current_dir'
-        dataset_name (optional str): dataset name for hdf5 desciption attribute
-        group_pattern (optional re.Pattern): regex pattern to group images into the same hdf5 file
-        sort_pattern (optional re.Pattern): regex pattern to extract index for sorting frames in a
-                                            group of images
+    Args:
+        existing_dataset_root (str): Path to the root directory of your image dataset.
+        new_dataset_root (str): Path to the directory which will be the root of your new dataset.
+        current_dir (str): Path to directory containing ``files``.
+        files (list[str]): List of file paths in ``current_dir``.
+        dataset_name (str, optional): Dataset name for hdf5 description attribute.
+        group_pattern (re.Pattern, optional): Regex pattern to group images into the same hdf5 file.
+        sort_pattern (re.Pattern, optional): Regex pattern to extract index for sorting frames in a
+            group of images.
 
     Returns:
         None
@@ -91,49 +91,48 @@ def convert_image_dataset(
     group_pattern=re.compile(r"(.*)\..*"),
     sort_pattern=None,
 ):
-    # pylint: disable=anomalous-backslash-in-string
-    """
+    r"""Converts an existing dataset of images or sequences of images to USBMD format.
+
     Maps an image dataset to a hdf5 dataset containing those images, preserving directory structure.
     Can also be used to map a video dataset to hdf5 if the videos are stored as sequences on images.
 
-    Params:
-        existing_dataset_root (str): path to the root directory of your image dataset
-        new_dataset_root (str): path to the directory which will be the root of your new dataset
-        dataset_name (optional str): dataset name for hdf5 desciption attribute
-        group_pattern (optional re.Pattern): regex pattern to group images into the same hdf5 file
-        sort_pattern (optional re.Pattern): regex pattern to extract index for sorting frames
-                                            in a group of images
+    Args:
+        existing_dataset_root (str): Path to the root directory of your image dataset.
+        new_dataset_root (str): Path to the directory which will be the root of your new dataset.
+        dataset_name (str, optional): Dataset name for hdf5 description attribute.
+        group_pattern (re.Pattern, optional): Regex pattern to group images into the same hdf5 file.
+        sort_pattern (re.Pattern, optional): Regex pattern to extract index for sorting frames
+            in a group of images.
 
     Returns:
         None
 
-    Note on group_pattern and sort_pattern:
-      * If you have a video dataset, stored as sequences of images, you may want to group
+    Note:
+        If you have a video dataset, stored as sequences of images, you may want to group
         the files such that images from the same video clip are stored in order in the same
         hdf5 file, with shape [n_frames, height, width]. This is what the group_pattern and
         sort_pattern regexes are for. Any images in the current_dir whose paths match
         group_pattern will be grouped into a single hdf5 file. If the file paths have some
         index,  e.g. frame_{i}.png, then you can match that index with sort_pattern, and
-        they frames will be sorted numerically according to that matched substring.
+        the frames will be sorted numerically according to that matched substring.
 
-    Example usage:
-        ```
-        convert_image_dataset(
-            "/mnt/z/Ultrasound-BMd/data/oisin/camus_test",
-            "/mnt/z/Ultrasound-BMd/data/oisin/camus_test_h5",
-            group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
-            sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
-        )
-        ```
+    Example:
+        .. code-block:: python
+
+            convert_image_dataset(
+                "/mnt/z/Ultrasound-BMd/data/oisin/camus_test",
+                "/mnt/z/Ultrasound-BMd/data/oisin/camus_test_h5",
+                group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
+                sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
+            )
     """
-    # pylint: enable=anomalous-backslash-in-string
     assert os.path.exists(
         existing_dataset_root
     ), f"The directory '{existing_dataset_root}' does not exist."
 
     for current_dir, _, files in os.walk(existing_dataset_root):
         print(f"Mapping {current_dir}")
-        img_dir_to_h5_dir(
+        _img_dir_to_h5_dir(
             existing_dataset_root,
             new_dataset_root,
             current_dir,

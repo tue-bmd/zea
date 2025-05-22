@@ -1,8 +1,4 @@
-"""Create a new config file by asking the user for input.
-
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 29/02/2024
-"""
+"""Create a new config file by asking the user for input."""
 
 import sys
 from pathlib import Path
@@ -10,10 +6,10 @@ from pathlib import Path
 import schema
 
 from usbmd.config import Config
-from usbmd.config.comments import DESCRIPTIONS, add_comments_to_yaml
+from usbmd.config.parameters import PARAMETER_DESCRIPTIONS
 from usbmd.config.validation import check_config, config_schema
+from usbmd.log import green, red
 from usbmd.utils import get_date_string, strtobool
-from usbmd.utils.log import green, red
 
 
 def _get_input_value(config, schema_key, schema_value, descriptions):
@@ -69,7 +65,7 @@ def create_config():
         return config
 
     config = {}
-    _ask_user_input(config, config_schema, DESCRIPTIONS)
+    _ask_user_input(config, config_schema, PARAMETER_DESCRIPTIONS)
 
     # Ask user if they want to change any optional keys
     while True:
@@ -121,7 +117,7 @@ def create_config():
 
                     schema_obj = schema_obj.schema[schema_key]
 
-                descriptions = DESCRIPTIONS
+                descriptions = PARAMETER_DESCRIPTIONS
                 for k in keys[:-1]:
                     descriptions = descriptions[k]
 
@@ -164,7 +160,5 @@ if __name__ == "__main__":
     filename = custom_configs_folder / f"{timestamp}_{name}.yaml"
 
     Config(config).save_to_yaml(filename)
-
-    add_comments_to_yaml(filename, DESCRIPTIONS)
 
     print(f"Find your config at {str(filename)}")

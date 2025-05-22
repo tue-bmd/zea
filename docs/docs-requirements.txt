@@ -3,15 +3,21 @@ sphinx-autobuild
 
 # if using typehints
 sphinx-autodoc-typehints
+# for copy button
+sphinx-copybutton
 
 mock
-autodoc
 
 # for using md
 myst-parser
+# for using notebooks
+nbsphinx
 
-# https://sphinx-themes.org/sample-sites/sphinx-rtd-theme/
-sphinx-rtd-theme
+# theme: https://github.com/pradyunsg/furo
+furo
 
 # install stemmer package
 PyStemmer
+
+# system dependency required for nbsphinx (install with: sudo apt-get install pandoc)
+# pandoc
