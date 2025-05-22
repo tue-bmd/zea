@@ -33,11 +33,13 @@ class DummyParameters(Parameters):
         param4: Fourth parameter (like sampling_frequency)
         param5: Optional fifth parameter
         param6: Optional sixth parameter
+        optional_param: Optional parameter that can be set directly or computed from dependencies
 
     Attributes:
         computed1: A computed property depending on param1 and param2
         computed2: A computed property depending on computed1
         computed3: A computed property depending on param3 and param4
+        optional_param: A property that is either set directly or computed from dependencies
     """
 
     VALID_PARAMS = {
@@ -47,6 +49,7 @@ class DummyParameters(Parameters):
         "param4": {"type": float, "default": None},
         "param5": {"type": float, "default": None},
         "param6": {"type": float, "default": None},
+        "optional_param": {"type": (list, type(None)), "default": None},
     }
 
     def _timestamp(self):
@@ -77,6 +80,25 @@ class DummyParameters(Parameters):
             self._computed3_count = 0
         self._computed3_count += 1
         return self.param3 / self.param4
+
+    @cache_with_dependencies("param3", "param1", "param4")
+    def optional_param(self):
+        # Use the underlying param if set
+        if self._params.get("optional_param", None) is not None:
+            return self._params["optional_param"]
+        # Otherwise, compute from dependencies
+        if None in (self.param3, self.param1, self.param4):
+            raise AttributeError("Missing dependencies for optional_param")
+        return [0, self.param3 * self.param1 / self.param4 / 2]
+
+    @cache_with_dependencies("optional_param", "param6")
+    def dependent_on_optional(self):
+        # If optional_param is set, use it, else use computed value
+        base = self.optional_param
+        if self.param6 is None:
+            raise AttributeError("Missing dependency: param6")
+        # Just for test: sum the second value of optional_param and param6
+        return base[1] + self.param6
 
 
 @pytest.fixture
@@ -192,3 +214,56 @@ def test_repr_and_str(dummy_params):
     assert "param1=" in r
     assert "DummyParameters" in s
     assert "param1=" in s
+
+
+def test_optional_param_leaf_or_dependency_behavior():
+    """Test that optional_param can be set as a leaf or computed as a dependency."""
+    # Case 1: optional_param provided, uses it directly
+    p = DummyParameters(
+        param1=10, param2=5, param3=1500.0, param4=5e6, optional_param=[1, 2]
+    )
+    assert p.optional_param == [1, 2]
+
+    # Case 2: optional_param not provided, computed from dependencies
+    p2 = DummyParameters(param1=10, param2=5, param3=1500.0, param4=5e6)
+    expected = [0, 1500.0 * 10 / 5e6 / 2]
+    assert np.allclose(p2.optional_param, expected)
+
+    # Case 3: optional_param set after init, uses new value
+    p2.optional_param = [3, 4]
+    assert p2.optional_param == [3, 4]
+
+    # Case 4: optional_param set to None, falls back to dependency
+    p2.optional_param = None
+    assert np.allclose(p2.optional_param, expected)
+
+
+def test_optional_parm_with_dependent_behavior():
+    """Test that dependent_on_optional behaves correctly with optional_param."""
+    # Case 1: optional_param provided, dependent uses it
+    p = DummyParameters(
+        param1=10,
+        param2=5,
+        param3=1500.0,
+        param4=5e6,
+        optional_param=[1, 2],
+        param6=7.0,
+    )
+    assert p.optional_param == [1, 2]
+    assert p.dependent_on_optional == 2 + 7.0
+
+    # Case 2: optional_param not provided, dependent uses computed value
+    p2 = DummyParameters(param1=10, param2=5, param3=1500.0, param4=5e6, param6=8.0)
+    expected = [0, 1500.0 * 10 / 5e6 / 2]
+    assert np.allclose(p2.optional_param, expected)
+    assert np.isclose(p2.dependent_on_optional, expected[1] + 8)
+
+    # Case 3: optional_param set after init, dependent uses new value
+    p2.optional_param = [3, 4]
+    assert p2.optional_param == [3, 4]
+    assert p2.dependent_on_optional == 4 + 8.0
+
+    # Case 4: optional_param set to None, dependent falls back to computed
+    p2.optional_param = None
+    assert np.allclose(p2.optional_param, expected)
+    assert np.isclose(p2.dependent_on_optional, expected[1] + 8)
