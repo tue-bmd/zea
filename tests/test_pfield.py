@@ -1,6 +1,4 @@
-"""
-Test the pytorch implementation of the beamformers.
-"""
+"""Test pressure field computation."""
 
 import numpy as np
 
