@@ -27,6 +27,11 @@ from keras import ops
 
 from usbmd import log
 from usbmd.internal.cache import cache_output
+from usbmd.tensor_ops import sinc
+
+
+def _abs_sinc(x):
+    return sinc(ops.abs(x))
 
 
 @cache_output(verbose=True)
@@ -54,7 +59,7 @@ def compute_pfield(
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
-            Default is 1.
+            Only works when norm is True. Default is 1.
         percentile (int, optional): minimum percentile threshold to keep in the weighting
             Higher is more aggressive) Default is 10.
         norm (bool, optional): per pixel normalization (True) or unnormalized (False)
@@ -148,24 +153,28 @@ def compute_pfield(
     theta = ops.arcsin((dxi + eps) / (ops.sqrt(d2) + eps)) - the
     sin_theta = ops.sin(theta)
 
-    mysinc = lambda x: ops.sin(ops.abs(x) + eps) / (ops.abs(x) + eps)
-
     pulse_width = num_waveforms / center_frequency  # temporal pulse width
     wc = 2 * np.pi * center_frequency
 
     def pulse_spectrum(w):
-        imag = mysinc(pulse_width * (w - wc) / 2) - mysinc(pulse_width * (w + wc) / 2)
+        imag = _abs_sinc(pulse_width * (w - wc) / 2) - _abs_sinc(
+            pulse_width * (w + wc) / 2
+        )
         return 1j * ops.cast(imag, "complex64")
 
     # FREQUENCY RESPONSE of the ensemble PZT + probe
     w_bandwidth = bandwidth_percent * wc / 100  # angular frequency bandwidth
     p_shape = ops.log(126) / ops.log(eps + 2 * wc / w_bandwidth)
-    probe_spectrum = lambda w: ops.exp(
-        -(
-            (ops.abs(w - wc) / (w_bandwidth / 2 / ops.log(2) ** (1 / p_shape)))
-            ** p_shape
-        )
-    )
+
+    def probe_spectrum(w):
+        # Calculate the normalized frequency difference
+        freq_diff = ops.abs(w - wc)
+        # Calculate the denominator for normalization
+        denom = (w_bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
+        # Raise the normalized difference to the power of p_shape
+        exponent = (freq_diff / denom) ** p_shape
+        # Apply the negative sign and exponential
+        return ops.exp(-exponent)
 
     p_list = []
 
@@ -238,8 +247,8 @@ def compute_pfield(
             ops.min(ops.sqrt(r)), "complex64"
         )  # normalize the field
 
-        kc = 2 * np.pi * center_frequency / sound_speed
-        directivity = mysinc(kc * seg_length / 2 * sin_theta)
+        center_wavenumber = 2 * np.pi * center_frequency / sound_speed
+        directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
         exp_arr = exp_arr * ops.cast(directivity, "complex64")
 
         # Render pressure field for all relevant frequencies and sum them up
