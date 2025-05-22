@@ -8,12 +8,6 @@ This module provides functionality to:
 3. Calculate cone parameters (apex position, opening angle, etc.)
 4. Crop and center the image around the cone
 5. Visualize the detected cone and its parameters
-
-Example:
-    >>> import numpy as np
-    >>> from usbmd.tools.fit_scan_cone import fit_and_crop_around_scan_cone
-    >>> image = np.random.rand(512, 512)  # Example ultrasound image
-    >>> cropped_image = fit_and_crop_around_scan_cone(image)
 """
 
 import os
