@@ -9,6 +9,7 @@ import numpy as np
 from keras import ops
 
 from usbmd import log
+from usbmd.beamform.delays import compute_t0_delays_planewave
 from usbmd.beamform.pfield import compute_pfield
 from usbmd.beamform.pixelgrid import check_for_aliasing, get_grid
 from usbmd.display import (
@@ -16,6 +17,388 @@ from usbmd.display import (
     compute_scan_convert_3d_coordinates,
 )
 from usbmd.internal.core import STATIC, Object
+from usbmd.internal.parameters import Parameters, cache_with_dependencies
+
+
+class Scan(Parameters):
+    """Represents an ultrasound scan configuration with computed properties.
+
+    Args:
+        Nx (int): Number of samples in the x-direction (lateral).
+        Nz (int): Number of samples in the z-direction (axial).
+        sound_speed (float, optional): Speed of sound in the medium in m/s. Defaults to 1540.0.
+        sampling_frequency (float): Sampling frequency in Hz.
+        center_frequency (float): Center frequency of the transducer in Hz.
+        n_el (int): Number of elements in the transducer array.
+        n_tx (int): Number of transmit events in the dataset.
+        n_ax (int): Number of axial samples in the received signal.
+        n_ch (int, optional): Number of channels (1 for RF, 2 for IQ data). Defaults to 1.
+        xlims (tuple of float): Lateral (x) limits of the imaging region in meters (min, max).
+        ylims (tuple of float, optional): Elevation (y) limits of the imaging region in meters (min, max).
+        zlims (tuple of float): Axial (z) limits of the imaging region in meters (min, max).
+        probe_geometry (np.ndarray): Element positions as array of shape (n_el, 3).
+        polar_angles (np.ndarray): Polar angles for each transmit event in radians.
+        azimuth_angles (np.ndarray): Azimuth angles for each transmit event in radians.
+        t0_delays (np.ndarray): Transmit delays in seconds for each event.
+        tx_apodizations (np.ndarray): Transmit apodizations for each event.
+        focus_distances (np.ndarray): Focus distances in meters for each event.
+        initial_times (np.ndarray): Initial times in seconds for each event.
+        bandwidth_percent (float, optional): Bandwidth as percentage of center frequency. Defaults to 200.0.
+        demodulation_frequency (float, optional): Demodulation frequency in Hz.
+        time_to_next_transmit (np.ndarray): Time between transmit events.
+        pixels_per_wavelength (int, optional): Number of pixels per wavelength. Defaults to 4.
+        downsample (int, optional): Downsampling factor for the data. Defaults to 1.
+        element_width (float, optional): Width of each transducer element in meters. Defaults to 0.2e-3.
+        resolution (float, optional): Desired spatial resolution in meters.
+        theta_range (tuple, optional): Range of theta angles for 3D imaging.
+        phi_range (tuple, optional): Range of phi angles for 3D imaging.
+        rho_range (tuple, optional): Range of rho (radial) distances for 3D imaging.
+        fill_value (float, optional): Value to use for out-of-bounds pixels. Defaults to 0.0.
+        attenuation_coef (float, optional): Attenuation coefficient in dB/(MHz*cm). Defaults to 0.0.
+        selected_transmits (None, str, int, list, or np.ndarray, optional): Specifies which transmit events to select.
+            - None or "all": Use all transmits.
+            - "center": Use only the center transmit.
+            - int: Select this many evenly spaced transmits.
+            - list/array: Use these specific transmit indices.
+
+    Properties:
+        grid (np.ndarray): Meshgrid of x and z coordinates, shape (Nx, Nz, 3).
+        grid_spacing (tuple): Grid spacing in x and z directions (dx, dz).
+        wavelength (float): Wavelength based on sound speed and center frequency.
+        z_axis (np.ndarray): The z-axis of the beamforming grid [m].
+        flatgrid (np.ndarray): Flattened beamforming grid of shape (Nz*Nx, 3).
+        selected_transmits (list): List of selected transmit indices.
+        n_tx_total (int): Total number of transmits in the full dataset.
+        n_tx (int): Number of currently selected transmits.
+        demodulation_frequency (float): Demodulation frequency in Hz.
+        polar_angles (np.ndarray): Polar angles of selected transmits in radians.
+        azimuth_angles (np.ndarray): Azimuth angles of selected transmits in radians.
+        t0_delays (np.ndarray): Transmit delays of selected transmits in seconds.
+        tx_apodizations (np.ndarray): Transmit apodizations of selected transmits.
+        focus_distances (np.ndarray): Focus distances of selected transmits in meters.
+        initial_times (np.ndarray): Initial times of selected transmits in seconds.
+        time_to_next_transmit (np.ndarray): Time between selected transmit events.
+    Methods:
+        set_transmits(selection): Select which transmit events to use.
+
+    """
+
+    VALID_PARAMS = {
+        # beamforming related parameters
+        "Nx": {"type": int, "default": None},
+        "Nz": {"type": int, "default": None},
+        "xlims": {"type": tuple, "default": None},
+        "ylims": {"type": tuple, "default": None},
+        "zlims": {"type": tuple, "default": None},
+        "pixels_per_wavelength": {"type": int, "default": 4},
+        "downsample": {"type": int, "default": 1},
+        "resolution": {"type": float, "default": None},
+        # acquisition parameters
+        "sound_speed": {"type": float, "default": 1540.0},
+        "sampling_frequency": {"type": float, "default": None},
+        "center_frequency": {"type": float, "default": None},
+        "n_el": {"type": int, "default": None},
+        "n_tx": {"type": int, "default": None},
+        "n_ax": {"type": int, "default": None},
+        "n_ch": {"type": int, "default": 1},
+        "bandwidth_percent": {"type": float, "default": 200.0},
+        "demodulation_frequency": {"type": float, "default": None},
+        "element_width": {"type": float, "default": 0.2e-3},
+        "attenuation_coef": {"type": float, "default": 0.0},
+        # array parameters
+        "probe_geometry": {"type": np.ndarray, "default": None},
+        "polar_angles": {"type": np.ndarray, "default": None},
+        "azimuth_angles": {"type": np.ndarray, "default": None},
+        "t0_delays": {"type": np.ndarray, "default": None},
+        "tx_apodizations": {"type": np.ndarray, "default": None},
+        "focus_distances": {"type": np.ndarray, "default": None},
+        "initial_times": {"type": np.ndarray, "default": None},
+        "time_to_next_transmit": {"type": np.ndarray, "default": None},
+        # scan conversion parameters
+        "theta_range": {"type": tuple, "default": None},
+        "phi_range": {"type": tuple, "default": None},
+        "rho_range": {"type": tuple, "default": None},
+        "fill_value": {"type": float, "default": 0.0},
+    }
+
+    def __init__(self, **kwargs):
+        # Store the current selection state before initialization
+        selected_transmits_input = kwargs.pop("selected_transmits", None)
+
+        # Initialize parent class
+        super().__init__(**kwargs)
+
+        # Initialize selection to None
+        self._selected_transmits = None
+
+        # Apply selection from input if provided
+        if selected_transmits_input is not None:
+            self.set_transmits(selected_transmits_input)
+
+    # Core properties with dependency tracking
+    @cache_with_dependencies("Nx", "Nz")
+    def grid(self):
+        """Get meshgrid of x and z coordinates."""
+        Nx, Nz = self.Nx, self.Nz
+
+        # Calculate grid based on specified dimensions
+        x = np.linspace(self.xlims[0], self.xlims[1], Nx)
+        z = np.linspace(self.zlims[0], self.zlims[1], Nz)
+        xgrid, zgrid = np.meshgrid(x, z, indexing="ij")
+
+        # Create 3D grid with y=0 for compatibility with 3D code
+        ygrid = np.zeros_like(xgrid)
+        grid = np.stack([xgrid, ygrid, zgrid], axis=-1)
+
+        return grid
+
+    @cache_with_dependencies("sound_speed", "center_frequency")
+    def wavelength(self):
+        """Calculate the wavelength based on sound speed and center frequency."""
+        return self.sound_speed / self.center_frequency
+
+    @cache_with_dependencies("sound_speed", "sampling_frequency", "n_ax")
+    def z_axis(self):
+        """The z-axis of the beamforming grid [m]."""
+        if self.zlims is None:
+            zlims = [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
+        else:
+            zlims = self.zlims
+        return np.linspace(zlims[0], zlims[1], self.n_ax)
+
+    @cache_with_dependencies("grid")
+    def flatgrid(self):
+        """The beamforming grid of shape (Nz*Nx, 3)."""
+        return self.grid.reshape(-1, 3)
+
+    @cache_with_dependencies()
+    def selected_transmits(self):
+        """Get the currently selected transmit indices.
+
+        Returns:
+            list: The list of selected transmit indices. If none were explicitly
+            selected and n_tx is available, all transmits are used.
+        """
+        # Return all transmits if none explicitly selected
+        if self._selected_transmits is None:
+            if "n_tx" in self._params:
+                return list(range(self._params["n_tx"]))
+            return []
+        return self._selected_transmits
+
+    @property
+    def n_tx_total(self):
+        """The total number of transmits in the full dataset."""
+        if "n_tx" not in self._params:
+            raise ValueError("n_tx must be set first")
+        return self._params["n_tx"]
+
+    @property
+    def n_tx(self):
+        """The number of currently selected transmits."""
+        return len(self.selected_transmits)
+
+    def _invalidate_selected_transmits(self):
+        """Explicitly invalidate the selected_transmits cache."""
+        if "selected_transmits" in self._cache:
+            self._cache.pop("selected_transmits")
+            self._computed.discard("selected_transmits")
+            # Also explicitly invalidate all dependents
+            self._invalidate_dependents("selected_transmits")
+
+    def set_transmits(self, selection):
+        """Select which transmit events to use.
+
+        This method provides flexible ways to select transmit events:
+
+        Args:
+            selection: Specifies which transmits to select:
+                - None: Use all transmits
+                - "all": Use all transmits
+                - "center": Use only the center transmit
+                - int: Select this many evenly spaced transmits
+                - list/array: Use these specific transmit indices
+
+        Returns:
+            The current instance for method chaining.
+
+        Raises:
+            ValueError: If the selection is invalid or incompatible with the scan.
+        """
+        n_tx_total = self._params.get("n_tx")
+        if n_tx_total is None:
+            raise ValueError("n_tx must be set before calling set_transmits")
+
+        # Handle None and "all" - use all transmits
+        if selection is None or selection == "all":
+            self._selected_transmits = None
+            self._invalidate_selected_transmits()
+            return self
+
+        # Handle "center" - use center transmit
+        if selection == "center":
+            self._selected_transmits = [n_tx_total // 2]
+            self._invalidate_selected_transmits()
+            return self
+
+        # Handle integer - select evenly spaced transmits
+        if isinstance(selection, (int, np.integer)):
+            selection = int(selection)  # Convert numpy integer to Python int
+            if selection <= 0:
+                raise ValueError(
+                    f"Number of transmits must be positive, got {selection}"
+                )
+
+            if selection > n_tx_total:
+                raise ValueError(
+                    f"Requested {selection} transmits exceeds available transmits ({n_tx_total})"
+                )
+
+            if selection == 1:
+                self._selected_transmits = [n_tx_total // 2]
+            else:
+                # Compute evenly spaced indices
+                tx_indices = np.linspace(0, n_tx_total - 1, selection)
+                self._selected_transmits = list(np.rint(tx_indices).astype(int))
+
+            self._invalidate_selected_transmits()
+            return self
+
+        # Handle array-like - convert to list of indices
+        if isinstance(selection, np.ndarray):
+            if len(selection.shape) == 0:
+                # Handle scalar numpy array
+                return self.set_transmits(int(selection))
+            elif len(selection.shape) == 1:
+                selection = selection.tolist()
+            else:
+                raise ValueError(f"Invalid array shape: {selection.shape}")
+
+        # Handle list of indices
+        if isinstance(selection, list):
+            # Validate indices
+            if not all(isinstance(i, (int, np.integer)) for i in selection):
+                raise ValueError("All transmit indices must be integers")
+
+            if any(i < 0 or i >= n_tx_total for i in selection):
+                raise ValueError(
+                    f"Transmit indices must be between 0 and {n_tx_total-1}"
+                )
+
+            self._selected_transmits = [
+                int(i) for i in selection
+            ]  # Convert numpy integers to Python ints
+            self._invalidate_selected_transmits()
+            return self
+
+        raise ValueError(f"Unsupported selection type: {type(selection)}")
+
+    @property
+    def demodulation_frequency(self):
+        """The demodulation frequency."""
+        if self._params.get("demodulation_frequency") is not None:
+            return self._params["demodulation_frequency"]
+
+        if self.n_ch is None:
+            raise ValueError("Please set scan.n_ch or scan.demodulation_frequency.")
+
+        # Default behavior based on n_ch
+        return self.center_frequency if self.n_ch == 2 else 0.0
+
+    @cache_with_dependencies("selected_transmits")
+    def polar_angles(self):
+        """The polar angles of transmits in radians."""
+        value = self._params.get("polar_angles")
+        if value is None:
+            return None
+
+        # Always filter based on selected_transmits if value matches n_tx shape
+        selected = self.selected_transmits
+        if len(value) == self._params.get("n_tx", 0):
+            return value[selected]
+
+        return value
+
+    @cache_with_dependencies("selected_transmits")
+    def azimuth_angles(self):
+        """The azimuth angles of transmits in radians."""
+        value = self._params.get("azimuth_angles")
+        if value is None:
+            return None
+
+        selected = self.selected_transmits
+        n_tx = self._params.get("n_tx", 0)
+        if len(value) != n_tx:
+            return value  # Return unfiltered if shape doesn't match n_tx
+
+        return value[selected]
+
+    @cache_with_dependencies("selected_transmits")
+    def t0_delays(self):
+        """The transmit delays in seconds."""
+        value = self._params.get("t0_delays")
+        if value is None:
+            return None
+
+        selected = self.selected_transmits
+        n_tx = self._params.get("n_tx", 0)
+        if len(value) != n_tx:
+            return value  # Return unfiltered if shape doesn't match n_tx
+
+        return value[selected]
+
+    @cache_with_dependencies("selected_transmits")
+    def tx_apodizations(self):
+        """The transmit apodizations."""
+        value = self._params.get("tx_apodizations")
+        if value is None:
+            return None
+
+        selected = self.selected_transmits
+        n_tx = self._params.get("n_tx", 0)
+        if len(value) != n_tx:
+            return value  # Return unfiltered if shape doesn't match n_tx
+
+        return value[selected]
+
+    @cache_with_dependencies("selected_transmits")
+    def focus_distances(self):
+        """The focus distances in meters."""
+        value = self._params.get("focus_distances")
+        if value is None:
+            return None
+
+        selected = self.selected_transmits
+        n_tx = self._params.get("n_tx", 0)
+        if len(value) != n_tx:
+            return value  # Return unfiltered if shape doesn't match n_tx
+
+        return value[selected]
+
+    @cache_with_dependencies("selected_transmits")
+    def initial_times(self):
+        """The initial times in seconds."""
+        value = self._params.get("initial_times")
+        if value is None:
+            return None
+
+        selected = self.selected_transmits
+        n_tx = self._params.get("n_tx", 0)
+        if len(value) != n_tx:
+            return value  # Return unfiltered if shape doesn't match n_tx
+
+        return value[selected]
+
+    @cache_with_dependencies("selected_transmits")
+    def time_to_next_transmit(self):
+        """Time between transmit events."""
+        value = self._params.get("time_to_next_transmit")
+        if value is None:
+            return None
+
+        selected = self.selected_transmits
+        return value[:, selected]
+
 
 SCAN_PARAM_TYPES = {
     "n_ax": int,
@@ -71,7 +454,7 @@ def cast_scan_parameters(scan_parameters: dict) -> dict:
     return scan_parameters
 
 
-class Scan(Object):
+class OldScan(Object):
     """Scan base class."""
 
     def __init__(
@@ -1209,153 +1592,3 @@ class DivergingWaveScan(Scan):
 
         self.focus = focus
         raise NotImplementedError("CircularWaveScan has not been implemented.")
-
-
-def compute_t0_delays_planewave(
-    probe_geometry, polar_angles, azimuth_angles=0, sound_speed=1540
-):
-    """Computes the transmit delays for a planewave, shifted such that the
-    first element fires at t=0.
-
-    Args:
-        probe_geometry (np.ndarray): The positions of the elements in the array of
-            shape (n_el, 3).
-        polar_angles (np.ndarray): The polar angles of the planewave in radians of shape (n_tx,).
-        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave
-            in radians of shape (n_tx,). Defaults to 0.
-        sound_speed (float, optional): The speed of sound. Defaults to 1540.
-
-    Returns:
-        np.ndarray: The transmit delays for each element of shape (n_tx, n_el).
-    """
-    assert (
-        probe_geometry is not None
-    ), "Probe geometry must be provided to compute t0_delays."
-
-    # Convert single angles to arrays for broadcasting
-    polar_angles = np.atleast_1d(polar_angles)
-    azimuth_angles = np.atleast_1d(azimuth_angles)
-
-    # Compute v for all angles
-    v = np.stack(
-        [
-            np.sin(polar_angles) * np.cos(azimuth_angles),
-            np.sin(polar_angles) * np.sin(azimuth_angles),
-            np.cos(polar_angles),
-        ],
-        axis=-1,
-    )
-
-    # Compute the projection of the element positions onto the wave vectors
-    projection = np.sum(probe_geometry[:, None, :] * v, axis=-1).T
-
-    # Convert from distance to time to compute the transmit delays.
-    t0_delays_not_zero_aligned = projection / sound_speed
-
-    # The smallest (possibly negative) time corresponds to the moment when
-    # the first element fires.
-    t_first_fire = np.min(t0_delays_not_zero_aligned, axis=1)
-
-    # The transmit delays are the projection minus the offset. This ensures
-    # that the first element fires at t=0.
-    t0_delays = t0_delays_not_zero_aligned - t_first_fire[:, None]
-    return t0_delays
-
-
-def compute_t0_delays_focused(
-    origins,
-    focus_distances,
-    probe_geometry,
-    polar_angles,
-    azimuth_angles=None,
-    sound_speed=1540,
-):
-    """Computes the transmit delays for a focused transmit, shifted such that
-    the first element fires at t=0.
-
-    Args:
-        origins (np.ndarray): The origin of the focused transmit of shape (n_tx, 3,).
-        focus_distance (float): The distance to the focus.
-        probe_geometry (np.ndarray): The positions of the elements in the array of
-            shape (element, 3).
-        polar_angles (np.ndarray): The polar angles of the planewave in radians of shape (n_tx,).
-        azimuth_angles (np.ndarray, optional): The azimuth angles of the planewave in
-            radians of shape (n_tx,).
-        sound_speed (float, optional): The speed of sound. Defaults to 1540.
-
-    Returns:
-        np.ndarray: The transmit delays for each element of shape (n_tx, element).
-    """
-    n_tx = len(focus_distances)
-    assert polar_angles.shape == (n_tx,), (
-        f"polar_angles must have length n_tx = {n_tx}. "
-        f"Got length {len(polar_angles)}."
-    )
-    assert origins.shape == (n_tx, 3), (
-        f"origins must have shape (n_tx, 3). " f"Got shape {origins.shape}."
-    )
-    assert probe_geometry.shape[1] == 3 and probe_geometry.ndim == 2, (
-        f"probe_geometry must have shape (element, 3). "
-        f"Got shape {probe_geometry.shape}."
-    )
-
-    # Convert single angles to arrays for broadcasting
-    polar_angles = np.atleast_1d(polar_angles)
-    if azimuth_angles is None:
-        azimuth_angles = np.zeros(len(polar_angles))
-    else:
-        azimuth_angles = np.atleast_1d(azimuth_angles)
-    assert azimuth_angles.shape == (n_tx,), (
-        f"azimuth_angles must have length n_tx = {n_tx}. "
-        f"Got length {len(azimuth_angles)}."
-    )
-
-    # Compute v for all angles
-    v = np.stack(
-        [
-            np.sin(polar_angles) * np.cos(azimuth_angles),
-            np.sin(polar_angles) * np.sin(azimuth_angles),
-            np.cos(polar_angles),
-        ],
-        axis=-1,
-    )
-
-    # Add a new dimension for broadcasting
-    # The shape is now (n_tx, n_el, 3)
-    v = np.expand_dims(v, axis=1)
-
-    # Compute the location of the virtual source by adding the focus distance
-    # to the origin along the wave vectors.
-    virtual_sources = origins[:, None] + focus_distances[:, None, None] * v
-
-    # Compute the distances between the virtual sources and each element
-    dist = np.linalg.norm(virtual_sources - probe_geometry, axis=-1)
-
-    # Adjust distances based on the direction of focus
-    dist *= -np.sign(focus_distances[:, None])
-
-    # Convert from distance to time to compute the
-    # transmit delays/travel times.
-    travel_times = dist / sound_speed
-
-    # The smallest (possibly negative) time corresponds to the moment when
-    # the first element fires.
-    t_first_fire = np.min(travel_times, axis=1)
-
-    # Shift the transmit delays such that the first element fires at t=0.
-    t0_delays = travel_times - t_first_fire[:, None]
-
-    return t0_delays
-
-
-def plot_t0_delays(t0_delays):
-    """Plot the t0_delays for each transducer element
-    Elements are on the x-axis, and the t0_delays are on the y-axis.
-    We plot multiple lines for each angle/transmit in the scan object."""
-    n_tx = t0_delays.shape[0]
-    _, ax = plt.subplots()
-    for tx in range(n_tx):
-        ax.plot(t0_delays[tx], label=f"Transmit {tx}")
-    ax.set_xlabel("Element number")
-    ax.set_ylabel("t0 delay [s]")
-    plt.show()
