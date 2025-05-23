@@ -447,15 +447,31 @@ class Config(dict):
         return _load_config_from_yaml(path, config_class=cls)
 
     @classmethod
-    def from_hf(cls, repo_id, path):
-        """Load config object from huggingface hub
+    def from_hf(cls, repo_id, path, **kwargs):
+        """Load config object from huggingface hub.
+
+        Example:
+
+        .. code-block:: python
+
+            config = Config.from_hf(
+                "usbmd/configs", "config_echonet.yaml", repo_type="dataset"
+            )
+
         Args:
-            path (str): path to huggingface hub.
-                For example: "username/repo_name/path/to/config.yaml"
+            repo_id (str): huggingface hub repo id.
+                For example: "usbmd/configs"
+            path (str): path to the config file in the repo.
+                For example: "train_config.yaml"
+            **kwargs: additional arguments to pass to the `hf_hub_download`
+                function. For example, use repo_type="dataset" to download
+                from a dataset repo, or revision="main" to download from
+                a specific branch.
+
         Returns:
             Config: config object.
         """
-        local_path = hf_hub_download(repo_id, path)
+        local_path = hf_hub_download(repo_id, path, **kwargs)
         return _load_config_from_yaml(local_path, config_class=cls)
 
     def to_tensor(self):
