@@ -16,8 +16,7 @@ from typing import Union
 import keras
 import yaml
 
-from usbmd import log
-from usbmd.config import load_config_from_yaml
+from usbmd import Config, log
 from usbmd.config.validation import check_config
 from usbmd.datapaths import create_new_user, set_data_paths
 from usbmd.internal.device import init_device
@@ -151,7 +150,7 @@ def setup_config(
                 "(usually on headless servers)."
             ) from e
 
-    config = load_config_from_yaml(Path(config_path), loader=loader)
+    config = Config.from_yaml(Path(config_path), loader=loader)
 
     if verbose:
         log.info(f"Using config file: {log.yellow(config_path)}")
