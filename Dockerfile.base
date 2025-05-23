@@ -1,7 +1,8 @@
 # Multi-stage base image for usbmd
+# Build MODE: set MODE=cpu or MODE=gpu (default)
 
 # --- Stage 0: System dependencies ---
-FROM ubuntu:22.04 as system-deps
+FROM ubuntu:22.04 AS system-deps
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG BASE_UID=1000
@@ -20,25 +21,24 @@ RUN apt-get update && \
         USERNAME="devcontainer$i"; \
         groupadd --gid $USER_UID $USERNAME && \
         useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
-        echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME && \
-        chmod 0440 /etc/sudoers.d/$USERNAME; \
+        echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
+        chmod 0440 /etc/sudoers.d/$USERNAME && \
         echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
     done
 
-# --- Stage 1: Build dependencies and install Python packages ---
-FROM system-deps as builder
+# --- Stage 1: Common Python setup ---
+FROM system-deps AS common-builder
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV LC_ALL=C
-ENV PIP_CACHE_DIR=/tmp/pip_cache
-ENV POETRY_VERSION=1.8.3 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    LC_ALL=C \
+    PIP_CACHE_DIR=/tmp/pip_cache \
+    POETRY_VERSION=1.8.3 \
     POETRY_VENV=/opt/poetry-venv \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=0 \
     POETRY_VIRTUALENVS_CREATE=0 \
     POETRY_CACHE_DIR=/tmp/poetry_cache
 
-# Install poetry and add to PATH
 RUN python3 -m venv $POETRY_VENV && \
     $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
@@ -46,63 +46,61 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# --- Backend selection ---
-ARG BACKEND=all
-ARG CPU_ONLY
-
-# Install dependencies for usbmd (with headless opencv)
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
     poetry install -E opencv-python-headless --no-root --compile
 
-# --- Backend-specific installs ---
-# TensorFlow
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "tensorflow" ] && [ -n "$CPU_ONLY" ]; then \
-    pip install tensorflow==2.15.0 keras keras-cv; \
-    fi
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "tensorflow" ] && [ -z "$CPU_ONLY" ]; then \
-    KERAS_VERSION=$(pip show keras | grep '^Version:' | awk '{print $2}') && \
-    pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-    pip install --upgrade "keras==$KERAS_VERSION" keras-cv; \
-    fi
+# --- Stage 2a: CPU-only build ---
+FROM common-builder AS builder-cpu
+ARG BACKEND=all
 
-# JAX
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "jax" ] && [ -n "$CPU_ONLY" ]; then \
-    pip install jax==0.4.26; \
-    fi
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "jax" ] && [ -z "$CPU_ONLY" ]; then \
-    pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
-    fi
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    case "$BACKEND" in \
+      tensorflow) \
+        pip install tensorflow==2.15.0 keras keras-cv ;; \
+      jax) \
+        pip install jax==0.4.26 ;; \
+      torch) \
+        pip install torch==2.2.2 torchvision torchmetrics ;; \
+      all) \
+        pip install tensorflow==2.15.0 keras keras-cv \
+                    jax==0.4.26 \
+                    torch==2.2.2 torchvision torchmetrics ;; \
+    esac
 
-# Torch
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ] && [ -n "$CPU_ONLY" ]; then \
-    pip install torch==2.2.2 torchvision torchmetrics; \
-    fi
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ] && [ -z "$CPU_ONLY" ]; then \
-    pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
-    fi
+# --- Stage 2b: GPU-enabled build ---
+FROM common-builder AS builder-gpu
+ARG BACKEND=all
 
-# All backends
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "all" ] && [ -n "$CPU_ONLY" ]; then \
-    pip install tensorflow==2.15.0 keras keras-cv && \
-    pip install jax==0.4.26 && \
-    pip install torch==2.2.2 torchvision torchmetrics; \
-    fi
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "all" ] && [ -z "$CPU_ONLY" ]; then \
-    KERAS_VERSION=$(pip show keras | grep '^Version:' | awk '{print $2}') && \
-    pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-    pip install --upgrade "keras==$KERAS_VERSION" keras-cv && \
-    pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 && \
-    pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
-    fi
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    case "$BACKEND" in \
+      tensorflow) \
+        K=$(pip show keras | awk '/^Version:/{print $2}') && \
+        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
+        pip install --upgrade "keras==$K" keras-cv ;; \
+      jax) \
+        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 ;; \
+      torch) \
+        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics ;; \
+      all) \
+        K=$(pip show keras | awk '/^Version:/{print $2}') && \
+        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
+        pip install --upgrade "keras==$K" keras-cv && \
+        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 && \
+        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics ;; \
+    esac
 
-# --- Stage 2: Final image, copy only what is needed ---
-FROM system-deps
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV LC_ALL=C
-
+# --- Stage 3a: Final image (CPU) ---
+FROM builder-cpu AS cpu
+ARG BACKEND=all
+ENV PYTHONDONTWRITEBYTECODE=1 LC_ALL=C
 WORKDIR /ultrasound-toolbox
+COPY --from=builder-cpu /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=builder-cpu /ultrasound-toolbox/pyproject.toml /ultrasound-toolbox/poetry.lock ./
 
-# Copy only installed site-packages and lock files from builder
-COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
-COPY --from=builder /ultrasound-toolbox/pyproject.toml /ultrasound-toolbox/poetry.lock ./
+# --- Stage 3b: Final image (GPU) ---
+FROM builder-gpu AS gpu
+ARG BACKEND=all
+ENV PYTHONDONTWRITEBYTECODE=1 LC_ALL=C
+WORKDIR /ultrasound-toolbox
+COPY --from=builder-gpu /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=builder-gpu /ultrasound-toolbox/pyproject.toml /ultrasound-toolbox/poetry.lock ./
