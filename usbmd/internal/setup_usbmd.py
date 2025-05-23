@@ -1,10 +1,49 @@
-"""This module contains setup functions for usbmd. In general
-these setup funcs group together several functions that are often
-used together for ease of use.
+"""
+usbmd setup
+===========
 
-setup_config: Setup function for config. Retrieves config file and checks for validity.
-setup: General setup function for usbmd. Runs setup_config, sets data paths and
-    initializes gpu if available.
+This module provides setup functions for the usbmd package, grouping together
+commonly used initialization routines for convenience.
+
+Overview
+--------
+
+The main entry point is the :func:`setup` function, which performs several key initialization steps for you:
+
+- Loads and validates the configuration file (YAML) via :func:`usbmd.internal.setup_usbmd.setup_config`.
+- Sets up user data paths using :func:`usbmd.datapaths.set_data_paths`.
+- Initializes the device (GPU/CPU) according to the configuration using :func:`usbmd.internal.device.init_device`.
+- Optionally creates a new user and prompts for datapath information via :func:`usbmd.datapaths.create_new_user`.
+
+By calling :func:`setup`, you can prepare your usbmd environment in a single step, ensuring that configuration, data paths, and device setup are all handled for you.
+
+.. code-block:: python
+
+
+    # Basic usage: loads config, sets paths, initializes device
+    config = setup_usbmd.setup(config_path="my_config.yaml")
+
+    # With user creation prompt
+    config = setup_usbmd.setup(config_path="my_config.yaml", create_user=True)
+
+Function Details
+----------------
+
+.. autofunction:: setup
+    :noindex:
+
+    Calls:
+        - :func:`usbmd.internal.setup_usbmd.setup_config`
+        - :func:`usbmd.datapaths.set_data_paths`
+        - :func:`usbmd.internal.device.init_device`
+        - :func:`usbmd.datapaths.create_new_user` (if ``create_user=True``)
+
+.. autofunction:: setup_config
+    :noindex:
+
+    Loads and validates the configuration file for usbmd. Supports interactive
+    selection if no path is provided.
+
 """
 
 import copy
