@@ -42,15 +42,15 @@ if "KERAS_BACKEND" not in os.environ:
 
 # Main (isort: split)
 from .config import Config, load_config_from_yaml
-from .data.datasets import Dataset
+from .data.datasets import Dataset, Folder
 from .data.file import File, load_usbmd_file
 from .datapaths import set_data_paths
 from .interface import Interface
 from .internal.device import init_device
+from .internal.setup_usbmd import set_backend, setup, setup_config
 from .ops import Pipeline
 from .probes import Probe
 from .scan import Scan
-from .internal.setup_usbmd import set_backend, setup, setup_config
 
 try:
     from .backend.tensorflow.dataloader import make_dataloader
