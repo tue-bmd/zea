@@ -442,9 +442,9 @@ class Config(dict):
                         v._recursive_setattr(set_key, set_value)
 
     @classmethod
-    def from_yaml(cls, path):
+    def from_yaml(cls, path, **kwargs):
         """Load config object from yaml file"""
-        return _load_config_from_yaml(path, config_class=cls)
+        return _load_config_from_yaml(path, config_class=cls, **kwargs)
 
     @classmethod
     def from_hf(cls, repo_id, path, **kwargs):
@@ -479,7 +479,7 @@ class Config(dict):
         return object_to_tensor(self)
 
 
-def _load_config_from_yaml(path, loader=yaml.FullLoader, config_class=Config):
+def _load_config_from_yaml(path, config_class=Config, loader=yaml.FullLoader):
     """Load config object from yaml file
 
     Args:
