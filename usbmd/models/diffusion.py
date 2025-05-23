@@ -103,6 +103,20 @@ class DiffusionModel(DeepGenerativeModel):
         self.operator = None
         self._init_operator_and_guidance(operator, guidance)
 
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "input_shape": self.input_shape,
+                "input_range": self.input_range,
+                "min_signal_rate": self.min_signal_rate,
+                "max_signal_rate": self.max_signal_rate,
+                "network_name": self.network_name,
+                "network_kwargs": self.network_kwargs,
+            }
+        )
+        return config
+
     def _init_operator_and_guidance(self, operator, guidance):
         if operator is not None:
             if isinstance(operator, str):
@@ -712,22 +726,6 @@ class DiffusionModel(DeepGenerativeModel):
                 self.track_progress.append(ops.convert_to_numpy(next_noisy_images))
             else:
                 raise ValueError("Invalid track_progress_type")
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "input_shape": self.input_shape,
-                "input_range": self.input_range,
-                "network_name": self.network_name,
-                "network_kwargs": self.network_kwargs,
-                "min_signal_rate": self.min_signal_rate,
-                "max_signal_rate": self.max_signal_rate,
-                "min_t": self.min_t,
-                "max_t": self.max_t,
-            }
-        )
-        return config
 
 
 register_presets(diffusion_model_presets, DiffusionModel)
