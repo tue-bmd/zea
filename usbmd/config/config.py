@@ -68,7 +68,9 @@ class Config(dict):
     We took inspiration from the following sources:
         - `EasyDict <https://pypi.org/project/easydict/>`_ # pylint: disable=line-too-long
         - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_ # pylint: disable=line-too-long
+
     But this implementation is superior :)
+
     """
 
     __frozen__ = False

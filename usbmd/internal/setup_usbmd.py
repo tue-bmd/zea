@@ -8,14 +8,19 @@ commonly used initialization routines for convenience.
 Overview
 --------
 
-The main entry point is the :func:`setup` function, which performs several key initialization steps for you:
+The main entry point is the :func:`setup` function, which performs several key
+initialization steps for you:
 
-- Loads and validates the configuration file (YAML) via :func:`usbmd.internal.setup_usbmd.setup_config`.
+- Loads and validates the configuration file (YAML) via
+    :func:`usbmd.internal.setup_usbmd.setup_config`.
 - Sets up user data paths using :func:`usbmd.datapaths.set_data_paths`.
-- Initializes the device (GPU/CPU) according to the configuration using :func:`usbmd.internal.device.init_device`.
-- Optionally creates a new user and prompts for datapath information via :func:`usbmd.datapaths.create_new_user`.
+- Initializes the device (GPU/CPU) according to the configuration using
+    :func:`usbmd.internal.device.init_device`.
+- Optionally creates a new user and prompts for datapath information via
+    :func:`usbmd.datapaths.create_new_user`.
 
-By calling :func:`setup`, you can prepare your usbmd environment in a single step, ensuring that configuration, data paths, and device setup are all handled for you.
+By calling :func:`setup`, you can prepare your usbmd environment in a single step,
+ensuring that configuration, data paths, and device setup are all handled for you.
 
 .. code-block:: python
 
