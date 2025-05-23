@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 
 from usbmd import log
+from usbmd.data.preset_utils import HF_PREFIX, _hf_resolve_path
 from usbmd.internal.checks import (
     _DATA_TYPES,
     _NON_IMAGE_DATA_TYPES,
@@ -28,11 +29,25 @@ def assert_key(file: h5py.File, key: str):
 class File(h5py.File):
     """h5py.File in usbmd format."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, name, *args, **kwargs):
+        """Initialize the file.
+
+        Args:
+            name (str, Path): The path to the file. Can be a string or a Path object.
+                Additionally can be a string with the prefix 'hf://', in which case
+                it will be resolved to a huggingface path.
+            *args: Additional arguments to pass to h5py.File.
+            **kwargs: Additional keyword arguments to pass to h5py.File.
+        """
+
+        if isinstance(name, (str, Path)) and str(name).startswith(HF_PREFIX):
+            name = _hf_resolve_path(str(name))
+
         if "locking" not in kwargs and "mode" in kwargs and kwargs["mode"] == "r":
             # If the file is opened in read mode, disable locking
             kwargs["locking"] = False
-        super().__init__(*args, **kwargs)
+
+        super().__init__(name, *args, **kwargs)
 
     @property
     def path(self):
