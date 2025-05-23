@@ -587,13 +587,3 @@ def count_samples_per_directory(file_names, directories):
     )
 
     return counts
-
-
-if __name__ == "__main__":
-    # Example usage
-    file = File(
-        "hf://usbmd/picmus/database/experiments/contrast_speckle/contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5",
-    )
-    folder = Folder("hf://usbmd/picmus/database/experiments", key="raw_data")
-    dataset = Dataset("hf://usbmd/picmus", key="raw_data")
-    ds = make_dataloader("hf://usbmd/picmus", key="raw_data", batch_size=1)
