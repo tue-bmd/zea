@@ -1,31 +1,12 @@
-# base image
-FROM ubuntu:22.04
+# Multi-stage base image for usbmd
 
-# Do not prompt for input when installing packages
+# --- Stage 0: System dependencies ---
+FROM ubuntu:22.04 as system-deps
+
 ARG DEBIAN_FRONTEND=noninteractive
-
-# Prevent python from writing pyc files
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Use default "C" locale
-ENV LC_ALL=C
-
-# Set pip cache directory
-ENV PIP_CACHE_DIR=/tmp/pip_cache
-
-# Set poetry version and venv path
-ENV POETRY_VERSION=1.8.3 \
-    POETRY_VENV=/opt/poetry-venv \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
-
-# Add non-root users
 ARG BASE_UID=1000
 ARG NUM_USERS=51
 
-# Create non-root users and install system packages in one command
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         python3 python3-pip git python3-tk python3-venv \
@@ -44,45 +25,79 @@ RUN apt-get update && \
         echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
     done
 
-# Install poetry once system dependencies are in place
-RUN python3 -m venv $POETRY_VENV && \
-    $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
+# --- Stage 1: Build dependencies and install Python packages ---
+FROM system-deps as builder
 
-# Set working directory and copy poetry configuration
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV LC_ALL=C
+ENV PIP_CACHE_DIR=/tmp/pip_cache
+ENV POETRY_VERSION=1.8.3 \
+    POETRY_VENV=/opt/poetry-venv \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=0 \
+    POETRY_VIRTUALENVS_CREATE=0 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
+
+# --- Backend selection ---
+ARG BACKEND=all
+ARG CPU_ONLY=0
 
 # Install dependencies for usbmd (with headless opencv)
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
     poetry install -E opencv-python-headless --no-root --compile
 
-# Set the default backend; override this when building if desired.
-ARG BACKEND=all
-
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "tensorflow" ]; then \
-    echo "Installing tensorflow..."; \
+# --- Backend-specific installs ---
+# TensorFlow
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "tensorflow" ] && [ "$CPU_ONLY" = "1" ]; then \
+    pip install tensorflow==2.15.0 keras keras-cv; \
+    fi
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "tensorflow" ] && [ "$CPU_ONLY" != "1" ]; then \
     KERAS_VERSION=$(pip show keras | grep '^Version:' | awk '{print $2}') && \
     pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-    # Reinstall Keras after tf to ensure its version 3.x
     pip install --upgrade "keras==$KERAS_VERSION" keras-cv; \
     fi
 
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "jax" ]; then \
-    echo "Installing jax..."; \
+# JAX
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "jax" ] && [ "$CPU_ONLY" = "1" ]; then \
+    pip install jax==0.4.26; \
+    fi
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "jax" ] && [ "$CPU_ONLY" != "1" ]; then \
     pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26; \
     fi
 
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ]; then \
-    echo "Installing torch..."; \
+# Torch
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ] && [ "$CPU_ONLY" = "1" ]; then \
+    pip install torch==2.2.2 torchvision torchmetrics; \
+    fi
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "torch" ] && [ "$CPU_ONLY" != "1" ]; then \
     pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
     fi
 
-RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "all" ]; then \
+# All backends
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "all" ] && [ "$CPU_ONLY" = "1" ]; then \
+    pip install tensorflow==2.15.0 keras keras-cv && \
+    pip install jax==0.4.26 && \
+    pip install torch==2.2.2 torchvision torchmetrics; \
+    fi
+RUN --mount=type=cache,target=$PIP_CACHE_DIR if [ "$BACKEND" = "all" ] && [ "$CPU_ONLY" != "1" ]; then \
     KERAS_VERSION=$(pip show keras | grep '^Version:' | awk '{print $2}') && \
     pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-    # Reinstall Keras after tf to ensure its version 3.x
     pip install --upgrade "keras==$KERAS_VERSION" keras-cv && \
     pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 && \
     pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics; \
     fi
+
+# --- Stage 2: Final image, copy only what is needed ---
+FROM system-deps
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV LC_ALL=C
+
+WORKDIR /ultrasound-toolbox
+
+# Copy only installed site-packages and lock files from builder
+COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=builder /ultrasound-toolbox/pyproject.toml /ultrasound-toolbox/poetry.lock ./
