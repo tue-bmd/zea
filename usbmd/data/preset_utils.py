@@ -19,7 +19,8 @@ HF_CACHE_DIR = Path.home() / ".hf_usbmd_cache"
 
 def _hf_parse_path(hf_path: str):
     """Parse hf://repo_id[/subpath] into (repo_id, subpath or None)."""
-    assert hf_path.startswith(HF_PREFIX)
+    if not hf_path.startswith(HF_PREFIX):
+        raise ValueError(f"Invalid hf_path: {hf_path}. It must start with '{HF_PREFIX}'.")
     path = hf_path.removeprefix(HF_PREFIX)
     parts = path.split("/")
     repo_id = "/".join(parts[:2])
