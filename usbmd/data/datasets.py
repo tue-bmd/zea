@@ -8,6 +8,12 @@ from typing import List
 
 import numpy as np
 import tqdm
+from huggingface_hub import hf_hub_download, list_repo_files, login
+from huggingface_hub.utils import (
+    EntryNotFoundError,
+    HFValidationError,
+    RepositoryNotFoundError,
+)
 
 from usbmd import log
 from usbmd.data.file import File, validate_file
@@ -24,6 +30,11 @@ _CHECK_MAX_DATASET_SIZE = 10000
 _VALIDATED_FLAG_FILE = "validated.flag"
 FILE_HANDLE_CACHE_CAPACITY = 128
 FILE_TYPES = [".hdf5", ".h5"]
+
+
+HF_SCHEME = "hf"
+HF_PREFIX = "hf://"
+HF_CACHE_DIR = Path.home() / ".hf_usbmd_cache"
 
 
 class H5FileHandleCache:
@@ -136,9 +147,19 @@ class Folder:
         key: str,
         search_file_tree_kwargs: dict | None = None,
         validate: bool = True,
+        hf_cache_dir: str = HF_CACHE_DIR,
         **kwargs,
     ):
+        # Hugging Face support
+        if isinstance(folder_path, (str, Path)):
+            folder_path_str = str(folder_path)
+            if folder_path_str.startswith(HF_PREFIX):
+                folder_path = self.get_file_from_hf(
+                    folder_path_str, cache_dir=hf_cache_dir
+                )
+
         super().__init__(**kwargs)
+
         self.folder_path = folder_path
         self.key = key
         self.search_file_tree_kwargs = search_file_tree_kwargs
@@ -303,6 +324,107 @@ class Folder:
     def __str__(self):
         return f"Folder with {self.n_files} files in '{self.folder_path}' (key='{self.key}')"
 
+    @staticmethod
+    def _hf_parse_path(hf_path: str):
+        """Parse hf://repo_id[/subpath] into (repo_id, subpath or None)."""
+        assert hf_path.startswith(HF_PREFIX)
+        path = hf_path.removeprefix(HF_PREFIX)
+        parts = path.split("/")
+        repo_id = "/".join(parts[:2])
+        subpath = "/".join(parts[2:]) if len(parts) > 2 else None
+        return repo_id, subpath
+
+    @staticmethod
+    def get_file_from_hf(hf_path: str, cache_dir: str = HF_CACHE_DIR):
+        """
+        Download a file or directory from Hugging Face Hub to a local cache directory.
+        Returns the local path to the downloaded file or directory.
+        """
+        repo_id, subpath = Folder._hf_parse_path(hf_path)
+
+        def is_h5(f):
+            return f.endswith(".h5") or f.endswith(".hdf5")
+
+        def _download_from_hf(repo_id, filename):
+            return hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                cache_dir=cache_dir,
+                repo_type="dataset",
+            )
+
+        # Try to list files, handle authentication if needed
+        try:
+            files = list_repo_files(repo_id, repo_type="dataset")
+        except RepositoryNotFoundError:
+            login(new_session=False)
+            files = list_repo_files(repo_id, repo_type="dataset")
+        except HFValidationError:
+            login(new_session=False)
+            files = list_repo_files(repo_id, repo_type="dataset")
+        except EntryNotFoundError:
+            login(new_session=False)
+            files = list_repo_files(repo_id, repo_type="dataset")
+
+        # Find the repo cache directory
+        repo_cache_dir = Path(cache_dir) / f"datasets--{repo_id.replace('/', '--')}"
+        snapshots_dir = repo_cache_dir / "snapshots"
+        if not snapshots_dir.exists():
+            raise FileNotFoundError(
+                f"No snapshots found in Hugging Face cache for {repo_id}"
+            )
+
+        # Use the latest snapshot (or the only one)
+        snapshot_hashes = sorted(
+            snapshots_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+        if not snapshot_hashes:
+            raise FileNotFoundError(f"No snapshot found for {repo_id} in cache.")
+        snapshot_dir = snapshot_hashes[0]
+
+        if subpath:
+            # Directory
+            if any(f.startswith(subpath + "/") for f in files):
+                local_dir = snapshot_dir / subpath
+                # Download all .h5/.hdf5 files in the subpath
+                for f in files:
+                    if f.startswith(subpath + "/") and is_h5(f):
+                        try:
+                            _download_from_hf(repo_id, f)
+                        except (HFValidationError, EntryNotFoundError):
+                            login(new_session=False)
+                            _download_from_hf(repo_id, f)
+                if not local_dir.exists():
+                    raise FileNotFoundError(
+                        f"Directory {local_dir} not found after download."
+                    )
+                return local_dir
+            # File
+            elif any(f == subpath for f in files) and is_h5(subpath):
+                try:
+                    _download_from_hf(repo_id, subpath)
+                except (HFValidationError, EntryNotFoundError):
+                    login(new_session=False)
+                    _download_from_hf(repo_id, subpath)
+                local_file = snapshot_dir / subpath
+                if not local_file.exists():
+                    raise FileNotFoundError(
+                        f"File {local_file} not found after download."
+                    )
+                return local_file
+            else:
+                raise FileNotFoundError(f"{subpath} not found in {repo_id}")
+        else:
+            # All .h5/.hdf5 files in repo
+            for f in files:
+                if is_h5(f):
+                    try:
+                        _download_from_hf(repo_id, f)
+                    except (HFValidationError, EntryNotFoundError):
+                        login(new_session=False)
+                        _download_from_hf(repo_id, f)
+            return snapshot_dir
+
 
 class Dataset(H5FileHandleCache):
     """Iterate over File(s) and Folder(s)."""
@@ -360,15 +482,14 @@ class Dataset(H5FileHandleCache):
 
         for file_path in paths:
             if isinstance(file_path, (str, Path)):
-                file_path = Path(file_path)
-                if file_path.is_dir():
+                if Path(file_path).is_dir() or str(file_path).startswith(HF_PREFIX):
                     folder = Folder(
                         file_path, self.key, self.search_file_tree_kwargs, self.validate
                     )
                     file_paths += folder.file_paths
                     file_shapes += folder.file_shapes
                     del folder
-                elif file_path.is_file():
+                elif Path(file_path).is_file():
                     file_paths.append(file_path)
                     with File(file_path) as file:
                         file_shapes.append(file.shape(self.key))
@@ -530,3 +651,6 @@ def count_samples_per_directory(file_names, directories):
     )
 
     return counts
+
+
+ds = Folder("hf://usbmd/picmus/database/experiments", key="raw_data")
