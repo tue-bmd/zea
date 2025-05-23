@@ -404,7 +404,7 @@ class Config(dict):
         """Deep copy the config object.
 
         This is useful when you want to modify the config object
-        without changing the original. Does not preserve the access history or frozen state!ds
+        without changing the original. Does not preserve the access history or frozen state!
         """
         return Config(copy.deepcopy(self.as_dict()))
 
