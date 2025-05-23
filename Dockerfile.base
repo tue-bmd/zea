@@ -1,106 +1,93 @@
-# Multi-stage base image for usbmd
-# Build MODE: set MODE=cpu or MODE=gpu (default)
+# syntax=docker/dockerfile:1
 
-# --- Stage 0: System dependencies ---
-FROM ubuntu:22.04 AS system-deps
+# -----------------------
+# Builder: install deps
+# -----------------------
+FROM python:3.10-bullseye AS builder
+ARG BACKEND=all
+ENV PIP_CACHE_DIR=/root/.cache/pip
 
-ARG DEBIAN_FRONTEND=noninteractive
-ARG BASE_UID=1000
-ARG NUM_USERS=51
-
+# 1. System dependencies & Poetry
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3 python3-pip git python3-tk python3-venv \
-        libsm6 libxext6 libxrender-dev libqt5gui5 sudo \
-        ffmpeg imagemagick make openssh-client && \
-    python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
-    ln -s /usr/bin/python3 /usr/bin/python && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    for i in $(seq 0 $NUM_USERS); do \
-        USER_UID=$((BASE_UID + i)); \
-        USERNAME="devcontainer$i"; \
-        groupadd --gid $USER_UID $USERNAME && \
-        useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
-        echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
-        chmod 0440 /etc/sudoers.d/$USERNAME && \
-        echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
-    done
+    apt-get install -y --no-install-recommends build-essential git && \
+    pip install --no-cache-dir poetry==1.8.3 && \
+    rm -rf /var/lib/apt/lists/*
 
-# --- Stage 1: Common Python setup ---
-FROM system-deps AS common-builder
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    LC_ALL=C \
-    PIP_CACHE_DIR=/tmp/pip_cache \
-    POETRY_VERSION=1.8.3 \
-    POETRY_VENV=/opt/poetry-venv \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
-
-RUN python3 -m venv $POETRY_VENV && \
-    $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
-
-WORKDIR /ultrasound-toolbox
+WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 
-RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
-    poetry install -E opencv-python-headless --no-root --compile
+# Install project dependencies into a Poetry venv at /app/.venv
+RUN poetry install --no-root --without dev && \
+    rm -rf $PIP_CACHE_DIR
 
-# --- Stage 2a: CPU-only build ---
-FROM common-builder AS builder-cpu
-ARG BACKEND=all
+# -----------------------
+# 2. Backend-specific installs
+#    (cumulative layers for 'all')
+# -----------------------
 
+# numpy
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    case "$BACKEND" in \
-      tensorflow) \
-        pip install tensorflow==2.15.0 keras keras-cv ;; \
-      jax) \
-        pip install jax==0.4.26 ;; \
-      torch) \
-        pip install torch==2.2.2 torchvision torchmetrics ;; \
-      all) \
-        pip install tensorflow==2.15.0 keras keras-cv \
-                    jax==0.4.26 \
-                    torch==2.2.2 torchvision torchmetrics ;; \
-    esac
+    if [ "$BACKEND" = "numpy" ] || [ "$BACKEND" = "all" ]; then \
+      poetry run pip install --no-cache-dir numpy; \
+    fi
 
-# --- Stage 2b: GPU-enabled build ---
-FROM common-builder AS builder-gpu
-ARG BACKEND=all
-
+# jax
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    case "$BACKEND" in \
-      tensorflow) \
-        K=$(pip show keras | awk '/^Version:/{print $2}') && \
-        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-        pip install --upgrade "keras==$K" keras-cv ;; \
-      jax) \
-        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 ;; \
-      torch) \
-        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics ;; \
-      all) \
-        K=$(pip show keras | awk '/^Version:/{print $2}') && \
-        pip install --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-        pip install --upgrade "keras==$K" keras-cv && \
-        pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html jax[cuda12_pip]==0.4.26 && \
-        pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.2+cu121 torchvision torchmetrics ;; \
-    esac
+    if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
+      poetry run pip install --no-cache-dir jax jaxlib[cuda12_pip] \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html; \
+    fi
 
-# --- Stage 3a: Final image (CPU) ---
-FROM builder-cpu AS cpu
-ARG BACKEND=all
-ENV PYTHONDONTWRITEBYTECODE=1 LC_ALL=C
-WORKDIR /ultrasound-toolbox
-COPY --from=builder-cpu /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
-COPY --from=builder-cpu /ultrasound-toolbox/pyproject.toml /ultrasound-toolbox/poetry.lock ./
+# torch
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
+      poetry run pip install --no-cache-dir torch==2.2.2+cu121 torchvision torchmetrics \
+        -f https://download.pytorch.org/whl/cu121/torch_stable.html; \
+    fi
 
-# --- Stage 3b: Final image (GPU) ---
-FROM builder-gpu AS gpu
-ARG BACKEND=all
-ENV PYTHONDONTWRITEBYTECODE=1 LC_ALL=C
-WORKDIR /ultrasound-toolbox
-COPY --from=builder-gpu /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
-COPY --from=builder-gpu /ultrasound-toolbox/pyproject.toml /ultrasound-toolbox/poetry.lock ./
+# tensorflow + keras
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
+      KERAS_VERSION=$(poetry run pip show keras | awk '/^Version:/ {print $2}') && \
+      poetry run pip install --no-cache-dir --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
+      poetry run pip install --no-cache-dir --upgrade "keras==$KERAS_VERSION" keras-cv; \
+    fi
+
+# -----------------------
+# 3. Cleanup
+# -----------------------
+RUN pip uninstall -y poetry && \
+    rm -rf $PIP_CACHE_DIR
+
+# -----------------------
+# CPU runtime image
+# -----------------------
+FROM python:3.10-slim-bullseye AS cpu
+ENV PATH="/app/.venv/bin:${PATH}"
+
+COPY --from=builder /app/.venv /app/.venv
+COPY . /app
+WORKDIR /app
+CMD ["python","-c","print('CPU image with', '$BACKEND', 'backend')"]
+
+# -----------------------
+# GPU runtime image
+# -----------------------
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu20.04 AS gpu
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Python 3.10 runtime
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3.10 python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Symlinks for consistent "python" and "pip"
+RUN ln -s /usr/bin/python3.10 /usr/local/bin/python && \
+    ln -s /usr/bin/pip3 /usr/local/bin/pip
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+COPY --from=builder /app/.venv /app/.venv
+COPY . /app
+WORKDIR /app
+CMD ["python","-c","import sys; print('GPU image with', '$BACKEND', 'backend')"]
