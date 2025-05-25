@@ -46,7 +46,8 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR \
         ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio \
           --index-url https://download.pytorch.org/whl/cu124; \
       else \
-        ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio; \
+        ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio \
+          --index-url https://download.pytorch.org/whl/cpu; \
       fi \
     fi  # :contentReference[oaicite:8]{index=8}
 
@@ -73,12 +74,13 @@ FROM python:3.12-slim-bullseye AS cpu
 ARG BACKEND=all
 ARG GPU=false
 ENV PATH="/app/.venv/bin:${PATH}"
+ENV BACKEND=${BACKEND}
 
 COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 WORKDIR /app
 
-CMD ["python","-c","print('CPU image with', 'BACKEND=', '$BACKEND')"]
+CMD python -c "print('CPU image with BACKEND=', '${BACKEND}')"
 
 # -----------------------
 # GPU runtime image
@@ -88,7 +90,8 @@ ARG BACKEND=all
 ARG GPU=false
 ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/usr/local/cuda/bin:${PATH}" \
-    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
+    BACKEND=${BACKEND}
 
 # Install CUDA runtime libraries and cuDNN (no driver)
 RUN apt-get update && \
@@ -108,4 +111,4 @@ COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 WORKDIR /app
 
-CMD ["python","-c","import sys; print('GPU image with', 'BACKEND=', '$BACKEND')"]
+CMD python -c "import sys; print('GPU image with BACKEND =', '${BACKEND}')"
