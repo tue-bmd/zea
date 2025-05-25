@@ -1,93 +1,111 @@
 # syntax=docker/dockerfile:1
 
 # -----------------------
-# Builder: install deps
+# Builder: install deps on slim Python 3.12
 # -----------------------
-FROM python:3.10-bullseye AS builder
+FROM python:3.12-slim-bullseye AS builder
 ARG BACKEND=all
+ARG GPU=false
 ENV PIP_CACHE_DIR=/root/.cache/pip
 
 # 1. System dependencies & Poetry
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential git && \
+    apt-get install -y --no-install-recommends \
+      build-essential git curl ca-certificates && \
     pip install --no-cache-dir poetry==1.8.3 && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 
-# Install project dependencies into a Poetry venv at /app/.venv
-RUN poetry install --no-root --without dev && \
+# 2. Install project deps into Poetry venv
+RUN poetry config virtualenvs.in-project true && \
+    poetry install --no-root --without dev && \
     rm -rf $PIP_CACHE_DIR
 
-# -----------------------
-# 2. Backend-specific installs
-#    (cumulative layers for 'all')
-# -----------------------
-
-# numpy
+# 3. Backend-specific installs (numpy as baseline)
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "numpy" ] || [ "$BACKEND" = "all" ]; then \
-      poetry run pip install --no-cache-dir numpy; \
+      ./.venv/bin/pip install --no-cache-dir numpy; \
     fi
 
-# jax
+# 4. JAX
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
-      poetry run pip install --no-cache-dir jax jaxlib[cuda12_pip] \
-        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html; \
-    fi
+      if [ "$GPU" = "true" ]; then \
+        ./.venv/bin/pip install --no-cache-dir -U "jax[cuda12]"; \
+      else \
+        ./.venv/bin/pip install --no-cache-dir -U jax; \
+      fi \
+    fi  # :contentReference[oaicite:7]{index=7}
 
-# torch
+# 5. PyTorch
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
-      poetry run pip install --no-cache-dir torch==2.2.2+cu121 torchvision torchmetrics \
-        -f https://download.pytorch.org/whl/cu121/torch_stable.html; \
-    fi
+      if [ "$GPU" = "true" ]; then \
+        ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio \
+          --index-url https://download.pytorch.org/whl/cu124; \
+      else \
+        ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio; \
+      fi \
+    fi  # :contentReference[oaicite:8]{index=8}
 
-# tensorflow + keras
+# 6. TensorFlow
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
-      KERAS_VERSION=$(poetry run pip show keras | awk '/^Version:/ {print $2}') && \
-      poetry run pip install --no-cache-dir --extra-index-url https://pypi.nvidia.com tensorflow[and-cuda]==2.15.0 && \
-      poetry run pip install --no-cache-dir --upgrade "keras==$KERAS_VERSION" keras-cv; \
-    fi
+      if [ "$GPU" = "true" ]; then \
+        ./.venv/bin/pip install --no-cache-dir \
+          --extra-index-url https://pypi.nvidia.com \
+          "tensorflow[and-cuda]==2.19.0"; \
+      else \
+        ./.venv/bin/pip install --no-cache-dir tensorflow==2.19.0; \
+      fi \
+    fi  # :contentReference[oaicite:9]{index=9}
 
-# -----------------------
-# 3. Cleanup
-# -----------------------
+# 7. Cleanup build tools and caches
 RUN pip uninstall -y poetry && \
     rm -rf $PIP_CACHE_DIR
 
 # -----------------------
 # CPU runtime image
 # -----------------------
-FROM python:3.10-slim-bullseye AS cpu
+FROM python:3.12-slim-bullseye AS cpu
+ARG BACKEND=all
+ARG GPU=false
 ENV PATH="/app/.venv/bin:${PATH}"
 
 COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 WORKDIR /app
-CMD ["python","-c","print('CPU image with', '$BACKEND', 'backend')"]
+
+CMD ["python","-c","print('CPU image with', 'BACKEND=', '$BACKEND')"]
 
 # -----------------------
 # GPU runtime image
 # -----------------------
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu20.04 AS gpu
-ENV DEBIAN_FRONTEND=noninteractive
+FROM python:3.12-bullseye AS gpu
+ARG BACKEND=all
+ARG GPU=false
+ENV DEBIAN_FRONTEND=noninteractive \
+    PATH="/usr/local/cuda/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 
-# Install Python 3.10 runtime
+# Install CUDA runtime libraries and cuDNN (no driver)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3.10 python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+      gnupg2 curl ca-certificates && \
+    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/\
+cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
+    dpkg -i /tmp/cuda-keyring.deb && \
+    rm /tmp/cuda-keyring.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      cuda-libraries-12-5 libcudnn9-cuda-12 && \
+    rm -rf /var/lib/apt/lists/*  
 
-# Symlinks for consistent "python" and "pip"
-RUN ln -s /usr/bin/python3.10 /usr/local/bin/python && \
-    ln -s /usr/bin/pip3 /usr/local/bin/pip
-
-ENV PATH="/app/.venv/bin:${PATH}"
-
+# Copy prebuilt venv and app code
 COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 WORKDIR /app
-CMD ["python","-c","import sys; print('GPU image with', '$BACKEND', 'backend')"]
+
+CMD ["python","-c","import sys; print('GPU image with', 'BACKEND=', '$BACKEND')"]
