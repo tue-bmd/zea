@@ -314,12 +314,6 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
     new_row["X1"] = new_row["X1"] + left_padding
     new_row["X2"] = new_row["X2"] + left_padding
 
-    # Apply top padding offset if crop_top was negative
-    if cone_params["crop_top"] < 0:
-        top_padding = -cone_params["crop_top"]
-        new_row["Y1"] = new_row["Y1"] + top_padding
-        new_row["Y2"] = new_row["Y2"] + top_padding
-
     # Check if coordinates are within the final image bounds
     final_width = cone_params["new_width"]
     final_height = cone_params["new_height"]
