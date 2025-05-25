@@ -50,23 +50,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push full Docker image
+      - name: Build and push all-cpu Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
+          target: cpu
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all:${{ needs.set-tag.outputs.docker_tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
           build-args: BACKEND=all
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+          cache-from: type=registry,ref=usbmd/all-cpu:cache
+          cache-to: type=registry,ref=usbmd/all-cpu:cache,mode=max
 
   build-other-images:
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        backend: [tensorflow, torch, jax, numpy]
+        backend: [numpy, jax, torch, tensorflow, all]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -80,11 +81,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push CPU Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
+          target: cpu
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.set-tag.outputs.docker_tag }}
+          build-args: BACKEND=${{ matrix.backend }}
+          cache-from: type=registry,ref=usbmd/${{ matrix.backend }}-cpu:cache
+          cache-to: type=registry,ref=usbmd/${{ matrix.backend }}-cpu:cache,mode=max
+
+      - name: Build and push GPU Docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile.base
+          target: gpu
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
           build-args: BACKEND=${{ matrix.backend }}
