@@ -76,9 +76,17 @@ ARG GPU=false
 ENV PATH="/app/.venv/bin:${PATH}"
 ENV BACKEND=${BACKEND}
 
+# Create a non-root user named actions
+RUN useradd -m actions
+
 COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 WORKDIR /app
+
+# Change ownership to actions
+RUN chown -R actions:actions /app /app/.venv
+
+USER actions
 
 CMD python -c "print('CPU image with BACKEND=', '${BACKEND}')"
 
@@ -110,5 +118,10 @@ cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
 COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 WORKDIR /app
+
+# Create a non-root user named actions and set ownership
+RUN useradd -m actions && chown -R actions:actions /app /app/.venv
+
+USER actions
 
 CMD python -c "import sys; print('GPU image with BACKEND =', '${BACKEND}')"
