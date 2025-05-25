@@ -133,7 +133,7 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
+            sh -c "pip install -e . && pylint \$(git ls-files '*.py') -j 0"
 
   tests:
     needs: [build-full-image, set-tag]
