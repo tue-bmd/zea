@@ -36,7 +36,14 @@ def _abs_sinc(x):
 
 @cache_output(verbose=True)
 def compute_pfield(
-    scan,
+    sound_speed,
+    center_frequency,
+    bandwidth_percent,
+    n_el,
+    probe_geometry,
+    tx_apodizations,
+    grid,
+    t0_delays,
     frequency_step=4,
     db_thresh=-1,
     downsample=10,
@@ -49,7 +56,14 @@ def compute_pfield(
     """Compute the pressure field for ultrasound imaging.
 
     Args:
-        scan (Scan): The ultrasound scan object.
+        sound_speed (float): Speed of sound in the medium.
+        center_frequency (float): Center frequency of the probe in Hz.
+        bandwidth_percent (float): Bandwidth of the probe, pulse-echo 6dB fractional bandwidth (%)
+        n_el (int): Number of elements in the probe.
+        probe_geometry (array): Geometry of the probe elements.
+        tx_apodizations (array): Transmit apodization values.
+        grid (array): Grid points where the pressure field is computed.
+        t0_delays (array): Transmit delays for each transmit event.
         frequency_step (int, optional): Frequency step. Default is 4.
             Higher is faster but less accurate.
         db_thresh (int, optional): dB threshold. Default is -1.
@@ -71,29 +85,21 @@ def compute_pfield(
     # medium params
     alpha_db = 0  # currently we ignore attenuation in the compounding
 
-    sound_speed = scan.sound_speed
-
     # probe params
-    center_frequency = scan.center_frequency  # central frequency (Hz)
     center_frequency = center_frequency / downmix  # downmixing the frequency
-
-    bandwidth_percent = (
-        scan.bandwidth_percent
-    )  # pulse-echo 6dB fractional bandwidth (%)
 
     # pulse params
     num_waveforms = 1  # number of waveforms in the pulse
 
     # array params
-    probe_geometry = ops.convert_to_tensor(scan.probe_geometry, dtype="float32")
+    probe_geometry = ops.convert_to_tensor(probe_geometry, dtype="float32")
 
-    num_elements = scan.n_el  # number of elements
     pitch = probe_geometry[1, 0] - probe_geometry[0, 0]  # element pitch
 
     kerf = 0.1 * pitch  # for now this is hardcoded
     element_width = pitch - kerf
 
-    num_transmits = len(scan.tx_apodizations)
+    num_transmits = len(tx_apodizations)
 
     # %------------------------------------%
     # % POINT LOCATIONS, DISTANCES & GRIDS %
@@ -103,8 +109,8 @@ def compute_pfield(
     lambda_min = sound_speed / (center_frequency * (1 + bandwidth_percent / 200))
     num_sub_elements = ops.ceil(element_width / lambda_min)
 
-    x_orig = ops.convert_to_tensor(scan.grid[:, :, 0], dtype="float32")
-    z_orig = ops.convert_to_tensor(scan.grid[:, :, 2], dtype="float32")
+    x_orig = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
+    z_orig = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
 
     size_orig = ops.shape(x_orig)
 
@@ -118,9 +124,9 @@ def compute_pfield(
     z = ops.reshape(z, (-1,))
 
     # Centers of the transducer elements (x- and z-coordinates)
-    xe = (ops.arange(0.0, num_elements) - (num_elements - 1) / 2) * pitch
-    ze = ops.zeros(num_elements)
-    the = ops.zeros(num_elements)
+    xe = (ops.arange(0.0, n_el) - (n_el - 1) / 2) * pitch
+    ze = ops.zeros(n_el)
+    the = ops.zeros(n_el)
 
     # Centroids of the sub-elements
     seg_length = element_width / num_sub_elements
@@ -183,11 +189,11 @@ def compute_pfield(
         progbar = keras.utils.Progbar(num_transmits, unit_name="transmits")
     for j in range(0, num_transmits):
         # delays and apodization of transmit event
-        delays_tx = ops.convert_to_tensor(scan.t0_delays[j], dtype="float32")
+        delays_tx = ops.convert_to_tensor(t0_delays[j], dtype="float32")
         idx_nan = ops.isnan(delays_tx)
         delays_tx = ops.where(idx_nan, 0, delays_tx)
 
-        tx_apodization = ops.convert_to_tensor(scan.tx_apodizations[j])
+        tx_apodization = ops.convert_to_tensor(tx_apodizations[j])
         idx_nan = ops.isnan(tx_apodization)
         tx_apodization = ops.where(idx_nan, 0, tx_apodization)
         tx_apodization = ops.squeeze(tx_apodization)
@@ -225,7 +231,7 @@ def compute_pfield(
         pulse_spect = pulse_spectrum(2 * np.pi * freq)
         probe_spect = probe_spectrum(2 * np.pi * freq)
 
-        # Exponential arrays of size [numel(x) num_elements num_sub_elements]
+        # Exponential arrays of size [numel(x) n_el num_sub_elements]
         kw = 2 * np.pi * freq[0] / sound_speed
         kwa = alpha_db / 8.69 * freq[0] / 1e6 * 1e2
 
@@ -310,10 +316,12 @@ def normalize_pressure_field(p_arr, alpha=1, percentile=10):
     # Flatten the last two dimensions, sort, and reshape back
     p_flat = ops.reshape(p_arr, (p_arr.shape[0], -1))
     p_sorted = ops.sort(p_flat, axis=1)
-    perc_value = p_sorted[:, int(p_arr.shape[1] * p_arr.shape[2] * percentile / 100)]
+    perc_value = p_sorted[
+        :, ops.cast(p_arr.shape[1] * p_arr.shape[2] * percentile / 100, "int32")
+    ]
     p_arr = ops.where(p_arr < perc_value[:, None, None], 0, p_arr)
 
-    p_arr = ops.convert_to_tensor(p_arr) ** alpha
+    p_arr = p_arr**alpha
     p_norm = p_arr / (keras.config.epsilon() + ops.sum(p_arr, axis=0))
 
     return p_norm
@@ -325,8 +333,7 @@ def _pfield_freq_step(
     sound_speed,
     delays_tx,
     tx_apodization,
-    exp_arr,
-    exp_df,
+    rp_mono,
     pulse_spect,
     probe_spect,
     z,
@@ -340,8 +347,8 @@ def _pfield_freq_step(
         sound_speed (float): Speed of sound.
         delays_tx (list): List of transmit delays.
         tx_apodization (list): List of transmit apodization values (complex64).
-        exp_arr (list): List of complex exponentials.
-        exp_df (list): List of complex exponential frequency shifts.
+        rp_mono: (Tensor): Per-element, per-field-point complex pressure response
+            (including directivity and propagation effects) at the current frequency sample.
         pulse_spect (list): List of pulse spectra.
         probe_spect (list): List of probe spectra (complex64).
         z (list): List of z-coordinates.
@@ -350,8 +357,6 @@ def _pfield_freq_step(
         rp_k (Tensor): Pressure field for this frequency.
     """
     kw = 2 * np.pi * freq[k] / sound_speed
-    rp_mono = ops.mean(exp_arr * ops.power(exp_df, k), axis=1)
-
     del_apod = (
         ops.exp(1j * ops.cast(kw * sound_speed * delays_tx, "complex64"))
         * tx_apodization
@@ -391,19 +396,21 @@ def _pfield_freq_loop(
 
     tx_apodization = ops.cast(tx_apodization, "complex64")
     probe_spect = ops.cast(probe_spect, "complex64")
-    stacked = ops.vectorized_map(
-        lambda k: _pfield_freq_step(
+    rp_mono = exp_arr
+    rp = 0
+    for k in range(len(freq)):
+        if k > 0:
+            rp_mono *= exp_df
+        rp_k = _pfield_freq_step(
             k,
             freq,
             sound_speed,
             delays_tx,
             tx_apodization,
-            exp_arr,
-            exp_df,
+            ops.mean(rp_mono, axis=1),  # avg over sub-elements
             pulse_spect,
             probe_spect,
             z,
-        ),
-        np.arange(0, len(freq), dtype="int32"),
-    )
-    return ops.sum(stacked, axis=0)
+        )
+        rp += rp_k
+    return rp
