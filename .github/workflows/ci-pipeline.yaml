@@ -107,7 +107,7 @@ jobs:
           if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+          docker pull usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pylint in container
         run: |
@@ -118,7 +118,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
+            usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
 
   tests:
@@ -137,7 +137,7 @@ jobs:
           if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+          docker pull usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pytest in container
         run: |
@@ -148,7 +148,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
+            usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
 
   build-docs:
@@ -166,7 +166,7 @@ jobs:
           if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+          docker pull usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Build documentation with Sphinx (fail on warnings)
         run: |
@@ -177,7 +177,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
+            usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "\
               sudo apt-get update && \
               sudo apt-get install -y pandoc && \
