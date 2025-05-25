@@ -12,6 +12,7 @@ This module provides functionality to:
 
 import os
 from pathlib import Path
+import argparse
 
 if __name__ == "__main__":
     os.environ["KERAS_BACKEND"] = (
@@ -20,7 +21,6 @@ if __name__ == "__main__":
 
 import keras
 from keras import ops
-import argparse
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -707,6 +707,7 @@ def get_args():
         # e.g. {data_root}/USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
         required=True,
     )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
