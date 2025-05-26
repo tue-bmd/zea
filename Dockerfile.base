@@ -35,41 +35,41 @@ RUN python3 -m venv $POETRY_VENV && \
 # 3. Backend-specific installs (numpy as baseline)
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "numpy" ] || [ "$BACKEND" = "all" ]; then \
-      ./.venv/bin/pip install --no-cache-dir numpy; \
+      $POETRY_VENV/bin/pip install --no-cache-dir numpy; \
     fi
 
 # 4. JAX
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        ./.venv/bin/pip install --no-cache-dir -U "jax[cuda12]"; \
+        $POETRY_VENV/bin/pip install --no-cache-dir -U "jax[cuda12]"; \
       else \
-        ./.venv/bin/pip install --no-cache-dir -U jax; \
-      fi \
+        $POETRY_VENV/bin/pip install --no-cache-dir -U jax; \
+      fi; \
     fi
 
 # 5. PyTorch
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio \
+        $POETRY_VENV/bin/pip install --no-cache-dir torch torchvision torchaudio \
           --index-url https://download.pytorch.org/whl/cu124; \
       else \
-        ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio \
+        $POETRY_VENV/bin/pip install --no-cache-dir torch torchvision torchaudio \
           --index-url https://download.pytorch.org/whl/cpu; \
-      fi \
+      fi; \
     fi
 
 # 6. TensorFlow
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        ./.venv/bin/pip install --no-cache-dir \
+        $POETRY_VENV/bin/pip install --no-cache-dir \
           --extra-index-url https://pypi.nvidia.com \
           "tensorflow[and-cuda]==2.19.0"; \
       else \
-        ./.venv/bin/pip install --no-cache-dir tensorflow==2.19.0; \
-      fi \
+        $POETRY_VENV/bin/pip install --no-cache-dir tensorflow==2.19.0; \
+      fi; \
     fi
 
 # 7. Cleanup build tools and caches
@@ -82,15 +82,16 @@ RUN pip uninstall -y poetry && \
 FROM python:3.12-slim-bullseye AS cpu
 ARG BACKEND=all
 ARG GPU=false
-ENV PATH="/ultrasound-toolbox/.venv/bin:${PATH}"
+ENV PATH="/opt/poetry-venv/bin:${PATH}"
 ENV BACKEND=${BACKEND}
 
-# Copy --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
-COPY --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
+# Copy prebuilt venv from builder (note the corrected source path)
+COPY --from=builder /opt/poetry-venv /opt/poetry-venv
 COPY . /ultrasound-toolbox
 WORKDIR /ultrasound-toolbox
 
-CMD python -c "print('CPU image with BACKEND=', '${BACKEND}')"
+CMD ["/bin/bash", "-c", "python -c \"import sys; print('GPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
+
 
 # -----------------------
 # GPU runtime image
@@ -107,8 +108,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       gnupg2 curl ca-certificates && \
-    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/\
-cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
+    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
     dpkg -i /tmp/cuda-keyring.deb && \
     rm /tmp/cuda-keyring.deb && \
     apt-get update && \
@@ -116,9 +116,9 @@ cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
       cuda-libraries-12-5 libcudnn9-cuda-12 && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy prebuilt venv and app code
-COPY --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
+# Copy prebuilt venv and app code (corrected source path)
+COPY --from=builder /opt/poetry-venv /opt/poetry-venv
 COPY . /ultrasound-toolbox
 WORKDIR /ultrasound-toolbox
 
-CMD python -c "import sys; print('GPU image with BACKEND =', '${BACKEND}')"
+CMD ["/bin/bash", "-c", "python -c \"import sys; print('GPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
