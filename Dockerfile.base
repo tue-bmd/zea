@@ -25,7 +25,7 @@ RUN apt-get update && \
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# 2. Install project deps into Poetry venv using the old style
+# 2. Install project deps into Poetry venv 
 RUN python3 -m venv $POETRY_VENV && \
     $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION} && \
     poetry config virtualenvs.in-project true && \
