@@ -126,12 +126,11 @@ jobs:
       - name: Run Pylint in container
         run: |
           docker run --rm \
-            --user actions \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
             -e HOME=/tmp \
-            -e USER=actions \
-            -e LOGNAME=actions \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && pylint \$(git ls-files '*.py') -j 0"
 
@@ -156,12 +155,11 @@ jobs:
       - name: Run Pytest in container
         run: |
           docker run --rm \
-            --user actions \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
             -e HOME=/tmp \
-            -e USER=actions \
-            -e LOGNAME=actions \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
 
@@ -185,12 +183,11 @@ jobs:
       - name: Build documentation with Sphinx (fail on warnings)
         run: |
           docker run --rm \
-            --user actions \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox/docs \
             -e HOME=/tmp \
-            -e USER=actions \
-            -e LOGNAME=actions \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "\
               sudo apt-get update && \
