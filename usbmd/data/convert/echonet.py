@@ -406,7 +406,7 @@ if __name__ == "__main__":
         for split in splits:
             yaml_file = split_yaml_dir / (split + ".yaml")
             assert yaml_file.exists(), f"File {yaml_file} does not exist."
-            splits[split] = Config.load_from_yaml(yaml_file)["file_paths"]
+            splits[split] = Config.from_yaml(yaml_file)["file_paths"]
     else:
         splits = None
 
