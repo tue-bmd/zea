@@ -274,6 +274,7 @@ class LVHProcessor(H5Processor):
             "probe_name": "generic",
             "description": "EchoNet-LVH dataset converted to USBMD format",
             "image": translate(np.array(polar_im_set), self._process_range, (0, 255)).astype(np.uint8),
+            "cast_to_float": False
         }
         return generate_usbmd_dataset(**usbmd_dataset)
 
