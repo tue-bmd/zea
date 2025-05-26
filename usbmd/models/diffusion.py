@@ -77,16 +77,20 @@ class DiffusionModel(DeepGenerativeModel):
         if network_name == "unet_time_conditional":
             self.network = get_time_conditional_unetwork(
                 image_shape=self.input_shape,
-                **network_kwargs,
+                **self.network_kwargs,
             )
         elif network_name == "dense_time_conditional":
             assert len(input_shape) == 1, "Dense network only supports 1D input"
             self.network = get_time_conditional_dense_network(
                 input_dim=self.input_shape[0],
-                **network_kwargs,
+                **self.network_kwargs,
             )
         else:
             raise ValueError("Invalid network name provided.")
+
+        # Also initialize the exponential moving average network
+        self.ema_network = keras.models.clone_model(self.network)
+        self.ema_network.trainable = False
 
         self.image_loss_tracker = LossTrackerWrapper("i_loss")
         self.noise_loss_tracker = LossTrackerWrapper("n_loss")
@@ -160,8 +164,13 @@ class DiffusionModel(DeepGenerativeModel):
 
     # pylint: disable=arguments-differ
     def call(self, inputs, training=False, **kwargs):
-        """Simply calls the score network."""
-        return self.network(inputs, training=training, **kwargs)
+        """Keras requires a call method to be implemented"""
+        # the exponential moving average weights are used at evaluation
+        if training:
+            network = self.network
+        else:
+            network = self.ema_network
+        return network(inputs, training=training, **kwargs)
 
     def sample(self, n_samples=1, n_steps=20, seed=None, **kwargs):
         """Sample from the model.
