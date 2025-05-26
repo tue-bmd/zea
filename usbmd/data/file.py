@@ -184,7 +184,8 @@ class File(h5py.File):
             key = "data/" + key
 
         assert key in self.keys(), (
-            f"Key {key} not found in file. " f"Available keys: {list(self.keys())}"
+            f"Key {key} not found in file. "
+            f"Available keys: {list(self['data'].keys())}"
         )
 
         return key
@@ -230,7 +231,14 @@ class File(h5py.File):
         indices = self._prepare_indices(indices)
 
         if self._simple_index(key):
-            data = self[key][indices]
+            data = self[key]
+            try:
+                data = data[indices]
+            except OSError:
+                raise ValueError(
+                    f"Invalid indices {indices} for key {key}. "
+                    f"{key} has shape {data.shape}."
+                )
             self.check_data(data, key)
         elif self.events_have_same_shape(key):
             raise NotImplementedError
