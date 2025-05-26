@@ -19,7 +19,7 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 # 1. System dependencies & Poetry
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      build-essential git curl ca-certificates && \
+      build-essential git curl ca-certificates sudo && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ultrasound-toolbox
