@@ -234,11 +234,11 @@ class File(h5py.File):
             data = self[key]
             try:
                 data = data[indices]
-            except OSError:
+            except OSError as exc:
                 raise ValueError(
                     f"Invalid indices {indices} for key {key}. "
                     f"{key} has shape {data.shape}."
-                )
+                ) from exc
             self.check_data(data, key)
         elif self.events_have_same_shape(key):
             raise NotImplementedError
