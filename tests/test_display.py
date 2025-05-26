@@ -100,7 +100,7 @@ def create_concentric_rings(size):
 @backend_equality_check(decimal=2, backends=["torch", "jax"])
 def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     """Tests the scan_conversion function with structured test patterns and
-    inverts the data with transform_sc_image_to_polar.
+    inverts the data with inverse_scan_convert_2d.
 
     TODO: This test fails for tensorflow on cpu because of `keras.ops.image.map_coordinates`.
     Therefore tensorflow is not included in the backends. Maybe in the future we can check
@@ -126,14 +126,73 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
 
     cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
     cartesian_data = ops.convert_to_numpy(cartesian_data)
-    cartesian_data_inv = display.transform_sc_image_to_polar(
-        cartesian_data, output_size=polar_data.shape
+    cartesian_data_inv = display.inverse_scan_convert_2d(
+        cartesian_data, output_size=polar_data.shape, find_scan_cone=False
     )
+    cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
     mean_squared_error = ((polar_data - cartesian_data_inv) ** 2).mean()
 
     assert (
         mean_squared_error < allowed_error
     ), f"MSE is too high: {mean_squared_error:.4f}"
+
+    return cartesian_data_inv
+
+
+@pytest.mark.parametrize(
+    "size, pattern_creator, allowed_error",
+    [
+        ((200, 200), "create_radial_pattern", 0.0015),
+        ((100, 333), "create_radial_pattern", 0.0015),
+        ((200, 200), "create_concentric_rings", 0.1),
+        ((100, 333), "create_concentric_rings", 0.1),
+    ],
+)
+@backend_equality_check(decimal=2, backends=["torch", "jax"])
+def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error):
+    """Tests the scan_conversion function with structured test patterns and
+    inverts the data with inverse_scan_convert_2d. In this case, the scan cone is
+    padded such that it is no longer centered and cropped. find_scan_cone=True is
+    used to automatically crop and center the scan cone.
+
+    TODO: This test fails for tensorflow on cpu because of `keras.ops.image.map_coordinates`.
+    Therefore tensorflow is not included in the backends. Maybe in the future we can check
+    if the error is fixed with a new keras or tensorflow version.
+    """
+    from keras import ops  # pylint: disable=reimported,import-outside-toplevel
+
+    from usbmd import display  # pylint: disable=reimported,import-outside-toplevel
+
+    if pattern_creator == "create_radial_pattern":
+        polar_data = create_radial_pattern(size)
+    elif pattern_creator == "create_concentric_rings":
+        polar_data = create_concentric_rings(size)
+    else:
+        raise ValueError("Unknown pattern creator")
+
+    rho_range = (0, 100)
+    theta_range = np.deg2rad((-45, 45))
+
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
+    cartesian_data = ops.convert_to_numpy(cartesian_data)
+
+    # now pad the cartesian image and test with find_scan_cone=True
+    left_padding = ops.zeros((ops.shape(cartesian_data)[0], 20))
+    cartesian_data_padded = ops.concatenate([left_padding, cartesian_data], axis=1)
+    top_padding = ops.zeros((20, ops.shape(cartesian_data_padded)[1]))
+    cartesian_data_padded = ops.concatenate(
+        [top_padding, cartesian_data_padded], axis=0
+    )
+    cartesian_data_inv = display.inverse_scan_convert_2d(
+        cartesian_data_padded, output_size=polar_data.shape, find_scan_cone=True
+    )
+    cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
+    mean_squared_error = ((polar_data - cartesian_data_inv) ** 2).mean()
+
+    assert (
+        mean_squared_error < allowed_error
+    ), f"MSE is too high: {mean_squared_error:.4f}"
+
     return cartesian_data_inv
 
 
