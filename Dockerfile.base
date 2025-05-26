@@ -7,19 +7,28 @@ FROM python:3.12-slim-bullseye AS builder
 ARG BACKEND=all
 ARG GPU=false
 ENV PIP_CACHE_DIR=/root/.cache/pip
+# Set poetry version and venv path
+ENV POETRY_VERSION=1.8.3 \
+    POETRY_VENV=/opt/poetry-venv \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=0 \
+    POETRY_VIRTUALENVS_CREATE=0 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
 # 1. System dependencies & Poetry
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       build-essential git curl ca-certificates && \
-    pip install --no-cache-dir poetry==1.8.3 && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# 2. Install project deps into Poetry venv
-RUN poetry config virtualenvs.in-project true && \
+# 2. Install project deps into Poetry venv using the old style
+RUN python3 -m venv $POETRY_VENV && \
+    $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION} && \
+    poetry config virtualenvs.in-project true && \
     poetry install --no-root --without dev && \
     rm -rf $PIP_CACHE_DIR
 
@@ -37,7 +46,7 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR \
       else \
         ./.venv/bin/pip install --no-cache-dir -U jax; \
       fi \
-    fi  # :contentReference[oaicite:7]{index=7}
+    fi
 
 # 5. PyTorch
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
@@ -49,7 +58,7 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR \
         ./.venv/bin/pip install --no-cache-dir torch torchvision torchaudio \
           --index-url https://download.pytorch.org/whl/cpu; \
       fi \
-    fi  # :contentReference[oaicite:8]{index=8}
+    fi
 
 # 6. TensorFlow
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
@@ -61,7 +70,7 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR \
       else \
         ./.venv/bin/pip install --no-cache-dir tensorflow==2.19.0; \
       fi \
-    fi  # :contentReference[oaicite:9]{index=9}
+    fi
 
 # 7. Cleanup build tools and caches
 RUN pip uninstall -y poetry && \
@@ -76,17 +85,10 @@ ARG GPU=false
 ENV PATH="/ultrasound-toolbox/.venv/bin:${PATH}"
 ENV BACKEND=${BACKEND}
 
-# Create a non-root user named actions
-RUN useradd -m actions
-
+# Copy --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
 COPY --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
 COPY . /ultrasound-toolbox
 WORKDIR /ultrasound-toolbox
-
-# Change ownership to actions
-RUN chown -R actions:actions /ultrasound-toolbox /ultrasound-toolbox/.venv
-
-USER actions
 
 CMD python -c "print('CPU image with BACKEND=', '${BACKEND}')"
 
@@ -118,10 +120,5 @@ cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
 COPY --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
 COPY . /ultrasound-toolbox
 WORKDIR /ultrasound-toolbox
-
-# Create a non-root user named actions and set ownership
-RUN useradd -m actions && chown -R actions:actions /ultrasound-toolbox /ultrasound-toolbox/.venv
-
-USER actions
 
 CMD python -c "import sys; print('GPU image with BACKEND =', '${BACKEND}')"
