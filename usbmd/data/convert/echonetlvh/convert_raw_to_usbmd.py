@@ -269,10 +269,11 @@ class LVHProcessor(H5Processor):
 
         usbmd_dataset = {
             "path": out_h5,
-            "image_sc": self.translate(np.array(sequence)),
+             # store as uint8 for memory efficiency
+            "image_sc": translate(np.array(sequence), self._process_range, (0, 255)).astype(np.uint8),
             "probe_name": "generic",
             "description": "EchoNet-LVH dataset converted to USBMD format",
-            "image": self.translate(np.array(polar_im_set)),
+            "image": translate(np.array(polar_im_set), self._process_range, (0, 255)).astype(np.uint8),
         }
         return generate_usbmd_dataset(**usbmd_dataset)
 
