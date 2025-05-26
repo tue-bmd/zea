@@ -1,8 +1,39 @@
-"""Config utilities.
-Load settings from yaml files and access them as objects / dicts.
+"""config.py
 
-- **Author(s)**     : Tristan Stevens, Wessel van Nierop
-- **Date**          : 14-09-2021
+This module provides the :class:`Config` class for managing configuration settings,
+with support for loading from YAML files, HuggingFace Hub, and dot notation access.
+
+Features
+--------
+
+- Dot notation access to dictionary keys.
+- Recursive conversion of nested dictionaries/lists to Config objects.
+- Attribute access logging and suggestion of similar attribute names.
+- Freezing/unfreezing to prevent/allow new attributes.
+- Serialization to YAML/JSON.
+- Integration with HuggingFace Hub.
+
+Example Usage
+-------------
+
+.. code-block:: python
+
+    from usbmd.config.config import Config
+
+    # Load from YAML
+    config = Config.from_yaml("config.yaml")
+    # Load from HuggingFace Hub
+    config = Config.from_hf("usbmd/diffusion-echonet-dynamic", "train_config.yaml")
+
+    # Access attributes with dot notation
+    print(config.model.name)
+
+    # Update recursively
+    config.update_recursive({"model": {"name": "new_model"}})
+
+    # Save to YAML
+    config.save_to_yaml("new_config.yaml")
+
 """
 
 import copy
@@ -12,25 +43,20 @@ import json
 from pathlib import Path
 
 import yaml
+from huggingface_hub import hf_hub_download
 
 from usbmd import log
 from usbmd.internal.core import object_to_tensor
 
 
-def path_to_str(path):
-    """Convert a Path object to a string."""
-    if isinstance(path, Path):
-        return str(path)
-    return path
-
-
 class Config(dict):
     """Config class.
 
-    This Config class extends a normal dictionary with easydict such that
-    values can be accessed as class attributes.
+    This Config class extends a normal dictionary with dot notation access.
 
-    Other features:
+    Features:
+        - `Config.from_yaml` method to load a config from a yaml file.
+        - `Config.from_hf` method to load a config from a huggingface hub.
         - `save_to_yaml` method to save the config to a yaml file.
         - `copy` method to create a deep copy of the config.
         - Normal dictionary methods such as `keys`, `values`, `items`, `pop`, `update`, `get`.
@@ -42,7 +68,9 @@ class Config(dict):
     We took inspiration from the following sources:
         - `EasyDict <https://pypi.org/project/easydict/>`_ # pylint: disable=line-too-long
         - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_ # pylint: disable=line-too-long
+
     But this implementation is superior :)
+
     """
 
     __frozen__ = False
@@ -128,21 +156,29 @@ class Config(dict):
             self[key] = value
 
     def update_recursive(self, dictionary: dict | None = None, **kwargs):
-        """
-        Update the config with the provided dictionary and keyword arguments.
+        """Recursively update the config with the provided dictionary and keyword arguments.
+
         If a key corresponds to another Config object, the update_recursive
         method is called recursively on that object. This makes it possible
         to update nested Config objects without replacing them.
 
-        Example:
-        ```python
-        config = Config({"a": 1, "b": {"c": 2, "d": 3}})
-        config.update_recursive({"a": 4, "b": {"c": 5}})
-        print(config)  # Output: <Config {'a': 4, 'b': {'c': 5, 'd': 3}}>
-        ```
-        Notice how "d" is kept and only "c" is updated.
-        """
+        If a value is a list and the corresponding config value is also a list,
+        each element is updated recursively if it is a Config, otherwise replaced.
 
+        Example:
+
+        .. code-block:: python
+
+            config = Config({"a": 1, "b": {"c": 2, "d": 3}})
+            config.update_recursive({"a": 4, "b": {"c": 5}})
+            print(config)
+            # <Config {'a': 4, 'b': {'c': 5, 'd': 3}}>
+            # Notice how "d" is kept and only "c" is updated.
+
+        Args:
+            dictionary (dict, optional): Dictionary to update from.
+            **kwargs: Additional key-value pairs to update.
+        """
         if dictionary is None:
             dictionary = {}
         dictionary.update(kwargs)
@@ -340,8 +376,7 @@ class Config(dict):
         return json.dumps(self)
 
     def as_dict(self, func_on_leaves=None):
-        """
-        Convert the config to a normal dictionary (recursively).
+        """Convert the config to a normal dictionary (recursively).
 
         Args:
             func_on_leaves (callable, optional): Function to apply to each leaf node.
@@ -365,16 +400,15 @@ class Config(dict):
 
     def serialize(self):
         """Return a dict of this config object with all Path objects converted to strings."""
-        return self.as_dict(lambda _, key, value: (key, path_to_str(value)))
+        return self.as_dict(lambda _, key, value: (key, _path_to_str(value)))
 
     def copy(self):
-        """
-        Deep copy the config object. This is useful when you want to modify the config object
+        """Deep copy the config object.
+
+        This is useful when you want to modify the config object
         without changing the original. Does not preserve the access history or frozen state!
         """
         return Config(copy.deepcopy(self.as_dict()))
-
-    deep_copy = copy  # Alias for copy
 
     def save_to_yaml(self, path):
         """Save config contents to yaml"""
@@ -387,8 +421,9 @@ class Config(dict):
             )
 
     def freeze(self):
-        """
-        Freeze config object. This means that no new attributes can be added.
+        """Freeze config object.
+
+        This means that no new attributes can be added.
         Only existing attributes can be modified.
         """
         self._recursive_setattr("__frozen__", True)
@@ -408,30 +443,66 @@ class Config(dict):
                     if isinstance(v, Config):
                         v._recursive_setattr(set_key, set_value)
 
-    @staticmethod
-    def load_from_yaml(path):
+    @classmethod
+    def from_yaml(cls, path, **kwargs):
         """Load config object from yaml file"""
-        return load_config_from_yaml(path)
+        return _load_config_from_yaml(path, config_class=cls, **kwargs)
+
+    @classmethod
+    def from_hf(cls, repo_id, path, **kwargs):
+        """Load config object from huggingface hub.
+
+        Example:
+
+        .. code-block:: python
+
+            config = Config.from_hf(
+                "usbmd/configs", "config_echonet.yaml", repo_type="dataset"
+            )
+
+        Args:
+            repo_id (str): huggingface hub repo id.
+                For example: "usbmd/configs"
+            path (str): path to the config file in the repo.
+                For example: "train_config.yaml"
+            **kwargs: additional arguments to pass to the `hf_hub_download`
+                function. For example, use repo_type="dataset" to download
+                from a dataset repo, or revision="main" to download from
+                a specific branch.
+
+        Returns:
+            Config: config object.
+        """
+        local_path = hf_hub_download(repo_id, path, **kwargs)
+        return _load_config_from_yaml(local_path, config_class=cls)
 
     def to_tensor(self):
         """Convert the attributes in the object to keras tensors"""
         return object_to_tensor(self)
 
 
-def load_config_from_yaml(path, loader=yaml.FullLoader):
+def _load_config_from_yaml(path, config_class=Config, loader=yaml.FullLoader):
     """Load config object from yaml file
 
     Args:
         path (str): path to yaml file.
         loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
             for custom objects, you might want to use yaml.UnsafeLoader.
+        config_class (type, optional): Config class to instantiate. Defaults to Config.
 
-    Returns:d
+    Returns:
         Config: config object.
     """
     with open(Path(path), "r", encoding="utf-8") as file:
         dictionary = yaml.load(file, Loader=loader)
     if dictionary:
-        return Config(dictionary)
+        return config_class(dictionary)
     else:
-        return Config()
+        return config_class()
+
+
+def _path_to_str(path):
+    """Convert a Path object to a string."""
+    if isinstance(path, Path):
+        return str(path)
+    return path

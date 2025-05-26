@@ -1,7 +1,4 @@
-"""Diffusion models
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 23/04/2025
-"""
+"""Diffusion models"""
 
 import abc
 from typing import Literal

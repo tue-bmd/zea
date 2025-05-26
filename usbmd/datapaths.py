@@ -1,8 +1,4 @@
-"""Set custom, user specific data paths in this file.
-
-- **Author(s)**     : Tristan Stevens, Frits de Bruijn
-- **Date**          : -
-"""
+"""Utility functions for handling data paths."""
 
 import copy
 import getpass
