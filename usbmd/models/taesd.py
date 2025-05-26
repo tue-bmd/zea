@@ -1,10 +1,7 @@
-"""
-Tiny Autoencoder (TAESD) model converted to Tensorflow.
+"""Tiny Autoencoder (TAESD) model converted to Tensorflow.
 
 Source: https://github.com/madebyollin/taesd
 See example usage in [examples/taesd](examples/taesd).
-
-- **Author(s)**     : Wessel van Nierop
 """
 
 from pathlib import Path
@@ -13,6 +10,7 @@ import keras
 import tensorflow as tf
 from keras import backend, ops
 
+from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import get_preset_loader, register_presets
 from usbmd.models.presets import (
@@ -20,7 +18,6 @@ from usbmd.models.presets import (
     taesdxl_encoder_presets,
     taesdxl_presets,
 )
-from usbmd.internal.registry import model_registry
 
 
 @model_registry(name="taesdxl")
