@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# -----------------------
+##############################
 # Builder: install deps on slim Python 3.12
-# -----------------------
+##############################
 FROM python:3.12-slim-bullseye AS builder
 ARG BACKEND=all
 ARG GPU=false
@@ -25,7 +25,7 @@ RUN apt-get update && \
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# 2. Install project deps into Poetry venv 
+# 2. Install project deps into Poetry venv
 RUN python3 -m venv $POETRY_VENV && \
     $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION} && \
     poetry config virtualenvs.in-project true && \
@@ -76,27 +76,36 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR \
 RUN pip uninstall -y poetry && \
     rm -rf $PIP_CACHE_DIR
 
-# -----------------------
-# CPU runtime image
-# -----------------------
-FROM python:3.12-slim-bullseye AS cpu
-ARG BACKEND=all
-ARG GPU=false
-ENV PATH="/opt/poetry-venv/bin:${PATH}"
-ENV BACKEND=${BACKEND}
 
-# Copy prebuilt venv from builder (note the corrected source path)
+#################################
+# Runtime-base: common system dependencies and code
+#################################
+FROM python:3.12-slim-bullseye AS runtime-base
+# Install common runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential git curl ca-certificates sudo && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /ultrasound-toolbox
+# Copy virtual environment and application code from the builder
 COPY --from=builder /opt/poetry-venv /opt/poetry-venv
 COPY . /ultrasound-toolbox
-WORKDIR /ultrasound-toolbox
-
-CMD ["/bin/bash", "-c", "python -c \"import sys; print('GPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
+ENV PATH="/opt/poetry-venv/bin:${PATH}"
 
 
-# -----------------------
+##############################
+# CPU runtime image
+##############################
+FROM runtime-base AS cpu
+ARG BACKEND=all
+ENV BACKEND=${BACKEND}
+CMD ["/bin/bash", "-c", "python -c \"print('CPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
+
+
+##############################
 # GPU runtime image
-# -----------------------
-FROM python:3.12-bullseye AS gpu
+##############################
+FROM runtime-base AS gpu
 ARG BACKEND=all
 ARG GPU=false
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -104,10 +113,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
     BACKEND=${BACKEND}
 
-# Install CUDA runtime libraries and cuDNN (no driver)
+# Install only the additional CUDA-specific dependencies (avoiding duplicates)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      gnupg2 curl ca-certificates && \
+    apt-get install -y --no-install-recommends gnupg2 && \
     curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
     dpkg -i /tmp/cuda-keyring.deb && \
     rm /tmp/cuda-keyring.deb && \
@@ -115,10 +123,5 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       cuda-libraries-12-5 libcudnn9-cuda-12 && \
     rm -rf /var/lib/apt/lists/*
-
-# Copy prebuilt venv and app code (corrected source path)
-COPY --from=builder /opt/poetry-venv /opt/poetry-venv
-COPY . /ultrasound-toolbox
 WORKDIR /ultrasound-toolbox
-
-CMD ["/bin/bash", "-c", "python -c \"import sys; print('GPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
+CMD ["/bin/bash", "-c", "python -c \"print('GPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
