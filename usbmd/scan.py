@@ -922,7 +922,7 @@ class Scan(Object):
     def theta_range(self):
         """The theta range for scan conversion."""
         if self._theta_range is None and self.polar_angles is not None:
-            self._theta_range = (self.polar_angles.min(), self.polar_angles.max())
+            self._theta_range = (self._polar_angles.min(), self._polar_angles.max())
         return self._theta_range
 
     @property
