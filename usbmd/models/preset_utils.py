@@ -271,11 +271,19 @@ class KerasPresetLoader(PresetLoader):
         model = load_serialized_object(self.config, **kwargs)
         if load_weights:
             jax_memory_cleanup(model)
-            # needed to add this after Keras 3.7 (build error)
-            if hasattr(model, "image_shape"):
-                model.build(input_shape=model.image_shape)
-            elif hasattr(model, "input_shape"):
-                model.build(input_shape=model.input_shape)
+
+            # custom usbmd: try to build with image_shape or input_shape
+            # preferred way to build is to have a build_config in the json!
+            if not model.built:
+                if hasattr(model, "image_shape"):
+                    model.build(input_shape=model.image_shape)
+                elif hasattr(model, "input_shape"):
+                    model.build(input_shape=model.input_shape)
+                else:
+                    raise Exception(
+                        "Model could not be built. Make sure to add a build_config to the json "
+                        "or set the input_shape or image_shape attribute before loading weights."
+                    )
             # if model has a custom load_weights method, call it
             if hasattr(model, "custom_load_weights"):
                 model.custom_load_weights(self.preset)
