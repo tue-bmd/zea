@@ -17,8 +17,9 @@ def random_uniform_lines(
     seed: int | keras.random.SeedGenerator = None,
     dtype=_DEFAULT_DTYPE,
 ):
-    """
-    Will generate a mask with random lines. Guarantees precisely n_actions.
+    """Will generate a mask with random lines.
+
+    Guarantees precisely n_actions.
 
     Args:
         n_actions (int): Number of actions to be selected.
@@ -39,19 +40,19 @@ def random_uniform_lines(
 
 
 def get_initial_equispaced_lines(n_actions, n_possible_actions, dtype=_DEFAULT_DTYPE):
-    """
-    Generates and initial equispaced k-hot line mask.
-    e.g.
-        if n_actions=2, n_possible_actions=6
-        then initial_mask=[1, 0, 0, 1, 0, 0]
+    """Generate an initial equispaced k-hot line mask.
+
+    For example, if ``n_actions=2`` and ``n_possible_actions=6``,
+    then ``initial_mask=[1, 0, 0, 1, 0, 0]``.
 
     Args:
         n_actions (int): Number of actions to be selected.
         n_possible_actions (int): Number of possible actions.
+        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
 
     Returns:
         Tensor: k-hot-encoded line vector of shape (n_possible_actions).
-                Needs to be converted to image size.
+            Needs to be converted to image size.
     """
     selected_indices = ops.arange(
         0, n_possible_actions, n_possible_actions // n_actions
@@ -70,18 +71,22 @@ def equispaced_lines(
     previous_mask=None,
     dtype=_DEFAULT_DTYPE,
 ):
-    """
-    Generates equispaced k-hot line mask.
-    If a previous mask is provided, will shift the mask by one.
+    """Generates equispaced k-hot line mask.
+
+    If a previous mask is provided, the mask will be shifted by one.
 
     Args:
         n_actions (int): Number of actions to be selected.
         n_possible_actions (int): Number of possible actions.
-        previous_actions (Tensor, optional): Previous actions. Defaults to None.
+        previous_mask (Tensor, optional): Previous mask to shift. Defaults to None.
+        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
 
     Returns:
         Tensor: k-hot-encoded line vector of shape (n_possible_actions).
-                Needs to be converted to image size.
+            Needs to be converted to image size.
+
+    Raises:
+        AssertionError: If n_possible_actions is not divisible by n_actions.
     """
     assert (
         n_possible_actions % n_actions == 0

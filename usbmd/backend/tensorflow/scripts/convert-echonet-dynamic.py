@@ -24,8 +24,6 @@ ml_dtypes==0.3.2 \
 tf-keras~=2.16 \
 flatbuffers>=23.5.26
 ```
-- **Author(s)**     : Tristan Stevens
-- **Date**          : 20/13/2024
 """
 
 import os
