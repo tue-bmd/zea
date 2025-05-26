@@ -41,7 +41,7 @@ if "KERAS_BACKEND" not in os.environ:
         )
 
 # Main (isort: split)
-from .config import Config, load_config_from_yaml
+from .config import Config
 from .data.datasets import Dataset, Folder
 from .data.file import File, load_usbmd_file
 from .datapaths import set_data_paths
