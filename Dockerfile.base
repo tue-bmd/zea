@@ -15,7 +15,7 @@ RUN apt-get update && \
     pip install --no-cache-dir poetry==1.8.3 && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
 # 2. Install project deps into Poetry venv
@@ -73,18 +73,18 @@ RUN pip uninstall -y poetry && \
 FROM python:3.12-slim-bullseye AS cpu
 ARG BACKEND=all
 ARG GPU=false
-ENV PATH="/app/.venv/bin:${PATH}"
+ENV PATH="/ultrasound-toolbox/.venv/bin:${PATH}"
 ENV BACKEND=${BACKEND}
 
 # Create a non-root user named actions
 RUN useradd -m actions
 
-COPY --from=builder /app/.venv /app/.venv
-COPY . /app
-WORKDIR /app
+COPY --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
+COPY . /ultrasound-toolbox
+WORKDIR /ultrasound-toolbox
 
 # Change ownership to actions
-RUN chown -R actions:actions /app /app/.venv
+RUN chown -R actions:actions /ultrasound-toolbox /ultrasound-toolbox/.venv
 
 USER actions
 
@@ -112,15 +112,15 @@ cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
       cuda-libraries-12-5 libcudnn9-cuda-12 && \
-    rm -rf /var/lib/apt/lists/*  
+    rm -rf /var/lib/apt/lists/*
 
 # Copy prebuilt venv and app code
-COPY --from=builder /app/.venv /app/.venv
-COPY . /app
-WORKDIR /app
+COPY --from=builder /ultrasound-toolbox/.venv /ultrasound-toolbox/.venv
+COPY . /ultrasound-toolbox
+WORKDIR /ultrasound-toolbox
 
 # Create a non-root user named actions and set ownership
-RUN useradd -m actions && chown -R actions:actions /app /app/.venv
+RUN useradd -m actions && chown -R actions:actions /ultrasound-toolbox /ultrasound-toolbox/.venv
 
 USER actions
 
