@@ -10,7 +10,7 @@ from schema import SchemaError
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from usbmd.config import Config, load_config_from_yaml
+from usbmd.config import Config
 from usbmd.config.validation import check_config
 
 # Define some dictionaries to test the Config class
@@ -127,7 +127,7 @@ def test_yaml_saving_loading(tmp_path, request, dictionary):
     config.save_to_yaml(path)
 
     # Load the config from the yaml file
-    config2 = load_config_from_yaml(path)
+    config2 = Config.from_yaml(path)
 
     try:
         # Check if the config is the same
