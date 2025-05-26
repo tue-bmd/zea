@@ -318,7 +318,9 @@ def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
     Args:
         f (callable): Function to apply element-wise over the first axis.
         xs (Tensor): Values over which to map along the leading axis.
-        batch_size (int, optional): Size of the batch for each step.
+        batch_size (int, optional): Size of the batch for each step. Defaults to None,
+            in which case the function will be equivalent to `ops.map`, and thus map over
+            the leading axis.
         jit (bool, optional): If True, use a jitted version of the function for
             faster batched mapping. Else, loop over the data with the original function.
         batch_kwargs (dict, optional): Additional keyword arguments (tensors) to
