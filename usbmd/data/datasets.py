@@ -1,5 +1,34 @@
-"""The datasets module contains classes for loading different types of
-ultrasound datasets.
+"""
+usbmd.data.datasets
+===================
+
+This module provides classes and utilities for loading, validating, and managing
+ultrasound datasets stored in HDF5 format. It supports both local and Hugging Face
+Hub datasets, and offers efficient file handle caching for large collections of files.
+
+Main Classes
+------------
+
+- H5FileHandleCache: Caches open HDF5 file handles to optimize repeated access.
+- Folder: Represents a group of HDF5 files in a directory, with optional validation.
+- Dataset: Provides an iterable interface over multiple HDF5 files or folders, with
+    support for directory-based splitting and validation.
+
+Functions
+---------
+
+- find_h5_files: Recursively finds HDF5 files and retrieves their dataset shapes.
+- split_files_by_directory: Splits files among directories according to specified ratios.
+- count_samples_per_directory: Counts the number of files per directory.
+
+Features
+--------
+
+- Validation of dataset integrity with flag files and error logging.
+- Support for Hugging Face Hub datasets with local caching.
+- Utilities for dataset splitting and sample counting.
+- Example usage provided in the module's main block.
+
 """
 
 from collections import OrderedDict
@@ -11,6 +40,13 @@ import tqdm
 
 from usbmd import log
 from usbmd.data.file import File, validate_file
+from usbmd.data.preset_utils import (
+    HF_CACHE_DIR,
+    HF_PREFIX,
+    _hf_list_files,
+    _hf_parse_path,
+    _hf_resolve_path,
+)
 from usbmd.datapaths import format_data_path
 from usbmd.io_lib import search_file_tree
 from usbmd.utils import (
@@ -105,6 +141,11 @@ def find_h5_files(
     file_shapes = []
     file_paths = []
     for path in paths:
+        if isinstance(path, (str, Path)) and str(path).startswith(HF_PREFIX):
+            # Let File handle HF path resolution
+            resolved = _hf_resolve_path(str(path))
+            path = resolved
+
         if path.is_file():
             # If the path is a file, get its shape directly
             file_shapes.append(File.get_shape(path, key))
@@ -136,9 +177,26 @@ class Folder:
         key: str,
         search_file_tree_kwargs: dict | None = None,
         validate: bool = True,
+        hf_cache_dir: str = HF_CACHE_DIR,
         **kwargs,
     ):
+        # Hugging Face support
+        if isinstance(folder_path, (str, Path)):
+            folder_path_str = str(folder_path)
+            if folder_path_str.startswith(HF_PREFIX):
+                # Only resolve to local dir if it's a directory, else let File handle it
+                repo_id, subpath = _hf_parse_path(folder_path_str)
+                files = _hf_list_files(repo_id)
+                if subpath and any(f == subpath for f in files):
+                    # It's a file, let File handle it
+                    pass
+                else:
+                    folder_path = _hf_resolve_path(
+                        folder_path_str, cache_dir=hf_cache_dir
+                    )
+
         super().__init__(**kwargs)
+
         self.folder_path = folder_path
         self.key = key
         self.search_file_tree_kwargs = search_file_tree_kwargs
@@ -360,15 +418,14 @@ class Dataset(H5FileHandleCache):
 
         for file_path in paths:
             if isinstance(file_path, (str, Path)):
-                file_path = Path(file_path)
-                if file_path.is_dir():
+                if Path(file_path).is_dir() or str(file_path).startswith(HF_PREFIX):
                     folder = Folder(
                         file_path, self.key, self.search_file_tree_kwargs, self.validate
                     )
                     file_paths += folder.file_paths
                     file_shapes += folder.file_shapes
                     del folder
-                elif file_path.is_file():
+                elif Path(file_path).is_file():
                     file_paths.append(file_path)
                     with File(file_path) as file:
                         file_shapes.append(file.shape(self.key))
