@@ -339,7 +339,7 @@ class EquispacedLines(LinesActionModel):
         n_possible_actions: int,
         img_width: int,
         img_height: int,
-        batch_size: int,
+        batch_size: int = 1,
     ):
         """
         Args:
