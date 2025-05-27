@@ -164,7 +164,11 @@ class DiffusionModel(DeepGenerativeModel):
 
     # pylint: disable=arguments-differ
     def call(self, inputs, training=False, **kwargs):
-        """Keras requires a call method to be implemented"""
+        """
+        Calls the score network.
+
+        Will use the exponential moving average network if training is False,
+        otherwise the regular network."""
         # the exponential moving average weights are used at evaluation
         if training:
             network = self.network
