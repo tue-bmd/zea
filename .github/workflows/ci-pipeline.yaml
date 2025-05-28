@@ -92,6 +92,7 @@ jobs:
           cache-to: type=registry,ref=usbmd/${{ matrix.backend }}:cache,mode=max
 
   pylint:
+    if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -122,6 +123,7 @@ jobs:
             sh -c "pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
 
   tests:
+    if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 30
