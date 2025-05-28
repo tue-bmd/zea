@@ -33,16 +33,12 @@ import keras
 
 from usbmd import log
 
-# Default cache directory
-_CACHE_DIR = Path.home() / ".usbmd_cache"
-
-# Set backend based on USBMD_CACHE_DIR flag, if applicable.
-if "USBMD_CACHE_DIR" in os.environ:
-    _cache_dir = os.environ["USBMD_CACHE_DIR"]
-    if _cache_dir:
-        _CACHE_DIR = _cache_dir
-
-_CACHE_DIR = Path(_CACHE_DIR).resolve()
+# Unified usbmd root directory
+_DEFAULT_USBMD_CACHE_DIR = Path.home() / ".cache" / "usbmd"
+USBMD_CACHE_DIR = Path(
+    os.environ.get("USBMD_CACHE_DIR", _DEFAULT_USBMD_CACHE_DIR)
+).resolve()
+_CACHE_DIR = USBMD_CACHE_DIR / "cached_funcs"
 
 try:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -268,25 +264,3 @@ def cache_summary():
             f"Function '{func_name}' has a total cache size of "
             f"{total_size / (1024 * 1024):.2f} MB"
         )
-
-
-def set_cache_dir(cache_dir):
-    """Set the cache directory to a custom location.
-
-    Args:
-        cache_dir (str | Path): Path to the new cache directory
-    """
-    global _CACHE_DIR  # pylint: disable=global-statement
-    previous_cache_dir = _CACHE_DIR
-
-    # Convert to Path and resolve
-    new_cache_dir = Path(cache_dir).resolve()
-
-    # Set environment variable
-    os.environ["USBMD_CACHE_DIR"] = str(new_cache_dir)
-
-    # Update module-level cache dir
-    _CACHE_DIR = new_cache_dir
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-    log.info(f"Changed cache directory from {previous_cache_dir} to {_CACHE_DIR}.")
