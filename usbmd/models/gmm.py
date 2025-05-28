@@ -170,7 +170,6 @@ class GaussianMixtureModel(GenerativeModel):
         """
         X = ops.convert_to_tensor(measurements, dtype="float32")
         gamma = self._e_step(X)  # (batch, n_components)
-        batch_size = ops.shape(X)[0]
         # Sample n_samples times for each measurement
         comp_idx = keras.random.categorical(
             ops.log(gamma), n_samples, seed=seed
