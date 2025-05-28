@@ -51,8 +51,3 @@ from .internal.setup_usbmd import set_backend, setup, setup_config
 from .ops import Pipeline
 from .probes import Probe
 from .scan import Scan
-
-try:
-    from .backend.tensorflow.dataloader import make_dataloader
-except ImportError:
-    log.warning("TensorFlow not installed. `make_dataloader` will not be available.")
