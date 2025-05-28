@@ -169,8 +169,8 @@ class DiffusionModel(DeepGenerativeModel):
     def posterior_sample(
         self,
         measurements,
-        n_steps=20,
         n_samples=1,
+        n_steps=20,
         initial_step=0,
         initial_samples=None,
         seed=None,
@@ -181,10 +181,10 @@ class DiffusionModel(DeepGenerativeModel):
         Args:
             measurements: Input measurements. Typically of shape
                 `(batch_size, *input_shape)`.
-            n_steps: Number of diffusion steps.
             n_samples: Number of posterior samples to generate.
                 Will generate `n_samples` samples for each measurement
                 in the `measurements` batch.
+            n_steps: Number of diffusion steps.
             initial_step: Initial step to start from. Can warm start the
                 diffusion process with a partially noised image, thereby
                 skipping part of the diffusion process. Initial step
