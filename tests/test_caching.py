@@ -1,10 +1,13 @@
 """Tests for the caching utility."""
 
+import os
 import time
 
 import keras
 import numpy as np
 import pytest
+
+os.environ["USBMD_CACHE_DIR"] = "/tmp/test_cache"
 
 from usbmd.internal.cache import (
     _CACHE_DIR,
@@ -12,7 +15,6 @@ from usbmd.internal.cache import (
     cache_summary,
     clear_cache,
     get_function_source,
-    set_cache_dir,
 )
 from usbmd.internal.core import Object
 
@@ -84,12 +86,9 @@ class CustomObject(Object):
 @pytest.fixture(scope="module", autouse=True)
 def clean_cache():
     """Fixture to clean up the cache directory before and after tests."""
-    original_cache_dir = _CACHE_DIR
-    set_cache_dir("/tmp/test_cache")
     clear_cache()
     yield
     clear_cache()
-    set_cache_dir(original_cache_dir)
 
 
 def test_get_function_source():
