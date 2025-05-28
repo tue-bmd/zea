@@ -10,7 +10,6 @@ import pytest
 os.environ["USBMD_CACHE_DIR"] = "/tmp/test_cache"
 
 from usbmd.internal.cache import (
-    _CACHE_DIR,
     cache_output,
     cache_summary,
     clear_cache,
