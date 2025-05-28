@@ -174,6 +174,7 @@ def _write_datasets(
     waveforms_one_way=None,
     waveforms_two_way=None,
     additional_elements=None,
+    cast_to_float=True,
     **kwargs,
 ):
     # weird pylint work around
@@ -181,7 +182,10 @@ def _write_datasets(
         raise ValueError(f"Unknown arguments: {list(kwargs.keys())}")
 
     def _convert_datatype(x, astype=np.float32):
-        return x.astype(astype) if x is not None else None
+        if cast_to_float:
+            return x.astype(astype) if x is not None else None
+        else:
+            return x
 
     def _first_not_none_shape(arr, axis):
         data = first_not_none_item(arr)
@@ -546,6 +550,7 @@ def generate_usbmd_dataset(
     waveforms_two_way=None,
     additional_elements=None,
     event_structure=False,
+    cast_to_float=True,
 ):
     """Generates a dataset in the USBMD format.
 
@@ -602,6 +607,9 @@ def generate_usbmd_dataset(
             In that case all data should be lists with the same length (number of events).
             The data will be stored under event_i/data and event_i/scan for each event i.
             Instead of just a single data and scan group.
+        cast_to_float (bool): Whether to store data as float32. You may want to set this
+            to False if storing images.
+
     """
     # check if all args are lists
     if isinstance(probe_name, list):
@@ -643,10 +651,10 @@ def generate_usbmd_dataset(
     # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
     assert (
         len(data_and_parameters)
-        == len(inspect.signature(generate_usbmd_dataset).parameters) - 2
+        == len(inspect.signature(generate_usbmd_dataset).parameters) - 3
     ), (
         "All arguments should be put in data_and_parameters except "
-        "`path` and `event_structure` arguments."
+        "`path`, `event_structure`, and `cast_to_float` arguments."
     )
 
     if event_structure:
@@ -713,6 +721,7 @@ def generate_usbmd_dataset(
                     dataset,
                     data_group_name=f"event_{i}/data",
                     scan_group_name=f"event_{i}/scan",
+                    cast_to_float=cast_to_float,
                     **_data_and_parameters,
                 )
 
@@ -721,6 +730,7 @@ def generate_usbmd_dataset(
                 dataset,
                 data_group_name="data",
                 scan_group_name="scan",
+                cast_to_float=cast_to_float,
                 **data_and_parameters,
             )
 
