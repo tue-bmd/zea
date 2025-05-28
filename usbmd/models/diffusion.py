@@ -46,7 +46,8 @@ class DiffusionModel(DeepGenerativeModel):
         """Initialize a diffusion model.
 
         Args:
-            input_shape: Shape of the input data.
+            input_shape: Shape of the input data. Typically of the form
+                `(height, width, channels)` for images.
             widths: List of filter widths for the UNet.
             block_depth: Number of residual blocks in each UNet block.
             timesteps: Number of diffusion timesteps.
@@ -169,6 +170,7 @@ class DiffusionModel(DeepGenerativeModel):
         self,
         measurements,
         n_steps=20,
+        n_samples=1,
         initial_step=0,
         initial_samples=None,
         seed=None,
@@ -177,23 +179,55 @@ class DiffusionModel(DeepGenerativeModel):
         """Sample from the posterior distribution given measurements.
 
         Args:
-            measurements: Conditioning data.
+            measurements: Input measurements. Typically of shape
+                `(batch_size, *input_shape)`.
+            n_steps: Number of diffusion steps.
+            n_samples: Number of posterior samples to generate.
+                Will generate `n_samples` samples for each measurement
+                in the `measurements` batch.
+            initial_step: Initial step to start from. Can warm start the
+                diffusion process with a partially noised image, thereby
+                skipping part of the diffusion process. Initial step
+                closer to n_steps, will result in a shorter diffusion process
+                (i.e. less noise added to the initial image). A value of 0
+                means that the diffusion process starts from pure noise.
+            initial_samples: Optional initial samples to start from.
+                If provided, these samples will be used as the starting point
+                for the diffusion process. Only used if `initial_step` is
+                greater than 0.
+            seed: Random seed generator.
             **kwargs: Additional arguments.
 
         Returns:
-            Conditionally generated samples.
-        """
+            Posterior samples p(x|y), of shape:
+                `(batch_size, n_samples, *input_shape)`.
 
+        """
         shape = ops.shape(measurements)
+
+        def _tile_with_sample_dim(tensor):
+            """Tile the tensor with an additional sample dimension."""
+            shape = ops.shape(tensor)
+            tensor = ops.expand_dims(tensor, axis=1)  # (batch, 1, ...)
+            multiples = [1, n_samples] + [1] * (len(shape) - 1)
+            tiled = ops.tile(tensor, multiples)  # (batch, n_samples, ...)
+            new_shape = (shape[0] * n_samples, *shape[1:])
+            return ops.reshape(tiled, new_shape)
+
+        measurements = _tile_with_sample_dim(measurements)
+        if initial_samples is not None:
+            initial_samples = _tile_with_sample_dim(initial_samples)
+        if "mask" in kwargs:
+            kwargs["mask"] = _tile_with_sample_dim(kwargs["mask"])
 
         seed1, seed2 = split_seed(seed, 2)
 
         initial_noise = keras.random.normal(
-            shape=shape,
+            shape=ops.shape(measurements),
             seed=seed1,
         )
 
-        return self.reverse_conditional_diffusion(
+        out = self.reverse_conditional_diffusion(
             measurements=measurements,
             initial_noise=initial_noise,
             diffusion_steps=n_steps,
@@ -202,6 +236,8 @@ class DiffusionModel(DeepGenerativeModel):
             seed=seed2,
             **kwargs,
         )
+        # returns: (batch_size, n_samples, *input_shape)
+        return ops.reshape(out, (shape[0], n_samples, *shape[1:]))
 
     def log_likelihood(self, data, **kwargs):
         """Approximate log-likelihood of the data under the model.
@@ -507,7 +543,9 @@ class DiffusionModel(DeepGenerativeModel):
             verbose,
         )
 
-        base_diffusion_times = ops.ones((num_images, 1, 1, 1)) * self.max_t
+        n_dims = len(input_shape)
+        base_diffusion_times = ops.ones((num_images, *[1] * n_dims)) * self.max_t
+
         next_noisy_images = self.prepare_schedule(
             base_diffusion_times,
             initial_noise,

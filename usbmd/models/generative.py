@@ -29,11 +29,15 @@ class GenerativeModel(abc.ABC):
         """
         raise NotImplementedError("sample() must be implemented in subclasses.")
 
-    def posterior_sample(self, measurements, **kwargs):
+    def posterior_sample(self, measurements, n_samples=1, **kwargs):
         r"""Draw samples $z \sim p(z \mid x)$ from the posterior given measurements.
 
         Args:
             measurements: The measurements $x$ to condition the posterior on.
+            n_samples: Number of posterior samples to generate. This will add
+                an additional dimension to the output. For instance,
+                if `measurements` has shape `(batch_size, ...)`, the output will
+                have shape `(batch_size, n_samples, ...)`.
             **kwargs: Additional arguments to pass to the sampling procedure.
 
         Returns:

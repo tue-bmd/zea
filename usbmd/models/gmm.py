@@ -156,11 +156,26 @@ class GaussianMixtureModel(GenerativeModel):
         samples = means + eps * ops.sqrt(vars_)
         return samples
 
-    def posterior_sample(self, measurements, seed=None, **kwargs):
+    def posterior_sample(self, measurements, n_samples=1, seed=None, **kwargs):
+        """
+        Sample component indices from the posterior p(z|x) for each measurement.
+
+        Args:
+            measurements: Input data, shape (batch, n_features).
+            n_samples: Number of posterior samples per measurement.
+            seed: Random seed.
+
+        Returns:
+            Component indices, shape (batch, n_samples).
+        """
         X = ops.convert_to_tensor(measurements, dtype="float32")
-        gamma = self._e_step(X)
-        comp_idx = keras.random.categorical(ops.log(gamma), 1, seed=seed)
-        comp_idx = ops.squeeze(comp_idx, axis=-1)
+        gamma = self._e_step(X)  # (batch, n_components)
+        batch_size = ops.shape(X)[0]
+        # Sample n_samples times for each measurement
+        comp_idx = keras.random.categorical(
+            ops.log(gamma), n_samples, seed=seed
+        )  # (batch, n_samples)
+        # Return as (batch, n_samples)
         return comp_idx
 
     def log_density(self, data, **kwargs):
