@@ -12,15 +12,21 @@ from huggingface_hub.utils import (
     RepositoryNotFoundError,
 )
 
+from usbmd.internal.cache import USBMD_CACHE_DIR
+
+HF_DATASETS_DIR = USBMD_CACHE_DIR / "huggingface" / "datasets"
+HF_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
+
 HF_SCHEME = "hf"
 HF_PREFIX = "hf://"
-HF_CACHE_DIR = Path.home() / ".hf_usbmd_cache"
 
 
 def _hf_parse_path(hf_path: str):
     """Parse hf://repo_id[/subpath] into (repo_id, subpath or None)."""
     if not hf_path.startswith(HF_PREFIX):
-        raise ValueError(f"Invalid hf_path: {hf_path}. It must start with '{HF_PREFIX}'.")
+        raise ValueError(
+            f"Invalid hf_path: {hf_path}. It must start with '{HF_PREFIX}'."
+        )
     path = hf_path.removeprefix(HF_PREFIX)
     parts = path.split("/")
     repo_id = "/".join(parts[:2])
@@ -37,7 +43,7 @@ def _hf_list_files(repo_id):
     return files
 
 
-def _hf_download(repo_id, filename, cache_dir=HF_CACHE_DIR):
+def _hf_download(repo_id, filename, cache_dir=HF_DATASETS_DIR):
     return hf_hub_download(
         repo_id=repo_id,
         filename=filename,
@@ -46,7 +52,7 @@ def _hf_download(repo_id, filename, cache_dir=HF_CACHE_DIR):
     )
 
 
-def _hf_get_snapshot_dir(repo_id, cache_dir=HF_CACHE_DIR):
+def _hf_get_snapshot_dir(repo_id, cache_dir=HF_DATASETS_DIR):
     repo_cache_dir = Path(cache_dir) / f"datasets--{repo_id.replace('/', '--')}"
     snapshots_dir = repo_cache_dir / "snapshots"
     if not snapshots_dir.exists() or not any(snapshots_dir.iterdir()):
@@ -69,7 +75,7 @@ def _hf_get_snapshot_dir(repo_id, cache_dir=HF_CACHE_DIR):
     return snapshot_hashes[0]
 
 
-def _hf_resolve_path(hf_path: str, cache_dir=HF_CACHE_DIR):
+def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR):
     """Download a file or directory from Hugging Face Hub to a local cache directory.
     Returns the local path to the downloaded file or directory.
     """
