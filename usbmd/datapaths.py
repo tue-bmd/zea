@@ -2,10 +2,10 @@
 
 import copy
 import getpass
+import importlib.resources
 import os
 import platform
 import socket
-import sys
 import warnings
 from functools import reduce
 from pathlib import Path
@@ -241,7 +241,7 @@ def set_data_paths(
     username = getpass.getuser()
     system = platform.system().lower()
     hostname = socket.gethostname()
-    repo_root = Path(__file__)
+    repo_root = importlib.resources.files("usbmd")  # ultrasound-toolbox/usbmd
 
     # If user_config is None, use the default users.yaml file
     if isinstance(user_config, type(None)):
@@ -279,9 +279,6 @@ def set_data_paths(
         output = _default_output_path(data_root)
     else:
         data_root, output = _verify_user_config_and_get_paths(config, system, local)
-
-    # Add repo_root to sys.path
-    sys.path.insert(1, repo_root)
 
     data_path = {
         "data_root": Path(data_root),
