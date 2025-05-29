@@ -6,6 +6,7 @@ import collections
 import datetime
 import json
 import os
+import tempfile
 from pathlib import Path
 
 import huggingface_hub
@@ -14,6 +15,10 @@ from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import usbmd
 from usbmd.internal.registry import model_registry
+from usbmd.utils import get_date_string
+
+dstr = get_date_string("%Y_%m_%d_%H%M%S_%f")
+tmp_dir = tempfile.mkdtemp(prefix=f"proc_{os.getpid()}_{dstr}")
 
 HF_PREFIX = "hf://"
 
@@ -85,7 +90,10 @@ def get_file(preset, path):
 
         def _download_from_hf(repo_id, filename):
             return huggingface_hub.hf_hub_download(
-                repo_id=repo_id, filename=filename, force_download=True
+                repo_id=repo_id,
+                filename=filename,
+                force_download=True,
+                local_dir=tmp_dir,
             )
 
         try:
