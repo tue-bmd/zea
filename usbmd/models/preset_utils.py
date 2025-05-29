@@ -209,6 +209,17 @@ def check_file_exists(preset, path):
     return True
 
 
+def assert_file_exists(preset, path):
+    try:
+        get_file(preset, path)
+    except FileNotFoundError as e:
+        raise ValueError(
+            f"Preset {preset} has no {path}. Make sure the URL or "
+            "directory you are trying to load is a valid KerasHub preset and "
+            "and that you have permissions to read/download from this location."
+        ) from e
+
+
 def keras_to_usbmd_registry(keras_name, usbmd_registry):
     """Convert a Keras class name to a USBMD registry name."""
     for registry_name, entry in usbmd_registry.registry.items():
@@ -390,12 +401,7 @@ def get_preset_saver(preset):
 
 def get_preset_loader(preset):
     """Get a preset loader."""
-    if not check_file_exists(preset, CONFIG_FILE):
-        raise ValueError(
-            f"Preset {preset} has no {CONFIG_FILE}. Make sure the URL or "
-            "directory you are trying to load is a valid KerasHub preset and "
-            "and that you have permissions to read/download from this location."
-        )
+    assert_file_exists(preset, CONFIG_FILE)
     # We currently assume all formats we support have a `config.json`, this is
     # true, for Keras, Transformers, and timm. We infer the on disk format by
     # inspecting the `config.json` file.
