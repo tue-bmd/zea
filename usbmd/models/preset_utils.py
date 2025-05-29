@@ -84,7 +84,9 @@ def get_file(preset, path):
         hf_handle = preset.removeprefix(HF_SCHEME + "://")
 
         def _download_from_hf(repo_id, filename):
-            return huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+            return huggingface_hub.hf_hub_download(
+                repo_id=repo_id, filename=filename, force_download=True
+            )
 
         try:
             # Try without login first
