@@ -1,13 +1,10 @@
 """Tests for the caching utility."""
 
-import os
 import time
 
 import keras
 import numpy as np
 import pytest
-
-os.environ["USBMD_CACHE_DIR"] = "/tmp/test_cache"
 
 from usbmd.internal.cache import (
     cache_output,
