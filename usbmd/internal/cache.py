@@ -35,35 +35,54 @@ import keras
 from usbmd import log
 
 _DEFAULT_USBMD_CACHE_DIR = Path.home() / ".cache" / "usbmd"
-USBMD_CACHE_DIR = Path(
-    os.environ.get("USBMD_CACHE_DIR", _DEFAULT_USBMD_CACHE_DIR)
-).resolve()
 
-# Even if we cannot create the cache directory, we still want to use a temporary directory
-# to avoid errors in the rest of the code (particularly huggingface)
-try:
-    USBMD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-except Exception as e:
+
+def _disable_cache():
+    """Disable caching by creating a temporary directory and setting the environment variable."""
+    global _tmp_dir
     os.environ["USBMD_DISABLE_CACHE"] = "1"
-    log.warning(
-        f"Could not create cache directory {USBMD_CACHE_DIR}: {e} \n"
-        + "Disabling cache globally. Set USBMD_CACHE_DIR to a different directory "
-        + "to enable caching again."
-    )
     _tmp_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
         prefix="usbmd_cache_"
     )
-    USBMD_CACHE_DIR = _tmp_dir.name
     atexit.register(lambda: _tmp_dir.cleanup())
-
-_CACHE_DIR = USBMD_CACHE_DIR / "cached_funcs"
-_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return Path(_tmp_dir.name)
 
 
 def is_cache_disabled():
     """Check if caching is disabled via environment variable."""
     val = os.environ.get("USBMD_DISABLE_CACHE", "0").strip().lower()
     return val in ("1", "true", "yes")
+
+
+def _make_cache_dir(path: Path):
+    """Try to create the cache directory.
+    If it fails, disable the cache and return a temporary directory instead."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except Exception as e:
+        log.warning(
+            f"Could not create cache directory {USBMD_CACHE_DIR}: {e} \n"
+            + "Disabling cache globally. Set USBMD_CACHE_DIR to a different directory "
+            + "to enable caching again."
+        )
+        return _disable_cache()
+
+
+USBMD_CACHE_DIR = Path(
+    os.environ.get("USBMD_CACHE_DIR", _DEFAULT_USBMD_CACHE_DIR)
+).resolve()
+
+# Even if we cannot create the cache directory, we still want to use a temporary directory
+# to avoid errors in the rest of the code (particularly huggingface)
+if is_cache_disabled():
+    USBMD_CACHE_DIR = _disable_cache()
+else:
+    USBMD_CACHE_DIR = _make_cache_dir(USBMD_CACHE_DIR)
+
+
+_CACHE_DIR = USBMD_CACHE_DIR / "cached_funcs"
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def serialize_elements(key_elements: list):
