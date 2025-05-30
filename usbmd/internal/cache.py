@@ -50,7 +50,9 @@ except Exception as e:
         + "Disabling cache globally. Set USBMD_CACHE_DIR to a different directory "
         + "to enable caching again."
     )
-    _tmp_dir = tempfile.TemporaryDirectory(prefix="usbmd_cache_")
+    _tmp_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
+        prefix="usbmd_cache_"
+    )
     USBMD_CACHE_DIR = _tmp_dir.name
     atexit.register(lambda: _tmp_dir.cleanup())
 

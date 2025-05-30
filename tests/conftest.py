@@ -6,7 +6,9 @@ import tempfile
 import matplotlib.pyplot as plt
 import pytest
 
-_tmp_cache_dir = tempfile.TemporaryDirectory(prefix="usbmd_test_cache_")
+_tmp_cache_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
+    prefix="usbmd_test_cache_"
+)
 
 os.environ["USBMD_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing usbmd
 
