@@ -74,8 +74,8 @@ def compute_pfield(
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
             Only works when norm is True. Default is 1.
-        percentile (int, optional): minimum percentile threshold to keep in the weighting
-            Higher is more aggressive) Default is 10.
+        percentile (int, optional): minimum percentile threshold to keep in the weighting.
+            Only works when norm is True. Higher is more aggressive. Default is 10.
         norm (bool, optional): per pixel normalization (True) or unnormalized (False)
         verbose (bool, optional): Whether to print progress.
 
