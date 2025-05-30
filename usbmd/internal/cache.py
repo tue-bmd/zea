@@ -20,6 +20,7 @@
 """
 
 import ast
+import atexit
 import hashlib
 import inspect
 import os
@@ -33,23 +34,28 @@ import keras
 
 from usbmd import log
 
-# Unified usbmd root directory
 _DEFAULT_USBMD_CACHE_DIR = Path.home() / ".cache" / "usbmd"
 USBMD_CACHE_DIR = Path(
     os.environ.get("USBMD_CACHE_DIR", _DEFAULT_USBMD_CACHE_DIR)
 ).resolve()
-_CACHE_DIR = USBMD_CACHE_DIR / "cached_funcs"
 
+# Even if we cannot create the cache directory, we still want to use a temporary directory
+# to avoid errors in the rest of the code (particularly huggingface)
 try:
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    USBMD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 except Exception as e:
-    unavailable_cache_dir = _CACHE_DIR
-    _CACHE_DIR = Path(tempfile.gettempdir()) / ".usbmd_cache"
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    os.environ["USBMD_DISABLE_CACHE"] = "1"
     log.warning(
-        f"Could not create cache directory {unavailable_cache_dir}: {e} "
-        + f"Using a temporary directory instead {_CACHE_DIR}"
+        f"Could not create cache directory {USBMD_CACHE_DIR}: {e} \n"
+        + "Disabling cache globally. Set USBMD_CACHE_DIR to a different directory "
+        + "to enable caching again."
     )
+    _tmp_dir = tempfile.TemporaryDirectory(prefix="usbmd_cache_")
+    USBMD_CACHE_DIR = _tmp_dir.name
+    atexit.register(lambda: _tmp_dir.cleanup())
+
+_CACHE_DIR = USBMD_CACHE_DIR / "cached_funcs"
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def is_cache_disabled():

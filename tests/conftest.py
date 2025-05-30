@@ -1,7 +1,14 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
+import os
+import tempfile
+
 import matplotlib.pyplot as plt
 import pytest
+
+_tmp_cache_dir = tempfile.TemporaryDirectory(prefix="usbmd_test_cache_")
+
+os.environ["USBMD_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing usbmd
 
 from usbmd.data.data_format import generate_example_dataset
 
@@ -21,6 +28,14 @@ def run_once_after_all_tests():
     yield
     print("Stopping workers")
     backend_workers.stop_workers()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def clean_cache_dir():
+    """Fixture to clean the cache directory after all tests."""
+    yield
+    print("Cleaning cache directory")
+    _tmp_cache_dir.cleanup()
 
 
 @pytest.fixture
