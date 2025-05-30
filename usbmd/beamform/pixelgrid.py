@@ -76,10 +76,10 @@ def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
     Args:
         xlims (tuple): Azimuthal limits of pixel grid ([xmin, xmax])
         zlims (tuple): Depth limits of pixel grid ([zmin, zmax])
-        dx (float): Pixel spacing in azimuth
-        dz (float): Pixel spacing in depth
         Nx (int): Number of azimuthal pixels, overrides dx and dz parameters
         Nz (int): Number of depth pixels, overrides dx and dz parameters
+        dx (float): Pixel spacing in azimuth
+        dz (float): Pixel spacing in depth
 
     Raises:
         ValueError: Either Nx and Nz or dx and dz must be defined.

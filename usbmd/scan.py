@@ -153,7 +153,7 @@ class Scan(Object):
                 the beamforming grid. Defaults to None.
             pixels_per_wavelength (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
-                defined. Defaults to 3.
+                defined. Defaults to 4.
             downsample (int, optional): Decimation factor applied after downconverting
                 data to baseband (RF to IQ). Defaults to 1.
             pfield (np.ndarray, float, optional): The estimated pressure field of shape
