@@ -76,6 +76,8 @@ class H5GeneratorTF(H5Generator):
             dtype = tf.float32
         elif "complex" in str(dtype):
             dtype = tf.complex64
+        elif "uint8" in str(dtype):
+            dtype = tf.uint8
         else:
             raise ValueError(f"Unsupported dtype: {dtype}")
         return dtype
