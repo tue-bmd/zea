@@ -204,3 +204,53 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     assert np.allclose(means_m, true_means_m, atol=2)
     for c, tc in zip(covs_m, true_covs_m):
         assert np.allclose(c, tc, atol=2)
+
+
+def test_gmm_posterior_sample():
+    """Test GMM posterior_sample returns correct shape and values."""
+    n_components = 3
+    n_features = 2
+    n_measurements = 5
+    n_samples = 4
+    rng = np.random.default_rng(123)
+    # Make up some GMM parameters and measurements
+    gmm = GaussianMixtureModel(n_components=n_components, n_features=n_features)
+    gmm.means = keras.ops.convert_to_tensor(
+        rng.normal(size=(n_components, n_features)), dtype="float32"
+    )
+    gmm.vars = keras.ops.ones((n_components, n_features))
+    gmm.pi = keras.ops.ones((n_components,)) / n_components
+    gmm._initialized = True
+    measurements = rng.normal(size=(n_measurements, n_features)).astype("float32")
+    comp_idx = gmm.posterior_sample(measurements, n_samples=n_samples)
+    arr = keras.ops.convert_to_numpy(comp_idx)
+    assert arr.shape == (n_measurements, n_samples)
+    assert ((arr >= 0) & (arr < n_components)).all()
+
+
+def test_diffusion_posterior_sample_shape():
+    """Test DiffusionModel.posterior_sample returns correct shape."""
+    n_measurements = 3
+    n_features = 2
+    n_samples = 5
+    # Use a minimal diffusion model with dense network
+    model = DiffusionModel(
+        input_shape=(n_features,),
+        network_name="dense_time_conditional",
+        network_kwargs={"widths": [8], "output_dim": n_features},
+    )
+    # No training needed for shape test
+    measurements = keras.random.uniform(
+        (n_measurements, n_features), minval=-1, maxval=1
+    )
+    mask = keras.random.uniform((n_measurements, n_features)) > 0.5
+    mask = keras.ops.cast(mask, "float32")
+    out = model.posterior_sample(
+        measurements=measurements,
+        n_samples=n_samples,
+        mask=mask,
+        n_steps=2,
+        omega=1.0,
+        verbose=False,
+    )
+    assert out.shape == (n_measurements, n_samples, n_features)

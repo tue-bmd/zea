@@ -1244,7 +1244,19 @@ class OldScan(Object):
             else:
                 pfield_kwargs = self.pfield_kwargs
 
-            self._pfield = ops.convert_to_numpy(compute_pfield(self, **pfield_kwargs))
+            self._pfield = ops.convert_to_numpy(
+                compute_pfield(
+                    self.sound_speed,
+                    self.center_frequency,
+                    self.bandwidth_percent,
+                    self.n_el,
+                    self.probe_geometry,
+                    self.tx_apodizations,
+                    self.grid,
+                    self.t0_delays,
+                    **pfield_kwargs,
+                )
+            )
 
         return self._pfield
 
