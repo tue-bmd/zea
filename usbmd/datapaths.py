@@ -147,7 +147,7 @@ def _verify_user_config_and_get_paths(config, system, local):
 
 def _verify_paths(data_path):
     """Verify that the paths exist and are directories."""
-    for key in {"data_root", "output"}:
+    for key in ["data_root", "output"]:
         path = data_path[key]
         if not Path(path).is_dir():
             log.warning(

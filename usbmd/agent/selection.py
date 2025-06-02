@@ -380,9 +380,7 @@ class EquispacedLines(LinesActionModel):
                 - Masks of shape (batch_size, img_height, img_width)
         """
         new_lines = ops.vectorized_map(
-            lambda lines: masks.next_equispaced_lines(
-                self.n_actions, self.n_possible_actions, lines
-            ),
+            lambda lines: masks.next_equispaced_lines(lines),
             current_lines,
         )
         return new_lines, self.lines_to_im_size(new_lines)
@@ -496,4 +494,4 @@ class CovarianceSamplingLines(LinesActionModel):
         best_mask = ops.squeeze(best_mask, axis=0)
 
         # [batch_size, h, w]
-        return masks.lines_to_im_size(best_mask, (self.img_height, self.img_width))
+        return best_mask, self.lines_to_im_size(best_mask)

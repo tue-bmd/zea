@@ -1,6 +1,5 @@
 """Basic tensor operations implemented with the multi-backend `keras.ops`."""
 
-import os
 from typing import Tuple, Union
 
 import keras
@@ -225,18 +224,41 @@ def boolean_mask(tensor, mask, size=None):
     Returns:
         Tensor: The masked tensor.
     """
-    backend = os.environ.get("KERAS_BACKEND")
-    if backend == "jax" and size is not None:
+    if keras.backend.backend() == "jax" and size is not None:
         import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
 
         indices = jnp.where(mask, size=size)  # Fixed size allows Jax tracing
         return tensor[indices]
-    elif backend == "tensorflow":
+    elif keras.backend.backend() == "tensorflow":
         import tensorflow as tf  # pylint: disable=import-outside-toplevel
 
         return tf.boolean_mask(tensor, mask)
     else:
         return tensor[mask]
+
+
+if keras.backend.backend() == "jax":
+    import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+
+    def nonzero(x, size=None, fill_value=None):
+        """Return the indices of the elements that are non-zero.
+
+        Args:
+            x (Tensor): Input tensor.
+            size (int, optional): optional static integer specifying the number of nonzero
+                entries to return. If there are more nonzero elements than the specified size,
+                then indices will be truncated at the end. If there are fewer nonzero elements
+                than the specified size, then indices will be padded with fill_value.
+            fill_value (int, optional): Value to fill in case there are not enough
+                non-zero elements. Defaults to None.
+        """
+        return jnp.nonzero(x, size=size, fill_value=fill_value)
+
+else:
+
+    def nonzero(x, size=None, fill_value=None):  #  pylint: disable=unused-argument
+        """Return the indices of the elements that are non-zero."""
+        return ops.nonzero(x)
 
 
 def flatten(tensor, start_dim=0, end_dim=-1):
