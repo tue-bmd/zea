@@ -16,6 +16,7 @@ from usbmd.backend.tensorflow.dataloader import make_dataloader
 from usbmd.models.diffusion import DiffusionModel
 from usbmd.models.echonet import INFERENCE_SIZE
 from usbmd.ops import Pipeline, ScanConvert
+from usbmd.utils import translate
 from usbmd.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
@@ -43,7 +44,7 @@ if __name__ == "__main__":
 
     ## Measurements
     line_thickness = 2
-    factor = 2
+    factor = 4
     agent = EquispacedLines(
         n_actions=img_size // line_thickness // factor,
         n_possible_actions=img_size // line_thickness,
@@ -74,13 +75,24 @@ if __name__ == "__main__":
     posterior_samples = model.posterior_sample(
         measurements=measurements,
         mask=mask,
+        n_samples=4,
         n_steps=90,
         omega=3.0,
+        verbose=True,
+    )
+    posterior_variance = ops.var(posterior_samples, axis=1)
+    posterior_samples = posterior_samples[:, 0]  # Get first sample only
+    # scale posterior variance to [-1, 1] range so it can be visualized
+    posterior_variance = translate(
+        posterior_variance,
+        (0, ops.max(posterior_variance)),
+        (-1, 1),
     )
 
     ## Post processing (ScanConvert)
     concatenated = ops.concatenate(
-        [prior_samples, batch, measurements, posterior_samples], axis=0
+        [prior_samples, batch, measurements, posterior_samples, posterior_variance],
+        axis=0,
     )
     concatenated = ops.squeeze(concatenated, axis=-1)
 
@@ -92,17 +104,26 @@ if __name__ == "__main__":
     parameters = pipeline.prepare_parameters(**parameters)
     processed_batch = pipeline(data=concatenated, **parameters)["data"]
 
+    n_rows = 5  # prior, batch, measurements, posterior, posterior_variance
+    imgs_per_row = n_imgs
+
+    cmaps = ["gray"] * ((n_rows - 1) * imgs_per_row) + ["inferno"] * imgs_per_row
+
     ## Plotting
     set_mpl_style()
     fig, _ = plot_image_grid(
-        processed_batch, vmin=-1, vmax=1, remove_axis=False, ncols=len(measurements)
+        processed_batch,
+        vmin=-1,
+        vmax=1,
+        remove_axis=False,
+        ncols=len(measurements),
+        cmap=cmaps,
     )
-    axes = fig.axes
 
-    titles = ["p(x)", "x", "y", "p(x|y)"]
+    titles = ["p(x)", "x", "y", "p(x|y)", "Var[p(x|y)]"]
 
     for i, title in enumerate(titles):
-        axes[i * n_imgs].set_ylabel(title)
+        fig.axes[i * n_imgs].set_ylabel(title)
 
     path = "diffusion_echonet_example.png"
     fig.savefig(
