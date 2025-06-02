@@ -246,10 +246,12 @@ Models
    from keras import ops
    import matplotlib.pyplot as plt
 
-   from usbmd import init_device, log, set_data_paths, make_dataloader
+   from usbmd import init_device, log, set_data_paths
    from usbmd.models.echonet import EchoNetDynamic
    from usbmd.tools.selection_tool import add_shape_from_mask
    from usbmd.visualize import plot_image_grid, set_mpl_style
+   from usbmd.backend.tensorflow.dataloader import make_dataloader
+
 
    data_paths = set_data_paths()
    init_device()
