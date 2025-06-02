@@ -856,26 +856,29 @@ class Scan(Object):
 
             self._pfield = self._default_pfield()
         else:
-            if self.pfield_kwargs is None:
-                pfield_kwargs = {}
-            else:
-                pfield_kwargs = self.pfield_kwargs
-
-            self._pfield = ops.convert_to_numpy(
-                compute_pfield(
-                    self.sound_speed,
-                    self.center_frequency,
-                    self.bandwidth_percent,
-                    self.n_el,
-                    self.probe_geometry,
-                    self.tx_apodizations,
-                    self.grid,
-                    self.t0_delays,
-                    **pfield_kwargs,
-                )
-            )
+            self._pfield = self.compute_pfield()
 
         return self._pfield
+
+    def compute_pfield(self, **kwargs):
+        """Compute the pfield with the given parameters."""
+        if self.pfield_kwargs is None:
+            self.pfield_kwargs = kwargs
+        else:
+            self.pfield_kwargs.update(kwargs)
+
+        pfield = compute_pfield(
+            self.sound_speed,
+            self.center_frequency,
+            self.bandwidth_percent,
+            self.n_el,
+            self.probe_geometry,
+            self.tx_apodizations,
+            self.grid,
+            self.t0_delays,
+            **self.pfield_kwargs,
+        )
+        return ops.convert_to_numpy(pfield)
 
     @property
     def flat_pfield(self):
