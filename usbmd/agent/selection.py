@@ -329,8 +329,9 @@ class EquispacedLines(LinesActionModel):
     ):
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
 
-        masks._assert_equal_spacing(n_actions, n_possible_actions)
         self.assert_equal_spacing = assert_equal_spacing
+        if self.assert_equal_spacing:
+            masks._assert_equal_spacing(n_actions, n_possible_actions)
 
     def sample(self, current_lines=None, batch_size=1):
         """Sample the action using the equispaced method.
