@@ -1277,6 +1277,11 @@ def linear_sum_assignment(cost):
     return np.array(row_ind), np.array(col_ind)
 
 
+def sinc(x, eps=keras.config.epsilon()):
+    """Sinc function."""
+    return ops.sin(x + eps) / (x + eps)
+
+
 if keras.backend.backend() == "tensorflow":
 
     def safe_vectorize(

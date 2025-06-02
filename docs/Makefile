@@ -25,6 +25,7 @@ docs-parameters:
 # Generate autosummary .rst files for API documentation
 # force means that it will overwrite existing files
 # separate means that it will create a separate file for each module
+# we will first backup existing usbmd.rst as we don't want to overwrite it
 docs-autosummary:
 	@if [ -f $(SOURCEDIR)/_autosummary/usbmd.rst ]; then cp $(SOURCEDIR)/_autosummary/usbmd.rst $(SOURCEDIR)/_autosummary/usbmd.rst.bak; fi
 	sphinx-apidoc -o $(SOURCEDIR)/_autosummary ../usbmd --force --separate
