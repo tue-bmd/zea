@@ -35,18 +35,16 @@ import keras
 from usbmd import log
 
 _DEFAULT_USBMD_CACHE_DIR = Path.home() / ".cache" / "usbmd"
-_TMP_DIR = None
 
 
 def _disable_cache():
     """Disable caching by creating a temporary directory and setting the environment variable."""
-    global _TMP_DIR  # avoid garbage collection of the temporary directory
     os.environ["USBMD_DISABLE_CACHE"] = "1"
-    _TMP_DIR = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
+    _tmp_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
         prefix="usbmd_cache_"
     )
-    atexit.register(lambda: _TMP_DIR.cleanup())
-    return Path(_TMP_DIR.name)
+    atexit.register(lambda: _tmp_dir.cleanup())
+    return Path(_tmp_dir.name)
 
 
 def is_cache_disabled():
