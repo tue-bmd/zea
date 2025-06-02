@@ -16,10 +16,6 @@ from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 import usbmd
 from usbmd.internal.cache import USBMD_CACHE_DIR
 from usbmd.internal.registry import model_registry
-from usbmd.utils import get_date_string
-
-dstr = get_date_string("%Y_%m_%d_%H%M%S_%f")
-tmp_dir = tempfile.mkdtemp(prefix=f"proc_{os.getpid()}_{dstr}")
 
 HF_PREFIX = "hf://"
 
