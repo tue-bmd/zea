@@ -50,10 +50,9 @@ if __name__ == "__main__":
         n_possible_actions=img_size // line_thickness,
         img_width=img_size,
         img_height=112,
-        batch_size=n_imgs,
     )
 
-    mask = agent.sample()
+    _, mask = agent.sample(batch_size=n_imgs)
     mask = ops.expand_dims(mask, axis=-1)
 
     measurements = ops.where(mask, batch, -1.0)

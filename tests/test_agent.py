@@ -120,14 +120,14 @@ def test_covariance_sampling_lines():
 
     n_actions = 1
     agent = selection.CovarianceSamplingLines(n_actions, w, h, w, n_masks=200)
-    mask = agent.sample(particles)
+    _, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
     first_row = mask[0, 0]
     assert np.count_nonzero(first_row) == n_actions
 
     n_actions = 2
     agent = selection.CovarianceSamplingLines(n_actions, w, h, w, n_masks=200)
-    mask = agent.sample(particles)
+    _, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
     first_row = mask[0, 0]
     first_row = mask[0, 0]
@@ -149,7 +149,7 @@ def test_single_action():
     assert np.count_nonzero(selected_lines[0]) == 1
 
     agent = selection.CovarianceSamplingLines(1, w, h, w, n_masks=200)
-    mask = agent.sample(particles)
+    _, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
     first_row = mask[0, 0]
     assert np.count_nonzero(first_row) == 1
@@ -170,7 +170,7 @@ def test_maximum_actions():
     assert np.count_nonzero(selected_lines[0]) == w
 
     agent = selection.CovarianceSamplingLines(w, w, h, w, n_masks=200)
-    mask = agent.sample(particles)
+    _, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
     first_row = mask[0, 0]
     assert np.count_nonzero(first_row) == w
@@ -189,8 +189,8 @@ def test_equispaced_lines_class():
 
     # Test with 2 actions
     n_actions = 2
-    agent = selection.EquispacedLines(n_actions, w, w, h, batch_size=b)
-    mask = agent.sample()
+    agent = selection.EquispacedLines(n_actions, w, w, h)
+    _, mask = agent.sample(batch_size=b)
 
     # Check mask shape (should include batch dimension)
     assert mask.shape == (b, h, w)
@@ -201,8 +201,8 @@ def test_equispaced_lines_class():
         assert np.count_nonzero(first_row) == n_actions
 
     # Test successive calls return different but valid patterns
-    mask1 = agent.sample()
-    mask2 = agent.sample()
+    lines1, mask1 = agent.sample(batch_size=b)
+    _, mask2 = agent.sample(lines1)
 
     # Masks should be different (alternating pattern) for each batch
     assert not np.array_equal(mask1, mask2)
@@ -217,14 +217,14 @@ def test_equispaced_lines_class():
         assert np.array_equal(mask2[0], mask2[batch_idx])
 
     # Test with maximum number of actions
-    agent = selection.EquispacedLines(w, w, h, w, batch_size=b)
-    mask = agent.sample()
+    agent = selection.EquispacedLines(w, w, h, w)
+    _, mask = agent.sample(batch_size=b)
     for batch_idx in range(b):
         assert np.count_nonzero(mask[batch_idx, 0]) == w
 
     # Test with non-divisible actions (should raise AssertionError)
     with pytest.raises(AssertionError):
-        selection.EquispacedLines(3, 10, h, w, batch_size=b)
+        selection.EquispacedLines(3, 10, h, w)
 
 
 def test_uniform_random_lines():
@@ -235,8 +235,8 @@ def test_uniform_random_lines():
 
     # Test with single action
     n_actions = 1
-    agent = selection.UniformRandomLines(n_actions, w, h, w, batch_size=batch_size)
-    selected_lines, mask = agent.sample()
+    agent = selection.UniformRandomLines(n_actions, w, h, w)
+    selected_lines, mask = agent.sample(batch_size=batch_size)
     assert mask.shape == (batch_size, h, w)
     assert selected_lines.shape == (batch_size, w)
 
@@ -248,8 +248,8 @@ def test_uniform_random_lines():
 
     # Test with multiple actions
     n_actions = 2
-    agent = selection.UniformRandomLines(n_actions, w, h, w, batch_size=batch_size)
-    selected_lines, mask = agent.sample()
+    agent = selection.UniformRandomLines(n_actions, w, h, w)
+    selected_lines, mask = agent.sample(batch_size=batch_size)
     assert mask.shape == (batch_size, h, w)
     assert selected_lines.shape == (batch_size, w)
 
@@ -260,8 +260,8 @@ def test_uniform_random_lines():
         assert np.count_nonzero(selected_lines[b]) == n_actions
 
     # Test with maximum actions
-    agent = selection.UniformRandomLines(w, w, h, w, batch_size=batch_size)
-    selected_lines, mask = agent.sample()
+    agent = selection.UniformRandomLines(w, w, h, w)
+    selected_lines, mask = agent.sample(batch_size=batch_size)
     assert mask.shape == (batch_size, h, w)
     assert selected_lines.shape == (batch_size, w)
 
@@ -273,9 +273,4 @@ def test_uniform_random_lines():
 
     # Test with non-divisible actions (should raise AssertionError)
     with pytest.raises(AssertionError):
-        selection.UniformRandomLines(3, 10, h, w, batch_size=batch_size)
-
-
-if __name__ == "__main__":
-    test_equispaced_lines_class()
-    pytest.main()
+        selection.UniformRandomLines(3, 10, h, w)

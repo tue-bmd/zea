@@ -76,6 +76,12 @@ class InpaintingOperator(Operator):
 
 @operator_registry(name="soft_inpainting")
 class SoftInpaintingOperator(Operator):
+    """Soft inpainting operator class.
+
+    Soft inpainting uses a soft grayscale mask for a smooth transition between
+    the inpainted and generated regions of the image.
+    """
+
     def __init__(self, image_range, mask_range=None):
         self.image_range = tuple(image_range)
         assert len(self.image_range) == 2
@@ -86,6 +92,7 @@ class SoftInpaintingOperator(Operator):
         assert len(self.mask_range) == 2
         assert self.mask_range[0] == 0.0, "mask_range[0] must be 0.0"
 
+    # pylint: disable=arguments-differ
     def forward(self, data, mask):
         data1 = translate(data, self.image_range, self.mask_range)
         data2 = mask * data1
