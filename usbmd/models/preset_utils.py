@@ -6,7 +6,6 @@ import collections
 import datetime
 import json
 import os
-import tempfile
 from pathlib import Path
 
 import huggingface_hub
