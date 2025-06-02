@@ -11,13 +11,13 @@ import numpy as np
 import pytest
 from keras import ops
 
+from usbmd import log
 from usbmd.backend.tensorflow.dataloader import make_dataloader
 from usbmd.data.augmentations import RandomCircleInclusion
 from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS, H5Generator
 from usbmd.data.file import File
 from usbmd.data.layers import Resizer
 from usbmd.data.utils import json_loads
-from usbmd import log
 
 from . import data_root
 
