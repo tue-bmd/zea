@@ -4,22 +4,21 @@ import numpy as np
 import pytest
 from keras import ops
 
-from usbmd.agent import selection
-from usbmd.agent.masks import equispaced_lines
+from usbmd.agent import masks, selection
 
 
 def test_equispaced_lines():
     """Test equispaced_lines."""
     expected_lines = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
-    lines = equispaced_lines(n_actions=5, n_possible_actions=10)
+    lines = masks.initial_equispaced_lines(n_actions=5, n_possible_actions=10)
     assert ops.all(lines == expected_lines)
 
     expected_lines = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
-    lines = equispaced_lines(n_actions=5, n_possible_actions=10, previous_mask=lines)
+    lines = masks.next_equispaced_lines(lines)
     assert ops.all(lines == expected_lines)
 
     expected_lines = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
-    lines = equispaced_lines(n_actions=5, n_possible_actions=10, previous_mask=lines)
+    lines = masks.next_equispaced_lines(lines)
     assert ops.all(lines == expected_lines)
 
 
@@ -27,11 +26,26 @@ def test_equispaced_lines_assertion():
     """Test equispaced_lines assertion."""
     # Should raise AssertionError when n_possible_actions is not divisible by n_actions
     with pytest.raises(AssertionError):
-        equispaced_lines(n_actions=3, n_possible_actions=10)
+        masks.initial_equispaced_lines(n_actions=3, n_possible_actions=10)
 
     # Should not raise error when n_possible_actions is divisible by n_actions
-    equispaced_lines(n_actions=2, n_possible_actions=10)
-    equispaced_lines(n_actions=5, n_possible_actions=10)
+    masks.initial_equispaced_lines(n_actions=2, n_possible_actions=10)
+    masks.initial_equispaced_lines(n_actions=5, n_possible_actions=10)
+
+
+def test_unequal_spacing():
+    """Test equispaced_lines with unequal spacing."""
+    # Should not raise error when n_possible_actions is not divisible by n_actions
+    lines = masks.initial_equispaced_lines(
+        n_actions=3, n_possible_actions=10, assert_equal_spacing=False
+    )
+    assert ops.shape(lines) == (10,)
+
+    # Should not raise error when n_possible_actions is divisible by n_actions
+    lines = masks.initial_equispaced_lines(
+        n_actions=2, n_possible_actions=10, assert_equal_spacing=False
+    )
+    assert ops.shape(lines) == (10,)
 
 
 def test_mask_action_model():

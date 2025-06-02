@@ -105,7 +105,7 @@ def next_equispaced_lines(previous_lines, shift=1):
     Rolls the previous equispaced mask of shape (..., n_possible_actions) to the right by
     `shift` which is 1 by default.
     """
-    return ops.roll(previous_lines, shift=shift, axis=0)
+    return ops.roll(previous_lines, shift=shift, axis=-1)
 
 
 def lines_to_im_size(lines, img_size: tuple):
