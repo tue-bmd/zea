@@ -170,7 +170,6 @@ class DiffusionModel(DeepGenerativeModel):
 
         Will use the exponential moving average network if training is False,
         otherwise the regular network."""
-        # the exponential moving average weights are used at evaluation
         if training:
             network = self.network
         else:
