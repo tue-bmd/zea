@@ -123,7 +123,7 @@ class TinyBase(BaseModel):
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
-            import usbmd.backend.tf2jax as tf2jax  # pylint: disable=import-outside-toplevel
+            from usbmd.backend import tf2jax  # pylint: disable=import-outside-toplevel
 
             jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
@@ -211,11 +211,11 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
     import jax  # pylint: disable=import-outside-toplevel
     import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
 
-    import usbmd.backend.tf2jax as tf2jax  # pylint: disable=import-outside-toplevel
+    from usbmd.backend import tf2jax  # pylint: disable=import-outside-toplevel
 
     def _resize_nearest_neighbor(proto):
         """Parse a ResizeNearestNeighbor op."""
-        tf2jax._src.ops._check_attrs(
+        tf2jax._src.ops._check_attrs(  # pylint: disable=no-member
             proto, {"T", "align_corners", "half_pixel_centers"}
         )
 
@@ -238,7 +238,9 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
         return _func
 
     # hack to allow align_corners=True and half_pixel_centers=True
-    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor
+    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = (  # pylint: disable=no-member
+        _resize_nearest_neighbor
+    )
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)

@@ -222,7 +222,7 @@ def check_file_exists(preset, path):
     return True
 
 
-def assert_file_exists(preset, path):
+def _assert_file_exists(preset, path):
     try:
         get_file(preset, path)
     except FileNotFoundError as e:
@@ -312,7 +312,7 @@ class KerasPresetLoader(PresetLoader):
             elif hasattr(model, "input_shape"):
                 model.build(input_shape=model.input_shape)
             else:
-                raise Exception(
+                raise ValueError(
                     "Model could not be built. Make sure to add a build_config to the json "
                     "or set the input_shape or image_shape attribute before loading weights."
                 )
@@ -414,7 +414,7 @@ def get_preset_saver(preset):
 
 def get_preset_loader(preset):
     """Get a preset loader."""
-    assert_file_exists(preset, CONFIG_FILE)
+    _assert_file_exists(preset, CONFIG_FILE)
     # We currently assume all formats we support have a `config.json`, this is
     # true, for Keras, Transformers, and timm. We infer the on disk format by
     # inspecting the `config.json` file.

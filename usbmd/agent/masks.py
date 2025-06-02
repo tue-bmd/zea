@@ -5,9 +5,57 @@ from typing import List
 import keras
 from keras import ops
 
+from usbmd import tensor_ops
 from usbmd.agent.gumbel import hard_straight_through
 
 _DEFAULT_DTYPE = "bool"
+
+
+def indices_to_k_hot(
+    indices: List[int],
+    n_possible_actions: int,
+    dtype=_DEFAULT_DTYPE,
+):
+    """Convert a list of indices to a k-hot encoded vector.
+
+    A k-hot encoded vector is suitable during tracing when the number of actions can change.
+    This is the default represenation for actions in usbmd.
+
+    Args:
+        indices (List[int]): List of indices to set to 1.
+        n_possible_actions (int): Total number of possible actions.
+        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
+
+    Returns:
+        Tensor: k-hot-encoded vector of shape (n_possible_actions).
+    """
+    mask = ops.zeros(n_possible_actions, dtype=dtype)
+    return ops.scatter_update(
+        mask, ops.expand_dims(indices, axis=1), ops.ones(len(indices), dtype=dtype)
+    )
+
+
+def k_hot_to_indices(selected_lines, n_actions: int, fill_value=-1):
+    """Convert k-hot encoded lines to indices of selected actions.
+
+    Args:
+        selected_lines (Tensor): k-hot encoded lines of shape (batch_size, n_possible_actions).
+        n_actions (int): Number of lines selected.
+        fill_value (int, optional): Value to fill in case there are not enough selected actions.
+            Defaults to -1.
+
+    Returns:
+        Tensor: Indices of selected actions of shape (batch_size, n_actions).
+            If there are fewer than `n_actions` selected, the remaining indices will be
+            filled with `fill_value`.
+    """
+
+    # Find nonzero indices for each frame
+    def get_nonzero(row):
+        return tensor_ops.nonzero(row > 0, size=n_actions, fill_value=fill_value)[0]
+
+    indices = ops.vectorized_map(get_nonzero, selected_lines)
+    return indices
 
 
 def random_uniform_lines(
@@ -37,27 +85,6 @@ def random_uniform_lines(
     )
     masks = hard_straight_through(masks, n_actions)
     return ops.cast(masks, dtype=dtype)
-
-
-def indices_to_k_hot(
-    indices: List[int],
-    n_possible_actions: int,
-    dtype=_DEFAULT_DTYPE,
-):
-    """Convert a list of indices to a k-hot encoded vector.
-
-    Args:
-        indices (List[int]): List of indices to set to 1.
-        n_possible_actions (int): Total number of possible actions.
-        dtype (str, optional): Data type of the mask. Defaults to _DEFAULT_DTYPE.
-
-    Returns:
-        Tensor: k-hot-encoded vector of shape (n_possible_actions).
-    """
-    mask = ops.zeros(n_possible_actions, dtype=dtype)
-    return ops.scatter_update(
-        mask, ops.expand_dims(indices, axis=1), ops.ones(len(indices), dtype=dtype)
-    )
 
 
 def _assert_equal_spacing(n_actions, n_possible_actions):

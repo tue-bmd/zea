@@ -65,7 +65,7 @@ class EchoNetDynamic(BaseModel):
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
-            import usbmd.backend.tf2jax as tf2jax  # pylint: disable=import-outside-toplevel
+            from usbmd.backend import tf2jax  # pylint: disable=import-outside-toplevel
 
             jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
