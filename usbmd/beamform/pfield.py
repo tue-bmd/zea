@@ -62,7 +62,7 @@ def compute_pfield(
         n_el (int): Number of elements in the probe.
         probe_geometry (array): Geometry of the probe elements.
         tx_apodizations (array): Transmit apodization values.
-        grid (array): Grid points where the pressure field is computed.
+        grid (array): Grid points where the pressure field is computed of shape (Nz, Nx, 3).
         t0_delays (array): Transmit delays for each transmit event.
         frequency_step (int, optional): Frequency step. Default is 4.
             Higher is faster but less accurate.
@@ -80,7 +80,7 @@ def compute_pfield(
         verbose (bool, optional): Whether to print progress.
 
     Returns:
-        ops.array: The normalized pressure field (across tx events) of shape (n_tx, Nz, Nx).
+        ops.array: The (normalized) pressure field (across tx events) of shape (n_tx, Nz, Nx).
     """
     # medium params
     alpha_db = 0  # currently we ignore attenuation in the compounding
@@ -296,33 +296,34 @@ def compute_pfield(
     return p_norm
 
 
-def normalize_pressure_field(p_arr, alpha=1, percentile=10):
-    """Normalize the input array of intensities.
+def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
+    """
+    Normalize the input array of intensities by zeroing out values below a given percentile.
 
     Args:
-        p_arr (array): Sequence of intensity arrays.
-        alpha (float, optional): Shape factor to tighten the beams. Higher is sharper.
-            Default is 1.
-        percentile (int, optional): Percentile to keep. Default is 10.
+        pfield (array): The unnormalized pressure field array of shape (n_tx, Nz, Nx).
+        alpha (float, optional): Exponent to 'sharpen or smooth' the weighting.
+            Higher values result in sharper weighting. Default is 1.0.
+        percentile (int, optional): minimum percentile threshold to keep in the weighting.
+            Higher is more aggressive. Default is 10.
 
     Returns:
         ops.array: Normalized intensity array.
-
     """
-    # keep only the highest intensities
-    # p_arr[p_arr < ops.percentile(p_arr, perc, axis=(1, 2))[:, None, None]] = 0
+    # Convert percentile to quantile (0–1 range)
+    q = percentile / 100.0
 
-    # let's do manual percentile calculation
-    # Flatten the last two dimensions, sort, and reshape back
-    p_flat = ops.reshape(p_arr, (p_arr.shape[0], -1))
-    p_sorted = ops.sort(p_flat, axis=1)
-    perc_value = p_sorted[
-        :, ops.cast(p_arr.shape[1] * p_arr.shape[2] * percentile / 100, "int32")
-    ]
-    p_arr = ops.where(p_arr < perc_value[:, None, None], 0, p_arr)
+    # Compute per-transmitter quantile thresholds
+    threshold = ops.quantile(pfield, q, axis=(1, 2), keepdims=True)
 
-    p_arr = p_arr**alpha
-    p_norm = p_arr / (keras.config.epsilon() + ops.sum(p_arr, axis=0))
+    # Zero out values below the threshold
+    pfield = ops.where(pfield < threshold, 0, pfield)
+
+    # Sharpen the beam
+    pfield = ops.power(pfield, alpha)
+
+    # Normalize over transmit events (axis=0)
+    p_norm = pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
     return p_norm
 
