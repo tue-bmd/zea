@@ -57,6 +57,17 @@ class LinesActionModel(MaskActionModel):
         ), "Image width must be divisible by n_possible_actions."
         self.stack_n_cols = int(stack_n_cols)
 
+    def lines_to_im_size(self, lines):
+        """Convert k-hot-encoded line vectors to image size.
+
+        Args:
+            lines (Tensor): shape is (n_masks, n_possible_actions)
+
+        Returns:
+            Tensor: Masks of shape (n_masks, img_height, img_width)
+        """
+        return masks.lines_to_im_size(lines, (self.img_height, self.img_width))
+
 
 @action_selection_registry(name="greedy_entropy")
 class GreedyEntropy(LinesActionModel):
@@ -267,9 +278,7 @@ class GreedyEntropy(LinesActionModel):
             ),
             axis=0,
         )
-        return selected_lines_k_hot, masks.lines_to_im_size(
-            selected_lines_k_hot, (self.img_height, self.img_width)
-        )
+        return selected_lines_k_hot, self.lines_to_im_size(selected_lines_k_hot)
 
 
 @action_selection_registry(name="uniform_random")
@@ -299,10 +308,7 @@ class UniformRandomLines(LinesActionModel):
             n_masks=batch_size,
             seed=seed,
         )
-        mask_batched = masks.lines_to_im_size(
-            selected_lines_batched, (self.img_height, self.img_width)
-        )
-        return selected_lines_batched, mask_batched
+        return selected_lines_batched, self.lines_to_im_size(selected_lines_batched)
 
 
 @action_selection_registry(name="equispaced")
@@ -313,6 +319,19 @@ class EquispacedLines(LinesActionModel):
     the image.
     """
 
+    def __init__(
+        self,
+        n_actions: int,
+        n_possible_actions: int,
+        img_width: int,
+        img_height: int,
+        assert_equal_spacing=True,
+    ):
+        super().__init__(n_actions, n_possible_actions, img_width, img_height)
+
+        masks._assert_equal_spacing(n_actions, n_possible_actions)
+        self.assert_equal_spacing = assert_equal_spacing
+
     def sample(self, current_lines=None, batch_size=1):
         """Sample the action using the equispaced method.
 
@@ -322,7 +341,7 @@ class EquispacedLines(LinesActionModel):
             Tensor: The mask of shape (batch_size, img_size, img_size)
         """
         if current_lines is None:
-            return self.initial_sample_stateless(batch_size=batch_size)
+            return self.initial_sample_stateless(batch_size)
         else:
             return self.sample_stateless(current_lines)
 
@@ -336,15 +355,15 @@ class EquispacedLines(LinesActionModel):
                 - Selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
                 - Masks of shape (batch_size, img_height, img_width)
         """
-        initial_lines = masks.get_initial_equispaced_lines(
-            self.n_actions, self.n_possible_actions
+        initial_lines = masks.initial_equispaced_lines(
+            self.n_actions,
+            self.n_possible_actions,
+            assert_equal_spacing=self.assert_equal_spacing,
         )
         initial_lines = ops.tile(
             initial_lines, (batch_size, 1)
         )  # (batch_size, n_actions)
-        return initial_lines, masks.lines_to_im_size(
-            initial_lines, (self.img_height, self.img_width)
-        )
+        return initial_lines, self.lines_to_im_size(initial_lines)
 
     def sample_stateless(self, current_lines):
         """Sample stateless.
@@ -361,14 +380,12 @@ class EquispacedLines(LinesActionModel):
                 - Masks of shape (batch_size, img_height, img_width)
         """
         new_lines = ops.vectorized_map(
-            lambda lines: masks.equispaced_lines(
+            lambda lines: masks.next_equispaced_lines(
                 self.n_actions, self.n_possible_actions, lines
             ),
             current_lines,
         )
-        return new_lines, masks.lines_to_im_size(
-            new_lines, (self.img_height, self.img_width)
-        )
+        return new_lines, self.lines_to_im_size(new_lines)
 
 
 @action_selection_registry(name="covariance")
