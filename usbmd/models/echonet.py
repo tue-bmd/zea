@@ -67,7 +67,9 @@ class EchoNetDynamic(BaseModel):
             inputs = ops.zeros(input_shape)
             from usbmd.backend import tf2jax  # pylint: disable=import-outside-toplevel
 
-            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
+            jax_func, jax_params = tf2jax.convert(  # pylint: disable=no-member
+                tf.function(self.network), inputs
+            )
 
             def call_fn(
                 params, state, rng, inputs, training
