@@ -8,7 +8,8 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, make_dataloader, set_data_paths
+from usbmd import init_device, log, set_data_paths
+from usbmd.backend.tensorflow.dataloader import make_dataloader
 from usbmd.models.taesd import TinyAutoencoder
 from usbmd.utils import get_date_string
 from usbmd.visualize import plot_image_grid

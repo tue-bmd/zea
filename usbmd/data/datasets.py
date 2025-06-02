@@ -41,7 +41,7 @@ import tqdm
 from usbmd import log
 from usbmd.data.file import File, validate_file
 from usbmd.data.preset_utils import (
-    HF_CACHE_DIR,
+    HF_DATASETS_DIR,
     HF_PREFIX,
     _hf_list_files,
     _hf_parse_path,
@@ -177,7 +177,7 @@ class Folder:
         key: str,
         search_file_tree_kwargs: dict | None = None,
         validate: bool = True,
-        hf_cache_dir: str = HF_CACHE_DIR,
+        hf_cache_dir: str = HF_DATASETS_DIR,
         **kwargs,
     ):
         # Hugging Face support
