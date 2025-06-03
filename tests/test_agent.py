@@ -40,12 +40,14 @@ def test_unequal_spacing():
         n_actions=3, n_possible_actions=10, assert_equal_spacing=False
     )
     assert ops.shape(lines) == (10,)
+    assert ops.sum(lines) == 3
 
     # Should not raise error when n_possible_actions is divisible by n_actions
     lines = masks.initial_equispaced_lines(
         n_actions=2, n_possible_actions=10, assert_equal_spacing=False
     )
     assert ops.shape(lines) == (10,)
+    assert ops.sum(lines) == 2
 
 
 def test_mask_action_model():
