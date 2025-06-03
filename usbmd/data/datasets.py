@@ -107,7 +107,8 @@ class H5FileHandleCache:
         """Ensure cached files are closed."""
         if hasattr(self, "_file_handle_cache"):
             for _, file in self._file_handle_cache.items():
-                file.close()
+                if file is not None and self._check_if_open(file):
+                    file.close()
             self._file_handle_cache = OrderedDict()
 
 

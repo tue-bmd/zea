@@ -1,4 +1,7 @@
-"""Action selection strategies."""
+"""Action selection strategies.
+
+All strategies are stateless, meaning that they do not maintain any internal state.
+"""
 
 import keras
 from keras import ops
@@ -51,8 +54,19 @@ class LinesActionModel(MaskActionModel):
         stack_n_cols = self.img_width / self.n_possible_actions
         assert (
             stack_n_cols.is_integer()
-        ), "Image size must be divisible by n_possible_actions."
+        ), "Image width must be divisible by n_possible_actions."
         self.stack_n_cols = int(stack_n_cols)
+
+    def lines_to_im_size(self, lines):
+        """Convert k-hot-encoded line vectors to image size.
+
+        Args:
+            lines (Tensor): shape is (n_masks, n_possible_actions)
+
+        Returns:
+            Tensor: Masks of shape (n_masks, img_height, img_width)
+        """
+        return masks.lines_to_im_size(lines, (self.img_height, self.img_width))
 
 
 @action_selection_registry(name="greedy_entropy")
@@ -223,7 +237,9 @@ class GreedyEntropy(LinesActionModel):
         # Create the re-weighting vector
         reweighting = ops.ones_like(padded_entropy_per_line)
         reweighting = ops.slice_update(
-            reweighting, (start_index,), self.upside_down_gaussian
+            reweighting,
+            (start_index,),
+            ops.cast(self.upside_down_gaussian, dtype=reweighting.dtype),
         )
 
         # Apply re-weighting to entropy values
@@ -262,9 +278,7 @@ class GreedyEntropy(LinesActionModel):
             ),
             axis=0,
         )
-        return selected_lines_k_hot, masks.lines_to_im_size(
-            selected_lines_k_hot, (self.img_height, self.img_width)
-        )
+        return selected_lines_k_hot, self.lines_to_im_size(selected_lines_k_hot)
 
 
 @action_selection_registry(name="uniform_random")
@@ -274,30 +288,7 @@ class UniformRandomLines(LinesActionModel):
     Creates masks with uniformly randomly sampled lines.
     """
 
-    def __init__(
-        self,
-        n_actions: int,
-        n_possible_actions: int,
-        img_width: int,
-        img_height: int,
-        batch_size: int = 1,
-    ):
-        """Initialize the UniformRandomLines action selection model.
-
-        Args:
-            n_actions (int): The number of actions the agent can take.
-            n_possible_actions (int): The number of possible actions.
-            img_width (int): The width of the input image.
-            img_height (int): The height of the input image.
-            batch_size (int): Number of masks to generate in parallel
-
-        Raises:
-            AssertionError: If image width is not divisible by n_possible_actions.
-        """
-        super().__init__(n_actions, n_possible_actions, img_width, img_height)
-        self.batch_size = batch_size
-
-    def sample(self, seed=None):
+    def sample(self, batch_size=1, seed=None):
         """Sample the action using the uniform random method.
 
         Generates or updates an equispaced mask to sweep rightwards by one step across the image.
@@ -307,18 +298,17 @@ class UniformRandomLines(LinesActionModel):
                 number generation. Defaults to None.
 
         Returns:
-            Tensor: The mask of shape (batch_size, img_size, img_size)
+            Tuple[Tensor, Tensor]:
+                - Newly selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
         """
         selected_lines_batched = masks.random_uniform_lines(
             n_actions=self.n_actions,
             n_possible_actions=self.n_possible_actions,
-            n_masks=self.batch_size,
+            n_masks=batch_size,
             seed=seed,
         )
-        mask_batched = masks.lines_to_im_size(
-            selected_lines_batched, (self.img_height, self.img_width)
-        )
-        return selected_lines_batched, mask_batched
+        return selected_lines_batched, self.lines_to_im_size(selected_lines_batched)
 
 
 @action_selection_registry(name="equispaced")
@@ -335,24 +325,15 @@ class EquispacedLines(LinesActionModel):
         n_possible_actions: int,
         img_width: int,
         img_height: int,
-        batch_size: int,
+        assert_equal_spacing=True,
     ):
-        """
-        Args:
-            n_actions (int): The number of actions the agent can take.
-            n_possible_actions (int): The number of possible actions.
-            img_width (int): The width of the input image.
-            img_height (int): The height of the input image.
-            batch_size (int): Number of masks to generate in parallel
-
-        Raises:
-            AssertionError: If image width is not divisible by n_possible_actions.
-        """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
-        self.current_lines = None
-        self.batch_size = batch_size
 
-    def sample(self):
+        self.assert_equal_spacing = assert_equal_spacing
+        if self.assert_equal_spacing:
+            masks._assert_equal_spacing(n_actions, n_possible_actions)
+
+    def sample(self, current_lines=None, batch_size=1):
         """Sample the action using the equispaced method.
 
         Generates or updates an equispaced mask to sweep rightwards by one step across the image.
@@ -360,13 +341,12 @@ class EquispacedLines(LinesActionModel):
         Returns:
             Tensor: The mask of shape (batch_size, img_size, img_size)
         """
-        if self.current_lines is None:
-            self.current_lines, masks = self.initial_sample_stateless()
+        if current_lines is None:
+            return self.initial_sample_stateless(batch_size)
         else:
-            self.current_lines, masks = self.sample_stateless(self.current_lines)
-        return masks
+            return self.sample_stateless(current_lines)
 
-    def initial_sample_stateless(self):
+    def initial_sample_stateless(self, batch_size=1):
         """Initial sample stateless.
 
         Generates a batch of initial equispaced line masks.
@@ -376,20 +356,17 @@ class EquispacedLines(LinesActionModel):
                 - Selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
                 - Masks of shape (batch_size, img_height, img_width)
         """
-        initial_lines = masks.get_initial_equispaced_lines(
-            self.n_actions, self.n_possible_actions
+        initial_lines = masks.initial_equispaced_lines(
+            self.n_actions,
+            self.n_possible_actions,
+            assert_equal_spacing=self.assert_equal_spacing,
         )
         initial_lines = ops.tile(
-            initial_lines, (self.batch_size, 1)
+            initial_lines, (batch_size, 1)
         )  # (batch_size, n_actions)
-        return initial_lines, masks.lines_to_im_size(
-            initial_lines, (self.img_height, self.img_width)
-        )
+        return initial_lines, self.lines_to_im_size(initial_lines)
 
-    def sample_stateless(
-        self,
-        current_lines,
-    ):
+    def sample_stateless(self, current_lines):
         """Sample stateless.
 
         Updates an existing equispaced mask to sweep rightwards by one step across the image.
@@ -403,15 +380,8 @@ class EquispacedLines(LinesActionModel):
                 - Newly selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
                 - Masks of shape (batch_size, img_height, img_width)
         """
-        current_lines = ops.vectorized_map(
-            lambda lines: masks.equispaced_lines(
-                self.n_actions, self.n_possible_actions, lines
-            ),
-            current_lines,
-        )
-        return current_lines, masks.lines_to_im_size(
-            current_lines, (self.img_height, self.img_width)
-        )
+        new_lines = masks.next_equispaced_lines(current_lines)
+        return new_lines, self.lines_to_im_size(new_lines)
 
 
 @action_selection_registry(name="covariance")
@@ -521,5 +491,4 @@ class CovarianceSamplingLines(LinesActionModel):
         best_mask = ops.take_along_axis(lines, best_mask_index, axis=0)
         best_mask = ops.squeeze(best_mask, axis=0)
 
-        # [batch_size, h, w]
-        return masks.lines_to_im_size(best_mask, (self.img_height, self.img_width))
+        return best_mask, self.lines_to_im_size(best_mask)
