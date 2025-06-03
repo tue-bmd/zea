@@ -536,7 +536,7 @@ class OldScan(Object):
                 the beamforming grid. Defaults to None.
             pixels_per_wavelength (int, optional): The number of pixels per wavelength
                 to use in the beamforming grid. Only used when Nx and Nz are not
-                defined. Defaults to 3.
+                defined. Defaults to 4.
             downsample (int, optional): Decimation factor applied after downconverting
                 data to baseband (RF to IQ). Defaults to 1.
             pfield (np.ndarray, float, optional): The estimated pressure field of shape
@@ -1239,26 +1239,29 @@ class OldScan(Object):
 
             self._pfield = self._default_pfield()
         else:
-            if self.pfield_kwargs is None:
-                pfield_kwargs = {}
-            else:
-                pfield_kwargs = self.pfield_kwargs
-
-            self._pfield = ops.convert_to_numpy(
-                compute_pfield(
-                    self.sound_speed,
-                    self.center_frequency,
-                    self.bandwidth_percent,
-                    self.n_el,
-                    self.probe_geometry,
-                    self.tx_apodizations,
-                    self.grid,
-                    self.t0_delays,
-                    **pfield_kwargs,
-                )
-            )
+            self._pfield = self.compute_pfield()
 
         return self._pfield
+
+    def compute_pfield(self, **kwargs):
+        """Compute the pfield with the given parameters."""
+        if self.pfield_kwargs is None:
+            self.pfield_kwargs = kwargs
+        else:
+            self.pfield_kwargs.update(kwargs)
+
+        pfield = compute_pfield(
+            self.sound_speed,
+            self.center_frequency,
+            self.bandwidth_percent,
+            self.n_el,
+            self.probe_geometry,
+            self.tx_apodizations,
+            self.grid,
+            self.t0_delays,
+            **self.pfield_kwargs,
+        )
+        return ops.convert_to_numpy(pfield)
 
     @property
     def flat_pfield(self):
@@ -1305,7 +1308,7 @@ class OldScan(Object):
     def theta_range(self):
         """The theta range for scan conversion."""
         if self._theta_range is None and self.polar_angles is not None:
-            self._theta_range = (self.polar_angles.min(), self.polar_angles.max())
+            self._theta_range = (self._polar_angles.min(), self._polar_angles.max())
         return self._theta_range
 
     @property

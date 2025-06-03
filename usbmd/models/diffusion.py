@@ -22,6 +22,7 @@ from usbmd.models.presets import diffusion_model_presets
 from usbmd.models.unet import get_time_conditional_unetwork
 from usbmd.models.utils import LossTrackerWrapper
 from usbmd.tensor_ops import L2, fori_loop, split_seed
+from usbmd.utils import fn_requires_argument
 
 
 @model_registry(name="diffusion")
@@ -77,16 +78,20 @@ class DiffusionModel(DeepGenerativeModel):
         if network_name == "unet_time_conditional":
             self.network = get_time_conditional_unetwork(
                 image_shape=self.input_shape,
-                **network_kwargs,
+                **self.network_kwargs,
             )
         elif network_name == "dense_time_conditional":
             assert len(input_shape) == 1, "Dense network only supports 1D input"
             self.network = get_time_conditional_dense_network(
                 input_dim=self.input_shape[0],
-                **network_kwargs,
+                **self.network_kwargs,
             )
         else:
             raise ValueError("Invalid network name provided.")
+
+        # Also initialize the exponential moving average network
+        self.ema_network = keras.models.clone_model(self.network)
+        self.ema_network.trainable = False
 
         self.image_loss_tracker = LossTrackerWrapper("i_loss")
         self.noise_loss_tracker = LossTrackerWrapper("n_loss")
@@ -100,6 +105,20 @@ class DiffusionModel(DeepGenerativeModel):
         self.operator = None
         self._init_operator_and_guidance(operator, guidance)
 
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "input_shape": self.input_shape,
+                "input_range": self.input_range,
+                "min_signal_rate": self.min_signal_rate,
+                "max_signal_rate": self.max_signal_rate,
+                "network_name": self.network_name,
+                "network_kwargs": self.network_kwargs,
+            }
+        )
+        return config
+
     def _init_operator_and_guidance(self, operator, guidance):
         if operator is not None:
             if isinstance(operator, str):
@@ -109,6 +128,13 @@ class DiffusionModel(DeepGenerativeModel):
                 self.operator = operator
             elif isinstance(operator, dict):
                 operator_class = operator_registry[operator["name"]]
+                if "params" not in operator:
+                    operator["params"] = {}
+                if (
+                    fn_requires_argument(operator_class.__init__, "image_range")
+                    and "image_range" not in operator["params"]
+                ):
+                    operator["params"]["image_range"] = self.input_range
                 self.operator = operator_class(**operator["params"])
             else:
                 raise ValueError(
@@ -139,8 +165,16 @@ class DiffusionModel(DeepGenerativeModel):
 
     # pylint: disable=arguments-differ
     def call(self, inputs, training=False, **kwargs):
-        """Simply calls the score network."""
-        return self.network(inputs, training=training, **kwargs)
+        """
+        Calls the score network.
+
+        Will use the exponential moving average network if training is False,
+        otherwise the regular network."""
+        if training:
+            network = self.network
+        else:
+            network = self.ema_network
+        return network(inputs, training=training, **kwargs)
 
     def sample(self, n_samples=1, n_steps=20, seed=None, **kwargs):
         """Sample from the model.
@@ -194,7 +228,7 @@ class DiffusionModel(DeepGenerativeModel):
             initial_samples: Optional initial samples to start from.
                 If provided, these samples will be used as the starting point
                 for the diffusion process. Only used if `initial_step` is
-                greater than 0.
+                greater than 0. Must be of shape `(batch_size, n_samples, *input_shape)`.
             seed: Random seed generator.
             **kwargs: Additional arguments.
 
@@ -208,15 +242,14 @@ class DiffusionModel(DeepGenerativeModel):
         def _tile_with_sample_dim(tensor):
             """Tile the tensor with an additional sample dimension."""
             shape = ops.shape(tensor)
-            tensor = ops.expand_dims(tensor, axis=1)  # (batch, 1, ...)
-            multiples = [1, n_samples] + [1] * (len(shape) - 1)
-            tiled = ops.tile(tensor, multiples)  # (batch, n_samples, ...)
-            new_shape = (shape[0] * n_samples, *shape[1:])
-            return ops.reshape(tiled, new_shape)
+            tensor = ops.repeat(
+                tensor[:, None], n_samples, axis=1
+            )  # (batch, n_samples, ...)
+            return ops.reshape(tensor, (-1, *shape[1:]))
 
         measurements = _tile_with_sample_dim(measurements)
         if initial_samples is not None:
-            initial_samples = _tile_with_sample_dim(initial_samples)
+            initial_samples = ops.reshape(initial_samples, (-1, *self.input_shape))
         if "mask" in kwargs:
             kwargs["mask"] = _tile_with_sample_dim(kwargs["mask"])
 
@@ -512,6 +545,7 @@ class DiffusionModel(DeepGenerativeModel):
         seed=None,
         verbose: bool = False,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
+        disable_jit=False,
         **kwargs,
     ):
         """Reverse diffusion process conditioned on some measurement.
@@ -611,7 +645,7 @@ class DiffusionModel(DeepGenerativeModel):
                 seed,
             ),
             # can't jit this with progbar or tracking intermediate values
-            disable_jit=verbose or track_progress_type,
+            disable_jit=verbose or track_progress_type or disable_jit,
         )
 
         return pred_images
@@ -738,21 +772,6 @@ class DiffusionModel(DeepGenerativeModel):
                 self.track_progress.append(ops.convert_to_numpy(next_noisy_images))
             else:
                 raise ValueError("Invalid track_progress_type")
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "input_shape": self.input_shape,
-                "input_range": self.input_range,
-                "network_name": self.network_name,
-                "network_kwargs": self.network_kwargs,
-                "min_signal_rate": self.min_signal_rate,
-                "max_signal_rate": self.max_signal_rate,
-                "min_t": self.min_t,
-                "max_t": self.max_t,
-            }
-        )
 
 
 register_presets(diffusion_model_presets, DiffusionModel)

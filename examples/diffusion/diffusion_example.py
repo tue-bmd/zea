@@ -10,8 +10,9 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, make_dataloader, set_data_paths
+from usbmd import init_device, log, set_data_paths
 from usbmd.agent.selection import EquispacedLines
+from usbmd.backend.tensorflow.dataloader import make_dataloader
 from usbmd.models.diffusion import DiffusionModel
 from usbmd.models.echonet import INFERENCE_SIZE
 from usbmd.ops import Pipeline, ScanConvert
@@ -49,10 +50,9 @@ if __name__ == "__main__":
         n_possible_actions=img_size // line_thickness,
         img_width=img_size,
         img_height=112,
-        batch_size=n_imgs,
     )
 
-    mask = agent.sample()
+    _, mask = agent.sample(batch_size=n_imgs)
     mask = ops.expand_dims(mask, axis=-1)
 
     measurements = ops.where(mask, batch, -1.0)
