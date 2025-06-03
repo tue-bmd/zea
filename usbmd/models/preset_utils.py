@@ -234,9 +234,9 @@ def keras_to_usbmd_registry(keras_name, usbmd_registry):
         if entry.__name__ == keras_name:
             return registry_name
     raise ValueError(
-        f"Class {keras_name} not found in USBMD registry. "
+        f"Class {keras_name} not found in `usbmd` registry. "
         "Make sure to register any custom classes with `usbmd.registry.model_registry()`. "
-        "Currently, the USBMD registry contains: "
+        "Currently, the `usbmd` registry contains: "
         f"{usbmd_registry.registry.items()}"
     )
 
