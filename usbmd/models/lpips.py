@@ -7,7 +7,7 @@ As well as the paper: https://arxiv.org/abs/1801.03924
 
 import keras
 from keras import ops
-from keras.api.layers import Conv2D, Dropout, Input
+from keras.layers import Conv2D, Dropout, Input
 
 from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
