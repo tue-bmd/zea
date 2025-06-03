@@ -228,7 +228,7 @@ class DiffusionModel(DeepGenerativeModel):
             initial_samples: Optional initial samples to start from.
                 If provided, these samples will be used as the starting point
                 for the diffusion process. Only used if `initial_step` is
-                greater than 0.
+                greater than 0. Must be of shape (batch_size, n_samples, *input_shape).
             seed: Random seed generator.
             **kwargs: Additional arguments.
 
@@ -242,15 +242,14 @@ class DiffusionModel(DeepGenerativeModel):
         def _tile_with_sample_dim(tensor):
             """Tile the tensor with an additional sample dimension."""
             shape = ops.shape(tensor)
-            tensor = ops.expand_dims(tensor, axis=1)  # (batch, 1, ...)
-            multiples = [1, n_samples] + [1] * (len(shape) - 1)
-            tiled = ops.tile(tensor, multiples)  # (batch, n_samples, ...)
-            new_shape = (shape[0] * n_samples, *shape[1:])
-            return ops.reshape(tiled, new_shape)
+            tensor = ops.repeat(
+                tensor[:, None], n_samples, axis=1
+            )  # (batch, n_samples, ...)
+            return ops.reshape(tensor, (-1, *shape[1:]))
 
         measurements = _tile_with_sample_dim(measurements)
         if initial_samples is not None:
-            initial_samples = _tile_with_sample_dim(initial_samples)
+            initial_samples = ops.reshape(initial_samples, (-1, *self.input_shape))
         if "mask" in kwargs:
             kwargs["mask"] = _tile_with_sample_dim(kwargs["mask"])
 
