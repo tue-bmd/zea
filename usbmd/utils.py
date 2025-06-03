@@ -512,6 +512,12 @@ def get_function_args(func):
     return tuple(sig.parameters)
 
 
+def fn_requires_argument(fn, arg_name):
+    """Returns True if the function requires the argument 'arg_name'."""
+    params = get_function_args(fn)
+    return arg_name in params
+
+
 def find_methods_with_return_type(cls, return_type_hint):
     """
     Find all methods in a class that have the specified return type hint.
