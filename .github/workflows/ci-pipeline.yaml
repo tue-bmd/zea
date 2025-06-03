@@ -15,7 +15,7 @@ env:
 
 jobs:
   set-tag:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       docker_tag: ${{ steps.set.outputs.tag }}
     steps:
@@ -36,7 +36,7 @@ jobs:
 
   build-full-image:
     needs: set-tag
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -63,7 +63,7 @@ jobs:
 
   build-other-images:
     needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       matrix:
         backend: [tensorflow, torch, jax, numpy]
@@ -94,7 +94,7 @@ jobs:
   pylint:
     if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -125,7 +125,7 @@ jobs:
   tests:
     if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -155,7 +155,7 @@ jobs:
 
   build-docs:
     needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
