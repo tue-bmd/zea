@@ -27,6 +27,8 @@ extensions = [
     "nbsphinx",  # for Jupyter notebook support
 ]
 
+autodoc_mock_imports = ["usbmd.backend.tf2jax"]
+
 autodoc_default_options = {
     "members": True,
     "undoc-members": True,
