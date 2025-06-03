@@ -8,7 +8,7 @@ Original implementation of paper:
 
 import keras
 from keras import ops
-from keras.api.layers import (
+from keras.layers import (
     BatchNormalization,
     Conv2D,
     Dropout,
@@ -18,10 +18,10 @@ from keras.api.layers import (
     concatenate,
 )
 
+from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
 from usbmd.models.preset_utils import register_presets
 from usbmd.models.presets import carotid_segmenter_presets
-from usbmd.internal.registry import model_registry
 
 INFERENCE_SIZE = 256
 

@@ -228,7 +228,7 @@ class DiffusionModel(DeepGenerativeModel):
             initial_samples: Optional initial samples to start from.
                 If provided, these samples will be used as the starting point
                 for the diffusion process. Only used if `initial_step` is
-                greater than 0. Must be of shape (batch_size, n_samples, *input_shape).
+                greater than 0. Must be of shape `(batch_size, n_samples, *input_shape)`.
             seed: Random seed generator.
             **kwargs: Additional arguments.
 
