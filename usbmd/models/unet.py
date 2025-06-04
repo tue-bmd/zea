@@ -3,6 +3,7 @@
 import keras
 from keras import layers
 
+from usbmd import log
 from usbmd.internal.registry import model_registry
 from usbmd.models.base import BaseModel
 from usbmd.models.layers import DownBlock, ResidualBlock, UpBlock, sinusoidal_embedding
@@ -143,8 +144,8 @@ class UNetTimeConditional(BaseModel):
 
 def get_time_conditional_unetwork(
     image_shape,
-    widths,
-    block_depth,
+    widths=None,
+    block_depth=None,
     embedding_min_frequency=1.0,
     embedding_max_frequency=1000.0,
     embedding_dims=32,
@@ -167,6 +168,13 @@ def get_time_conditional_unetwork(
     assert (
         len(image_shape) == 3
     ), "image_shape must be a tuple of (height, width, channels)"
+
+    if widths is None:
+        log.warning("No widths provided, using default widths [32, 64, 96, 128]")
+        widths = [32, 64, 96, 128]
+    if block_depth is None:
+        log.warning("No block_depth provided, using default block_depth 2")
+        block_depth = 2
 
     image_height, image_width, n_channels = image_shape
     noisy_images = keras.Input(shape=(image_height, image_width, n_channels))

@@ -5,7 +5,7 @@ Tensorflow utilities
 import keras
 import numpy as np
 import tensorflow as tf
-from keras.api.layers import Lambda, LeakyReLU, ReLU
+from keras.layers import Lambda, LeakyReLU, ReLU
 
 PI = tf.experimental.numpy.pi
 
