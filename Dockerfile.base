@@ -116,7 +116,7 @@ FROM runtime-base AS cpu
 ARG BACKEND=all
 ENV BACKEND=${BACKEND}
 
-CMD ["/bin/bash", "-c", "echo \"CPU image ready → $(pylint --version)\"; exec /bin/bash"]
+CMD ["/bin/bash", "-c", "echo \"CPU image ready → BACKEND=${BACKEND}\"; exec /bin/bash"]
 
 ##############################
 # GPU runtime image
@@ -143,4 +143,4 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ultrasound-toolbox
-CMD ["/bin/bash", "-c", "echo \"GPU image ready → $(pytest --version)\"; exec /bin/bash"]
+CMD ["/bin/bash", "-c", "echo \"GPU image ready → BACKEND=${BACKEND}\"; exec /bin/bash"]
