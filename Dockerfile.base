@@ -26,31 +26,7 @@ ENV POETRY_VERSION=1.8.3 \
     POETRY_CACHE_DIR=/tmp/poetry_cache
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
-# 1. System dependencies & Poetry
-# Add non-root users
-ARG BASE_UID=1000
-ARG NUM_USERS=51
-
-# Create non-root users and install system packages in one command
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3 python3-pip git python3-tk python3-venv \
-        libsm6 libxext6 libxrender-dev libqt5gui5 sudo \
-        ffmpeg imagemagick make openssh-client && \
-    python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
-    ln -s /usr/bin/python3 /usr/bin/python && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    for i in $(seq 0 $NUM_USERS); do \
-        USER_UID=$((BASE_UID + i)); \
-        USERNAME="devcontainer$i"; \
-        groupadd --gid $USER_UID $USERNAME && \
-        useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
-        echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME && \
-        chmod 0440 /etc/sudoers.d/$USERNAME; \
-        echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
-    done
-
-# Install poetry once system dependencies are in place
+# 1. Poetry
 RUN python3 -m venv $POETRY_VENV && \
     $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
@@ -63,11 +39,9 @@ COPY pyproject.toml poetry.lock ./
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
     poetry install -E opencv-python-headless --no-root --compile
 
-# 3. Backend-specific installs (numpy as baseline)
+# 3. Always install numpy
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    if [ "$BACKEND" = "numpy" ] || [ "$BACKEND" = "all" ]; then \
-      $POETRY_VENV/bin/pip install --no-cache-dir numpy; \
-    fi
+    $POETRY_VENV/bin/pip install --no-cache-dir numpy
 
 # 4. JAX
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
@@ -112,16 +86,52 @@ RUN pip uninstall -y poetry && \
 # Runtime-base: common system dependencies and code
 #################################
 FROM python:3.12-slim-bullseye AS runtime-base
-# Install common runtime dependencies
+# Do not prompt for input when installing packages
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Prevent python from writing pyc files
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Use default "C" locale
+ENV LC_ALL=C
+
+# Set pip cache directory
+ENV PIP_CACHE_DIR=/tmp/pip_cache
+
+# Set poetry version and venv path
+ENV POETRY_VERSION=1.8.3 \
+    POETRY_VENV=/opt/poetry-venv \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=0 \
+    POETRY_VIRTUALENVS_CREATE=0 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+# Add non-root users
+ARG BASE_UID=1000
+ARG NUM_USERS=51
+
+# Create non-root users and install system packages in one command
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      build-essential git curl ca-certificates sudo && \
-    rm -rf /var/lib/apt/lists/*
-WORKDIR /ultrasound-toolbox
-# Copy virtual environment and application code from the builder
-COPY --from=builder /opt/poetry-venv /opt/poetry-venv
-COPY . /ultrasound-toolbox
-ENV PATH="/opt/poetry-venv/bin:${PATH}"
+        libsm6 libxext6 libxrender-dev libqt5gui5 sudo \
+        ffmpeg imagemagick make openssh-client && \
+    python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
+    ln -s /usr/bin/python3 /usr/bin/python && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    for i in $(seq 0 $NUM_USERS); do \
+        USER_UID=$((BASE_UID + i)); \
+        USERNAME="devcontainer$i"; \
+        groupadd --gid $USER_UID $USERNAME && \
+        useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
+        echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME && \
+        chmod 0440 /etc/sudoers.d/$USERNAME; \
+        echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
+    done
+
+# Install poetry once system dependencies are in place
+RUN python3 -m venv $POETRY_VENV && \
+    $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
+ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
 
 ##############################
@@ -139,8 +149,7 @@ CMD ["/bin/bash", "-c", "python -c \"print('CPU image with BACKEND =', '${BACKEN
 FROM runtime-base AS gpu
 ARG BACKEND=all
 ARG GPU=false
-ENV DEBIAN_FRONTEND=noninteractive \
-    PATH="/usr/local/cuda/bin:${PATH}" \
+ENV PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
     BACKEND=${BACKEND}
 
