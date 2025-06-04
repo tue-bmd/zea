@@ -2,10 +2,10 @@
 
 import copy
 import getpass
+import importlib.resources
 import os
 import platform
 import socket
-import sys
 import warnings
 from functools import reduce
 from pathlib import Path
@@ -147,9 +147,8 @@ def _verify_user_config_and_get_paths(config, system, local):
 
 def _verify_paths(data_path):
     """Verify that the paths exist and are directories."""
-    for key, path in data_path.items():
-        if key not in ["data_root", "output"]:
-            continue
+    for key in ["data_root", "output"]:
+        path = data_path[key]
         if not Path(path).is_dir():
             log.warning(
                 f"{key} path `{path}` does not exist, please update your "
@@ -195,7 +194,9 @@ def _load_users_yaml(user_config, local, username, hostname):
     return config
 
 
-def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> dict:
+def set_data_paths(
+    user_config: Union[str, dict] = None, local: bool = True, verify: bool = True
+) -> dict:
     """Get data paths (absolute paths to location of data).
 
     Args:
@@ -203,6 +204,8 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
             If None, uses ``./users.yaml`` as the default file. Can also be a dictionary
             structured as shown below.
         local (bool, optional): Use local dataset or get from NAS.
+        verify (bool, optional): Verify that the paths exist and are directories.
+            Default is True.
 
     Example YAML structure::
 
@@ -238,7 +241,7 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     username = getpass.getuser()
     system = platform.system().lower()
     hostname = socket.gethostname()
-    repo_root = Path(__file__)
+    repo_root = importlib.resources.files("usbmd")  # ultrasound-toolbox/usbmd
 
     # If user_config is None, use the default users.yaml file
     if isinstance(user_config, type(None)):
@@ -277,9 +280,6 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
     else:
         data_root, output = _verify_user_config_and_get_paths(config, system, local)
 
-    # Add repo_root to sys.path
-    sys.path.insert(1, repo_root)
-
     data_path = {
         "data_root": Path(data_root),
         "repo_root": repo_root,
@@ -289,7 +289,8 @@ def set_data_paths(user_config: Union[str, dict] = None, local: bool = True) -> 
         "hostname": hostname,
     }
 
-    _verify_paths(data_path)
+    if verify:
+        _verify_paths(data_path)
 
     return Config(data_path)
 

@@ -217,12 +217,28 @@ def check_file_exists(preset, path):
     return True
 
 
+def _assert_file_exists(preset, path):
+    try:
+        get_file(preset, path)
+    except FileNotFoundError as e:
+        raise ValueError(
+            f"Preset {preset} has no {path}. Make sure the URL or "
+            "directory you are trying to load is a valid KerasHub preset and "
+            "and that you have permissions to read/download from this location."
+        ) from e
+
+
 def keras_to_usbmd_registry(keras_name, usbmd_registry):
     """Convert a Keras class name to a USBMD registry name."""
     for registry_name, entry in usbmd_registry.registry.items():
         if entry.__name__ == keras_name:
             return registry_name
-    return None
+    raise ValueError(
+        f"Class {keras_name} not found in `usbmd` registry. "
+        "Make sure to register any custom classes with `usbmd.registry.model_registry()`. "
+        "Currently, the `usbmd` registry contains: "
+        f"{usbmd_registry.registry.items()}"
+    )
 
 
 class PresetLoader:
@@ -272,18 +288,31 @@ class KerasPresetLoader(PresetLoader):
     ):  # pylint: disable=unused-argument
         """Load a model from a serialized Keras config."""
         model = load_serialized_object(self.config, **kwargs)
-        if load_weights:
-            jax_memory_cleanup(model)
-            # needed to add this after Keras 3.7 (build error)
+
+        if not load_weights:
+            return model
+
+        jax_memory_cleanup(model)
+
+        # if model has a custom load_weights method, call it
+        if hasattr(model, "custom_load_weights"):
+            model.custom_load_weights(self.preset)
+            return model
+
+        # try to build with image_shape or input_shape if not built yet ->
+        # but preferred way to build is to have a build_config in the json!
+        if not model.built:
             if hasattr(model, "image_shape"):
                 model.build(input_shape=model.image_shape)
             elif hasattr(model, "input_shape"):
                 model.build(input_shape=model.input_shape)
-            # if model has a custom load_weights method, call it
-            if hasattr(model, "custom_load_weights"):
-                model.custom_load_weights(self.preset)
             else:
-                model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
+                raise ValueError(
+                    "Model could not be built. Make sure to add a build_config to the json "
+                    "or set the input_shape or image_shape attribute before loading weights."
+                )
+        model.load_weights(get_file(self.preset, MODEL_WEIGHTS_FILE))
+
         return model
 
     def load_image_converter(self, cls, **kwargs):  # pylint: disable=unused-argument
@@ -380,12 +409,7 @@ def get_preset_saver(preset):
 
 def get_preset_loader(preset):
     """Get a preset loader."""
-    if not check_file_exists(preset, CONFIG_FILE):
-        raise ValueError(
-            f"Preset {preset} has no {CONFIG_FILE}. Make sure the URL or "
-            "directory you are trying to load is a valid KerasHub preset and "
-            "and that you have permissions to read/download from this location."
-        )
+    _assert_file_exists(preset, CONFIG_FILE)
     # We currently assume all formats we support have a `config.json`, this is
     # true, for Keras, Transformers, and timm. We infer the on disk format by
     # inspecting the `config.json` file.

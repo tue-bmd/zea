@@ -3,7 +3,7 @@
 # pylint: disable=abstract-method
 import keras
 from keras import Input, ops
-from keras.api.layers import Add, Conv2D, UpSampling2D
+from keras.layers import Add, Conv2D, UpSampling2D
 from tensorflow.python.keras.layers import Layer
 
 from usbmd.backend.tensorflow.layers.utils import get_activation

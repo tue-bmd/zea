@@ -123,9 +123,11 @@ class TinyBase(BaseModel):
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
-            import tf2jax  # pylint: disable=import-outside-toplevel
+            from usbmd.backend import tf2jax  # pylint: disable=import-outside-toplevel
 
-            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
+            jax_func, jax_params = tf2jax.convert(  # pylint: disable=no-member
+                tf.function(self.network), inputs
+            )
 
             def call_fn(
                 params, state, rng, inputs, training
@@ -207,41 +209,40 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
     # not be a 100% match to the tensorflow model
     if backend.backend() != "jax":
         return
-    try:
-        import jax  # pylint: disable=import-outside-toplevel
-        import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
-        import tf2jax  # pylint: disable=import-outside-toplevel
 
-        def _resize_nearest_neighbor(proto):
-            """Parse a ResizeNearestNeighbor op."""
-            tf2jax._src.ops._check_attrs(
-                proto, {"T", "align_corners", "half_pixel_centers"}
-            )
+    import jax  # pylint: disable=import-outside-toplevel
+    import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
 
-            def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
-                if len(images.shape) != 4:
-                    raise ValueError(
-                        "Expected A 4D tensor with shape [batch, height, width, channels], "
-                        f"found {images.shape}"
-                    )
+    from usbmd.backend import tf2jax  # pylint: disable=import-outside-toplevel
 
-                inp_batch, _, _, inp_channels = images.shape
-                out_height, out_width = size.tolist()
+    def _resize_nearest_neighbor(proto):
+        """Parse a ResizeNearestNeighbor op."""
+        tf2jax._src.ops._check_attrs(  # pylint: disable=no-member
+            proto, {"T", "align_corners", "half_pixel_centers"}
+        )
 
-                return jax.image.resize(
-                    images,
-                    shape=(inp_batch, out_height, out_width, inp_channels),
-                    method=jax.image.ResizeMethod.NEAREST,
+        def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
+            if len(images.shape) != 4:
+                raise ValueError(
+                    "Expected A 4D tensor with shape [batch, height, width, channels], "
+                    f"found {images.shape}"
                 )
 
-            return _func
+            inp_batch, _, _, inp_channels = images.shape
+            out_height, out_width = size.tolist()
 
-        # hack to allow align_corners=True and half_pixel_centers=True
-        tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor
-    except ImportError as exc:
-        raise ImportError(
-            "To use the Jax backend with TAESD, please install the `tf2jax` package."
-        ) from exc
+            return jax.image.resize(
+                images,
+                shape=(inp_batch, out_height, out_width, inp_channels),
+                method=jax.image.ResizeMethod.NEAREST,
+            )
+
+        return _func
+
+    # hack to allow align_corners=True and half_pixel_centers=True
+    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = (  # pylint: disable=no-member
+        _resize_nearest_neighbor
+    )
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)
