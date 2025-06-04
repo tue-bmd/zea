@@ -221,7 +221,7 @@ jobs:
           cd docs/functions
           npm install
 
-      - name: Deploy to Firebase Hosting & Functions
+      - name: Deploy to Firebase Hosting & Functions (dry run)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
