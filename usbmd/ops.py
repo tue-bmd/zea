@@ -856,7 +856,9 @@ class Pipeline:
             ), f"Expected an instance of `usbmd.scan.Scan`, got {type(scan)}"
             except_tensors = []
             for key in scan._on_request:
-                if not self.needs(key):
+                # If the pipeline does not need the key or it will be overridden by kwargs,
+                # we can skip converting it to a tensor
+                if not self.needs(key) or key in kwargs:
                     except_tensors.append(key)
             scan_dict = scan.to_tensor(except_tensors)
 
