@@ -23,66 +23,6 @@ ENV POETRY_VERSION=1.8.3 \
 # Ensure poetry venv is on PATH
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
-# 1. Create a dedicated virtualenv for Poetry
-RUN python3 -m venv $POETRY_VENV \
- && $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
-
-WORKDIR /ultrasound-toolbox
-COPY pyproject.toml poetry.lock ./
-
-# 2. Install all dependencies
-RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
-    poetry install -E opencv-python-headless --no-root --compile
-
-# 3. Always install numpy
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    pip install --no-cache-dir numpy
-
-# 4. JAX (if requested)
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
-      if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir -U "jax[cuda12]"; \
-      else \
-        pip install --no-cache-dir -U jax; \
-      fi; \
-    fi
-
-# 5. PyTorch (if requested)
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
-      if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir torch torchvision torchaudio \
-          --index-url https://download.pytorch.org/whl/cu124; \
-      else \
-        pip install --no-cache-dir torch torchvision torchaudio \
-          --index-url https://download.pytorch.org/whl/cpu; \
-      fi; \
-    fi
-
-# 6. TensorFlow (if requested)
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
-      if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir \
-          --extra-index-url https://pypi.nvidia.com \
-          "tensorflow[and-cuda]==2.19.0"; \
-      else \
-        pip install --no-cache-dir tensorflow==2.19.0; \
-      fi; \
-    fi
-
-
-##############################
-# Runtime-base: copy the venv from builder and set up system deps
-##############################
-FROM python:3.12-slim-bullseye AS runtime-base
-ARG DEBIAN_FRONTEND=noninteractive
-
-# Prevent Python from writing .pyc files and use C locale
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV LC_ALL=C
 
 # 1. Install system packages and create non-root users (as before)
 RUN apt-get update && \
@@ -102,17 +42,61 @@ RUN apt-get update && \
       echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
     done
 
-
-# 3. Copy the builder’s python virtual environment to the runtime image
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin            /usr/local/bin
+# 2. Create a dedicated virtualenv for Poetry
+RUN python3 -m venv $POETRY_VENV \
+ && $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
+ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
 WORKDIR /ultrasound-toolbox
+COPY pyproject.toml poetry.lock ./
+
+# 3. Install all dependencies
+RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
+    poetry install -E opencv-python-headless --no-root --compile
+
+# 4. Always install numpy
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    pip install --no-cache-dir numpy
+
+# 5. JAX (if requested)
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
+      if [ "$GPU" = "true" ]; then \
+        pip install --no-cache-dir -U "jax[cuda12]"; \
+      else \
+        pip install --no-cache-dir -U jax; \
+      fi; \
+    fi
+
+# 6. PyTorch (if requested)
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
+      if [ "$GPU" = "true" ]; then \
+        pip install --no-cache-dir torch torchvision torchaudio \
+          --index-url https://download.pytorch.org/whl/cu124; \
+      else \
+        pip install --no-cache-dir torch torchvision torchaudio \
+          --index-url https://download.pytorch.org/whl/cpu; \
+      fi; \
+    fi
+
+# 7. TensorFlow (if requested)
+RUN --mount=type=cache,target=$PIP_CACHE_DIR \
+    if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
+      if [ "$GPU" = "true" ]; then \
+        pip install --no-cache-dir \
+          --extra-index-url https://pypi.nvidia.com \
+          "tensorflow[and-cuda]==2.19.0"; \
+      else \
+        pip install --no-cache-dir tensorflow==2.19.0; \
+      fi; \
+    fi
+
 
 ##############################
 # CPU runtime image
 ##############################
-FROM runtime-base AS cpu
+FROM builder AS cpu
 ARG BACKEND=all
 ENV BACKEND=${BACKEND}
 
@@ -121,7 +105,7 @@ CMD ["/bin/bash", "-c", "echo \"CPU image ready → BACKEND=${BACKEND}\"; exec /
 ##############################
 # GPU runtime image
 ##############################
-FROM runtime-base AS gpu
+FROM builder AS gpu
 ARG BACKEND=all
 ARG GPU=false
 
