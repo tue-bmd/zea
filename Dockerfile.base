@@ -6,133 +6,108 @@
 FROM python:3.12-slim-bullseye AS builder
 ARG BACKEND=all
 ARG GPU=false
-
-# Do not prompt for input when installing packages
 ARG DEBIAN_FRONTEND=noninteractive
-# Prevent python from writing pyc files
-ENV PYTHONDONTWRITEBYTECODE=1
-# Use default "C" locale
-ENV LC_ALL=C
-# Set pip cache directoryy
-ENV PIP_CACHE_DIR=/tmp/pip_cache
 
-ENV PIP_CACHE_DIR=/root/.cache/pip
-# Set poetry version and venv path
+# Prevent Python from writing .pyc files and use C locale
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV LC_ALL=C
+
+# Poetry and cache settings
 ENV POETRY_VERSION=1.8.3 \
     POETRY_VENV=/opt/poetry-venv \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=0 \
     POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+    POETRY_CACHE_DIR=/tmp/poetry_cache \
+    PIP_CACHE_DIR=/root/.cache/pip
+# Ensure poetry venv is on PATH
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
-# 1. Poetry
-RUN python3 -m venv $POETRY_VENV && \
-    $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
+# 1. Create a dedicated virtualenv for Poetry
+RUN python3 -m venv $POETRY_VENV \
+ && $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
-# Set working directory and copy poetry configuration
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# 2. # Install dependencies for usbmd (with headless opencv)
+# 2. Install all dependencies
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
     poetry install -E opencv-python-headless --no-root --compile
 
 # 3. Always install numpy
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    $POETRY_VENV/bin/pip install --no-cache-dir numpy
+    pip install --no-cache-dir numpy
 
-# 4. JAX
+# 4. JAX (if requested)
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        $POETRY_VENV/bin/pip install --no-cache-dir -U "jax[cuda12]"; \
+        pip install --no-cache-dir -U "jax[cuda12]"; \
       else \
-        $POETRY_VENV/bin/pip install --no-cache-dir -U jax; \
+        pip install --no-cache-dir -U jax; \
       fi; \
     fi
 
-# 5. PyTorch
+# 5. PyTorch (if requested)
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        $POETRY_VENV/bin/pip install --no-cache-dir torch torchvision torchaudio \
+        pip install --no-cache-dir torch torchvision torchaudio \
           --index-url https://download.pytorch.org/whl/cu124; \
       else \
-        $POETRY_VENV/bin/pip install --no-cache-dir torch torchvision torchaudio \
+        pip install --no-cache-dir torch torchvision torchaudio \
           --index-url https://download.pytorch.org/whl/cpu; \
       fi; \
     fi
 
-# 6. TensorFlow
+# 6. TensorFlow (if requested)
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        $POETRY_VENV/bin/pip install --no-cache-dir \
+        pip install --no-cache-dir \
           --extra-index-url https://pypi.nvidia.com \
           "tensorflow[and-cuda]==2.19.0"; \
       else \
-        $POETRY_VENV/bin/pip install --no-cache-dir tensorflow==2.19.0; \
+        pip install --no-cache-dir tensorflow==2.19.0; \
       fi; \
     fi
 
-# 7. Cleanup build tools and caches
-RUN pip uninstall -y poetry && \
-    rm -rf $PIP_CACHE_DIR
 
-
-#################################
-# Runtime-base: common system dependencies and code
-#################################
+##############################
+# Runtime-base: copy the venv from builder and set up system deps
+##############################
 FROM python:3.12-slim-bullseye AS runtime-base
-# Do not prompt for input when installing packages
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Prevent python from writing pyc files
+# Prevent Python from writing .pyc files and use C locale
 ENV PYTHONDONTWRITEBYTECODE=1
-
-# Use default "C" locale
 ENV LC_ALL=C
 
-# Set pip cache directory
-ENV PIP_CACHE_DIR=/tmp/pip_cache
-
-# Set poetry version and venv path
-ENV POETRY_VERSION=1.8.3 \
-    POETRY_VENV=/opt/poetry-venv \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
-    POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
-
-# Add non-root users
-ARG BASE_UID=1000
-ARG NUM_USERS=51
-
-# Create non-root users and install system packages in one command
+# 1. Install system packages and create non-root users (as before)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libsm6 libxext6 libxrender-dev libqt5gui5 sudo \
-        ffmpeg imagemagick make openssh-client && \
+      libsm6 libxext6 libxrender-dev libqt5gui5 sudo \
+      ffmpeg imagemagick make openssh-client && \
     python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
     ln -s /usr/bin/python3 /usr/bin/python && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    for i in $(seq 0 $NUM_USERS); do \
-        USER_UID=$((BASE_UID + i)); \
-        USERNAME="devcontainer$i"; \
-        groupadd --gid $USER_UID $USERNAME && \
-        useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
-        echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME && \
-        chmod 0440 /etc/sudoers.d/$USERNAME; \
-        echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
+    for i in $(seq 0 51); do \
+      USER_UID=$((1000 + i)); \
+      USERNAME="devcontainer$i"; \
+      groupadd --gid $USER_UID $USERNAME && \
+      useradd --uid $USER_UID --gid $USER_UID -m --shell /bin/bash $USERNAME && \
+      echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
+      chmod 0440 /etc/sudoers.d/$USERNAME && \
+      echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
     done
 
-# Install poetry once system dependencies are in place
-RUN python3 -m venv $POETRY_VENV && \
-    $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
+# 3. Copy the builder’s python virtual environment to the runtime image
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin            /usr/local/bin
+
+WORKDIR /ultrasound-toolbox
 
 ##############################
 # CPU runtime image
@@ -140,8 +115,8 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 FROM runtime-base AS cpu
 ARG BACKEND=all
 ENV BACKEND=${BACKEND}
-CMD ["/bin/bash", "-c", "python -c \"print('CPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
 
+CMD ["/bin/bash", "-c", "echo \"CPU image ready → $(pylint --version)\"; exec /bin/bash"]
 
 ##############################
 # GPU runtime image
@@ -149,19 +124,23 @@ CMD ["/bin/bash", "-c", "python -c \"print('CPU image with BACKEND =', '${BACKEN
 FROM runtime-base AS gpu
 ARG BACKEND=all
 ARG GPU=false
+
+# Add CUDA paths
 ENV PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
     BACKEND=${BACKEND}
 
-# Install only the additional CUDA-specific dependencies (avoiding duplicates)
+# Install CUDA runtime libraries
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gnupg2 && \
-    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb && \
+    apt-get install -y --no-install-recommends gnupg2 curl && \
+    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/cuda-keyring_1.1-1_all.deb \
+      -o /tmp/cuda-keyring.deb && \
     dpkg -i /tmp/cuda-keyring.deb && \
     rm /tmp/cuda-keyring.deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
       cuda-libraries-12-5 libcudnn9-cuda-12 && \
     rm -rf /var/lib/apt/lists/*
+
 WORKDIR /ultrasound-toolbox
-CMD ["/bin/bash", "-c", "python -c \"print('GPU image with BACKEND =', '${BACKEND}')\"; exec /bin/bash"]
+CMD ["/bin/bash", "-c", "echo \"GPU image ready → $(pytest --version)\"; exec /bin/bash"]
