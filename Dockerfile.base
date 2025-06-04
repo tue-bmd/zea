@@ -58,11 +58,11 @@ RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     pip install --no-cache-dir numpy
 
-# 5. JAX (if requested)
+# 5. JAX (if requested) 0.6.0 latest compatible version
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir -U "jax[cuda12]"; \
+        pip install --no-cache-dir -U "jax[cuda12]==0.6.0"; \
       else \
         pip install --no-cache-dir -U jax; \
       fi; \
@@ -72,10 +72,12 @@ RUN --mount=type=cache,target=$PIP_CACHE_DIR \
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \
     if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
       if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir torch torchvision torchaudio \
+        pip install --no-cache-dir \
+          torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
           --index-url https://download.pytorch.org/whl/cu124; \
       else \
-        pip install --no-cache-dir torch torchvision torchaudio \
+        pip install --no-cache-dir \
+          torch==2.6.0+cpu torchvision==0.21.0+cpu torchaudio==2.6.0+cpu \
           --index-url https://download.pytorch.org/whl/cpu; \
       fi; \
     fi
@@ -111,7 +113,6 @@ ARG GPU=false
 
 # Add CUDA paths
 ENV PATH="/usr/local/cuda/bin:${PATH}" \
-    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
     BACKEND=${BACKEND}
 
 # Install CUDA runtime libraries
