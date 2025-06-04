@@ -13,6 +13,7 @@ import keras
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 
 import usbmd
+from usbmd.internal.cache import USBMD_CACHE_DIR
 from usbmd.internal.registry import model_registry
 
 HF_PREFIX = "hf://"
@@ -33,6 +34,9 @@ MODEL_WEIGHTS_FILE = "model.weights.h5"
 # HuggingFace filenames.
 README_FILE = "README.md"
 HF_CONFIG_FILE = "config.json"
+
+HF_MODELS_DIR = USBMD_CACHE_DIR / "huggingface" / "models"
+HF_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Global state for preset registry.
 BUILTIN_PRESETS = {}
@@ -84,7 +88,11 @@ def get_file(preset, path):
         hf_handle = preset.removeprefix(HF_SCHEME + "://")
 
         def _download_from_hf(repo_id, filename):
-            return huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+            return huggingface_hub.hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                cache_dir=HF_MODELS_DIR,
+            )
 
         try:
             # Try without login first
