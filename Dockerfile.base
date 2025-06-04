@@ -27,7 +27,7 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 # 1. Install system packages and create non-root users (as before)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      libsm6 libxext6 libxrender-dev libqt5gui5 python3-tk\
+      libsm6 libxext6 libxrender-dev libqt5gui5 python3-tk tk\
       ffmpeg imagemagick make openssh-client git sudo && \
     python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
     ln -s /usr/bin/python3 /usr/bin/python && \
