@@ -1,9 +1,5 @@
 """Tests the pipeline for different transmit schemes."""
 
-import os
-
-os.environ["KERAS_BACKEND"] = "numpy"  # Use numpy backend for testing
-
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 import keras
 import numpy as np
@@ -151,8 +147,8 @@ def _get_linear_probe():
 
     return Probe(
         probe_geometry=probe_geometry,
-        center_frequency=5e6,
-        sampling_frequency=20e6,
+        center_frequency=2.5e6,
+        sampling_frequency=10e6,
     )
 
 
