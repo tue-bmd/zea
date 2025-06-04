@@ -1,5 +1,9 @@
 """Tests the pipeline for different transmit schemes."""
 
+import os
+
+os.environ["KERAS_BACKEND"] = "numpy"  # Use numpy backend for testing
+
 # pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 import keras
 import numpy as np
@@ -82,7 +86,7 @@ def _find_peak_location(image, extent, position, max_diff=0.6e-3):
 @pytest.fixture(scope="module")
 def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
-    pipeline = ops.Pipeline.from_default(num_patches=40, jit_options="ops")
+    pipeline = ops.Pipeline.from_default(num_patches=10, jit_options="ops")
     pipeline.prepend(ops.Simulate())
     pipeline.append(
         ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255))
