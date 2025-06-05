@@ -16,30 +16,28 @@ os.environ["KERAS_BACKEND"] = "jax"
 
 
 if __name__ == "__main__":
-    from usbmd import (
-        init_device,
-    )  # pylint: disable=import-outside-toplevel
+    from usbmd import init_device  # pylint: disable=import-outside-toplevel
 
     init_device("auto:1")
 
+import argparse
 import csv
 import sys
-import argparse
-from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import jax.numpy as jnp
+import numpy as np
 from jax import jit, vmap
 from tqdm import tqdm
 
+from usbmd.data import generate_usbmd_dataset
+
 # USBMD imports
 from usbmd.data.convert.echonet import H5Processor
+from usbmd.display import cartesian_to_polar_matrix
 from usbmd.io_lib import load_video
 from usbmd.utils import translate
-from usbmd.data import generate_usbmd_dataset
-from usbmd.display import cartesian_to_polar_matrix
 
 
 def get_args():
@@ -82,17 +80,16 @@ def get_args():
 def load_splits(source_dir):
     """Load splits from MeasurementsList.csv and return avi filenames"""
     csv_path = Path(source_dir) / "MeasurementsList.csv"
-    df = pd.read_csv(csv_path)
-
-    # Create dictionary of filename to split mapping
     splits = {"train": [], "val": [], "test": []}
-
-    # Group by HashedFileName to get unique files and their splits
-    for filename, group in df.groupby("HashedFileName"):
-        # Get the split for this file (should all be the same)
-        split = group["split"].iloc[0]
-        splits[split].append(filename + ".avi")
-
+    with open(csv_path, newline="", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        file_split_map = {}
+        for row in reader:
+            filename = row["HashedFileName"]
+            split = row["split"]
+            file_split_map.setdefault(filename, split)
+        for filename, split in file_split_map.items():
+            splits[split].append(filename + ".avi")
     return splits
 
 
@@ -269,7 +266,7 @@ class LVHProcessor(H5Processor):
 
         usbmd_dataset = {
             "path": out_h5,
-             # store as uint8 for memory efficiency
+            # store as uint8 for memory efficiency
             "image_sc": translate(
                 np.array(sequence), self._process_range, (0, 255)
             ).astype(np.uint8),
@@ -278,7 +275,7 @@ class LVHProcessor(H5Processor):
             "image": translate(
                 np.array(polar_im_set), self._process_range, (0, 255)
             ).astype(np.uint8),
-            "cast_to_float": False
+            "cast_to_float": False,
         }
         return generate_usbmd_dataset(**usbmd_dataset)
 
@@ -287,7 +284,7 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
     """Transform measurement coordinates using cone parameters from fit_scan_cone.
 
     Args:
-        row: A pandas Series containing measurement data with X1,X2,Y1,Y2 coordinates
+        row: A dict containing measurement data with X1,X2,Y1,Y2 coordinates
         cone_params: Dictionary containing cone parameters from fit_scan_cone
 
     Returns:
@@ -297,17 +294,16 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
         print(f"Warning: No cone parameters for file {row['HashedFileName']}")
         return None
 
-    new_row = row.copy()
+    new_row = dict(row)
 
     # Apply cropping offset
     crop_left = cone_params["crop_left"]
     crop_top = cone_params["crop_top"]
 
     # Transform coordinates
-    new_row["X1"] = row["X1"] - crop_left
-    new_row["X2"] = row["X2"] - crop_left
-    new_row["Y1"] = row["Y1"] - crop_top
-    new_row["Y2"] = row["Y2"] - crop_top
+    for k in ["X1", "X2", "Y1", "Y2"]:
+        # Convert to float if not already
+        new_row[k] = float(row[k]) - (crop_left if k.startswith("X") else crop_top)
 
     # Apply horizontal centering offset
     apex_x_in_crop = cone_params["apex_x"] - crop_left
@@ -341,6 +337,10 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
             f"Warning: Transformed coordinates out of bounds for file {row['HashedFileName']}"
         )
 
+    # Convert back to string if original was string
+    for k in ["X1", "X2", "Y1", "Y2"]:
+        new_row[k] = str(new_row[k])
+
     return new_row
 
 
@@ -354,7 +354,10 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
     """
     try:
         # Read the CSV file
-        df = pd.read_csv(source_csv)
+        with open(source_csv, newline="", encoding="utf-8") as csvfile:
+            reader = csv.DictReader(csvfile)
+            rows = list(reader)
+            fieldnames = reader.fieldnames
 
         # Load cone parameters if available
         cone_parameters = {}
@@ -369,13 +372,10 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
         transformed_rows = []
         skipped_files = set()
 
-        for _, row in df.iterrows():
+        for row in rows:
             try:
                 avi_filename = row["HashedFileName"] + ".avi"
-
-                # Get cone parameters for this file
                 cone_params = cone_parameters.get(avi_filename, None)
-
                 transformed_row = transform_measurement_coordinates_with_cone_params(
                     row, cone_params
                 )
@@ -389,17 +389,25 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
                 )
                 skipped_files.add(row["HashedFileName"])
 
-        # Create new dataframe from transformed rows
-        df_transformed = pd.DataFrame(transformed_rows)
-
         # Save to new CSV file
-        df_transformed.to_csv(output_csv, index=False)
+        if transformed_rows:
+            # Use keys from first row as fieldnames
+            out_fieldnames = list(transformed_rows[0].keys())
+            with open(output_csv, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=out_fieldnames)
+                writer.writeheader()
+                writer.writerows(transformed_rows)
+        else:
+            # Write header only if no rows
+            with open(output_csv, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
 
         # Print summary
         print("\nConversion Summary:")
-        print(f"Total rows processed: {len(df)}")
-        print(f"Rows successfully converted: {len(df_transformed)}")
-        print(f"Rows skipped: {len(df) - len(df_transformed)}")
+        print(f"Total rows processed: {len(rows)}")
+        print(f"Rows successfully converted: {len(transformed_rows)}")
+        print(f"Rows skipped: {len(rows) - len(transformed_rows)}")
         if skipped_files:
             print("\nSkipped files:")
             for filename in sorted(skipped_files):
