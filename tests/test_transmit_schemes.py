@@ -147,8 +147,8 @@ def _get_linear_probe():
 
     return Probe(
         probe_geometry=probe_geometry,
-        center_frequency=5e6,
-        sampling_frequency=20e6,
+        center_frequency=2.5e6,
+        sampling_frequency=10e6,
     )
 
 
