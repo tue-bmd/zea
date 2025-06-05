@@ -11,7 +11,6 @@ from functools import wraps
 from pathlib import Path
 from statistics import mean, median, stdev
 
-import cv2
 import numpy as np
 import yaml
 from PIL import Image
@@ -145,7 +144,8 @@ def grayscale_to_rgb(image):
         ndarray: RGB image.
     """
     assert image.ndim == 2, "Input image must be grayscale."
-    return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    # Stack the grayscale image into 3 channels (RGB)
+    return np.stack([image] * 3, axis=-1)
 
 
 def preprocess_for_saving(images):
@@ -263,6 +263,15 @@ def save_to_mp4(images, filename, fps=20):
     parent_dir = Path(filename).parent
     if not parent_dir.exists():
         raise FileNotFoundError(f"Directory '{parent_dir}' does not exist.")
+
+    try:
+        import cv2  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        raise ImportError(
+            "OpenCV is required to save MP4 files. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        )
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     _, height, width, _ = images.shape
