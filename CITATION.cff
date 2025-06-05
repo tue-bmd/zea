@@ -1,0 +1,56 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as follows:"
+title: "zea: A Toolbox for Cognitive Ultrasound Imaging"
+version: 1.0.0
+doi: 10.0000/placeholder-doi  # Replace with actual DOI later
+date-released: 2025-07-01     # Replace with actual date of release
+repository-code: https://github.com/tue-bmd/zea
+license: Apache-2.0
+keywords:
+  - Python
+  - ultrasound
+  - Keras
+  - machine learning
+  - signal processing
+  - deep generative models
+authors:
+  - family-names: Stevens
+    given-names: Tristan S.W.
+    orcid: https://orcid.org/0000-0002-8563-5931
+    affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: van Nierop
+    given-names: Wessel L.
+    orcid: https://orcid.org/0009-0003-3141-3369
+    affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: Luijten
+    given-names: Ben
+    orcid: https://orcid.org/0000-0002-1797-8721
+    affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: van de Schaft
+    given-names: Vincent
+    orcid: https://orcid.org/0000-0002-8515-5372
+    affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: Nolan
+    given-names: Oisín I.
+    orcid: https://orcid.org/0009-0002-6939-7627
+    affiliation: Eindhoven University of Technology, the Netherlands
+  # - family-names: Federici
+  #   given-names: Beatrice
+  #   orcid: https://orcid.org/0000-0000-0000-0000
+  #   affiliation: Eindhoven University of Technology, the Netherlands
+  # - family-names: van Harten
+  #   given-names: Louis D.
+  #   orcid: https://orcid.org/0000-0000-0000-0000
+  #   affiliation: Eindhoven University of Technology, the Netherlands
+  # - family-names: Penninga
+  #   given-names: Simon W.
+  #   orcid: https://orcid.org/0000-0000-0000-0000
+  #   affiliation: Eindhoven University of Technology, the Netherlands
+  # - family-names: Schueler
+  #   given-names: Noortje I.P.
+  #   orcid: https://orcid.org/0000-0000-0000-0000
+  #   affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: van Sloun
+    given-names: Ruud J.G.
+    orcid: https://orcid.org/0000-0003-2845-0495
+    affiliation: Eindhoven University of Technology, the Netherlands
