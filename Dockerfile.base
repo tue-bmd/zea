@@ -53,7 +53,7 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 WORKDIR /ultrasound-toolbox
 COPY pyproject.toml poetry.lock ./
 
-# Install dependencies for usbmd (with opencv via gui extra)
+# Install Python dependencies using poetry
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
     poetry install --no-root --compile
 
