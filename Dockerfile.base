@@ -55,7 +55,7 @@ COPY pyproject.toml poetry.lock ./
 
 # Install dependencies for usbmd (with opencv via gui extra)
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
-    poetry install -E gui --no-root --compile
+    poetry install --no-root --compile
 
 # Set the default backend; override this when building if desired.
 ARG BACKEND=all
