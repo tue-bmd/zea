@@ -44,7 +44,6 @@ dependencies = [
     "wget >=3.2",
     # can we make these optional or remove?
     "pydicom >=2.4",
-    "opencv-python-headless>=4",
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
 ]
@@ -69,6 +68,12 @@ docs = [
 ]
 jax = [
     "jax[cuda12_pip]>=0.4.26"
+]
+display = [
+    "opencv-python>=4",
+]
+display-headless = [
+    "opencv-python-headless>=4",
 ]
 
 [project.urls]
