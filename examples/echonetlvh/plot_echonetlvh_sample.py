@@ -3,13 +3,15 @@ Script to visualize a sample from the EchoNet-LVH dataset in USBMD format.
 Creates a GIF of the video frames and images with measurement overlays.
 """
 
-import os
 import argparse
+import csv
+import os
 from pathlib import Path
-import numpy as np
-import pandas as pd
+
 import h5py
 import matplotlib.pyplot as plt
+import numpy as np
+
 from usbmd.utils import save_to_gif, translate
 
 
@@ -73,13 +75,15 @@ def find_measurements(csv_path, video_id):
         video_id: ID of the video (HDF5 filename without extension)
 
     Returns:
-        DataFrame with measurements for the video
+        List of dicts with measurements for the video
     """
-    df = pd.read_csv(csv_path)
-
-    # Match based on HashedFileName
     video_basename = Path(video_id).stem
-    measurements = df[df["HashedFileName"] == video_basename]
+    measurements = []
+    with open(csv_path, newline="") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            if row.get("HashedFileName") == video_basename:
+                measurements.append(row)
 
     if len(measurements) == 0:
         print(f"Warning: No measurements found for {video_basename}")
@@ -93,15 +97,15 @@ def create_measurement_overlays(frames, measurements, output_dir):
 
     Args:
         frames: Video frames
-        measurements: DataFrame with measurements
+        measurements: List of dicts with measurements
         output_dir: Directory to save output images
     """
     # Create output directory if not exists
     os.makedirs(output_dir, exist_ok=True)
 
     # Process each measurement
-    for idx, row in measurements.iterrows():
-        if "Frame" in row:
+    for idx, row in enumerate(measurements):
+        if "Frame" in row and row["Frame"] != "":
             frame_idx = int(row["Frame"])
             if 0 <= frame_idx < len(frames):
                 frame = frames[frame_idx]
@@ -124,8 +128,9 @@ def create_measurement_overlays(frames, measurements, output_dir):
 
                 # Extract coordinates and draw the measurement line
                 try:
-                    x1, y1 = row["X1"], row["Y1"]
-                    x2, y2 = row["X2"], row["Y2"]
+                    # Convert coordinates to float
+                    x1, y1 = float(row["X1"]), float(row["Y1"])
+                    x2, y2 = float(row["X2"]), float(row["Y2"])
 
                     # Draw line
                     ax_image.plot(
@@ -136,9 +141,7 @@ def create_measurement_overlays(frames, measurements, output_dir):
 
                     # Get measurement type and value
                     measurement_type = row["Calc"]
-                    measurement_value = (
-                        row["CalcValue"] if "CalcValue" in row else "N/A"
-                    )
+                    measurement_value = row.get("CalcValue", "N/A")
 
                     # Hide axes in legend area
                     ax_legend.axis("off")
