@@ -5147,4 +5147,4 @@ jax = ["jax"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.13"
-content-hash = "f7308b9c45802b1109cdd7b297b4b1ddabf7204fa3093423700e9dfb4983babb"
+content-hash = "cfe1b54a3afc94e81c1abf58e71e0a7a15739adf975f58cadc8c8dbe42f4c170"
