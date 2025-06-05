@@ -47,6 +47,16 @@ def hide_gpus(gpu_ids=None):
             print(f"Hiding GPUs {hide_gpu_ids} from the system.")
 
 
+def print_gpu_memory_table(memory_free_values):
+    """Prints a table of GPU memory similar to pandas DataFrame output."""
+    # Header
+    print("     memory")
+    print("GPU        ")
+    # Rows
+    for idx, mem in enumerate(memory_free_values):
+        print(f"{idx:<6}{mem:>7}")
+
+
 def get_gpu_memory(verbose=True):
     """Retrieve memory allocation information of all gpus.
 
@@ -88,11 +98,7 @@ def get_gpu_memory(verbose=True):
         memory_free_values = [memory_free_values[gpu] for gpu in gpus]
 
     if verbose:
-        import pandas as pd  # pylint: disable=import-outside-toplevel
-
-        df = df = pd.DataFrame({"memory": memory_free_values})
-        df.index.name = "GPU"
-        print(df)
+        print_gpu_memory_table(memory_free_values)
 
     return memory_free_values
 
