@@ -14,7 +14,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from PyQt5.QtCore import QRect
 
 from usbmd import log
 
@@ -128,9 +127,6 @@ def get_matplotlib_figure_props(figure):
             # Extract X and Y position values as integers
             position = map(int, pos_str)
         elif backend_name == "QtAgg":
-            assert isinstance(
-                geometry, QRect
-            ), f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
             # format: QRect object
             position = geometry.x(), geometry.y()
             size = geometry.size().width(), geometry.size().height()

@@ -43,6 +43,11 @@ dependencies = [
     "huggingface_hub >=0.26",
     "wandb >=0.18",
     "wget >=3.2",
+    # can we make these optional or remove?
+    "pydicom >=2.4",
+    "opencv-python-headless>=4",
+    "scikit-image >=0.23",
+    "scikit-learn >=1.4",
 ]
 [project.optional-dependencies]
 dev = [
@@ -51,13 +56,6 @@ dev = [
     "papermill>=2.4",
     "ipykernel>=6.29.5",
     "cloudpickle>=3.1.1"
-]
-gui = [
-    "PyQt5 >=5.15",
-    "pydicom >=2.4",
-    "opencv-python-headless>=4",
-    "scikit-image >=0.23",
-    "scikit-learn >=1.4",
 ]
 docs = [
     "sphinx",
