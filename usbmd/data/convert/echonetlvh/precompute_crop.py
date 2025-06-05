@@ -9,7 +9,6 @@ import json
 import os
 from pathlib import Path
 
-import cv2
 from tqdm import tqdm
 
 # Set Keras backend to numpy for best CPU performance
@@ -101,6 +100,15 @@ def load_first_frame(avi_file):
     Returns:
         First frame as numpy array
     """
+    try:
+        import cv2  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        raise ImportError(
+            "OpenCV is required for loading video files. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        )
+
     cap = cv2.VideoCapture(str(avi_file))
     ret, frame = cap.read()
     cap.release()
