@@ -129,9 +129,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
-            -u $(id -u):$(id -g) \
             -e HOME=/tmp \
-            -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e .[dev] && pylint \$(git ls-files '*.py') -j 0"
@@ -160,9 +158,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox \
-            -u $(id -u):$(id -g) \
             -e HOME=/tmp \
-            -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e .[dev] && pytest -p no:cacheprovider ./tests"
@@ -189,9 +185,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/ultrasound-toolbox" \
             -w /ultrasound-toolbox/docs \
-            -u $(id -u):$(id -g) \
             -e HOME=/tmp \
-            -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "\
