@@ -31,20 +31,15 @@ classifiers = [
 ]
 dependencies = [
     "keras >=3.9",
-    "matplotlib >=3.8",
+    "h5py >=3.11",
     "numpy >=1",
+    "matplotlib >=3.8",
     "scipy >=1.13",
     "pillow >=10",
-    "scikit-image >=0.23",
-    "scikit-learn >=1.4",
-    "h5py >=3.11",
-    "pandas >=2.2",
     "schema >=0.7",
     "tqdm >=4",
     "pyyaml >=6",
     "decorator >=5",
-    "bm3d ==4.0.1",
-    "bm4d ==4.2.3",
     "huggingface_hub >=0.26",
     "wandb >=0.18",
     "wget >=3.2",
@@ -61,6 +56,8 @@ gui = [
     "PyQt5 >=5.15",
     "pydicom >=2.4",
     "opencv-python-headless>=4",
+    "scikit-image >=0.23",
+    "scikit-learn >=1.4",
 ]
 docs = [
     "sphinx",
