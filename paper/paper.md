@@ -18,8 +18,8 @@ authors:
     orcid: 0000-0002-8515-5372
   - name: Oisín I. Nolan
     orcid: 0009-0002-6939-7627
-  # - name: Beatrice Federici
-  #   orcid: 0000-0000-0000-0000
+  - name: Beatrice Federici
+    orcid: 0009-0003-2496-8825
   # - name: Louis D. van Harten
   #   orcid: 0000-0000-0000-0000
   # - name: Simon W. Penninga
@@ -57,10 +57,9 @@ bibliography: paper.bib
 # Summary
 Ultrasound imaging is a powerful medical imaging modality that is widely used in clinical settings for various applications, including obstetrics, cardiology, and abdominal imaging. While ultrasound imaging is non-invasive, real-time, and relatively low-cost compared to other imaging modalities such as MRI or CT, it still faces challenges in terms of image quality, and interpretation. Many signal processing steps are required to extract useful information from the raw ultrasound data, such as filtering, beamforming, and image reconstruction. Traditional ultrasound imaging techniques often suffer from reduced image quality as naive assumptions are made in these processing steps which do not account for the complex nature of ultrasound signals. Furthermore, acquisition (action) and reconstruction (perception) of ultrasound is often performed disjointly. Cognitive ultrasound imaging [@van2024active] is a novel approach that aims to address these challenges by leveraging more powerful generative models, enabled by advances in deep learning, to close the action-perception loop. This approach requires a redesign of current common ultrasound imaging pipeline, where parameters are expected to be changed dynamically based on past and current observations. Furthermore, the high-dimensional nature of ultrasound data requires powerful deep generative models to learn the structured distribution of ultrasound signals. This necessitates a flexible and efficient toolbox that can handle the complexities of cognitive ultrasound imaging, including a real-time ultrasound reconstruction pipeline, dynamic parameter adjustment, and advanced generative modeling.
 
+We present `zea` (pronounced *za-yah*), a Python package for cognitive ultrasound imaging that provides a flexible and modular pipeline for ultrasound data processing, as well as a collection of pre-defined models for ultrasound image and signal processing. The toolbox is designed to be easy to use, with a high-level interface that allows users to define their own ultrasound reconstruction pipelines, and to integrate deep learning models into the pipeline. The toolbox is built on top of Keras [@chollet2015keras], which provides a framework for building and training deep learning models with the three major deep learning frameworks as backend: TensorFlow [@abadi2016tensorflow], PyTorch [@NEURIPS2019_9015] and JAX [@jax2018github]. This means that it is easy to integrate a custom ultrasound reconstruction pipeline in a machine learning workflow. In the past few years, several works have used and contributed to `zea`, including @van2024off, @stevens2024dehazing, @nolan2024active, @stevens2025sequential and @stevens2025high.
 
 # Statement of need
-
-`zea` is an open-source ultrasound python library that provides a practical toolbox for implementing closed-loop cognitive ultrasound imaging. Moreover, it aims to provide an implementation using Keras [@chollet2015keras], which provides a high-level interface for building and training deep learning models with the three major deep learning frameworks as backend: TensorFlow [@abadi2016tensorflow], PyTorch [@NEURIPS2019_9015] and JAX [@jax2018github]. This means that it is easy to integrate a custom ultrasound reconstruction pipeline in a machine learning workflow. Current ultrasound research is build upon one
 
 Some of the existing ultrasound toolboxes, such as `k-wave` [@treeby2010k] and `Field II` [@jensen1992field], `ARRUS` [@jarosik2020arrus], `FAST` [@smistad2021fast]
 

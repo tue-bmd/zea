@@ -34,10 +34,10 @@ authors:
     given-names: Oisín I.
     orcid: https://orcid.org/0009-0002-6939-7627
     affiliation: Eindhoven University of Technology, the Netherlands
-  # - family-names: Federici
-  #   given-names: Beatrice
-  #   orcid: https://orcid.org/0000-0000-0000-0000
-  #   affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: Federici
+    given-names: Beatrice
+    orcid: https://orcid.org/0009-0003-2496-8825
+    affiliation: Eindhoven University of Technology, the Netherlands
   # - family-names: van Harten
   #   given-names: Louis D.
   #   orcid: https://orcid.org/0000-0000-0000-0000
