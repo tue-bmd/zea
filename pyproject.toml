@@ -29,7 +29,6 @@ classifiers = [
     "Natural Language :: English",
     "Topic :: Scientific/Engineering",
 ]
-
 dependencies = [
     "keras >=3.9",
     "matplotlib >=3.8",
