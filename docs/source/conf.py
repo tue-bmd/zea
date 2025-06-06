@@ -3,14 +3,14 @@
 import os
 import sys
 
-import usbmd
+import zea
 
 sys.path.insert(0, os.path.abspath("../usbmd"))
 
 # -- Project information -----------------------------------------------------
-project = "usbmd"
+project = "zea"
 # get automatically the version from the package
-release = usbmd.__version__
+release = zea.__version__
 
 # -- General configuration ---------------------------------------------------
 extensions = [
@@ -48,8 +48,8 @@ html_theme_options = {
     #     </a>
     # """,
     "sidebar_hide_name": True,
-    "light_logo": "usbmd_logo_v3.svg",
-    "dark_logo": "usbmd_logo_v3.svg",
+    "light_logo": "zea-logo.svg",
+    "dark_logo": "zea-logo.svg",
 }
 html_static_path = ["../_static"]
 
