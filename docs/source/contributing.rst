@@ -42,7 +42,7 @@ To check if pylint runs successfully, run the following in the root directory:
 
 .. code-block:: bash
 
-   pylint usbmd
+   pylint zea
 
 Docstrings (Google)
 ~~~~~~~~~~~~~~~~~~~
@@ -90,7 +90,7 @@ The typical PR workflow to make changes to the code will look as follows:
 
    .. code-block:: shell
 
-      pylint usbmd
+      pylint zea
       pytest ./tests
 
 #. Stage the changes to commit
@@ -147,10 +147,10 @@ Working on your first Pull Request? You can learn how from this *free* series, `
 
 At this point, you're ready to make your changes! Feel free to ask for help; everyone is a beginner at first :relaxed:
 
-Bumping usbmd version
+Bumping zea version
 ---------------------
 
-Bumping and releasing a new version of usbmd is done by the maintainers of the repository. To bump the version, follow these steps:
+Bumping and releasing a new version of zea is done by the maintainers of the repository. To bump the version, follow these steps:
 
 First check out the most recent version of the main branch and pull the latest changes:
 
@@ -165,16 +165,16 @@ Then run the following command to bump the version:
 
    ./post-release.sh <new_version> <snellius_username>
 
-The usbmd ``new_version`` should be a valid version number, e.g. ``v0.1.0``, with the ``v`` prefix and major, minor and patch version numbers. The ``snellius_username`` is the username you use to log in to the Snellius cluster.
+The zea ``new_version`` should be a valid version number, e.g. ``v0.1.0``, with the ``v`` prefix and major, minor and patch version numbers. The ``snellius_username`` is the username you use to log in to the Snellius cluster.
 
-Make sure to follow the instructions in the ``post-release.sh`` script. This script will build the new (Docker) environment and version of usbmd.
+Make sure to follow the instructions in the ``post-release.sh`` script. This script will build the new (Docker) environment and version of zea.
 
 Adding models
 -------------
 
-Please see the :doc:`models` section for more information on how to add new models to ``usbmd``.
+Please see the :doc:`models` section for more information on how to add new models to ``zea``.
 
 Adding ops
 ----------
 
-Please see the :doc:`pipeline` section for more information on how to add new ops to ``usbmd``.
+Please see the :doc:`pipeline` section for more information on how to add new ops to ``zea``.
