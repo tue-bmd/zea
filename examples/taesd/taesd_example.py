@@ -8,11 +8,11 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import make_dataloader
-from usbmd.models.taesd import TinyAutoencoder
-from usbmd.utils import get_date_string
-from usbmd.visualize import plot_image_grid
+from zea import init_device, log, set_data_paths
+from zea.backend.tensorflow.dataloader import make_dataloader
+from zea.models.taesd import TinyAutoencoder
+from zea.utils import get_date_string
+from zea.visualize import plot_image_grid
 
 if __name__ == "__main__":
     # Set up data paths and device
@@ -33,10 +33,10 @@ if __name__ == "__main__":
     )
 
     presets = list(TinyAutoencoder.presets.keys())
-    log.info(f"Available built-in usbmd presets for TAESD: {presets}")
+    log.info(f"Available built-in zea presets for TAESD: {presets}")
 
     model = TinyAutoencoder.from_preset("taesdxl")
-    # model = TinyAutoencoder.from_preset("hf://usbmd/taesdxl")
+    # model = TinyAutoencoder.from_preset("hf://zea/taesdxl")
     # model = TinyAutoencoder.from_preset("/mnt/z/Ultrasound-BMd/pretrained/taesdxl")
     # model = TinyAutoencoder.from_preset("./test_model_savings")
 

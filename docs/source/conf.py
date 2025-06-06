@@ -5,7 +5,7 @@ import sys
 
 import zea
 
-sys.path.insert(0, os.path.abspath("../usbmd"))
+sys.path.insert(0, os.path.abspath("../zea"))
 
 # -- Project information -----------------------------------------------------
 project = "zea"
@@ -27,8 +27,8 @@ extensions = [
     "nbsphinx",  # for Jupyter notebook support
 ]
 
-autodoc_mock_imports = ["usbmd.backend.tf2jax"]
-exclude_patterns = ["_autosummary/usbmd.backend.tf2jax.rst"]
+autodoc_mock_imports = ["zea.backend.tf2jax"]
+exclude_patterns = ["_autosummary/zea.backend.tf2jax.rst"]
 
 autodoc_default_options = {
     "members": True,
@@ -44,7 +44,7 @@ html_theme_options = {
     # "announcement": """
     #     <a style=\"text-decoration: none; color: white;\"
     #        href=\"https://github.com/tue-bmd/ultrasound-toolbox">
-    #        <img src=\"_static/usbmd_logo_v3.svg\"/> An example of an announcement!
+    #        <img src=\"_static/zea-logo.svg\"/> An example of an announcement!
     #     </a>
     # """,
     "sidebar_hide_name": True,
@@ -57,7 +57,7 @@ html_static_path = ["../_static"]
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
 # pixels large.
 # html_favicon = None
-# html_favicon = "../_static/usbmd_logo_v3.svg"
+html_favicon = "../_static/zea-logo-fav-32px.png"
 
 # for index
-modindex_common_prefix = ["usbmd."]
+modindex_common_prefix = ["zea."]

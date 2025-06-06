@@ -11,10 +11,10 @@ import matplotlib.pyplot as plt
 import torch
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import make_dataloader
-from usbmd.utils import get_date_string
-from usbmd.visualize import plot_image_grid
+from zea import init_device, log, set_data_paths
+from zea.backend.tensorflow.dataloader import make_dataloader
+from zea.utils import get_date_string
+from zea.visualize import plot_image_grid
 
 if __name__ == "__main__":
     if importlib.util.find_spec("diffusers") is None:
