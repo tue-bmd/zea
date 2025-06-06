@@ -1,4 +1,4 @@
-"""Test generating and validating usbmd data format."""
+"""Test generating and validating zea data format."""
 
 from pathlib import Path
 from typing import Generator
@@ -6,13 +6,13 @@ from typing import Generator
 import numpy as np
 import pytest
 
-from usbmd.data.data_format import (
+from zea.data.data_format import (
     DatasetElement,
     generate_example_dataset,
-    generate_usbmd_dataset,
+    generate_zea_dataset,
 )
-from usbmd.data.file import File, validate_file
-from usbmd.internal.checks import _REQUIRED_SCAN_KEYS
+from zea.data.file import File, validate_file
+from zea.internal.checks import _REQUIRED_SCAN_KEYS
 
 n_frames = 2
 n_tx = 4
@@ -78,7 +78,7 @@ def test_omit_key(key, tmp_hdf5_path):
     """
     reduced_parameters = DATASET_PARAMETERS.copy()
     reduced_parameters.pop(key)
-    generate_usbmd_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS)
+    generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS)
 
 
 @pytest.mark.parametrize(
@@ -110,7 +110,7 @@ def test_wrong_shape(key, tmp_hdf5_path):
     wrong_parameters = DATASET_PARAMETERS.copy()
     wrong_parameters[key] = np.zeros((n_frames, n_tx + 7, n_el + 1), dtype=np.float32)
     with pytest.raises(AssertionError):
-        generate_usbmd_dataset(path=tmp_hdf5_path, **wrong_parameters)
+        generate_zea_dataset(path=tmp_hdf5_path, **wrong_parameters)
 
 
 def test_existing_path(tmp_hdf5_path):
@@ -119,12 +119,12 @@ def test_existing_path(tmp_hdf5_path):
     tmp_hdf5_path.touch()
 
     with pytest.raises(FileExistsError):
-        generate_usbmd_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS)
+        generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS)
 
 
 def test_additional_dataset_element(tmp_hdf5_path):
     """Tests the functionality of the additional_elements parameter in the
-    generate_usbmd_dataset function by adding additional elements to the
+    generate_zea_dataset function by adding additional elements to the
     dataset."""
 
     elements = []
@@ -160,6 +160,6 @@ def test_additional_dataset_element(tmp_hdf5_path):
             )
         )
 
-    generate_usbmd_dataset(
+    generate_zea_dataset(
         path=tmp_hdf5_path, **DATASET_PARAMETERS, additional_elements=elements
     )

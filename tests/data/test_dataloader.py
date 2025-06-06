@@ -11,13 +11,13 @@ import numpy as np
 import pytest
 from keras import ops
 
-from usbmd import log
-from usbmd.backend.tensorflow.dataloader import make_dataloader
-from usbmd.data.augmentations import RandomCircleInclusion
-from usbmd.data.dataloader import MAX_RETRY_ATTEMPTS, H5Generator
-from usbmd.data.file import File
-from usbmd.data.layers import Resizer
-from usbmd.data.utils import json_loads
+from zea import log
+from zea.backend.tensorflow.dataloader import make_dataloader
+from zea.data.augmentations import RandomCircleInclusion
+from zea.data.dataloader import MAX_RETRY_ATTEMPTS, H5Generator
+from zea.data.file import File
+from zea.data.layers import Resizer
+from zea.data.utils import json_loads
 
 from . import data_root
 
@@ -460,7 +460,7 @@ def test_ndim_hdf5_dataset(
         return_filename=False,
         resize_type=resize_type,
         resize_axes=(-3, -1),
-        validate=False,  # ndim_hdf5_dataset_path is not a usbmd dataset
+        validate=False,  # ndim_hdf5_dataset_path is not a zea dataset
     )
 
     next(iter(dataset))
@@ -504,7 +504,7 @@ def test_h5_file_retry_count(
         # After specified failures, call the original method
         return original_load_data(self, dtype, indices)
 
-    # Apply the monkeypatch to the usbmd.file.File class method
+    # Apply the monkeypatch to the zea.file.File class method
     monkeypatch.setattr(File, "load_data", mock_load_data)
 
     if should_succeed:

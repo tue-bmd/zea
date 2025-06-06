@@ -195,7 +195,7 @@ class BackendEqualityCheck:
                 @pytest.mark.parametrize('some_keys', [some_values])
                 @backend_equality_check(decimal=4) # <-- add as inner most decorator
                 def test_my_processing_func(some_arguments):
-                    from usbmd import my_processing_func # <-- reload the function(s)
+                    from zea import my_processing_func # <-- reload the function(s)
 
                     # Do some processing
                     output = my_processing_func(some_arguments)

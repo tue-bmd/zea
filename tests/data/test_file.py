@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from usbmd.data.file import File
-from usbmd.probes import Probe
-from usbmd.scan import Scan
+from zea.data.file import File
+from zea.probes import Probe
+from zea.scan import Scan
 
 from . import data_root
 

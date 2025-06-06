@@ -1,15 +1,9 @@
 ################ GITIGNORE COPY ################
-#### usbmd repo specific ####
+#### repo specific ####
 /figures
 /custom_configs
 /data
 /log
-
-backend/tensorflow/figures/
-usbmd/figures/
-examples/deep_beamforming/example_config_ABLE.yaml
-trained_models/
-benchmarks/
 
 # Temporary files
 temp/

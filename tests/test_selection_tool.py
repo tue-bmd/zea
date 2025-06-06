@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from usbmd.tools.selection_tool import (
+from zea.tools.selection_tool import (
     equalize_polygons,
     extract_polygon_from_mask,
     extract_rectangle_from_mask,

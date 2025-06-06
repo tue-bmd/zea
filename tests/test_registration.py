@@ -2,7 +2,7 @@
 
 import pytest
 
-from usbmd.internal.registry import RegisterDecorator
+from zea.internal.registry import RegisterDecorator
 
 
 def test_names():

@@ -15,12 +15,12 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import make_dataloader
-from usbmd.models.echonet import EchoNetDynamic
-from usbmd.tools.selection_tool import add_shape_from_mask
-from usbmd.utils import translate
-from usbmd.visualize import plot_image_grid, set_mpl_style
+from zea import init_device, log, set_data_paths
+from zea.backend.tensorflow.dataloader import make_dataloader
+from zea.models.echonet import EchoNetDynamic
+from zea.tools.selection_tool import add_shape_from_mask
+from zea.utils import translate
+from zea.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
     # Set up data paths and device
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     init_device()
 
     presets = list(EchoNetDynamic.presets.keys())
-    log.info(f"Available built-in usbmd presets for EchoNetDynamic: {presets}")
+    log.info(f"Available built-in zea presets for EchoNetDynamic: {presets}")
 
     model = EchoNetDynamic.from_preset("echonet-dynamic")
 

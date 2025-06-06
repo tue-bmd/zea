@@ -1,10 +1,10 @@
-""" Tests for usbmd.agent.gumbel """
+"""Tests for zea.agent.gumbel"""
 
 import numpy as np
 import pytest
 from keras import ops
 
-from usbmd.agent.gumbel import hard_straight_through
+from zea.agent.gumbel import hard_straight_through
 
 
 @pytest.mark.parametrize(

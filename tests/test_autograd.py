@@ -6,7 +6,7 @@ import keras
 import numpy as np
 import pytest
 
-from usbmd.backend.autograd import AutoGrad
+from zea.backend.autograd import AutoGrad
 
 from . import backend_equality_check
 
