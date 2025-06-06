@@ -79,7 +79,7 @@ def find_measurements(csv_path, video_id):
     """
     video_basename = Path(video_id).stem
     measurements = []
-    with open(csv_path, newline="") as csvfile:
+    with open(csv_path, newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
             if row.get("HashedFileName") == video_basename:

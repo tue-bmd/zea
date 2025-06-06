@@ -5,8 +5,13 @@ import os
 
 from . import log
 
+# dynamically add __version__ attribute (see pyproject.toml)
+# __version__ = __import__("importlib.metadata").metadata.version(__package__)
+__version__ = "2.4.0"
+
 
 def setup():
+    """Setup function to initialize the usbmd package."""
 
     def _check_backend_installed():
         """Assert that at least one ML backend (torch, tensorflow, jax) is installed.
@@ -29,9 +34,10 @@ def setup():
         )
         raise AssertionError(
             "No ML backend (torch, tensorflow, jax) installed in current environment. "
-            f"Please install at least one ML backend before importing {__package__} or any other library. "
-            f"Current KERAS_BACKEND is set to '{backend_env}', please install it first, see: {guide_url}. "
-            f"One simple alternative is to install with default backend: `pip install {__package__}[jax]`."
+            f"Please install at least one ML backend before importing {__package__} or "
+            f"any other library. Current KERAS_BACKEND is set to '{backend_env}', "
+            f"please install it first, see: {guide_url}. One simple alternative is to "
+            f"install with default backend: `pip install {__package__}[jax]`."
         )
 
     _check_backend_installed()
@@ -39,11 +45,6 @@ def setup():
     import keras  # pylint: disable=import-outside-toplevel
 
     log.info(f"Using backend {keras.backend.backend()!r}")
-
-    # dynamically add __version__ attribute (see pyproject.toml)
-    globals()["__version__"] = __import__("importlib.metadata").metadata.version(
-        __package__
-    )
 
 
 # call and clean up namespace

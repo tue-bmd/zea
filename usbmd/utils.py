@@ -266,12 +266,12 @@ def save_to_mp4(images, filename, fps=20):
 
     try:
         import cv2  # pylint: disable=import-outside-toplevel
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "OpenCV is required to save MP4 files. "
             "Please install it with 'pip install opencv-python' or "
             "'pip install opencv-python-headless'."
-        )
+        ) from exc
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     _, height, width, _ = images.shape
