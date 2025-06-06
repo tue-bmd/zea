@@ -77,15 +77,6 @@ postprocess_schema = Schema(
             },
         ),
         Optional("lista", default=None): Or(bool, None),
-        Optional("bm3d", default=None): Or(
-            None,
-            {
-                Optional("sigma", default=0.1): positive_float,
-                Optional("stage", default="all_stages"): Or(
-                    "all_stages", "hard_thresholding"
-                ),
-            },
-        ),
     }
 )
 
