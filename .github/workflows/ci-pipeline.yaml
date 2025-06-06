@@ -134,7 +134,7 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "python -m pip install -e . && python -m pylint \$(git ls-files '*.py') -j 0"
+            sh -c "pip install -e . && pylint \$(git ls-files '*.py') -j 0"
 
   tests:
     if: github.event_name == 'pull_request'
@@ -165,7 +165,7 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             usbmd/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "python -m pip install -e .[dev, display-headless] && python -m pytest -p no:cacheprovider ./tests"
+            sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
 
   build-docs:
     needs: [build-full-image, set-tag]
@@ -197,7 +197,7 @@ jobs:
             sh -c "\
               sudo apt-get update && \
               sudo apt-get install -y pandoc && \
-              python -m pip install -e ..[docs] && \
+              pip install -e .. && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               make docs-build SPHINXOPTS='-W --keep-going' \
             "
