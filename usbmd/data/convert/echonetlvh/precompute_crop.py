@@ -102,12 +102,12 @@ def load_first_frame(avi_file):
     """
     try:
         import cv2  # pylint: disable=import-outside-toplevel
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "OpenCV is required for loading video files. "
             "Please install it with 'pip install opencv-python' or "
             "'pip install opencv-python-headless'."
-        )
+        ) from exc
 
     cap = cv2.VideoCapture(str(avi_file))
     ret, frame = cap.read()
