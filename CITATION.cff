@@ -42,14 +42,14 @@ authors:
   #   given-names: Louis D.
   #   orcid: https://orcid.org/0000-0000-0000-0000
   #   affiliation: Eindhoven University of Technology, the Netherlands
-  # - family-names: Penninga
-  #   given-names: Simon W.
-  #   orcid: https://orcid.org/0000-0000-0000-0000
-  #   affiliation: Eindhoven University of Technology, the Netherlands
-  # - family-names: Schueler
-  #   given-names: Noortje I.P.
-  #   orcid: https://orcid.org/0000-0000-0000-0000
-  #   affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: Penninga
+    given-names: Simon W.
+    orcid: https://orcid.org/0009-0003-4095-8168
+    affiliation: Eindhoven University of Technology, the Netherlands
+  - family-names: Schueler
+    given-names: Noortje I.P.
+    orcid: https://orcid.org/0009-0003-7134-6850
+    affiliation: Eindhoven University of Technology, the Netherlands
   - family-names: van Sloun
     given-names: Ruud J.G.
     orcid: https://orcid.org/0000-0003-2845-0495
