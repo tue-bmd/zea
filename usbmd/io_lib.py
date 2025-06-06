@@ -41,12 +41,12 @@ def load_video(filename):
     """
     try:
         import cv2  # pylint: disable=import-outside-toplevel
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "OpenCV is required for video loading. "
             "Please install it with 'pip install opencv-python' or "
             "'pip install opencv-python-headless'."
-        )
+        ) from exc
 
     filename = Path(filename)
     assert Path(filename).exists(), f"File {filename} does not exist"
@@ -93,12 +93,12 @@ def load_image(filename, grayscale=True, color_order="RGB"):
     """
     try:
         import cv2  # pylint: disable=import-outside-toplevel
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "OpenCV is required for image loading. "
             "Please install it with 'pip install opencv-python' or "
             "'pip install opencv-python-headless'."
-        )
+        ) from exc
 
     filename = Path(filename)
     assert Path(filename).exists(), f"File {filename} does not exist"

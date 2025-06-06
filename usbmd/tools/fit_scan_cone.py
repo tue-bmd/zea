@@ -117,12 +117,12 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     """
     try:
         import cv2  # pylint: disable=import-outside-toplevel
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "OpenCV is required for cone detection and visualization. "
             "Please install it with 'pip install opencv-python' or "
             "'pip install opencv-python-headless'."
-        )
+        ) from exc
 
     if len(ops.shape(image)) != 2:
         raise ValueError("Input image must be 2D (grayscale)")
@@ -677,12 +677,12 @@ def main(avi_path):
     """Demonstrate scan cone fitting on a sample AVI file."""
     try:
         import cv2  # pylint: disable=import-outside-toplevel
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "OpenCV is required for cone detection and visualization. "
             "Please install it with 'pip install opencv-python' or "
             "'pip install opencv-python-headless'."
-        )
+        ) from exc
 
     # Load first frame
     cap = cv2.VideoCapture(avi_path)

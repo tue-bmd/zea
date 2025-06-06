@@ -95,12 +95,7 @@ from usbmd.probes import Probe
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, resample, reshape_axis
-from usbmd.utils import (
-    check_architecture,
-    deep_compare,
-    map_negative_indices,
-    translate,
-)
+from usbmd.utils import deep_compare, map_negative_indices, translate
 
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
