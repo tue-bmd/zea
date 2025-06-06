@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 from typing import List
 
-import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -305,7 +304,7 @@ class Interface:
         elif self.plot_lib == "opencv":
             self.image_viewer.show(data)
             if not self.headless and block:
-                cv2.waitKey(0)
+                self.image_viewer._cv2.waitKey(0)  # pylint: disable=no-member
             self.save_image(self.image)
             return self.image
 
@@ -426,7 +425,8 @@ class Interface:
                     # For opencv, show frame for 25 ms and check if "q" is pressed
                     if not self.headless:
                         if self.plot_lib == "opencv":
-                            if cv2.waitKey(25) & 0xFF == ord("q"):
+                            # pylint: disable=no-member
+                            if self.image_viewer._cv2.waitKey(25) & 0xFF == ord("q"):
                                 self.image_viewer.close()
                                 return images
                             if self.image_viewer.has_been_closed():

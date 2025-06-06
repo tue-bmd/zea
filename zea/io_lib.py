@@ -10,7 +10,6 @@ import time
 from io import BytesIO
 from pathlib import Path
 
-import cv2
 import imageio
 import numpy as np
 import pydicom
@@ -40,6 +39,15 @@ def load_video(filename):
     Raises:
         ValueError: If the file extension is not supported.
     """
+    try:
+        import cv2  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV is required for video loading. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        ) from exc
+
     filename = Path(filename)
     assert Path(filename).exists(), f"File {filename} does not exist"
     extension = filename.suffix
@@ -83,6 +91,15 @@ def load_image(filename, grayscale=True, color_order="RGB"):
     Raises:
         ValueError: If the file extension is not supported.
     """
+    try:
+        import cv2  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV is required for image loading. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        ) from exc
+
     filename = Path(filename)
     assert Path(filename).exists(), f"File {filename} does not exist"
     extension = filename.suffix

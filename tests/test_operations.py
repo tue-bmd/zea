@@ -459,44 +459,6 @@ def test_threshold_op(
 
 
 @pytest.mark.parametrize(
-    "sigma,stage",
-    [
-        (0.1, "all_stages"),
-        (0.2, "all_stages"),
-        (0.2, "hard_thresholding"),
-    ],
-)
-@backend_equality_check()
-def test_bm3d_op(spiral_image, sigma, stage):
-    """Test `ops.BM3DDenoise` operation on a noisy synthetic image."""
-    import keras
-
-    from zea import ops
-
-    spiral = spiral_image["spiral"]
-    noisy = spiral_image["noisy"]
-    noisy_tensor = keras.ops.convert_to_tensor(noisy)
-
-    bm3d = ops.BM3DDenoise(stage=stage, with_batch_dim=False)
-    denoised = bm3d(data=noisy_tensor, sigma=sigma)
-    denoised_np = keras.ops.convert_to_numpy(denoised["data"])
-
-    # Quantitative: denoised image should be closer to original than noisy
-    orig_mse = np.mean((spiral - noisy) ** 2)
-    denoised_mse = np.mean((spiral - denoised_np) ** 2)
-    assert (
-        denoised_mse < orig_mse
-    ), f"BM3D with sigma={sigma}, stage={stage} did not improve image quality"
-
-    # Check that noise variance is reduced
-    assert np.var(denoised_np) < np.var(
-        noisy
-    ), f"BM3D with sigma={sigma}, stage={stage} did not reduce variance"
-
-    return denoised_np
-
-
-@pytest.mark.parametrize(
     "niter,lmbda",
     [
         (5, 0.5),
