@@ -5,29 +5,29 @@
 Parameters
 ===========
 
-This page provides a comprehensive overview of all configuration parameters available in usbmd.
+This page provides a comprehensive overview of all configuration parameters available in zea.
 These parameters are used in the YAML config files to control data loading, preprocessing, model settings, scan parameters, and more.
 
 .. note::
-  You can use these configs to, for instance, initialize :doc:`usbmd.Models <models>` or :doc:`usbmd.Pipeline <pipeline>`.
+  You can use these configs to, for instance, initialize :doc:`zea.Models <models>` or :doc:`zea.Pipeline <pipeline>`.
 
-Configs are written in YAML format and can be loaded, edited, and saved using the usbmd API.
+Configs are written in YAML format and can be loaded, edited, and saved using the zea API.
 
 -------------------------------
 How to Load and Save a Config
 -------------------------------
 
-Here is a minimal example of how to load and save a config file using usbmd:
+Here is a minimal example of how to load and save a config file using zea:
 
 .. code-block:: python
 
-   from usbmd import Config
-   from usbmd.config.validation import check_config
+   from zea import Config
+   from zea.config.validation import check_config
 
    # Load a config from file
    config = Config.from_yaml("configs/config_picmus_rf.yaml")
 
-   # We can check if the config has valid parameters (usbmd compliance)
+   # We can check if the config has valid parameters (zea compliance)
    config = check_config(config)
 
    # Access parameters
@@ -105,7 +105,7 @@ Parameters Reference
    * - ``pipeline.with_batch_dim``
      - Whether operations should expect a batch dimension in the input. Defaults to True.
    * - ``plot``
-     - Settings pertaining to plotting when running the UI (`usbmd --config <path-to-config.yaml>`)
+     - Settings pertaining to plotting when running the UI (`zea --config <path-to-config.yaml>`)
    * - ``plot.fliplr``
      - Set to true to flip the image left to right
    * - ``plot.fps``
