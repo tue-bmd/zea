@@ -53,7 +53,13 @@ COPY pyproject.toml poetry.lock ./
 
 # 3. Install all dependencies
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
-    poetry install --no-root --compile
+  if [ "$BACKEND" = "all" ]; then \
+    # Only install full dev stack if "all" backend is requested
+    poetry install --no-root --compile -E dev; \
+  else \
+    # Keep individual backend installations lightweight
+    poetry install --no-root --compile; \
+  fi
 
 # 4. Always install numpy
 RUN --mount=type=cache,target=$PIP_CACHE_DIR \

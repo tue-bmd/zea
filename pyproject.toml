@@ -49,6 +49,27 @@ dependencies = [
 ]
 [project.optional-dependencies]
 dev = [
+    # tests
+    "pytest>=8.1",
+    "pylint>=3.1",
+    "papermill>=2.4",
+    "ipykernel>=6.29.5",
+    "cloudpickle>=3.1.1",
+    # docs
+    "sphinx",
+    "sphinx-autobuild",
+    "sphinx-autodoc-typehints",
+    "sphinx-copybutton",
+    "mock",
+    "myst-parser",
+    "nbsphinx",
+    "furo",
+    "PyStemmer",
+    # display
+    "opencv-python-headless>=4",
+]
+
+tests = [
     "pytest>=8.1",
     "pylint>=3.1",
     "papermill>=2.4",
