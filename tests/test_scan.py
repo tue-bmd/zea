@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from usbmd.scan import PlaneWaveScan, Scan
+from zea.scan import PlaneWaveScan, Scan
 
 scan_args = {
     "n_tx": 10,

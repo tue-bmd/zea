@@ -8,12 +8,12 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.agent.masks import random_uniform_lines
-from usbmd.backend.tensorflow.dataloader import make_dataloader
-from usbmd.models.lpips import LPIPS
-from usbmd.models.unet import UNet
-from usbmd.visualize import plot_image_grid, set_mpl_style
+from zea import init_device, log, set_data_paths
+from zea.agent.masks import random_uniform_lines
+from zea.backend.tensorflow.dataloader import make_dataloader
+from zea.models.lpips import LPIPS
+from zea.models.unet import UNet
+from zea.visualize import plot_image_grid, set_mpl_style
 
 
 def plot_unet_example(
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     )
 
     presets = list(UNet.presets.keys())
-    log.info(f"Available built-in usbmd presets for UNet: {presets}")
+    log.info(f"Available built-in zea presets for UNet: {presets}")
 
     model = UNet.from_preset("unet-echonet-inpainter")
 

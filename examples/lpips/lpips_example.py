@@ -13,10 +13,10 @@ import numpy as np
 import torch
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.backend.tensorflow.dataloader import make_dataloader
-from usbmd.models.lpips import LPIPS
-from usbmd.visualize import plot_image_grid, set_mpl_style
+from zea import init_device, log, set_data_paths
+from zea.backend.tensorflow.dataloader import make_dataloader
+from zea.models.lpips import LPIPS
+from zea.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
     TEST_WITH_TORCH = False  # set to True to test with torch variant

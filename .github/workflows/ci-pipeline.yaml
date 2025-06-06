@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_PREFIX: usbmd
+  IMAGE_PREFIX: zeahub
 
 jobs:
   set-tag:
@@ -58,8 +58,8 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all:${{ needs.set-tag.outputs.docker_tag }}
           build-args: BACKEND=all
-          cache-from: type=registry,ref=usbmd/all:cache
-          cache-to: type=registry,ref=usbmd/all:cache,mode=max
+          cache-from: type=registry,ref=zeahub/all:cache
+          cache-to: type=registry,ref=zeahub/all:cache,mode=max
 
   build-other-images:
     needs: [build-full-image, set-tag]
@@ -88,8 +88,8 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
           build-args: BACKEND=${{ matrix.backend }}
-          cache-from: type=registry,ref=usbmd/${{ matrix.backend }}:cache
-          cache-to: type=registry,ref=usbmd/${{ matrix.backend }}:cache,mode=max
+          cache-from: type=registry,ref=zeahub/${{ matrix.backend }}:cache
+          cache-to: type=registry,ref=zeahub/${{ matrix.backend }}:cache,mode=max
 
   pylint:
     if: github.event_name == 'pull_request'
@@ -108,7 +108,7 @@ jobs:
           if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+          docker pull zeahub/all:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pylint in container
         run: |
@@ -119,7 +119,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
+            zeahub/all:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && poetry run pylint \$(git ls-files '*.py') -j 0"
 
   tests:
@@ -139,7 +139,7 @@ jobs:
           if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+          docker pull zeahub/all:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pytest in container
         run: |
@@ -150,7 +150,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
+            zeahub/all:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
 
   build-docs:
@@ -168,7 +168,7 @@ jobs:
           if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull usbmd/all:${{ needs.set-tag.outputs.docker_tag }}
+          docker pull zeahub/all:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Build documentation with Sphinx (fail on warnings)
         run: |
@@ -179,7 +179,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:${{ needs.set-tag.outputs.docker_tag }} \
+            zeahub/all:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "\
               sudo apt-get update && \
               sudo apt-get install -y pandoc && \

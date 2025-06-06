@@ -19,7 +19,7 @@ jobs:
 
       - name: Pull full Docker image
         run: |
-          docker pull usbmd/all:latest
+          docker pull zeahub/all:latest
 
       - name: Build documentation with Sphinx (fail on warnings)
         run: |
@@ -30,7 +30,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            usbmd/all:latest \
+            zeahub/all:latest \
             sh -c "\
               sudo apt-get update && \
               sudo apt-get install -y pandoc && \

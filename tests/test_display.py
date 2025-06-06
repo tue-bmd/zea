@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from usbmd import display
+from zea import display
 
 from . import backend_equality_check
 
@@ -29,7 +29,7 @@ def test_scan_conversion(size, resolution, order):
     """
     from keras import ops  # pylint: disable=reimported,import-outside-toplevel
 
-    from usbmd import display  # pylint: disable=reimported,import-outside-toplevel
+    from zea import display  # pylint: disable=reimported,import-outside-toplevel
 
     rng = np.random.default_rng(42)
     data = rng.random(size).astype(np.float32)
@@ -112,7 +112,7 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     """
     from keras import ops  # pylint: disable=reimported,import-outside-toplevel
 
-    from usbmd import display  # pylint: disable=reimported,import-outside-toplevel
+    from zea import display  # pylint: disable=reimported,import-outside-toplevel
 
     if pattern_creator == "create_radial_pattern":
         polar_data = create_radial_pattern(size)
@@ -161,7 +161,7 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     """
     from keras import ops  # pylint: disable=reimported,import-outside-toplevel
 
-    from usbmd import display  # pylint: disable=reimported,import-outside-toplevel
+    from zea import display  # pylint: disable=reimported,import-outside-toplevel
 
     if pattern_creator == "create_radial_pattern":
         polar_data = create_radial_pattern(size)

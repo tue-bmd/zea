@@ -3,14 +3,16 @@ Script to visualize a sample from the EchoNet-LVH dataset in USBMD format.
 Creates a GIF of the video frames and images with measurement overlays.
 """
 
-import os
 import argparse
+import os
 from pathlib import Path
-import numpy as np
-import pandas as pd
+
 import h5py
 import matplotlib.pyplot as plt
-from usbmd.utils import save_to_gif, translate
+import numpy as np
+import pandas as pd
+
+from zea.utils import save_to_gif, translate
 
 
 def get_args():

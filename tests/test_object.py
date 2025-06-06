@@ -4,7 +4,7 @@ import timeit
 
 import numpy as np
 
-from usbmd.internal.core import Object
+from zea.internal.core import Object
 
 
 class SomeObj(Object):

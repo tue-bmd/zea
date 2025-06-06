@@ -10,14 +10,14 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import matplotlib.pyplot as plt
 from keras import ops
 
-from usbmd import init_device, log, set_data_paths
-from usbmd.agent.selection import EquispacedLines
-from usbmd.backend.tensorflow.dataloader import make_dataloader
-from usbmd.models.diffusion import DiffusionModel
-from usbmd.models.echonet import INFERENCE_SIZE
-from usbmd.ops import Pipeline, ScanConvert
-from usbmd.utils import translate
-from usbmd.visualize import plot_image_grid, set_mpl_style
+from zea import init_device, log, set_data_paths
+from zea.agent.selection import EquispacedLines
+from zea.backend.tensorflow.dataloader import make_dataloader
+from zea.models.diffusion import DiffusionModel
+from zea.models.echonet import INFERENCE_SIZE
+from zea.ops import Pipeline, ScanConvert
+from zea.utils import translate
+from zea.visualize import plot_image_grid, set_mpl_style
 
 if __name__ == "__main__":
     ## Setup

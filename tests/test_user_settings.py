@@ -1,12 +1,11 @@
-"""User settings testing
-"""
+"""User settings testing"""
 
 import getpass
 import socket
 
 import pytest
 
-from usbmd.datapaths import NoYamlFileError, UnknownUsernameWarning, set_data_paths
+from zea.datapaths import NoYamlFileError, UnknownUsernameWarning, set_data_paths
 
 user_config0 = {
     getpass.getuser(): {
