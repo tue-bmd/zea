@@ -1,5 +1,5 @@
 """
-Script to visualize a sample from the EchoNet-LVH dataset in USBMD format.
+Script to visualize a sample from the EchoNet-LVH dataset in zea format.
 Creates a GIF of the video frames and images with measurement overlays.
 """
 

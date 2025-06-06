@@ -1,4 +1,4 @@
-"""Functionality to convert the camus dataset to the USBMD format.
+"""Functionality to convert the camus dataset to the zea format.
 Requires SimpleITK to be installed: pip install SimpleITK.
 """
 
@@ -159,7 +159,7 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
 
 
 def convert_camus(source_path, output_path, overwrite=False):
-    """Converts the camus database to the USBMD format.
+    """Converts the camus database to the zea format.
 
     Args:
         source_path (str, pathlike): The path to the original camus file.
@@ -194,7 +194,7 @@ def convert_camus(source_path, output_path, overwrite=False):
         image=image_seq_polar,
         image_sc=image_seq,
         probe_name="generic",
-        description="camus dataset converted to USBMD format",
+        description="camus dataset converted to zea format",
     )
 
 
