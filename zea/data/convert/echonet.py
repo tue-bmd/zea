@@ -1,5 +1,5 @@
 """
-Script to convert the EchoNet database to .npy and USBMD formats.
+Script to convert the EchoNet database to .npy and zea formats.
 Will segment the images and convert them to polar coordinates.
 """
 
@@ -23,7 +23,7 @@ from zea.utils import translate
 
 def get_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Convert EchoNet to USBMD format")
+    parser = argparse.ArgumentParser(description="Convert EchoNet to zea format")
     parser.add_argument(
         "--source",
         type=str,
@@ -389,7 +389,7 @@ class H5Processor:
             "path": out_h5,
             "image_sc": self.translate(sequence),
             "probe_name": "generic",
-            "description": "EchoNet dataset converted to USBMD format",
+            "description": "EchoNet dataset converted to zea format",
         }
         if accepted:
             zea_dataset["image"] = self.translate(polar_im_set)

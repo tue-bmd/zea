@@ -1,5 +1,5 @@
 [project]
-name = "usbmd"
+name = "zea"
 version = "2.4.0"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
@@ -102,7 +102,7 @@ Homepage = "https://github.com/tue-bmd/ultrasound-toolbox/"
 Repository = "https://github.com/tue-bmd/ultrasound-toolbox/"
 
 [project.scripts]
-usbmd = "usbmd.__main__:main"
+zea = "zea.__main__:main"
 
 [build-system]
 requires = ["poetry-core"]
@@ -117,6 +117,6 @@ include = '\.pyi?$|\.ipynb$' # Include both Python files and Jupyter notebooks
 profile = "black"
 line_length = 88
 
-# To update the poetry.lock file run `sudo /opt/poetry-venv/bin/python3 -m poetry lock` inside the usbmd container (where poetry is installed)
+# To update the poetry.lock file run `sudo /opt/poetry-venv/bin/python3 -m poetry lock` inside the zea container (where poetry is installed)
 # Otherwise a simple `poetry lock` will suffice.
 # Rebuild docker image afterwards to match the lock file!

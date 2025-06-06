@@ -1,6 +1,6 @@
 """
 The function convert_image_dataset convert an existing dataset of images
-or sequences of images to USBMD format.
+or sequences of images to zea format.
 """
 
 import os
@@ -80,7 +80,7 @@ def _img_dir_to_h5_dir(
             path=new_h5_file_path,
             image=frames,
             probe_name="generic",
-            description=f"{dataset_name or 'image'} dataset converted to USBMD format",
+            description=f"{dataset_name or 'image'} dataset converted to zea format",
         )
 
 
@@ -91,7 +91,7 @@ def convert_image_dataset(
     group_pattern=re.compile(r"(.*)\..*"),
     sort_pattern=None,
 ):
-    r"""Converts an existing dataset of images or sequences of images to USBMD format.
+    r"""Converts an existing dataset of images or sequences of images to zea format.
 
     Maps an image dataset to a hdf5 dataset containing those images, preserving directory structure.
     Can also be used to map a video dataset to hdf5 if the videos are stored as sequences on images.

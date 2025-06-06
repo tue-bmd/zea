@@ -454,7 +454,7 @@ class File(h5py.File):
 def load_zea_file(
     path, frames=None, transmits=None, data_type="raw_data", scan: Scan = None
 ):
-    """Loads a hdf5 file in the USBMD format and returns the data together with
+    """Loads a hdf5 file in the zea format and returns the data together with
     a scan object containing the parameters of the acquisition and a probe
     object containing the parameters of the probe.
 
