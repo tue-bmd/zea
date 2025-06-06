@@ -21,11 +21,11 @@ authors:
   - name: Beatrice Federici
     orcid: 0009-0003-2496-8825
   # - name: Louis D. van Harten
-  #   orcid: 0000-0000-0000-0000
-  # - name: Simon W. Penninga
-  #   orcid: 0000-0000-0000-0000
-  # - name: Noortje I.P. Schueler
-  #   orcid: 0000-0000-0000-0000
+  #   orcid: /0009-0003-4095-8168
+  - name: Simon W. Penninga
+    orcid: 0009-0003-4095-8168
+  - name: Noortje I.P. Schueler
+    orcid: 0009-0003-7134-6850
   - name: Ruud J.G. van Sloun
     orcid: 0000-0003-2845-0495
 affiliations:
