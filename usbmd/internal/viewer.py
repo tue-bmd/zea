@@ -17,6 +17,9 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from usbmd import log
 
+# ignore cv2 has no member pylint
+# pylint: disable=no-member
+
 
 def running_in_notebook():
     """Check whether code is running in a Jupyter Notebook or not."""
@@ -294,12 +297,12 @@ class ImageViewerOpenCV(ImageViewer):
             import cv2  # pylint: disable=import-outside-toplevel
 
             self._cv2 = cv2
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "OpenCV is required for ImageViewerOpenCV to work. "
                 "Please install it with 'pip install opencv-python' or "
                 "'pip install opencv-python-headless'."
-            )
+            ) from exc
 
     def _create_window(self):
         if self.resizable_window:
