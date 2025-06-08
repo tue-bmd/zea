@@ -496,6 +496,14 @@ class Dataset(H5FileHandleCache):
     def __str__(self):
         return f"Dataset with {self.n_files} files (key='{self.key}')"
 
+    def close(self):
+        """Close all cached file handles."""
+        for file in self._file_handle_cache.values():
+            if file is not None and file.id.valid:
+                file.close()
+        self._file_handle_cache.clear()
+        log.info("Closed all cached file handles.")
+
 
 def split_files_by_directory(file_names, file_shapes, directory_list, directory_splits):
     """Split files according to their parent directories and given split ratios.
