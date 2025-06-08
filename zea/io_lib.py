@@ -129,7 +129,7 @@ def search_file_tree(
     dataset_info_filename="dataset_info.yaml",
     hdf5_key_for_length=None,
     redo=False,
-    parallel=True,
+    parallel=False,
     verbose=True,
 ):
     """Lists all files in directory and sub-directories.
