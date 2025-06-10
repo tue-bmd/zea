@@ -17,6 +17,7 @@ Example usage
 """
 
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ file_logger = None
 
 LOG_DIR = Path("log")
 
+ZEA_LOG_LEVEL = os.getenv("ZEA_LOG_LEVEL", "DEBUG").upper()
 
 DEPRECATED_LEVEL_NUM = logging.WARNING + 5
 logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
@@ -322,7 +324,7 @@ def enable_file_logging():
 
 
 logger = configure_console_logger(
-    level="DEBUG",
+    level=ZEA_LOG_LEVEL,
     name="zea",
     color=True,
     name_color="darkgreen",
