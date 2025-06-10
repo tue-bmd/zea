@@ -9,7 +9,6 @@ import json
 import os
 from pathlib import Path
 
-import pandas as pd
 from tqdm import tqdm
 
 # Set Keras backend to numpy for best CPU performance
