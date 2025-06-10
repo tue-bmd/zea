@@ -22,7 +22,6 @@ _REQUIRED_SCAN_KEYS = [
     "n_ax",
     "n_el",
     "n_tx",
-    "n_ch",
     "probe_geometry",
     "sampling_frequency",
     "center_frequency",
