@@ -14,6 +14,10 @@ sys.path = [str(p) if isinstance(p, PosixPath) else p for p in sys.path]
 
 import tensorflow as tf
 
+# alias
+# pylint: ignore=unused-import
+from .dataloader import make_dataloader
+
 
 def on_device_tf(func, inputs, device, return_numpy=False, **kwargs):
     """Applies a Tensorflow function to inputs on a specified device.

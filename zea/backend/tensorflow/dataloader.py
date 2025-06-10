@@ -318,12 +318,6 @@ def make_dataloader(
     if len(image_extractor.shape) != 3:
         dataset = dataset_map(dataset, lambda x: tf.expand_dims(x, axis=-1))
 
-    # Check if there are outliers in the image range
-    if assert_image_range and image_range is not None:
-        dataset = dataset_map(
-            dataset, partial(_assert_image_range, image_range=image_range)
-        )
-
     # Clip to image range
     if clip_image_range and image_range is not None:
         dataset = dataset_map(
@@ -333,6 +327,12 @@ def make_dataloader(
                 clip_value_min=image_range[0],
                 clip_value_max=image_range[1],
             ),
+        )
+
+    # Check if there are outliers in the image range
+    if assert_image_range and image_range is not None:
+        dataset = dataset_map(
+            dataset, partial(_assert_image_range, image_range=image_range)
         )
 
     if image_size or resize_type:
