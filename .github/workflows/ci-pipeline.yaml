@@ -198,7 +198,6 @@ jobs:
               sudo apt-get update && \
               sudo apt-get install -y pandoc && \
               pip install -e .. && \
-              pip install -r docs-requirements.txt && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               make docs-build SPHINXOPTS='-W --keep-going' \
             "

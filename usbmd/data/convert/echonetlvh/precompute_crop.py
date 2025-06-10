@@ -3,13 +3,12 @@ Script to precompute cone parameters for the EchoNet-LVH dataset.
 This script should be run separately before the main conversion process.
 """
 
-import os
+import argparse
 import csv
 import json
-import argparse
+import os
 from pathlib import Path
-import pandas as pd
-import cv2
+
 from tqdm import tqdm
 
 # Set Keras backend to numpy for best CPU performance
@@ -55,17 +54,19 @@ def get_args():
 def load_splits(source_dir):
     """Load splits from MeasurementsList.csv and return avi filenames"""
     csv_path = Path(source_dir) / "MeasurementsList.csv"
-    df = pd.read_csv(csv_path)
-
-    # Create dictionary of filename to split mapping
     splits = {"train": [], "val": [], "test": []}
-
-    # Group by HashedFileName to get unique files and their splits
-    for filename, group in df.groupby("HashedFileName"):
-        # Get the split for this file (should all be the same)
-        split = group["split"].iloc[0]
-        splits[split].append(filename + ".avi")
-
+    # Read CSV using built-in csv module
+    with open(csv_path, newline="", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        # Group by HashedFileName
+        file_split_map = {}
+        for row in reader:
+            filename = row["HashedFileName"]
+            split = row["split"]
+            file_split_map.setdefault(filename, split)
+        # Now, for each unique filename, add to the correct split
+        for filename, split in file_split_map.items():
+            splits[split].append(filename + ".avi")
     return splits
 
 
@@ -99,6 +100,15 @@ def load_first_frame(avi_file):
     Returns:
         First frame as numpy array
     """
+    try:
+        import cv2  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV is required for loading video files. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        ) from exc
+
     cap = cv2.VideoCapture(str(avi_file))
     ret, frame = cap.read()
     cap.release()
