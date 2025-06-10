@@ -119,6 +119,9 @@ class File(h5py.File):
             - int -> single frame
             - list of ints -> indexes first axis (frames)
             - list of list, ranges or slices -> indexes multiple axes
+
+        Returns:
+            indices (tuple): A tuple of indices / slices to use for indexing.
         """
         _value_error_msg = (
             f"Invalid value for indices: {indices}. "
@@ -196,45 +199,45 @@ class File(h5py.File):
             yield self.load_data(key, frame_idx)
 
     @staticmethod
-    def key_to_dtype(key):
+    def key_to_data_type(key):
         """Convert the key to a data type."""
-        dtype = key.split("/")[-1]
-        return dtype
+        data_type = key.split("/")[-1]
+        return data_type
 
     def load_transmits(self, key, selected_transmits):
         """Load raw_data or aligned_data for a given list of transmits.
         Args:
-            dtype (str): The type of data to load. Options are 'raw_data' and 'aligned_data'.
+            data_type (str): The type of data to load. Options are 'raw_data' and 'aligned_data'.
             selected_transmits (list, np.ndarray): The transmits to load.
         """
         key = self.format_key(key)
-        dtype = self.key_to_dtype(key)
-        assert dtype in ["raw_data", "aligned_data"], (
-            f"Cannot load transmits for {dtype}. "
+        data_type = self.key_to_data_type(key)
+        assert data_type in ["raw_data", "aligned_data"], (
+            f"Cannot load transmits for {data_type}. "
             "Only raw_data and aligned_data are supported."
         )
         indices = [slice(None), np.array(selected_transmits)]
         return self.load_data(key, indices)
 
-    def load_data(self, dtype, indices: str | int | List[int] = "all"):
+    def load_data(self, data_type, indices: str | int | List[int] = "all"):
         """Load data from the file.
 
         Args:
-            dtype (str): The type of data to load. Options are 'raw_data', 'aligned_data',
+            data_type (str): The type of data to load. Options are 'raw_data', 'aligned_data',
                 'beamformed_data', 'envelope_data', 'image' and 'image_sc'.
             indices (str, int, list, optional): The indices to load. Defaults to "all" in
                 which case all frames are loaded. If an int is provided, it will be used
                 as a single index. If a list is provided, it will be used as a list of
                 indices.
         """
-        key = self.format_key(dtype)
+        key = self.format_key(data_type)
         indices = self._prepare_indices(indices)
 
         if self._simple_index(key):
             data = self[key]
             try:
                 data = data[indices]
-            except OSError as exc:
+            except (OSError, IndexError) as exc:
                 raise ValueError(
                     f"Invalid indices {indices} for key {key}. "
                     f"{key} has shape {data.shape}."
@@ -448,63 +451,66 @@ class File(h5py.File):
 
     def summary(self):
         """Print the contents of the file."""
-        print_hdf5_attrs(self)
+        _print_hdf5_attrs(self)
 
 
-def load_zea_file(
-    path, frames=None, transmits=None, data_type="raw_data", scan: Scan = None
+def load_file(
+    path,
+    data_type="raw_data",
+    indices: str | int | List[int] = "all",
+    scan_kwargs: dict = None,
 ):
-    """Loads a hdf5 file in the zea format and returns the data together with
-    a scan object containing the parameters of the acquisition and a probe
-    object containing the parameters of the probe.
+    """Loads a zea data files (h5py file).
+
+    Returns the data together with a scan object containing the parameters
+    of the acquisition and a probe object containing the parameters of the probe.
+
+    Additionally, it can load a specific subset of frames / transmits.
 
     # TODO: add support for event
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
-        frames (tuple, list, optional): The frames to load. Defaults to None in
-            which case all frames are loaded.
-        transmits (tuple, list, optional): The transmits to load. Defaults to
-            None in which case all transmits are used.
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
-        scan (utils.config.Config, optional): A Scan object to override the scan parameters
-            in the data file. Defaults to None.
+        indices (str, int, list, optional): The indices to load. Defaults to "all" in
+            which case all frames are loaded. If an int is provided, it will be used
+            as a single index. If a list is provided, it will be used as a list of
+            indices.
+        scan_kwargs (utils.config.Config, dict, optional): Additional keyword arguments
+            to pass to the Scan object. These will override the parameters from the file
+            if they are present in the file. Defaults to None.
 
     Returns:
         (np.ndarray): The raw data of shape (n_frames, n_tx, n_ax, n_el, n_ch).
         (Scan): A scan object containing the parameters of the acquisition.
         (Probe): A probe object containing the parameters of the probe.
     """
-
-    if frames is not None:
-        # Assert that all frames are integers
-        assert all(
-            isinstance(frame, int) for frame in frames
-        ), "All frames must be integers."
-    else:
-        frames = "all"
-
     # Define the additional keyword parameters from the scan object
-    if scan is None:
-        scan = {}
-
-    if transmits is not None:
-        # Assert that all frames are integers
-        assert all(
-            isinstance(tx, int) for tx in transmits
-        ), "All transmits must be integers."
+    if scan_kwargs is None:
+        scan_kwargs = {}
 
     with File(path, mode="r") as file:
         # Load the probe object from the file
         probe = file.probe()
 
         # Load the desired frames from the file
-        data = file.load_data(data_type, indices=frames)
+        data = file.load_data(data_type, indices=indices)
 
-        scan["selected_transmits"] = transmits
-        scan = file.scan(**scan)
+        # extract transmits from indices
+        # we only have to do this when the data has a n_tx dimension
+        # in that case we also have update scan parameters to match
+        # the number of selected transmits
+        if data_type in ["raw_data", "aligned_data"]:
+            indices = File._prepare_indices(indices)
+            n_tx = data.shape[1]
+            if isinstance(indices, tuple) and len(indices) > 1:
+                tx_idx = indices[1]
+                transmits = np.arange(n_tx)[tx_idx]
+                scan_kwargs["selected_transmits"] = transmits
+
+        scan = file.scan(**scan_kwargs)
 
         return data, scan, probe
 
@@ -548,7 +554,7 @@ def recursively_load_dict_contents_from_group(
     return ans
 
 
-def print_hdf5_attrs(hdf5_obj, prefix=""):
+def _print_hdf5_attrs(hdf5_obj, prefix=""):
     """Recursively prints all keys, attributes, and shapes in an HDF5 file.
 
     Args:
@@ -585,7 +591,7 @@ def print_hdf5_attrs(hdf5_obj, prefix=""):
                 marker = "├── "
                 new_prefix = prefix + "│   "
             print(prefix + marker + key + "/")
-            print_hdf5_attrs(hdf5_obj[key], new_prefix)
+            _print_hdf5_attrs(hdf5_obj[key], new_prefix)
 
 
 def validate_file(path: str = None, file: File = None):
