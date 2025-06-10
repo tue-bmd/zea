@@ -15,7 +15,7 @@ sys.path = [str(p) if isinstance(p, PosixPath) else p for p in sys.path]
 import tensorflow as tf
 
 # alias
-# pylint: ignore=unused-import
+# pylint: disable=unused-import
 from .dataloader import make_dataloader
 
 
