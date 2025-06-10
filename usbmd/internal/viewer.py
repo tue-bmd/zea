@@ -1,6 +1,7 @@
 """Functions for displaying images and videos using OpenCV or Matplotlib."""
 
 import abc
+import os
 import sys
 from collections import deque
 from multiprocessing.pool import ThreadPool
@@ -9,14 +10,15 @@ from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 from typing import Callable, Optional
 
-import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from PyQt5.QtCore import QRect
 
 from usbmd import log
+
+# ignore cv2 has no member pylint
+# pylint: disable=no-member
 
 
 def running_in_notebook():
@@ -128,9 +130,6 @@ def get_matplotlib_figure_props(figure):
             # Extract X and Y position values as integers
             position = map(int, pos_str)
         elif backend_name == "QtAgg":
-            assert isinstance(
-                geometry, QRect
-            ), f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
             # format: QRect object
             position = geometry.x(), geometry.y()
             size = geometry.size().width(), geometry.size().height()
@@ -215,10 +214,11 @@ class ImageViewer(abc.ABC):
         self.collect_frames = collect_frames
 
         if self.num_threads is None:
-            self.num_threads = cv2.getNumberOfCPUs()
+            # Default to the number of CPU cores if not specified
+            self.num_threads = max(1, os.cpu_count() - 1)
 
         if self.threading:
-            self.pool = ThreadPool(processes=num_threads)
+            self.pool = ThreadPool(processes=self.num_threads)
 
         self.pending = deque()
         self.frame_no = 0
@@ -293,11 +293,22 @@ class ImageViewerOpenCV(ImageViewer):
         self.window = None
         self.headless = headless
 
+        try:
+            import cv2  # pylint: disable=import-outside-toplevel
+
+            self._cv2 = cv2
+        except ImportError as exc:
+            raise ImportError(
+                "OpenCV is required for ImageViewerOpenCV to work. "
+                "Please install it with 'pip install opencv-python' or "
+                "'pip install opencv-python-headless'."
+            ) from exc
+
     def _create_window(self):
         if self.resizable_window:
-            cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+            self._cv2.namedWindow(self.window_name, self._cv2.WINDOW_NORMAL)
         else:
-            cv2.namedWindow(self.window_name)
+            self._cv2.namedWindow(self.window_name)
         self.window = True
 
     def show(self, *args, **kwargs) -> None:
@@ -318,9 +329,11 @@ class ImageViewerOpenCV(ImageViewer):
             if self.frame_no == 0:
                 if self.window is None:
                     self._create_window()
-                    cv2.resizeWindow(self.window_name, frame.shape[1], frame.shape[0])
+                    self._cv2.resizeWindow(
+                        self.window_name, frame.shape[1], frame.shape[0]
+                    )
 
-            cv2.imshow(self.window_name, frame)
+            self._cv2.imshow(self.window_name, frame)
             self.frame_no += 1
 
     def close(self):
@@ -329,13 +342,16 @@ class ImageViewerOpenCV(ImageViewer):
             return
         if self.has_been_closed():
             return
-        cv2.destroyWindow(self.window_name)
+        self._cv2.destroyWindow(self.window_name)
 
     def has_been_closed(self):
         """Returns True if the window has been closed."""
         if self.window is None:
             return False
-        return cv2.getWindowProperty(self.window_name, cv2.WND_PROP_VISIBLE) < 1
+        return (
+            self._cv2.getWindowProperty(self.window_name, self._cv2.WND_PROP_VISIBLE)
+            < 1
+        )
 
 
 class ImageViewerMatplotlib(ImageViewer):

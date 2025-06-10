@@ -10,9 +10,9 @@ This module provides functionality to:
 5. Visualize the detected cone and its parameters
 """
 
+import argparse
 import os
 from pathlib import Path
-import argparse
 
 if __name__ == "__main__":
     os.environ["KERAS_BACKEND"] = (
@@ -20,10 +20,10 @@ if __name__ == "__main__":
     )
 
 import keras
-from keras import ops
-import cv2
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+from keras import ops
+
 from usbmd import log
 
 
@@ -115,6 +115,15 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     Raises:
         ValueError: If input image is not 2D or cone detection fails
     """
+    try:
+        import cv2  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV is required for cone detection and visualization. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        ) from exc
+
     if len(ops.shape(image)) != 2:
         raise ValueError("Input image must be 2D (grayscale)")
 
@@ -666,6 +675,14 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
 
 def main(avi_path):
     """Demonstrate scan cone fitting on a sample AVI file."""
+    try:
+        import cv2  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV is required for cone detection and visualization. "
+            "Please install it with 'pip install opencv-python' or "
+            "'pip install opencv-python-headless'."
+        ) from exc
 
     # Load first frame
     cap = cv2.VideoCapture(avi_path)
