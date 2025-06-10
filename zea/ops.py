@@ -415,13 +415,13 @@ class Pipeline:
 
     @classmethod
     def from_default(
-        cls, num_patches=20, baseband=False, pfield=False, **kwargs
+        cls, num_patches=100, baseband=False, pfield=False, **kwargs
     ) -> "Pipeline":
         """Create a default pipeline.
 
         Args:
             num_patches (int): Number of patches for the PatchedGrid operation.
-                Defaults to 20. If you get an out of memory error, try to increase this number.
+                Defaults to 100. If you get an out of memory error, try to increase this number.
             baseband (bool): If True, assume the input data is baseband (I/Q) data,
                 which has 2 channels (last dim). Defaults to False, which assumes RF data,
                 so input signal has a single channel dim and is still on carrier frequency.
