@@ -415,17 +415,17 @@ class Pipeline:
 
     @classmethod
     def from_default(
-        cls, num_patches=20, baseband=False, pfield=True, **kwargs
+        cls, num_patches=20, baseband=False, pfield=False, **kwargs
     ) -> "Pipeline":
         """Create a default pipeline.
 
         Args:
             num_patches (int): Number of patches for the PatchedGrid operation.
-                Defaults to 20.
+                Defaults to 20. If you get an out of memory error, try to increase this number.
             baseband (bool): If True, assume the input data is baseband (I/Q) data,
                 which has 2 channels (last dim). Defaults to False, which assumes RF data,
                 so input signal has a single channel dim and is still on carrier frequency.
-            pfield (bool): If True, apply Pfield weighting. Defaults to True.
+            pfield (bool): If True, apply Pfield weighting. Defaults to False.
                 This will calculate pressure field and only beamform the data to those locations.
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
