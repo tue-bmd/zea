@@ -1,44 +1,55 @@
 """usbmd: A Python package for ultrasound image reconstructing using deep learning."""
 
-__version__ = "2.4.0"
-
-import inspect
+import importlib.util
 import os
 
 from . import log
 
-
-def _imported_from_main():
-    """Check if the module was imported from __main__.py
-    or usbmd was called from the command line.
-
-    In this case, we don't need to print the warning message, as
-    we will set the backend in __main__.py just after this __init__.py.
-    """
-    for frame in inspect.stack():
-        filename = frame.filename
-        if filename.endswith("__main__.py") or filename.endswith("bin/usbmd"):
-            return True
-    return False
+# dynamically add __version__ attribute (see pyproject.toml)
+# __version__ = __import__("importlib.metadata").metadata.version(__package__)
+__version__ = "2.4.0"
 
 
-# set to numpy as default to prevent unecessary imports (of tensorflow),
-# but preferred action is to set it manually before importing usbmd
-# for instance at top of script:
-# os.environ["KERAS_BACKEND"] = "jax"
-# or in your terminal:
-# export KERAS_BACKEND=jax
+def setup():
+    """Setup function to initialize the usbmd package."""
 
-# this module was imported from __main__.py we don't need this warning
-# as this will set the backend in __main__.py just after this __init__.py
-if "KERAS_BACKEND" not in os.environ:
-    os.environ["KERAS_BACKEND"] = "numpy"
-    if not _imported_from_main():
-        print(
-            "`KERAS_BACKEND` not set. usbmd will set it to `numpy` by default. "
-            "It is recommended to set it manually using `os.environ['KERAS_BACKEND']` "
-            "at top of your script before importing usbmd or any other library."
+    def _check_backend_installed():
+        """Assert that at least one ML backend (torch, tensorflow, jax) is installed.
+        If not, raise an AssertionError with a helpful install message.
+        """
+
+        ml_backends = ["torch", "tensorflow", "jax"]
+        for backend in ml_backends:
+            if importlib.util.find_spec(backend) is not None:
+                return
+
+        backend_env = os.environ.get("KERAS_BACKEND", "numpy")
+        install_guide_urls = {
+            "torch": "https://pytorch.org/get-started/locally/",
+            "tensorflow": "https://www.tensorflow.org/install",
+            "jax": "https://docs.jax.dev/en/latest/installation.html",
+        }
+        guide_url = install_guide_urls.get(
+            backend_env, "https://keras.io/getting_started/"
         )
+        raise AssertionError(
+            "No ML backend (torch, tensorflow, jax) installed in current environment. "
+            f"Please install at least one ML backend before importing {__package__} or "
+            f"any other library. Current KERAS_BACKEND is set to '{backend_env}', "
+            f"please install it first, see: {guide_url}. One simple alternative is to "
+            f"install with default backend: `pip install {__package__}[jax]`."
+        )
+
+    _check_backend_installed()
+
+    import keras  # pylint: disable=import-outside-toplevel
+
+    log.info(f"Using backend {keras.backend.backend()!r}")
+
+
+# call and clean up namespace
+setup()
+del setup
 
 # Main (isort: split)
 from .config import Config

@@ -95,12 +95,7 @@ from usbmd.probes import Probe
 from usbmd.scan import Scan
 from usbmd.simulator import simulate_rf
 from usbmd.tensor_ops import patched_map, resample, reshape_axis
-from usbmd.utils import (
-    check_architecture,
-    deep_compare,
-    map_negative_indices,
-    translate,
-)
+from usbmd.utils import deep_compare, map_negative_indices, translate
 
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
@@ -2522,61 +2517,6 @@ class Threshold(Operation):
 
         fill_value = self._resolve_fill_value(data, threshold)
         result = self._threshold_func(data, threshold, fill_value)
-        return {self.output_key: result}
-
-
-@ops_registry("bm3d")
-class BM3DDenoise(Operation):
-    """Block Matching 3D (BM3D) denoising operation."""
-
-    def __init__(self, stage="all_stages", **kwargs):
-        super().__init__(
-            jittable=False,
-            **kwargs,
-        )
-
-        if "arm" in check_architecture():
-            raise ValueError(
-                log.error("BM3D denoiser is not supported on ARM architecture.")
-            )
-
-        # pylint: disable=import-outside-toplevel
-        import bm3d as _bm3d_module
-
-        self._bm3d_module = _bm3d_module
-
-        str_to_stage = {
-            "hard_thresholding": self._bm3d_module.BM3DStages.HARD_THRESHOLDING,
-            "all_stages": self._bm3d_module.BM3DStages.ALL_STAGES,
-        }
-        self.stage = str_to_stage[stage]
-
-    def call(self, sigma=0.1, **kwargs):
-        """BM3D denoising operation.
-
-        Args:
-            sigma: Noise standard deviation.
-
-        Returns:
-            Denoised image(s), same shape as input.
-        """
-        data = kwargs[self.key]
-
-        # Convert to numpy for bm3d (cpu)
-        data_np = ops.convert_to_numpy(data)
-
-        if not self.with_batch_dim:
-            data_np = np.expand_dims(data_np, axis=0)
-
-        denoised = [
-            self._bm3d_module.bm3d(img, sigma, stage_arg=self.stage) for img in data_np
-        ]
-        denoised = np.stack(denoised)
-
-        if not self.with_batch_dim:
-            denoised = np.squeeze(denoised, axis=0)
-
-        result = ops.convert_to_tensor(denoised, dtype=data.dtype)
         return {self.output_key: result}
 
 
