@@ -5,9 +5,9 @@ import keras
 import numpy as np
 import pytest
 
-from usbmd import ops
-from usbmd.probes import Probe
-from usbmd.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
+from zea import ops
+from zea.probes import Probe
+from zea.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
 
 
 def _get_flatgrid(extent, shape):

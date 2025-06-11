@@ -1,13 +1,13 @@
 Installation
 =============
 
-This document describes how to install the usbmd package and how to use it in a docker container.
+This document describes how to install the zea package and how to use it in a docker container.
 Make sure you always use a virtual environment such as ``miniconda`` or ``venv`` to avoid conflicts with other packages!
 
 Backend installation
 --------------------
 
-First, install one machine learning backend of choice. Note that usbmd can run with a numpy backend, but it is not recommended. Also, using the `Docker`_ image will automatically install all compatible backends, so in that case you can skip this step.
+First, install one machine learning backend of choice. Note that zea can run with a numpy backend, but it is not recommended. Also, using the `Docker`_ image will automatically install all compatible backends, so in that case you can skip this step.
 
 - `Install JAX <https://jax.readthedocs.io/en/latest/installation.html>`__
 - `Install PyTorch <https://pytorch.org/get-started/locally/>`__
@@ -21,16 +21,15 @@ Make sure you are in the root folder (``ultrasound-toolbox``) where the ``pyproj
 
 .. code-block:: bash
 
-   pip install -e .[opencv-python-headless,dev]
+   pip install -e .[dev]
 
-This installs the dev dependencies and opencv without the GUI backend. This means it `does not conflict with matplotlib <https://github.com/tue-bmd/ultrasound-toolbox/issues/410>`_.
-In case you need the opencv GUI backend, you can install it with ``pip install -e .[opencv-python]``.
+This also installs the dev dependencies, needed for building docs, running tests and the linter.
 
 Install from github
 -------------------
 
 You can also directly install the package from github. This is useful if you want to install a specific release or branch and keep it fixed in your environment.
-Note that this is supported from usbmd v1.2.6 onward.
+Note that this is supported from zea v1.2.6 onward.
 You can install from Github using either a Github Personal Access Token or an SSH key.
 
 Using a Personal Access Token
@@ -99,21 +98,21 @@ Public images
 
 These images are all built on top of ``Dockerfile.base``:
 
-- usbmd/all: This image includes support for all machine learning backends (TensorFlow, PyTorch, and JAX).
-- usbmd/tensorflow: This image includes support for TensorFlow.
-- usbmd/torch: This image includes support for PyTorch.
-- usbmd/jax: This image includes support for JAX.
+- `zeahub/all`: This image includes support for all machine learning backends (TensorFlow, PyTorch, and JAX).
+- `zeahub/tensorflow`: This image includes support for TensorFlow.
+- `zeahub/torch`: This image includes support for PyTorch.
+- `zeahub/jax`: This image includes support for JAX.
 
 These images are uploaded to Docker Hub via the CI pipeline and can be used directly in your projects via:
 
 .. code-block:: shell
 
-   docker pull usbmd/all:latest
+   docker pull zeahub/all:latest
 
 Private images
 ~~~~~~~~~~~~~~
 
-- usbmd/private: Built from ``Dockerfile``. This image inherits from usbmd/all, copies your repository, performs an editable installation of usbmd, and adds a Message of the Day displaying the usbmd version. This image is also used for development with VSCode, as described below.
+- zeahub/private: Built from ``Dockerfile``. This image inherits from `zeahub/all`, copies your repository, performs an editable installation of `zea`, and adds a Message of the Day displaying the `zea` version. This image is also used for development with VSCode, as described below.
 
 The private image is not uploaded to Docker Hub and must be built manually to prevent pushing private code to a public repository. If you use VSCode, you can use the provided ``.devcontainer.json`` file to attach to the private image for development, see `Development in the Container using VSCode`_.
 
@@ -124,19 +123,19 @@ To manually build the base image from its dedicated Dockerfile:
 
 .. code-block:: shell
 
-   docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t usbmd/base:latest
+   docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t zeahub/base:latest
 
 To build the full image with all backends (the default is BACKEND=all):
 
 .. code-block:: shell
 
-   docker build -f Dockerfile.base --build-arg BACKEND=all . -t usbmd/all:latest
+   docker build -f Dockerfile.base --build-arg BACKEND=all . -t zeahub/all:latest
 
 To build the private (development) image:
 
 .. code-block:: shell
 
-   docker build . -t usbmd/private:latest
+   docker build . -t zeahub/private:latest
 
 Run
 ---
@@ -168,7 +167,7 @@ The container uses ``/bin/bash`` as its entrypoint, allowing you to interactivel
 
 .. important::
 
-   Mount your ``ultrasound-toolbox`` repository to ``/ultrasound-toolbox`` inside the container so that changes are reflected in the usbmd installation inside the container. Additionally, use your user ID and group ID with ``--user "$(id -u):$(id -g)"`` to avoid permission issues when writing to mounted volumes.
+   Mount your ``ultrasound-toolbox`` repository to ``/ultrasound-toolbox`` inside the container so that changes are reflected in the `zea` installation inside the container. Additionally, use your user ID and group ID with ``--user "$(id -u):$(id -g)"`` to avoid permission issues when writing to mounted volumes.
 
 .. tip::
 

@@ -1,10 +1,10 @@
-"""Tests for the usbmd.visualize module."""
+"""Tests for the zea.visualize module."""
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from usbmd.visualize import plot_biplanes, plot_frustum_vertices, plot_quadrants
+from zea.visualize import plot_biplanes, plot_frustum_vertices, plot_quadrants
 
 
 @pytest.fixture

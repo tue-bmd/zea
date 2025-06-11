@@ -3,7 +3,7 @@
 Pipeline
 ========
 
-.. automodule:: usbmd.ops
+.. automodule:: zea.ops
    :no-members:
    :no-inherited-members:
    :no-special-members:
