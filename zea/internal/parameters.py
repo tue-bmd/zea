@@ -16,6 +16,7 @@ import numpy as np
 
 from zea.internal.core import BASE_FLOAT_PRECISION, BASE_INT_PRECISION, STATIC
 from zea.internal.core import Object as ZeaObject
+from zea.internal.core import _to_tensor
 
 
 def cache_with_dependencies(*deps):
@@ -328,33 +329,6 @@ class Parameters(ZeaObject):
             compute_missing (bool): If True, compute missing computed properties.
             compute_keys (list or None): If not None, only compute these computed properties (by name).
         """
-
-        def _to_tensor(key, val):
-            if key in STATIC:
-                return val
-            if val is None:
-                return None
-            # Recursively handle dicts
-            if isinstance(val, dict):
-                return {k: _to_tensor(k, v) for k, v in val.items()}
-            # Use float precision for all floats (including np.float32/64)
-            if isinstance(val, float) or (
-                isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)
-            ):
-                dtype = BASE_FLOAT_PRECISION
-            # Use int precision for all ints (including np.int32/64)
-            elif isinstance(val, bool) or (
-                isinstance(val, np.ndarray) and np.issubdtype(val.dtype, bool)
-            ):
-                dtype = bool
-            elif isinstance(val, int) or (
-                isinstance(val, np.ndarray) and np.issubdtype(val.dtype, int)
-            ):
-                dtype = BASE_INT_PRECISION
-            else:
-                dtype = None
-            return keras.ops.convert_to_tensor(val, dtype=dtype)
-
         tensor_dict = {k: _to_tensor(k, v) for k, v in self._params.items()}
 
         # Compute missing properties if requested
@@ -369,7 +343,6 @@ class Parameters(ZeaObject):
                         try:
                             val = getattr(self, name)
                             if val is not None:
-                                # This will add to _computed if not already present
                                 pass
                         except Exception as e:
                             print(f"Warning: Could not compute '{name}': {str(e)}")

@@ -878,8 +878,9 @@ class Pipeline:
                 scan, Scan
             ), f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
             scan_dict = scan.to_tensor(
-                compute_missing=True
-            )  # , compute_keys=self.valid_keys)
+                compute_missing=True,
+                compute_keys=self.valid_keys,
+            )
 
         if config is not None:
             assert isinstance(
