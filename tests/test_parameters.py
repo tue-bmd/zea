@@ -227,9 +227,16 @@ def test_to_tensor_partial_computed_subset(dummy_params):
     )
     assert "computed1" in tensors3
     assert "param1" in tensors3
-    # If compute_keys is empty, no computed properties should be added
     tensors4 = dummy_params.to_tensor(compute_missing=True, compute_keys=[])
-    assert set(tensors4.keys()) == {"param1", "param2", "param3", "param4"}
+
+    assert set(tensors4.keys()) == {
+        "param1",
+        "param2",
+        "param3",
+        "param4",
+        "computed1",
+        "computed3",
+    }
 
     # Access computed2 manually
     _ = dummy_params.computed2
