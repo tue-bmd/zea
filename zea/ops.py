@@ -641,7 +641,7 @@ class Pipeline:
         (such as multi_bandpass_filter)
         Will merge the pipeline lines if it detects a stacking operation (such as stack)
         """
-        split_operations = ["MultiBandPassFilter"]
+        split_operations = []
         merge_operations = ["Stack"]
 
         operations = [operation.__class__.__name__ for operation in self.operations]
