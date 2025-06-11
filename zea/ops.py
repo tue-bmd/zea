@@ -188,7 +188,10 @@ class Operation(keras.Operation):
         self._jittable = jittable
 
         # Set the jit compilation flag and compile the `call` method
-        self.set_jit(jit_compile)
+        # Set zea logger level to suppress warnings regarding
+        # torch not being able to compile the function
+        with log.set_level("ERROR"):
+            self.set_jit(jit_compile)
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""

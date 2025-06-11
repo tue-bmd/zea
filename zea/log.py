@@ -16,6 +16,7 @@ Example usage
 
 """
 
+import contextlib
 import logging
 import os
 import re
@@ -292,13 +293,6 @@ def critical(message, *args, **kwargs):
     return message
 
 
-def set_level(level):
-    """Sets the log level of the logger."""
-    logger.setLevel(level)
-    if file_logger:
-        file_logger.setLevel(level)
-
-
 def set_file_logger_directory(directory):
     """Sets the log level of the logger."""
     # Add pylint exception
@@ -321,6 +315,37 @@ def enable_file_logging():
     if not file_logger:
         file_logger = configure_file_logger(level="DEBUG")
         file_logger.propagate = False
+
+
+@contextlib.contextmanager
+def set_level(level):
+    """Context manager to temporarily set the log level for the logger.
+
+    Also sets the log level for the file logger if it exists.
+
+    Example:
+        >>> with set_level("WARNING"):
+        ...     log.info("This will not be shown")
+        ...     log.warning("This will be shown")
+
+    Args:
+        level (str or int): The log level to set temporarily
+            (e.g., "DEBUG", "INFO", logging.WARNING).
+
+    Yields:
+        None
+    """
+    prev_level = logger.level
+    prev_file_level = file_logger.level if file_logger else None
+    logger.setLevel(level)
+    if file_logger:
+        file_logger.setLevel(level)
+    try:
+        yield
+    finally:
+        logger.setLevel(prev_level)
+        if file_logger and prev_file_level is not None:
+            file_logger.setLevel(prev_file_level)
 
 
 logger = configure_console_logger(
