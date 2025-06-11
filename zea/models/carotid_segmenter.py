@@ -32,7 +32,7 @@ class CarotidSegmenter(BaseModel):
 
     def __init__(
         self,
-        image_shape=(INFERENCE_SIZE, INFERENCE_SIZE, 1),
+        input_shape=(INFERENCE_SIZE, INFERENCE_SIZE, 1),
         input_range=(0, 1),
         name="carotid_segmenter",
         **kwargs,
@@ -50,16 +50,16 @@ class CarotidSegmenter(BaseModel):
             name=name,
             **kwargs,
         )
-        self.image_shape = image_shape
+        self.input_shape = input_shape
         self.input_range = input_range
 
-        self.network = _get_network(self.image_shape)
+        self.network = _get_network(self.input_shape)
 
     def get_config(self):
         config = super().get_config()
         config.update(
             {
-                "image_shape": self.image_shape,
+                "input_shape": self.input_shape,
                 "input_range": self.input_range,
             }
         )
