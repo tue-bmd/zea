@@ -209,6 +209,11 @@ class Operation(keras.Operation):
         self._valid_keys = set(self._input_signature.parameters.keys())
 
     @property
+    def valid_keys(self):
+        """Get the valid keys for the `call` method."""
+        return self._valid_keys
+
+    @property
     def jittable(self):
         """Check if the operation can be JIT compiled."""
         return self._jittable
@@ -281,9 +286,9 @@ class Operation(keras.Operation):
                 return {**merged_kwargs, **self._output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `call` method
-        if not "kwargs" in self._valid_keys:
+        if not "kwargs" in self.valid_keys:
             filtered_kwargs = {
-                k: v for k, v in merged_kwargs.items() if k in self._valid_keys
+                k: v for k, v in merged_kwargs.items() if k in self.valid_keys
             }
         else:
             filtered_kwargs = merged_kwargs
@@ -410,11 +415,16 @@ class Pipeline:
 
     def needs(self, key):
         """Check if the pipeline needs a specific key."""
+        if key in self.valid_keys:
+            return True
+
+    @property
+    def valid_keys(self):
+        """Get a set of valid keys for the pipeline."""
+        valid_keys = set()
         for operation in self.operations:
-            if isinstance(operation, Pipeline):
-                return operation.needs(key)
-            if key in operation._valid_keys:
-                return True
+            valid_keys.update(operation.valid_keys)
+        return valid_keys
 
     @classmethod
     def from_default(
@@ -614,7 +624,7 @@ class Pipeline:
             operation_params = {
                 key: value
                 for key, value in params.items()
-                if key in operation._valid_keys
+                if key in operation.valid_keys
             }
             if operation_params:
                 operation.set_input_cache(operation_params)
@@ -867,16 +877,11 @@ class Pipeline:
             assert isinstance(
                 scan, Scan
             ), f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
-            except_tensors = []
-            for key in scan._on_request:
-                # If the pipeline does not need the key or it will be overridden by kwargs,
-                # we can skip converting it to a tensor
-                if not self.needs(key) or key in kwargs:
-                    except_tensors.append(key)
-            scan_dict = scan.to_tensor(except_tensors)
+            scan_dict = scan.to_tensor(
+                compute_missing=True
+            )  # , compute_keys=self.valid_keys)
 
         if config is not None:
-            # TODO: currently nothing...
             assert isinstance(
                 config, Config
             ), f"Expected an instance of `zea.config.Config`, got {type(config)}"

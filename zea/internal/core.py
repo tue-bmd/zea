@@ -11,7 +11,8 @@ import numpy as np
 from zea.utils import reduce_to_signature, update_dictionary
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
-BASE_PRECISION = "float32"
+BASE_FLOAT_PRECISION = "float32"
+BASE_INT_PRECISION = "int32"
 
 # TODO: make static more neat
 # These are global static attributes for all ops. Ops specific
@@ -201,6 +202,12 @@ def object_to_tensor(obj: Object, except_tensors=None):
         except ValueError:
             continue
 
+        # if a dict is passed
+        if isinstance(value, dict):
+            # If the value is a dict, we recursively convert it to a tensor
+            snapshot[key] = object_to_tensor(value, except_tensors)
+            continue
+
         if value is None:
             snapshot[key] = None
 
@@ -218,7 +225,7 @@ def object_to_tensor(obj: Object, except_tensors=None):
         dtype = None
         # Convert double precision arrays to float32
         if isinstance(value, np.ndarray) and value.dtype == np.float64:
-            dtype = BASE_PRECISION
+            dtype = BASE_FLOAT_PRECISION
 
         snapshot[key] = keras.ops.convert_to_tensor(value, dtype=dtype)
     return snapshot
