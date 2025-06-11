@@ -4,36 +4,20 @@ Getting Started
 Installation
 ------------
 
-Preferred Install Method via Docker
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The recommended way to install and run zea is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in :doc:`installation`.
-
-Alternative - Editable Install using Git
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-If you prefer not to use Docker, you can install zea in editable mode from PyPI by checking out the repository and running:
+A simple pip command will install the latest version of ``zea`` from `PyPI <https://pypi.org/project/zea>`_. Furthermore, you also have to install a backend of choice (``jax``, ``tensorflow`` or ``torch``). For more installation instructions, please refer to the :doc:`installation` page.
 
 .. code-block:: shell
 
-   # Checkout and move into the directory
-   git clone git@github.com:tue-bmd/ultrasound-toolbox.git
-   cd ultrasound-toolbox
-   # Editable install without conflicts via headless OpenCV
-   pip install -e .[opencv-python-headless]
-
-.. important::
-
-   You should make sure to install the requirements for your chosen backend as these are not included by default in a plain zea install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the `Jax installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_. The easiest way to set up your environment is through the provided docker image (see :doc:`installation`), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running ``pip install zea[jax]`` although this is not extensively tested (yet).
+   pip install zea
 
 Example usage
 --------------
 
 .. tip::
 
-   A more complete set of examples can be found in the :doc:`examples </examples>` folder.
+   A more complete set of examples can be found on the :doc:`examples` page.
 
-After installation, you can use the package as follows in your own project. ``zea`` is written in Python on top of `Keras 3 <https://keras.io/about/>`_. This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend ("jax", "tensorflow", "torch" or "numpy"), which means you can use ``zea`` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the ``KERAS_BACKEND`` environment variable, either in your code or in your terminal. The default backend used by ``zea`` is "numpy", if no backend is specified before importing ``zea``. This will not allow you to use the GPU for processing.
+``zea`` is written in Python on top of `Keras 3 <https://keras.io/about/>`_. This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend, which means you can use ``zea`` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the ``KERAS_BACKEND`` environment variable, either in your code or in your terminal.
 
 .. code-block:: shell
 
@@ -77,14 +61,14 @@ Loading a single file
 ~~~~~~~~~~~~~~~~~~~~~
 
 The ``Interface`` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
-We do this by manually loading a single zea file with ``load_zea_file`` and processing it with the ``Process`` class.
+We do this by manually loading a single zea file with ``load_file`` and processing it with the ``Process`` class.
 
 .. code-block:: python
 
    import keras
    import matplotlib.pyplot as plt
 
-   from zea import setup, load_zea_file, Pipeline
+   from zea import setup, load_file, Pipeline
 
    # choose your config file
    # all necessary settings should be in the config file
@@ -106,8 +90,8 @@ We do this by manually loading a single zea file with ``load_zea_file`` and proc
    # only 1 frame in PICMUS to be selected
    selected_frames = [0]
 
-   # loading a file manually using `load_zea_file`
-   data, scan, probe = load_zea_file(
+   # loading a file manually using `load_file`
+   data, scan, probe = load_file(
        data_path, frames=selected_frames, scan=config.scan, data_type="raw_data"
    )
 

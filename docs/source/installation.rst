@@ -21,10 +21,9 @@ Make sure you are in the root folder (``ultrasound-toolbox``) where the ``pyproj
 
 .. code-block:: bash
 
-   pip install -e .[opencv-python-headless,dev]
+   pip install -e .[dev]
 
-This installs the dev dependencies and opencv without the GUI backend. This means it `does not conflict with matplotlib <https://github.com/tue-bmd/ultrasound-toolbox/issues/410>`_.
-In case you need the opencv GUI backend, you can install it with ``pip install -e .[opencv-python]``.
+This also installs the dev dependencies, needed for building docs, running tests and the linter.
 
 Install from github
 -------------------
