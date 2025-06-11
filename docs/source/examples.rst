@@ -4,7 +4,7 @@ Examples
 Explore practical usage of zea with the following example notebooks.
 
 Data / Pipeline
---------------
+---------------
 
 .. toctree::
    :maxdepth: 1
@@ -16,7 +16,7 @@ Data / Pipeline
    notebooks/zea_simulation_example.ipynb
 
 Model
------------------
+-----
 
 .. toctree::
    :maxdepth: 1
@@ -26,5 +26,3 @@ Model
    notebooks/segmentation_example.ipynb
    notebooks/custom_models_example.ipynb
    notebooks/agent_selection.ipynb
-
-   .. notebooks/*
