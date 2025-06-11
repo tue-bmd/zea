@@ -10,8 +10,8 @@ from schema import SchemaError
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from usbmd.config import Config
-from usbmd.config.validation import check_config
+from zea.config import Config
+from zea.config.validation import check_config
 
 # Define some dictionaries to test the Config class
 simple_dict = {"a": 1, "b": 2, "c": 3}

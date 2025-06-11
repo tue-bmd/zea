@@ -5,9 +5,9 @@ import inspect
 import numpy as np
 import pytest
 
-from usbmd.backend.tensorflow.losses import SMSLE
-from usbmd.internal.registry import metrics_registry
-from usbmd import metrics
+from zea import metrics
+from zea.backend.tensorflow.losses import SMSLE
+from zea.internal.registry import metrics_registry
 
 
 def test_smsle():

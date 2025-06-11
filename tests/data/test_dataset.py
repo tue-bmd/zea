@@ -3,11 +3,11 @@
 import numpy as np
 import pytest
 
-from usbmd.config import Config
-from usbmd.config.validation import check_config
-from usbmd.data.datasets import Dataset
-from usbmd.generate import GenerateDataSet
-from usbmd.internal.setup_usbmd import setup_config
+from zea.config import Config
+from zea.config.validation import check_config
+from zea.data.datasets import Dataset
+from zea.generate import GenerateDataSet
+from zea.internal.setup_zea import setup_config
 
 from .. import DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_X, DUMMY_DATASET_N_Z
 

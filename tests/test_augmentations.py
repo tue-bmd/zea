@@ -1,8 +1,10 @@
 """Tests for RandomCircleInclusion augmentation."""
 
 import numpy as np
-from keras import ops, random as keras_random
-from usbmd.data.augmentations import RandomCircleInclusion
+from keras import ops
+from keras import random as keras_random
+
+from zea.data.augmentations import RandomCircleInclusion
 
 
 def assert_circle_pixels(image, center, radius, fill_value, tol=1e-5):

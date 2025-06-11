@@ -8,7 +8,7 @@ SPHINXBUILD   ?= sphinx-build
 SPHINXAUTOBUILD ?= sphinx-autobuild
 SOURCEDIR     = source
 BUILDDIR      = _build
-REMOVE_LIST   = ["usbmd.ops_dep.rst", "modules.rst"]
+REMOVE_LIST   = ["modules.rst"]
 
 .PHONY: help Makefile docs-clean docs-build docs-serve docs-parameters
 
@@ -25,12 +25,12 @@ docs-parameters:
 # Generate autosummary .rst files for API documentation
 # force means that it will overwrite existing files
 # separate means that it will create a separate file for each module
-# we will first backup existing usbmd.rst as we don't want to overwrite it
+# we will first backup existing zea.rst as we don't want to overwrite it
 docs-autosummary:
-	@if [ -f $(SOURCEDIR)/_autosummary/usbmd.rst ]; then cp $(SOURCEDIR)/_autosummary/usbmd.rst $(SOURCEDIR)/_autosummary/usbmd.rst.bak; fi
-	sphinx-apidoc -o $(SOURCEDIR)/_autosummary ../usbmd --force --separate
-	@if [ -f $(SOURCEDIR)/_autosummary/usbmd.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/usbmd.rst.bak $(SOURCEDIR)/_autosummary/usbmd.rst; fi
-	@rm -f $(SOURCEDIR)/_autosummary/usbmd.ops_dep.rst $(SOURCEDIR)/_autosummary/modules.rst
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.rst ]; then cp $(SOURCEDIR)/_autosummary/zea.rst $(SOURCEDIR)/_autosummary/zea.rst.bak; fi
+	sphinx-apidoc -o $(SOURCEDIR)/_autosummary ../zea --force --separate
+	@if [ -f $(SOURCEDIR)/_autosummary/zea.rst.bak ]; then mv $(SOURCEDIR)/_autosummary/zea.rst.bak $(SOURCEDIR)/_autosummary/zea.rst; fi
+	@rm -f $(SOURCEDIR)/_autosummary/modules.rst
 
 # Build docs cleanly (parameters.rst and autosummary must be up to date)
 docs-build: docs-parameters docs-autosummary

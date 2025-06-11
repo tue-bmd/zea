@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from usbmd.probes import Probe
-from usbmd.internal.registry import probe_registry
+from zea.internal.registry import probe_registry
+from zea.probes import Probe
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())

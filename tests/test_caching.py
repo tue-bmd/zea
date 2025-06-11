@@ -6,13 +6,13 @@ import keras
 import numpy as np
 import pytest
 
-from usbmd.internal.cache import (
+from zea.internal.cache import (
     cache_output,
     cache_summary,
     clear_cache,
     get_function_source,
 )
-from usbmd.internal.core import Object
+from zea.internal.core import Object
 
 # Global variable for the expected duration of the expensive operation
 EXPECTED_DURATION = 0.05

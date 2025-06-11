@@ -3,7 +3,7 @@
 Models
 ========
 
-.. automodule:: usbmd.models
+.. automodule:: zea.models
    :no-members:
    :no-inherited-members:
    :no-special-members:
