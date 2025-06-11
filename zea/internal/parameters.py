@@ -14,6 +14,7 @@ import hashlib
 import keras
 import numpy as np
 
+from zea.internal.core import BASE_FLOAT_PRECISION, BASE_INT_PRECISION, STATIC
 from zea.internal.core import Object as ZeaObject
 
 
@@ -150,15 +151,20 @@ class Parameters(ZeaObject):
                     f"Valid parameters are: {list(self.VALID_PARAMS.keys())}"
                 )
             expected_type = self.VALID_PARAMS[param]["type"]
-            if (
-                expected_type is not None
-                and value is not None
-                and not isinstance(value, expected_type)
-            ):
-                raise TypeError(
-                    f"Parameter '{param}' expected type {expected_type.__name__}, "
-                    f"got {type(value).__name__}"
-                )
+            if expected_type is not None and value is not None:
+                if isinstance(expected_type, tuple):
+                    if not isinstance(value, expected_type):
+                        allowed = ", ".join([t.__name__ for t in expected_type])
+                        raise TypeError(
+                            f"Parameter '{param}' expected type {allowed}, "
+                            f"got {type(value).__name__}"
+                        )
+                else:
+                    if not isinstance(value, expected_type):
+                        raise TypeError(
+                            f"Parameter '{param}' expected type {expected_type.__name__}, "
+                            f"got {type(value).__name__}"
+                        )
 
         self._params = {}
         self._computed = set()
@@ -234,15 +240,18 @@ class Parameters(ZeaObject):
 
             # Validate parameter type
             expected_type = self.VALID_PARAMS[key]["type"]
-            if (
-                expected_type is not None
-                and value is not None
-                and not isinstance(value, expected_type)
-            ):
-                raise TypeError(
-                    f"Parameter '{key}' expected type {expected_type.__name__}, "
-                    f"got {type(value).__name__}"
-                )
+            if expected_type is not None and value is not None:
+                if isinstance(expected_type, tuple):
+                    if not isinstance(value, expected_type):
+                        allowed = ", ".join([t.__name__ for t in expected_type])
+                        raise TypeError(
+                            f"Parameter '{key}' expected type {allowed}, got {type(value).__name__}"
+                        )
+                else:
+                    if not isinstance(value, expected_type):
+                        raise TypeError(
+                            f"Parameter '{key}' expected type {expected_type.__name__}, got {type(value).__name__}"
+                        )
 
             # Set the parameter and invalidate dependencies
             self._params[key] = value
@@ -311,36 +320,64 @@ class Parameters(ZeaObject):
             failed.add(name)
             return False
 
-    def to_tensor(self, compute_missing=False):
-        tensor_dict = {}
+    def to_tensor(self, compute_missing=False, compute_keys=None):
+        """
+        Convert all parameters (and optionally computed properties) to tensors.
 
-        # First include all direct parameters
-        for key, val in self._params.items():
-            tensor_dict[key] = keras.ops.convert_to_tensor(val)
+        Args:
+            compute_missing (bool): If True, compute missing computed properties.
+            compute_keys (list or None): If not None, only compute these computed properties (by name).
+        """
 
+        def _to_tensor(key, val):
+            if key in STATIC:
+                return val
+            if val is None:
+                return None
+            # Recursively handle dicts
+            if isinstance(val, dict):
+                return {k: _to_tensor(k, v) for k, v in val.items()}
+            # Use float precision for all floats (including np.float32/64)
+            if isinstance(val, float) or (
+                isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)
+            ):
+                dtype = BASE_FLOAT_PRECISION
+            # Use int precision for all ints (including np.int32/64)
+            elif isinstance(val, bool) or (
+                isinstance(val, np.ndarray) and np.issubdtype(val.dtype, bool)
+            ):
+                dtype = bool
+            elif isinstance(val, int) or (
+                isinstance(val, np.ndarray) and np.issubdtype(val.dtype, int)
+            ):
+                dtype = BASE_INT_PRECISION
+            else:
+                dtype = None
+            return keras.ops.convert_to_tensor(val, dtype=dtype)
+
+        tensor_dict = {k: _to_tensor(k, v) for k, v in self._params.items()}
+
+        # Compute missing properties if requested
         if compute_missing:
-            # Find all properties that have dependencies
             for name in dir(self.__class__):
+                if compute_keys is not None and name not in compute_keys:
+                    continue
                 attr = getattr(self.__class__, name)
                 if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
-                    # Try to resolve and compute the property
                     failed = set()
                     if self._resolve_dependency_tree(name, failed):
-                        # Actually compute the property
                         try:
                             val = getattr(self, name)
                             if val is not None:
-                                tensor_dict[name] = keras.ops.convert_to_tensor(val)
-                                if name not in self._cache:
-                                    self._cache[name] = val
-                                    self._computed.add(name)
+                                # This will add to _computed if not already present
+                                pass
                         except Exception as e:
                             print(f"Warning: Could not compute '{name}': {str(e)}")
-        else:
-            # Just include what's already been computed
-            for key in self._computed:
-                val = getattr(self, key)
-                tensor_dict[key] = keras.ops.convert_to_tensor(val)
+
+        # Always include all already computed properties
+        for key in self._computed:
+            val = getattr(self, key)
+            tensor_dict[key] = _to_tensor(key, val)
 
         return tensor_dict
 

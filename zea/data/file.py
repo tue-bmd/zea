@@ -16,7 +16,7 @@ from zea.internal.checks import (
     get_check,
 )
 from zea.probes import Probe
-from zea.scan import Scan, cast_scan_parameters
+from zea.scan import Scan
 from zea.utils import reduce_to_signature
 
 
@@ -315,7 +315,6 @@ class File(h5py.File):
         else:
             log.warning("Could not find scan parameters in file.")
 
-        scan_parameters = cast_scan_parameters(scan_parameters)
         return scan_parameters
 
     def get_scan_parameters(self, event=None) -> dict:

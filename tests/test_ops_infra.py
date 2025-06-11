@@ -628,7 +628,7 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
         element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
         apply_lens_correction=False,
         sound_speed=sound_speed,
-        lens_sound_speed=1000,
+        lens_sound_speed=1000.0,
         lens_thickness=1e-3,
         initial_times=np.ones((n_tx,)) * 1e-6,
         attenuation_coef=0.2,
