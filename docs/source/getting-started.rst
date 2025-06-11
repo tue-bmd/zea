@@ -4,36 +4,20 @@ Getting Started
 Installation
 ------------
 
-Preferred Install Method via Docker
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The recommended way to install and run usbmd is by using Docker, as it ensures a fully configured environment with all required dependencies. Detailed instructions can be found in :doc:`installation`.
-
-Alternative - Editable Install using Git
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-If you prefer not to use Docker, you can install usbmd in editable mode from PyPI by checking out the repository and running:
+A simple pip command will install the latest version of ``zea`` from `PyPI <https://pypi.org/project/zea>`_. Furthermore, you also have to install a backend of choice (``jax``, ``tensorflow`` or ``torch``). For more installation instructions, please refer to the :doc:`installation` page.
 
 .. code-block:: shell
 
-   # Checkout and move into the directory
-   git clone git@github.com:tue-bmd/ultrasound-toolbox.git
-   cd ultrasound-toolbox
-   # Editable install without conflicts via headless OpenCV
-   pip install -e .[opencv-python-headless]
-
-.. important::
-
-   You should make sure to install the requirements for your chosen backend as these are not included by default in a plain usbmd install (as seen above). For example, if you choose "jax" as your backend, make sure to follow the `Jax installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_. The easiest way to set up your environment is through the provided docker image (see :doc:`installation`), which has all the necessary libraries pre-installed. Alternatively, you can install the necessary libraries by running ``pip install usbmd[jax]`` although this is not extensively tested (yet).
+   pip install zea
 
 Example usage
 --------------
 
 .. tip::
 
-   A more complete set of examples can be found in the :doc:`examples </examples>` folder.
+   A more complete set of examples can be found on the :doc:`examples` page.
 
-After installation, you can use the package as follows in your own project. ``usbmd`` is written in Python on top of `Keras 3 <https://keras.io/about/>`_. This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend ("jax", "tensorflow", "torch" or "numpy"), which means you can use ``usbmd`` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the ``KERAS_BACKEND`` environment variable, either in your code or in your terminal. The default backend used by ``usbmd`` is "numpy", if no backend is specified before importing ``usbmd``. This will not allow you to use the GPU for processing.
+``zea`` is written in Python on top of `Keras 3 <https://keras.io/about/>`_. This means that under the hood we use the Keras framework to implement the pipeline and models. Keras allows you to set a backend, which means you can use ``zea`` alongside all your projects that are implemented in their respective frameworks. To get started you first have to specify your preferred backend. This can be done by setting the ``KERAS_BACKEND`` environment variable, either in your code or in your terminal.
 
 .. code-block:: shell
 
@@ -46,11 +30,11 @@ After installation, you can use the package as follows in your own project. ``us
    import os
    os.environ["KERAS_BACKEND"] = "jax"
 
-After setting the backend you can simply import ``usbmd``
+After setting the backend you can simply import ``zea``
 
 .. code-block:: python
 
-   import usbmd
+   import zea
 
 The easiest way to get started is to use the Interface class
 
@@ -58,14 +42,14 @@ The easiest way to get started is to use the Interface class
 
    import matplotlib.pyplot as plt
 
-   from usbmd import Interface, setup
+   from zea import Interface, setup
 
    # choose your config file
    # all necessary settings should be in the config file
    config_path = "configs/config_picmus_rf.yaml"
 
    # setup function handles local data paths, default config settings and GPU usage
-   # make sure to create your own users.yaml using usbmd/datapaths.py
+   # make sure to create your own users.yaml using zea/datapaths.py
    users_paths = "users.yaml"
    config = setup(config_path, users_paths, create_user=True)
 
@@ -77,21 +61,21 @@ Loading a single file
 ~~~~~~~~~~~~~~~~~~~~~
 
 The ``Interface`` class is a convenient way to load and inspect your data. However for more custom use cases, you might want to load and process the data yourself.
-We do this by manually loading a single usbmd file with ``load_usbmd_file`` and processing it with the ``Process`` class.
+We do this by manually loading a single zea file with ``load_file`` and processing it with the ``Process`` class.
 
 .. code-block:: python
 
    import keras
    import matplotlib.pyplot as plt
 
-   from usbmd import setup, load_usbmd_file, Pipeline
+   from zea import setup, load_file, Pipeline
 
    # choose your config file
    # all necessary settings should be in the config file
    config_path = "configs/config_picmus_rf.yaml"
 
    # setup function handles local data paths, default config settings and GPU usage
-   # make sure to create your own users.yaml using usbmd/datapaths.py
+   # make sure to create your own users.yaml using zea/datapaths.py
    users_paths = "users.yaml"
    config = setup(config_path, users_paths, create_user=True)
 
@@ -101,13 +85,13 @@ We do this by manually loading a single usbmd file with ``load_usbmd_file`` and 
 
    print(f"\n🔔 Hi {user}! You are using data from {data_root}\n")
 
-   data_path = data_root / "USBMD_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
+   data_path = data_root / "zea_datasets/PICMUS/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_rf/contrast_speckle_simu_dataset_rf.hdf5"
 
    # only 1 frame in PICMUS to be selected
    selected_frames = [0]
 
-   # loading a file manually using `load_usbmd_file`
-   data, scan, probe = load_usbmd_file(
+   # loading a file manually using `load_file`
+   data, scan, probe = load_file(
        data_path, frames=selected_frames, scan=config.scan, data_type="raw_data"
    )
 
@@ -145,7 +129,7 @@ Custom pipelines are also supported in various ways. One way is to define a pipe
 .. code-block:: python
 
    import keras
-   from usbmd import Config, Pipeline
+   from zea import Config, Pipeline
 
    config = Config(
        {
@@ -191,7 +175,7 @@ Custom pipelines are also supported in various ways. One way is to define a pipe
 Handling multiple files (i.e. datasets)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can also make use of the ``USBMDDataSet`` class to load and process multiple files at once.
+You can also make use of the ``Dataset`` class to load and process multiple files at once.
 We will have to manually initialize the ``Scan`` and ``Probe`` classes and pass them to the ``Process`` class. This was done automatically in the ``Interface`` in the first example.
 
 .. code-block:: python
@@ -199,7 +183,7 @@ We will have to manually initialize the ``Scan`` and ``Probe`` classes and pass 
    import keras
    import matplotlib.pyplot as plt
 
-   from usbmd import Dataset, Pipeline, init_device, setup
+   from zea import Dataset, Pipeline, init_device, setup
 
    device = init_device()
 
@@ -207,7 +191,7 @@ We will have to manually initialize the ``Scan`` and ``Probe`` classes and pass 
    config_path = "configs/config_picmus_rf.yaml"
 
    # setup function handles local data paths, default config settings and GPU usage
-   # make sure to create your own users.yaml using usbmd/datapaths.py
+   # make sure to create your own users.yaml using zea/datapaths.py
    users_paths = "users.yaml"
    config = setup(config_path, users_paths, create_user=True)
 
@@ -234,7 +218,7 @@ We will have to manually initialize the ``Scan`` and ``Probe`` classes and pass 
 Models
 ------
 
-``usbmd`` also contains a collection of models that can be used for various tasks. An example of how to use the :class:`usbmd.models.echonet.EchoNetDynamic` model is shown below. Simply use the :meth:`from_preset` method to load a model with a specific preset. All models can be found in the :mod:`usbmd.models` module. See the :doc:`models` documentation for more information.
+``zea`` also contains a collection of models that can be used for various tasks. An example of how to use the :class:`zea.models.echonet.EchoNetDynamic` model is shown below. Simply use the :meth:`from_preset` method to load a model with a specific preset. All models can be found in the :mod:`zea.models` module. See the :doc:`models` documentation for more information.
 
 .. code-block:: python
 
@@ -246,18 +230,18 @@ Models
    from keras import ops
    import matplotlib.pyplot as plt
 
-   from usbmd import init_device, log, set_data_paths
-   from usbmd.models.echonet import EchoNetDynamic
-   from usbmd.tools.selection_tool import add_shape_from_mask
-   from usbmd.visualize import plot_image_grid, set_mpl_style
-   from usbmd.backend.tensorflow.dataloader import make_dataloader
+   from zea import init_device, log, set_data_paths
+   from zea.models.echonet import EchoNetDynamic
+   from zea.tools.selection_tool import add_shape_from_mask
+   from zea.visualize import plot_image_grid, set_mpl_style
+   from zea.backend.tensorflow.dataloader import make_dataloader
 
 
    data_paths = set_data_paths()
    init_device()
 
    val_dataset = make_dataloader(
-       data_paths.data_root / "USBMD_datasets/CAMUS/val",
+       data_paths.data_root / "zea_datasets/CAMUS/val",
        key="data/image",
        batch_size=16,
        shuffle=True,
@@ -269,7 +253,7 @@ Models
    )
 
    presets = list(EchoNetDynamic.presets.keys())
-   log.info(f"Available built-in usbmd presets for EchoNet: {presets}")
+   log.info(f"Available built-in zea presets for EchoNet: {presets}")
 
    model = EchoNetDynamic.from_preset("echonet-dynamic")
 

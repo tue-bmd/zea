@@ -3,15 +3,15 @@
 Data
 ================================
 
-This page provides a comprehensive overview of how ultrasound data is acquired, structured, and managed within the **usbmd** toolbox.
+This page provides a comprehensive overview of how ultrasound data is acquired, structured, and managed within the **zea** toolbox.
 For a quick start, see :doc:`Getting Started <getting-started>`.
 For a full reference of all config parameters, see :doc:`Parameters <parameters>`.
 
 -------------------------------
-usbmd data format
+zea data format
 -------------------------------
 
-The **usbmd** toolbox uses a custom data format based on the HDF5 standard to ensure consistency, reproducibility, and ease of use across different projects and platforms.
+The **zea** toolbox uses a custom data format based on the HDF5 standard to ensure consistency, reproducibility, and ease of use across different projects and platforms.
 
 **Key Features:**
 - All data and metadata are stored in a single `.hdf5` file per sequence.
@@ -95,8 +95,8 @@ The **usbmd** toolbox uses a custom data format based on the HDF5 standard to en
 
 **Tips:**
 
-- Use :py:meth:`usbmd.File.summary` to inspect datasets.
-- Use :py:func:`usbmd.data.data_format.generate_usbmd_dataset` to create new datasets in the correct format.
+- Use :py:meth:`zea.File.summary` to inspect datasets.
+- Use :py:func:`zea.data.data_format.generate_zea_dataset` to create new datasets in the correct format.
 - `HDFView <https://www.hdfgroup.org/downloads/hdfview/>`__ can be used for manual inspection.
 
 
@@ -104,43 +104,43 @@ The **usbmd** toolbox uses a custom data format based on the HDF5 standard to en
 Supported Datasets & Conversion
 -------------------------------
 
-The **usbmd** toolbox supports several public and research ultrasound datasets. For each, we provide scripts to download and convert the data into the usbmd format for integration with the toolbox.
+The **zea** toolbox supports several public and research ultrasound datasets. For each, we provide scripts to download and convert the data into the zea format for integration with the toolbox.
 
 **Supported Datasets:**
 
 - **EchoNet-Dynamic**: Large-scale cardiac ultrasound dataset.
 - **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
 - **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
-- **Custom Datasets**: You can add your own datasets by following the usbmd format.
+- **Custom Datasets**: You can add your own datasets by following the zea format.
 
 **Conversion Scripts:**
-- Scripts are provided in the ``usbmd/data/convert/`` directory to automate downloading and conversion.
+- Scripts are provided in the ``zea/data/convert/`` directory to automate downloading and conversion.
 - Example usage:
 
   .. code-block:: bash
 
-      python usbmd/data/convert/echonet.py --output-dir <your_data_dir>
-      python usbmd/data/convert/camus.py --output-dir <your_data_dir>
-      python usbmd/data/convert/picmus.py --output-dir <your_data_dir>
+      python zea/data/convert/echonet.py --output-dir <your_data_dir>
+      python zea/data/convert/camus.py --output-dir <your_data_dir>
+      python zea/data/convert/picmus.py --output-dir <your_data_dir>
 
-- These scripts will fetch the raw data, process it, and store it in the standardized usbmd format.
+- These scripts will fetch the raw data, process it, and store it in the standardized zea format.
 
 -------------------------------
 Data Acquisition Platforms
 -------------------------------
 
-The **usbmd** toolbox is designed to work with data from multiple ultrasound acquisition systems. We provide tools and documentation for integrating data from the following platforms:
+The **zea** toolbox is designed to work with data from multiple ultrasound acquisition systems. We provide tools and documentation for integrating data from the following platforms:
 
 **Verasonics**
 - Record data using your preferred Verasonics script.
 - Save entire workspace to a `.mat` file.
-- Use ``usbmd/data/convert/matlab.py`` to convert the MATLAB workspace files to usbmd format.
+- Use ``zea/data/convert/matlab.py`` to convert the MATLAB workspace files to zea format.
 - Example:
 
   .. code-block:: bash
 
-      python usbmd/data/convert/matlab.py --input <verasonics_mat_file> --output <usbmd_hdf5_file>
+      python zea/data/convert/matlab.py --input <verasonics_mat_file> --output <zea_hdf5_file>
 
 **us4us**
 - TBA
-- See ``usbmd/data/convert/us4us.py`` for details.
+- See ``zea/data/convert/us4us.py`` for details.

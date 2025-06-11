@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from usbmd.probes import Verasonics_l11_4v
-from usbmd.scan import PlaneWaveScan
+from zea.probes import Verasonics_l11_4v
+from zea.scan import PlaneWaveScan
 
 
 def test_pfield(debug=False):

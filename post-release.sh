@@ -2,16 +2,16 @@
 # Run this script on the linux server where the docker images are built.
 # Depends on: git, docker, apptainer, scp, awk and poetry
 # 1. Make sure `./post-release.sh` is executable: `chmod +x post-release.sh`
-# 2. Also make sure to checkout the usbmd version you want to release before running this script.
+# 2. Also make sure to checkout the zea version you want to release before running this script.
 # 3. Also make sure your git working directory is clean (no uncommitted changes).
-# 4. Run this script using `./post-release.sh <USBMD_VERSION> <SNELLIUS_USER>`
+# 4. Run this script using `./post-release.sh <ZEA_VERSION> <SNELLIUS_USER>`
 #    e.g. `./post-release.sh v2.1.1 tstevens`
 # 5. Sit back and relax, this might take a while...
 
 shopt -s expand_aliases
 
-TMP_USBMD_IMAGE_TAR=/tmp/usbmd.tar
-TMP_USBMD_IMAGE_SIF=/tmp/usbmd.sif
+TMP_ZEA_IMAGE_TAR=/tmp/zea.tar
+TMP_ZEA_IMAGE_SIF=/tmp/zea.sif
 SNELLIUS_ADDRESS=snellius.surf.nl
 PREPEND_ECHO="[post-release.sh]"
 alias precho='echo $PREPEND_ECHO'
@@ -46,14 +46,14 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 # previous version
-PREVIOUS_VERSION=$(awk -F'"' '/__version__/ {print $2}' usbmd/__init__.py)
+PREVIOUS_VERSION=$(awk -F'"' '/__version__/ {print $2}' zea/__init__.py)
 PREVIOUS_VERSION="v$PREVIOUS_VERSION"
 
 ## Update version in pyproject.toml
 sed -i "s/^version = .*/version = \"$VERSION_WITHOUT_V\"/" pyproject.toml
 
 # Update version in __init__.py
-sed -i "s/__version__ = .*/__version__ = \"$VERSION_WITHOUT_V\"/" usbmd/__init__.py
+sed -i "s/__version__ = .*/__version__ = \"$VERSION_WITHOUT_V\"/" zea/__init__.py
 
 # Shift arguments to maintain compatibility with rest of script
 shift
@@ -86,30 +86,30 @@ if command -v poetry &> /dev/null; then
     poetry lock --no-interaction
 else
     # If poetry is not installed, use docker
-    docker run --rm -v "$(pwd):/ultrasound-toolbox" --user "$(id -u):$(id -g)" usbmd/base:latest sudo /opt/poetry-venv/bin/python3 -m poetry lock --no-interaction
+    docker run --rm -v "$(pwd):/ultrasound-toolbox" --user "$(id -u):$(id -g)" zeahub/base:latest sudo /opt/poetry-venv/bin/python3 -m poetry lock --no-interaction
 fi
 
 ## Build images
 precho "Building docker images..."
-docker build -f Dockerfile.base --build-arg BACKEND=all . -t usbmd/all:latest
-docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t usbmd/base:latest
+docker build -f Dockerfile.base --build-arg BACKEND=all . -t zeahub/all:latest
+docker build -f Dockerfile.base --build-arg BACKEND=numpy . -t zeahub/base:latest
 
 ## Tag images
 # tag latest image with version
-docker tag usbmd/all:latest usbmd/all:$VERSION
+docker tag zeahub/all:latest zeahub/all:$VERSION
 # tag latest image with version
-docker tag usbmd/base:latest usbmd/base:$VERSION
+docker tag zeahub/base:latest zeahub/base:$VERSION
 
 ## Build private image
 precho "Building private docker image..."
-docker build -t "usbmd/private:$VERSION" .
-docker tag "usbmd/private:$VERSION" usbmd/private:latest
+docker build -t "zeahub/private:$VERSION" .
+docker tag "zeahub/private:$VERSION" zeahub/private:latest
 
 ## Update image on snellius
 precho "Updating images on snellius..."
 # save docker image to file.
-docker save -o $TMP_USBMD_IMAGE_TAR usbmd/private:latest
+docker save -o $TMP_ZEA_IMAGE_TAR zeahub/private:latest
 # convert docker image to apptainer image
-apptainer build $TMP_USBMD_IMAGE_SIF docker-archive://$TMP_USBMD_IMAGE_TAR
+apptainer build $TMP_ZEA_IMAGE_SIF docker-archive://$TMP_ZEA_IMAGE_TAR
 # copy apptainer image to snellius
-scp $TMP_USBMD_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/usbmd-private-$VERSION.sif
+scp $TMP_ZEA_IMAGE_SIF $SNELLIUS_USER@$SNELLIUS_ADDRESS:/projects/0/prjs0966/zea-private-$VERSION.sif
