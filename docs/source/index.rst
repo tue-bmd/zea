@@ -1,12 +1,12 @@
-usbmd
+zea
 ===================
 
-Welcome to the documentation for the ``usbmd`` package: a Python toolbox for ultrasound signal processing, image reconstruction, and deep learning.
+Welcome to the documentation for the ``zea`` package: a Python toolbox for ultrasound signal processing, image reconstruction, and deep learning.
 
-Currently ``usbmd`` offers:
+Currently ``zea`` offers:
 
-- Complete ultrasound signal processing and image reconstruction `pipeline <https://github.com/tue-bmd/ultrasound-toolbox/blob/main/usbmd/ops.py>`_.
-- A collection of `models <https://github.com/tue-bmd/ultrasound-toolbox/tree/main/usbmd/models>`_ for ultrasound image and signal processing.
+- Complete ultrasound signal processing and image reconstruction `pipeline <https://github.com/tue-bmd/ultrasound-toolbox/blob/main/zea/ops.py>`_.
+- A collection of `models <https://github.com/tue-bmd/ultrasound-toolbox/tree/main/zea/models>`_ for ultrasound image and signal processing.
 - Multi-Backend Support via `Keras3 <https://keras.io/keras_3/>`_: You can use `PyTorch <https://github.com/pytorch/pytorch>`_, `TensorFlow <https://github.com/tensorflow/tensorflow>`_, or `JAX <https://github.com/google/jax>`_.
 
 .. admonition:: Beta!
@@ -35,7 +35,7 @@ Currently ``usbmd`` offers:
    :maxdepth: 2
    :hidden:
 
-   _autosummary/usbmd
+   _autosummary/zea
    data-acquisition
    parameters
    pipeline

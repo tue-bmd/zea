@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from keras import ops
 
-from usbmd.agent import masks, selection
+from zea.agent import masks, selection
 
 
 def test_equispaced_lines():

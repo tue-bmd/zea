@@ -7,12 +7,12 @@ import matplotlib.pyplot as plt
 import pytest
 
 _tmp_cache_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
-    prefix="usbmd_test_cache_"
+    prefix="zea_test_cache_"
 )
 
-os.environ["USBMD_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing usbmd
+os.environ["ZEA_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing zea
 
-from usbmd.data.data_format import generate_example_dataset
+from zea.data.data_format import generate_example_dataset
 
 from . import (
     DUMMY_DATASET_N_FRAMES,
