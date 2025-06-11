@@ -5,10 +5,10 @@ import keras
 import numpy as np
 import pytest
 
-from usbmd import ops
-from usbmd.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
-from usbmd.probes import Probe
-from usbmd.scan import Scan
+from zea import ops
+from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
+from zea.probes import Probe
+from zea.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
 
 
 def _get_flatgrid(extent, shape):
@@ -148,8 +148,8 @@ def _get_linear_probe():
 
     return Probe(
         probe_geometry=probe_geometry,
-        center_frequency=5e6,
-        sampling_frequency=20e6,
+        center_frequency=2.5e6,
+        sampling_frequency=10e6,
     )
 
 

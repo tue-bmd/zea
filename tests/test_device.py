@@ -4,7 +4,7 @@ from itertools import product
 
 import pytest
 
-from usbmd.internal.device import init_device
+from zea.internal.device import init_device
 
 devices = ["cpu", "gpu:0", "cuda:0", "auto:-1", "auto:1"]
 backends = ["tensorflow", "torch", "jax", "auto", "numpy"]

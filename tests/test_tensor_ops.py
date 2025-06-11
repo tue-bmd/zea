@@ -12,7 +12,7 @@ from keras import ops
 from numpy.random import default_rng
 from scipy.ndimage import gaussian_filter
 
-from usbmd import tensor_ops
+from zea import tensor_ops
 
 from . import backend_equality_check
 
@@ -29,7 +29,7 @@ from . import backend_equality_check
 @backend_equality_check()
 def test_flatten(array, start_dim, end_dim):
     """Test the `flatten` function to `torch.flatten`."""
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     out = tensor_ops.flatten(array, start_dim, end_dim)
     torch_out = torch.flatten(
@@ -74,7 +74,7 @@ def test_batch_cov(data, rowvar, bias, ddof):
     """
     from keras import ops
 
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     data = ops.convert_to_tensor(data)
 
@@ -115,7 +115,7 @@ def test_extend_n_dims():
 @backend_equality_check()
 def test_matrix_power(array, n):
     """Test matrix_power to np.linalg.matrix_power."""
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     out = tensor_ops.matrix_power(array, n)
 
@@ -142,7 +142,7 @@ def test_boolean_mask(array, mask):
     """Tests if boolean_mask runs."""
     from keras import ops
 
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     out = tensor_ops.boolean_mask(array, mask)
 
@@ -168,7 +168,7 @@ def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
 
     from keras import ops
 
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     if func == "rgb_to_grayscale":
         func = ops.image.rgb_to_grayscale
@@ -194,7 +194,7 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
 
     TODO: does not work for torch...
     """
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     # Create random test data (gradient)
     data = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
@@ -254,7 +254,7 @@ def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
     """Test the batched_map function using _test_function fixture."""
     from keras import ops
 
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     array = ops.convert_to_tensor(array)
     # Convert any numpy arrays in batched_kwargs to tensors.
@@ -314,7 +314,7 @@ def test_pad_array_to_divisible(array, divisor, axis):
     """Test the pad_array_to_divisible function."""
     from keras import ops
 
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     array = ops.convert_to_tensor(array)
 
@@ -361,7 +361,7 @@ def test_pad_array_to_divisible(array, divisor, axis):
 @backend_equality_check()
 def test_images_to_patches(image, patch_size, overlap):
     """Test the images_to_patches function."""
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     patches = tensor_ops.images_to_patches(image, patch_size, overlap)
     assert patches.shape[0] == image.shape[0]
@@ -382,7 +382,7 @@ def test_images_to_patches(image, patch_size, overlap):
 @backend_equality_check()
 def test_patches_to_images(patches, image_shape, overlap, window_type):
     """Test the patches_to_images function."""
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     image = tensor_ops.patches_to_images(patches, image_shape, overlap, window_type)
     assert image.shape[1:] == image_shape
@@ -400,7 +400,7 @@ def test_patches_to_images(patches, image_shape, overlap, window_type):
 @backend_equality_check()
 def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
     """Test images_to_patches and patches_to_images together."""
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     patches = tensor_ops.images_to_patches(image, patch_size, overlap)
     reconstructed_image = tensor_ops.patches_to_images(
@@ -430,25 +430,25 @@ def test_gaussian_filter(array, sigma, order, truncate):
     """
     from keras import ops
 
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     array = array.astype(np.float32)
 
     blurred_scipy = gaussian_filter(array, sigma=sigma, order=order, truncate=truncate)
 
     tensor = ops.convert_to_tensor(array)
-    blurred_usbmd = tensor_ops.gaussian_filter(
+    blurred_zea = tensor_ops.gaussian_filter(
         tensor, sigma=sigma, order=order, truncate=truncate
     )
-    blurred_usbmd = ops.convert_to_numpy(blurred_usbmd)
+    blurred_zea = ops.convert_to_numpy(blurred_zea)
 
-    np.testing.assert_allclose(blurred_scipy, blurred_usbmd, rtol=1e-5, atol=1e-5)
-    return blurred_usbmd
+    np.testing.assert_allclose(blurred_scipy, blurred_zea, rtol=1e-5, atol=1e-5)
+    return blurred_zea
 
 
 def test_linear_sum_assignment_greedy():
     """Test the custom greedy linear_sum_assignment function."""
-    from usbmd import tensor_ops
+    from zea import tensor_ops
 
     # Simple cost matrix: diagonal is optimal
     cost = np.array([[1, 2, 3], [2, 1, 3], [3, 2, 1]], dtype=np.float32)
