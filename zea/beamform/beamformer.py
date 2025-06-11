@@ -274,8 +274,8 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
         d1 = ops.clip(d1, clip_min, clip_max)
 
     if data.shape[-1] == 2:
-        d0 = ops.repeat(d0, 2, axis=-1)
-        d1 = ops.repeat(d1, 2, axis=-1)
+        d0 = ops.concatenate([d0, d0], axis=-1)
+        d1 = ops.concatenate([d1, d1], axis=-1)
 
     # Gather pixel values
     # Here we extract for each transducer element the sample containing the
