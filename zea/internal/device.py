@@ -13,7 +13,7 @@ def check_nvidia_smi():
     return shutil.which("nvidia-smi") is not None
 
 
-def hide_gpus(gpu_ids=None):
+def hide_gpus(gpu_ids=None, verbose=True):
     """Hides the specified GPUs from the system by setting the
     CUDA_VISIBLE_DEVICES environment variable.
 
@@ -44,7 +44,8 @@ def hide_gpus(gpu_ids=None):
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, keep_gpu_ids))
         if len(hide_gpu_ids) > 0:
-            print(f"Hiding GPUs {hide_gpu_ids} from the system.")
+            if verbose:
+                print(f"Hiding GPUs {hide_gpu_ids} from the system.")
 
 
 def print_gpu_memory_table(memory_free_values):
@@ -169,14 +170,15 @@ def select_gpus(
             num_gpus = int(device.split(":")[1])  # number of GPUs to use
 
             # num_gpus can be -1 which means use all available GPUs
-            if num_gpus == -1:
-                print("Selecting all available GPUs.")
-            elif num_gpus == 0:
-                print("Not using any GPUs.")
-            elif num_gpus == 1:
-                print("Selecting 1 GPU based on available memory.")
-            else:
-                print(f"Selecting {num_gpus} GPUs based on available memory.")
+            if verbose:
+                if num_gpus == -1:
+                    print("Selecting all available GPUs.")
+                elif num_gpus == 0:
+                    print("Not using any GPUs.")
+                elif num_gpus == 1:
+                    print("Selecting 1 GPU based on available memory.")
+                else:
+                    print(f"Selecting {num_gpus} GPUs based on available memory.")
 
             if not isinstance(num_gpus, int):
                 raise ValueError(
@@ -219,7 +221,7 @@ def select_gpus(
     # Hide other GPUs from the system
     if hide_others:
         hide_gpu_ids = [x for x in available_gpu_ids if x not in gpu_ids]
-        hide_gpus(hide_gpu_ids)
+        hide_gpus(hide_gpu_ids, verbose=verbose)
 
     return gpu_ids
 
