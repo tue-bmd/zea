@@ -1,15 +1,15 @@
-"""Tests for generative models in usbmd."""
+"""Tests for generative models in zea."""
 
 import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from usbmd import log
-from usbmd.io_lib import matplotlib_figure_to_numpy
-from usbmd.models.diffusion import DiffusionModel
-from usbmd.models.gmm import GaussianMixtureModel, match_means_covariances
-from usbmd.utils import save_to_gif
+from zea import log
+from zea.io_lib import matplotlib_figure_to_numpy
+from zea.models.diffusion import DiffusionModel
+from zea.models.gmm import GaussianMixtureModel, match_means_covariances
+from zea.utils import save_to_gif
 
 
 @pytest.fixture(params=[2, 3])

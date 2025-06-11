@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from usbmd.io_lib import retry_on_io_error
+from zea.io_lib import retry_on_io_error
 
 MAX_RETRIES = 3
 INITIAL_DELAY = 0.01

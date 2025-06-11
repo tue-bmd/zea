@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="a" data-name="logo" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 465 588.15">
+  <defs>
+    <style>
+      .aj, .ak, .al {
+        fill: none;
+      }
+
+      .am {
+        fill: #e6e6e6;
+      }
+
+      .an {
+        fill: #593c5e;
+      }
+
+      .ao {
+        fill: #c7c7c7;
+      }
+
+      .ap {
+        fill: #fff;
+      }
+
+      .aq {
+        fill: #56395b;
+      }
+
+      .ar {
+        font-family: Courier-Bold, Courier;
+        font-size: 40.61px;
+        font-weight: 700;
+      }
+
+      .as {
+        clip-path: url(#j);
+      }
+
+      .at {
+        clip-path: url(#e);
+      }
+
+      .au {
+        clip-path: url(#d);
+      }
+
+      .av {
+        clip-path: url(#g);
+      }
+
+      .aw {
+        clip-path: url(#f);
+      }
+
+      .ak {
+        stroke-width: 15px;
+      }
+
+      .ak, .al {
+        stroke: #e6e6e6;
+        stroke-linecap: round;
+        stroke-miterlimit: 10;
+      }
+
+      .al {
+        stroke-width: 13px;
+      }
+
+      .ax {
+        fill: #bfbfbf;
+      }
+
+      .ay {
+        fill: #fbb53e;
+      }
+    </style>
+    <clipPath id="d">
+      <path class="al" d="M336.48,506.16c-42.34,73.8-159.98,56.34-215.98-9.66"/>
+    </clipPath>
+    <clipPath id="e">
+      <path class="am" d="M257,235h156c5.52,0,10,4.48,10,10v20h-176v-20c0-5.52,4.48-10,10-10Z"/>
+    </clipPath>
+    <clipPath id="f">
+      <path class="am" d="M247,278v15.31c0,8.28,1.6,16.41,4.65,23.84,2.35,5.72,6.12,10.54,10.79,13.97l10.33,7.59c11.37,8.35,18.22,22.65,18.22,37.99v75.66c0,12.51,8.95,22.64,20,22.64h48c11.05,0,20-10.14,20-22.64v-75.66c0-15.34,6.86-29.64,18.22-37.99l10.33-7.59c4.67-3.43,8.45-8.25,10.79-13.97,3.05-7.43,4.65-15.56,4.65-23.84v-15.31h-176Z"/>
+    </clipPath>
+    <clipPath id="g">
+      <path class="am" d="M344.71,506h-19.42c-3.47,0-6.29-1.22-6.29-2.73v-30.27h32v30.27c0,1.51-2.82,2.73-6.29,2.73Z"/>
+    </clipPath>
+    <clipPath id="j">
+      <rect class="aj" x="36.33" y="43" width="167.79" height="414"/>
+    </clipPath>
+  </defs>
+  <g id="b" data-name="background">
+    <rect width="465" height="575" rx="111.44" ry="111.44"/>
+  </g>
+  <g id="c" data-name="probe">
+    <g>
+      <g class="au">
+        <path class="ap" d="M358.06,499.47c-4.93-2.88-12.31-1.35-15.05,3.95-15.29,29.59-46.65,45.54-71.4,66.04-4.58,3.79-3.92,11.63,0,15.56,4.53,4.53,10.97,3.8,15.56,0,26.48-21.94,58.45-38.79,74.84-70.5,2.73-5.28,1.37-11.94-3.95-15.05Z"/>
+      </g>
+      <path class="al" d="M336.48,506.16c-42.34,73.8-159.98,56.34-215.98-9.66"/>
+    </g>
+    <g>
+      <path class="am" d="M257,235h156c5.52,0,10,4.48,10,10v20h-176v-20c0-5.52,4.48-10,10-10Z"/>
+      <g class="at">
+        <path class="ao" d="M429.48,229.63c-2.33-5.47-10.38-6.68-15.05-3.95-5.66,3.31-4.43,9.35-4.43,15.32s.14,10.93,0,13c-.26,3.78-.74,7.22-1,11-.41,5.93,5.73,5.97,11.38,5.97,6.3,0,10.59-5.05,11-11,.72-10.47,2.33-20.43-1.89-30.34Z"/>
+      </g>
+    </g>
+    <g>
+      <path class="am" d="M247,278v15.31c0,8.28,1.6,16.41,4.65,23.84,2.35,5.72,6.12,10.54,10.79,13.97l10.33,7.59c11.37,8.35,18.22,22.65,18.22,37.99v75.66c0,12.51,8.95,22.64,20,22.64h48c11.05,0,20-10.14,20-22.64v-75.66c0-15.34,6.86-29.64,18.22-37.99l10.33-7.59c4.67-3.43,8.45-8.25,10.79-13.97,3.05-7.43,4.65-15.56,4.65-23.84v-15.31h-176Z"/>
+      <g class="aw">
+        <path class="ax" d="M359,464c-2.85,2.87-10,4-12,9,0,0-1.79,4.86,0,5,2.64.21,4.47,5.46,6.85,6.71,4.52,2.39,11.6,1.75,14.53-2.98,11.41-5.01,17.4-22.25,19.21-33.56,2.67-16.65.53-33.1-.54-49.78-.82-12.86-.97-27.18,4.63-39.03,6.41-13.57,21.62-17.48,30.3-29.14,11.01-14.79,5.25-33.16,11.68-49.25,1.66-4.14-.53-8.88-3.96-11.59.21-.52.4-1.07.54-1.66,2.89-11.94,2.63-24.3-1.27-35.99-1.88-5.63-7.58-9.32-13.53-7.68-5.5,1.51-9.57,7.87-7.68,13.53,2.69,8.05,3.28,16.01,1.27,24.29-1.24,5.11.91,9.13,4.28,11.46-.32.57-.61,1.17-.86,1.79-2.74,6.85-3.39,14.32-3.85,21.62-.36,5.7-.24,11.92-2.45,17.3-2.21,5.38-7.4,8.35-12.03,11.45-6.19,4.14-11.68,8.54-16.21,14.47-17.8,23.28-12.63,53.82-11.17,80.89.43,7.9.7,16.1-.79,23.91-.69,3.61.04,9.24-2.96,13.24"/>
+      </g>
+    </g>
+    <g>
+      <path class="am" d="M344.71,506h-19.42c-3.47,0-6.29-1.22-6.29-2.73v-30.27h32v30.27c0,1.51-2.82,2.73-6.29,2.73Z"/>
+      <g class="av">
+        <path class="am" d="M357.96,466.47c-6.55,0-10.27,5.4-11,11.71l-2.7,23.38c-.73,6.29,5.58,11.71,11,11.71,6.55,0,10.27-5.4,11-11.71l2.7-23.38c.73-6.29-5.58-11.71-11-11.71Z"/>
+        <path class="ax" d="M343.11,505.12c-.53,2.15-.45,4.47.1,6.59.04.15.14.54.27,1,.34,3.39,1.96,6.5,5.15,8.49,4.69,2.92,12.62,1.6,15.05-4.2.47-1.12.86-2.15,1.15-3.17,2.4-2.17,3.87-5.49,4.21-9.13.56-6.09.54-12.11.08-18.11.04-.47.08-.95.11-1.42.11-1.54-.16-3.03-.7-4.4-.27-2.14-.58-4.27-.95-6.41-1.08-6.22-8.16-9.75-13.53-8.18-6.14,1.8-8.56,8.13-7.68,14.4.38,2.7.75,6.22-.37,12.11"/>
+      </g>
+    </g>
+  </g>
+  <g id="h" data-name="waves">
+    <g>
+      <path class="ak" d="M249,93.4c57.54,0,104.19,46.65,104.19,104.19"/>
+      <path class="ak" d="M257.09,50.08c76.99,0,139.41,62.42,139.41,139.41"/>
+      <path class="ak" d="M249.06,136.41c33.69,0,61,27.31,61,61"/>
+    </g>
+  </g>
+  <g id="i" data-name="corn">
+    <g class="as">
+      <g>
+        <g id="k" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="80.81" y="43" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="l" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="125.28" y="43" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="m" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="36.33" y="102.64" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="n" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="an" x="80.81" y="102.64" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="o" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="125.28" y="102.64" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="p" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="169.76" y="102.64" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="q" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="36.33" y="162.27" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="r" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="80.81" y="162.27" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="s" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="125.28" y="162.27" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="t" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="169.76" y="162.27" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="u" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="aq" x="36.33" y="221.91" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="v" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="80.81" y="221.91" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="w" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="125.28" y="221.91" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="x" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="aq" x="169.76" y="221.91" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="y" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="36.33" y="281.55" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="z" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="80.81" y="281.55" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="aa" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="aq" x="125.28" y="281.55" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="ab" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="169.76" y="281.55" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="ac" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="36.33" y="341.18" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="ad" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="80.81" y="341.18" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="ae" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="125.28" y="341.18" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="af" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="aq" x="169.76" y="341.18" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="ag" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="80.81" y="400.82" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+        <g id="ah" data-name="&amp;lt;Grid Repeat&amp;gt;">
+          <rect class="ay" x="125.28" y="400.82" width="34.37" height="49.53" rx="8.95" ry="8.95"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <g id="ai" data-name="zea">
+    <text class="ar" transform="translate(39.53 376.13) scale(1.12 1)"><tspan x="0" y="0">z</tspan></text>
+    <text class="ar" transform="translate(85.29 376.09) scale(1.12 1)"><tspan x="0" y="0">e</tspan></text>
+    <text class="ar" transform="translate(128.63 376.09) scale(1.12 1)"><tspan x="0" y="0">a</tspan></text>
+  </g>
+</svg>

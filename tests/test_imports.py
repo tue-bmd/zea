@@ -89,4 +89,4 @@ def test_package_only_imports_keras_backend():
     See: /usr/local/lib/python3.10/dist-packages/keras/src/backend/numpy/image.py"""
 
     with no_ml_lib_import():
-        importlib.import_module("usbmd")
+        importlib.import_module("zea")

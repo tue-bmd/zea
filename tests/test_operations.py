@@ -16,10 +16,10 @@ import pytest
 from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert
 
-from usbmd import ops
-from usbmd.ops import Pipeline, Simulate
-from usbmd.probes import Probe
-from usbmd.scan import Scan
+from zea import ops
+from zea.ops import Pipeline, Simulate
+from zea.probes import Probe
+from zea.scan import Scan
 
 from . import backend_equality_check
 
@@ -39,7 +39,7 @@ def test_companding(comp_type, size, parameter_value_range):
 
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
@@ -87,7 +87,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
 
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     if dynamic_range is None:
         _dynamic_range = (-60, 0)
@@ -133,7 +133,7 @@ def test_normalize(size, output_range, input_range):
 
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     normalize = ops.Normalize(output_range, input_range)
 
@@ -310,7 +310,7 @@ def test_hilbert_transform():
 
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
@@ -377,7 +377,7 @@ def test_gaussian_blur(sigma, spiral_image):
     """
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     blur = ops.GaussianBlur(sigma=sigma, with_batch_dim=False)
 
@@ -386,11 +386,11 @@ def test_gaussian_blur(sigma, spiral_image):
     image_tensor = keras.ops.convert_to_tensor(image[..., None])
 
     blurred_scipy = gaussian_filter(image, sigma=sigma)
-    blurred_usbmd = blur(data=image_tensor)["data"][..., 0]
+    blurred_zea = blur(data=image_tensor)["data"][..., 0]
 
-    blurred_usbmd = keras.ops.convert_to_numpy(blurred_usbmd)
+    blurred_zea = keras.ops.convert_to_numpy(blurred_zea)
 
-    np.testing.assert_allclose(blurred_scipy, blurred_usbmd, atol=1e-1, rtol=1e-1)
+    np.testing.assert_allclose(blurred_scipy, blurred_zea, atol=1e-1, rtol=1e-1)
 
 
 @pytest.mark.parametrize("sigma", [1.0, 2.0])
@@ -401,7 +401,7 @@ def test_lee_filter(sigma, spiral_image):
     """
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     # Use spiral image for testing
     image = spiral_image["spiral"]
@@ -432,7 +432,7 @@ def test_threshold_op(
     """Test `ops.Threshold` operation on a synthetic spiral image."""
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     spiral = spiral_image["spiral"]
     spiral_tensor = keras.ops.convert_to_tensor(spiral)
@@ -471,7 +471,7 @@ def test_anisotropic_diffusion_op(spiral_image, niter, lmbda):
 
     import keras
 
-    from usbmd import ops
+    from zea import ops
 
     speckle = spiral_image["speckle"]
     speckle_tensor = keras.ops.convert_to_tensor(speckle)

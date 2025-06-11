@@ -1,11 +1,11 @@
-"""Tests for the usbmd.utils module."""
+"""Tests for the zea.utils module."""
 
 import re
 
 import numpy as np
 import pytest
 
-from usbmd.utils import (
+from zea.utils import (
     find_first_nonzero_index,
     find_key,
     first_not_none_item,
