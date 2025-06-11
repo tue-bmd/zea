@@ -65,6 +65,7 @@ class Interface:
         self.process = Pipeline.from_config(
             self.config.pipeline,
             with_batch_dim=False,
+            jit_options=None,
         )
         self.parameters = self.process.prepare_parameters(
             self.probe, self.scan, self.config
