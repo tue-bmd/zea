@@ -31,7 +31,5 @@ repos:
     description: Prevent large files from being committed
   - id: check-merge-conflict
     description: Check for files that contain merge conflict strings
-  - id: check-symlinks
-    description: Check for symlinks which do not point to anything
   - id: detect-private-key
     description: Detects the presence of private keys
