@@ -1,6 +1,5 @@
 """Tests the pipeline for different transmit schemes."""
 
-# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
 import keras
 import numpy as np
 import pytest

@@ -40,7 +40,7 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     # Jit with TensorFlow
     if backend == "tensorflow" and tensorflow:
         try:
-            import tensorflow as tf  # pylint: disable=import-outside-toplevel
+            import tensorflow as tf
 
             jit_compile = kwargs.pop("jit_compile", True)
             return tf.function(func, jit_compile=jit_compile, **kwargs)
@@ -51,7 +51,7 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     # Jit with JAX
     elif backend == "jax" and jax:
         try:
-            import jax  # pylint: disable=import-outside-toplevel
+            import jax
 
             return jax.jit(func, **kwargs)
         except ImportError as exc:

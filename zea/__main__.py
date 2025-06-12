@@ -5,7 +5,6 @@ Or do not pass a config file to open a file dialog to choose a config file.
 
 """
 
-# pylint: disable=import-outside-toplevel
 import argparse
 import sys
 from pathlib import Path
@@ -41,7 +40,6 @@ def get_args():
         action="store_true",
         help="Skip zea file integrity checks. Use with caution.",
     )
-    # pylint: disable=no-member
     parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     return args
