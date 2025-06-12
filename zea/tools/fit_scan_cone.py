@@ -112,7 +112,7 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
         ValueError: If input image is not 2D or cone detection fails
     """
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required for cone detection and visualization. "
@@ -653,7 +653,7 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
 def main(avi_path):
     """Demonstrate scan cone fitting on a sample AVI file."""
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required for cone detection and visualization. "
