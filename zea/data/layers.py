@@ -38,7 +38,7 @@ class Resizer(TFDataLayer):
         seed: int | None = None,
         **resize_kwargs,
     ):
-        # pylint: disable=line-too-long
+        # noqa: E501
         """
         Initializes the data loader with the specified parameters.
 

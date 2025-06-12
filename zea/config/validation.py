@@ -16,7 +16,6 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-import zea.metrics  # pylint: disable=unused-import
 from zea import log
 from zea.config import Config
 from zea.internal.checks import _DATA_TYPES
