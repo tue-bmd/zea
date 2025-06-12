@@ -6,7 +6,7 @@ import tempfile
 import matplotlib.pyplot as plt
 import pytest
 
-_tmp_cache_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
+_tmp_cache_dir = tempfile.TemporaryDirectory(
     prefix="zea_test_cache_"
 )
 
@@ -14,12 +14,8 @@ os.environ["ZEA_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing zea
 
 from zea.data.data_format import generate_example_dataset  # noqa: E402
 
-from . import (  # noqa: E402
-    DUMMY_DATASET_N_FRAMES,
-    DUMMY_DATASET_N_X,
-    DUMMY_DATASET_N_Z,
-    backend_workers,
-)
+from . import (DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_X,  # noqa: E402
+               DUMMY_DATASET_N_Z, backend_workers)
 
 plt.rcParams["backend"] = "agg"
 
