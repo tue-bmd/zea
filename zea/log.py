@@ -291,8 +291,6 @@ def critical(message, *args, **kwargs):
 
 def set_file_logger_directory(directory):
     """Sets the log level of the logger."""
-    # Add pylint exception
-    # pylint: disable=global-statement
     global LOG_DIR, file_logger
     LOG_DIR = directory
     # Remove all handlers from the file logger
@@ -305,8 +303,6 @@ def set_file_logger_directory(directory):
 
 def enable_file_logging():
     """Enables file logging"""
-    # Add pylint exception
-    # pylint: disable=global-statement
     global file_logger
     if not file_logger:
         file_logger = configure_file_logger(level="DEBUG")

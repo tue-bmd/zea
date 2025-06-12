@@ -377,7 +377,6 @@ class Interface:
         n_frames = self.file.n_frames
 
         self.verbose = False
-        # pylint: disable=too-many-nested-blocks
         try:
             while True:
                 # first frame is already plotted during initialization of plotting

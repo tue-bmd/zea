@@ -1,7 +1,5 @@
 """Tests for the Operation and Pipeline classes in ops.py"""
 
-# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
-
 import json
 
 import keras

@@ -87,9 +87,8 @@ from zea.beamform.beamformer import tof_correction
 from zea.config.config import Config
 from zea.display import scan_convert
 from zea.internal.checks import _assert_keys_and_axes
-from zea.internal.core import STATIC, DataTypes
+from zea.internal.core import STATIC, DataTypes, ZEADecoderJSON, ZEAEncoderJSON
 from zea.internal.core import Object as ZEAObject
-from zea.internal.core import ZEADecoderJSON, ZEAEncoderJSON
 from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
@@ -218,7 +217,6 @@ class Operation(keras.Operation):
         """Check if the operation can be JIT compiled."""
         return self._jittable
 
-    # pylint: disable=arguments-differ
     def call(self, **kwargs):
         """
         Abstract method that defines the processing logic for the operation.
@@ -400,7 +398,6 @@ class Pipeline:
         else:
             log.warning("Pipeline validation is disabled, make sure to validate manually.")
 
-        # pylint: disable=method-hidden
         if jit_kwargs is None:
             if keras.backend.backend() == "jax":
                 jit_kwargs = {"static_argnames": STATIC}
@@ -1178,9 +1175,7 @@ class PatchedGrid(Pipeline):
 
         def patched_call(flatgrid, **patch_kwargs):
             patch_args = {k: v for k, v in patch_kwargs.items() if v is not None}
-            out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
-                flatgrid=flatgrid, **patch_args, **inputs
-            )
+            out = super(PatchedGrid, self).call(flatgrid=flatgrid, **patch_args, **inputs)
             return out[self.output_key]
 
         out = patched_map(
@@ -1335,7 +1330,6 @@ class Simulate(Operation):
             **kwargs,
         )
 
-    # pylint: disable=arguments-differ
     def call(
         self,
         scatterer_positions,
@@ -1397,7 +1391,6 @@ class TOFCorrection(Operation):
         )
         self.apply_phase_rotation = apply_phase_rotation
 
-    # pylint: disable=arguments-differ
     def call(
         self,
         flatgrid,
@@ -2205,19 +2198,16 @@ class Companding(Operation):
         else:
             self._compand_func = self._a_law_expand if self.expand else self._a_law_compress
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _mu_law_compress(x, mu=255, **kwargs):
         x = ops.clip(x, -1, 1)
         return ops.sign(x) * ops.log(1.0 + mu * ops.abs(x)) / ops.log(1.0 + mu)
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _mu_law_expand(y, mu=255, **kwargs):
         y = ops.clip(y, -1, 1)
         return ops.sign(y) * ((1.0 + mu) ** ops.abs(y) - 1.0) / mu
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _a_law_compress(x, A=87.6, **kwargs):
         x = ops.clip(x, -1, 1)
@@ -2229,7 +2219,6 @@ class Companding(Operation):
         y = ops.where((x_abs >= 0) & (x_abs < (1.0 / A)), val1, val2)
         return y
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _a_law_expand(y, A=87.6, **kwargs):
         y = ops.clip(y, -1, 1)
