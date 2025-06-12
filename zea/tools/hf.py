@@ -104,8 +104,12 @@ def upload_folder_to_hf(
 class HFPath(PurePosixPath):
     """A path-like object that preserves the hf:// scheme and mimics Path API."""
 
-    __slots__ = ("_hf_scheme",)
     _scheme = "hf://"
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the HFPath object."""
+        super().__init__(*args, **kwargs)
+        self._hf_scheme = False
 
     def __new__(cls, uri):
         if isinstance(uri, HFPath):
@@ -141,6 +145,7 @@ class HFPath(PurePosixPath):
     @property
     def parent(self):
         p = super().parent
+        # pylint: disable=assigning-non-slot
         if getattr(self, "_hf_scheme", False):
             p._hf_scheme = True
         return p
