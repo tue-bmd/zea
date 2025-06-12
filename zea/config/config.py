@@ -47,7 +47,6 @@ from huggingface_hub import hf_hub_download
 
 from zea import log
 from zea.internal.core import object_to_tensor
-from zea.tools.hf import HFPath
 
 
 class Config(dict):
@@ -504,6 +503,7 @@ def _load_config_from_yaml(path, config_class=Config, loader=yaml.FullLoader):
 
 def _path_to_str(path):
     """Convert a Path object to a string."""
-    if isinstance(path, (Path, HFPath)):
-        return str(path)
+    if hasattr(path, "as_posix"):
+        # If path is a Path object, convert to string
+        path = path.as_posix()
     return path
