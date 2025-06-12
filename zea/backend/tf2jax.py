@@ -3,7 +3,7 @@ Wrapper module to load tf2jax if available.
 """
 
 try:
-    from tf2jax import * # noqa: F401, F403
+    from tf2jax import *  # noqa: F401, F403
 except ImportError as exc:
     raise ImportError(
         "tf2jax is not installed. "

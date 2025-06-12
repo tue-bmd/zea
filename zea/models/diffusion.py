@@ -350,7 +350,7 @@ class DiffusionModel(DeepGenerativeModel):
             t+1 = previous time step
             t = current time step
 
-        """ # noqa: E501
+        """  # noqa: E501
         # diffusion times -> angles
         start_angle = ops.cast(ops.arccos(self.max_signal_rate), "float32")
         end_angle = ops.cast(ops.arccos(self.min_signal_rate), "float32")

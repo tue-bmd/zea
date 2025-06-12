@@ -71,7 +71,7 @@ class Config(dict):
 
     But this implementation is superior :)
 
-    """ # noqa: E501
+    """  # noqa: E501
 
     __frozen__ = False
 

@@ -26,7 +26,7 @@ class SubsetOperator:
     Sources:
         - `Reparameterizable Subset Sampling via Continuous Relaxations <https://github.com/ermongroup/subsets>`_
         - `Sampling Subsets with Gumbel-Top Relaxations <https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/subsets.html>`_
-    """ # noqa: E501
+    """  # noqa: E501
 
     def __init__(self, k, tau=1.0, hard=False, n_value_dims=1):
         self.k = k

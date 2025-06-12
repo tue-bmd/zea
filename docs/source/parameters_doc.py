@@ -3,7 +3,6 @@
 Also generates a reStructuredText (RST) file for sphinx documentation.
 """
 
-
 import os
 import re
 import sys

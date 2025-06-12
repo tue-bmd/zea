@@ -105,61 +105,6 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache,mode=max
 
-  pylint:
-    if: github.event_name == 'pull_request'
-    needs: [build-full-image, set-tag]
-    runs-on: self-hosted
-    timeout-minutes: 20
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Git
-        run: git config --global safe.directory $GITHUB_WORKSPACE
-
-      - name: Pull full Docker image
-        run: |
-          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
-            echo "Image tag not set!" && exit 1
-          fi
-          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
-
-      - name: Run Pylint in container
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/ultrasound-toolbox" \
-            -w /ultrasound-toolbox \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
-            ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "pip install -e . && pylint \$(git ls-files '*.py') -j 0"
-
-  pylint:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install Ruff
-        run: |
-          pip install -U pip setuptools wheel
-          pip install ruff
-
-      - name: Run Linter
-        run: ruff check --config pyproject.toml --verbose
-
-      - name: Run Formatter
-        run: ruff format --config pyproject.toml --check --verbose
-
   tests:
     if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
