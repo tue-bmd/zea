@@ -175,7 +175,6 @@ def _write_datasets(
     cast_to_float=True,
     **kwargs,
 ):
-    # weird pylint work around
     if kwargs:
         raise ValueError(f"Unknown arguments: {list(kwargs.keys())}")
 

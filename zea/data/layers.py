@@ -7,8 +7,6 @@ from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 from zea.ops import Pad as PadOp
 from zea.utils import map_negative_indices
 
-# pylint: disable=arguments-differ
-
 
 class Pad(PadOp):
     """Pad layer for padding tensors to a specified shape which can be used in tf.data pipelines."""
@@ -62,7 +60,6 @@ class Resizer(TFDataLayer):
             ValueError: If an unsupported resize type is provided.
             AssertionError: If resize_axes is not of length 2.
         """
-        # pylint enable=line-too-long
         super().__init__()
 
         assert isinstance(image_size, (tuple, list, np.ndarray)) and len(image_size) == 2, (

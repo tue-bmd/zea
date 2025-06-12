@@ -1,6 +1,5 @@
 """Model and constructor for unfolded convolutional ISTA"""
 
-# pylint: disable=abstract-method
 import keras
 from keras import Input, ops
 from keras.layers import Add, Conv2D, UpSampling2D
@@ -93,11 +92,10 @@ class Prox(Layer):
         self.alpha = None
 
     def build(self, input_shape):
-        # pylint: disable=missing-function-docstring
         self.alpha = self.add_weight(shape=(1, 1), initializer="random_normal", trainable=True)
         super().build(input_shape)
 
-    def call(self, inputs, *args, **kwargs):  # pylint: disable=arguments-differ, unused-argument, missing-function-docstring
+    def call(self, inputs, *args, **kwargs):
         """Apply the proximal operator.
 
         Args:
@@ -111,5 +109,4 @@ class Prox(Layer):
         return ops.sign(inputs) * ops.relu(ops.abs(inputs) - ops.softplus(self.alpha))
 
     def compute_output_shape(self, input_shape):
-        # pylint: disable=missing-function-docstring
         return input_shape

@@ -155,9 +155,9 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     Therefore tensorflow is not included in the backends. Maybe in the future we can check
     if the error is fixed with a new keras or tensorflow version.
     """
-    from keras import ops  # pylint: disable=reimported,import-outside-toplevel
+    from keras import ops
 
-    from zea import display  # pylint: disable=reimported,import-outside-toplevel
+    from zea import display
 
     if pattern_creator == "create_radial_pattern":
         polar_data = create_radial_pattern(size)
