@@ -17,9 +17,6 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from zea import log
 
-# ignore cv2 has no member pylint
-# pylint: disable=no-member
-
 
 def running_in_notebook():
     """Check whether code is running in a Jupyter Notebook or not."""
@@ -290,7 +287,7 @@ class ImageViewerOpenCV(ImageViewer):
         self.headless = headless
 
         try:
-            import cv2  # pylint: disable=import-outside-toplevel
+            import cv2
 
             self._cv2 = cv2
         except ImportError as exc:

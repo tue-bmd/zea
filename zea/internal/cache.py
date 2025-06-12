@@ -40,9 +40,7 @@ _DEFAULT_ZEA_CACHE_DIR = Path.home() / ".cache" / "zea"
 def _disable_cache():
     """Disable caching by creating a temporary directory and setting the environment variable."""
     os.environ["ZEA_DISABLE_CACHE"] = "1"
-    _tmp_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
-        prefix="zea_cache_"
-    )
+    _tmp_dir = tempfile.TemporaryDirectory(prefix="zea_cache_")
     atexit.register(lambda: _tmp_dir.cleanup())
     return Path(_tmp_dir.name)
 

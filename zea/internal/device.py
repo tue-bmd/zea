@@ -284,19 +284,19 @@ def backend_cuda_available(backend):
     """Check if the selected backend is installed with CUDA support."""
     if backend == "torch":
         try:
-            import torch  # pylint: disable=import-outside-toplevel
+            import torch
         except Exception:
             return False
         return torch.cuda.is_available()
     if backend == "tensorflow":
         try:
-            import tensorflow as tf  # pylint: disable=import-outside-toplevel
+            import tensorflow as tf
         except Exception:
             return False
         return bool(tf.config.list_physical_devices("GPU"))
     if backend == "jax":
         try:
-            import jax  # pylint: disable=import-outside-toplevel
+            import jax
         except Exception:
             return False
         try:
@@ -341,7 +341,7 @@ def selected_gpu_ids_to_device(selected_gpu_ids, backend):
 def set_memory_growth_tf():
     """Attempts to allocate only as much GPU memory as needed for the runtime allocations"""
     try:
-        import tensorflow as tf  # pylint: disable=import-outside-toplevel
+        import tensorflow as tf
     except Exception:
         return
 

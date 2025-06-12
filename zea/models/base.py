@@ -19,7 +19,7 @@ class BaseModel(keras.models.Model):
     """
 
     @classmethod
-    def from_config(cls, config):  # pylint: disable=arguments-differ
+    def from_config(cls, config):
         """Create a model instance from a configuration dictionary.
 
         The default ``from_config()`` for functional models will return a
@@ -35,7 +35,7 @@ class BaseModel(keras.models.Model):
         return cls(**config)
 
     @classproperty
-    def presets(cls):  # pylint: disable=no-self-argument
+    def presets(cls):
         """List built-in presets for a ``BaseModel`` subclass.
 
         Returns:

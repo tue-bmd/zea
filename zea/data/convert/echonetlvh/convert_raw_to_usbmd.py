@@ -1,4 +1,3 @@
-# pylint: disable=ungrouped-imports
 """
 Script to convert the EchoNet-LVH database to zea format.
 
@@ -16,7 +15,7 @@ os.environ["KERAS_BACKEND"] = "jax"
 
 
 if __name__ == "__main__":
-    from zea import init_device  # pylint: disable=import-outside-toplevel
+    from zea import init_device
 
     init_device("auto:1")
 
@@ -213,7 +212,7 @@ class LVHProcessor(H5Processor):
         # Store the pre-computed cone parameters
         self.cone_parameters = cone_params or {}
 
-    def get_split(self, avi_file: str, sequence):  # pylint: disable=arguments-renamed
+    def get_split(self, avi_file: str, sequence):
         """
         Get the split (train/val/test) for a given AVI file.
 
