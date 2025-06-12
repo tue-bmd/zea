@@ -59,5 +59,6 @@ def test_timing():
 
     time_non_cached = timeit.timeit(lambda: _time_with_change(obj1, obj2), number=N)
     print(
-        f"obj1 == obj2: {time_non_cached:.2f}, or: {time_non_cached / N * 1000:.2f}(ms) per comparison"
+        f"obj1 == obj2: {time_non_cached:.2f}, or: "
+        f"{time_non_cached / N * 1000:.2f}(ms) per comparison"
     )

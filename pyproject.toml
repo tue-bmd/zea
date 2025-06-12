@@ -163,7 +163,9 @@ target-version = "py310"
 # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
 # McCabe complexity (`C901`) by default.
 select = ["E", "F"]
-ignore = []
+ignore = [
+    "E731",  # Ignore ambiguous variable name globally
+]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
@@ -176,10 +178,16 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 "__init__.py" = [
     "F401",  # unused imports
+    "E501",  # line too long
+    "E402",  # module level import not at top of file
 ]
 
 "tests/**/__init__.py" = [
     "F403",  # * imports
+]
+
+"docs/source/parameters_doc.py" = [
+    "E501",  # line too long
 ]
 
 [tool.ruff.format]

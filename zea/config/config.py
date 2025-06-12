@@ -67,12 +67,12 @@ class Config(dict):
         - Logs all accessed attributes such that you can check if all attributes have been accessed.
 
     We took inspiration from the following sources:
-        - `EasyDict <https://pypi.org/project/easydict/>`_ # noqa: E501
-        - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_ # noqa: E501
+        - `EasyDict <https://pypi.org/project/easydict/>`_
+        - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_
 
     But this implementation is superior :)
 
-    """
+    """ # noqa: E501
 
     __frozen__ = False
 

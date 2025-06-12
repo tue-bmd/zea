@@ -251,7 +251,8 @@ class Parameters(ZeaObject):
                 else:
                     if not isinstance(value, expected_type):
                         raise TypeError(
-                            f"Parameter '{key}' expected type {expected_type.__name__}, got {type(value).__name__}"
+                            f"Parameter '{key}' expected type {expected_type.__name__}, "
+                            f"got {type(value).__name__}"
                         )
 
             # Set the parameter and invalidate dependencies

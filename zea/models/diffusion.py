@@ -327,7 +327,6 @@ class DiffusionModel(DeepGenerativeModel):
         return {m.name: m.result() for m in self.metrics}
 
     def diffusion_schedule(self, diffusion_times):
-        # noqa: E501
         """Cosine diffusion schedule https://arxiv.org/abs/2102.09672
 
         Args:
@@ -338,19 +337,20 @@ class DiffusionModel(DeepGenerativeModel):
             signal_rates: tensor with signal rates
 
             according to:
-                - x_t = signal_rate * x_0 + noise_rate * noise
-                - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t) * noise
+            - x_t = signal_rate * x_0 + noise_rate * noise
+            - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t) * noise
 
             or with stochastic sampling:
-                - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t - sigma_t^2) * noise + sigma_t * epsilon
+            - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t - sigma_t^2) * noise + sigma_t * epsilon
 
-            where sigma_t = sqrt((1 - alpha_t) / (1 - alpha_{t+1})) * sqrt(1 - alpha_{t+1} / alpha_t)
+            where:
+            - sigma_t = sqrt((1 - alpha_t) / (1 - alpha_{t+1})) * sqrt(1 - alpha_{t+1} / alpha_t)
 
         Note:
             t+1 = previous time step
             t = current time step
 
-        """
+        """ # noqa: E501
         # diffusion times -> angles
         start_angle = ops.cast(ops.arccos(self.max_signal_rate), "float32")
         end_angle = ops.cast(ops.arccos(self.min_signal_rate), "float32")

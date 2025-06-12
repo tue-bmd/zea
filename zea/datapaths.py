@@ -173,7 +173,7 @@ def _load_users_yaml(user_config, local, username, hostname):
 
         try:
             create_new_user(local=local)
-        except:
+        except Exception:
             log.warning(
                 f"Could not create user profile for {username} on {hostname}, using default."
             )

@@ -285,23 +285,23 @@ def backend_cuda_available(backend):
     if backend == "torch":
         try:
             import torch  # pylint: disable=import-outside-toplevel
-        except:
+        except Exception:
             return False
         return torch.cuda.is_available()
     if backend == "tensorflow":
         try:
             import tensorflow as tf  # pylint: disable=import-outside-toplevel
-        except:
+        except Exception:
             return False
         return bool(tf.config.list_physical_devices("GPU"))
     if backend == "jax":
         try:
             import jax  # pylint: disable=import-outside-toplevel
-        except:
+        except Exception:
             return False
         try:
             return bool(jax.devices("gpu"))
-        except:
+        except Exception:
             return False
     return False
 
@@ -342,7 +342,7 @@ def set_memory_growth_tf():
     """Attempts to allocate only as much GPU memory as needed for the runtime allocations"""
     try:
         import tensorflow as tf  # pylint: disable=import-outside-toplevel
-    except:
+    except Exception:
         return
 
     try:

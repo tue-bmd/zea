@@ -207,7 +207,7 @@ def test_to_tensor_only_computed(dummy_params):
 
 
 def test_to_tensor_partial_computed_subset(dummy_params):
-    """Test that to_tensor(compute_missing=True, compute_keys=[...]) only computes the requested subset."""
+    """Test that to_tensor only computes the requested subset."""
     # Access no computed properties yet
     tensors = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1"])
     # Only computed1 should be present (besides direct params)

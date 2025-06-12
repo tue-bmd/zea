@@ -40,7 +40,7 @@ def setup():
 
     _check_backend_installed()
 
-    import keras  # pylint: disable=import-outside-toplevel
+    import keras
 
     log.info(f"Using backend {keras.backend.backend()!r}")
 
@@ -49,7 +49,6 @@ def setup():
 setup()
 del setup
 
-# Main (isort: split)
 from .config import Config
 from .data.datasets import Dataset, Folder
 from .data.file import File, load_file
