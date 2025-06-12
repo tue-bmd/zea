@@ -1,6 +1,6 @@
 """Huggingface hub (hf) tooling."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from huggingface_hub import HfApi, login, snapshot_download
 
@@ -98,3 +98,56 @@ def upload_folder_to_hf(
         log.info(log.yellow(msg))
 
     return f"https://huggingface.co/{repo_id}"
+
+
+class HFPath(PurePosixPath):
+    """A path-like object that preserves the hf:// scheme and mimics Path API."""
+
+    _scheme = "hf://"
+
+    def __new__(cls, uri):
+        if isinstance(uri, HFPath):
+            return uri
+        uri = str(uri)
+        if uri.startswith(cls._scheme):
+            # Remove the scheme for internal representation
+            obj = super().__new__(cls, uri[len(cls._scheme) :])
+            obj._hf_scheme = True
+        else:
+            obj = super().__new__(cls, uri)
+            obj._hf_scheme = False
+        return obj
+
+    def __str__(self):
+        if getattr(self, "_hf_scheme", False):
+            return self._scheme + super().__str__()
+        return super().__str__()
+
+    def __fspath__(self):
+        return str(self)
+
+    def __truediv__(self, key):
+        result = super().__truediv__(key)
+        if getattr(self, "_hf_scheme", False):
+            result._hf_scheme = True
+        return result
+
+    @property
+    def name(self):
+        return super().name
+
+    @property
+    def parent(self):
+        p = super().parent
+        if getattr(self, "_hf_scheme", False):
+            p._hf_scheme = True
+        return p
+
+    @property
+    def parts(self):
+        if getattr(self, "_hf_scheme", False):
+            return (self._scheme,) + super().parts
+        return super().parts
+
+    def as_posix(self):
+        return str(self)

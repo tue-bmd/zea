@@ -49,6 +49,7 @@ from zea.data.preset_utils import (
 )
 from zea.datapaths import format_data_path
 from zea.io_lib import search_file_tree
+from zea.tools.hf import HFPath
 from zea.utils import (
     calculate_file_hash,
     date_string_to_readable,
@@ -142,7 +143,7 @@ def find_h5_files(
     file_shapes = []
     file_paths = []
     for path in paths:
-        if isinstance(path, (str, Path)) and str(path).startswith(HF_PREFIX):
+        if isinstance(path, (str, Path, HFPath)) and str(path).startswith(HF_PREFIX):
             # Let File handle HF path resolution
             resolved = _hf_resolve_path(str(path))
             path = resolved
@@ -182,7 +183,7 @@ class Folder:
         **kwargs,
     ):
         # Hugging Face support
-        if isinstance(folder_path, (str, Path)):
+        if isinstance(folder_path, (str, Path, HFPath)):
             folder_path_str = str(folder_path)
             if folder_path_str.startswith(HF_PREFIX):
                 # Only resolve to local dir if it's a directory, else let File handle it
@@ -418,7 +419,7 @@ class Dataset(H5FileHandleCache):
             paths = [paths]
 
         for file_path in paths:
-            if isinstance(file_path, (str, Path)):
+            if isinstance(file_path, (str, Path, HFPath)):
                 if Path(file_path).is_dir() or str(file_path).startswith(HF_PREFIX):
                     folder = Folder(
                         file_path, self.key, self.search_file_tree_kwargs, self.validate
@@ -503,6 +504,12 @@ class Dataset(H5FileHandleCache):
                 file.close()
         self._file_handle_cache.clear()
         log.info("Closed all cached file handles.")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, **kwargs):  # pylint: disable=unused-argument
+        self.close()
 
 
 def split_files_by_directory(file_names, file_shapes, directory_list, directory_splits):
