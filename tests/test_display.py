@@ -27,9 +27,9 @@ def test_scan_conversion(size, resolution, order):
     Therefore tensorflow is not included in the backends. Maybe in the future we can check
     if the error is fixed with a new keras or tensorflow version.
     """
-    from keras import ops  # pylint: disable=reimported,import-outside-toplevel
+    from keras import ops
 
-    from zea import display  # pylint: disable=reimported,import-outside-toplevel
+    from zea import display
 
     rng = np.random.default_rng(42)
     data = rng.random(size).astype(np.float32)
@@ -108,9 +108,9 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
         The allowed_error is set to 0.1 for concentric rings because the MSE is
         expected to be higher due to the nature of the pattern.
     """
-    from keras import ops  # pylint: disable=reimported,import-outside-toplevel
+    from keras import ops
 
-    from zea import display  # pylint: disable=reimported,import-outside-toplevel
+    from zea import display
 
     if pattern_creator == "create_radial_pattern":
         polar_data = create_radial_pattern(size)
