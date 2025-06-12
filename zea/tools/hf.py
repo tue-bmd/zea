@@ -147,12 +147,15 @@ class HFPath(PurePosixPath):
     @property
     def repo_id(self):
         """Extract the repo ID (e.g., zeahub/camus-sample)."""
-        return f"{self.parts[0]}/{self.parts[1]}"
+        parts = [p for p in self.parts if p and p != "hf:"]
+        if len(parts) < 2:
+            raise ValueError("Invalid HFPath: cannot extract repo_id")
+        return f"{parts[0]}/{parts[1]}"
 
     @property
     def subpath(self):
         """Get path inside the repo."""
-        return "/".join(self.parts[2:])
+        return "/".join(self.parts[3:])
 
     def is_file(self):
         """Return True if this HFPath points to a file in the repo."""
