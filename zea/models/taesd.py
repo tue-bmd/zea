@@ -13,11 +13,7 @@ from keras import backend, ops
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
-from zea.models.presets import (
-    taesdxl_decoder_presets,
-    taesdxl_encoder_presets,
-    taesdxl_presets,
-)
+from zea.models.presets import taesdxl_decoder_presets, taesdxl_encoder_presets, taesdxl_presets
 
 
 @model_registry(name="taesdxl")
@@ -72,7 +68,7 @@ class TinyAutoencoder(BaseModel):
             decoded = ops.image.rgb_to_grayscale(decoded, data_format="channels_last")
         return decoded
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """Applies the full autoencoder to the input."""
         encoded = self.encode(inputs)
         # NOTE: Here you can compress the encoding a little bit more by going
@@ -81,7 +77,7 @@ class TinyAutoencoder(BaseModel):
         decoded = self.decode(encoded)
         return decoded
 
-    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
+    def custom_load_weights(self, preset, **kwargs):
         """Load the weights for the encoder and decoder."""
         self.encoder.custom_load_weights(preset)
         self.decoder.custom_load_weights(preset)
@@ -120,13 +116,11 @@ class TinyBase(BaseModel):
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
-            from zea.backend import tf2jax  # pylint: disable=import-outside-toplevel
+            from zea.backend import tf2jax
 
-            jax_func, jax_params = tf2jax.convert(  # pylint: disable=no-member
-                tf.function(self.network), inputs
-            )
+            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
-            def call_fn(params, state, rng, inputs, training):  # pylint: disable=unused-argument
+            def call_fn(params, state, rng, inputs, training):
                 return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
@@ -142,7 +136,7 @@ class TinyBase(BaseModel):
                 f"TensorFlow or Jax backend. You are using {backend.backend()}."
             )
 
-    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
+    def custom_load_weights(self, preset, **kwargs):
         """Load the weights for the encoder or decoder."""
         loader = get_preset_loader(preset)
 
@@ -152,7 +146,7 @@ class TinyBase(BaseModel):
         base_path = Path(filename).parent
         self.network = self._load_layer(base_path)
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """
         Applies the network to the input.
         """
@@ -204,16 +198,14 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
     if backend.backend() != "jax":
         return
 
-    import jax  # pylint: disable=import-outside-toplevel
-    import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+    import jax
+    import jax.numpy as jnp
 
-    from zea.backend import tf2jax  # pylint: disable=import-outside-toplevel
+    from zea.backend import tf2jax
 
     def _resize_nearest_neighbor(proto):
         """Parse a ResizeNearestNeighbor op."""
-        tf2jax._src.ops._check_attrs(  # pylint: disable=no-member
-            proto, {"T", "align_corners", "half_pixel_centers"}
-        )
+        tf2jax._src.ops._check_attrs(proto, {"T", "align_corners", "half_pixel_centers"})
 
         def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
             if len(images.shape) != 4:
@@ -234,9 +226,7 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
         return _func
 
     # hack to allow align_corners=True and half_pixel_centers=True
-    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = (  # pylint: disable=no-member
-        _resize_nearest_neighbor
-    )
+    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)
