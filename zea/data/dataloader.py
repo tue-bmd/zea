@@ -63,24 +63,22 @@ def generate_h5_indices(
 
             [
                 (
-                    '/folder/path_to_file.hdf5',
-                    'data/image',
-                    [range(0, 1), slice(None, 256, None), slice(None, 256, None)]
+                    "/folder/path_to_file.hdf5",
+                    "data/image",
+                    [range(0, 1), slice(None, 256, None), slice(None, 256, None)],
                 ),
                 (
-                    '/folder/path_to_file.hdf5',
-                    'data/image',
-                    [range(1, 2), slice(None, 256, None), slice(None, 256, None)]
+                    "/folder/path_to_file.hdf5",
+                    "data/image",
+                    [range(1, 2), slice(None, 256, None), slice(None, 256, None)],
                 ),
-                ...
+                ...,
             ]
     """
     if not limit_n_frames:
         limit_n_frames = np.inf
 
-    assert len(file_paths) == len(
-        file_shapes
-    ), "file_paths and file_shapes must have same length"
+    assert len(file_paths) == len(file_shapes), "file_paths and file_shapes must have same length"
 
     if additional_axes_iter:
         # cannot contain initial_frame_axis
@@ -126,9 +124,7 @@ def generate_h5_indices(
 
     indices = []
     skipped_files = 0
-    for file, shape, axis_indices in zip(
-        file_paths, file_shapes, list(axis_indices_files())
-    ):
+    for file, shape, axis_indices in zip(file_paths, file_shapes, list(axis_indices_files())):
         # remove all the files that have empty list at initial_frame_axis
         # this can happen if the file is too small to fit a block
         if not axis_indices[0]:  # initial_frame_axis is the first entry in axis_indices
@@ -226,12 +222,10 @@ class H5Generator(Dataset):
         self.seed = seed
         self.additional_axes_iter = additional_axes_iter or []
 
-        assert (
-            self.frame_index_stride > 0
-        ), f"`frame_index_stride` must be greater than 0, got {self.frame_index_stride}"
-        assert (
-            self.n_frames > 0
-        ), f"`n_frames` must be greater than 0, got {self.n_frames}"
+        assert self.frame_index_stride > 0, (
+            f"`frame_index_stride` must be greater than 0, got {self.frame_index_stride}"
+        )
+        assert self.n_frames > 0, f"`n_frames` must be greater than 0, got {self.n_frames}"
 
         # Extract some general information about the dataset
         image_shapes = np.array(self.file_shapes)

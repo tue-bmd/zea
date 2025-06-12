@@ -49,30 +49,22 @@ def _img_dir_to_h5_dir(
     # Select only image files
     img_files = list(
         filter(
-            lambda path: any(
-                path.lower().endswith(ext) for ext in _SUPPORTED_IMG_TYPES
-            ),
+            lambda path: any(path.lower().endswith(ext) for ext in _SUPPORTED_IMG_TYPES),
             files,
         )
     )
 
     # Group and sort the frames, if patterns are present
     get_group = lambda path: group_pattern.match(path)[1]
-    get_rank = lambda path: (
-        int(sort_pattern.match(path)[1]) if sort_pattern is not None else 0
-    )
+    get_rank = lambda path: (int(sort_pattern.match(path)[1]) if sort_pattern is not None else 0)
     grouped_sorted_files = [
-        (parent, sorted(child, key=get_rank))
-        for parent, child in groupby(img_files, key=get_group)
+        (parent, sorted(child, key=get_rank)) for parent, child in groupby(img_files, key=get_group)
     ]
 
     # Convert each group of images to a stacked np array and save as hdf5
     for group_id, imgs_in_group in grouped_sorted_files:
         frames = np.vstack(
-            [
-                load_image(Path(current_dir) / img_file)[None, ...]
-                for img_file in imgs_in_group
-            ]
+            [load_image(Path(current_dir) / img_file)[None, ...] for img_file in imgs_in_group]
         )
 
         new_h5_file_path = new_dir_path / f"{group_id}.hdf5"
@@ -126,9 +118,9 @@ def convert_image_dataset(
                 sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
             )
     """
-    assert os.path.exists(
-        existing_dataset_root
-    ), f"The directory '{existing_dataset_root}' does not exist."
+    assert os.path.exists(existing_dataset_root), (
+        f"The directory '{existing_dataset_root}' does not exist."
+    )
 
     for current_dir, _, files in os.walk(existing_dataset_root):
         print(f"Mapping {current_dir}")

@@ -83,9 +83,7 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
 
     # Find indices of first and last non-zero element along x axis (for every horizontal line)
     non_zeros_left = find_first_nonzero_index(polar_image, 1)
-    non_zeros_right = width - find_first_nonzero_index(
-        np.flip(polar_image, 1), 1, width_middle
-    )
+    non_zeros_right = width - find_first_nonzero_index(np.flip(polar_image, 1), 1, width_middle)
 
     # Remove any black horizontal lines (rows) that do not contain image data
     remove_horizontal_lines = np.max(np.where(non_zeros_left == -1)) + 1
@@ -94,15 +92,11 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
     non_zeros_right = non_zeros_right[remove_horizontal_lines:]
 
     if fit_outline:
-        model_fitted_left = np.poly1d(
-            np.polyfit(range(len(non_zeros_left)), non_zeros_left, 2)
-        )
+        model_fitted_left = np.poly1d(np.polyfit(range(len(non_zeros_left)), non_zeros_left, 2))
         non_zeros_left = model_fitted_left(range(len(non_zeros_left)))
         non_zeros_left = non_zeros_left.round().astype(np.int64)
 
-        model_fitted_right = np.poly1d(
-            np.polyfit(range(len(non_zeros_right)), non_zeros_right, 2)
-        )
+        model_fitted_right = np.poly1d(np.polyfit(range(len(non_zeros_right)), non_zeros_right, 2))
         non_zeros_right = model_fitted_right(range(len(non_zeros_right)))
         non_zeros_right = non_zeros_right.round().astype(np.int64)
 
@@ -115,12 +109,8 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
             polar_image[y_i, :] = polar_image[y_i, width_middle]
         else:
             # Perform linear interpolation to stretch the line to the desired width.
-            array_interp = scipy.interpolate.interp1d(
-                np.arange(small_array.size), small_array
-            )
-            polar_image[y_i, :] = array_interp(
-                np.linspace(0, small_array.size - 1, width)
-            )
+            array_interp = scipy.interpolate.interp1d(np.arange(small_array.size), small_array)
+            polar_image[y_i, :] = array_interp(np.linspace(0, small_array.size - 1, width))
 
     # Resize image to output_size
     return resize(polar_image, output_size, preserve_range=True)
@@ -230,9 +220,7 @@ def get_split(patient_id: int) -> str:
 
 if __name__ == "__main__":
     if importlib.util.find_spec("SimpleITK") is None:
-        log.error(
-            "SimpleITK not installed. Please install SimpleITK: `pip install SimpleITK`"
-        )
+        log.error("SimpleITK not installed. Please install SimpleITK: `pip install SimpleITK`")
         sys.exit()
     import SimpleITK as sitk
 
@@ -243,9 +231,7 @@ if __name__ == "__main__":
 
     # check if output folders already exist
     for split in splits:
-        assert not (
-            camus_output_folder / split
-        ).exists(), (
+        assert not (camus_output_folder / split).exists(), (
             f"Output folder {camus_output_folder / split} exists. Exiting program."
         )
 
@@ -261,9 +247,7 @@ if __name__ == "__main__":
         patient_id = int(patient.removeprefix("patient"))
         split = get_split(patient_id)
 
-        output_file = (
-            camus_output_folder / split / source_file.relative_to(camus_source_folder)
-        )
+        output_file = camus_output_folder / split / source_file.relative_to(camus_source_folder)
 
         # Replace .nii.gz with .hdf5
         output_file = output_file.with_suffix("").with_suffix(".hdf5")

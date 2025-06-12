@@ -163,9 +163,7 @@ def compute_pfield(
     wc = 2 * np.pi * center_frequency
 
     def pulse_spectrum(w):
-        imag = _abs_sinc(pulse_width * (w - wc) / 2) - _abs_sinc(
-            pulse_width * (w + wc) / 2
-        )
+        imag = _abs_sinc(pulse_width * (w - wc) / 2) - _abs_sinc(pulse_width * (w + wc) / 2)
         return 1j * ops.cast(imag, "complex64")
 
     # FREQUENCY RESPONSE of the ensemble PZT + probe
@@ -249,9 +247,7 @@ def compute_pfield(
         exp_df = ops.exp((-dkwa + 1j * dkw) * r_complex)
 
         exp_arr = exp_arr / ops.sqrt(r_complex)
-        exp_arr = exp_arr * ops.cast(
-            ops.min(ops.sqrt(r)), "complex64"
-        )  # normalize the field
+        exp_arr = exp_arr * ops.cast(ops.min(ops.sqrt(r)), "complex64")  # normalize the field
 
         center_wavenumber = 2 * np.pi * center_frequency / sound_speed
         directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
@@ -274,9 +270,7 @@ def compute_pfield(
         p = ops.reshape(ops.sqrt(rp), size_downsampled)
 
         # resize p to exactly the original grid size
-        p = ops.squeeze(
-            ops.image.resize(p[..., None], size_orig, interpolation="nearest"), axis=-1
-        )
+        p = ops.squeeze(ops.image.resize(p[..., None], size_orig, interpolation="nearest"), axis=-1)
 
         p_list.append(p)
 
@@ -358,10 +352,7 @@ def _pfield_freq_step(
         rp_k (Tensor): Pressure field for this frequency.
     """
     kw = 2 * np.pi * freq[k] / sound_speed
-    del_apod = (
-        ops.exp(1j * ops.cast(kw * sound_speed * delays_tx, "complex64"))
-        * tx_apodization
-    )
+    del_apod = ops.exp(1j * ops.cast(kw * sound_speed * delays_tx, "complex64")) * tx_apodization
     rp_k = ops.matmul(rp_mono, del_apod) * pulse_spect[k] * probe_spect[k]
     rp_k = ops.where(z < 0, 0, rp_k)
     return ops.abs(rp_k) ** 2

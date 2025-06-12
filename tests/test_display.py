@@ -61,9 +61,7 @@ def test_scan_conversion(size, resolution, order):
     assert isinstance(params, dict), "params is not a dict"
 
     # Check that dtype was not changed
-    assert ops.dtype(out) == ops.dtype(
-        data
-    ), "output dtype is not the same as input dtype"
+    assert ops.dtype(out) == ops.dtype(data), "output dtype is not the same as input dtype"
 
     out = ops.convert_to_numpy(out)
 
@@ -132,9 +130,7 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
     mean_squared_error = ((polar_data - cartesian_data_inv) ** 2).mean()
 
-    assert (
-        mean_squared_error < allowed_error
-    ), f"MSE is too high: {mean_squared_error:.4f}"
+    assert mean_squared_error < allowed_error, f"MSE is too high: {mean_squared_error:.4f}"
 
     return cartesian_data_inv
 
@@ -180,18 +176,14 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     left_padding = ops.zeros((ops.shape(cartesian_data)[0], 20))
     cartesian_data_padded = ops.concatenate([left_padding, cartesian_data], axis=1)
     top_padding = ops.zeros((20, ops.shape(cartesian_data_padded)[1]))
-    cartesian_data_padded = ops.concatenate(
-        [top_padding, cartesian_data_padded], axis=0
-    )
+    cartesian_data_padded = ops.concatenate([top_padding, cartesian_data_padded], axis=0)
     cartesian_data_inv = display.inverse_scan_convert_2d(
         cartesian_data_padded, output_size=polar_data.shape, find_scan_cone=True
     )
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
     mean_squared_error = ((polar_data - cartesian_data_inv) ** 2).mean()
 
-    assert (
-        mean_squared_error < allowed_error
-    ), f"MSE is too high: {mean_squared_error:.4f}"
+    assert mean_squared_error < allowed_error, f"MSE is too high: {mean_squared_error:.4f}"
 
     return cartesian_data_inv
 
@@ -212,10 +204,7 @@ def test_converting_to_image(size, dynamic_range):
     else:
         _dynamic_range = dynamic_range
 
-    data = (
-        np.random.random(size) * (_dynamic_range[1] - _dynamic_range[0])
-        + _dynamic_range[0]
-    )
+    data = np.random.random(size) * (_dynamic_range[1] - _dynamic_range[0]) + _dynamic_range[0]
     _data = display.to_8bit(data, dynamic_range, pillow=False)
     assert np.all(np.logical_and(_data >= 0, _data <= 255))
     assert _data.dtype == "uint8"

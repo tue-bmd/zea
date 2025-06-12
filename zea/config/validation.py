@@ -68,9 +68,7 @@ postprocess_schema = Schema(
             {
                 Optional("percentile", default=None): Or(None, percentage),
                 Optional("threshold", default=None): Or(None, any_number),
-                Optional("fill_value", default="min"): Or(
-                    "min", "max", "threshold", any_number
-                ),
+                Optional("fill_value", default="min"): Or("min", "max", "threshold", any_number),
                 Optional("below_threshold", default=True): bool,
                 Optional("threshold_type", default="hard"): Or("hard", "soft"),
             },
@@ -103,9 +101,7 @@ scan_schema = Schema(
         Optional("f_number", default=None): Or(None, positive_float),
         Optional("apply_lens_correction", default=False): bool,
         Optional("lens_thickness", default=1e-3): positive_float,
-        Optional("lens_sound_speed", default=1000): Or(
-            positive_float, positive_integer
-        ),
+        Optional("lens_sound_speed", default=1000): Or(positive_float, positive_integer),
         Optional("theta_range", default=None): Or(None, list_of_size_two),
         Optional("phi_range", default=None): Or(None, list_of_size_two),
         Optional("rho_range", default=None): Or(None, list_of_size_two),
@@ -123,9 +119,7 @@ plot_schema = Schema(
         Optional("tag", default=None): Or(None, str),
         Optional("headless", default=False): bool,
         Optional("selector", default=None): Or(None, "rectangle", "lasso"),
-        Optional("selector_metric", default="gcnr"): Or(
-            *metrics_registry.registered_names()
-        ),
+        Optional("selector_metric", default="gcnr"): Or(*metrics_registry.registered_names()),
         Optional("fliplr", default=False): bool,
         Optional("image_extension", default="png"): Or("png", "jpg"),
         Optional("video_extension", default="gif"): Or("mp4", "gif"),

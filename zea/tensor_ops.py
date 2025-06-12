@@ -32,9 +32,9 @@ def split_seed(seed, n):
 
     # For other backends, we have to use Keras SeedGenerator
     else:
-        assert isinstance(
-            seed, keras.random.SeedGenerator
-        ), "seed must be a SeedGenerator when not using JAX."
+        assert isinstance(seed, keras.random.SeedGenerator), (
+            "seed must be a SeedGenerator when not using JAX."
+        )
 
         # Just duplicate the SeedGenerator
         return [seed for _ in range(n)]
@@ -45,9 +45,7 @@ def is_jax_prng_key(x):
     if keras.backend.backend() == "jax":
         import jax  # pylint: disable=import-outside-toplevel
 
-        return (
-            isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
-        )
+        return isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
     else:
         return False
 
@@ -109,12 +107,12 @@ def extend_n_dims(arr, axis, n_dims):
     Raises:
         AssertionError: If the axis is out of range.
     """
-    assert axis <= ops.ndim(
-        arr
-    ), "Axis must be less than or equal to the number of dimensions in the array"
-    assert (
-        axis >= -ops.ndim(arr) - 1
-    ), "Axis must be greater than or equal to the negative number of dimensions minus 1"
+    assert axis <= ops.ndim(arr), (
+        "Axis must be less than or equal to the number of dimensions in the array"
+    )
+    assert axis >= -ops.ndim(arr) - 1, (
+        "Axis must be greater than or equal to the negative number of dimensions minus 1"
+    )
     axis = ops.ndim(arr) + axis + 1 if axis < 0 else axis
 
     # Get the current shape of the array
@@ -313,9 +311,7 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     x_centered = x - mean_x
 
     # Compute the covariance using einsum
-    cov_matrices = ops.einsum("...ik,...jk->...ij", x_centered, x_centered) / (
-        num_obs - ddof
-    )
+    cov_matrices = ops.einsum("...ik,...jk->...ij", x_centered, x_centered) / (num_obs - ddof)
     return cov_matrices
 
 
@@ -359,9 +355,7 @@ def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
     # Ensure all batch kwargs have the same leading dimension as xs.
     if batch_kwargs:
         assert all(
-            ops.shape(xs)[0] == ops.shape(v)[0]
-            for v in batch_kwargs.values()
-            if v is not None
+            ops.shape(xs)[0] == ops.shape(v)[0] for v in batch_kwargs.values() if v is not None
         ), "All batch kwargs must have the same first dimension size as xs."
 
     total = ops.shape(xs)[0]
@@ -406,9 +400,7 @@ def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
             reshaped_kwargs[k] = None
         else:
             v_padded = pad_array_to_divisible(v, batch_size, axis=0)
-            reshaped_kwargs[k] = ops.reshape(
-                v_padded, (-1, batch_size) + ops.shape(v_padded)[1:]
-            )
+            reshaped_kwargs[k] = ops.reshape(v_padded, (-1, batch_size) + ops.shape(v_padded)[1:])
 
     batched_f = create_batched_f(list(reshaped_kwargs.keys()))
     out = ops.map(batched_f, (xs_reshaped, *reshaped_kwargs.values()))
@@ -488,9 +480,9 @@ def interpolate_data(subsampled_data, mask, order=1, axis=-1):
         raise ValueError("Mask does not indicate any missing data.")
 
     # make sure subsampled data corresponds with number of 1s in the mask
-    assert len(ops.where(mask)[0]) == ops.prod(
-        subsampled_data.shape
-    ), "Subsampled data does not match the number of 1s in the mask."
+    assert len(ops.where(mask)[0]) == ops.prod(subsampled_data.shape), (
+        "Subsampled data does not match the number of 1s in the mask."
+    )
 
     assert subsampled_data.ndim == 1, "Subsampled data should be a flattened 1D array"
 
@@ -599,9 +591,7 @@ def map_indices_for_interpolation(indices):
     """
     indices = ops.array(indices, dtype="int32")
 
-    assert is_monotonic(
-        indices, increasing=True
-    ), "Indices should be monotonically increasing"
+    assert is_monotonic(indices, increasing=True), "Indices should be monotonically increasing"
 
     gap_starts = ops.where(indices[1:] - indices[:-1] > 1)[0]
     gap_starts = ops.concatenate([ops.array([0]), gap_starts + 1], axis=0)
@@ -673,9 +663,7 @@ def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number:
     return data
 
 
-def split_volume_data_from_axis(
-    data, batch_axis: int, stack_axis: int, number: int, padding: int
-):
+def split_volume_data_from_axis(data, batch_axis: int, stack_axis: int, number: int, padding: int):
     """Splits previously stacked tensor data back to its original shape.
 
     This function reverses the operation performed by `stack_volume_data_along_axis`.
@@ -732,13 +720,11 @@ def compute_required_patch_overlap(image_shape, patch_shape):
         given the image and patch shapes.
     """
     assert len(image_shape) == 2, "image_shape must be a tuple of (height, width)"
-    assert (
-        len(patch_shape) == 2
-    ), "patch_shape must be a tuple of (patch_height, patch_width)"
+    assert len(patch_shape) == 2, "patch_shape must be a tuple of (patch_height, patch_width)"
 
-    assert all(
-        image_shape[i] >= patch_shape[i] for i in range(2)
-    ), "patch_shape must be equal or smaller than image_shape"
+    assert all(image_shape[i] >= patch_shape[i] for i in range(2)), (
+        "patch_shape must be equal or smaller than image_shape"
+    )
 
     image_y, image_x = image_shape
     patch_y, patch_x = patch_shape
@@ -791,9 +777,9 @@ def compute_required_patch_shape(image_shape, patch_shape, overlap):
     new_patch_y = compute_patch_size(image_y, patch_y, overlap_y)
     new_patch_x = compute_patch_size(image_x, patch_x, overlap_x)
 
-    if (image_y - new_patch_y) % (new_patch_y - overlap_y) != 0 or (
-        image_x - new_patch_x
-    ) % (new_patch_x - overlap_x) != 0:
+    if (image_y - new_patch_y) % (new_patch_y - overlap_y) != 0 or (image_x - new_patch_x) % (
+        new_patch_x - overlap_x
+    ) != 0:
         return None
 
     return new_patch_y, new_patch_x
@@ -839,9 +825,7 @@ def check_patches_fit(
             (image_x - patch_x) // stride_x * stride_x + patch_x,
         )
         # new_patch_shape = tuple(map(int, new_patch_shape))
-        new_patch_shape = compute_required_patch_shape(
-            image_shape, patch_shape, overlap
-        )
+        new_patch_shape = compute_required_patch_shape(image_shape, patch_shape, overlap)
 
         # Calculate new overlap only if we have more than one patch
         new_overlap = compute_required_patch_overlap(image_shape, patch_shape)
@@ -885,15 +869,15 @@ def images_to_patches(
         >>> patches.shape
         (2, 3, 3, 4, 4, 3)
     """
-    assert (
-        len(images.shape) == 4
-    ), f"input array should have 4 dimensions, but has {len(images.shape)} dimensions"
-    assert (
-        isinstance(patch_shape, int) or len(patch_shape) == 2
-    ), f"patch_shape should be an integer or a tuple of length 2, but is {patch_shape}"
-    assert (
-        isinstance(overlap, (int, type(None))) or len(overlap) == 2
-    ), f"overlap should be an integer or a tuple of length 2, but is {overlap}"
+    assert len(images.shape) == 4, (
+        f"input array should have 4 dimensions, but has {len(images.shape)} dimensions"
+    )
+    assert isinstance(patch_shape, int) or len(patch_shape) == 2, (
+        f"patch_shape should be an integer or a tuple of length 2, but is {patch_shape}"
+    )
+    assert isinstance(overlap, (int, type(None))) or len(overlap) == 2, (
+        f"overlap should be an integer or a tuple of length 2, but is {overlap}"
+    )
 
     batch_size, *image_shape, n_channels = images.shape
 
@@ -967,9 +951,7 @@ def patches_to_images(
         (2, 8, 8, 3)
     """
     # Input validation
-    assert (
-        len(image_shape) == 3
-    ), "image_shape must have 3 dimensions: (height, width, channels)."
+    assert len(image_shape) == 3, "image_shape must have 3 dimensions: (height, width, channels)."
     assert len(patches.shape) == 6, (
         "patches must have 6 dimensions: [batch_size, n_patch_y, n_patch_x, "
         "patch_size_y, patch_size_x, n_channels]."
@@ -1076,9 +1058,7 @@ def _gaussian_filter1d(array, kernel, radius, cval=None, axis=-1, mode="symmetri
     length = orig_shape[-1]
 
     # Collapse all non-convolution dimensions into the batch.
-    reshaped = ops.reshape(
-        moved, (-1, length, 1)
-    )  # shape: (batch, length, in_channels=1)
+    reshaped = ops.reshape(moved, (-1, length, 1))  # shape: (batch, length, in_channels=1)
 
     # Reshape kernel for convolution: expected shape (kernel_size, in_channels, out_channels)
     kernel_size = kernel.shape[0]
@@ -1101,9 +1081,7 @@ def _gaussian_filter1d(array, kernel, radius, cval=None, axis=-1, mode="symmetri
     return result
 
 
-def gaussian_filter1d(
-    array, sigma, axis=-1, order=0, mode="symmetric", truncate=4.0, cval=None
-):
+def gaussian_filter1d(array, sigma, axis=-1, order=0, mode="symmetric", truncate=4.0, cval=None):
     """1-D Gaussian filter.
 
     Args:
@@ -1228,9 +1206,7 @@ def resample(x, n_samples, axis=-2, order=1):
 
     # Create sampling grid
     batch_coords = ops.arange(batch_size, dtype="float32")  # (batch_size,)
-    new_coords = ops.linspace(
-        0.0, ops.cast(old_n - 1, dtype="float32"), n_samples
-    )  # (n_samples,)
+    new_coords = ops.linspace(0.0, ops.cast(old_n - 1, dtype="float32"), n_samples)  # (n_samples,)
     other_coords = [ops.arange(d, dtype="float32") for d in other_dims]
 
     # Meshgrid
@@ -1309,7 +1285,9 @@ def sinc(x, eps=keras.config.epsilon()):
 if keras.backend.backend() == "tensorflow":
 
     def safe_vectorize(
-        pyfunc, excluded=None, signature=None  # pylint: disable=unused-argument
+        pyfunc,
+        excluded=None,
+        signature=None,  # pylint: disable=unused-argument
     ):
         """Just a wrapper around ops.vectorize.
 
