@@ -118,12 +118,9 @@ class Config(dict):
     def items(self):
         """Returns a list containing a tuple for each key value pair"""
         # Use a generator that calls __getitem__ for every key
-        return [
-            (key, self[key])
-            for key in self.keys()  # pylint: disable=consider-using-dict-items
-        ]
+        return [(key, self[key]) for key in self.keys()]
 
-    def keys(self):  # pylint: disable=useless-parent-delegation
+    def keys(self):
         """Returns a list containing the config's keys"""
         return super().keys()
 
@@ -197,10 +194,7 @@ class Config(dict):
     def values(self):
         """Returns a list of all the values in the config"""
         # Use __getitem__ to get values
-        return (
-            self[key]
-            for key in self.keys()  # pylint: disable=consider-using-dict-items
-        )
+        return (self[key] for key in self.keys())
 
     def __or__(self, other):
         """

@@ -299,7 +299,7 @@ class Interface:
         elif self.plot_lib == "opencv":
             self.image_viewer.show(data)
             if not self.headless and block:
-                self.image_viewer._cv2.waitKey(0)  # pylint: disable=no-member
+                self.image_viewer._cv2.waitKey(0)
             self.save_image(self.image)
             return self.image
 
@@ -419,7 +419,6 @@ class Interface:
                     # For opencv, show frame for 25 ms and check if "q" is pressed
                     if not self.headless:
                         if self.plot_lib == "opencv":
-                            # pylint: disable=no-member
                             if self.image_viewer._cv2.waitKey(25) & 0xFF == ord("q"):
                                 self.image_viewer.close()
                                 return images
