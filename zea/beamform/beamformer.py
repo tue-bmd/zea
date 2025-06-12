@@ -150,7 +150,6 @@ def calculate_delays(
     n_el,
     focus_distances,
     polar_angles,
-    # pylint: disable=unused-argument
     **kwargs,
 ):
     """Calculates the delays in samples to every pixel in the grid.

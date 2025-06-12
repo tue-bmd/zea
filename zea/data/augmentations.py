@@ -6,8 +6,6 @@ from keras import layers, ops
 
 from zea.tensor_ops import is_jax_prng_key, split_seed
 
-# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
-
 
 class RandomCircleInclusion(layers.Layer):
     """

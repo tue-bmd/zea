@@ -156,11 +156,11 @@ def generate_h5_indices(
 
 def _h5_reopen_on_io_error(
     dataloader_obj: H5FileHandleCache,
-    file,  # pylint: disable=unused-argument
-    key,  # pylint: disable=unused-argument
+    file,
+    key,
     indices,
     retry_count,
-    **kwargs,  # pylint: disable=unused-argument
+    **kwargs,
 ):
     """Reopen the file if an I/O error occurs.
     Also removes the file from the cache and try to close file.
@@ -372,7 +372,7 @@ class H5Generator(Dataset):
         """Generator that yields images from the hdf5 files."""
         if self.shuffle:
             self._shuffle()
-        for idx in range(len(self)):  # pylint: disable=consider-using-enumerate
+        for idx in range(len(self)):
             yield self[idx]
 
     def __iter__(self):

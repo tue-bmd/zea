@@ -203,7 +203,7 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
         # Generate palette from all frames
         global_palette = combined_image.quantize(
             colors=256,
-            method=Image.MEDIANCUT,  # pylint: disable=no-member
+            method=Image.MEDIANCUT,
             kmeans=1,
         )
 
@@ -211,7 +211,7 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
         pillow_imgs = [
             img.convert("RGB").quantize(
                 palette=global_palette,
-                dither=Image.NONE,  # pylint: disable=no-member
+                dither=Image.NONE,
             )
             for img in pillow_imgs
         ]
@@ -255,7 +255,7 @@ def save_to_mp4(images, filename, fps=20):
         raise FileNotFoundError(f"Directory '{parent_dir}' does not exist.")
 
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required to save MP4 files. "
