@@ -100,9 +100,9 @@ class Scan(Parameters):
         # beamforming related parameters
         "Nx": {"type": int, "default": None},
         "Nz": {"type": int, "default": None},
-        "xlims": {"type": tuple, "default": None},
-        "ylims": {"type": tuple, "default": None},
-        "zlims": {"type": tuple, "default": None},
+        "xlims": {"type": (tuple, list), "default": None},
+        "ylims": {"type": (tuple, list), "default": None},
+        "zlims": {"type": (tuple, list), "default": None},
         "pixels_per_wavelength": {"type": int, "default": 4},
         "downsample": {"type": int, "default": 1},
         "resolution": {"type": float, "default": None},
@@ -133,9 +133,9 @@ class Scan(Parameters):
         "initial_times": {"type": np.ndarray, "default": None},
         "time_to_next_transmit": {"type": np.ndarray, "default": None},
         # scan conversion parameters
-        "theta_range": {"type": tuple, "default": None},
-        "phi_range": {"type": tuple, "default": None},
-        "rho_range": {"type": tuple, "default": None},
+        "theta_range": {"type": (tuple, list), "default": None},
+        "phi_range": {"type": (tuple, list), "default": None},
+        "rho_range": {"type": (tuple, list), "default": None},
         "fill_value": {"type": float, "default": 0.0},
     }
 
@@ -221,7 +221,7 @@ class Scan(Parameters):
         """The beamforming grid of shape (Nz*Nx, 3)."""
         return self.grid.reshape(-1, 3)
 
-    @property
+    @cache_with_dependencies("n_tx")
     def selected_transmits(self):
         """Get the currently selected transmit indices.
 
@@ -248,14 +248,9 @@ class Scan(Parameters):
 
     def _invalidate_selected_transmits(self):
         """Explicitly invalidate the selected_transmits cache and its dependents."""
-        # Invalidate selected_transmits itself
-        if "selected_transmits" in self._cache:
-            self._cache.pop("selected_transmits")
-            self._computed.discard("selected_transmits")
-            # Also explicitly invalidate all dependents
-            self._invalidate_dependents("selected_transmits")
-        # Invalidate all properties that depend on selected_transmits
         for key in [
+            "selected_transmits",
+            # also invalidate properties that depend on selected_transmits
             "polar_angles",
             "azimuth_angles",
             "t0_delays",
@@ -375,7 +370,8 @@ class Scan(Parameters):
         """The polar angles of transmits in radians."""
         value = self._params.get("polar_angles")
         if value is None:
-            return None
+            log.warning("No polar angles provided, using zeros")
+            value = np.zeros(self.n_tx_total)
 
         return value[self.selected_transmits]
 
@@ -384,7 +380,8 @@ class Scan(Parameters):
         """The azimuth angles of transmits in radians."""
         value = self._params.get("azimuth_angles")
         if value is None:
-            return None
+            log.warning("No azimuth angles provided, using zeros")
+            value = np.zeros(self.n_tx_total)
 
         return value[self.selected_transmits]
 
@@ -393,7 +390,8 @@ class Scan(Parameters):
         """The transmit delays in seconds."""
         value = self._params.get("t0_delays")
         if value is None:
-            return None
+            log.warning("No transmit delays provided, using zeros")
+            return np.zeros((self.n_tx_total, self.n_el))
 
         return value[self.selected_transmits]
 
@@ -402,7 +400,8 @@ class Scan(Parameters):
         """The transmit apodizations."""
         value = self._params.get("tx_apodizations")
         if value is None:
-            return None
+            log.warning("No transmit apodizations provided, using ones")
+            value = np.ones((self.n_tx_total, self.n_el))
 
         return value[self.selected_transmits]
 
@@ -411,7 +410,8 @@ class Scan(Parameters):
         """The focus distances in meters."""
         value = self._params.get("focus_distances")
         if value is None:
-            return None
+            log.warning("No focus distances provided, using zeros")
+            value = np.zeros(self.n_tx_total)
 
         return value[self.selected_transmits]
 
@@ -420,7 +420,8 @@ class Scan(Parameters):
         """The initial times in seconds."""
         value = self._params.get("initial_times")
         if value is None:
-            return None
+            log.warning("No initial times provided, using zeros")
+            value = np.zeros(self.n_tx_total)
 
         return value[self.selected_transmits]
 
@@ -499,6 +500,10 @@ class Scan(Parameters):
         Uses the time it took to do all transmits (per frame). So if you only use some portion
         of the transmits, the fps will still be calculated based on all.
         """
+        if self.time_to_next_transmit is None:
+            log.warning("Time to next transmit is not set, cannot compute fps")
+            return None
+
         # Check if fps is constant
         uniq = np.unique(self.time_to_next_transmit, axis=0)  # frame axis
         if uniq.shape[0] != 1:
