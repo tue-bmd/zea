@@ -418,7 +418,6 @@ def interpolate_rectangles(rectangles, x_indices, y_indices):
     for values in [x1, x2, y1, y2]:
         values_interp.append(np.interp(y_indices, x_indices, values).astype(np.int32))
 
-    # pylint: disable=unbalanced-tuple-unpacking
     x1, x2, y1, y2 = values_interp
     new_rectangles = [((x1[i], y1[i]), (x2[i], y2[i])) for i in range(len(x1))]
     return new_rectangles

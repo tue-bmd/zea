@@ -143,7 +143,6 @@ class HFPath(PurePosixPath):
     @property
     def parent(self):
         p = super().parent
-        # pylint: disable=assigning-non-slot
         if getattr(self, "_hf_scheme", False):
             p._hf_scheme = True
         return p
