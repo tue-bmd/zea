@@ -40,7 +40,7 @@ def load_video(filename):
         ValueError: If the file extension is not supported.
     """
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required for video loading. "
@@ -90,7 +90,7 @@ def load_image(filename, grayscale=True, color_order="RGB"):
         ValueError: If the file extension is not supported.
     """
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required for image loading. "

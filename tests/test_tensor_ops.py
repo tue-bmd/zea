@@ -2,9 +2,6 @@
 Tests for the `tensor_ops` module.
 """
 
-# pylint: disable=import-outside-toplevel
-# pylint: disable=reimported
-
 import numpy as np
 import pytest
 import torch

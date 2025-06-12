@@ -25,7 +25,6 @@ def split_seed(seed, n):
 
     # If seed is a JAX key, split it into n keys
     if keras.backend.backend() == "jax":
-        # pylint: disable=import-outside-toplevel
         import jax
 
         return jax.random.split(seed, n)
@@ -43,7 +42,7 @@ def split_seed(seed, n):
 def is_jax_prng_key(x):
     """Distinguish between jax.random.PRNGKey() and jax.random.key()"""
     if keras.backend.backend() == "jax":
-        import jax  # pylint: disable=import-outside-toplevel
+        import jax
 
         return isinstance(x, jax.Array) and x.shape == (2,) and x.dtype == jax.numpy.uint32
     else:
@@ -223,12 +222,12 @@ def boolean_mask(tensor, mask, size=None):
         Tensor: The masked tensor.
     """
     if keras.backend.backend() == "jax" and size is not None:
-        import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+        import jax.numpy as jnp
 
         indices = jnp.where(mask, size=size)  # Fixed size allows Jax tracing
         return tensor[indices]
     elif keras.backend.backend() == "tensorflow":
-        import tensorflow as tf  # pylint: disable=import-outside-toplevel
+        import tensorflow as tf
 
         return tf.boolean_mask(tensor, mask)
     else:
@@ -236,7 +235,7 @@ def boolean_mask(tensor, mask, size=None):
 
 
 if keras.backend.backend() == "jax":
-    import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+    import jax.numpy as jnp
 
     def nonzero(x, size=None, fill_value=None):
         """Return the indices of the elements that are non-zero.
@@ -254,7 +253,7 @@ if keras.backend.backend() == "jax":
 
 else:
 
-    def nonzero(x, size=None, fill_value=None):  #  pylint: disable=unused-argument
+    def nonzero(x, size=None, fill_value=None):
         """Return the indices of the elements that are non-zero."""
         return ops.nonzero(x)
 
@@ -1164,9 +1163,9 @@ def gaussian_filter(
     if len(axes) > 0:
         for (
             axis,
-            sigma,  # pylint: disable=redefined-argument-from-local
-            order,  # pylint: disable=redefined-argument-from-local
-            mode,  # pylint: disable=redefined-argument-from-local
+            sigma,
+            order,
+            mode,
         ) in axes:
             output = gaussian_filter1d(array, sigma, axis, order, mode, truncate, cval)
             array = output
@@ -1287,7 +1286,7 @@ if keras.backend.backend() == "tensorflow":
     def safe_vectorize(
         pyfunc,
         excluded=None,
-        signature=None,  # pylint: disable=unused-argument
+        signature=None,
     ):
         """Just a wrapper around ops.vectorize.
 

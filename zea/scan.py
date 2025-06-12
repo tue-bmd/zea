@@ -1,17 +1,12 @@
 """Structure containing parameters defining an ultrasound scan."""
 
-# pylint: disable=too-many-public-methods
-
 import numpy as np
 from keras import ops
 
 from zea import log
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import check_for_aliasing, get_grid
-from zea.display import (
-    compute_scan_convert_2d_coordinates,
-    compute_scan_convert_3d_coordinates,
-)
+from zea.display import compute_scan_convert_2d_coordinates, compute_scan_convert_3d_coordinates
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
