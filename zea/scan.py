@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from keras import ops
 
-from zea import log
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import check_for_aliasing, get_grid
