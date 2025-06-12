@@ -2,11 +2,12 @@
 
 from pathlib import Path, PurePosixPath
 
-from huggingface_hub import HfApi, login, snapshot_download
+from huggingface_hub import HfApi, list_repo_files, login, snapshot_download
 
 from zea import log
 from zea.data.preset_utils import _hf_list_files, _hf_parse_path
 
+HF_PREFIX = "hf://"
 
 def load_model_from_hf(repo_id, revision="main", verbose=True):
     """
@@ -101,63 +102,57 @@ def upload_folder_to_hf(
     return f"https://huggingface.co/{repo_id}"
 
 
+
+
 class HFPath(PurePosixPath):
     """A path-like object that preserves the hf:// scheme and mimics Path API."""
 
-    _scheme = "hf://"
+    _scheme = HF_PREFIX
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the HFPath object."""
-        super().__init__(*args, **kwargs)
-        self._hf_scheme = False
-
-    def __new__(cls, uri):
-        if isinstance(uri, HFPath):
-            return uri
-        uri = str(uri)
-        if uri.startswith(cls._scheme):
-            # Remove the scheme for internal representation
-            obj = super().__new__(cls, uri[len(cls._scheme) :])
-            obj._hf_scheme = True
-        else:
-            obj = super().__new__(cls, uri)
-            obj._hf_scheme = False
-        return obj
+    def __new__(cls, *args):
+        # Strip "hf://" from all arguments and normalize
+        parts = []
+        for arg in args:
+            s = str(arg)
+            if s.startswith(cls._scheme):
+                s = s[len(cls._scheme):]
+            parts.append(s.strip("/"))
+        combined = "/".join(parts)
+        # Store path without scheme
+        self = super().__new__(cls, combined)
+        # Mark this as an HF path that needs a scheme when stringified
+        self._needs_scheme = True
+        return self
 
     def __str__(self):
-        if getattr(self, "_hf_scheme", False):
-            return self._scheme + super().__str__()
-        return super().__str__()
+        # Get the raw path string without any scheme
+        path_str = PurePosixPath.__str__(self)
 
-    def __fspath__(self):
-        return str(self)
+        # Remove any hf:/ prefix if it somehow got included
+        if path_str.startswith("hf:/"):
+            path_str = path_str[len("hf:/"):]
+
+        # Add our scheme prefix if this is meant to be an HF path
+        if getattr(self, "_needs_scheme", True):
+            return f"{self._scheme}{path_str}"
+        return path_str
 
     def __truediv__(self, key):
-        result = super().__truediv__(key)
-        if getattr(self, "_hf_scheme", False):
-            result._hf_scheme = True
-        return result
+        return self.__class__(self, key)
+
+    def joinpath(self, *args):
+        """Join paths like Path.joinpath but preserve the hf:// scheme."""
+        return self.__class__(self, *args)
 
     @property
-    def name(self):
-        return super().name
+    def repo_id(self):
+        """Extract the repo ID (e.g., zeahub/camus-sample)."""
+        return f"{self.parts[0]}/{self.parts[1]}"
 
     @property
-    def parent(self):
-        p = super().parent
-        # pylint: disable=assigning-non-slot
-        if getattr(self, "_hf_scheme", False):
-            p._hf_scheme = True
-        return p
-
-    @property
-    def parts(self):
-        if getattr(self, "_hf_scheme", False):
-            return (self._scheme,) + super().parts
-        return super().parts
-
-    def as_posix(self):
-        return str(self)
+    def subpath(self):
+        """Get path inside the repo."""
+        return "/".join(self.parts[2:])
 
     def is_file(self):
         """Return True if this HFPath points to a file in the repo."""
