@@ -80,7 +80,7 @@ class TinyAutoencoder(BaseModel):
         encoded = self.encode(inputs)
         # NOTE: Here you can compress the encoding a little bit more by going
         # to uint8 like in the original model
-        # https://github.com/huggingface/diffusers/blob/cd30820/src/diffusers/models/autoencoders/autoencoder_tiny.py?plain=1#L336-L342 # pylint: disable=line-too-long
+        # https://github.com/huggingface/diffusers/blob/cd30820/src/diffusers/models/autoencoders/autoencoder_tiny.py?plain=1#L336-L342 # noqa: E501
         decoded = self.decode(encoded)
         return decoded
 

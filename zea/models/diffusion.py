@@ -331,7 +331,7 @@ class DiffusionModel(DeepGenerativeModel):
         return {m.name: m.result() for m in self.metrics}
 
     def diffusion_schedule(self, diffusion_times):
-        # pylint: disable=line-too-long
+        # noqa: E501
         """Cosine diffusion schedule https://arxiv.org/abs/2102.09672
 
         Args:

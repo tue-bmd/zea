@@ -286,7 +286,7 @@ class Operation(keras.Operation):
                 return {**merged_kwargs, **self._output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `call` method
-        if not "kwargs" in self.valid_keys:
+        if "kwargs" not in self.valid_keys:
             filtered_kwargs = {
                 k: v for k, v in merged_kwargs.items() if k in self.valid_keys
             }

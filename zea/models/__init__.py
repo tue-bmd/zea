@@ -1,4 +1,4 @@
-# pylint: disable=line-too-long
+# noqa: E501
 """
 zea models
 ============

@@ -3,7 +3,7 @@
 Also generates a reStructuredText (RST) file for sphinx documentation.
 """
 
-# pylint: disable=line-too-long
+# noqa: E501
 
 import os
 import re
