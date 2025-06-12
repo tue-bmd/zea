@@ -91,8 +91,6 @@ class Scan(Parameters):
         focus_distances (np.ndarray): Focus distances of selected transmits in meters.
         initial_times (np.ndarray): Initial times of selected transmits in seconds.
         time_to_next_transmit (np.ndarray): Time between selected transmit events.
-    Methods:
-        set_transmits(selection): Select which transmit events to use.
 
     """
 
@@ -342,7 +340,7 @@ class Scan(Parameters):
 
             if any(i < 0 or i >= n_tx_total for i in selection):
                 raise ValueError(
-                    f"Transmit indices must be between 0 and {n_tx_total-1}"
+                    f"Transmit indices must be between 0 and {n_tx_total - 1}"
                 )
 
             self._selected_transmits = [
