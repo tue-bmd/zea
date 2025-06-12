@@ -12,11 +12,9 @@ import numpy as np
 # this is necessary due to weird TF bug when importing
 sys.path = [str(p) if isinstance(p, PosixPath) else p for p in sys.path]
 
-import tensorflow as tf
+import tensorflow as tf # noqa: E402
 
-# alias
-# pylint: disable=unused-import
-from .dataloader import make_dataloader
+from .dataloader import make_dataloader # noqa: E402
 
 
 def on_device_tf(func, inputs, device, return_numpy=False, **kwargs):

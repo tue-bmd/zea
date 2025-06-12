@@ -35,8 +35,8 @@
 		"vscode": {
 			"extensions": [
 				"ms-python.python",
-				"ms-python.black-formatter",
-				"ms-python.isort",
+				"charliermarsh.ruff",
+				"tamasfe.even-better-toml",
 				"sleistner.vscode-fileutils",
 				"github.copilot",
 				"adpyke.codesnap",

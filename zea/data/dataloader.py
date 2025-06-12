@@ -98,7 +98,7 @@ def generate_h5_indices(
             )
             file_paths = [file_paths[i] for i in indices_sorting_file_paths]
             file_shapes = [file_shapes[i] for i in indices_sorting_file_paths]
-        except:
+        except Exception:
             log.warning("H5Generator: Could not sort file_paths by number.")
 
     # block size with stride included

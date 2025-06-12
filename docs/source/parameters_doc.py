@@ -3,7 +3,6 @@
 Also generates a reStructuredText (RST) file for sphinx documentation.
 """
 
-# noqa: E501
 
 import os
 import re

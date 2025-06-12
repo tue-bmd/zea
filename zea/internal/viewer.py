@@ -425,12 +425,12 @@ class ImageViewerMatplotlib(ImageViewer):
                 if self.init_figure_props:
                     if self.cax_kwargs:
                         divider = make_axes_locatable(self.ax)
+                        cax = divider.append_axes(**self.cax_kwargs)
                         if "color" in self.cax_kwargs:
                             color = self.cax_kwargs.pop("color")
                             cax.yaxis.label.set_color(color)
                             cax.tick_params(axis="y", colors=color)
                             cax.title.set_color(color)
-                        cax = divider.append_axes(**self.cax_kwargs)
                         plt.colorbar(self.image_obj, cax=cax)
                     self.fig.tight_layout()
                     self.init_figure_props = False
