@@ -17,7 +17,6 @@ from zea.internal.checks import (
 )
 from zea.probes import Probe
 from zea.scan import Scan
-from zea.tools.hf import HFPath
 from zea.utils import reduce_to_signature
 
 
@@ -42,7 +41,7 @@ class File(h5py.File):
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
-        if isinstance(name, (str, Path, HFPath)) and str(name).startswith(HF_PREFIX):
+        if str(name).startswith(HF_PREFIX):
             name = _hf_resolve_path(str(name))
 
         if "locking" not in kwargs and "mode" in kwargs and kwargs["mode"] == "r":
