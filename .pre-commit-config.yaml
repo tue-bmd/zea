@@ -33,3 +33,8 @@ repos:
     description: Check for files that contain merge conflict strings
   - id: detect-private-key
     description: Detects the presence of private keys
+-   repo: https://github.com/python-poetry/poetry
+    rev: 2.1.3
+    hooks:
+    -   id: poetry-check
+    -   id: poetry-lock
