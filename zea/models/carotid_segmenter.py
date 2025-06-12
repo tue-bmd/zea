@@ -65,7 +65,7 @@ class CarotidSegmenter(BaseModel):
         )
         return config
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """Segment the input image."""
         if self.network is None:
             raise ValueError(
