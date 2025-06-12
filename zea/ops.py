@@ -490,7 +490,18 @@ class Pipeline:
     def call(self, **inputs):
         """Process input data through the pipeline."""
         for operation in self._pipeline_layers:
-            outputs = operation(**inputs)
+            try:
+                outputs = operation(**inputs)
+            except KeyError as exc:
+                raise KeyError(
+                    f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
+                    f"requires input key '{exc.args[0]}', "
+                    "but it was not provided in the inputs.\n"
+                    "Check whether the objects (such as `zea.Scan`) passed to "
+                    "`pipeline.prepare_parameters()` contain all required keys.\n"
+                    f"Current list of all passed keys: {list(inputs.keys())}\n"
+                    f"Valid keys for this pipeline: {self.valid_keys}"
+                ) from exc
             inputs = outputs
         return outputs
 

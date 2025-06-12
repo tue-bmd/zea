@@ -1,6 +1,7 @@
 """Tests for the Scan class."""
 
 import numpy as np
+import pytest
 
 from zea.scan import Scan
 
@@ -64,3 +65,46 @@ def test_initialization():
     assert np.all(scan.focus_distances == scan_args["focus_distances"])
     assert np.all(scan.initial_times == scan_args["initial_times"])
     assert scan.pixels_per_wavelength == scan_args["pixels_per_wavelength"]
+
+
+@pytest.mark.parametrize(
+    "attr, expected_shape",
+    [
+        ("polar_angles", (10,)),
+        ("azimuth_angles", (10,)),
+        ("t0_delays", (10, 10)),
+        ("tx_apodizations", (10, 10)),
+        ("focus_distances", (10,)),
+        ("initial_times", (10,)),
+    ],
+)
+def test_selected_transmits_affects_shape(attr, expected_shape):
+    scan = Scan(**scan_args)
+    # Check initial shape
+    val = getattr(scan, attr)
+    assert val.shape == expected_shape
+
+    # Select 3 transmits
+    scan.set_transmits(3)
+    val = getattr(scan, attr)
+    # For 2D arrays, first dimension is always n_tx
+    if val.ndim == 2:
+        assert val.shape[0] == 3
+    else:
+        assert val.shape == (3,)
+
+    # Select center transmit
+    scan.set_transmits("center")
+    val = getattr(scan, attr)
+    if val.ndim == 2:
+        assert val.shape[0] == 1
+    else:
+        assert val.shape == (1,)
+
+    # Select all again
+    scan.set_transmits("all")
+    val = getattr(scan, attr)
+    if val.ndim == 2:
+        assert val.shape[0] == expected_shape[0]
+    else:
+        assert val.shape == (expected_shape[0],)
