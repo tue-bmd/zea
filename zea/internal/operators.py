@@ -65,7 +65,6 @@ class InpaintingOperator(Operator):
         super().__init__(**kwargs)
         self.min_val = min_val
 
-    # pylint: disable=arguments-differ
     def forward(self, data, mask):
         # return self.mask * data
         return ops.where(mask, data, self.min_val)
@@ -92,7 +91,6 @@ class SoftInpaintingOperator(Operator):
         assert len(self.mask_range) == 2
         assert self.mask_range[0] == 0.0, "mask_range[0] must be 0.0"
 
-    # pylint: disable=arguments-differ
     def forward(self, data, mask):
         data1 = translate(data, self.image_range, self.mask_range)
         data2 = mask * data1

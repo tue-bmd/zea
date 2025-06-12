@@ -44,7 +44,7 @@ class LPIPS(BaseModel):
         self.disable_checks = disable_checks
         self.trainable = False  # for keras: makes the weights non-trainable
 
-    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
+    def custom_load_weights(self, preset, **kwargs):
         """Load the weights for the VGG and linear models."""
         loader = get_preset_loader(preset)
 
@@ -62,7 +62,7 @@ class LPIPS(BaseModel):
         norm_factor = ops.sqrt(eps + ops.sum(in_feat**2, axis=-1, keepdims=True))
         return in_feat / norm_factor
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """Compute the LPIPS metric.
 
         Args:

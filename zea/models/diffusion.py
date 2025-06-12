@@ -10,11 +10,7 @@ from keras import ops
 from zea.backend.autograd import AutoGrad
 from zea.internal.core import Object
 from zea.internal.operators import Operator
-from zea.internal.registry import (
-    diffusion_guidance_registry,
-    model_registry,
-    operator_registry,
-)
+from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
 from zea.models.dense import get_time_conditional_dense_network
 from zea.models.generative import DeepGenerativeModel
 from zea.models.preset_utils import register_presets
@@ -163,7 +159,6 @@ class DiffusionModel(DeepGenerativeModel):
                     f"DiffusionGuidance object, got {guidance}"
                 )
 
-    # pylint: disable=arguments-differ
     def call(self, inputs, training=False, **kwargs):
         """
         Calls the score network.

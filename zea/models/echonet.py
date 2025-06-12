@@ -64,18 +64,16 @@ class EchoNetDynamic(BaseModel):
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
-            from zea.backend import tf2jax  # pylint: disable=import-outside-toplevel
+            from zea.backend import tf2jax
 
-            jax_func, jax_params = tf2jax.convert(  # pylint: disable=no-member
-                tf.function(self.network), inputs
-            )
+            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
-            def call_fn(params, state, rng, inputs, training):  # pylint: disable=unused-argument
+            def call_fn(params, state, rng, inputs, training):
                 return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """Segment the input image."""
         if self.network is None:
             raise ValueError(
@@ -123,7 +121,7 @@ class EchoNetDynamic(BaseModel):
                 f"TensorFlow or Jax backend. You are using {backend.backend()}."
             )
 
-    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
+    def custom_load_weights(self, preset, **kwargs):
         """Load the weights for the segmentation model."""
         loader = get_preset_loader(preset)
         for file in self.download_files:

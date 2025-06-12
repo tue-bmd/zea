@@ -101,7 +101,7 @@ def load_first_frame(avi_file):
         First frame as numpy array
     """
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required for loading video files. "
