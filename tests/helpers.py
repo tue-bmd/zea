@@ -57,7 +57,7 @@ class BackendEqualityCheck:
         os.environ["KERAS_BACKEND"] = backend
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jaxs
-        import keras  # pylint: disable=import-outside-toplevel
+        import keras
 
         # start worker
         while True:
