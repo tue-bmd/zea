@@ -49,23 +49,23 @@ def check_for_aliasing(scan):
     if scan.Nx and scan.Nz:
         if width / scan.Nx > wvln / 2:
             log.warning(
-                f"width/Nx = {width/scan.Nx:.7f} < wvln/2 = {wvln/2}. "
-                f"Consider increasing scan.Nx to {int(np.ceil(width/(wvln/2)))} or more."
+                f"width/Nx = {width / scan.Nx:.7f} < wvln/2 = {wvln / 2}. "
+                f"Consider increasing scan.Nx to {int(np.ceil(width / (wvln / 2)))} or more."
             )
         if depth / scan.Nz > wvln / 2:
             log.warning(
-                f"depth/Nz = {depth/scan.Nz:.7f} < wvln/2 = {wvln/2:.7f}. "
-                f"Consider increasing scan.Nz to {int(np.ceil(depth/(wvln/2)))} or more."
+                f"depth/Nz = {depth / scan.Nz:.7f} < wvln/2 = {wvln / 2:.7f}. "
+                f"Consider increasing scan.Nz to {int(np.ceil(depth / (wvln / 2)))} or more."
             )
     else:
         if dx > wvln / 2:
             log.warning(
-                f"dx = {dx:.7f} > wvln/2 = {wvln/2:.7f}. "
+                f"dx = {dx:.7f} > wvln/2 = {wvln / 2:.7f}. "
                 f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
         if dz > wvln / 2:
             log.warning(
-                f"dz = {dz:.7f} > wvln/2 = {wvln/2:.7f}. "
+                f"dz = {dz:.7f} > wvln/2 = {wvln / 2:.7f}. "
                 f"Consider increasing scan.pixels_per_wavelength to 2 or more"
             )
 
@@ -88,9 +88,9 @@ def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
         grid (np.ndarray): Pixel grid of size (nz, nx, 3) in
             Cartesian coordinates (x, y, z)
     """
-    assert (bool(Nx) and bool(Nz)) ^ (
-        bool(dx) and bool(dz)
-    ), "Either Nx and Nz or dx and dz must be defined."
+    assert (bool(Nx) and bool(Nz)) ^ (bool(dx) and bool(dz)), (
+        "Either Nx and Nz or dx and dz must be defined."
+    )
 
     # Determine the grid spacing
     if Nx is not None and Nz is not None:

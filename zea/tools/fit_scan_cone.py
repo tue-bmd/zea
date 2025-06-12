@@ -27,9 +27,7 @@ from keras import ops
 from zea import log
 
 
-def filter_edge_points_by_boundary(
-    edge_points, is_left=True, min_cone_half_angle_deg=20
-):
+def filter_edge_points_by_boundary(edge_points, is_left=True, min_cone_half_angle_deg=20):
     """
     Filter edge points to keep only those that form the actual boundary of the scan cone.
     Enforces minimum cone angle constraint to ensure valid cone shapes.
@@ -81,9 +79,7 @@ def filter_edge_points_by_boundary(
         if is_boundary_point:
             filtered_points.append(point)
 
-    return (
-        ops.convert_to_tensor(filtered_points) if filtered_points else ops.zeros((0, 2))
-    )
+    return ops.convert_to_tensor(filtered_points) if filtered_points else ops.zeros((0, 2))
 
 
 def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
@@ -181,10 +177,7 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
         min_cone_half_angle_deg=min_cone_half_angle_deg,
     )
 
-    if (
-        ops.shape(filtered_left_points)[0] < 3
-        or ops.shape(filtered_right_points)[0] < 3
-    ):
+    if ops.shape(filtered_left_points)[0] < 3 or ops.shape(filtered_right_points)[0] < 3:
         return None
 
     # Fit lines using least squares: x = a + b*y
@@ -199,9 +192,7 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
     # Right line
     A_right = np.vstack([np.ones(len(filtered_right_np)), filtered_right_np[:, 1]]).T
-    right_coeffs, _, _, _ = np.linalg.lstsq(
-        A_right, filtered_right_np[:, 0], rcond=None
-    )
+    right_coeffs, _, _, _ = np.linalg.lstsq(A_right, filtered_right_np[:, 0], rcond=None)
     right_a, right_b = right_coeffs
 
     # Convert back to tensors
@@ -286,19 +277,19 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
     if left_intersect is None or right_intersect is None:
         # Fallback to line endpoints at max_y
-        left_y_bottom, left_x_bottom = ops.convert_to_numpy(
-            max_y
-        ), ops.convert_to_numpy(left_a + left_b * max_y)
-        right_y_bottom, right_x_bottom = ops.convert_to_numpy(
-            max_y
-        ), ops.convert_to_numpy(right_a + right_b * max_y)
+        left_y_bottom, left_x_bottom = (
+            ops.convert_to_numpy(max_y),
+            ops.convert_to_numpy(left_a + left_b * max_y),
+        )
+        right_y_bottom, right_x_bottom = (
+            ops.convert_to_numpy(max_y),
+            ops.convert_to_numpy(right_a + right_b * max_y),
+        )
     else:
         left_y_bottom, left_x_bottom = left_intersect
         right_y_bottom, right_x_bottom = right_intersect
 
-    sector_bottom = int(
-        circle_radius + apex_y
-    )  # this is the coordinate on the unpadded image
+    sector_bottom = int(circle_radius + apex_y)  # this is the coordinate on the unpadded image
 
     # Calculate crop boundaries (can be negative)
     padding_x = 0
@@ -335,10 +326,7 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     crop_bottom_clipped = min(h_np, crop_bottom)
 
     data_coverage = 0.0
-    assert (
-        crop_left_clipped < crop_right_clipped
-        and crop_top_clipped < crop_bottom_clipped
-    )
+    assert crop_left_clipped < crop_right_clipped and crop_top_clipped < crop_bottom_clipped
     crop_region = thresh_np[
         crop_top_clipped:crop_bottom_clipped, crop_left_clipped:crop_right_clipped
     ]
@@ -468,15 +456,11 @@ def fit_and_crop_around_scan_cone(
         ValueError: If cone detection fails or image is not 2D
     """
     if keras.backend.backend() != "numpy":
-        log.info(
-            f"❗️ It is recommended to use {log.blue('numpy')} backend for `fit_scan_cone()`."
-        )
+        log.info(f"❗️ It is recommended to use {log.blue('numpy')} backend for `fit_scan_cone()`.")
 
     # Ensure image is 2D
     if len(ops.shape(image_tensor)) != 2:
-        raise ValueError(
-            f"Input must be 2D grayscale image, got shape {ops.shape(image_tensor)}"
-        )
+        raise ValueError(f"Input must be 2D grayscale image, got shape {ops.shape(image_tensor)}")
 
     # Detect cone parameters
     cone_params = detect_cone_parameters(
@@ -550,12 +534,8 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
         circle_radius = cone_params["circle_radius"]
 
         # Calculate angles for left and right intersection points
-        left_angle = np.arctan2(
-            left_x_bottom - circle_center_x, bottom_y - circle_center_y
-        )
-        right_angle = np.arctan2(
-            right_x_bottom - circle_center_x, bottom_y - circle_center_y
-        )
+        left_angle = np.arctan2(left_x_bottom - circle_center_x, bottom_y - circle_center_y)
+        right_angle = np.arctan2(right_x_bottom - circle_center_x, bottom_y - circle_center_y)
 
         # Ensure angles are in the correct order
         if right_angle < left_angle:
@@ -568,10 +548,7 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
 
         # Only draw the part that's visible in the image
         visible_mask = (
-            (arc_y >= 0)
-            & (arc_y < image.shape[0])
-            & (arc_x >= 0)
-            & (arc_x < image.shape[1])
+            (arc_y >= 0) & (arc_y < image.shape[0]) & (arc_x >= 0) & (arc_x < image.shape[1])
         )
         if np.any(visible_mask):
             ax.plot(
@@ -612,11 +589,11 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
     opening_angle_deg = np.degrees(cone_params["opening_angle"])
     info_text = (
         f"Opening Angle: {opening_angle_deg:.1f}°\n"
-        f'Symmetry Ratio: {cone_params.get("symmetry_ratio", 0.0):.3f}'
+        f"Symmetry Ratio: {cone_params.get('symmetry_ratio', 0.0):.3f}"
     )
 
     if "circle_radius" in cone_params:
-        info_text += f'\nCircle Radius: {cone_params["circle_radius"]:.1f} px'
+        info_text += f"\nCircle Radius: {cone_params['circle_radius']:.1f} px"
 
     ax.text(
         0.02,

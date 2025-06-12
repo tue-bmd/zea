@@ -73,9 +73,7 @@ class LPIPS(BaseModel):
         input1, input2 = inputs
 
         # check input images
-        if not self.disable_checks and not (
-            self._valid_img(input1) and self._valid_img(input2)
-        ):
+        if not self.disable_checks and not (self._valid_img(input1) and self._valid_img(input2)):
             raise ValueError(
                 "Expected both input arguments to be normalized tensors with shape [B, H, W, C]"
                 f" or [H, W, C]. Got input with shape {input1.shape} and {input2.shape} and values"
@@ -103,9 +101,7 @@ class LPIPS(BaseModel):
         lin_out = self.lin(diffs)
 
         # take spatial average: list([N, 1], [N, 1], [N, 1], [N, 1], [N, 1])
-        lin_out = ops.convert_to_tensor(
-            [ops.mean(t, axis=[1, 2], keepdims=False) for t in lin_out]
-        )
+        lin_out = ops.convert_to_tensor([ops.mean(t, axis=[1, 2], keepdims=False) for t in lin_out])
 
         # take sum of all layers: [N, 1]
         lin_out = ops.sum(lin_out, axis=0)

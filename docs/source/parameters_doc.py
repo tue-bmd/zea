@@ -90,9 +90,7 @@ def flatten_schema_keys(schema, prefix=""):
     return keys
 
 
-def wrap_string_as_comment(
-    input_string, indent_level=0, max_line_length=100, indent_size=2
-):
+def wrap_string_as_comment(input_string, indent_level=0, max_line_length=100, indent_size=2):
     """Limit the length of lines in a string and adds a comment prefix."""
     if isinstance(input_string, dict):
         input_string = input_string.get("description", "-")
@@ -102,9 +100,7 @@ def wrap_string_as_comment(
     prefix = indent + "# "
     prefix_length = len(prefix)
     if max_line_length <= prefix_length:
-        raise ValueError(
-            "max_line_length must be greater than the length of the prefix"
-        )
+        raise ValueError("max_line_length must be greater than the length of the prefix")
     words = input_string.split()
     result_lines = []
     current_line = prefix
@@ -288,12 +284,10 @@ Parameters Reference
 def update_configs(descriptions, configs_dir=CONFIGS_DIRNAME):
     """Update YAML config files with comments based on parameter descriptions."""
     config_dir = Path(configs_dir)
-    yaml_files = [
-        f for f in os.listdir(config_dir) if f.endswith(".yaml") or f.endswith(".yml")
-    ]
+    yaml_files = [f for f in os.listdir(config_dir) if f.endswith(".yaml") or f.endswith(".yml")]
     yaml_files = [f for f in yaml_files if f != PROBES_YAML]
     for file_name in yaml_files:
-        log.info(f"Adding comments to {config_dir/file_name}")
+        log.info(f"Adding comments to {config_dir / file_name}")
         add_comments_to_yaml(config_dir / file_name, descriptions)
 
 

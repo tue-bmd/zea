@@ -84,9 +84,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
     initial_times = np.zeros((n_tx,))
     for n in range(n_tx):
         v = np.array([np.sin(polar_angles[n]), 0, np.cos(0)])
-        initial_times[n] = (
-            -np.min(np.sum(probe_geometry * v[None], axis=1)) / sound_speed
-        )
+        initial_times[n] = -np.min(np.sum(probe_geometry * v[None], axis=1)) / sound_speed
 
         t0_delays[n] = compute_t0_delays_planewave(
             probe_geometry=probe_geometry,
@@ -130,9 +128,7 @@ def get_args():
         help="Source directory where the original PICMUS data is stored.",
     )
 
-    parser.add_argument(
-        "--output_dir", type=str, help="Output directory of the converted database"
-    )
+    parser.add_argument("--output_dir", type=str, help="Output directory of the converted database")
     return parser.parse_args()
 
 

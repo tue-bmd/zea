@@ -90,9 +90,7 @@ def download_weights(weights_folder):
 
 file_path = download_weights("./echonet_weights")
 
-model = torchvision.models.segmentation.deeplabv3_resnet50(
-    pretrained=False, aux_loss=False
-)
+model = torchvision.models.segmentation.deeplabv3_resnet50(pretrained=False, aux_loss=False)
 model.classifier[-1] = torch.nn.Conv2d(
     model.classifier[-1].in_channels,
     1,
@@ -113,9 +111,7 @@ input_tensor = input_tensor.to(device)
 
 # Where to save the models
 timestamp = time.strftime("%Y%m%d-%H%M%S")
-save_to_path = Path(
-    f"/mnt/z/Ultrasound-BMd/pretrained/echonet-dynamic/tristan-{timestamp}"
-)
+save_to_path = Path(f"/mnt/z/Ultrasound-BMd/pretrained/echonet-dynamic/tristan-{timestamp}")
 save_to_path.mkdir(parents=True, exist_ok=True)
 
 output_onnx_path = str(save_to_path / "echonet-dynamic.onnx")

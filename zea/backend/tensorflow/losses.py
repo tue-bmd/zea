@@ -57,8 +57,8 @@ class SMSLE(keras.losses.Loss):
             0,
         )
 
-        loss = 0.5 * ops.mean(
-            ops.square(first_log_pos - secon_log_pos)
-        ) + 0.5 * ops.mean(ops.square(first_log_neg - secon_log_neg))
+        loss = 0.5 * ops.mean(ops.square(first_log_pos - secon_log_pos)) + 0.5 * ops.mean(
+            ops.square(first_log_neg - secon_log_neg)
+        )
 
         return loss

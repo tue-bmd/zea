@@ -4,9 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def compute_t0_delays_planewave(
-    probe_geometry, polar_angles, azimuth_angles=0, sound_speed=1540
-):
+def compute_t0_delays_planewave(probe_geometry, polar_angles, azimuth_angles=0, sound_speed=1540):
     """Computes the transmit delays for a planewave, shifted such that the
     first element fires at t=0.
 
@@ -21,9 +19,7 @@ def compute_t0_delays_planewave(
     Returns:
         np.ndarray: The transmit delays for each element of shape (n_tx, n_el).
     """
-    assert (
-        probe_geometry is not None
-    ), "Probe geometry must be provided to compute t0_delays."
+    assert probe_geometry is not None, "Probe geometry must be provided to compute t0_delays."
 
     # Convert single angles to arrays for broadcasting
     polar_angles = np.atleast_1d(polar_angles)
@@ -81,15 +77,13 @@ def compute_t0_delays_focused(
     """
     n_tx = len(focus_distances)
     assert polar_angles.shape == (n_tx,), (
-        f"polar_angles must have length n_tx = {n_tx}. "
-        f"Got length {len(polar_angles)}."
+        f"polar_angles must have length n_tx = {n_tx}. Got length {len(polar_angles)}."
     )
     assert origins.shape == (n_tx, 3), (
-        f"origins must have shape (n_tx, 3). " f"Got shape {origins.shape}."
+        f"origins must have shape (n_tx, 3). Got shape {origins.shape}."
     )
     assert probe_geometry.shape[1] == 3 and probe_geometry.ndim == 2, (
-        f"probe_geometry must have shape (element, 3). "
-        f"Got shape {probe_geometry.shape}."
+        f"probe_geometry must have shape (element, 3). Got shape {probe_geometry.shape}."
     )
 
     # Convert single angles to arrays for broadcasting
@@ -99,8 +93,7 @@ def compute_t0_delays_focused(
     else:
         azimuth_angles = np.atleast_1d(azimuth_angles)
     assert azimuth_angles.shape == (n_tx,), (
-        f"azimuth_angles must have length n_tx = {n_tx}. "
-        f"Got length {len(azimuth_angles)}."
+        f"azimuth_angles must have length n_tx = {n_tx}. Got length {len(azimuth_angles)}."
     )
 
     # Compute v for all angles

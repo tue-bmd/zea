@@ -119,9 +119,9 @@ def get_matplotlib_figure_props(figure):
 
     try:
         if backend_name == "TkAgg":
-            assert isinstance(
-                geometry, str
-            ), f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
+            assert isinstance(geometry, str), (
+                f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
+            )
             # format: "widthxheight+X+Y"
             # Split the geometry string by '+' to extract size and position
             size_str, *pos_str = geometry.split("+")
@@ -237,9 +237,7 @@ class ImageViewer(abc.ABC):
     def _add_task(self, *args, **kwargs):
         if self.threading:
             if len(self.pending) < self.num_threads:
-                task = self.pool.apply_async(
-                    self.get_frame_func, args=args, kwds=kwargs
-                )
+                task = self.pool.apply_async(self.get_frame_func, args=args, kwds=kwargs)
                 self.pending.append(task)
         else:
             task = DummyTask(self.get_frame_func(*args, **kwargs))
@@ -287,9 +285,7 @@ class ImageViewerOpenCV(ImageViewer):
         headless: Optional[bool] = False,
     ) -> None:
         """Initializes the ImageViewerOpenCV object."""
-        super().__init__(
-            get_frame, window_name, num_threads, resizable_window, threading
-        )
+        super().__init__(get_frame, window_name, num_threads, resizable_window, threading)
         self.window = None
         self.headless = headless
 
@@ -329,9 +325,7 @@ class ImageViewerOpenCV(ImageViewer):
             if self.frame_no == 0:
                 if self.window is None:
                     self._create_window()
-                    self._cv2.resizeWindow(
-                        self.window_name, frame.shape[1], frame.shape[0]
-                    )
+                    self._cv2.resizeWindow(self.window_name, frame.shape[1], frame.shape[0])
 
             self._cv2.imshow(self.window_name, frame)
             self.frame_no += 1
@@ -348,10 +342,7 @@ class ImageViewerOpenCV(ImageViewer):
         """Returns True if the window has been closed."""
         if self.window is None:
             return False
-        return (
-            self._cv2.getWindowProperty(self.window_name, self._cv2.WND_PROP_VISIBLE)
-            < 1
-        )
+        return self._cv2.getWindowProperty(self.window_name, self._cv2.WND_PROP_VISIBLE) < 1
 
 
 class ImageViewerMatplotlib(ImageViewer):
@@ -381,9 +372,7 @@ class ImageViewerMatplotlib(ImageViewer):
         cax_kwargs: Optional[dict] = None,
     ) -> None:
         """Initializes the ImageViewerMatplotlib object."""
-        super().__init__(
-            get_frame, window_name, num_threads, resizable_window, threading
-        )
+        super().__init__(get_frame, window_name, num_threads, resizable_window, threading)
         plt.ion()
         self.fig = None
         self.ax = None
@@ -428,9 +417,7 @@ class ImageViewerMatplotlib(ImageViewer):
                     self.bg = self.fig.canvas.copy_from_bbox(self.fig.bbox)
 
                 if self.imshow_kwargs:
-                    self.image_obj = self.ax.imshow(
-                        frame, **self.imshow_kwargs, animated=True
-                    )
+                    self.image_obj = self.ax.imshow(frame, **self.imshow_kwargs, animated=True)
                 else:
                     self.image_obj = self.ax.imshow(frame, animated=True)
 

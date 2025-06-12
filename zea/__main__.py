@@ -17,9 +17,7 @@ from zea.visualize import set_mpl_style
 def get_args():
     """Command line argument parser"""
     parser = argparse.ArgumentParser(description="Process ultrasound data.")
-    parser.add_argument(
-        "-c", "--config", type=str, default=None, help="path to config file."
-    )
+    parser.add_argument("-c", "--config", type=str, default=None, help="path to config file.")
     parser.add_argument(
         "-t",
         "--task",
@@ -83,9 +81,7 @@ def main():
         ui.run(plot=True)
 
     elif args.task == "generate":
-        destination_folder = keep_trying(
-            lambda: input(">> Give absolute destination folder path")
-        )
+        destination_folder = keep_trying(lambda: input(">> Give absolute destination folder path"))
         to_dtype = keep_trying(
             lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
             required_set=_DATA_TYPES,

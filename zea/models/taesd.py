@@ -33,8 +33,7 @@ class TinyAutoencoder(BaseModel):
         """
         if backend.backend() not in ["tensorflow", "jax"]:
             raise NotImplementedError(
-                "TinyDecoder is only currently supported with the "
-                "TensorFlow or Jax backend."
+                "TinyDecoder is only currently supported with the TensorFlow or Jax backend."
             )
 
         _fix_tf_to_jax_resize_nearest_neighbor()
@@ -59,9 +58,7 @@ class TinyAutoencoder(BaseModel):
 
         if ops.shape(inputs)[-1] == 1:
             self._grayscale = True
-            inputs = ops.concatenate(
-                [inputs, inputs, inputs], axis=-1
-            )  # grayscale to RGB
+            inputs = ops.concatenate([inputs, inputs, inputs], axis=-1)  # grayscale to RGB
         return self.encoder(inputs)
 
     def decode(self, inputs):
@@ -129,9 +126,7 @@ class TinyBase(BaseModel):
                 tf.function(self.network), inputs
             )
 
-            def call_fn(
-                params, state, rng, inputs, training
-            ):  # pylint: disable=unused-argument
+            def call_fn(params, state, rng, inputs, training):  # pylint: disable=unused-argument
                 return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
@@ -163,8 +158,7 @@ class TinyBase(BaseModel):
         """
         if self.network is None:
             raise ValueError(
-                f"Please load model using `{self.__class__.__name__}.from_preset()` "
-                "before calling."
+                f"Please load model using `{self.__class__.__name__}.from_preset()` before calling."
             )
 
         out = self.network(inputs)
