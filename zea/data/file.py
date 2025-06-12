@@ -335,6 +335,8 @@ class File(h5py.File):
                 param_type = Scan.VALID_PARAMS[parameter]["type"]
                 if param_type in (bool, int, float):
                     scan_parameters[parameter] = param_type(value)
+                elif isinstance(param_type, tuple) and float in param_type:
+                    scan_parameters[parameter] = float(value)
                 else:
                     scan_parameters[parameter] = value
 

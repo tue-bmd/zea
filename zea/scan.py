@@ -247,12 +247,29 @@ class Scan(Parameters):
         return len(self.selected_transmits)
 
     def _invalidate_selected_transmits(self):
-        """Explicitly invalidate the selected_transmits cache."""
+        """Explicitly invalidate the selected_transmits cache and its dependents."""
+        # Invalidate selected_transmits itself
         if "selected_transmits" in self._cache:
             self._cache.pop("selected_transmits")
             self._computed.discard("selected_transmits")
             # Also explicitly invalidate all dependents
             self._invalidate_dependents("selected_transmits")
+        # Invalidate all properties that depend on selected_transmits
+        for key in [
+            "polar_angles",
+            "azimuth_angles",
+            "t0_delays",
+            "tx_apodizations",
+            "focus_distances",
+            "initial_times",
+            "time_to_next_transmit",
+            "pfield",
+            "flat_pfield",
+        ]:
+            if key in self._cache:
+                self._cache.pop(key)
+                self._computed.discard(key)
+                self._dependency_versions.pop(key, None)
 
     def set_transmits(self, selection):
         """Select which transmit events to use.
@@ -353,7 +370,7 @@ class Scan(Parameters):
         # Default behavior based on n_ch
         return self.center_frequency if self.n_ch == 2 else 0.0
 
-    @cache_with_dependencies("polar_angles", "selected_transmits")
+    @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
         """The polar angles of transmits in radians."""
         value = self._params.get("polar_angles")
@@ -396,12 +413,7 @@ class Scan(Parameters):
         if value is None:
             return None
 
-        selected = self.selected_transmits
-        n_tx = self._params.get("n_tx", 0)
-        if len(value) != n_tx:
-            return value  # Return unfiltered if shape doesn't match n_tx
-
-        return value[selected]
+        return value[self.selected_transmits]
 
     @cache_with_dependencies("selected_transmits")
     def initial_times(self):
@@ -410,12 +422,7 @@ class Scan(Parameters):
         if value is None:
             return None
 
-        selected = self.selected_transmits
-        n_tx = self._params.get("n_tx", 0)
-        if len(value) != n_tx:
-            return value  # Return unfiltered if shape doesn't match n_tx
-
-        return value[selected]
+        return value[self.selected_transmits]
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):
