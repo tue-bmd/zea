@@ -525,3 +525,20 @@ class Interface:
 
         if self.verbose:
             log.info(f"Video saved to {log.yellow(path)}")
+
+    def __del__(self):
+        try:
+            if self.image_viewer is not None:
+                self.image_viewer.close()
+        except Exception:
+            pass
+        try:
+            if self.fig is not None:
+                plt.close(self.fig)
+        except Exception:
+            pass
+        try:
+            if self.file is not None:
+                self.file.close()
+        except Exception:
+            pass

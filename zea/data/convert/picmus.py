@@ -20,7 +20,6 @@ import numpy as np
 from zea import log
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.data.data_format import generate_zea_dataset
-from zea.scan import compute_t0_delays_planewave
 
 
 def convert_picmus(source_path, output_path, overwrite=False):
