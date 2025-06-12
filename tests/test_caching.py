@@ -6,12 +6,8 @@ import keras
 import numpy as np
 import pytest
 
-from zea.internal.cache import (
-    cache_output,
-    cache_summary,
-    clear_cache,
-    get_function_source,
-)
+from zea.internal.cache import (cache_output, cache_summary, clear_cache,
+                                get_function_source)
 from zea.internal.core import Object
 
 # Global variable for the expected duration of the expensive operation
@@ -19,7 +15,7 @@ EXPECTED_DURATION = 0.05
 
 
 @cache_output("x")
-def _expensive_operation_x(x, y):  # pylint: disable=unused-argument
+def _expensive_operation_x(x, y):
     # Simulate an expensive operation
     result = x
     time.sleep(EXPECTED_DURATION)
@@ -27,7 +23,7 @@ def _expensive_operation_x(x, y):  # pylint: disable=unused-argument
 
 
 @cache_output("y")
-def _expensive_operation_y(x, y):  # pylint: disable=unused-argument
+def _expensive_operation_y(x, y):
     # Simulate an expensive operation
     result = y
     time.sleep(EXPECTED_DURATION)
