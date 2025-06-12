@@ -8,7 +8,7 @@ import pytest
 from zea import ops
 from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.probes import Probe
-from zea.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
+from zea.scan import Scan
 
 
 def _get_flatgrid(extent, shape):

@@ -11,15 +11,16 @@ See the Parameters class docstring for details on features and usage.
 import functools
 import hashlib
 
-import keras
 import numpy as np
 
-from zea.internal.core import BASE_FLOAT_PRECISION, BASE_INT_PRECISION, STATIC
+from zea import log
 from zea.internal.core import Object as ZeaObject
 from zea.internal.core import _to_tensor
 
 
 def cache_with_dependencies(*deps):
+    """Decorator to mark a method as a computed property with dependencies."""
+
     def decorator(func):
         func._dependencies = deps
 
@@ -28,7 +29,8 @@ def cache_with_dependencies(*deps):
             failed = set()
             if not self._resolve_dependency_tree(func.__name__, failed):
                 raise AttributeError(
-                    f"Cannot access '{func.__name__}' due to missing base dependencies: {sorted(failed)}"
+                    f"Cannot access '{func.__name__}' due to missing base dependencies: "
+                    f"{sorted(failed)}"
                 )
 
             if func.__name__ in self._cache:
@@ -53,36 +55,38 @@ def cache_with_dependencies(*deps):
 class Parameters(ZeaObject):
     """Base class for parameters with dependencies.
 
-    This class provides a robust parameter management system for scientific and engineering
-    applications, supporting dependency tracking, lazy evaluation, and type validation.
+    This class provides a robust parameter management system,
+    supporting dependency tracking, lazy evaluation, and type validation.
 
     **Features:**
 
-    - **Type Validation:** All parameters must be validated against their expected types as
-      specified in the `VALID_PARAMS` dictionary. Setting a parameter to an invalid type
-      raises a `TypeError`.
+    - **Type Validation:** All parameters must be validated against their
+      expected types as specified in the `VALID_PARAMS` dictionary.
+      Setting a parameter to an invalid type raises a `TypeError`.
 
-    - **Dependency Tracking:** Computed properties can declare dependencies on other parameters
-      or properties using the `@cache_with_dependencies` decorator. The system automatically
-      tracks and resolves these dependencies.
+    - **Dependency Tracking:** Computed properties can declare dependencies on
+      other parameters or properties using the `@cache_with_dependencies`
+      decorator. The system automatically tracks and resolves these dependencies.
 
-    - **Lazy Computation:** Computed properties are evaluated only when accessed, and their
-      results are cached for efficiency.
+    - **Lazy Computation:** Computed properties are evaluated only when accessed,
+      and their results are cached for efficiency.
 
-    - **Cache Invalidation:** When a parameter changes, all dependent computed properties are
-      invalidated and recomputed on next access.
+    - **Cache Invalidation:** When a parameter changes, all dependent computed
+      properties are invalidated and recomputed on next access.
 
-    - **Leaf Parameter Enforcement:** Only leaf parameters (those directly listed in `VALID_PARAMS`)
-      can be set. Attempting to set a computed property raises an informative `AttributeError`
-      listing the leaf parameters that must be changed instead.
+    - **Leaf Parameter Enforcement:** Only leaf parameters
+      (those directly listed in `VALID_PARAMS`) can be set. Attempting to set a computed
+      property raises an informative `AttributeError` listing the leaf parameters
+      that must be changed instead.
 
-    - **Optional Dependency Parameters:** Parameters can be both set directly (as a leaf) or computed
-      from dependencies if not set. If a parameter is present in `VALID_PARAMS` and also decorated
-      with `@cache_with_dependencies`, it will use the explicitly set value if provided, or fall back
-      to the computed value if not set or set to `None`. If you set such a parameter after it has been
-      computed, the explicitly set value will override the computed value and remain in effect until you
-      set it back to `None`, at which point it will again be computed from its dependencies. This pattern
-      is useful for parameters that are usually derived from other values, but can also be overridden
+    - **Optional Dependency Parameters:** Parameters can be both set directly (as a leaf)
+      or computed from dependencies if not set. If a parameter is present in `VALID_PARAMS`
+      and also decorated with `@cache_with_dependencies`, it will use the explicitly set
+      value if provided, or fall back to the computed value if not set or set to `None`.
+      If you set such a parameter after it has been computed, the explicitly set value
+      will override the computed value and remain in effect until you set it back to `None`,
+      at which point it will again be computed from its dependencies. This pattern is useful
+      for parameters that are usually derived from other values, but can also be overridden
       directly when needed, and thus don't have a forced relationship with the dependencies.
 
     - **Tensor Conversion:** The `to_tensor` method converts all parameters and optionally all
@@ -134,6 +138,7 @@ class Parameters(ZeaObject):
     VALID_PARAMS = None
 
     def __init__(self, **kwargs):
+        super().__init__()
 
         if self.VALID_PARAMS is None:
             raise NotImplementedError(
@@ -327,7 +332,8 @@ class Parameters(ZeaObject):
 
         Args:
             compute_missing (bool): If True, compute missing computed properties.
-            compute_keys (list or None): If not None, only compute these computed properties (by name).
+            compute_keys (list or None): If not None, only compute these
+                computed properties (by name).
         """
         tensor_dict = {k: _to_tensor(k, v) for k, v in self._params.items()}
 
@@ -345,7 +351,7 @@ class Parameters(ZeaObject):
                             if val is not None:
                                 pass
                         except Exception as e:
-                            print(f"Warning: Could not compute '{name}': {str(e)}")
+                            log.warning(f"Could not compute '{name}': {str(e)}")
 
         # Always include all already computed properties
         for key in self._computed:
@@ -383,3 +389,11 @@ class Parameters(ZeaObject):
 
         param_str = ",\n".join(param_lines)
         return f"{self.__class__.__name__}(\n{param_str}\n)"
+
+    @classmethod
+    def safe_initialize(cls, **kwargs):
+        """Overwrite safe initialize from zea.core.Object.
+
+        We do not want safe initialization here.
+        """
+        return cls(**kwargs)

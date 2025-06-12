@@ -14,7 +14,7 @@ from zea.config.config import Config
 from zea.internal.core import DataTypes
 from zea.internal.registry import ops_registry
 from zea.probes import Dummy, Probe
-from zea.scan import Scan, compute_t0_delays_planewave
+from zea.scan import Scan
 
 """Some operations for testing"""
 

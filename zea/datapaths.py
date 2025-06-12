@@ -15,6 +15,8 @@ import yaml
 
 from zea import log
 from zea.config import Config
+from zea.data.preset_utils import HF_PREFIX
+from zea.tools.hf import HFPath
 from zea.utils import strtobool
 
 DEFAULT_DATA_ROOT = {
@@ -539,15 +541,17 @@ def create_new_user(user_config_path: str = None, local: bool = None):
     return data_paths
 
 
-def format_data_path(path, user):
+def format_data_path(path: str, user: Config = None) -> Path:
     """If the path is not absolute, prepend the data_root to it."""
-    path = Path(path)
-    if path.is_absolute():
-        return path
+    if Path(path).is_absolute():
+        return Path(path)
+    elif str(path).startswith(HF_PREFIX):
+        return HFPath(path)
     else:
         assert user is not None, (
-            "The dataset folder is absolute, but no user is provided. "
-            "Please provide a user to load the dataset."
+            "The dataset folder is relative, but no user is provided. "
+            "Please provide a user to load the dataset relative to "
+            "the user's data_root."
         )
     return Path(user.data_root) / path
 
