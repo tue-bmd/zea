@@ -151,3 +151,26 @@ class HFPath(PurePosixPath):
 
     def as_posix(self):
         return str(self)
+
+    def is_file(self):
+        """Return True if this HFPath points to a file in the repo."""
+        from zea.data.preset_utils import _hf_list_files, _hf_parse_path
+
+        repo_id, subpath = _hf_parse_path(str(self))
+        if not subpath:
+            return False
+        files = _hf_list_files(repo_id)
+        return any(f == subpath for f in files)
+
+    def is_dir(self):
+        """Return True if this HFPath points to a directory in the repo."""
+        from zea.data.preset_utils import _hf_list_files, _hf_parse_path
+
+        repo_id, subpath = _hf_parse_path(str(self))
+        files = _hf_list_files(repo_id)
+        # If subpath is empty, it's the repo root, which is a directory
+        if not subpath:
+            return True
+        # If any file starts with subpath + '/', it's a directory
+        prefix = subpath.rstrip("/") + "/"
+        return any(f.startswith(prefix) for f in files)

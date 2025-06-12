@@ -138,8 +138,6 @@ def find_h5_files(
     if not isinstance(paths, (tuple, list)):
         paths = [paths]
 
-    paths = [Path(path) for path in paths]
-
     file_shapes = []
     file_paths = []
     for path in paths:
@@ -148,7 +146,8 @@ def find_h5_files(
             resolved = _hf_resolve_path(str(path))
             path = resolved
 
-        if path.is_file():
+        if Path(path).is_file():
+            path = Path(path)
             # If the path is a file, get its shape directly
             file_shapes.append(File.get_shape(path, key))
             file_paths.append(str(path))
@@ -419,29 +418,32 @@ class Dataset(H5FileHandleCache):
             paths = [paths]
 
         for file_path in paths:
-            if isinstance(file_path, (str, Path, HFPath)):
-                if Path(file_path).is_dir() or str(file_path).startswith(HF_PREFIX):
-                    folder = Folder(
-                        file_path, self.key, self.search_file_tree_kwargs, self.validate
-                    )
-                    file_paths += folder.file_paths
-                    file_shapes += folder.file_shapes
-                    del folder
-                elif Path(file_path).is_file():
-                    file_paths.append(file_path)
-                    with File(file_path) as file:
-                        file_shapes.append(file.shape(self.key))
-                        if self.validate:
-                            file.validate()
-                else:
-                    raise ValueError(f"File {file_path} is not a file or directory.")
-            elif isinstance(file_path, (list, tuple)):
+            if isinstance(file_path, (list, tuple)):
                 # If the path is a list, recursively call find_files_and_shapes
                 _file_paths, _file_shapes = self.find_files_and_shapes(file_path)
                 file_paths += _file_paths
                 file_shapes += _file_shapes
+                continue
+
+            file_path = str(file_path)
+            if file_path.startswith(HF_PREFIX):
+                file_path = HFPath(file_path)
             else:
-                raise ValueError(f"File {file_path} is not a string or Path object.")
+                file_path = Path(file_path)
+
+            if file_path.is_dir():
+                folder = Folder(
+                    file_path, self.key, self.search_file_tree_kwargs, self.validate
+                )
+                file_paths += folder.file_paths
+                file_shapes += folder.file_shapes
+                del folder
+            elif file_path.is_file():
+                file_paths.append(file_path)
+                with File(file_path) as file:
+                    file_shapes.append(file.shape(self.key))
+                    if self.validate:
+                        file.validate()
 
         return file_paths, file_shapes
 
