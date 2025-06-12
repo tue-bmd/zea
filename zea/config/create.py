@@ -127,7 +127,7 @@ def create_config():
         except KeyboardInterrupt:
             print(red("KeyboardInterrupt, exiting."))
             sys.exit()
-        except:
+        except Exception:
             if key is None:
                 print(red("Invalid input, please try again."))
             else:

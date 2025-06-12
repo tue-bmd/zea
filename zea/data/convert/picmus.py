@@ -176,7 +176,7 @@ if __name__ == "__main__":
             output_file.parent.mkdir(parents=True, exist_ok=True)
 
             convert_picmus(file, output_file, overwrite=True)
-        except:
+        except Exception:
             output_file.parent.rmdir()
             log.error("Failed to convert %s", str_file)
             continue

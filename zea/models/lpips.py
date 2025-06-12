@@ -148,7 +148,7 @@ def perceptual_model():
     ]
     vgg16 = keras.applications.vgg16.VGG16(include_top=False, weights=None)
 
-    vgg16_output_layers = [l.output for l in vgg16.layers if l.name in layers]
+    vgg16_output_layers = [layer.output for layer in vgg16.layers if layer.name in layers]
     model = keras.Model(vgg16.input, vgg16_output_layers, name="perceptual_model")
     return model
 

@@ -1,5 +1,4 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
-
 import os
 import tempfile
 
@@ -12,9 +11,9 @@ _tmp_cache_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-
 
 os.environ["ZEA_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing zea
 
-from zea.data.data_format import generate_example_dataset
+from zea.data.data_format import generate_example_dataset # noqa: E402
 
-from . import (
+from . import (  # noqa: E402
     DUMMY_DATASET_N_FRAMES,
     DUMMY_DATASET_N_X,
     DUMMY_DATASET_N_Z,
