@@ -1411,6 +1411,7 @@ class TOFCorrection(Operation):
         )
         self.apply_phase_rotation = apply_phase_rotation
 
+    # pylint: disable=arguments-differ
     def call(
         self,
         flatgrid,
