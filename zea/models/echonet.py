@@ -43,8 +43,7 @@ class EchoNetDynamic(BaseModel):
     def __init__(self, **kwargs):
         if backend.backend() not in ["tensorflow", "jax"]:
             raise NotImplementedError(
-                "EchoNetDynamic is only currently supported with the "
-                "TensorFlow or Jax backend."
+                "EchoNetDynamic is only currently supported with the TensorFlow or Jax backend."
             )
 
         super().__init__(**kwargs)
@@ -71,9 +70,7 @@ class EchoNetDynamic(BaseModel):
                 tf.function(self.network), inputs
             )
 
-            def call_fn(
-                params, state, rng, inputs, training
-            ):  # pylint: disable=unused-argument
+            def call_fn(params, state, rng, inputs, training):  # pylint: disable=unused-argument
                 return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
@@ -85,13 +82,13 @@ class EchoNetDynamic(BaseModel):
                 "Please load model using `EchoNetDynamic.from_preset()` before calling."
             )
 
-        assert (
-            inputs.ndim == 4
-        ), f"Input should have 4 dimensions (B, H, W, C), but has {inputs.ndim}."
+        assert inputs.ndim == 4, (
+            f"Input should have 4 dimensions (B, H, W, C), but has {inputs.ndim}."
+        )
 
-        assert (
-            inputs.shape[-1] == 1 or inputs.shape[-1] == 3
-        ), f"Input should have 1 or 3 channels, but has {inputs.shape[-1]}."
+        assert inputs.shape[-1] == 1 or inputs.shape[-1] == 3, (
+            f"Input should have 1 or 3 channels, but has {inputs.shape[-1]}."
+        )
 
         # resize image to 112x112
         original_size = ops.shape(inputs)[1:3]

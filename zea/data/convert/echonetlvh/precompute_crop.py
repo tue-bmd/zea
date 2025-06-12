@@ -140,9 +140,7 @@ def precompute_cone_parameters(args):
 
     # Check if parameters already exist
     if cone_params_csv.exists() and not args.force:
-        print(
-            f"Parameters already exist at {cone_params_csv}. Use --force to recompute."
-        )
+        print(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
         return cone_params_csv
 
     # Get list of files to process
@@ -152,9 +150,7 @@ def precompute_cone_parameters(args):
     for split_files in splits.values():
         for avi_filename in split_files:
             # Strip .avi if present
-            base_filename = (
-                avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-            )
+            base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
             avi_file = find_avi_file(args.source, base_filename, batch=args.batch)
             if avi_file:
                 files_to_process.append((avi_file, avi_filename))
@@ -167,9 +163,7 @@ def precompute_cone_parameters(args):
     # Limit files if max_files is specified
     if args.max_files is not None:
         files_to_process = files_to_process[: args.max_files]
-        print(
-            f"Limited to processing {args.max_files} files due to max_files parameter"
-        )
+        print(f"Limited to processing {args.max_files} files due to max_files parameter")
 
     print(f"Computing cone parameters for {len(files_to_process)} files")
 
@@ -195,17 +189,13 @@ def precompute_cone_parameters(args):
         writer.writeheader()
 
         # Process each file
-        for avi_file, avi_filename in tqdm(
-            files_to_process, desc="Computing cone parameters"
-        ):
+        for avi_file, avi_filename in tqdm(files_to_process, desc="Computing cone parameters"):
             try:
                 # Load only the first frame of video using OpenCV directly
                 first_frame = load_first_frame(avi_file)
 
                 # Detect cone parameters
-                _, full_cone_params = fit_and_crop_around_scan_cone(
-                    first_frame, return_params=True
-                )
+                _, full_cone_params = fit_and_crop_around_scan_cone(first_frame, return_params=True)
 
                 # Extract only the essential parameters
                 essential_params = {

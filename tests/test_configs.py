@@ -239,9 +239,9 @@ def test_config_update():
     config = Config(simple_dict)
     config.update(**nested_dict)  # update with kwargs
     config.update(nested_dict)  # update with dict
-    assert isinstance(
-        config.nested_dictionary, Config
-    ), "config.nested_dictionary should be a Config object not just a dictionary"
+    assert isinstance(config.nested_dictionary, Config), (
+        "config.nested_dictionary should be a Config object not just a dictionary"
+    )
 
 
 def test_config_recursive():

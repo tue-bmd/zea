@@ -32,9 +32,7 @@ def test_flatten(array, start_dim, end_dim):
     from zea import tensor_ops
 
     out = tensor_ops.flatten(array, start_dim, end_dim)
-    torch_out = torch.flatten(
-        torch.from_numpy(array), start_dim=start_dim, end_dim=end_dim
-    ).numpy()
+    torch_out = torch.flatten(torch.from_numpy(array), start_dim=start_dim, end_dim=end_dim).numpy()
 
     # Test if the output is equal to the torch.flatten implementation
     np.testing.assert_almost_equal(torch_out, out)
@@ -200,9 +198,7 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     data = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
 
     # First stack the data
-    stacked = tensor_ops.stack_volume_data_along_axis(
-        data, batch_axis, stack_axis, n_frames
-    )
+    stacked = tensor_ops.stack_volume_data_along_axis(data, batch_axis, stack_axis, n_frames)
 
     # Calculate padding that was added (if any)
     original_size = data.shape[batch_axis]
@@ -216,9 +212,7 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     )
 
     # Verify shapes match
-    assert (
-        restored.shape == data.shape
-    ), "Shapes don't match after stack/split operations"
+    assert restored.shape == data.shape, "Shapes don't match after stack/split operations"
 
     # Verify contents match
     np.testing.assert_allclose(restored, data, rtol=1e-5, atol=1e-5)
@@ -282,9 +276,7 @@ def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
     expected = []
     batch_shape = array.shape[:batch_dims]
     for idx in np.ndindex(*batch_shape):
-        slicing = tuple(
-            slice(None) if i >= len(idx) else idx[i] for i in range(array.ndim)
-        )
+        slicing = tuple(slice(None) if i >= len(idx) else idx[i] for i in range(array.ndim))
         if batched_kwargs:
             # For each keyword, extract the corresponding slice.
             kw_slicing = {k: v[idx] for k, v in batched_kwargs.items()}
@@ -321,30 +313,24 @@ def test_pad_array_to_divisible(array, divisor, axis):
     padded = tensor_ops.pad_array_to_divisible(array, divisor, axis=axis)
 
     # Check that output shape is divisible by divisor only on specified axis
-    assert (
-        padded.shape[axis] % divisor == 0
-    ), "Output dimension not divisible by divisor on specified axis"
+    assert padded.shape[axis] % divisor == 0, (
+        "Output dimension not divisible by divisor on specified axis"
+    )
 
     # Check that the original array is preserved in the first part
-    np.testing.assert_array_equal(
-        padded[tuple(slice(0, s) for s in array.shape)], array
-    )
+    np.testing.assert_array_equal(padded[tuple(slice(0, s) for s in array.shape)], array)
 
     # Check that padding size is minimal on specified axis
     axis_dim = padded.shape[axis]
     orig_dim = array.shape[axis]
-    assert (
-        axis_dim >= orig_dim and axis_dim - orig_dim < divisor
-    ), "Padding is not minimal"
+    assert axis_dim >= orig_dim and axis_dim - orig_dim < divisor, "Padding is not minimal"
 
     if axis < 0:  # deal with negative axis
         axis = array.ndim + axis
     # Check other dimensions remain unchanged
     for i, (p_dim, o_dim) in enumerate(zip(padded.shape, array.shape)):
         if i != axis:
-            assert (
-                p_dim == o_dim
-            ), "Dimensions not matching axis should remain unchanged"
+            assert p_dim == o_dim, "Dimensions not matching axis should remain unchanged"
 
     return padded
 
@@ -437,9 +423,7 @@ def test_gaussian_filter(array, sigma, order, truncate):
     blurred_scipy = gaussian_filter(array, sigma=sigma, order=order, truncate=truncate)
 
     tensor = ops.convert_to_tensor(array)
-    blurred_zea = tensor_ops.gaussian_filter(
-        tensor, sigma=sigma, order=order, truncate=truncate
-    )
+    blurred_zea = tensor_ops.gaussian_filter(tensor, sigma=sigma, order=order, truncate=truncate)
     blurred_zea = ops.convert_to_numpy(blurred_zea)
 
     np.testing.assert_allclose(blurred_scipy, blurred_zea, rtol=1e-5, atol=1e-5)

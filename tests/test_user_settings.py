@@ -68,9 +68,7 @@ def test_set_data_paths(user_config):
 
     for local in [True, False]:
         data_paths = set_data_paths(user_config, local=local)
-        assert (
-            "data_root" in data_paths
-        ), f"data_root not in data_paths for local={local}"
+        assert "data_root" in data_paths, f"data_root not in data_paths for local={local}"
         assert "output" in data_paths, f"output not in data_paths for local={local}"
 
 
@@ -88,9 +86,7 @@ def test_set_data_paths_defaults(tmp_path, user_config):
     for local in [True, False]:
         with pytest.warns((UnknownUsernameWarning, NoYamlFileError)):
             data_paths = set_data_paths(user_config, local=local)
-        assert (
-            "data_root" in data_paths
-        ), f"data_root not in data_paths for local={local}"
+        assert "data_root" in data_paths, f"data_root not in data_paths for local={local}"
         assert "output" in data_paths, f"output not in data_paths for local={local}"
 
 

@@ -110,9 +110,7 @@ def generate_example_dataset(
     )
 
 
-def validate_input_data(
-    raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc
-):
+def validate_input_data(raw_data, aligned_data, envelope_data, beamformed_data, image, image_sc):
     """
     Validates input data for generate_zea_dataset
 
@@ -191,9 +189,7 @@ def _write_datasets(
         data = first_not_none_item(arr)
         return data.shape[axis] if data is not None else None
 
-    def _add_dataset(
-        group_name: str, name: str, data: np.ndarray, description: str, unit: str
-    ):
+    def _add_dataset(group_name: str, name: str, data: np.ndarray, description: str, unit: str):
         """Adds a dataset to the given group with a description and unit.
         If data is None, the dataset is not added."""
         if data is None:
@@ -281,10 +277,7 @@ def _write_datasets(
         name="image_sc",
         data=_convert_datatype(image_sc),
         unit="unitless",
-        description=(
-            "The scan converted images of shape [n_frames, output_size_z,"
-            " output_size_x]"
-        ),
+        description=("The scan converted images of shape [n_frames, output_size_z, output_size_x]"),
     )
 
     # Write scan group
@@ -319,9 +312,7 @@ def _write_datasets(
         group_name=scan_group_name,
         name="n_ch",
         data=n_ch,
-        description=(
-            "The number of channels. For RF data this is 1. For IQ data " "this is 2."
-        ),
+        description=("The number of channels. For RF data this is 1. For IQ data this is 2."),
         unit="unitless",
     )
 
@@ -413,9 +404,7 @@ def _write_datasets(
         group_name=scan_group_name,
         name="polar_angles",
         data=polar_angles,
-        description=(
-            "The polar angles of the transmit beams in radians of shape (n_tx,)."
-        ),
+        description=("The polar angles of the transmit beams in radians of shape (n_tx,)."),
         unit="rad",
     )
 
@@ -423,9 +412,7 @@ def _write_datasets(
         group_name=scan_group_name,
         name="azimuth_angles",
         data=azimuth_angles,
-        description=(
-            "The azimuthal angles of the transmit beams in radians of shape (n_tx,)."
-        ),
+        description=("The azimuthal angles of the transmit beams in radians of shape (n_tx,)."),
         unit="rad",
     )
 
@@ -433,9 +420,7 @@ def _write_datasets(
         group_name=scan_group_name,
         name="bandwidth_percent",
         data=bandwidth_percent,
-        description=(
-            "The receive bandwidth of RF signal in percentage of center frequency."
-        ),
+        description=("The receive bandwidth of RF signal in percentage of center frequency."),
         unit="unitless",
     )
 
@@ -443,9 +428,7 @@ def _write_datasets(
         group_name=scan_group_name,
         name="time_to_next_transmit",
         data=time_to_next_transmit,
-        description=(
-            "The time between subsequent transmit events of shape " "(n_frames, n_tx)."
-        ),
+        description=("The time between subsequent transmit events of shape (n_frames, n_tx)."),
         unit="s",
     )
 
@@ -614,9 +597,7 @@ def generate_zea_dataset(
     # check if all args are lists
     if isinstance(probe_name, list):
         # all names in probe_name list should be the same
-        assert (
-            len(set(probe_name)) == 1
-        ), "Probe names for all events should be the same"
+        assert len(set(probe_name)) == 1, "Probe names for all events should be the same"
 
     data_and_parameters = {
         "raw_data": raw_data,
@@ -650,8 +631,7 @@ def generate_zea_dataset(
     # make sure input arguments of func is same length as data_and_parameters
     # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
     assert (
-        len(data_and_parameters)
-        == len(inspect.signature(generate_zea_dataset).parameters) - 3
+        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 3
     ), (
         "All arguments should be put in data_and_parameters except "
         "`path`, `event_structure`, and `cast_to_float` arguments."
@@ -661,19 +641,17 @@ def generate_zea_dataset(
         for argument, argument_value in data_and_parameters.items():
             _num_events = None
             if argument_value is not None:
-                assert isinstance(
-                    argument_value, list
-                ), f"{argument} should be a list when event_structure is set to True."
+                assert isinstance(argument_value, list), (
+                    f"{argument} should be a list when event_structure is set to True."
+                )
                 num_events = len(argument_value)
                 if _num_events is not None:
-                    assert (
-                        num_events == _num_events
-                    ), "All arguments should have the same number of events."
+                    assert num_events == _num_events, (
+                        "All arguments should have the same number of events."
+                    )
                 _num_events = num_events
 
-        assert (
-            len(set(probe_name)) == 1
-        ), "Probe names for all events should be the same"
+        assert len(set(probe_name)) == 1, "Probe names for all events should be the same"
         log.info(
             f"Event structure is set to True. Writing dataset with event "
             f"structure (found {len(probe_name)} events)."

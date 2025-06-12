@@ -91,9 +91,7 @@ def upload_folder_to_hf(
         api.create_tag(repo_id, repo_type="model", tag=tag)
 
     if verbose:
-        msg = (
-            f"Uploaded files from '{local_dir}' to 'https://huggingface.co/{repo_id}'."
-        )
+        msg = f"Uploaded files from '{local_dir}' to 'https://huggingface.co/{repo_id}'."
         if tag:
             msg += f" Tagged as {tag}."
         log.info(log.yellow(msg))

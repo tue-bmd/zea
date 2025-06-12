@@ -150,9 +150,7 @@ class Object:
 
     def _tree_flatten(self):
         if not isinstance(self, Object):
-            raise NotImplementedError(
-                f"{type(self).__name__} must implement _tree_flatten."
-            )
+            raise NotImplementedError(f"{type(self).__name__} must implement _tree_flatten.")
         return (), ()
 
     @classmethod
@@ -218,18 +216,12 @@ def _to_tensor(key, val):
     if isinstance(val, dict):
         return {k: _to_tensor(k, v) for k, v in val.items()}
     # Use float precision for all floats (including np.float32/64)
-    if isinstance(val, float) or (
-        isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)
-    ):
+    if isinstance(val, float) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)):
         dtype = BASE_FLOAT_PRECISION
     # Use int precision for all ints (including np.int32/64)
-    elif isinstance(val, bool) or (
-        isinstance(val, np.ndarray) and np.issubdtype(val.dtype, bool)
-    ):
+    elif isinstance(val, bool) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, bool)):
         dtype = bool
-    elif isinstance(val, int) or (
-        isinstance(val, np.ndarray) and np.issubdtype(val.dtype, int)
-    ):
+    elif isinstance(val, int) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, int)):
         dtype = BASE_INT_PRECISION
     else:
         dtype = None

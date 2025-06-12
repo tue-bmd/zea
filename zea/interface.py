@@ -35,9 +35,7 @@ class Interface:
     # TODO: maybe we can refactor such that it is clear what needs to be in config.
     """
 
-    def __init__(
-        self, config: Config = None, verbose: bool = True, validate_file: bool = True
-    ):
+    def __init__(self, config: Config = None, verbose: bool = True, validate_file: bool = True):
         """Initialize Interface.
 
         Args:
@@ -58,18 +56,16 @@ class Interface:
         self.scan = self.file.scan(**self.config.scan)
 
         # initialize Pipeline
-        assert (
-            "pipeline" in self.config
-        ), "Pipeline not found in config, please specify pipeline in config."
+        assert "pipeline" in self.config, (
+            "Pipeline not found in config, please specify pipeline in config."
+        )
 
         self.process = Pipeline.from_config(
             self.config.pipeline,
             with_batch_dim=False,
             jit_options=None,
         )
-        self.parameters = self.process.prepare_parameters(
-            self.probe, self.scan, self.config
-        )
+        self.parameters = self.process.prepare_parameters(self.probe, self.scan, self.config)
 
         # initialize attributes for UI class
         self.data = None
@@ -204,9 +200,7 @@ class Interface:
                 self.frame_no = 0
             else:
                 self.frame_no = keep_trying(
-                    lambda: int(
-                        input(f">> Frame number (0 / {self.file.n_frames - 1}): ")
-                    )
+                    lambda: int(input(f">> Frame number (0 / {self.file.n_frames - 1}): "))
                 )
 
         # get data from dataset
@@ -434,10 +428,7 @@ class Interface:
                                 return images
                         # For matplotlib, check if window has been closed
                         elif self.plot_lib == "matplotlib":
-                            if (
-                                time.sleep(0.025)
-                                and self.image_viewer.has_been_closed()
-                            ):
+                            if time.sleep(0.025) and self.image_viewer.has_been_closed():
                                 return images
                     # For headless mode, check if all frames have been plotted
                     if self.headless:
@@ -506,9 +497,7 @@ class Interface:
                 tag = "_" + self.config.plot.tag
             else:
                 tag = ""
-            filename = (
-                self.file_path.stem + tag + "." + self.config.plot.video_extension
-            )
+            filename = self.file_path.stem + tag + "." + self.config.plot.video_extension
 
             path = Path("./figures", filename)
             Path("./figures").mkdir(parents=True, exist_ok=True)
