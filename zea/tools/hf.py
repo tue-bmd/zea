@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 from huggingface_hub import HfApi, login, snapshot_download
 
 from zea import log
+from zea.data.preset_utils import _hf_list_files, _hf_parse_path
 
 
 def load_model_from_hf(repo_id, revision="main", verbose=True):
@@ -103,6 +104,7 @@ def upload_folder_to_hf(
 class HFPath(PurePosixPath):
     """A path-like object that preserves the hf:// scheme and mimics Path API."""
 
+    __slots__ = ("_hf_scheme",)
     _scheme = "hf://"
 
     def __new__(cls, uri):
@@ -154,8 +156,6 @@ class HFPath(PurePosixPath):
 
     def is_file(self):
         """Return True if this HFPath points to a file in the repo."""
-        from zea.data.preset_utils import _hf_list_files, _hf_parse_path
-
         repo_id, subpath = _hf_parse_path(str(self))
         if not subpath:
             return False
@@ -164,8 +164,6 @@ class HFPath(PurePosixPath):
 
     def is_dir(self):
         """Return True if this HFPath points to a directory in the repo."""
-        from zea.data.preset_utils import _hf_list_files, _hf_parse_path
-
         repo_id, subpath = _hf_parse_path(str(self))
         files = _hf_list_files(repo_id)
         # If subpath is empty, it's the repo root, which is a directory
