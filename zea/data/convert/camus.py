@@ -254,7 +254,7 @@ if __name__ == "__main__":
     files = list(camus_source_folder.glob("**/*_half_sequence.nii.gz"))
     for source_file in tqdm(files):
         # check if source file in camus database (ignore other files)
-        if not "database_nifti" in source_file.parts:
+        if "database_nifti" not in source_file.parts:
             continue
 
         patient = source_file.stem.split("_")[0]

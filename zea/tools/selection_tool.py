@@ -718,7 +718,7 @@ def remove_masks_from_axs(axs: matplotlib.axes.Axes) -> None:
         if isinstance(obj, (PathPatch, Rectangle)):
             try:
                 obj.remove()
-            except:
+            except Exception:
                 pass
 
 
