@@ -16,7 +16,6 @@ import yaml
 from PIL import Image
 
 from zea import log
-from zea.tools.hf import HFPath
 
 
 def _assert_uint8_images(images: np.ndarray):
@@ -187,9 +186,6 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
             of PIL.Image.save. Note: True can cause slow saving for longer sequences.
 
     """
-    assert isinstance(
-        filename, (str, Path, HFPath)
-    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     if fps > 50:
@@ -254,9 +250,6 @@ def save_to_mp4(images, filename, fps=20):
         str: Success message.
 
     """
-    assert isinstance(
-        filename, (str, Path, HFPath)
-    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     filename = str(filename)
