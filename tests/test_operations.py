@@ -5,9 +5,6 @@ that when the backend is switched, the functions inside are reimported with the
 correct backend.
 """
 
-# pylint: disable=import-outside-toplevel
-# pylint: disable=reimported
-
 import math
 
 import keras

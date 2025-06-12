@@ -6,8 +6,7 @@ import keras
 import numpy as np
 import pytest
 
-from zea.internal.cache import (cache_output, cache_summary, clear_cache,
-                                get_function_source)
+from zea.internal.cache import cache_output, cache_summary, clear_cache, get_function_source
 from zea.internal.core import Object
 
 # Global variable for the expected duration of the expensive operation
@@ -60,7 +59,7 @@ def _some_random_func():
 
 
 @cache_output("x")
-def _expensive_nested_operation(x, y):  # pylint: disable=unused-argument
+def _expensive_nested_operation(x, y):
     result = x + _some_random_func()
     time.sleep(EXPECTED_DURATION)
     return result
