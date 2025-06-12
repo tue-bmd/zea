@@ -25,4 +25,4 @@ Model
    notebooks/diffusion_model_example.ipynb
    notebooks/segmentation_example.ipynb
    notebooks/custom_models_example.ipynb
-   notebooks/agent_selection.ipynb
+   notebooks/agent_example.ipynb
