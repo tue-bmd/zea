@@ -33,7 +33,7 @@ def test_pfield():
 
     scan = Scan(
         probe_geometry=probe.probe_geometry,
-        n_tx=1,
+        n_tx=n_tx,
         n_el=n_el,
         xlims=(-19e-3, 19e-3),
         zlims=(0, 63e-3),
@@ -56,6 +56,6 @@ def test_pfield():
 
     pfield = scan.pfield
 
-    assert pfield.shape == (n_tx, scan.Nx, scan.Nz), (
-        f"Expected pfield shape {(n_tx, scan.Nx, scan.Nz)}, " f"but got {pfield.shape}"
+    assert pfield.shape == (n_tx, scan.Nz, scan.Nx), (
+        f"Expected pfield shape {(n_tx, scan.Nz, scan.Nx)}, " f"but got {pfield.shape}"
     )
