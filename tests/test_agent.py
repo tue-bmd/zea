@@ -5,7 +5,6 @@ import pytest
 from keras import ops
 
 from zea.agent import masks, selection
-from . import backend_equality_check
 
 
 def test_equispaced_lines():
