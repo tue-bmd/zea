@@ -22,6 +22,16 @@ from . import (  # noqa: E402
 plt.rcParams["backend"] = "agg"
 
 
+def pytest_addoption(parser):
+    """Add custom command line options for pytest."""
+    parser.addoption(
+        "--gpu",
+        action="store_true",
+        default=False,
+        help="Run tests with GPU support if CUDA is available",
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def run_once_after_all_tests():
     """Fixture to stop workers after all tests have run."""
