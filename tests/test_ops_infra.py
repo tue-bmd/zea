@@ -579,10 +579,13 @@ def ultrasound_probe():
 
 
 def get_scan(ultrasound_probe, Nx=None, Nz=None):
-    """Returns a scan for ultrasound simulation tests."""
+    """Returns a scan for ultrasound simulation tests.
+
+    Note these parameters are not really realistic, but are used for testing purposes.
+    """
     n_el = ultrasound_probe.n_el
     n_tx = 2
-    n_ax = 513
+    n_ax = 100
 
     tx_apodizations = np.ones((n_tx, n_el)) * np.hanning(n_el)[None]
     probe_geometry = ultrasound_probe.probe_geometry
@@ -600,8 +603,8 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
-        center_frequency=ultrasound_probe.center_frequency,
-        sampling_frequency=ultrasound_probe.sampling_frequency,
+        center_frequency=ultrasound_probe.center_frequency / 100,
+        sampling_frequency=ultrasound_probe.sampling_frequency / 100,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -624,7 +627,7 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
 @pytest.fixture
 def ultrasound_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
-    return get_scan(ultrasound_probe, Nx=100, Nz=100)
+    return get_scan(ultrasound_probe, Nx=20, Nz=20)
 
 
 def get_scatterers():
