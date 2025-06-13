@@ -415,7 +415,7 @@ def rotate_coordinates(coords, angle_deg):
             [ops.sin(angle_rad), ops.cos(angle_rad)],
         ]
     )
-    return coords @ rotation_matrix.T
+    return coords @ ops.transpose(rotation_matrix)
 
 
 def cartesian_to_polar_matrix(
