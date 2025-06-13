@@ -13,9 +13,7 @@ def calculate_lens_corrected_delays(
     sound_speed,
     n_tx,
     n_el,
-    # pylint: disable=unused-argument
     focus_distances,
-    # pylint: disable=unused-argument
     polar_angles,
     lens_sound_speed=1000,
     lens_thickness=1e-3,
