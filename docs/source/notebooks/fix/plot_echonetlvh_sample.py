@@ -21,14 +21,15 @@ def get_args():
     parser.add_argument(
         "--input_h5",
         type=str,
-        # e.g. {data_root}/USBMD_datasets/echonetlvh_v2025/train/0X1017398D3C3F5FF9.hdf5
+        # e.g. {data_root}/echonetlvh_v2025/train/0X1017398D3C3F5FF9.hdf5
         required=True,
         help="Path to input HDF5 file",
     )
     parser.add_argument(
         "--measurements_csv",
         type=str,
-        required=True,  # e.g. {data_root}/USBMD_datasets/echonetlvh_v2025/MeasurementsList.csv
+        required=True,
+        # e.g. {data_root}/echonetlvh_v2025/MeasurementsList.csv
         help="Path to measurements CSV file",
     )
     parser.add_argument(

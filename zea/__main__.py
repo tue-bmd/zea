@@ -46,7 +46,7 @@ def get_args():
 
 
 def main():
-    """main entrypoint for UI script USBMD"""
+    """main entrypoint for zea"""
     args = get_args()
 
     set_mpl_style()

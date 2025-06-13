@@ -698,7 +698,6 @@ def get_args():
     parser.add_argument(
         "--input_file",
         type=str,
-        # e.g. {data_root}/USBMD_datasets/_RAW/echonetlvh/Batch1/0XF4970F1D036BC609.avi"
         required=True,
     )
     return parser.parse_args()
