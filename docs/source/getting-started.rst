@@ -112,7 +112,7 @@ We do this by manually loading a single zea file with ``load_file`` and processi
 
    # we can also process a single plane wave angle by
    # setting the `selected_transmits` parameter in the scan object
-   scan.set_transmits = 1
+   scan.set_transmits(1)
    parameters = pipeline.prepare_parameters(probe, scan, config)
 
    image = pipeline(data=data_frame, **parameters)["data"]
