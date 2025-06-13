@@ -29,20 +29,14 @@ class SMSLE(nn.Module):
 
         first_log_pos = torch.clamp(
             20
-            * torch.log(
-                torch.clamp(y_pred / y_pred_max, min=torch.finfo(torch.float32).eps)
-                + 0.0
-            )
+            * torch.log(torch.clamp(y_pred / y_pred_max, min=torch.finfo(torch.float32).eps) + 0.0)
             / torch.log(torch.tensor(10.0)),
             -self.dynamic_range,
             0,
         )
         secon_log_pos = torch.clamp(
             20
-            * torch.log(
-                torch.clamp(y_true / y_true_max, min=torch.finfo(torch.float32).eps)
-                + 0.0
-            )
+            * torch.log(torch.clamp(y_true / y_true_max, min=torch.finfo(torch.float32).eps) + 0.0)
             / torch.log(torch.tensor(10.0)),
             -self.dynamic_range,
             0,
@@ -50,27 +44,21 @@ class SMSLE(nn.Module):
 
         first_log_neg = torch.clamp(
             20
-            * torch.log(
-                torch.clamp(-y_pred / y_pred_max, min=torch.finfo(torch.float32).eps)
-                + 0.0
-            )
+            * torch.log(torch.clamp(-y_pred / y_pred_max, min=torch.finfo(torch.float32).eps) + 0.0)
             / torch.log(torch.tensor(10.0)),
             -self.dynamic_range,
             0,
         )
         secon_log_neg = torch.clamp(
             20
-            * torch.log(
-                torch.clamp(-y_true / y_true_max, min=torch.finfo(torch.float32).eps)
-                + 0.0
-            )
+            * torch.log(torch.clamp(-y_true / y_true_max, min=torch.finfo(torch.float32).eps) + 0.0)
             / torch.log(torch.tensor(10.0)),
             -self.dynamic_range,
             0,
         )
 
-        loss = 0.5 * torch.mean(
-            torch.square(first_log_pos - secon_log_pos)
-        ) + 0.5 * torch.mean(torch.square(first_log_neg - secon_log_neg))
+        loss = 0.5 * torch.mean(torch.square(first_log_pos - secon_log_pos)) + 0.5 * torch.mean(
+            torch.square(first_log_neg - secon_log_neg)
+        )
 
         return loss

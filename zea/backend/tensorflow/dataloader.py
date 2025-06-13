@@ -14,9 +14,7 @@ from zea.data.dataloader import H5Generator
 from zea.data.layers import Resizer
 from zea.utils import find_methods_with_return_type, translate
 
-METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(
-    tf.data.Dataset, "DatasetV2"
-)
+METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(tf.data.Dataset, "DatasetV2")
 
 
 class TFDatasetToKeras(TFDatasetAdapter):
@@ -101,10 +99,7 @@ def _assert_image_range(images, image_range):
     # Check if there are outliers in the image range
     minval = tf.reduce_min(images)
     maxval = tf.reduce_max(images)
-    _msg = (
-        f"Image range {image_range} is not in the range of the data "
-        f"{minval} - {maxval}"
-    )
+    _msg = f"Image range {image_range} is not in the range of the data {minval} - {maxval}"
     tf.debugging.assert_greater_equal(
         minval,
         tf.cast(image_range[0], minval.dtype),
@@ -257,9 +252,9 @@ def make_dataloader(
     """
     # Setup
     if normalization_range is not None:
-        assert (
-            image_range is not None
-        ), "If normalization_range is set, image_range must be set as well."
+        assert image_range is not None, (
+            "If normalization_range is set, image_range must be set as well."
+        )
 
     resize_kwargs = resize_kwargs or {}
 
@@ -295,9 +290,7 @@ def make_dataloader(
     )
 
     # Assert cardinality
-    dataset = dataset.apply(
-        tf.data.experimental.assert_cardinality(len(image_extractor))
-    )
+    dataset = dataset.apply(tf.data.experimental.assert_cardinality(len(image_extractor)))
 
     # Shard dataset
     if num_shards > 1:
@@ -331,9 +324,7 @@ def make_dataloader(
 
     # Check if there are outliers in the image range
     if assert_image_range and image_range is not None:
-        dataset = dataset_map(
-            dataset, partial(_assert_image_range, image_range=image_range)
-        )
+        dataset = dataset_map(dataset, partial(_assert_image_range, image_range=image_range))
 
     if image_size or resize_type:
         if frame_axis != -1:

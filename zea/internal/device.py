@@ -26,9 +26,9 @@ def hide_gpus(gpu_ids=None, verbose=True):
     """
     if gpu_ids is None:
         return
-    assert isinstance(
-        gpu_ids, (int, list)
-    ), f"gpu_ids must be an integer or a list of integers, not {type(gpu_ids)}"
+    assert isinstance(gpu_ids, (int, list)), (
+        f"gpu_ids must be an integer or a list of integers, not {type(gpu_ids)}"
+    )
     if not isinstance(gpu_ids, list):
         gpu_ids = [gpu_ids]
 
@@ -37,9 +37,7 @@ def hide_gpus(gpu_ids=None, verbose=True):
     keep_gpu_ids = [x for x in all_gpu_ids if x not in hide_gpu_ids]
 
     if len(keep_gpu_ids) == 0:
-        log.warning(
-            "All GPUs are hidden. Setting CUDA_VISIBLE_DEVICES to an empty string."
-        )
+        log.warning("All GPUs are hidden. Setting CUDA_VISIBLE_DEVICES to an empty string.")
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, keep_gpu_ids))
@@ -94,7 +92,7 @@ def get_gpu_memory(verbose=True):
             num_disabled_gpus = len(memory_free_values) - len(gpus)
             num_gpus = len(memory_free_values)
 
-            print(f"{num_disabled_gpus/num_gpus} GPUs were disabled")
+            print(f"{num_disabled_gpus / num_gpus} GPUs were disabled")
 
         memory_free_values = [memory_free_values[gpu] for gpu in gpus]
 
@@ -104,9 +102,7 @@ def get_gpu_memory(verbose=True):
     return memory_free_values
 
 
-def select_gpus(
-    available_gpu_ids, memory_free, device=None, verbose=True, hide_others=True
-):
+def select_gpus(available_gpu_ids, memory_free, device=None, verbose=True, hide_others=True):
     """Select GPU based on the device argument and available GPU's. This
     function does not rely on pytorch or tensorflow, and is shared between both
     frameworks.
@@ -160,9 +156,7 @@ def select_gpus(
             device_id = int(device.split(":")[1])
 
             if not isinstance(device_id, int):
-                raise ValueError(
-                    f'Invalid device format: {device}. Expected "cuda:<gpu_id>".'
-                )
+                raise ValueError(f'Invalid device format: {device}. Expected "cuda:<gpu_id>".')
             gpu_ids = [device_id]
 
         elif device.startswith("auto:"):
@@ -181,9 +175,7 @@ def select_gpus(
                     print(f"Selecting {num_gpus} GPUs based on available memory.")
 
             if not isinstance(num_gpus, int):
-                raise ValueError(
-                    f'Invalid device format: {device}. Expected "auto:<num_gpus>".'
-                )
+                raise ValueError(f'Invalid device format: {device}. Expected "auto:<num_gpus>".')
             if num_gpus == -1:
                 num_gpus = len(available_gpu_ids)  # use all available GPUs
             # Create list of N None values corresponding to unassigned GPUs
@@ -196,13 +188,12 @@ def select_gpus(
     if None in gpu_ids:
         # Automatically select GPUs based on available memory
         sorted_gpu_ids = [
-            x
-            for x, _ in sorted(enumerate(memory_free), key=lambda x: x[1], reverse=True)
+            x for x, _ in sorted(enumerate(memory_free), key=lambda x: x[1], reverse=True)
         ]
 
-        assert len(gpu_ids) <= len(
-            sorted_gpu_ids
-        ), f"Selected more GPUs ({len(gpu_ids)}) than available ({len(sorted_gpu_ids)})"
+        assert len(gpu_ids) <= len(sorted_gpu_ids), (
+            f"Selected more GPUs ({len(gpu_ids)}) than available ({len(sorted_gpu_ids)})"
+        )
 
         for i, gpu in enumerate(gpu_ids):
             if gpu is None and sorted_gpu_ids[i] in available_gpu_ids:
@@ -214,9 +205,7 @@ def select_gpus(
 
     if verbose:
         for gpu_id in gpu_ids:
-            print(
-                f"Selected GPU {gpu_id} with Free Memory: {memory_free[gpu_id]:.2f} MiB"
-            )
+            print(f"Selected GPU {gpu_id} with Free Memory: {memory_free[gpu_id]:.2f} MiB")
 
     # Hide other GPUs from the system
     if hide_others:
@@ -295,24 +284,24 @@ def backend_cuda_available(backend):
     """Check if the selected backend is installed with CUDA support."""
     if backend == "torch":
         try:
-            import torch  # pylint: disable=import-outside-toplevel
-        except:
+            import torch
+        except Exception:
             return False
         return torch.cuda.is_available()
     if backend == "tensorflow":
         try:
-            import tensorflow as tf  # pylint: disable=import-outside-toplevel
-        except:
+            import tensorflow as tf
+        except Exception:
             return False
         return bool(tf.config.list_physical_devices("GPU"))
     if backend == "jax":
         try:
-            import jax  # pylint: disable=import-outside-toplevel
-        except:
+            import jax
+        except Exception:
             return False
         try:
             return bool(jax.devices("gpu"))
-        except:
+        except Exception:
             return False
     return False
 
@@ -352,8 +341,8 @@ def selected_gpu_ids_to_device(selected_gpu_ids, backend):
 def set_memory_growth_tf():
     """Attempts to allocate only as much GPU memory as needed for the runtime allocations"""
     try:
-        import tensorflow as tf  # pylint: disable=import-outside-toplevel
-    except:
+        import tensorflow as tf
+    except Exception:
         return
 
     try:

@@ -59,9 +59,7 @@ def simulate_rf(
     pulse_spectrum_fn = get_pulse_spectrum_fn(center_frequency, n_period=4)
 
     if not apply_lens_correction:
-        dist = ops.linalg.norm(
-            probe_geometry[None] - scatterer_positions[:, None], axis=-1
-        )
+        dist = ops.linalg.norm(probe_geometry[None] - scatterer_positions[:, None], axis=-1)
     else:
         dist = (
             compute_lens_corrected_travel_times(
@@ -78,14 +76,12 @@ def simulate_rf(
     n_ax_rounded = _round_up_to_power_of_two(int(n_ax))
 
     freqs = (
-        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax_rounded, "float32")
-        * sampling_frequency
+        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax_rounded, "float32") * sampling_frequency
     )
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
     parts = []
     for tx in range(n_tx):
-
         tx_idx = ops.array(tx)
 
         # [n_scat, n_txel, rxel]
@@ -93,9 +89,7 @@ def simulate_rf(
 
         # [n_scat, n_txel, n_rxel]
         tau_total = (
-            (dist_total / sound_speed)
-            + t0_delays[tx_idx][None, :, None]
-            - initial_times[tx_idx]
+            (dist_total / sound_speed) + t0_delays[tx_idx][None, :, None] - initial_times[tx_idx]
         )
 
         scat_pos_relative_to_probe = scatterer_positions[:, None] - probe_geometry[None]
@@ -104,9 +98,7 @@ def simulate_rf(
         theta = ops.arctan2(
             scat_pos_relative_to_probe[:, :, 0], scat_pos_relative_to_probe[:, :, 2]
         )
-        phi = ops.arctan2(
-            scat_pos_relative_to_probe[:, :, 1], scat_pos_relative_to_probe[:, :, 2]
-        )
+        phi = ops.arctan2(scat_pos_relative_to_probe[:, :, 1], scat_pos_relative_to_probe[:, :, 2])
 
         directivity_tx = directivity(
             freqs[None, None, None],
@@ -228,9 +220,7 @@ def attenuate(f, attenuation_coef, dist):
     Returns:
         array-like: The spectrum of the attenuation.
     """
-    return ops.exp(
-        -ops.log(10) * attenuation_coef / 20 * dist * 100 * ops.abs(f) * 1e-6
-    )
+    return ops.exp(-ops.log(10) * attenuation_coef / 20 * dist * 100 * ops.abs(f) * 1e-6)
 
 
 def spread(dist, mindist=1e-4):
@@ -278,10 +268,7 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
 
     def spectrum_fn(f):
         return ops.array(1 / 2, "complex64") * ops.cast(
-            (
-                hann_fd(f - center_frequency, period)
-                + hann_fd(f + center_frequency, period)
-            ),
+            (hann_fd(f - center_frequency, period) + hann_fd(f + center_frequency, period)),
             "complex64",
         )
 

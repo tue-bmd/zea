@@ -341,12 +341,8 @@ class H5Processor:
         hdf5_file = avi_file.stem + ".hdf5"
         sequence = load_video(avi_file)
 
-        assert (
-            sequence.min() >= self.range_from[0]
-        ), f"{sequence.min()} < {self.range_from[0]}"
-        assert (
-            sequence.max() <= self.range_from[1]
-        ), f"{sequence.max()} > {self.range_from[1]}"
+        assert sequence.min() >= self.range_from[0], f"{sequence.min()} < {self.range_from[0]}"
+        assert sequence.max() <= self.range_from[1], f"{sequence.max()} > {self.range_from[1]}"
 
         # Translate to [0, 1]
         sequence = translate(sequence, self.range_from, self._process_range)
@@ -423,9 +419,7 @@ if __name__ == "__main__":
     print(f"Files left to process: {len(h5_files)}")
 
     # Run the processor
-    processor = H5Processor(
-        path_out_h5=args.output, path_out=args.output_numpy, splits=splits
-    )
+    processor = H5Processor(path_out_h5=args.output, path_out=args.output_numpy, splits=splits)
 
     print("Starting the conversion process.")
 

@@ -49,6 +49,7 @@ from zea.data.preset_utils import (
 )
 from zea.datapaths import format_data_path
 from zea.io_lib import search_file_tree
+from zea.tools.hf import HFPath
 from zea.utils import (
     calculate_file_hash,
     date_string_to_readable,
@@ -112,9 +113,7 @@ class H5FileHandleCache:
             self._file_handle_cache = OrderedDict()
 
 
-def find_h5_files(
-    paths: str | list, key: str, search_file_tree_kwargs: dict | None = None
-):
+def find_h5_files(paths: str | list, key: str, search_file_tree_kwargs: dict | None = None):
     """
     Find HDF5 files from a directory or list of directories and retrieve their shapes.
 
@@ -137,17 +136,16 @@ def find_h5_files(
     if not isinstance(paths, (tuple, list)):
         paths = [paths]
 
-    paths = [Path(path) for path in paths]
-
     file_shapes = []
     file_paths = []
     for path in paths:
-        if isinstance(path, (str, Path)) and str(path).startswith(HF_PREFIX):
+        if isinstance(path, (str, Path, HFPath)) and str(path).startswith(HF_PREFIX):
             # Let File handle HF path resolution
             resolved = _hf_resolve_path(str(path))
             path = resolved
 
-        if path.is_file():
+        if Path(path).is_file():
+            path = Path(path)
             # If the path is a file, get its shape directly
             file_shapes.append(File.get_shape(path, key))
             file_paths.append(str(path))
@@ -160,9 +158,7 @@ def find_h5_files(
             **search_file_tree_kwargs,
         )
         file_shapes += dataset_info["file_shapes"]
-        file_paths += [
-            str(Path(path) / file_path) for file_path in dataset_info["file_paths"]
-        ]
+        file_paths += [str(Path(path) / file_path) for file_path in dataset_info["file_paths"]]
 
     return file_paths, file_shapes
 
@@ -182,7 +178,7 @@ class Folder:
         **kwargs,
     ):
         # Hugging Face support
-        if isinstance(folder_path, (str, Path)):
+        if isinstance(folder_path, (str, Path, HFPath)):
             folder_path_str = str(folder_path)
             if folder_path_str.startswith(HF_PREFIX):
                 # Only resolve to local dir if it's a directory, else let File handle it
@@ -192,9 +188,7 @@ class Folder:
                     # It's a file, let File handle it
                     pass
                 else:
-                    folder_path = _hf_resolve_path(
-                        folder_path_str, cache_dir=hf_cache_dir
-                    )
+                    folder_path = _hf_resolve_path(folder_path_str, cache_dir=hf_cache_dir)
 
         super().__init__(**kwargs)
 
@@ -255,9 +249,7 @@ class Folder:
             try:
                 validate_file(file_path)
             except Exception as e:
-                validation_error_log.append(
-                    f"File {file_path} is not a valid zea dataset.\n{e}\n"
-                )
+                validation_error_log.append(f"File {file_path} is not a valid zea dataset.\n{e}\n")
                 # convert into warning
                 log.warning(f"Error in file {file_path}.\n{e}")
                 validated_succesfully = False
@@ -273,16 +265,13 @@ class Folder:
                         f.write(error)
             except Exception as e:
                 log.error(
-                    f"Could not write validation errors to {validation_error_file_path}."
-                    f"\n{e}"
+                    f"Could not write validation errors to {validation_error_file_path}.\n{e}"
                 )
             return
 
         # Create the validated flag file
         self._write_validation_file(self.folder_path, num_frames_per_file)
-        log.info(
-            f"{log.green('Dataset validated.')} Check {validation_file_path} for details."
-        )
+        log.info(f"{log.green('Dataset validated.')} Check {validation_file_path} for details.")
 
     @staticmethod
     def _assert_validation_file(validation_file_path):
@@ -301,16 +290,11 @@ class Folder:
                 ) from exc
 
             log.info(
-                "Dataset was validated on "
-                f"{log.green(date_string_to_readable(validation_date))}"
+                f"Dataset was validated on {log.green(date_string_to_readable(validation_date))}"
             )
-            log.info(
-                f"Remove {log.yellow(validation_file_path)} if you want to redo validation."
-            )
+            log.info(f"Remove {log.yellow(validation_file_path)} if you want to redo validation.")
         # check if validation file was corrupted
-        validation_file_hash = calculate_file_hash(
-            validation_file_path, omit_line_str="hash"
-        )
+        validation_file_hash = calculate_file_hash(validation_file_path, omit_line_str="hash")
         assert validation_file_hash == read_validation_file_hash, log.error(
             f"Validation file {log.yellow(validation_file_path)} was corrupted.\n"
             f"Remove it if you want to redo validation.\n"
@@ -418,29 +402,30 @@ class Dataset(H5FileHandleCache):
             paths = [paths]
 
         for file_path in paths:
-            if isinstance(file_path, (str, Path)):
-                if Path(file_path).is_dir() or str(file_path).startswith(HF_PREFIX):
-                    folder = Folder(
-                        file_path, self.key, self.search_file_tree_kwargs, self.validate
-                    )
-                    file_paths += folder.file_paths
-                    file_shapes += folder.file_shapes
-                    del folder
-                elif Path(file_path).is_file():
-                    file_paths.append(file_path)
-                    with File(file_path) as file:
-                        file_shapes.append(file.shape(self.key))
-                        if self.validate:
-                            file.validate()
-                else:
-                    raise ValueError(f"File {file_path} is not a file or directory.")
-            elif isinstance(file_path, (list, tuple)):
+            if isinstance(file_path, (list, tuple)):
                 # If the path is a list, recursively call find_files_and_shapes
                 _file_paths, _file_shapes = self.find_files_and_shapes(file_path)
                 file_paths += _file_paths
                 file_shapes += _file_shapes
+                continue
+
+            file_path = str(file_path)
+            if file_path.startswith(HF_PREFIX):
+                file_path = HFPath(file_path)
             else:
-                raise ValueError(f"File {file_path} is not a string or Path object.")
+                file_path = Path(file_path)
+
+            if file_path.is_dir():
+                folder = Folder(file_path, self.key, self.search_file_tree_kwargs, self.validate)
+                file_paths += folder.file_paths
+                file_shapes += folder.file_shapes
+                del folder
+            elif file_path.is_file():
+                file_paths.append(file_path)
+                with File(file_path) as file:
+                    file_shapes.append(file.shape(self.key))
+                    if self.validate:
+                        file.validate()
 
         return file_paths, file_shapes
 
@@ -489,8 +474,7 @@ class Dataset(H5FileHandleCache):
 
     def __repr__(self):
         return (
-            f"<zea.data.datasets.Dataset at 0x{id(self):x}: "
-            f"{self.n_files} files, key='{self.key}'>"
+            f"<zea.data.datasets.Dataset at 0x{id(self):x}: {self.n_files} files, key='{self.key}'>"
         )
 
     def __str__(self):
@@ -503,6 +487,12 @@ class Dataset(H5FileHandleCache):
                 file.close()
         self._file_handle_cache.clear()
         log.info("Closed all cached file handles.")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
 
 def split_files_by_directory(file_names, file_shapes, directory_list, directory_splits):
@@ -522,27 +512,24 @@ def split_files_by_directory(file_names, file_shapes, directory_list, directory_
     if isinstance(directory_splits, (float, int)):
         directory_splits = [directory_splits]
 
-    assert len(directory_splits) == len(
-        directory_list
-    ), "Number of directory splits must be equal to the number of directories."
-    assert all(
-        0 <= split <= 1 for split in directory_splits
-    ), "Directory splits must be between 0 and 1."
+    assert len(directory_splits) == len(directory_list), (
+        "Number of directory splits must be equal to the number of directories."
+    )
+    assert all(0 <= split <= 1 for split in directory_splits), (
+        "Directory splits must be between 0 and 1."
+    )
 
     # Get directory sizes using the new count function implementation
     directory_counts = count_samples_per_directory(file_names, directory_list)
     directory_sizes = [directory_counts[str(dir_path)] for dir_path in directory_list]
 
     # take percentage of the files from each directory
-    split_indices = [
-        int(split * size) for split, size in zip(directory_splits, directory_sizes)
-    ]
+    split_indices = [int(split * size) for split, size in zip(directory_splits, directory_sizes)]
 
     # offset split indices by each total number of files
     start_datasets = [0] + list(np.cumsum(directory_sizes))
     split_indices = [
-        (start_datasets[i], start_datasets[i] + split)
-        for i, split in enumerate(split_indices)
+        (start_datasets[i], start_datasets[i] + split) for i, split in enumerate(split_indices)
     ]
 
     # split the files
@@ -584,8 +571,7 @@ def count_samples_per_directory(file_names, directories):
 
     # Count files per directory using string matching
     counts = {
-        dir_path: sum(1 for f in file_paths if f.startswith(dir_path))
-        for dir_path in dir_paths
+        dir_path: sum(1 for f in file_paths if f.startswith(dir_path)) for dir_path in dir_paths
     }
 
     # Assert that the total counts match the number of files

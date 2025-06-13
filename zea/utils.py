@@ -34,9 +34,7 @@ def _assert_uint8_images(images: np.ndarray):
         AssertionError: If images have anything other than 1 (grayscale),
             3 (rgb) or 4 (rgba) channels.
     """
-    assert (
-        images.dtype == np.uint8
-    ), f"dtype of images should be uint8, got {images.dtype}"
+    assert images.dtype == np.uint8, f"dtype of images should be uint8, got {images.dtype}"
 
     assert images.ndim in (3, 4), (
         "images must have shape (n_frames, height, width, channels),"
@@ -193,9 +191,6 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
             of PIL.Image.save. Note: True can cause slow saving for longer sequences.
 
     """
-    assert isinstance(
-        filename, (str, Path)
-    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     if fps > 50:
@@ -209,15 +204,13 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
     if shared_color_palette:
         # Apply the same palette to all frames without dithering for consistent color mapping
         # Convert all images to RGB and combine their colors for palette generation
-        all_colors = np.vstack(
-            [np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs]
-        )
+        all_colors = np.vstack([np.array(img.convert("RGB")).reshape(-1, 3) for img in pillow_imgs])
         combined_image = Image.fromarray(all_colors.reshape(-1, 1, 3))
 
         # Generate palette from all frames
         global_palette = combined_image.quantize(
             colors=256,
-            method=Image.MEDIANCUT,  # pylint: disable=no-member
+            method=Image.MEDIANCUT,
             kmeans=1,
         )
 
@@ -225,7 +218,7 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
         pillow_imgs = [
             img.convert("RGB").quantize(
                 palette=global_palette,
-                dither=Image.NONE,  # pylint: disable=no-member
+                dither=Image.NONE,
             )
             for img in pillow_imgs
         ]
@@ -260,9 +253,6 @@ def save_to_mp4(images, filename, fps=20):
         str: Success message.
 
     """
-    assert isinstance(
-        filename, (str, Path)
-    ), f"Filename must be a string or Path object, not {type(filename)}"
     images = preprocess_for_saving(images)
 
     filename = str(filename)
@@ -272,7 +262,7 @@ def save_to_mp4(images, filename, fps=20):
         raise FileNotFoundError(f"Directory '{parent_dir}' does not exist.")
 
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required to save MP4 files. "
@@ -368,9 +358,7 @@ def find_first_nonzero_index(arr, axis, invalid_val=-1):
 
     """
     nonzero_mask = arr != 0
-    return np.where(
-        nonzero_mask.any(axis=axis), nonzero_mask.argmax(axis=axis), invalid_val
-    )
+    return np.where(nonzero_mask.any(axis=axis), nonzero_mask.argmax(axis=axis), invalid_val)
 
 
 def first_not_none_item(arr):
@@ -413,7 +401,6 @@ def deprecated(replacement=None):
         ...     @property
         ...     def old_property(self):
         ...         return self._old_attribute
-        ...
 
         >>> # Using the deprecated method
         >>> obj = MyClass()
@@ -439,8 +426,7 @@ def deprecated(replacement=None):
             def wrapper(*args, **kwargs):
                 if replacement:
                     log.deprecated(
-                        f"Call to deprecated {item.__name__}."
-                        f" Use {replacement} instead."
+                        f"Call to deprecated {item.__name__}. Use {replacement} instead."
                     )
                 else:
                     log.deprecated(f"Call to deprecated {item.__name__}.")
@@ -456,9 +442,7 @@ def deprecated(replacement=None):
                         f"use {replacement} instead."
                     )
                 else:
-                    log.deprecated(
-                        f"Access to deprecated attribute {item.fget.__name__}."
-                    )
+                    log.deprecated(f"Access to deprecated attribute {item.fget.__name__}.")
                 return item.fget(self)
 
             def setter(self, value):
@@ -468,9 +452,7 @@ def deprecated(replacement=None):
                         f"use {replacement} instead."
                     )
                 else:
-                    log.deprecated(
-                        f"Setting value to deprecated attribute {item.fget.__name__}."
-                    )
+                    log.deprecated(f"Setting value to deprecated attribute {item.fget.__name__}.")
                 item.fset(self, value)
 
             def deleter(self):
@@ -480,17 +462,13 @@ def deprecated(replacement=None):
                         f"use {replacement} instead."
                     )
                 else:
-                    log.deprecated(
-                        f"Deleting deprecated attribute {item.fget.__name__}."
-                    )
+                    log.deprecated(f"Deleting deprecated attribute {item.fget.__name__}.")
                 item.fdel(self)
 
             return property(getter, setter, deleter)
 
         else:
-            raise TypeError(
-                "Decorator can only be applied to functions, methods, or properties."
-            )
+            raise TypeError("Decorator can only be applied to functions, methods, or properties.")
 
     return decorator
 
@@ -625,7 +603,6 @@ class FunctionTimer:
     Example:
         >>> timer = FunctionTimer()
         >>> my_function = timer(my_function)
-        ...
         >>> my_function()
         >>> print(timer.get_stats("my_function"))
     """

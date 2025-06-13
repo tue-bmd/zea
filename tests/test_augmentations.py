@@ -21,9 +21,7 @@ def assert_circle_pixels(image, center, radius, fill_value, tol=1e-5):
 def test_random_circle_inclusion_2d_with_batch():
     """Test 2D batch augmentation."""
     images = np.zeros((4, 28, 28), dtype=np.float32)
-    layer = RandomCircleInclusion(
-        radius=5, fill_value=1.0, circle_axes=(1, 2), with_batch_dim=True
-    )
+    layer = RandomCircleInclusion(radius=5, fill_value=1.0, circle_axes=(1, 2), with_batch_dim=True)
     seed = keras_random.SeedGenerator(123)
     out = layer(ops.convert_to_tensor(images), seed=seed)
     out_np = ops.convert_to_numpy(out)
@@ -127,9 +125,7 @@ def test_evaluate_recovered_circle_accuracy_2d_with_batch_centers():
     )
     seed = keras_random.SeedGenerator(123)
     out, centers = layer(ops.convert_to_tensor(images), seed=seed)
-    acc = layer.evaluate_recovered_circle_accuracy(
-        out, centers, recovery_threshold=1e-5
-    )
+    acc = layer.evaluate_recovered_circle_accuracy(out, centers, recovery_threshold=1e-5)
     assert np.all(np.isclose(acc, 1.0)), f"Expected 1.0, got {acc}"
 
 
@@ -145,9 +141,7 @@ def test_evaluate_recovered_circle_accuracy_3d_with_batch_centers():
     )
     seed = keras_random.SeedGenerator(123)
     out, centers = layer(ops.convert_to_tensor(images), seed=seed)
-    acc = layer.evaluate_recovered_circle_accuracy(
-        out, centers, recovery_threshold=1e-5
-    )
+    acc = layer.evaluate_recovered_circle_accuracy(out, centers, recovery_threshold=1e-5)
     assert np.all(np.isclose(acc, 1.0)), f"Expected 1.0, got {acc}"
 
 
@@ -163,9 +157,7 @@ def test_evaluate_recovered_circle_accuracy_3d_no_batch_centers():
     )
     seed = keras_random.SeedGenerator(123)
     out, centers = layer(ops.convert_to_tensor(image), seed=seed)
-    acc = layer.evaluate_recovered_circle_accuracy(
-        out, centers, recovery_threshold=1e-5
-    )
+    acc = layer.evaluate_recovered_circle_accuracy(out, centers, recovery_threshold=1e-5)
     assert np.all(np.isclose(acc, 1.0)), f"Expected 1.0, got {acc}"
 
 
@@ -185,7 +177,5 @@ def test_evaluate_recovered_circle_accuracy_partial_recovery():
     half = len(mask_indices) // 2
     for idx in mask_indices[:half]:
         image[tuple(idx)] = 1.0
-    acc = layer.evaluate_recovered_circle_accuracy(
-        image, center, recovery_threshold=1e-5
-    )
+    acc = layer.evaluate_recovered_circle_accuracy(image, center, recovery_threshold=1e-5)
     assert 0.4 < acc < 0.6, f"Expected ~0.5, got {acc}"

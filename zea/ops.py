@@ -87,9 +87,8 @@ from zea.beamform.beamformer import tof_correction
 from zea.config.config import Config
 from zea.display import scan_convert
 from zea.internal.checks import _assert_keys_and_axes
-from zea.internal.core import STATIC, DataTypes
+from zea.internal.core import STATIC, DataTypes, ZEADecoderJSON, ZEAEncoderJSON
 from zea.internal.core import Object as ZEAObject
-from zea.internal.core import ZEADecoderJSON, ZEAEncoderJSON
 from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
@@ -209,11 +208,15 @@ class Operation(keras.Operation):
         self._valid_keys = set(self._input_signature.parameters.keys())
 
     @property
+    def valid_keys(self):
+        """Get the valid keys for the `call` method."""
+        return self._valid_keys
+
+    @property
     def jittable(self):
         """Check if the operation can be JIT compiled."""
         return self._jittable
 
-    # pylint: disable=arguments-differ
     def call(self, **kwargs):
         """
         Abstract method that defines the processing logic for the operation.
@@ -281,10 +284,8 @@ class Operation(keras.Operation):
                 return {**merged_kwargs, **self._output_cache[cache_key]}
 
         # Filter kwargs to match the valid keys of the `call` method
-        if not "kwargs" in self._valid_keys:
-            filtered_kwargs = {
-                k: v for k, v in merged_kwargs.items() if k in self._valid_keys
-            }
+        if "kwargs" not in self.valid_keys:
+            filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in self.valid_keys}
         else:
             filtered_kwargs = merged_kwargs
 
@@ -395,11 +396,8 @@ class Pipeline:
         if validate:
             self.validate()
         else:
-            log.warning(
-                "Pipeline validation is disabled, make sure to validate manually."
-            )
+            log.warning("Pipeline validation is disabled, make sure to validate manually.")
 
-        # pylint: disable=method-hidden
         if jit_kwargs is None:
             if keras.backend.backend() == "jax":
                 jit_kwargs = {"static_argnames": STATIC}
@@ -410,16 +408,19 @@ class Pipeline:
 
     def needs(self, key):
         """Check if the pipeline needs a specific key."""
+        if key in self.valid_keys:
+            return True
+
+    @property
+    def valid_keys(self):
+        """Get a set of valid keys for the pipeline."""
+        valid_keys = set()
         for operation in self.operations:
-            if isinstance(operation, Pipeline):
-                return operation.needs(key)
-            if key in operation._valid_keys:
-                return True
+            valid_keys.update(operation.valid_keys)
+        return valid_keys
 
     @classmethod
-    def from_default(
-        cls, num_patches=100, baseband=False, pfield=False, **kwargs
-    ) -> "Pipeline":
+    def from_default(cls, num_patches=100, baseband=False, pfield=False, **kwargs) -> "Pipeline":
         """Create a default pipeline.
 
         Args:
@@ -480,7 +481,18 @@ class Pipeline:
     def call(self, **inputs):
         """Process input data through the pipeline."""
         for operation in self._pipeline_layers:
-            outputs = operation(**inputs)
+            try:
+                outputs = operation(**inputs)
+            except KeyError as exc:
+                raise KeyError(
+                    f"[zea.Pipeline] Operation '{operation.__class__.__name__}' "
+                    f"requires input key '{exc.args[0]}', "
+                    "but it was not provided in the inputs.\n"
+                    "Check whether the objects (such as `zea.Scan`) passed to "
+                    "`pipeline.prepare_parameters()` contain all required keys.\n"
+                    f"Current list of all passed keys: {list(inputs.keys())}\n"
+                    f"Valid keys for this pipeline: {self.valid_keys}"
+                ) from exc
             inputs = outputs
         return outputs
 
@@ -612,9 +624,7 @@ class Pipeline:
         """Set parameters for the operations in the pipeline by adding them to the cache."""
         for operation in self.operations:
             operation_params = {
-                key: value
-                for key, value in params.items()
-                if key in operation._valid_keys
+                key: value for key, value in params.items() if key in operation.valid_keys
             }
             if operation_params:
                 operation.set_input_cache(operation_params)
@@ -658,9 +668,7 @@ class Pipeline:
                 if operation in split_operations:
                     index = string.index(operation)
                     index = index + len(operation)
-                    split_line = (
-                        split_line[:index] + "\\->" + split_line[index + len("\\->") :]
-                    )
+                    split_line = split_line[:index] + "\\->" + split_line[index + len("\\->") :]
                     split_detected = True
                     merge_detected = False
                     split_operation = operation
@@ -748,11 +756,13 @@ class Pipeline:
         Example:
             .. code-block:: python
 
-                config = Config({
-                    "operations": [
-                        "identity",
-                    ],
-                })
+                config = Config(
+                    {
+                        "operations": [
+                            "identity",
+                        ],
+                    }
+                )
                 pipeline = Pipeline.from_config(config)
         """
         return pipeline_from_config(Config(config), **kwargs)
@@ -858,28 +868,24 @@ class Pipeline:
 
         # Process args to extract Probe, Scan, and Config objects
         if probe is not None:
-            assert isinstance(
-                probe, Probe
-            ), f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
+            assert isinstance(probe, Probe), (
+                f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
+            )
             probe_dict = probe.to_tensor()
 
         if scan is not None:
-            assert isinstance(
-                scan, Scan
-            ), f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
-            except_tensors = []
-            for key in scan._on_request:
-                # If the pipeline does not need the key or it will be overridden by kwargs,
-                # we can skip converting it to a tensor
-                if not self.needs(key) or key in kwargs:
-                    except_tensors.append(key)
-            scan_dict = scan.to_tensor(except_tensors)
+            assert isinstance(scan, Scan), (
+                f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
+            )
+            scan_dict = scan.to_tensor(
+                compute_missing=True,
+                compute_keys=self.valid_keys,
+            )
 
         if config is not None:
-            # TODO: currently nothing...
-            assert isinstance(
-                config, Config
-            ), f"Expected an instance of `zea.config.Config`, got {type(config)}"
+            assert isinstance(config, Config), (
+                f"Expected an instance of `zea.config.Config`, got {type(config)}"
+            )
             config_dict.update(config.to_tensor())
 
         # Convert all kwargs to tensors
@@ -936,11 +942,13 @@ def make_operation_chain(
     Example:
         .. code-block:: python
 
-            chain = make_operation_chain([
-                "envelope_detect",
-                {"name": "normalize", "params": {"output_range": (0, 1)}},
-                SomeCustomOperation(),
-            ])
+            chain = make_operation_chain(
+                [
+                    "envelope_detect",
+                    {"name": "normalize", "params": {"output_range": (0, 1)}},
+                    SomeCustomOperation(),
+                ]
+            )
     """
     chain = []
     for operation in operation_chain:
@@ -949,9 +957,9 @@ def make_operation_chain(
             chain.append(operation)
             continue
 
-        assert isinstance(
-            operation, (str, dict, Config)
-        ), f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
+        assert isinstance(operation, (str, dict, Config)), (
+            f"Operation {operation} should be a string, dict, Config object, Operation, or Pipeline"
+        )
 
         if isinstance(operation, str):
             operation_instance = get_ops(operation)()
@@ -993,20 +1001,12 @@ def make_operation_chain(
 
                 # Instantiate pipeline-type operations with nested operations
                 if issubclass(operation_cls, Pipeline):
-                    operation_instance = operation_cls(
-                        operations=nested_operations, **params
-                    )
+                    operation_instance = operation_cls(operations=nested_operations, **params)
                 else:
-                    operation_instance = operation_cls(
-                        operations=nested_operations, **params
-                    )
+                    operation_instance = operation_cls(operations=nested_operations, **params)
             elif operation["name"] in ["patched_grid"]:
-                nested_operations = make_operation_chain(
-                    operation["params"].pop("operations")
-                )
-                operation_instance = operation_cls(
-                    operations=nested_operations, **params
-                )
+                nested_operations = make_operation_chain(operation["params"].pop("operations"))
+                operation_instance = operation_cls(operations=nested_operations, **params)
             else:
                 operation_instance = operation_cls(**params)
 
@@ -1019,12 +1019,12 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a Config object.
     """
-    assert (
-        "operations" in config
-    ), "Config object must have an 'operations' key for pipeline creation."
-    assert isinstance(
-        config.operations, (list, np.ndarray)
-    ), "Config object must have a list or numpy array of operations for pipeline creation."
+    assert "operations" in config, (
+        "Config object must have an 'operations' key for pipeline creation."
+    )
+    assert isinstance(config.operations, (list, np.ndarray)), (
+        "Config object must have a list or numpy array of operations for pipeline creation."
+    )
 
     operations = make_operation_chain(config.operations)
 
@@ -1175,9 +1175,7 @@ class PatchedGrid(Pipeline):
 
         def patched_call(flatgrid, **patch_kwargs):
             patch_args = {k: v for k, v in patch_kwargs.items() if v is not None}
-            out = super(PatchedGrid, self).call(  # pylint: disable=super-with-arguments
-                flatgrid=flatgrid, **patch_args, **inputs
-            )
+            out = super(PatchedGrid, self).call(flatgrid=flatgrid, **patch_args, **inputs)
             return out[self.output_key]
 
         out = patched_map(
@@ -1332,7 +1330,6 @@ class Simulate(Operation):
             **kwargs,
         )
 
-    # pylint: disable=arguments-differ
     def call(
         self,
         scatterer_positions,
@@ -1396,17 +1393,17 @@ class TOFCorrection(Operation):
 
     def call(
         self,
-        flatgrid=None,
-        sound_speed=None,
-        polar_angles=None,
-        focus_distances=None,
-        sampling_frequency=None,
-        f_number=None,
-        demodulation_frequency=None,
-        t0_delays=None,
-        tx_apodizations=None,
-        initial_times=None,
-        probe_geometry=None,
+        flatgrid,
+        sound_speed,
+        polar_angles,
+        focus_distances,
+        sampling_frequency,
+        f_number,
+        demodulation_frequency,
+        t0_delays,
+        tx_apodizations,
+        initial_times,
+        probe_geometry,
         apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
@@ -1589,14 +1586,10 @@ class DelayAndSum(Operation):
             beamformed_data = self.process_image(data, rx_apo, tx_apo)
         else:
             # Apply process_image to each item in the batch
-            beamformed_data = ops.map(
-                lambda data: self.process_image(data, rx_apo, tx_apo), data
-            )
+            beamformed_data = ops.map(lambda data: self.process_image(data, rx_apo, tx_apo), data)
 
         if self.reshape_grid:
-            beamformed_data = reshape_axis(
-                beamformed_data, (Nz, Nx), axis=int(self.with_batch_dim)
-            )
+            beamformed_data = reshape_axis(beamformed_data, (Nz, Nx), axis=int(self.with_batch_dim))
 
         return {self.output_key: beamformed_data}
 
@@ -1733,9 +1726,7 @@ class Normalize(Operation):
     def to_float32(data):
         """Converts an iterable to float32 and leaves None values as is."""
         return (
-            [np.float32(x) if x is not None else None for x in data]
-            if data is not None
-            else None
+            [np.float32(x) if x is not None else None for x in data] if data is not None else None
         )
 
     def call(self, **kwargs):
@@ -1793,8 +1784,7 @@ class ScanConvert(Operation):
         if order > 1:
             jittable = False
             log.warning(
-                "GPU support for order > 1 is not available. "
-                + "Disabling jit for ScanConvert."
+                "GPU support for order > 1 is not available. " + "Disabling jit for ScanConvert."
             )
         else:
             jittable = True
@@ -1904,14 +1894,13 @@ class GaussianBlur(Operation):
         """
         n = np.zeros((self.kernel_size, self.kernel_size))
         n[self.radius, self.radius] = 1
-        kernel = scipy.ndimage.gaussian_filter(
-            n, sigma=self.sigma, mode="constant"
-        ).astype(np.float32)
+        kernel = scipy.ndimage.gaussian_filter(n, sigma=self.sigma, mode="constant").astype(
+            np.float32
+        )
         kernel = kernel[:, :, None, None]
         return ops.convert_to_tensor(kernel)
 
     def call(self, **kwargs):
-
         data = kwargs[self.key]
 
         # Add batch dimension if not present
@@ -2095,9 +2084,9 @@ class Pad(Operation, TFDataLayer):
     def _format_target_shape(shape_array, target_shape, axis):
         if isinstance(axis, int):
             axis = [axis]
-        assert len(axis) == len(
-            target_shape
-        ), "The length of axis must be equal to the length of target_shape."
+        assert len(axis) == len(target_shape), (
+            "The length of axis must be equal to the length of target_shape."
+        )
         axis = map_negative_indices(axis, len(shape_array))
 
         target_shape = [
@@ -2141,9 +2130,7 @@ class Pad(Operation, TFDataLayer):
             target_shape = self._format_target_shape(shape_array, target_shape, axis)
 
         if not fail_on_bigger_shape:
-            target_shape = [
-                max(target_shape[i], shape_array[i]) for i in range(len(shape_array))
-            ]
+            target_shape = [max(target_shape[i], shape_array[i]) for i in range(len(shape_array))]
 
         # Compute the padding required for each dimension
         pad_shape = np.array(target_shape) - shape_array
@@ -2207,27 +2194,20 @@ class Companding(Operation):
             raise ValueError("comp_type must be 'mu' or 'a'.")
 
         if self.comp_type == "mu":
-            self._compand_func = (
-                self._mu_law_expand if self.expand else self._mu_law_compress
-            )
+            self._compand_func = self._mu_law_expand if self.expand else self._mu_law_compress
         else:
-            self._compand_func = (
-                self._a_law_expand if self.expand else self._a_law_compress
-            )
+            self._compand_func = self._a_law_expand if self.expand else self._a_law_compress
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _mu_law_compress(x, mu=255, **kwargs):
         x = ops.clip(x, -1, 1)
         return ops.sign(x) * ops.log(1.0 + mu * ops.abs(x)) / ops.log(1.0 + mu)
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _mu_law_expand(y, mu=255, **kwargs):
         y = ops.clip(y, -1, 1)
         return ops.sign(y) * ((1.0 + mu) ** ops.abs(y) - 1.0) / mu
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _a_law_compress(x, A=87.6, **kwargs):
         x = ops.clip(x, -1, 1)
@@ -2239,7 +2219,6 @@ class Companding(Operation):
         y = ops.where((x_abs >= 0) & (x_abs < (1.0 / A)), val1, val2)
         return y
 
-    # pylint: disable=unused-argument
     @staticmethod
     def _a_law_expand(y, A=87.6, **kwargs):
         y = ops.clip(y, -1, 1)
@@ -2486,13 +2465,11 @@ class Threshold(Operation):
         else:  # soft
             if below_threshold:
                 self._threshold_func = (
-                    lambda data, threshold, fill: ops.maximum(data - threshold, 0)
-                    + fill
+                    lambda data, threshold, fill: ops.maximum(data - threshold, 0) + fill
                 )
             else:
                 self._threshold_func = (
-                    lambda data, threshold, fill: ops.minimum(data - threshold, 0)
-                    + fill
+                    lambda data, threshold, fill: ops.minimum(data - threshold, 0) + fill
                 )
 
     def _resolve_fill_value(self, data, threshold):
@@ -2525,9 +2502,7 @@ class Threshold(Operation):
         """
         data = kwargs[self.key]
         if (threshold is None) == (percentile is None):
-            raise ValueError(
-                "Pass either threshold or percentile, not both or neither."
-            )
+            raise ValueError("Pass either threshold or percentile, not both or neither.")
 
         if percentile is not None:
             # Convert percentile to quantile value (0-1 range)
@@ -2570,9 +2545,7 @@ class AnisotropicDiffusion(Operation):
         results = []
         for i in range(batch_size):
             image = data[i]
-            image_out = self._anisotropic_diffusion_single(
-                image, niter, lmbda, rect, eps
-            )
+            image_out = self._anisotropic_diffusion_single(image, niter, lmbda, rect, eps)
             results.append(image_out)
 
         result = ops.stack(results, axis=0)
@@ -2588,25 +2561,15 @@ class AnisotropicDiffusion(Operation):
         M, N = image.shape
 
         for _ in range(niter):
-            iN = ops.concatenate(
-                [image[1:], ops.zeros((1, N), dtype=image.dtype)], axis=0
-            )
-            iS = ops.concatenate(
-                [ops.zeros((1, N), dtype=image.dtype), image[:-1]], axis=0
-            )
-            jW = ops.concatenate(
-                [image[:, 1:], ops.zeros((M, 1), dtype=image.dtype)], axis=1
-            )
-            jE = ops.concatenate(
-                [ops.zeros((M, 1), dtype=image.dtype), image[:, :-1]], axis=1
-            )
+            iN = ops.concatenate([image[1:], ops.zeros((1, N), dtype=image.dtype)], axis=0)
+            iS = ops.concatenate([ops.zeros((1, N), dtype=image.dtype), image[:-1]], axis=0)
+            jW = ops.concatenate([image[:, 1:], ops.zeros((M, 1), dtype=image.dtype)], axis=1)
+            jE = ops.concatenate([ops.zeros((M, 1), dtype=image.dtype), image[:, :-1]], axis=1)
 
             if rect is not None:
                 x1, y1, x2, y2 = rect
                 imageuniform = image[x1:x2, y1:y2]
-                q0_squared = (
-                    ops.std(imageuniform) / (ops.mean(imageuniform) + eps)
-                ) ** 2
+                q0_squared = (ops.std(imageuniform) / (ops.mean(imageuniform) + eps)) ** 2
 
             dN = iN - image
             dS = iS - image
@@ -2623,9 +2586,7 @@ class AnisotropicDiffusion(Operation):
                 den = (q_squared - q0_squared) / (q0_squared * (1 + q0_squared) + eps)
             c = 1.0 / (1 + den)
             cS = ops.concatenate([ops.zeros((1, N), dtype=image.dtype), c[:-1]], axis=0)
-            cE = ops.concatenate(
-                [ops.zeros((M, 1), dtype=image.dtype), c[:, :-1]], axis=1
-            )
+            cE = ops.concatenate([ops.zeros((M, 1), dtype=image.dtype), c[:, :-1]], axis=1)
 
             D = (cS * dS) + (c * dN) + (cE * dE) + (c * dW)
             image = image + (lmbda / 4) * D
@@ -2676,9 +2637,7 @@ def demodulate_not_jitable(
 
     """
     rf_data = ops.convert_to_numpy(rf_data)
-    assert np.isreal(
-        rf_data
-    ).all(), f"RF must contain real RF signals, got {rf_data.dtype}"
+    assert np.isreal(rf_data).all(), f"RF must contain real RF signals, got {rf_data.dtype}"
 
     input_shape = rf_data.shape
     n_dim = len(input_shape)
@@ -2688,9 +2647,7 @@ def demodulate_not_jitable(
         n_ax, n_el = input_shape
 
     if filter_coeff is None:
-        assert (
-            sampling_frequency is not None
-        ), "provide sampling_frequency when no filter is given."
+        assert sampling_frequency is not None, "provide sampling_frequency when no filter is given."
         # Time vector
         t = np.arange(n_ax) / sampling_frequency
         t0 = 0
@@ -2717,12 +2674,10 @@ def demodulate_not_jitable(
             Wn = min(2 * center_frequency / sampling_frequency, 0.5)
             bandwidth = center_frequency * Wn
         else:
-            assert np.isscalar(
-                bandwidth
-            ), "The signal bandwidth (in %) must be a scalar."
-            assert (bandwidth > 0) & (
-                bandwidth <= 200
-            ), "The signal bandwidth (in %) must be within the interval of ]0,200]."
+            assert np.isscalar(bandwidth), "The signal bandwidth (in %) must be a scalar."
+            assert (bandwidth > 0) & (bandwidth <= 200), (
+                "The signal bandwidth (in %) must be within the interval of ]0,200]."
+            )
             # bandwidth in Hz
             bandwidth = center_frequency * bandwidth / 100
             Wn = bandwidth / sampling_frequency
@@ -2831,9 +2786,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
     Returns:
         ndarray: band pass filter
     """
-    bpf = scipy.signal.firwin(
-        num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency
-    )
+    bpf = scipy.signal.firwin(num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency)
     return bpf
 
 
@@ -2858,9 +2811,9 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
         f"got {bw / 2} Hz, must be within (0, {sampling_frequency / 2}) Hz"
     )
     t_qbp = np.arange(num_taps) / sampling_frequency
-    lpf = scipy.signal.firwin(
-        num_taps, bw / 2, pass_zero=True, fs=sampling_frequency
-    ) * np.exp(1j * 2 * np.pi * f * t_qbp)
+    lpf = scipy.signal.firwin(num_taps, bw / 2, pass_zero=True, fs=sampling_frequency) * np.exp(
+        1j * 2 * np.pi * f * t_qbp
+    )
     return lpf
 
 
@@ -3025,18 +2978,11 @@ def demodulate(data, center_frequency, sampling_frequency, axis=-3):
     # Cast to complex64
     center_frequency = ops.cast(center_frequency, dtype="complex64")
     sampling_frequency = ops.cast(sampling_frequency, dtype="complex64")
-    frequency_indices_shaped_like_rf = ops.cast(
-        frequency_indices_shaped_like_rf, dtype="complex64"
-    )
+    frequency_indices_shaped_like_rf = ops.cast(frequency_indices_shaped_like_rf, dtype="complex64")
 
     # Shift to baseband
     phasor_exponent = (
-        -1j
-        * 2
-        * np.pi
-        * center_frequency
-        * frequency_indices_shaped_like_rf
-        / sampling_frequency
+        -1j * 2 * np.pi * center_frequency * frequency_indices_shaped_like_rf / sampling_frequency
     )
     iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
 

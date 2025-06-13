@@ -18,8 +18,8 @@ import h5py
 import numpy as np
 
 from zea import log
+from zea.beamform.delays import compute_t0_delays_planewave
 from zea.data.data_format import generate_zea_dataset
-from zea.scan import compute_t0_delays_planewave
 
 
 def convert_picmus(source_path, output_path, overwrite=False):
@@ -84,9 +84,7 @@ def convert_picmus(source_path, output_path, overwrite=False):
     initial_times = np.zeros((n_tx,))
     for n in range(n_tx):
         v = np.array([np.sin(polar_angles[n]), 0, np.cos(0)])
-        initial_times[n] = (
-            -np.min(np.sum(probe_geometry * v[None], axis=1)) / sound_speed
-        )
+        initial_times[n] = -np.min(np.sum(probe_geometry * v[None], axis=1)) / sound_speed
 
         t0_delays[n] = compute_t0_delays_planewave(
             probe_geometry=probe_geometry,
@@ -130,9 +128,7 @@ def get_args():
         help="Source directory where the original PICMUS data is stored.",
     )
 
-    parser.add_argument(
-        "--output_dir", type=str, help="Output directory of the converted database"
-    )
+    parser.add_argument("--output_dir", type=str, help="Output directory of the converted database")
     return parser.parse_args()
 
 
@@ -180,7 +176,7 @@ if __name__ == "__main__":
             output_file.parent.mkdir(parents=True, exist_ok=True)
 
             convert_picmus(file, output_file, overwrite=True)
-        except:
+        except Exception:
             output_file.parent.rmdir()
             log.error("Failed to convert %s", str_file)
             continue

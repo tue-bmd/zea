@@ -66,9 +66,7 @@ def get_unetwork(
     Returns:
         keras.Model
     """
-    assert (
-        len(image_shape) == 3
-    ), "image_shape must be a tuple of (height, width, channels)"
+    assert len(image_shape) == 3, "image_shape must be a tuple of (height, width, channels)"
 
     image_height, image_width, n_channels = image_shape
     noisy_images = keras.Input(shape=(image_height, image_width, n_channels))
@@ -165,9 +163,7 @@ def get_time_conditional_unetwork(
     Returns:
         keras.Model
     """
-    assert (
-        len(image_shape) == 3
-    ), "image_shape must be a tuple of (height, width, channels)"
+    assert len(image_shape) == 3, "image_shape must be a tuple of (height, width, channels)"
 
     if widths is None:
         log.warning("No widths provided, using default widths [32, 64, 96, 128]")
@@ -187,9 +183,7 @@ def get_time_conditional_unetwork(
         )
 
     e = layers.Lambda(_sinusoidal_embedding, output_shape=(1, 1, 32))(noise_variances)
-    e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(
-        e
-    )
+    e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(e)
 
     x = layers.Conv2D(widths[0], kernel_size=1)(noisy_images)
     x = layers.Concatenate()([x, e])

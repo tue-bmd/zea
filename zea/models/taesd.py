@@ -13,11 +13,7 @@ from keras import backend, ops
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
-from zea.models.presets import (
-    taesdxl_decoder_presets,
-    taesdxl_encoder_presets,
-    taesdxl_presets,
-)
+from zea.models.presets import taesdxl_decoder_presets, taesdxl_encoder_presets, taesdxl_presets
 
 
 @model_registry(name="taesdxl")
@@ -33,8 +29,7 @@ class TinyAutoencoder(BaseModel):
         """
         if backend.backend() not in ["tensorflow", "jax"]:
             raise NotImplementedError(
-                "TinyDecoder is only currently supported with the "
-                "TensorFlow or Jax backend."
+                "TinyDecoder is only currently supported with the TensorFlow or Jax backend."
             )
 
         _fix_tf_to_jax_resize_nearest_neighbor()
@@ -59,9 +54,7 @@ class TinyAutoencoder(BaseModel):
 
         if ops.shape(inputs)[-1] == 1:
             self._grayscale = True
-            inputs = ops.concatenate(
-                [inputs, inputs, inputs], axis=-1
-            )  # grayscale to RGB
+            inputs = ops.concatenate([inputs, inputs, inputs], axis=-1)  # grayscale to RGB
         return self.encoder(inputs)
 
     def decode(self, inputs):
@@ -75,16 +68,16 @@ class TinyAutoencoder(BaseModel):
             decoded = ops.image.rgb_to_grayscale(decoded, data_format="channels_last")
         return decoded
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """Applies the full autoencoder to the input."""
         encoded = self.encode(inputs)
         # NOTE: Here you can compress the encoding a little bit more by going
         # to uint8 like in the original model
-        # https://github.com/huggingface/diffusers/blob/cd30820/src/diffusers/models/autoencoders/autoencoder_tiny.py?plain=1#L336-L342 # pylint: disable=line-too-long
+        # https://github.com/huggingface/diffusers/blob/cd30820/src/diffusers/models/autoencoders/autoencoder_tiny.py?plain=1#L336-L342 # noqa: E501
         decoded = self.decode(encoded)
         return decoded
 
-    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
+    def custom_load_weights(self, preset, **kwargs):
         """Load the weights for the encoder and decoder."""
         self.encoder.custom_load_weights(preset)
         self.decoder.custom_load_weights(preset)
@@ -123,15 +116,11 @@ class TinyBase(BaseModel):
         """Converts the network to Jax if backend is Jax."""
         if backend.backend() == "jax":
             inputs = ops.zeros(input_shape)
-            from zea.backend import tf2jax  # pylint: disable=import-outside-toplevel
+            from zea.backend import tf2jax
 
-            jax_func, jax_params = tf2jax.convert(  # pylint: disable=no-member
-                tf.function(self.network), inputs
-            )
+            jax_func, jax_params = tf2jax.convert(tf.function(self.network), inputs)
 
-            def call_fn(
-                params, state, rng, inputs, training
-            ):  # pylint: disable=unused-argument
+            def call_fn(params, state, rng, inputs, training):
                 return jax_func(state, inputs)
 
             self.network = keras.layers.JaxLayer(call_fn, state=jax_params)
@@ -147,7 +136,7 @@ class TinyBase(BaseModel):
                 f"TensorFlow or Jax backend. You are using {backend.backend()}."
             )
 
-    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
+    def custom_load_weights(self, preset, **kwargs):
         """Load the weights for the encoder or decoder."""
         loader = get_preset_loader(preset)
 
@@ -157,14 +146,13 @@ class TinyBase(BaseModel):
         base_path = Path(filename).parent
         self.network = self._load_layer(base_path)
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """
         Applies the network to the input.
         """
         if self.network is None:
             raise ValueError(
-                f"Please load model using `{self.__class__.__name__}.from_preset()` "
-                "before calling."
+                f"Please load model using `{self.__class__.__name__}.from_preset()` before calling."
             )
 
         out = self.network(inputs)
@@ -210,16 +198,14 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
     if backend.backend() != "jax":
         return
 
-    import jax  # pylint: disable=import-outside-toplevel
-    import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
+    import jax
+    import jax.numpy as jnp
 
-    from zea.backend import tf2jax  # pylint: disable=import-outside-toplevel
+    from zea.backend import tf2jax
 
     def _resize_nearest_neighbor(proto):
         """Parse a ResizeNearestNeighbor op."""
-        tf2jax._src.ops._check_attrs(  # pylint: disable=no-member
-            proto, {"T", "align_corners", "half_pixel_centers"}
-        )
+        tf2jax._src.ops._check_attrs(proto, {"T", "align_corners", "half_pixel_centers"})
 
         def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
             if len(images.shape) != 4:
@@ -240,9 +226,7 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
         return _func
 
     # hack to allow align_corners=True and half_pixel_centers=True
-    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = (  # pylint: disable=no-member
-        _resize_nearest_neighbor
-    )
+    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)
