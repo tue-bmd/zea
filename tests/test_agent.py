@@ -5,6 +5,7 @@ import pytest
 from keras import ops
 
 from zea.agent import masks, selection
+from . import backend_equality_check
 
 
 def test_equispaced_lines():
@@ -84,8 +85,11 @@ def test_greedy_entropy():
     rand_img_1[:, 2] = rand_img_1[:, 3]
     rand_img_2[:, 2] = rand_img_2[:, 3]
 
-    particles = np.stack([rand_img_1, rand_img_2], axis=0)[:, None]
-    particles = np.squeeze(particles, axis=-1)  # shape (n_particles, 1, h, w)
+    particles = np.stack([rand_img_1, rand_img_2], axis=0)
+    particles = np.expand_dims(particles, axis=0)  # add batch dim
+    particles = np.squeeze(
+        particles, axis=-1
+    )  # remove channel dim --> (batch, n_particles, h, w)
 
     n_actions = 1
     agent = selection.GreedyEntropy(n_actions, w, h, w)
@@ -140,7 +144,7 @@ def test_single_action():
     """Test single action."""
     np.random.seed(2)
     h, w = 8, 8
-    particles = np.random.rand(2, 1, h, w).astype(np.float32)
+    particles = np.random.rand(1, 2, h, w).astype(np.float32)
 
     agent = selection.GreedyEntropy(1, w, h, w)
     selected_lines, mask = agent.sample(particles)
