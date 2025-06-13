@@ -141,8 +141,8 @@ class GreedyEntropy(LinesActionModel):
             of shape (n_particles, n_particles, batch, height, width)
         """
         assert (
-            particles.shape[0] > 1
-        ), "The entropy cannot be approximated using a single sample."
+            particles.shape[1] > 1
+        ), "The entropy cannot be approximated using a single particle."
 
         if n_possible_actions is None:
             n_possible_actions = particles.shape[-1]
@@ -150,7 +150,7 @@ class GreedyEntropy(LinesActionModel):
         # TODO: I think we only need to compute the lower triangular
         # of this matrix, since it's symmetric
         squared_l2_error_matrices = (
-            particles[:, None, ...] - particles[None, :, ...]
+            particles[:, :, None, ...] - particles[:, None, :, ...]
         ) ** 2
         gaussian_error_per_pixel_i_j = ops.exp(
             (squared_l2_error_matrices) / (2 * entropy_sigma**2)
@@ -158,13 +158,13 @@ class GreedyEntropy(LinesActionModel):
         # Vertically stack all columns corresponding with the same line
         # This way we can just sum across the height axis and get the entropy
         # for each pixel in a given line
-        _, n_particles, batch_size, height, _ = gaussian_error_per_pixel_i_j.shape
+        batch_size, n_particles, _, height, _ = gaussian_error_per_pixel_i_j.shape
         gaussian_error_per_pixel_stacked = ops.reshape(
             gaussian_error_per_pixel_i_j,
             [
-                n_particles,
-                n_particles,
                 batch_size,
+                n_particles,
+                n_particles,
                 height * stack_n_cols,
                 n_possible_actions,
             ],
@@ -180,7 +180,7 @@ class GreedyEntropy(LinesActionModel):
         For more details see Section 4 here: https://arxiv.org/abs/2406.14388
 
         Args:
-            particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
+            particles (Tensor): Particles of shape (batch_size, n_particles, height, width)
 
         Returns:
             Tensor: batch of entropies per line, of shape (batch, n_possible_actions)
@@ -196,10 +196,10 @@ class GreedyEntropy(LinesActionModel):
         gaussian_error_per_line = ops.sum(gaussian_error_per_pixel_stacked, axis=3)
         # sum out first dimension of (n_particles x n_particles) error matrix
         # [n_particles, batch, n_possible_actions]
-        entropy_per_line_i = ops.sum(gaussian_error_per_line, axis=0)
+        entropy_per_line_i = ops.sum(gaussian_error_per_line, axis=1)
         # sum out second dimension of (n_particles x n_particles) error matrix
         # [batch, n_possible_actions]
-        entropy_per_line = ops.sum(entropy_per_line_i, axis=0)
+        entropy_per_line = ops.sum(entropy_per_line_i, axis=1)
         return entropy_per_line
 
     def select_line_and_reweight_entropy(self, entropy_per_line):
@@ -255,7 +255,7 @@ class GreedyEntropy(LinesActionModel):
         """Sample the action using the greedy entropy method.
 
         Args:
-            particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
+            particles (Tensor): Particles of shape (batch_size, n_particles, height, width)
 
         Returns:
            Tuple[Tensor, Tensor]:
