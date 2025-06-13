@@ -86,8 +86,6 @@ class Scan(Parameters):
         focus_distances (np.ndarray): Focus distances of selected transmits in meters.
         initial_times (np.ndarray): Initial times of selected transmits in seconds.
         time_to_next_transmit (np.ndarray): Time between selected transmit events.
-    Methods:
-        set_transmits(selection): Select which transmit events to use.
 
     """
 
