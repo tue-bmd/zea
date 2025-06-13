@@ -9,32 +9,33 @@ os.environ["KERAS_BACKEND"] = DEFAULT_TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
 
-def _should_use_gpu():
-    """Only use GPU if --gpu is passed and CUDA devices are available
+# import sys
+# def _should_use_gpu():
+#     """Only use GPU if --gpu is passed and CUDA devices are available
 
-    In vscode you can add the following to your settings.json to enable GPU tests:
-    ```json
-    {
-        // ...existing settings...
-        "python.testing.pytestArgs": [
-            "tests",
-            "--gpu"
-        ]
-    }
-    ```
-    """
-    # pytest stores options in sys.argv, check for --gpu
-    use_gpu = "--gpu" in sys.argv
-    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "") != ""
-    return use_gpu and cuda_visible
+#     In vscode you can add the following to your settings.json to enable GPU tests:
+#     ```json
+#     {
+#         // ...existing settings...
+#         "python.testing.pytestArgs": [
+#             "tests",
+#             "--gpu"
+#         ]
+#     }
+#     ```
+#     """
+#     # pytest stores options in sys.argv, check for --gpu
+#     use_gpu = "--gpu" in sys.argv
+#     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "") != ""
+#     return use_gpu and cuda_visible
 
 
-from zea.internal.device import init_device
+# from zea.internal.device import init_device
 
-if _should_use_gpu():
-    init_device("auto:1")
-else:
-    init_device("cpu")
+# if _should_use_gpu():
+#     init_device("auto:1")
+# else:
+#     init_device("cpu")
 
 # Initializing the backend workers for `backend_equality_check` and `run_in_backend`.
 # Note that these workers only have CPU access!
