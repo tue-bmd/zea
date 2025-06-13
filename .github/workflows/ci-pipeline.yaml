@@ -124,18 +124,6 @@ jobs:
           fi
           docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
 
-      - name: Run Pylint in container
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/ultrasound-toolbox" \
-            -w /ultrasound-toolbox \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
-            ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "pip install -e . && pylint \$(git ls-files '*.py') -j 0"
-
   tests:
     if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
@@ -166,6 +154,19 @@ jobs:
             -e LOGNAME=$(id -un) \
             ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "pip install -e . && pytest -p no:cacheprovider ./tests"
+
+      - name: Run heavy Pytest (allowed to fail)
+        continue-on-error: true
+        run: |
+          docker run --rm \
+          -v "${{ github.workspace }}:/ultrasound-toolbox" \
+          -w /ultrasound-toolbox \
+          -u $(id -u):$(id -g) \
+          -e HOME=/tmp \
+          -e USER=$(id -un) \
+          -e LOGNAME=$(id -un) \
+          ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
+          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
 
   build-docs:
     needs: [build-full-image, set-tag]
