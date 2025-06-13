@@ -26,6 +26,7 @@ Models
    notebooks/segmentation_example.ipynb
    notebooks/custom_models_example.ipynb
    notebooks/taesd_autoencoder_example.ipynb
+   notebooks/unet_example.ipynb
 
 Metrics
 -------
