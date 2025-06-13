@@ -413,7 +413,8 @@ def rotate_coordinates(coords, angle_deg):
         [
             [ops.cos(angle_rad), -ops.sin(angle_rad)],
             [ops.sin(angle_rad), ops.cos(angle_rad)],
-        ]
+        ],
+        dtype=coords.dtype,
     )
     return coords @ ops.transpose(rotation_matrix)
 
