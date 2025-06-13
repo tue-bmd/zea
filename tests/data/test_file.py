@@ -1,22 +1,11 @@
 """Tests for the File module."""
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
 from zea.data.file import File
 from zea.probes import Probe
 from zea.scan import Scan
-
-from . import data_root
-
-DATASET_PATH = f"{data_root}/USBMD_datasets/2024_USBMD_cardiac_S51/HDF5"
-FILE_NAME = "20240701_P1_A4CH_0000.hdf5"
-FILE_PATH = DATASET_PATH + "/" + FILE_NAME
-FILE_HAS_EVENTS = False
-FILE_N_FRAMES = 100
-FILE_PROBE_NAME = "generic"
 
 
 @pytest.fixture
@@ -92,17 +81,23 @@ def test_print_hdf5_attrs(complex_h5_file, capsys):
 
 def test_file_attributes():
     """Test file attributes."""
-    if not Path(DATASET_PATH).exists():
-        pytest.skip("The dataset path is unavailable.")
 
-    # Test the file attributes
+    DATASET_PATH = (
+        "hf://zeahub/picmus/database/simulation/contrast_speckle/contrast_speckle_simu_dataset_iq"
+    )
+
+    FILE_NAME = "contrast_speckle_simu_dataset_iq.hdf5"
+    FILE_PATH = DATASET_PATH + "/" + FILE_NAME
+    FILE_HAS_EVENTS = False
+    FILE_N_FRAMES = 1
+    FILE_PROBE_NAME = "verasonics_l11_4v"
+
     with File(FILE_PATH) as file:
-        assert file.name == FILE_NAME
-        assert file.path == Path(FILE_PATH)
-        assert file.has_events == FILE_HAS_EVENTS
-        assert file.n_frames == FILE_N_FRAMES
-        assert file.probe_name == FILE_PROBE_NAME
-        assert isinstance(file.probe(), Probe)
-        assert isinstance(file.scan(), Scan)
+        assert file.name == FILE_NAME, "File name should match expected value"
+        assert file.has_events == FILE_HAS_EVENTS, "File should not have events"
+        assert file.n_frames == FILE_N_FRAMES, "Number of frames should match expected value"
+        assert file.probe_name == FILE_PROBE_NAME, "Probe name should match expected value"
+        assert isinstance(file.probe(), Probe), "Probe should be an instance of Probe class"
+        assert isinstance(file.scan(), Scan), "Scan should be an instance of Scan class"
 
         file.validate()
