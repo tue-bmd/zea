@@ -7,8 +7,6 @@ from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 from zea.ops import Pad as PadOp
 from zea.utils import map_negative_indices
 
-# pylint: disable=arguments-differ
-
 
 class Pad(PadOp):
     """Pad layer for padding tensors to a specified shape which can be used in tf.data pipelines."""
@@ -38,7 +36,7 @@ class Resizer(TFDataLayer):
         seed: int | None = None,
         **resize_kwargs,
     ):
-        # pylint: disable=line-too-long
+        # noqa: E501
         """
         Initializes the data loader with the specified parameters.
 
@@ -62,15 +60,12 @@ class Resizer(TFDataLayer):
             ValueError: If an unsupported resize type is provided.
             AssertionError: If resize_axes is not of length 2.
         """
-        # pylint enable=line-too-long
         super().__init__()
 
-        assert (
-            isinstance(image_size, (tuple, list, np.ndarray)) and len(image_size) == 2
-        ), f"image_size must be of length 2, got: {image_size}"
-        assert isinstance(
-            resize_type, str
-        ), f"resize_type must be a string, got: {resize_type}"
+        assert isinstance(image_size, (tuple, list, np.ndarray)) and len(image_size) == 2, (
+            f"image_size must be of length 2, got: {image_size}"
+        )
+        assert isinstance(resize_type, str), f"resize_type must be a string, got: {resize_type}"
 
         self.image_size = image_size
 
@@ -79,9 +74,7 @@ class Resizer(TFDataLayer):
         elif resize_type == "center_crop":
             self.resizer = keras.layers.CenterCrop(*image_size, **resize_kwargs)
         elif resize_type == "random_crop":
-            self.resizer = keras.layers.RandomCrop(
-                *image_size, seed=seed, **resize_kwargs
-            )
+            self.resizer = keras.layers.RandomCrop(*image_size, seed=seed, **resize_kwargs)
         elif resize_type == "crop_or_pad":
             pad_kwargs = {}
             if "constant_values" in resize_kwargs:
@@ -165,9 +158,7 @@ class Resizer(TFDataLayer):
         resize_axes = map_negative_indices(self.resize_axes, ndim)
 
         # Prepare tensor for resizing
-        inputs, perm, perm_shape = self._permute_before_resize(
-            inputs, ndim, resize_axes
-        )
+        inputs, perm, perm_shape = self._permute_before_resize(inputs, ndim, resize_axes)
 
         # Apply resize
         out = self.resizer(inputs)

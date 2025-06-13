@@ -33,9 +33,7 @@ def plot_unet_example(
     n_imgs = batch.shape[0] // 4
     cmaps = ["gray"] * (3 * n_imgs) + ["viridis"] * n_imgs
 
-    fig, _ = plot_image_grid(
-        batch, vmin=-1, vmax=1, ncols=n_imgs, remove_axis=False, cmap=cmaps
-    )
+    fig, _ = plot_image_grid(batch, vmin=-1, vmax=1, ncols=n_imgs, remove_axis=False, cmap=cmaps)
 
     titles = ["Ground Truth", "Corrupted", "Inpainted", "Error"]
     for i, ax in enumerate(fig.axes[: len(titles) * n_imgs]):

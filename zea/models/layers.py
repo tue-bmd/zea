@@ -7,9 +7,7 @@ from keras import layers, ops
 
 
 @keras.saving.register_keras_serializable()
-def sinusoidal_embedding(
-    x, embedding_min_frequency, embedding_max_frequency, embedding_dims
-):
+def sinusoidal_embedding(x, embedding_min_frequency, embedding_max_frequency, embedding_dims):
     """Sinusoidal embedding layer."""
     frequencies = ops.exp(
         ops.linspace(

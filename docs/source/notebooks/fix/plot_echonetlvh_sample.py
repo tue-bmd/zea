@@ -17,9 +17,7 @@ from zea.utils import save_to_gif, translate
 
 def get_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Plot a sample from EchoNet-LVH dataset"
-    )
+    parser = argparse.ArgumentParser(description="Plot a sample from EchoNet-LVH dataset")
     parser.add_argument(
         "--input_h5",
         type=str,
@@ -39,9 +37,7 @@ def get_args():
         default="./output",
         help="Directory to save output files",
     )
-    parser.add_argument(
-        "--fps", type=int, default=20, help="Frames per second for the GIF"
-    )
+    parser.add_argument("--fps", type=int, default=20, help="Frames per second for the GIF")
     return parser.parse_args()
 
 
@@ -114,9 +110,7 @@ def create_measurement_overlays(frames, measurements, output_dir):
                 fig = plt.figure(figsize=(12, 8))
 
                 # Main image takes 80% of width, legend takes 20%
-                ax_image = fig.add_axes(
-                    [0.05, 0.1, 0.75, 0.8]
-                )  # [left, bottom, width, height]
+                ax_image = fig.add_axes([0.05, 0.1, 0.75, 0.8])  # [left, bottom, width, height]
                 ax_legend = fig.add_axes([0.82, 0.1, 0.15, 0.8])
 
                 # Normalize frame for better visualization
@@ -133,9 +127,7 @@ def create_measurement_overlays(frames, measurements, output_dir):
                     x2, y2 = float(row["X2"]), float(row["Y2"])
 
                     # Draw line
-                    ax_image.plot(
-                        [x1, x2], [y1, y2], "r-", linewidth=2, label=f"{row['Calc']}"
-                    )
+                    ax_image.plot([x1, x2], [y1, y2], "r-", linewidth=2, label=f"{row['Calc']}")
                     ax_image.plot([x1], [y1], "go", markersize=5)  # Start point
                     ax_image.plot([x2], [y2], "bo", markersize=5)  # End point
 
@@ -147,30 +139,18 @@ def create_measurement_overlays(frames, measurements, output_dir):
                     ax_legend.axis("off")
 
                     # Add measurement details to legend area
-                    ax_legend.text(
-                        0.05, 0.9, "Measurement:", fontsize=12, fontweight="bold"
-                    )
+                    ax_legend.text(0.05, 0.9, "Measurement:", fontsize=12, fontweight="bold")
                     ax_legend.text(0.05, 0.8, f"Type: {measurement_type}", fontsize=12)
-                    ax_legend.text(
-                        0.05, 0.7, f"Value: {measurement_value}", fontsize=12
-                    )
+                    ax_legend.text(0.05, 0.7, f"Value: {measurement_value}", fontsize=12)
                     ax_legend.text(0.05, 0.6, f"Frame: {frame_idx}", fontsize=12)
 
                     # Add coordinate information
-                    ax_legend.text(
-                        0.05, 0.45, "Coordinates:", fontsize=12, fontweight="bold"
-                    )
-                    ax_legend.text(
-                        0.05, 0.35, f"Start: ({x1:.1f}, {y1:.1f})", fontsize=10
-                    )
-                    ax_legend.text(
-                        0.05, 0.25, f"End: ({x2:.1f}, {y2:.1f})", fontsize=10
-                    )
+                    ax_legend.text(0.05, 0.45, "Coordinates:", fontsize=12, fontweight="bold")
+                    ax_legend.text(0.05, 0.35, f"Start: ({x1:.1f}, {y1:.1f})", fontsize=10)
+                    ax_legend.text(0.05, 0.25, f"End: ({x2:.1f}, {y2:.1f})", fontsize=10)
 
                     # Add color legend
-                    ax_legend.text(
-                        0.05, 0.1, "● Start point", fontsize=10, color="green"
-                    )
+                    ax_legend.text(0.05, 0.1, "● Start point", fontsize=10, color="green")
                     ax_legend.text(0.05, 0.05, "● End point", fontsize=10, color="blue")
                     ax_legend.text(0.05, 0.0, "— Measurement", fontsize=10, color="red")
 
@@ -178,21 +158,15 @@ def create_measurement_overlays(frames, measurements, output_dir):
                     fig.suptitle(f"Frame {frame_idx}: {measurement_type}", fontsize=14)
 
                     # Save figure
-                    filename = (
-                        f"frame_{frame_idx}_{measurement_type.replace('/', '_')}.png"
-                    )
-                    plt.savefig(
-                        os.path.join(output_dir, filename), dpi=150, bbox_inches="tight"
-                    )
+                    filename = f"frame_{frame_idx}_{measurement_type.replace('/', '_')}.png"
+                    plt.savefig(os.path.join(output_dir, filename), dpi=150, bbox_inches="tight")
                     plt.close(fig)
                     print(f"Saved measurement overlay: {filename}")
 
                 except Exception as e:
                     print(f"Error processing measurement at index {idx}: {e}")
             else:
-                print(
-                    f"Warning: Frame index {frame_idx} out of bounds (0-{len(frames)-1})"
-                )
+                print(f"Warning: Frame index {frame_idx} out of bounds (0-{len(frames) - 1})")
         else:
             print(f"Warning: No Frame index for measurement at index {idx}")
 

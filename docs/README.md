@@ -12,7 +12,7 @@ pip install -e .[docs]
 We also need to install `pandoc` to build the documentation:
 
 ```sh
-apt-get install -y pandoc
+apt-get update && apt-get install pandoc
 ```
 
 If you are using a clean Docker image, you may also need to set the locale to avoid issues with `make`:

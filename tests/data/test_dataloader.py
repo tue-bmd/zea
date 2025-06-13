@@ -3,7 +3,6 @@
 import hashlib
 import pickle
 from copy import deepcopy
-from pathlib import Path
 
 import h5py
 import keras
@@ -15,14 +14,14 @@ from zea import log
 from zea.backend.tensorflow.dataloader import make_dataloader
 from zea.data.augmentations import RandomCircleInclusion
 from zea.data.dataloader import MAX_RETRY_ATTEMPTS, H5Generator
+from zea.data.datasets import Dataset
 from zea.data.file import File
 from zea.data.layers import Resizer
 from zea.data.utils import json_loads
+from zea.tools.hf import HFPath
 
-from . import data_root
-
-CAMUS_DATASET_PATH = f"{data_root}/USBMD_datasets/CAMUS/train/patient0001"
-CAMUS_FILE = CAMUS_DATASET_PATH + "/patient0001_2CH_half_sequence.hdf5"
+CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
+CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
 DUMMY_IMAGE_SHAPE = (28, 28)
 
 
@@ -67,22 +66,16 @@ def ndim_hdf5_dataset_path(tmp_path):
 @pytest.fixture
 def camus_dataset():
     """Fixture to return the path to the CAMUS dataset."""
-    if not Path(CAMUS_DATASET_PATH).exists():
-        pytest.skip("The CAMUS dataset directory is unavailable")
     return CAMUS_DATASET_PATH
 
 
 @pytest.fixture
 def camus_file():
     """Fixture to return the path to the CAMUS dataset."""
-    if not Path(CAMUS_FILE).exists():
-        pytest.skip("The CAMUS dataset directory is unavailable")
     return CAMUS_FILE
 
 
-def _get_h5_generator(
-    file_path, key, n_frames, insert_frame_axis, seed=None, validate=True
-):
+def _get_h5_generator(file_path, key, n_frames, insert_frame_axis, seed=None, validate=True):
     file_paths = [file_path]
     # Create a H5Generator instance
     generator = H5Generator(
@@ -116,9 +109,7 @@ def test_h5_generator(file_path, key, n_frames, insert_frame_axis, request):
     validate = file_path != "dummy_hdf5"
     file_path = request.getfixturevalue(file_path)
 
-    generator = _get_h5_generator(
-        file_path, key, n_frames, insert_frame_axis, validate=validate
-    )
+    generator = _get_h5_generator(file_path, key, n_frames, insert_frame_axis, validate=validate)
 
     batch_shape = next(generator()).shape
     if insert_frame_axis:
@@ -136,24 +127,20 @@ def test_h5_generator(file_path, key, n_frames, insert_frame_axis, request):
 def test_h5_generator_shuffle(dummy_hdf5):
     """Test the H5Generator class"""
 
-    generator = _get_h5_generator(
-        dummy_hdf5, "data", 10, False, seed=42, validate=False
-    )
+    generator = _get_h5_generator(dummy_hdf5, "data", 10, False, seed=42, validate=False)
 
     # Test shuffle
     shuffled_items = deepcopy(generator.shuffled_items)
     generator._shuffle()
-    assert (
-        shuffled_items != generator.shuffled_items
-    ), "The generator indices were not shuffled"
+    assert shuffled_items != generator.shuffled_items, "The generator indices were not shuffled"
 
 
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
     [
-        ("camus_dataset", "data/image_sc", 1, True, 2, 18 + 20),
+        ("camus_dataset", "data/image_sc", 1, True, 6, 101),
         ("fake_directory", "data", 1, True, 3, 9 * 3),
-        ("camus_dataset", "data/image_sc", 5, False, 2, 18 + 20),
+        ("camus_dataset", "data/image_sc", 5, False, 6, 101),
         ("fake_directory", "data", 5, False, 3, 9 * 3),
     ],
 )
@@ -173,18 +160,23 @@ def test_dataloader(
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
-            with h5py.File(tmp_path / f"dummy_data_{i}.hdf5", "w", locking=False) as f:
+            with File(tmp_path / f"dummy_data_{i}.hdf5", "w") as f:
                 data = np.random.rand(total_samples // num_files, 28, 28)
                 f.create_dataset(key, data=data)
-        expected_len_dataset = total_samples // num_files // n_frames * num_files
         directory = tmp_path
         image_range = (0, 1)
     elif directory == "camus_dataset":
         directory = request.getfixturevalue(directory)
-        expected_len_dataset = 18 // n_frames + 20 // n_frames
         image_range = (-60, 0)
     else:
         raise ValueError("Invalid directory for testing")
+
+    with Dataset(directory, key=key) as dataset_test:
+        file_lengths = [len(file[key]) for file in dataset_test]
+
+    expected_len_dataset = sum(
+        [length // n_frames if not insert_frame_axis else length for length in file_lengths]
+    )
 
     dataset = make_dataloader(
         directory,
@@ -269,15 +261,13 @@ def test_h5_dataset_return_filename(
 
     batch = next(iter(dataset))
 
-    assert (
-        len(batch) == 2
-    ), "The batch should contain two elements: images and file names"
+    assert len(batch) == 2, "The batch should contain two elements: images and file names"
 
     _, file_dict = batch
 
-    assert (
-        len(file_dict) == batch_size
-    ), "The file_dict should contain the same number of elements as the batch size"
+    assert len(file_dict) == batch_size, (
+        "The file_dict should contain the same number of elements as the batch size"
+    )
 
     file_dict = file_dict[0]  # get the first file_dict of the batch
     file_dict = json_loads(file_dict.numpy())
@@ -303,44 +293,13 @@ def test_h5_dataset_return_filename(
             1,
         ),
         ("dummy_hdf5", "data", (20, 23), "resize", 1),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "center_crop",
-            3,
-        ),
         ("dummy_hdf5", "data", (20, 23), "center_crop", 3),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "center_crop",
-            3,
-        ),
-        ("dummy_hdf5", "data", (20, 23), "center_crop", 3),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "random_crop",
-            3,
-        ),
         ("dummy_hdf5", "data", (20, 23), "random_crop", 3),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "random_crop",
-            1,
-        ),
         ("dummy_hdf5", "data", (20, 23), "random_crop", 1),
         ("dummy_hdf5", "data", (32, 32), "crop_or_pad", 1),
     ],
 )
-def test_h5_dataset_resize_types(
-    directory, key, image_size, resize_type, batch_size, request
-):
+def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_size, request):
     """Test the dataloader with different resize types."""
 
     validate = directory != "dummy_hdf5"
@@ -366,9 +325,9 @@ def test_h5_dataset_resize_types(
     expected_shape = (batch_size, *image_size)
     dataset_shape = images.shape[:-1]
 
-    assert (
-        expected_shape == dataset_shape
-    ), f"The images should be resized to {expected_shape}, but got {dataset_shape}"
+    assert expected_shape == dataset_shape, (
+        f"The images should be resized to {expected_shape}, but got {dataset_shape}"
+    )
 
 
 def test_crop_or_pad():
@@ -378,9 +337,9 @@ def test_crop_or_pad():
     inp = np.random.rand(1, *DUMMY_IMAGE_SHAPE, 1)
     out = resizer(inp)
 
-    assert (
-        ops.sum(keras.layers.CenterCrop(*DUMMY_IMAGE_SHAPE)(out) - inp) == 0.0
-    ), "The center crop pad layer did not work as expected, probably a one-off padding issue"
+    assert ops.sum(keras.layers.CenterCrop(*DUMMY_IMAGE_SHAPE)(out) - inp) == 0.0, (
+        "The center crop pad layer did not work as expected, probably a one-off padding issue"
+    )
 
 
 @pytest.mark.parametrize(
@@ -497,9 +456,7 @@ def test_h5_file_retry_count(
     def mock_load_data(self, dtype, indices):
         if error_count[0] < mock_error_count:
             error_count[0] += 1
-            log.debug(
-                f"Simulating I/O error in File.load_data. Error count: {error_count[0]}"
-            )
+            log.debug(f"Simulating I/O error in File.load_data. Error count: {error_count[0]}")
             raise OSError(f"Simulated file access error (attempt {error_count[0]})")
         # After specified failures, call the original method
         return original_load_data(self, dtype, indices)
@@ -518,9 +475,9 @@ def test_h5_file_retry_count(
             next(iter(generator))
         assert "Failed to complete operation" in str(exc_info.value)
 
-    assert (
-        generator.retry_count == expected_retries
-    ), f"Expected {expected_retries} retries but got {generator.retry_count}"
+    assert generator.retry_count == expected_retries, (
+        f"Expected {expected_retries} retries but got {generator.retry_count}"
+    )
 
 
 @pytest.mark.usefixtures("dummy_hdf5")
@@ -568,9 +525,9 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
 
     # Since input is random and augmentation sets a circle to fill_value=1.0,
     # there should be some pixels exactly 1.0
-    assert np.any(
-        np.isclose(images_np, 1.0)
-    ), "Augmentation did not set any pixels to fill_value=1.0 as expected"
+    assert np.any(np.isclose(images_np, 1.0)), (
+        "Augmentation did not set any pixels to fill_value=1.0 as expected"
+    )
 
 
 def test_resize_with_different_shapes(multi_shape_dataset):

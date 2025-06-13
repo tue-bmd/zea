@@ -6,8 +6,6 @@ from keras import layers, ops
 
 from zea.tensor_ops import is_jax_prng_key, split_seed
 
-# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
-
 
 class RandomCircleInclusion(layers.Layer):
     """
@@ -96,9 +94,7 @@ class RandomCircleInclusion(layers.Layer):
         elif a2 > 0 and self.with_batch_dim:
             a2 -= 1
         if not (0 <= a1 < rank and 0 <= a2 < rank):
-            raise ValueError(
-                f"circle_axes {self.circle_axes} out of range for rank {rank}"
-            )
+            raise ValueError(f"circle_axes {self.circle_axes} out of range for rank {rank}")
         if a1 == a2:
             raise ValueError("circle_axes must be two distinct axes")
         self._axis1, self._axis2 = a1, a2
@@ -222,9 +218,7 @@ class RandomCircleInclusion(layers.Layer):
                     batch_size = ops.shape(x)[0]
                     seeds = split_seed(seed, batch_size)
                     if all(seed is seeds[0] for seed in seeds):
-                        imgs, centers = ops.map(
-                            lambda arg: self._call(arg, seeds[0]), x
-                        )
+                        imgs, centers = ops.map(lambda arg: self._call(arg, seeds[0]), x)
                     else:
                         imgs, centers = ops.map(
                             lambda args: self._call(args[0], args[1]), (x, seeds)
@@ -318,9 +312,7 @@ class RandomCircleInclusion(layers.Layer):
             h, w = image_perm.shape[-2], image_perm.shape[-1]
             flat_image, _, _, _ = self._flatten_batch_and_other_dims(image_perm)
             flat_center = ops.reshape(center, [-1, 2])
-            mask = self._make_circle_mask(
-                flat_center, h, w, self.radius, flat_image.dtype
-            )
+            mask = self._make_circle_mask(flat_center, h, w, self.radius, flat_image.dtype)
             diff = ops.abs(flat_image - fill_value)
             recovered = ops.cast(diff <= recovery_threshold, flat_image.dtype) * mask
             recovered_sum = ops.sum(recovered, axis=[1, 2])

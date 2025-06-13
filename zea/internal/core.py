@@ -11,7 +11,8 @@ import numpy as np
 from zea.utils import reduce_to_signature, update_dictionary
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
-BASE_PRECISION = "float32"
+BASE_FLOAT_PRECISION = "float32"
+BASE_INT_PRECISION = "int32"
 
 # TODO: make static more neat
 # These are global static attributes for all ops. Ops specific
@@ -122,15 +123,13 @@ class Object:
     def __delitem__(self, key):
         delattr(self, key)
 
-    def to_tensor(self, except_tensors=None):
+    def to_tensor(self):
         """Convert the attributes in the object to keras tensors"""
-        return object_to_tensor(self, except_tensors)
+        return object_to_tensor(self)
 
     @classmethod
     def safe_initialize(cls, **kwargs):
         """Safely initialize a class by removing any invalid arguments."""
-        # NOTE: we have the zea.utils.safe_initialize_class function, but do not use that here
-        # as pylint will not be able to detect the class type
         reduced_params = reduce_to_signature(cls.__init__, kwargs)
         return cls(**reduced_params)
 
@@ -142,16 +141,14 @@ class Object:
         return cls.safe_initialize(**params)
 
     @classmethod
-    def _tree_unflatten(cls, aux, children):  # pylint: disable=unused-argument
+    def _tree_unflatten(cls, aux, children):
         if cls is not Object:
             raise NotImplementedError(f"{cls.__name__} must implement _tree_unflatten.")
         return cls(*children)
 
     def _tree_flatten(self):
         if not isinstance(self, Object):
-            raise NotImplementedError(
-                f"{type(self).__name__} must implement _tree_flatten."
-            )
+            raise NotImplementedError(f"{type(self).__name__} must implement _tree_flatten.")
         return (), ()
 
     @classmethod
@@ -160,7 +157,7 @@ class Object:
         https://docs.jax.dev/en/latest/_autosummary/jax.tree_util.register_pytree_node.html
         """
         try:
-            from jax import tree_util  # pylint: disable=import-outside-toplevel
+            from jax import tree_util
         except ImportError as exc:
             raise ImportError(
                 "JAX is not installed. Please install JAX to use `register_pytree_node`."
@@ -173,55 +170,60 @@ class Object:
         )
 
 
-def object_to_tensor(obj: Object, except_tensors=None):
-    """Convert an object to a tensor"""
+def object_to_tensor(obj):
+    """Convert an object to a dictionary of tensors."""
     snapshot = {}
-    if except_tensors is None:
-        except_tensors = []
-
-    # Check if the object has static attributes, we will not convert them to tensors
-    if hasattr(obj, "_static_attrs"):
-        static_attrs = obj._static_attrs
-    else:
-        static_attrs = []
 
     for key in dir(obj):
         # Skip dunder/hidden methods and excepted tensors
-        if key.startswith("_") or key in except_tensors:
+        if key.startswith("_"):
             continue
 
-        # Some objects have a _set_params dict that stores if parameters have
-        # been (lazily) set. We don't want to convert these attributes to tensors
-        # if hasattr(obj, "_set_params") and not obj._set_params.get(key, True):
-        #     continue
+        value = getattr(obj, key, None)
 
-        # Skip methods
-        try:
-            value = getattr(obj, key)
-        except ValueError:
-            continue
-
-        if value is None:
-            snapshot[key] = None
-
+        # Skip methods and functions
         if callable(value):
+            continue
+
+        # if a dict is passed
+        if isinstance(value, dict):
+            # If the value is a dict, we recursively convert it to a tensor
+            snapshot[key] = object_to_tensor(value)
             continue
 
         # Skip byte strings
         if isinstance(value, bytes):
             continue
 
-        if key in static_attrs or not isinstance(value, CONVERT_TO_KERAS_TYPES):
-            snapshot[key] = value
-            continue
+        # Convert the value to a tensor
+        snapshot[key] = _to_tensor(key, value)
 
-        dtype = None
-        # Convert double precision arrays to float32
-        if isinstance(value, np.ndarray) and value.dtype == np.float64:
-            dtype = BASE_PRECISION
-
-        snapshot[key] = keras.ops.convert_to_tensor(value, dtype=dtype)
     return snapshot
+
+
+def _to_tensor(key, val):
+    if key in STATIC:
+        return val
+
+    if not isinstance(val, CONVERT_TO_KERAS_TYPES):
+        return val
+
+    if val is None:
+        return None
+    # Recursively handle dicts
+    if isinstance(val, dict):
+        return {k: _to_tensor(k, v) for k, v in val.items()}
+    # Use float precision for all floats (including np.float32/64)
+    if isinstance(val, float) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)):
+        dtype = BASE_FLOAT_PRECISION
+    # Use int precision for all ints (including np.int32/64)
+    elif isinstance(val, bool) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, bool)):
+        dtype = bool
+    elif isinstance(val, int) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, int)):
+        dtype = BASE_INT_PRECISION
+    else:
+        dtype = None
+    return keras.ops.convert_to_tensor(val, dtype=dtype)
 
 
 class ZEAEncoderJSON(json.JSONEncoder):

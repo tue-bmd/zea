@@ -51,11 +51,12 @@ dependencies = [
 dev = [
     # tests
     "pytest>=8.1",
-    "pylint>=3.1",
     "papermill>=2.4",
     "ipykernel>=6.29.5",
     "cloudpickle>=3.1.1",
     "ipywidgets",
+    "pre-commit",
+    "ruff",
     # docs
     "sphinx",
     "sphinx-autobuild",
@@ -72,11 +73,12 @@ dev = [
 
 tests = [
     "pytest>=8.1",
-    "pylint>=3.1",
     "papermill>=2.4",
     "ipykernel>=6.29.5",
     "cloudpickle>=3.1.1",
     "ipywidgets",
+    "pre-commit",
+    "ruff",
 ]
 docs = [
     "sphinx",
@@ -110,15 +112,106 @@ zea = "zea.__main__:main"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.black]
-line-length = 88
-target-version = ['py39']
-include = '\.pyi?$|\.ipynb$' # Include both Python files and Jupyter notebooks
-
-[tool.isort]
-profile = "black"
-line_length = 88
-
 # To update the poetry.lock file run `sudo /opt/poetry-venv/bin/python3 -m poetry lock` inside the zea container (where poetry is installed)
 # Otherwise a simple `poetry lock` will suffice.
 # Rebuild docker image afterwards to match the lock file!
+
+[tool.ruff]
+# We use ruff to lint and auto-format code
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+    "*.ipynb",  # ignore jupyter notebooks completely for now
+]
+
+# more lenient line width than Black
+line-length = 100
+indent-width = 4
+
+# minimum target python version
+target-version = "py310"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = ["E", "F"]
+ignore = [
+    "E731",  # Ignore ambiguous variable name globally
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+
+"__init__.py" = [
+    "F401",  # unused imports
+    "E501",  # line too long
+    "E402",  # module level import not at top of file
+]
+
+"tests/**/__init__.py" = [
+    "F403",  # * imports
+]
+
+"docs/source/parameters_doc.py" = [
+    "E501",  # line too long
+]
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+#
+# This is currently disabled by default, but it is planned for this
+# to be opt-out in the future.
+docstring-code-format = true
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+#
+# This only has an effect when the `docstring-code-format` setting is
+# enabled.
+docstring-code-line-length = "dynamic"

@@ -109,8 +109,7 @@ def create_config():
                 schema_obj = config_schema
                 for k in keys:
                     sub_keys = [
-                        s.key if not isinstance(s, str) else s
-                        for s in schema_obj.schema.keys()
+                        s.key if not isinstance(s, str) else s for s in schema_obj.schema.keys()
                     ]
 
                     schema_key = list(schema_obj.schema.keys())[sub_keys.index(k)]
@@ -121,16 +120,14 @@ def create_config():
                 for k in keys[:-1]:
                     descriptions = descriptions[k]
 
-                nested_dict = _get_input_value(
-                    nested_dict, keys[-1], schema_obj, descriptions
-                )
+                nested_dict = _get_input_value(nested_dict, keys[-1], schema_obj, descriptions)
             else:
                 print("No optional keys will be changed.")
                 break
         except KeyboardInterrupt:
             print(red("KeyboardInterrupt, exiting."))
             sys.exit()
-        except:
+        except Exception:
             if key is None:
                 print(red("Invalid input, please try again."))
             else:
