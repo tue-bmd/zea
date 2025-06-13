@@ -699,6 +699,7 @@ def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
     )
 
 
+@pytest.mark.heavy
 def test_default_ultrasound_pipeline(
     default_pipeline,
     patched_pipeline,
