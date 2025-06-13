@@ -102,9 +102,7 @@ def interactive_selector(
     """
     assert data.ndim == 2, f"Data must be 2D, not {data.ndim}D."
 
-    x, y = np.meshgrid(
-        np.arange(data.shape[1], dtype=int), np.arange(data.shape[0], dtype=int)
-    )
+    x, y = np.meshgrid(np.arange(data.shape[1], dtype=int), np.arange(data.shape[0], dtype=int))
     pix = np.vstack((x.flatten(), y.flatten())).T
 
     def _translate_coordinates(x, y):
@@ -194,9 +192,7 @@ def interactive_selector(
             add_shape_from_mask(ax, mask, alpha=0.5)
         plt.draw()
         # tkinter yes / no dialog
-        like_selection = tk.messagebox.askyesno(
-            "Like Selection", "Do you like your selection?"
-        )
+        like_selection = tk.messagebox.askyesno("Like Selection", "Do you like your selection?")
 
         if not like_selection:
             remove_masks_from_axs(ax)
@@ -315,9 +311,7 @@ def interactive_selector_with_plot_and_metric(
     )
 
     if len(patches) != 2:
-        raise ValueError(
-            "exactly 2 patches are required for using this wrapper function"
-        )
+        raise ValueError("exactly 2 patches are required for using this wrapper function")
 
     # get patches for all data in data list using the selection made
     patches = []
@@ -424,7 +418,6 @@ def interpolate_rectangles(rectangles, x_indices, y_indices):
     for values in [x1, x2, y1, y2]:
         values_interp.append(np.interp(y_indices, x_indices, values).astype(np.int32))
 
-    # pylint: disable=unbalanced-tuple-unpacking
     x1, x2, y1, y2 = values_interp
     new_rectangles = [((x1[i], y1[i]), (x2[i], y2[i])) for i in range(len(x1))]
     return new_rectangles
@@ -447,9 +440,7 @@ def extract_polygon_from_mask(mask, tolerance: float = 0.01, verbose: bool = Tru
         contour_lengths = [len(contour) for contour in contours]
         contour = contours[np.argmax(contour_lengths)]
         if verbose:
-            log.warning(
-                "Warning: multiple contours found. Returning the largest contour."
-            )
+            log.warning("Warning: multiple contours found. Returning the largest contour.")
     elif len(contours) == 0:
         if verbose:
             log.warning("Warning: no contours found. Returning None.")
@@ -587,9 +578,7 @@ def equalize_polygons(polygons, mode="max"):
                 f_y = interp1d(np.arange(len(polygon)), polygon[:, 1], kind="linear")
 
                 # evaluate the functions at the interpolated indices
-                interpolated_polygons.append(
-                    np.column_stack((f_x(indices), f_y(indices)))
-                )
+                interpolated_polygons.append(np.column_stack((f_x(indices), f_y(indices))))
             else:
                 interpolated_polygons.append(polygon)
         return interpolated_polygons
@@ -599,21 +588,15 @@ def interpolate_masks(
     masks: Union[list, np.ndarray], num_frames: int, rectangle: bool = False
 ) -> list:
     """Interpolate between arbitrary number of masks."""
-    assert isinstance(
-        masks, (list, np.ndarray)
-    ), "Masks must be a list of numpy arrays."
+    assert isinstance(masks, (list, np.ndarray)), "Masks must be a list of numpy arrays."
     assert num_frames > 1, "At least two frames are required for interpolation."
     number_of_masks = len(masks)
     assert number_of_masks > 1, "At least two masks are required for interpolation."
     mask_shape = masks[0].shape
-    assert all(
-        mask.shape == mask_shape for mask in masks
-    ), "All masks must have the same shape."
+    assert all(mask.shape == mask_shape for mask in masks), "All masks must have the same shape."
 
     # distribute number of frames over number of masks
-    num_frames_per_segment = [num_frames // (number_of_masks - 1)] * (
-        number_of_masks - 1
-    )
+    num_frames_per_segment = [num_frames // (number_of_masks - 1)] * (number_of_masks - 1)
     if num_frames % num_frames_per_segment[0] != 0:
         # make sure that number of frames per mask adds up to total number of frames
         num_frames_per_segment[-1] += num_frames - sum(num_frames_per_segment)
@@ -633,9 +616,7 @@ def interpolate_masks(
         # reconstruct the masks
         interpolated_masks = []
         for _rectangle in rectangles:
-            interpolated_masks.append(
-                reconstruct_mask_from_rectangle(_rectangle, mask_shape)
-            )
+            interpolated_masks.append(reconstruct_mask_from_rectangle(_rectangle, mask_shape))
         return interpolated_masks
 
     # get the contours
@@ -654,16 +635,12 @@ def interpolate_masks(
     interpolated_polygons = []
     for i in range(number_of_masks - 1):
         for t in np.linspace(0, 1, num_frames_per_segment[i]):
-            interpolated_polygons.append(
-                interpolate_polygons(polygons[i], polygons[i + 1], t)
-            )
+            interpolated_polygons.append(interpolate_polygons(polygons[i], polygons[i + 1], t))
 
     # reconstruct the masks
     interpolated_masks = []
     for interpolated_polygon in interpolated_polygons:
-        interpolated_masks.append(
-            reconstruct_mask_from_polygon(interpolated_polygon, mask_shape)
-        )
+        interpolated_masks.append(reconstruct_mask_from_polygon(interpolated_polygon, mask_shape))
 
     return interpolated_masks
 
@@ -678,9 +655,7 @@ def interactive_selector_for_dataset():
 def ask_for_selection_tool():
     """Ask user for which selection tool to use."""
     while True:
-        selector = input(
-            "Which selection tool do you want to use? [rectangle/lasso]): "
-        )
+        selector = input("Which selection tool do you want to use? [rectangle/lasso]): ")
         if selector in ["rectangle", "lasso"]:
             break
         print("Please enter either 'rectangle' or 'lasso'")
@@ -718,7 +693,7 @@ def remove_masks_from_axs(axs: matplotlib.axes.Axes) -> None:
         if isinstance(obj, (PathPatch, Rectangle)):
             try:
                 obj.remove()
-            except:
+            except Exception:
                 pass
 
 
@@ -810,9 +785,7 @@ def main():
 
             num_selections = ask_for_num_selections()
 
-            selection_idx = np.linspace(0, len(images) - 1, int(num_selections)).astype(
-                int
-            )
+            selection_idx = np.linspace(0, len(images) - 1, int(num_selections)).astype(int)
             selection_images = [images[idx] for idx in selection_idx]
             selection_masks = []
             pos, size = None, None
@@ -826,14 +799,10 @@ def main():
                 axs.imshow(image, cmap="gray")
 
                 while True:
-                    _, mask = interactive_selector(
-                        image, axs, selector=selector, num_selections=1
-                    )
+                    _, mask = interactive_selector(image, axs, selector=selector, num_selections=1)
                     # check if mask is empty else retry
                     if mask[0].sum() == 0:
-                        print(
-                            "Empty mask. Try again, make sure to make a descent selection..."
-                        )
+                        print("Empty mask. Try again, make sure to make a descent selection...")
                     else:
                         break
 

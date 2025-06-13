@@ -32,10 +32,14 @@ def on_device_jax(func, inputs, device, return_numpy=False, **kwargs):
         .. code-block:: python
 
             import jax.numpy as jnp
+
+
             def square(x):
-                return x ** 2
+                return x**2
+
+
             inputs = [1, 2, 3, 4, 5]
-            device = 'gpu'
+            device = "gpu"
             output = on_device_jax(square, inputs, device)
     """
     device = device.split(":")
@@ -49,8 +53,7 @@ def on_device_jax(func, inputs, device, return_numpy=False, **kwargs):
 
     if device_number > len(jax.devices(device_type)):
         raise ValueError(
-            f"Device {device} is not available from JAX devices: "
-            f"{jax.devices(device_type)}"
+            f"Device {device} is not available from JAX devices: {jax.devices(device_type)}"
         )
 
     jax_device = jax.devices(device_type)[device_number]

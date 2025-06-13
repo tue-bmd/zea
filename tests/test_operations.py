@@ -5,9 +5,6 @@ that when the backend is switched, the functions inside are reimported with the
 correct backend.
 """
 
-# pylint: disable=import-outside-toplevel
-# pylint: disable=reimported
-
 import math
 
 import keras
@@ -56,9 +53,9 @@ def test_companding(comp_type, size, parameter_value_range):
         signal = keras.ops.convert_to_numpy(signal)
         signal_out = keras.ops.convert_to_numpy(signal_out)
 
-        assert np.any(
-            np.not_equal(signal, signal_out)
-        ), "Companding failed, arrays should not be equal"
+        assert np.any(np.not_equal(signal, signal_out)), (
+            "Companding failed, arrays should not be equal"
+        )
 
         companding = ops.Companding(comp_type=comp_type, expand=True)
 
@@ -98,9 +95,7 @@ def test_converting_to_image(size, dynamic_range, input_range):
     else:
         _input_range = input_range
 
-    data = (
-        np.random.random(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
-    )
+    data = np.random.random(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
     output_range = (0, 1)
     normalize = ops.Normalize(output_range, input_range)
     log_compress = ops.LogCompress()
@@ -262,7 +257,6 @@ def test_up_and_down_conversion(factor, batch_size):
     data = []
     _data = []
     for _ in range(batch_size):
-
         # Define scatterers with random variation
         scat_x_base, scat_z_base = np.meshgrid(
             np.linspace(-10e-3, 10e-3, 5),
@@ -411,9 +405,9 @@ def test_lee_filter(sigma, spiral_image):
     image_tensor = keras.ops.convert_to_tensor(image[..., None])
     filtered = lee(data=image_tensor)["data"][..., 0]
 
-    assert keras.ops.var(filtered) < keras.ops.var(
-        image_tensor
-    ), "LeeFilter should reduce variance of the processed image"
+    assert keras.ops.var(filtered) < keras.ops.var(image_tensor), (
+        "LeeFilter should reduce variance of the processed image"
+    )
 
 
 @pytest.mark.parametrize(
@@ -426,9 +420,7 @@ def test_lee_filter(sigma, spiral_image):
     ],
 )
 @backend_equality_check()
-def test_threshold_op(
-    spiral_image, threshold_type, below_threshold, fill_value, threshold_param
-):
+def test_threshold_op(spiral_image, threshold_type, below_threshold, fill_value, threshold_param):
     """Test `ops.Threshold` operation on a synthetic spiral image."""
     import keras
 
@@ -447,9 +439,7 @@ def test_threshold_op(
     percentile = threshold_param.get("percentile", None)
     threshold_value = threshold_param.get("threshold", None)
 
-    out = threshold(
-        data=spiral_tensor, percentile=percentile, threshold=threshold_value
-    )
+    out = threshold(data=spiral_tensor, percentile=percentile, threshold=threshold_value)
     out_np = keras.ops.convert_to_numpy(out["data"])
 
     # Quantitative: check that thresholding changes the image

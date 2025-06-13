@@ -66,12 +66,12 @@ class Config(dict):
         - Logs all accessed attributes such that you can check if all attributes have been accessed.
 
     We took inspiration from the following sources:
-        - `EasyDict <https://pypi.org/project/easydict/>`_ # pylint: disable=line-too-long
-        - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_ # pylint: disable=line-too-long
+        - `EasyDict <https://pypi.org/project/easydict/>`_
+        - `keras.utils.Config <https://keras.io/api/utils/experiment_management_utils/#config-class>`_
 
     But this implementation is superior :)
 
-    """
+    """  # noqa: E501
 
     __frozen__ = False
 
@@ -118,12 +118,9 @@ class Config(dict):
     def items(self):
         """Returns a list containing a tuple for each key value pair"""
         # Use a generator that calls __getitem__ for every key
-        return [
-            (key, self[key])
-            for key in self.keys()  # pylint: disable=consider-using-dict-items
-        ]
+        return [(key, self[key]) for key in self.keys()]
 
-    def keys(self):  # pylint: disable=useless-parent-delegation
+    def keys(self):
         """Returns a list containing the config's keys"""
         return super().keys()
 
@@ -197,10 +194,7 @@ class Config(dict):
     def values(self):
         """Returns a list of all the values in the config"""
         # Use __getitem__ to get values
-        return (
-            self[key]
-            for key in self.keys()  # pylint: disable=consider-using-dict-items
-        )
+        return (self[key] for key in self.keys())
 
     def __or__(self, other):
         """
@@ -233,9 +227,7 @@ class Config(dict):
     def __setattr__(self, name, value):
         # Check if attribute is a method of the Config class, this cannot be overridden
         if hasattr(self, "__protected__") and name in self.__protected__:
-            raise AttributeError(
-                f"Cannot set attribute `{name}`. It is used by the Config class."
-            )
+            raise AttributeError(f"Cannot set attribute `{name}`. It is used by the Config class.")
 
         # Check if config is frozen
         if self.__frozen__ and not hasattr(self, name):
@@ -253,8 +245,7 @@ class Config(dict):
         # Ensures lists and tuples of dictionaries are converted to Config objects as well
         if isinstance(value, list):
             value = [
-                self.__class__(x, __parent__=self) if isinstance(x, dict) else x
-                for x in value
+                self.__class__(x, __parent__=self) if isinstance(x, dict) else x for x in value
             ]
         # Ensures dictionaries are converted to Config objects as well
         elif isinstance(value, dict):
@@ -268,9 +259,7 @@ class Config(dict):
     def _unknown_attr(self, name):
         msg = f"Unknown attribute: '{name}'."
         if "difflib" in globals():
-            closest_matches = difflib.get_close_matches(
-                name, self.keys(), n=1, cutoff=0.7
-            )
+            closest_matches = difflib.get_close_matches(name, self.keys(), n=1, cutoff=0.7)
             if closest_matches:
                 msg += f" Did you mean '{closest_matches[0]}'?"
         return msg
@@ -312,9 +301,7 @@ class Config(dict):
             if isinstance(value, list):
                 for i, v in enumerate(value):
                     if v == self:
-                        return self.__parent__._trace_through_ancestors(
-                            [key + f"_{i}"] + key_trace
-                        )
+                        return self.__parent__._trace_through_ancestors([key + f"_{i}"] + key_trace)
             if value == self:
                 return self.__parent__._trace_through_ancestors([key] + key_trace)
         raise ValueError("Parent not found in ancestors. Report to zea developers.")
@@ -388,10 +375,7 @@ class Config(dict):
             if isinstance(value, Config):
                 value = value.as_dict(func_on_leaves)
             elif isinstance(value, list):
-                value = [
-                    v.as_dict(func_on_leaves) if isinstance(v, Config) else v
-                    for v in value
-                ]
+                value = [v.as_dict(func_on_leaves) if isinstance(v, Config) else v for v in value]
             # a dict does not exist inside a Config object, because it is a Config object itself
             if func_on_leaves:
                 key, value = func_on_leaves(self, key, value)
@@ -456,13 +440,11 @@ class Config(dict):
 
         .. code-block:: python
 
-            config = Config.from_hf(
-                "zea/configs", "config_echonet.yaml", repo_type="dataset"
-            )
+            config = Config.from_hf("zeahub/configs", "config_camus.yaml", repo_type="dataset")
 
         Args:
             repo_id (str): huggingface hub repo id.
-                For example: "zea/configs"
+                For example: "zeahub/configs"
             path (str): path to the config file in the repo.
                 For example: "train_config.yaml"
             **kwargs: additional arguments to pass to the `hf_hub_download`
@@ -503,6 +485,7 @@ def _load_config_from_yaml(path, config_class=Config, loader=yaml.FullLoader):
 
 def _path_to_str(path):
     """Convert a Path object to a string."""
-    if isinstance(path, Path):
-        return str(path)
+    if hasattr(path, "as_posix"):
+        # If path is a Path object, convert to string
+        path = path.as_posix()
     return path

@@ -44,7 +44,7 @@ class LPIPS(BaseModel):
         self.disable_checks = disable_checks
         self.trainable = False  # for keras: makes the weights non-trainable
 
-    def custom_load_weights(self, preset, **kwargs):  # pylint: disable=unused-argument
+    def custom_load_weights(self, preset, **kwargs):
         """Load the weights for the VGG and linear models."""
         loader = get_preset_loader(preset)
 
@@ -62,7 +62,7 @@ class LPIPS(BaseModel):
         norm_factor = ops.sqrt(eps + ops.sum(in_feat**2, axis=-1, keepdims=True))
         return in_feat / norm_factor
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """Compute the LPIPS metric.
 
         Args:
@@ -73,9 +73,7 @@ class LPIPS(BaseModel):
         input1, input2 = inputs
 
         # check input images
-        if not self.disable_checks and not (
-            self._valid_img(input1) and self._valid_img(input2)
-        ):
+        if not self.disable_checks and not (self._valid_img(input1) and self._valid_img(input2)):
             raise ValueError(
                 "Expected both input arguments to be normalized tensors with shape [B, H, W, C]"
                 f" or [H, W, C]. Got input with shape {input1.shape} and {input2.shape} and values"
@@ -103,9 +101,7 @@ class LPIPS(BaseModel):
         lin_out = self.lin(diffs)
 
         # take spatial average: list([N, 1], [N, 1], [N, 1], [N, 1], [N, 1])
-        lin_out = ops.convert_to_tensor(
-            [ops.mean(t, axis=[1, 2], keepdims=False) for t in lin_out]
-        )
+        lin_out = ops.convert_to_tensor([ops.mean(t, axis=[1, 2], keepdims=False) for t in lin_out])
 
         # take sum of all layers: [N, 1]
         lin_out = ops.sum(lin_out, axis=0)
@@ -152,7 +148,7 @@ def perceptual_model():
     ]
     vgg16 = keras.applications.vgg16.VGG16(include_top=False, weights=None)
 
-    vgg16_output_layers = [l.output for l in vgg16.layers if l.name in layers]
+    vgg16_output_layers = [layer.output for layer in vgg16.layers if layer.name in layers]
     model = keras.Model(vgg16.input, vgg16_output_layers, name="perceptual_model")
     return model
 

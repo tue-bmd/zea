@@ -16,7 +16,7 @@ from zea.internal.checks import (
     get_check,
 )
 from zea.probes import Probe
-from zea.scan import Scan, cast_scan_parameters
+from zea.scan import Scan
 from zea.utils import reduce_to_signature
 
 
@@ -33,14 +33,15 @@ class File(h5py.File):
         """Initialize the file.
 
         Args:
-            name (str, Path): The path to the file. Can be a string or a Path object.
-                Additionally can be a string with the prefix 'hf://', in which case
-                it will be resolved to a huggingface path.
+            name (str, Path, HFPath): The path to the file.
+                Can be a string or a Path object. Additionally can be a string with
+                the prefix 'hf://', in which case it will be resolved to a
+                huggingface path.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
-        if isinstance(name, (str, Path)) and str(name).startswith(HF_PREFIX):
+        if str(name).startswith(HF_PREFIX):
             name = _hf_resolve_path(str(name))
 
         if "locking" not in kwargs and "mode" in kwargs and kwargs["mode"] == "r":
@@ -82,9 +83,7 @@ class File(h5py.File):
         if "scan" in self.file:
             return int(self.file["scan"]["n_frames"][()])
         else:
-            return sum(
-                int(event["scan"]["n_frames"][()]) for event in self.file.values()
-            )
+            return sum(int(event["scan"]["n_frames"][()]) for event in self.file.values())
 
     def get_event_shapes(self, key):
         """Get the shapes of a key for all events."""
@@ -150,9 +149,7 @@ class File(h5py.File):
         ), _value_error_msg
 
         # Convert ranges to lists
-        processed_indices = [
-            list(idx) if isinstance(idx, range) else idx for idx in indices
-        ]
+        processed_indices = [list(idx) if isinstance(idx, range) else idx for idx in indices]
 
         # Check if items are list-like and cast to tuple (needed for hdf5)
         if any(isinstance(idx, (list, tuple, slice)) for idx in processed_indices):
@@ -187,8 +184,7 @@ class File(h5py.File):
             key = "data/" + key
 
         assert key in self.keys(), (
-            f"Key {key} not found in file. "
-            f"Available keys: {list(self['data'].keys())}"
+            f"Key {key} not found in file. Available keys: {list(self['data'].keys())}"
         )
 
         return key
@@ -213,8 +209,7 @@ class File(h5py.File):
         key = self.format_key(key)
         data_type = self.key_to_data_type(key)
         assert data_type in ["raw_data", "aligned_data"], (
-            f"Cannot load transmits for {data_type}. "
-            "Only raw_data and aligned_data are supported."
+            f"Cannot load transmits for {data_type}. Only raw_data and aligned_data are supported."
         )
         indices = [slice(None), np.array(selected_transmits)]
         return self.load_data(key, indices)
@@ -239,8 +234,7 @@ class File(h5py.File):
                 data = data[indices]
             except (OSError, IndexError) as exc:
                 raise ValueError(
-                    f"Invalid indices {indices} for key {key}. "
-                    f"{key} has shape {data.shape}."
+                    f"Invalid indices {indices} for key {key}. {key} has shape {data.shape}."
                 ) from exc
             self.check_data(data, key)
         elif self.events_have_same_shape(key):
@@ -283,8 +277,8 @@ class File(h5py.File):
             event (int, optional): Event number. When specified, an event structure
                 is expected as follows::
 
-                    event_0/scan
-                    event_1/scan
+                    event_0 / scan
+                    event_1 / scan
                     ...
 
                 Defaults to None. In that case no event structure is expected.
@@ -309,13 +303,10 @@ class File(h5py.File):
                 f"Found number of events: {len(self.keys())}."
             )
 
-            scan_parameters = recursively_load_dict_contents_from_group(
-                self, f"event_{event}/scan"
-            )
+            scan_parameters = recursively_load_dict_contents_from_group(self, f"event_{event}/scan")
         else:
             log.warning("Could not find scan parameters in file.")
 
-        scan_parameters = cast_scan_parameters(scan_parameters)
         return scan_parameters
 
     def get_scan_parameters(self, event=None) -> dict:
@@ -328,7 +319,17 @@ class File(h5py.File):
         """
         file_scan_parameters = self.get_parameters(event)
 
-        scan_parameters = reduce_to_signature(Scan.__init__, file_scan_parameters)
+        scan_parameters = {}
+        for parameter, value in file_scan_parameters.items():
+            if parameter in Scan.VALID_PARAMS:
+                param_type = Scan.VALID_PARAMS[parameter]["type"]
+                if param_type in (bool, int, float):
+                    scan_parameters[parameter] = param_type(value)
+                elif isinstance(param_type, tuple) and float in param_type:
+                    scan_parameters[parameter] = float(value)
+                else:
+                    scan_parameters[parameter] = value
+
         if len(scan_parameters) == 0:
             log.info(f"Could not find proper scan parameters in {self}.")
         return scan_parameters
@@ -340,8 +341,8 @@ class File(h5py.File):
             event (int, optional): Event number. When specified, an event structure
                 is expected as follows::
 
-                    event_0/scan
-                    event_1/scan
+                    event_0 / scan
+                    event_1 / scan
                     ...
 
                 Defaults to None. In that case no event structure is expected.
@@ -375,8 +376,8 @@ class File(h5py.File):
             event (int, optional): Event number. When specified, an event structure
                 is expected as follows::
 
-                    event_0/scan
-                    event_1/scan
+                    event_0 / scan
+                    event_1 / scan
                     ...
 
                 Defaults to None. In that case, no event structure is expected.
@@ -400,9 +401,7 @@ class File(h5py.File):
                 )
         return probe
 
-    def recursively_load_dict_contents_from_group(
-        self, path: str, squeeze: bool = False
-    ) -> dict:
+    def recursively_load_dict_contents_from_group(self, path: str, squeeze: bool = False) -> dict:
         """Load dict from contents of group
 
         Values inside the group are converted to numpy arrays
@@ -548,9 +547,7 @@ def recursively_load_dict_contents_from_group(
                     else:
                         ans[key] = float(ans[key])
         elif isinstance(item, h5py._hl.group.Group):
-            ans[key] = recursively_load_dict_contents_from_group(
-                h5file, path + "/" + key + "/"
-            )
+            ans[key] = recursively_load_dict_contents_from_group(h5file, path + "/" + key + "/")
     return ans
 
 
@@ -563,9 +560,9 @@ def _print_hdf5_attrs(hdf5_obj, prefix=""):
             parameter is used in internal recursion and should not be supplied
             by the user.
     """
-    assert isinstance(
-        hdf5_obj, (h5py.File, h5py.Group, h5py.Dataset)
-    ), "ERROR: hdf5_obj must be a File, Group, or Dataset object"
+    assert isinstance(hdf5_obj, (h5py.File, h5py.Group, h5py.Dataset)), (
+        "ERROR: hdf5_obj must be a File, Group, or Dataset object"
+    )
 
     if isinstance(hdf5_obj, h5py.File):
         name = "root" if hdf5_obj.name == "/" else hdf5_obj.name
@@ -604,9 +601,9 @@ def validate_file(path: str = None, file: File = None):
         file (File): The hdf5 file.
 
     """
-    assert (path is not None) ^ (
-        file is not None
-    ), "Provide either the path or the file, but not both."
+    assert (path is not None) ^ (file is not None), (
+        "Provide either the path or the file, but not both."
+    )
 
     if path is not None:
         path = Path(path)
@@ -648,9 +645,7 @@ def _validate_structure(file: File):
     )
 
     # Check if there is only image data
-    not_only_image_data = (
-        len([i for i in _NON_IMAGE_DATA_TYPES if i in file["data"].keys()]) > 0
-    )
+    not_only_image_data = len([i for i in _NON_IMAGE_DATA_TYPES if i in file["data"].keys()]) > 0
 
     # Only check scan group if there is non-image data
     if not_only_image_data:
@@ -667,43 +662,43 @@ def _validate_structure(file: File):
         data_shape = file["data"][key].shape
         if key == "raw_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert (
-                data_shape[0] == file["scan"]["n_frames"][()]
-            ), "n_frames does not match the first dimension of raw_data."
-            assert (
-                data_shape[1] == file["scan"]["n_tx"][()]
-            ), "n_tx does not match the second dimension of raw_data."
-            assert (
-                data_shape[2] == file["scan"]["n_ax"][()]
-            ), "n_ax does not match the third dimension of raw_data."
-            assert (
-                data_shape[3] == file["scan"]["n_el"][()]
-            ), "n_el does not match the fourth dimension of raw_data."
+            assert data_shape[0] == file["scan"]["n_frames"][()], (
+                "n_frames does not match the first dimension of raw_data."
+            )
+            assert data_shape[1] == file["scan"]["n_tx"][()], (
+                "n_tx does not match the second dimension of raw_data."
+            )
+            assert data_shape[2] == file["scan"]["n_ax"][()], (
+                "n_ax does not match the third dimension of raw_data."
+            )
+            assert data_shape[3] == file["scan"]["n_el"][()], (
+                "n_el does not match the fourth dimension of raw_data."
+            )
         elif key == "aligned_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert (
-                data_shape[0] == file["scan"]["n_frames"][()]
-            ), "n_frames does not match the first dimension of aligned_data."
+            assert data_shape[0] == file["scan"]["n_frames"][()], (
+                "n_frames does not match the first dimension of aligned_data."
+            )
         elif key == "beamformed_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert (
-                data_shape[0] == file["scan"]["n_frames"][()]
-            ), "n_frames does not match the first dimension of beamformed_data."
+            assert data_shape[0] == file["scan"]["n_frames"][()], (
+                "n_frames does not match the first dimension of beamformed_data."
+            )
         elif key == "envelope_data":
             get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert (
-                data_shape[0] == file["scan"]["n_frames"][()]
-            ), "n_frames does not match the first dimension of envelope_data."
+            assert data_shape[0] == file["scan"]["n_frames"][()], (
+                "n_frames does not match the first dimension of envelope_data."
+            )
         elif key == "image":
             get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert (
-                data_shape[0] == file["scan"]["n_frames"][()]
-            ), "n_frames does not match the first dimension of image."
+            assert data_shape[0] == file["scan"]["n_frames"][()], (
+                "n_frames does not match the first dimension of image."
+            )
         elif key == "image_sc":
             get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert (
-                data_shape[0] == file["scan"]["n_frames"][()]
-            ), "n_frames does not match the first dimension of image_sc."
+            assert data_shape[0] == file["scan"]["n_frames"][()], (
+                "n_frames does not match the first dimension of image_sc."
+            )
 
     if not_only_image_data:
         _assert_scan_keys_present(file)
@@ -721,9 +716,9 @@ def _assert_scan_keys_present(file: File):
         AssertionError: If a required key is missing or does not have the right shape.
     """
     for required_key in _REQUIRED_SCAN_KEYS:
-        assert (
-            required_key in file["scan"].keys()
-        ), f"The scan group does not contain the required key {required_key}."
+        assert required_key in file["scan"].keys(), (
+            f"The scan group does not contain the required key {required_key}."
+        )
 
     # Ensure that all keys have the correct shape
     for key in file["scan"].keys():
@@ -808,13 +803,11 @@ def _assert_unit_and_description_present(hdf5_file, _prefix=""):
     """
     for key in hdf5_file.keys():
         if isinstance(hdf5_file[key], h5py.Group):
-            _assert_unit_and_description_present(
-                hdf5_file[key], _prefix=_prefix + key + "/"
-            )
+            _assert_unit_and_description_present(hdf5_file[key], _prefix=_prefix + key + "/")
         else:
-            assert (
-                "unit" in hdf5_file[key].attrs.keys()
-            ), f"The file {_prefix}/{key} does not have a unit attribute."
-            assert (
-                "description" in hdf5_file[key].attrs.keys()
-            ), f"The file {_prefix}/{key} does not have a description attribute."
+            assert "unit" in hdf5_file[key].attrs.keys(), (
+                f"The file {_prefix}/{key} does not have a unit attribute."
+            )
+            assert "description" in hdf5_file[key].attrs.keys(), (
+                f"The file {_prefix}/{key} does not have a description attribute."
+            )

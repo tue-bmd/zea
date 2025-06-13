@@ -16,9 +16,7 @@ PARAMETER_DESCRIPTIONS = {
             "The path of the folder to load data files from (relative to the user data "
             "root as set in users.yaml)"
         ),
-        "to_dtype": (
-            f"The type of data to convert to ({allows_type_to_str(_DATA_TYPES)})"
-        ),
+        "to_dtype": (f"The type of data to convert to ({allows_type_to_str(_DATA_TYPES)})"),
         "file_path": (
             "The path of the file to load when running the UI (either an absolute path "
             "or one relative to the dataset folder)"
@@ -26,12 +24,8 @@ PARAMETER_DESCRIPTIONS = {
         "frame_no": "The frame number to load when running the UI (null, int, 'all')",
         "input_range": "The range of the input data in db (null, [min, max])",
         "apodization": "The receive apodization to use.",
-        "output_range": (
-            "The output range to which the data should be mapped (e.g. [0, 1])."
-        ),
-        "resolution": (
-            "The spatial resolution of the data in meters per pixel (float, optional)."
-        ),
+        "output_range": ("The output range to which the data should be mapped (e.g. [0, 1])."),
+        "resolution": ("The spatial resolution of the data in meters per pixel (float, optional)."),
         "local": "true: use local data on this device, false: use data from NAS",
         "dtype": (
             "The form of data to load (raw_data, rf_data, iq_data, beamformed_data, "
@@ -72,9 +66,7 @@ PARAMETER_DESCRIPTIONS = {
             "Set to true to apply lens correction in the time-of-flight calculation"
         ),
         "lens_thickness": "The thickness of the lens in meters",
-        "lens_sound_speed": (
-            "The speed of sound in the lens in m/s. Usually around 1000 m/s"
-        ),
+        "lens_sound_speed": ("The speed of sound in the lens in m/s. Usually around 1000 m/s"),
         "f_number": (
             "The receive f-number for apodization. Set to zero to disable masking. "
             "The f-number is the ratio between the distance from the transducer and the "
@@ -89,12 +81,8 @@ PARAMETER_DESCRIPTIONS = {
         "theta_range": (
             "The range of theta values in radians for scan conversion (null, [min, max])."
         ),
-        "rho_range": (
-            "The range of rho values in meters for scan conversion (null, [min, max])."
-        ),
-        "resolution": (
-            "The resolution for scan conversion in meters per pixel (float, optional)."
-        ),
+        "rho_range": ("The range of rho values in meters for scan conversion (null, [min, max])."),
+        "resolution": ("The resolution for scan conversion in meters per pixel (float, optional)."),
     },
     "pipeline": {
         "description": "This section contains the necessary parameters for building the pipeline.",
@@ -103,8 +91,7 @@ PARAMETER_DESCRIPTIONS = {
             "where each dictionary contains the parameters for a single operation."
         ),
         "with_batch_dim": (
-            "Whether operations should expect a batch dimension in the input. "
-            "Defaults to True."
+            "Whether operations should expect a batch dimension in the input. Defaults to True."
         ),
         "jit_options": (
             "The JIT options to use. Must be 'pipeline', 'ops', or None. "
@@ -112,9 +99,7 @@ PARAMETER_DESCRIPTIONS = {
             "'ops' compiles each operation separately. None disables JIT compilation. "
             "Defaults to 'ops'."
         ),
-        "jit_kwargs": (
-            "Additional keyword arguments for the JIT compiler. " "Defaults to None."
-        ),
+        "jit_kwargs": ("Additional keyword arguments for the JIT compiler. Defaults to None."),
         "name": ("The name of the pipeline. Defaults to 'pipeline'."),
         "validate": ("Whether to validate the pipeline. Defaults to True."),
     },
@@ -124,12 +109,8 @@ PARAMETER_DESCRIPTIONS = {
             "Settings pertaining to plotting when running the UI "
             "(`zea --config <path-to-config.yaml>`)"
         ),
-        "save": (
-            "Set to true to save the plots to disk, false to only display them in the UI"
-        ),
-        "plot_lib": (
-            f"The plotting library to use ({allows_type_to_str(_ALLOWED_PLOT_LIBS)})"
-        ),
+        "save": ("Set to true to save the plots to disk, false to only display them in the UI"),
+        "plot_lib": (f"The plotting library to use ({allows_type_to_str(_ALLOWED_PLOT_LIBS)})"),
         "fps": "Frames per second for video output.",
         "tag": "The name for the plot",
         "fliplr": "Set to true to flip the image left to right",
@@ -139,12 +120,8 @@ PARAMETER_DESCRIPTIONS = {
         "selector": (
             "Type of selector to use for ROI selection in the UI ('rectangle', 'lasso', or None)."
         ),
-        "selector_metric": (
-            "Metric to use for evaluating selected regions (e.g., 'gcnr')."
-        ),
+        "selector_metric": ("Metric to use for evaluating selected regions (e.g., 'gcnr')."),
     },
     "git": "The git commit hash or branch for reproducibility (string, optional).",
-    "hide_devices": (
-        "List of device indices to hide from selection (list of int, optional)."
-    ),
+    "hide_devices": ("List of device indices to hide from selection (list of int, optional)."),
 }

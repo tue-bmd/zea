@@ -1,4 +1,3 @@
-# pylint: disable=line-too-long
 """
 zea models
 ============
@@ -19,7 +18,8 @@ To use these models, you can import them directly from the :mod:`zea.models` mod
 .. code-block:: python
 
     from zea.models import UNet
-    model = UNet.from_preset('unet-echonet-inpainter')
+
+    model = UNet.from_preset("unet-echonet-inpainter")
 
 You can list all available presets using the :attr:`presets` attribute:
 
@@ -50,7 +50,8 @@ An example of how to use the :class:`zea.models.diffusion.DiffusionModel` is sho
 .. code-block:: python
 
     from zea.models import DiffusionModel
-    model = DiffusionModel.from_preset('diffusion-echonet-dynamic')
+
+    model = DiffusionModel.from_preset("diffusion-echonet-dynamic")
     samples = model.sample(n_samples=4)
 
 

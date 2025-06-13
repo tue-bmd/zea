@@ -35,10 +35,14 @@ def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
         .. code-block:: python
 
             import torch
+
+
             def square(x):
-                return x ** 2
+                return x**2
+
+
             inputs = [1, 2, 3, 4, 5]
-            device = 'cuda'
+            device = "cuda"
             output = on_device_torch(square, inputs, device)
             print(output)
     """

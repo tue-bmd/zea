@@ -65,20 +65,18 @@ class CarotidSegmenter(BaseModel):
         )
         return config
 
-    def call(self, inputs):  # pylint: disable=arguments-differ
+    def call(self, inputs):
         """Segment the input image."""
         if self.network is None:
             raise ValueError(
                 "Please load model using `CarotidSegmenter.from_preset()` before calling."
             )
 
-        assert (
-            inputs.ndim == 4
-        ), f"Input should have 4 dimensions (B, H, W, C), but has {inputs.ndim}."
+        assert inputs.ndim == 4, (
+            f"Input should have 4 dimensions (B, H, W, C), but has {inputs.ndim}."
+        )
 
-        assert (
-            inputs.shape[-1] == 1
-        ), f"Input should have 1 channel, but has {inputs.shape[-1]}."
+        assert inputs.shape[-1] == 1, f"Input should have 1 channel, but has {inputs.shape[-1]}."
 
         original_size = ops.shape(inputs)[1:3]
         inputs = ops.image.resize(inputs, [INFERENCE_SIZE, INFERENCE_SIZE])
@@ -93,10 +91,8 @@ class CarotidSegmenter(BaseModel):
 
 def _conv_block(x, filters, block, convs=2, dropout=0.5, pool=True):
     for i in range(convs):
-        x = Conv2D(
-            filters, 3, activation="relu", padding="same", name=f"Conv{block}_{i+1}"
-        )(x)
-        x = BatchNormalization(name=f"BN{block}_{i+1}")(x)
+        x = Conv2D(filters, 3, activation="relu", padding="same", name=f"Conv{block}_{i + 1}")(x)
+        x = BatchNormalization(name=f"BN{block}_{i + 1}")(x)
     if pool:
         x_pooled = MaxPooling2D(pool_size=(2, 2), name=f"P{block}")(x)
         x_pooled = Dropout(dropout, name=f"DO{block}")(x_pooled)
@@ -113,9 +109,7 @@ def _up_block(x, skip, filters, block, convs=2, final_conv_filters=None):
     x = BatchNormalization(name=f"BN{block}_1")(x)
     x = concatenate([skip, x], axis=3, name=f"Merge{block}")
     for i in range(2, convs + 2):
-        x = Conv2D(
-            filters, 3, activation="relu", padding="same", name=f"Conv{block}_{i}"
-        )(x)
+        x = Conv2D(filters, 3, activation="relu", padding="same", name=f"Conv{block}_{i}")(x)
         x = BatchNormalization(name=f"BN{block}_{i}")(x)
     # For block 9, add Conv9_4 with 2 filters and BN9_4
     if final_conv_filters is not None:
@@ -139,9 +133,7 @@ def _get_network(input_size=(256, 256, 1)):
     # Encoder
     skips = []
     for block in range(1, 5):
-        x, x_pooled = _conv_block(
-            x, NrFeaturesPerLayer, block, convs=2, dropout=0.5, pool=True
-        )
+        x, x_pooled = _conv_block(x, NrFeaturesPerLayer, block, convs=2, dropout=0.5, pool=True)
         skips.append(x)
         x = x_pooled
 
@@ -152,18 +144,16 @@ def _get_network(input_size=(256, 256, 1)):
     for block, skip in zip(range(6, 9), reversed(skips[1:])):
         x = _up_block(x, skip, NrFeaturesPerLayer, block, convs=2)
 
-    up9 = Conv2D(
-        NrFeaturesPerLayer, 2, activation="relu", padding="same", name="Conv9_1"
-    )(UpSampling2D(size=(2, 2))(x))
+    up9 = Conv2D(NrFeaturesPerLayer, 2, activation="relu", padding="same", name="Conv9_1")(
+        UpSampling2D(size=(2, 2))(x)
+    )
     bn20 = BatchNormalization(name="BN9_1")(up9)
     merge9 = concatenate([skips[0], bn20], axis=3, name="Merge9")
-    conv9_2 = Conv2D(
-        NrFeaturesPerLayer, 3, activation="relu", padding="same", name="Conv9_2"
-    )(merge9)
+    conv9_2 = Conv2D(NrFeaturesPerLayer, 3, activation="relu", padding="same", name="Conv9_2")(
+        merge9
+    )
     bn21 = BatchNormalization(name="BN9_2")(conv9_2)
-    conv9_3 = Conv2D(
-        NrFeaturesPerLayer, 3, activation="relu", padding="same", name="Conv9_3"
-    )(bn21)
+    conv9_3 = Conv2D(NrFeaturesPerLayer, 3, activation="relu", padding="same", name="Conv9_3")(bn21)
     bn22 = BatchNormalization(name="BN9_3")(conv9_3)
     conv9_4 = Conv2D(2, 3, activation="relu", padding="same", name="Conv9_4")(bn22)
     bn23 = BatchNormalization(name="BN9_4")(conv9_4)

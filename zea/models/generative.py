@@ -43,9 +43,7 @@ class GenerativeModel(abc.ABC):
         Returns:
             Samples $z$ from the posterior $p(z \mid x)$.
         """
-        raise NotImplementedError(
-            "posterior_sample() must be implemented in subclasses."
-        )
+        raise NotImplementedError("posterior_sample() must be implemented in subclasses.")
 
     def log_density(self, data, **kwargs):
         r"""Compute the log-density $\log p(x)$ of the data under the model.
