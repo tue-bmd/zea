@@ -91,7 +91,7 @@ A few things to keep in mind when making changes:
 5. Document your changes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is written in reStructuredText format. You can find the documentation files in the `docs/source` directory. Docstrings are written in Google style, which you can see examples of in the `example_google_docstrings.py` file. If you add new functionality, please make sure to document it in the documentation files.
+The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is written in reStructuredText format. You can find the documentation files in the `docs/source` directory. Docstrings are written in Google style, which you can see examples of in the `example_google_docstrings.py <https://github.com/tue-bmd/zea/blob/main/docs/example_google_docstrings.py>`_ file. If you add new functionality, please make sure to document it in the documentation files.
 
 The overall structure of the documentation is manually designed, but the API documentation is auto-generated based on the docstrings in the code. To generate the docs locally you can run:
 
@@ -150,12 +150,12 @@ Adding notebooks
 
 New tutorial or example notebooks are always welcome! Please add them to the `docs/source/notebooks` directory. Make sure to follow the naming conventions and structure of existing notebooks. If you are adding a new tutorial, please also update the `examples.rst` file in the `docs/source` directory to check if your notebook is included.
 
-Adding to `zea.models`
-~~~~~~~~~~~~~~~~~~~~~~
+Adding to ``zea.models``
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Please see the :doc:`models` section for more information on how to add new models to ``zea``.
 
-Adding to `zea.ops`
-~~~~~~~~~~~~~~~~~~~
+Adding to ``zea.ops``
+~~~~~~~~~~~~~~~~~~~~~
 
 Please see the :doc:`pipeline` section for more information on how to add new ops to ``zea``.

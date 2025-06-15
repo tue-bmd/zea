@@ -46,8 +46,9 @@ Welcome to the documentation for the ``zea`` package: *A Toolbox for Cognitive U
    models
 
 .. toctree::
-   :caption: Project Links
+   :caption: Project
    :maxdepth: 1
    :hidden:
 
    GitHub Project <https://github.com/tue-bmd/ultrasound-toolbox>
+   about
