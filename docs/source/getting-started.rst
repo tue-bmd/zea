@@ -120,6 +120,8 @@ For example, to set the backend to JAX, you can use one of the following:
 
 .. backend-installation-end
 
+.. _citation:
+
 Citation
 --------
 
