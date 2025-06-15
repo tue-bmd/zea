@@ -62,6 +62,8 @@ dev = [
     "sphinx-autobuild",
     "sphinx-autodoc-typehints",
     "sphinx-copybutton",
+    "sphinx_design",
+    "sphinxcontrib-bibtex",
     "mock",
     "myst-parser",
     "nbsphinx",

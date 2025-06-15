@@ -39,3 +39,10 @@ repos:
     hooks:
     -   id: poetry-check
     -   id: poetry-lock
+-   repo: local
+    hooks:
+    -   id: run-parameters-doc
+        name: Run parameters_doc.py
+        entry: python docs/source/parameters_doc.py
+        language: system
+        files: ^docs/source/parameters_doc\.py$
