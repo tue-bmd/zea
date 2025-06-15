@@ -1,5 +1,5 @@
 <!-- This is the readme for the github page (more complete readme for pdocs can be found in usmbd/README.md) -->
-# zea <img src="docs/_static/zea-log.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="zea Logo" />
+# zea <img src="docs/_static/zea-logo.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="zea Logo" />
 
 <!-- https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png -->
 
