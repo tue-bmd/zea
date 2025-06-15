@@ -3,17 +3,23 @@ Examples
 
 Explore practical usage of zea with the following example notebooks.
 
-Data / Pipeline
+Data
 ---------------
 
 .. toctree::
    :maxdepth: 1
    :glob:
 
-   notebooks/zea_data_example.ipynb
-   notebooks/zea_pipeline_example.ipynb
-   notebooks/sequence_example.ipynb
-   notebooks/zea_simulation_example.ipynb
+   notebooks/data/*
+
+Pipeline
+--------
+
+.. toctree::
+   :maxdepth: 1
+   :glob:
+
+   notebooks/pipeline/*
 
 Models
 ------
@@ -22,11 +28,7 @@ Models
    :maxdepth: 1
    :glob:
 
-   notebooks/diffusion_model_example.ipynb
-   notebooks/segmentation_example.ipynb
-   notebooks/custom_models_example.ipynb
-   notebooks/taesd_autoencoder_example.ipynb
-   notebooks/unet_example.ipynb
+   notebooks/models/*
 
 Metrics
 -------
@@ -35,7 +37,7 @@ Metrics
    :maxdepth: 1
    :glob:
 
-   notebooks/lpips_example.ipynb
+   notebooks/metrics/*
 
 Agent
 ------
@@ -44,4 +46,4 @@ Agent
    :maxdepth: 1
    :glob:
 
-   notebooks/agent_selection.ipynb
+   notebooks/agent/*
