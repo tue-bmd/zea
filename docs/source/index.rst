@@ -50,5 +50,6 @@ Welcome to the documentation for the ``zea`` package: *A Toolbox for Cognitive U
    :maxdepth: 1
    :hidden:
 
-   GitHub Project <https://github.com/tue-bmd/ultrasound-toolbox>
    about
+   GitHub Project <https://github.com/tue-bmd/ultrasound-toolbox>
+   HuggingFace Hub <https://huggingface.co/zeahub>
