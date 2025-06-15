@@ -22,6 +22,8 @@ Besides installation through `PyPI <https://pypi.org/project/zea>`_, we also pro
                docker run --gpus 'all' -it zeahub/all:latest
 
 
+.. _backend-installation:
+
 Backend
 -------
 
