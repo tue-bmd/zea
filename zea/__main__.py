@@ -20,8 +20,8 @@ def get_args():
     parser.add_argument(
         "-t",
         "--task",
-        default="run",
-        choices=["run", "generate"],
+        default="view",
+        choices=["view", "generate"],
         type=str,
         help="which task to run",
     )
@@ -69,14 +69,14 @@ def main():
 
     config = setup(args.config)
 
-    if args.task == "run":
-        ui = Interface(
+    if args.task == "view":
+        cli = Interface(
             config,
             validate_file=not args.skip_validate_file,
         )
 
         log.info(f"Using {keras.backend.backend()} backend")
-        ui.run(plot=True)
+        cli.run(plot=True)
 
     elif args.task == "generate":
         destination_folder = keep_trying(lambda: input(">> Give absolute destination folder path"))
