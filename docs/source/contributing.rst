@@ -48,7 +48,7 @@ Check out a new branch for your changes.
 
 .. code-block:: shell
 
-   cd bayesflow
+   cd zea
    git checkout -b <your_feature_branch_name>
 
 Set up your development environment. We recommend using Docker as described in the :doc:`installation` guide. This ensures consistency and avoids dependency issues. If you prefer to work without Docker, you can set up a local environment using `conda` or `pip`. For example, to set up a conda environment, you can run:

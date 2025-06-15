@@ -41,7 +41,10 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
 
 .. code-block:: python
 
+   import zea
    from zea.models.echonet import EchoNetDynamic
+
+   zea.init_device()
 
    # presets can also paths to local checkpoints of the model
    model = EchoNetDynamic.from_preset("echonet-dynamic")
