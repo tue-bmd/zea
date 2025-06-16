@@ -11,7 +11,7 @@ These parameters are used in the YAML config files to control data loading, prep
 .. note::
   You can use these configs to, for instance, initialize :doc:`zea.Models <models>` or :doc:`zea.Pipeline <pipeline>`.
 
-Configs are written in YAML format and can be loaded, edited, and saved using the zea API.
+Configs are written in YAML format and can be loaded, edited, and saved using the ``zea`` API.
 
 -------------------------------
 How to Load and Save a Config
@@ -21,21 +21,24 @@ Here is a minimal example of how to load and save a config file using zea:
 
 .. code-block:: python
 
-   from zea import Config
-   from zea.config.validation import check_config
+    from zea import Config
+    from zea.config.validation import check_config
 
-   # Load a config from file
-   config = Config.from_yaml("configs/config_picmus_rf.yaml")
+    # Load a config from file
+    config = Config.from_yaml("configs/config_picmus_rf.yaml")
+    # or some predefined from Hugging Face Hub
+    config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
 
-   # We can check if the config has valid parameters (zea compliance)
-   config = check_config(config)
+    # We can check if the config has valid parameters (zea compliance)
+    config = check_config(config)
 
-   # Access parameters
-   print(config.scan.sampling_frequency)
-   config.scan.sampling_frequency = 8e6
+    # Access or change parameters
+    print(config.scan.sampling_frequency)
+    config.scan.sampling_frequency = 8e6
 
-   # Save the config back to file
-   config.to_yaml("configs/config_picmus_rf_modified.yaml")
+    # Save the config back to file
+    config.save_to_yaml("configs/config_picmus_rf_modified.yaml")
+
 
 -------------------------------
 Parameter List
