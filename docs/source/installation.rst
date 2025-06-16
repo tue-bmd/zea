@@ -95,8 +95,10 @@ Run a container with one of the built images. Ensure you mount your repository a
    - ``-m`` or ``--memory``: set a memory limit (use g for gigabytes).
    - ``--cpus``: specify the number of CPU cores to use.
    - ``--user``: run as a specific user.
-
-The container uses ``/bin/bash`` as its entrypoint, allowing you to interactively execute shell commands.
+   - ``-w`` or ``--workdir``: set the working directory inside the container.
+   - ``--rm``: automatically remove the container when it *exits*.
+   - ``--env-file``: load environment variables from a .env file.
+   - ``--hostname``: set the container hostname (useful for ``users.yaml`` file).
 
 .. important::
 
@@ -106,32 +108,8 @@ The container uses ``/bin/bash`` as its entrypoint, allowing you to interactivel
 
    The Docker container sets a random hostname by default. You can set a hostname with the ``--hostname`` flag. This is useful for the ``users.yaml`` file. Alternatively, you can use the hostname wildcard in the ``users.yaml`` file.
 
-Alternative flags:
 
-- ``-w`` or ``--workdir``: set the working directory inside the container.
-- ``--rm``: automatically remove the container when it *exits*.
-- ``--env-file``: load environment variables from a .env file.
+Development using VSCode
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-Attach / Start / Stop
-~~~~~~~~~~~~~~~~~~~~~
-
-To attach to the container:
-
-.. code-block:: shell
-
-   docker attach {CONTAINER-NAME}
-
-Start and stop the container with:
-
-.. code-block:: shell
-
-   docker start {CONTAINER-NAME}
-
-.. code-block:: shell
-
-   docker stop {CONTAINER-NAME}
-
-Development in the Container using VSCode
------------------------------------------
-
-You can use the VSCode Remote Containers extension to attach to the running container for development. A ``.devcontainer.json`` file is provided which specifies the Docker image to use, the volumes to mount, and the extensions to install. To use it, ensure the Remote Containers extension is installed in VSCode, then click the devcontainer icon in the bottom left corner and select "Reopen in Container". To revert to the host environment, click the devcontainer icon again and select "Reopen Locally".
+You can use the VSCode Remote Containers extension to attach to the running container for development. A `devcontainer.json <https://github.com/zeahub/ultrasound-toolbox/blob/main/.devcontainer/devcontainer.json>`__ file is provided in our repository, which specifies the Docker image to use, the volumes to mount, and the extensions to install. If you want to work on ``zea`` inside the development container, you can open the repository in VSCode, and use "Dev Containers: Rebuild Container" from the command palette (Ctrl+Shift+P).
