@@ -30,7 +30,9 @@ class MaskActionModel:
 class LinesActionModel(MaskActionModel):
     """Base class for action selection methods that select lines."""
 
-    def __init__(self, n_actions: int, n_possible_actions: int, img_width: int, img_height: int):
+    def __init__(
+        self, n_actions: int, n_possible_actions: int, img_width: int, img_height: int
+    ):
         """Initialize the LinesActionModel.
 
         Args:
@@ -50,7 +52,9 @@ class LinesActionModel(MaskActionModel):
         self.img_height = img_height
 
         stack_n_cols = self.img_width / self.n_possible_actions
-        assert stack_n_cols.is_integer(), "Image width must be divisible by n_possible_actions."
+        assert (
+            stack_n_cols.is_integer()
+        ), "Image width must be divisible by n_possible_actions."
         self.stack_n_cols = int(stack_n_cols)
 
     def lines_to_im_size(self, lines):
@@ -136,15 +140,21 @@ class GreedyEntropy(LinesActionModel):
             Tensor: batch of pixelwise pairwise Gaussian errors,
             of shape (n_particles, n_particles, batch, height, width)
         """
-        assert particles.shape[1] > 1, "The entropy cannot be approximated using a single particle."
+        assert (
+            particles.shape[1] > 1
+        ), "The entropy cannot be approximated using a single particle."
 
         if n_possible_actions is None:
             n_possible_actions = particles.shape[-1]
 
         # TODO: I think we only need to compute the lower triangular
         # of this matrix, since it's symmetric
-        squared_l2_error_matrices = (particles[:, :, None, ...] - particles[:, None, :, ...]) ** 2
-        gaussian_error_per_pixel_i_j = ops.exp((squared_l2_error_matrices) / (2 * entropy_sigma**2))
+        squared_l2_error_matrices = (
+            particles[:, :, None, ...] - particles[:, None, :, ...]
+        ) ** 2
+        gaussian_error_per_pixel_i_j = ops.exp(
+            (squared_l2_error_matrices) / (2 * entropy_sigma**2)
+        )
         # Vertically stack all columns corresponding with the same line
         # This way we can just sum across the height axis and get the entropy
         # for each pixel in a given line
@@ -175,11 +185,13 @@ class GreedyEntropy(LinesActionModel):
         Returns:
             Tensor: batch of entropies per line, of shape (batch, n_possible_actions)
         """
-        gaussian_error_per_pixel_stacked = GreedyEntropy.compute_pairwise_pixel_gaussian_error(
-            particles,
-            self.stack_n_cols,
-            self.n_possible_actions,
-            self.entropy_sigma,
+        gaussian_error_per_pixel_stacked = (
+            GreedyEntropy.compute_pairwise_pixel_gaussian_error(
+                particles,
+                self.stack_n_cols,
+                self.n_possible_actions,
+                self.entropy_sigma,
+            )
         )
         gaussian_error_per_line = ops.sum(gaussian_error_per_pixel_stacked, axis=3)
         # sum out first dimension of (n_particles x n_particles) error matrix
@@ -261,7 +273,9 @@ class GreedyEntropy(LinesActionModel):
             all_selected_lines.append(max_entropy_line)
 
         selected_lines_k_hot = ops.any(
-            ops.one_hot(all_selected_lines, self.n_possible_actions, dtype=masks._DEFAULT_DTYPE),
+            ops.one_hot(
+                all_selected_lines, self.n_possible_actions, dtype=masks._DEFAULT_DTYPE
+            ),
             axis=0,
         )
         return selected_lines_k_hot, self.lines_to_im_size(selected_lines_k_hot)
@@ -347,7 +361,9 @@ class EquispacedLines(LinesActionModel):
             self.n_possible_actions,
             assert_equal_spacing=self.assert_equal_spacing,
         )
-        initial_lines = ops.tile(initial_lines, (batch_size, 1))  # (batch_size, n_actions)
+        initial_lines = ops.tile(
+            initial_lines, (batch_size, 1)
+        )  # (batch_size, n_actions)
         return initial_lines, self.lines_to_im_size(initial_lines)
 
     def sample_stateless(self, current_lines):
@@ -415,18 +431,14 @@ class CovarianceSamplingLines(LinesActionModel):
         """Sample the action using the covariance sampling method.
 
         Args:
-            particles (Tensor): Particles of shape (n_particles, batch_size, h, w)
+            particles (Tensor): Particles of shape (batch_size, n_particles, h, w)
             seed (int | SeedGenerator | jax.random.key, optional): Seed for random number
                 generation. Defaults to None.
 
         Returns:
             Tensor: The mask of shape (batch_size, img_size, img_size)
         """
-        # [n_particles, batch_size, rows, cols]
-        n_particles, batch_size, rows, _ = ops.shape(particles)
-
-        # [batch_size, rows, cols, n_particles]
-        particles = ops.transpose(particles, (1, 2, 3, 0))
+        batch_size, n_particles, rows, _ = ops.shape(particles)
 
         # [batch_size, rows * stack_n_cols, n_possible_actions, n_particles]
         shape = [
@@ -448,7 +460,9 @@ class CovarianceSamplingLines(LinesActionModel):
 
         # Make matrix masks [n_masks, batch_size, n_possible_actions, n_possible_actions]
         reshaped_lines = ops.repeat(lines[..., None], self.n_possible_actions, axis=-1)
-        bool_masks = ops.logical_and(reshaped_lines, ops.swapaxes(reshaped_lines, -1, -2))
+        bool_masks = ops.logical_and(
+            reshaped_lines, ops.swapaxes(reshaped_lines, -1, -2)
+        )
 
         # Subsample the covariance matrix with random lines
         def subsample_with_mask(mask):
@@ -456,7 +470,9 @@ class CovarianceSamplingLines(LinesActionModel):
             subsampled_cov_matrix = tensor_ops.boolean_mask(
                 cov_matrix, mask, size=batch_size * self.n_actions**2
             )
-            return ops.reshape(subsampled_cov_matrix, [batch_size, self.n_actions, self.n_actions])
+            return ops.reshape(
+                subsampled_cov_matrix, [batch_size, self.n_actions, self.n_actions]
+            )
 
         # [n_masks, batch_size, cols, cols]
         subsampled_cov_matrices = ops.vectorized_map(subsample_with_mask, bool_masks)
