@@ -62,6 +62,7 @@ import yaml
 
 from zea import Config, log
 from zea.config.validation import check_config
+from zea.data.preset_utils import HF_PREFIX, _hf_parse_path
 from zea.datapaths import create_new_user, set_data_paths
 from zea.internal.device import init_device
 from zea.internal.git_info import get_git_summary
@@ -161,19 +162,26 @@ def setup_config(
     verbose: bool = True,
     disable_config_check: bool = False,
     loader=yaml.FullLoader,
+    repo_type: str = "dataset",
 ):
     """Setup function for config. Retrieves config file and checks for validity.
 
     Args:
         config_path (str, optional): file path to config yaml. Defaults to None.
             if None, argparser is checked. If that is None as well, the window
-            ui will pop up for choosing the config file manually.
+            ui will pop up for choosing the config file manually. Besides a local
+            path it can also be a Hugging Face repository path, in the form
+            hf://<repo_id>/<path_to_config>. For example:
+            `hf://username/zeahub/configs/config_camus.yaml`.
         verbose (bool, optional): print config file path and git summary. Defaults to True.
         disable_config_check (bool, optional): whether to check for zea config validity.
             Defaults to False. Can be set to True if you are using some other config that
             does not have to adhere to zea config standards.
         loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
             for custom objects, you might want to use yaml.UnsafeLoader.
+        repo_type (str, optional): type of the Hugging Face repository.
+            Defaults to "dataset". Only used when `config_path` starts with
+            `HF_PREFIX`. Can be "model", "dataset", or "space".
     Returns:
         config (dict): config object / dict.
 
@@ -194,7 +202,15 @@ def setup_config(
                 "(usually on headless servers)."
             ) from e
 
-    config = Config.from_yaml(Path(config_path), loader=loader)
+    if str(config_path).startswith(HF_PREFIX):
+        repo_id, path = _hf_parse_path(config_path)
+        config = Config.from_hf(
+            repo_id=repo_id,
+            path=path,
+            repo_type=repo_type,
+        )
+    else:
+        config = Config.from_yaml(Path(config_path), loader=loader)
 
     if verbose:
         log.info(f"Using config file: {log.yellow(config_path)}")

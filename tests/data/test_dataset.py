@@ -95,7 +95,7 @@ def test_generate(dtype, to_dtype, filetype, tmp_path, dummy_dataset_path):
 
     generator = GenerateDataSet(
         config,
-        destination_folder=tmp_path / "dest",
+        destination_folder=tmp_path / "test",
         to_dtype=to_dtype,
         retain_folder_structure=True,
         filetype=filetype,

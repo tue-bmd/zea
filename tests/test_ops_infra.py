@@ -9,11 +9,12 @@ import numpy as np
 import pytest
 
 from zea import ops
+from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config.config import Config
 from zea.internal.core import DataTypes
 from zea.internal.registry import ops_registry
 from zea.probes import Dummy, Probe
-from zea.scan import Scan, compute_t0_delays_planewave
+from zea.scan import Scan
 
 """Some operations for testing"""
 
@@ -627,7 +628,7 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
         element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
         apply_lens_correction=False,
         sound_speed=sound_speed,
-        lens_sound_speed=1000,
+        lens_sound_speed=1000.0,
         lens_thickness=1e-3,
         initial_times=np.ones((n_tx,)) * 1e-6,
         attenuation_coef=0.2,
@@ -698,6 +699,7 @@ def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
     )
 
 
+@pytest.mark.heavy
 def test_default_ultrasound_pipeline(
     default_pipeline,
     patched_pipeline,

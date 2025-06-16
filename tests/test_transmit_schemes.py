@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 
 from zea import ops
+from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.probes import Probe
-from zea.scan import Scan, compute_t0_delays_focused, compute_t0_delays_planewave
+from zea.scan import Scan
 
 
 def _get_flatgrid(extent, shape):
@@ -179,8 +180,6 @@ def _get_n_ax(ultrasound_probe):
     """
     is_low_frequency_probe = ultrasound_probe.center_frequency < 4e6
 
-    # Intentionally returns values that are not powers of 2 to catch potential bugs
-    # related to this.
     if is_low_frequency_probe:
         return 510
 
@@ -483,6 +482,7 @@ def ultrasound_scatterers():
         ("phased_array", "focused"),
     ],
 )
+@pytest.mark.heavy
 def test_transmit_schemes(
     default_pipeline,
     probe_kind,
