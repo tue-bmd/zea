@@ -44,10 +44,6 @@ PARAMETER_DESCRIPTIONS = {
             "transmits in the frame, or a list of integers for specific transmits to "
             "select from the frame."
         ),
-        "downsample": (
-            "The decimation factor to use for downsampling the data from rf "
-            "to iq. If 1, no downsampling is performed."
-        ),
         "Nx": "The number of pixels in the beamforming grid in the x-direction",
         "Nz": "The number of pixels in the beamforming grid in the z-direction",
         "n_ch": "The number of channels in the raw data (1 for rf data, 2 for iq data)",

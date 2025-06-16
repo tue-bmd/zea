@@ -43,7 +43,7 @@ def get_args():
     parser.add_argument(
         "--source",
         type=str,
-        required=True,  # e.g. {data_root}/USBMD_datasets/_RAW/echonetlvh",
+        required=True,
     )
     parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--output_numpy", type=str, default=None)

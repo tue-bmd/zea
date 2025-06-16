@@ -25,6 +25,8 @@ extensions = [
     "myst_parser",  # for markdown support
     "sphinx.ext.doctest",  # for testing code snippets in the documentation
     "nbsphinx",  # for Jupyter notebook support
+    "sphinx_design",  # for fancy code block selection
+    "sphinxcontrib.bibtex",  # for bibliography support
 ]
 
 autodoc_mock_imports = ["zea.backend.tf2jax"]
@@ -61,3 +63,6 @@ html_favicon = "../_static/zea-logo-fav-32px.png"
 
 # for index
 modindex_common_prefix = ["zea."]
+
+# for bibtex
+bibtex_bibfiles = ["../../paper/paper.bib"]

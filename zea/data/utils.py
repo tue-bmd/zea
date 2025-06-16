@@ -6,11 +6,11 @@ from pathlib import Path
 from keras import ops
 
 
-class USBMDJSONEncoder(json.JSONEncoder):
+class ZeaJSONEncoder(json.JSONEncoder):
     """Wrapper for json.dumps to encode range and slice objects.
 
     Example:
-        >>> json.dumps(range(10), cls=USBMDJSONEncoder)
+        >>> json.dumps(range(10), cls=ZeaJSONEncoder)
         '{"__type__": "range", "start": 0, "stop": 10, "step": 1}'
 
     Note:
@@ -45,7 +45,7 @@ def json_dumps(obj):
     Returns:
         str: serialized object (json string).
     """
-    return json.dumps(obj, cls=USBMDJSONEncoder)
+    return json.dumps(obj, cls=ZeaJSONEncoder)
 
 
 def json_loads(obj):

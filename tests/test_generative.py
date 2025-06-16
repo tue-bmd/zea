@@ -155,6 +155,10 @@ def animate_diffusion_trajectory_2d(
 def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     """Test diffusion model fitting and sampling on synthetic 2D data."""
     data, *_ = synthetic_2d_data
+
+    keras.utils.set_random_seed(123)
+    seed_gen = keras.random.SeedGenerator(123)
+
     n = len(data)
     model = DiffusionModel(
         input_shape=(2,),
@@ -172,7 +176,7 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     # for the tests this is good enough
     model.fit(data, epochs=200, batch_size=64, verbose=0)
 
-    samples = model.sample(n_samples=n, n_steps=100)
+    samples = model.sample(n_samples=n, n_steps=100, seed=seed_gen)
     samples = keras.ops.convert_to_numpy(samples)
     samples = samples.reshape(-1, 2)
 
@@ -192,9 +196,9 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     vars_ = keras.ops.convert_to_numpy(gmm.vars)
     covs = [np.diag(v) for v in vars_]
     means_m, true_means_m, covs_m, true_covs_m = match_means_covariances(means, means, covs, covs)
-    assert np.allclose(means_m, true_means_m, atol=2)
+    assert np.allclose(means_m, true_means_m, atol=1)
     for c, tc in zip(covs_m, true_covs_m):
-        assert np.allclose(c, tc, atol=2)
+        assert np.allclose(c, tc, atol=1)
 
 
 def test_gmm_posterior_sample():
@@ -204,6 +208,7 @@ def test_gmm_posterior_sample():
     n_measurements = 5
     n_samples = 4
     rng = np.random.default_rng(123)
+    seed_gen = keras.random.SeedGenerator(123)
     # Make up some GMM parameters and measurements
     gmm = GaussianMixtureModel(n_components=n_components, n_features=n_features)
     gmm.means = keras.ops.convert_to_tensor(
@@ -213,7 +218,7 @@ def test_gmm_posterior_sample():
     gmm.pi = keras.ops.ones((n_components,)) / n_components
     gmm._initialized = True
     measurements = rng.normal(size=(n_measurements, n_features)).astype("float32")
-    comp_idx = gmm.posterior_sample(measurements, n_samples=n_samples)
+    comp_idx = gmm.posterior_sample(measurements, n_samples=n_samples, seed=seed_gen)
     arr = keras.ops.convert_to_numpy(comp_idx)
     assert arr.shape == (n_measurements, n_samples)
     assert ((arr >= 0) & (arr < n_components)).all()
@@ -224,6 +229,10 @@ def test_diffusion_posterior_sample_shape():
     n_measurements = 3
     n_features = 2
     n_samples = 5
+
+    keras.utils.set_random_seed(123)
+    seed_gen = keras.random.SeedGenerator(123)
+
     # Use a minimal diffusion model with dense network
     model = DiffusionModel(
         input_shape=(n_features,),
@@ -240,6 +249,7 @@ def test_diffusion_posterior_sample_shape():
         mask=mask,
         n_steps=2,
         omega=1.0,
+        seed=seed_gen,
         verbose=False,
     )
     assert out.shape == (n_measurements, n_samples, n_features)

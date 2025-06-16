@@ -138,8 +138,6 @@ Parameters Reference
      - The center frequency of the transducer in Hz
    * - ``scan.demodulation_frequency``
      - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
-   * - ``scan.downsample``
-     - The decimation factor to use for downsampling the data from rf to iq. If 1, no downsampling is performed.
    * - ``scan.f_number``
      - The receive f-number for apodization. Set to zero to disable masking. The f-number is the ratio between the distance from the transducer and the size of the aperture.
    * - ``scan.fill_value``

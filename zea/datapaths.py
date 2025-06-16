@@ -20,10 +20,10 @@ from zea.tools.hf import HFPath
 from zea.utils import strtobool
 
 DEFAULT_DATA_ROOT = {
-    "windows": "Z:/Ultrasound-BMd/data",
-    "linux": "/mnt/z/Ultrasound-BMd/data",
-    "darwin": "/mnt/z/Ultrasound-BMd/data",
-    None: "/mnt/z/Ultrasound-BMd/data",  # for other system
+    "windows": "Z:/data",
+    "linux": "/mnt/z/data",
+    "darwin": "/mnt/z/data",
+    None: "/mnt/z/data",  # for other system
 }
 
 DEFAULT_LINUX_DATA_ROOT = DEFAULT_DATA_ROOT["linux"]
