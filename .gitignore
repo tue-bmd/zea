@@ -3,6 +3,7 @@
 /custom_configs
 /data
 /log
+docs/source/_autosummary
 
 # Temporary files
 temp/
