@@ -23,7 +23,7 @@ from zea.data.file import File
 
 _SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
-_SUPPORTED_USBMD_TYPES = [".hdf5", ".h5"]
+_SUPPORTED_ZEA_TYPES = [".hdf5", ".h5"]
 
 
 def load_video(filename):
@@ -195,7 +195,7 @@ def search_file_tree(
 
     # set default file type
     if filetypes is None:
-        filetypes = _SUPPORTED_IMG_TYPES + _SUPPORTED_VID_TYPES + _SUPPORTED_USBMD_TYPES
+        filetypes = _SUPPORTED_IMG_TYPES + _SUPPORTED_VID_TYPES + _SUPPORTED_ZEA_TYPES
 
     file_paths = []
 

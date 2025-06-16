@@ -4,7 +4,7 @@ Script to convert the PICMUS database to the zea format.
 Example usage:
 ```bash
 python zea/data/convert/picmus.py \
---src_dir /mnt/z/Ultrasound-BMd/data/PICMUS \
+--src_dir /mnt/data/PICMUS \
 --output_dir converted_PICMUS_dir
 ```
 """
