@@ -192,9 +192,9 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     vars_ = keras.ops.convert_to_numpy(gmm.vars)
     covs = [np.diag(v) for v in vars_]
     means_m, true_means_m, covs_m, true_covs_m = match_means_covariances(means, means, covs, covs)
-    assert np.allclose(means_m, true_means_m, atol=2)
+    assert np.allclose(means_m, true_means_m, atol=1)
     for c, tc in zip(covs_m, true_covs_m):
-        assert np.allclose(c, tc, atol=2)
+        assert np.allclose(c, tc, atol=1)
 
 
 def test_gmm_posterior_sample():
