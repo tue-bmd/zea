@@ -98,7 +98,6 @@ scan_schema = Schema(
         Optional("center_frequency", default=None): Or(None, any_number),
         Optional("sampling_frequency", default=None): Or(None, any_number),
         Optional("demodulation_frequency", default=None): Or(None, any_number),
-        Optional("downsample", default=None): Or(None, positive_integer),
         Optional("f_number", default=None): Or(None, positive_float),
         Optional("apply_lens_correction", default=False): bool,
         Optional("lens_thickness", default=1e-3): positive_float,

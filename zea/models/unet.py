@@ -17,10 +17,10 @@ class UNet(BaseModel):
 
     def __init__(
         self,
-        image_shape,
+        input_shape,
         widths,
         block_depth,
-        image_range,
+        input_range,
         name="unet",
         **kwargs,
     ):
@@ -28,19 +28,19 @@ class UNet(BaseModel):
 
         super().__init__(name=name, **kwargs)
 
-        self.image_shape = image_shape
-        self.image_range = image_range
+        self.input_shape = input_shape
+        self.input_range = input_range
         self.widths = widths
         self.block_depth = block_depth
 
-        self.network = get_unetwork(self.image_shape, self.widths, self.block_depth)
+        self.network = get_unetwork(self.input_shape, self.widths, self.block_depth)
 
     def get_config(self):
         config = super().get_config()
         config.update(
             {
-                "image_shape": self.image_shape,
-                "image_range": self.image_range,
+                "input_shape": self.input_shape,
+                "input_range": self.input_range,
                 "widths": self.widths,
                 "block_depth": self.block_depth,
             }

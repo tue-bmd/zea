@@ -1,180 +1,161 @@
 .. _contributing:
 
 Contributing
-=======================
+=============
 
-Style conventions
+zea is an open-source project and we welcome contributions from the ultrasound community. Whether you want to report a bug, suggest a new feature, or contribute code, your input is valuable. This document outlines how you can contribute to the project.
+
+How to contribute
 -----------------
+First, take some time to read through this whole guide. Then follow the following steps to contribute:
 
-Code style (PEP 8)
-~~~~~~~~~~~~~~~~~~
+1. Make an issue
+~~~~~~~~~~~~~~~~
 
-To keep our code consistent and ease collaboration, we all follow the PEP 8 style convention. You can read about PEP 8 at https://peps.python.org/pep-0008/. Please take a look and familiarise yourself with these conventions. Some examples of what this style uses are:
+Take a look at the current `issues <https://github.com/tue-bmd/zea/issues>`_ on GitHub to see if there are any open issues that you can help with. If your issue is not listed, please create a new issue describing the motivation behind the problem or feature you want to work on. That way we can discuss it and make sure that your contribution is aligned with the project's goals.
 
-- Use 4 spaces per indentation level
-- Limit all lines to a maximum of 88 characters
-- Imports are always put at the top of the file and are grouped by type.
-- Class names should normally use the CapWords convention
-- Function and variable names should be lowercase, with words separated by underscores as necessary to improve readability
-- (Many more recommendations)
+.. dropdown:: Example Issue Template
 
-The style of our code will be continuously checked via ``pylint`` when you submit a Pull Request to merge code to branch ``main``. Any inconsistency will be flagged and will block the pull request until it is resolved.
+   .. code-block:: markdown
 
-It's recommended to set up your IDE to enforce PEP 8 style. In general, we use VS Code, the black formatter, pylint and isort to achieve this. You can install `black <https://marketplace.visualstudio.com/items?itemName=ms-python.black-formatter>`_, `isort <https://marketplace.visualstudio.com/items?itemName=ms-python.isort>`_, `pylint <https://marketplace.visualstudio.com/items?itemName=ms-python.pylint>`_ as extensions to VS Code.
+      **Title:** [Bug/Feature/Question]: Brief summary
 
-Additionally, it is useful to add the following settings to your VS Code ``settings.json``. This will automatically format your code on save.
+      **Description:**
+      - For problems or bugs
+          - What is the problem?
+          - Steps to reproduce
+          - Expected behavior
+          - Actual behavior
+      - For feature requests
+          - What is the feature and why is it needed?
+          - Possible interface or implementation details
+      - References (if applicable)
+        - Link to relevant documentation, discussions, or related issues.
 
-.. code-block:: json
+2. Fork the repository
+~~~~~~~~~~~~~~~~~~~~~~
 
-   "[python]": {
-      "editor.defaultFormatter": "ms-python.black-formatter",
-      "editor.formatOnSave": true,
-      "editor.codeActionsOnSave": {
-         "source.organizeImports": true
-      }
-   },
-   "isort.args": [
-      "--profile",
-      "black"
-   ],
+Most contributors will not have write access to the main repository. Instead, you will need to fork the repository to your own GitHub account. You can fork the repository on GitHub by clicking the "Fork" button at the top right of the page. This will create a copy of the repository under your GitHub account. One can also use:
 
-To check if pylint runs successfully, run the following in the root directory:
+.. code-block:: shell
 
-.. code-block:: bash
+   gh repo fork tue-bmd/zea --clone
 
-   pylint zea
+3. Setup environment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Docstrings (Google)
-~~~~~~~~~~~~~~~~~~~
+Check out a new branch for your changes.
 
-For docstrings we'll rely on the Google style described in ``example_google_docstrings.py``. Your IDE is also able to automatically populate docstrings in our style of choice, so it's a good idea to configure this too (see this `example in PyCharm <https://www.jetbrains.com/help/pycharm/settings-tools-python-integrated-tools.html>`_).
+.. code-block:: shell
 
-Pull Requests (PR)
-------------------
+   cd zea
+   git checkout -b <your_feature_branch_name>
 
-We're following a Git workflow to collaborate at scale and efficiently. If you're not familiar with Git a good starting point would be to read tutorials such as `this one <https://nvie.com/posts/a-successful-git-branching-model/>`_ or these from Atlassian (`tutorial 1 <https://www.atlassian.com/git/tutorials/comparing-workflows#:~:text=A%20Git%20workflow%20is%20a,in%20how%20users%20manage%20changes.>`_, `tutorial 2 <https://www.atlassian.com/git/tutorials/comparing-workflows/gitflow-workflow>`_).
+Set up your development environment. We recommend using Docker as described in the :doc:`installation` guide. This ensures consistency and avoids dependency issues. If you prefer to work without Docker, you can set up a local environment using `conda` or `pip`. For example, to set up a conda environment, you can run:
 
-We'll be using a simplified version of the workflows described in the tutorials above. In its simplest form, our repository will contain three types of branches:
+.. code-block:: shell
 
-- ``main`` branch: This contains the most stable version of our code. Unit tests should always pass in this branch. We use this branch to release new official versions of the code. We only merge from the develop branch into this branch with each new release.
-- ``develop`` branch: This contains the latest version of our code. Unit tests should always pass in this branch and at least one review is mandatory. We use this branch to merge new features into. This is generally where you would branch off from to create a new feature branch, and also where you would PR your feature branch into.
-- ``feature`` branches: Feature branches are derived from ``develop`` and are intended for the development of features, so we don't expect them to be tested and reliable at all times. Once the feature is finalised, we'll test core components it brings into the code and merge it into ``develop`` through a Pull Request.
+   conda create -n zea python=3.12
+   conda activate zea
+   conda install pip
+   pip install -e .[dev]
+   pre-commit install
 
-Submitting a Pull Request (PR)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Now install the backend(s). If you use the Docker image, the backends are already installed. If you use a local environment, you need to install one of the supported machine learning backends: JAX, PyTorch or TensorFlow. For more information on how to install the backends, see the :ref:`backend installation <backend-installation>`.` guide.
 
-The typical PR workflow to make changes to the code will look as follows:
+4. Make your changes
+~~~~~~~~~~~~~~~~~~~~
 
-#. Switch to the main branch and pull the latest changes:
+In general, we recommend a test-driven development approach:
 
-   .. code-block:: shell
+1. Write a test for the functionality you want to add.
 
-      git checkout main
-      git pull
+2. Write the code to make the test pass.
 
-#. Create a new feature branch for your changes:
+You can run tests for your installed environment using `pytest <https://docs.pytest.org/en/stable/>`_:
 
-   .. code-block:: shell
+.. code-block:: shell
 
-      git checkout -b <your_feature_branch_name>
+   pytest
 
-   Try to use a descriptive name. A good convention is to use your initials followed by a concise description for what you will implement, for instance:
+A few things to keep in mind when making changes:
 
-   .. code-block:: shell
+- Make sure to write backend-agnostic code. This means that your code should work with all supported backends. This can be achieved by using the ``keras.ops`` API (see the `Keras ops documentation <https://keras.io/api/ops/>`_), instead of using backend-specific functions. For example, use ``keras.ops.squeeze`` instead of ``jax.numpy.squeeze`` or ``torch.squeeze``. Also, when converting tensors to numpy arrays, use the ``keras.ops.convert_to_numpy`` function (instead of ``my_tensor.numpy()``) to ensure compatibility with all backends.
 
-      git checkout -b feature/ts_unet_sr_network
+- The code is autoformatted using `ruff <https://pypi.org/project/ruff/>`_. You can run the pre-commit hooks to automatically format and check your code using:
 
-#. Make your changes in your feature branch. Test new code components if necessary.
+.. code-block:: shell
 
-#. Ensure that all tests pass locally and your code is formatted correctly. You can run the tests and check the code style by running the following commands from the root directory of the repository:
+   pre-commit run --all-files
 
-   .. code-block:: shell
+5. Document your changes
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-      pylint zea
-      pytest ./tests
+The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is written in reStructuredText format. You can find the documentation files in the `docs/source` directory. Docstrings are written in Google style, which you can see examples of in the `example_google_docstrings.py <https://github.com/tue-bmd/zea/blob/main/docs/example_google_docstrings.py>`_ file. If you add new functionality, please make sure to document it in the documentation files.
 
-#. Stage the changes to commit
+The overall structure of the documentation is manually designed, but the API documentation is auto-generated based on the docstrings in the code. To generate the docs locally you can run:
 
-   .. code-block:: shell
+.. code-block:: shell
 
-      git add <path_to_files_to_stage>
+   # if you didn't install the dependencies earlier
+   pip install -e .[docs]
+   cd docs
+   make clean && make docs-buid
+   # you can also serve the docs locally
+   make docs-serve
+   # and open them in your browser at http://localhost:8000
 
-   For instance, from the repository root directory you can add all changes with
+See the `README.md <https://github.com/tue-bmd/zea/blob/main/README.md>`_ for more information.
 
-   .. code-block:: shell
 
-      git add .
+6. Make a pull request
+~~~~~~~~~~~~~~~~~~~~~~
+Once your changes are ready and all tests pass, push your branch to your forked repository:
 
-#. Commit your changes using a short but descriptive commit message
+.. code-block:: shell
 
-   .. code-block:: shell
+   git add .
+   git commit -m "Description of your changes"
+   git push origin <your_feature_branch_name>
 
-      git commit -m "<your_commit_message>"
+Then, go to the original repository on GitHub and open a Pull Request (PR) from your branch. In your PR description, clearly explain what changes you made and reference any related issues.
 
-#. (Likely needed) Merge any changes from remote ``develop`` into your branch to incorporate work from others that happened while you were working on your branch. If any conflicts arise, resolve them and repeat steps 3 to 7.
+.. dropdown:: Example Pull Request Template
 
-   .. code-block:: shell
+   .. code-block:: markdown
 
-      git merge origin/develop
+      **Title:** [Bug/Feature]: Brief summary of changes
 
-#. Push your branch to the GitHub remote repository:
+      **Description:**
+      - What changes were made?
+      - Why were these changes made?
+      - How do these changes address the issue or feature request?
+      - Any additional context or references.
+      - How to test the changes.
 
-   .. code-block:: shell
-
-      git push origin <your_feature_branch_name>
-
-   Your PR will now be available on GitHub. A url will show in the console output that can take you directly to it.
-
-#. In GitHub, send a PR to merge your feature branch into the develop branch.
-
-#. Wait for a reviewer to review your PR. After it's accepted, proceed with the merge.
-
-#. After your pull request is merged, make sure that your branch is deleted.
+The maintainers will review your PR and may request changes or ask questions. Please respond to feedback and update your PR as needed. Once everything looks good, your changes will be merged!
 
 .. note::
 
-   Did you find any issues or inconsistencies following these PR guidelines? Please let a maintainer of the repository know so it's always up to date!
+   Anyone can review pull requests, we encourage others to review each other's work, however, only the maintainers can approve a pull request. Pull Requests require at least one approval and all tests passing before being able to merge it.
 
-Reviewing a Pull Request
+Thank you for contributing to zea!
+
+
+Contributing topics
+-------------------
+
+Adding notebooks
+~~~~~~~~~~~~~~~~
+
+New tutorial or example notebooks are always welcome! Please add them to the `docs/source/notebooks` directory. Make sure to follow the naming conventions and structure of existing notebooks. If you are adding a new tutorial, please also update the `examples.rst` file in the `docs/source` directory to check if your notebook is included.
+
+Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~
-
-Anyone can review pull requests, we encourage others to review each other's work, however, only the maintainers can approve a pull request. Pull Requests require at least one approval and all tests passing before being able to merge it.
-
-Your First Contribution
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Working on your first Pull Request? You can learn how from this *free* series, `How to Contribute to an Open Source Project on GitHub <https://app.egghead.io/playlists/how-to-contribute-to-an-open-source-project-on-github>`_. If you prefer to read through some tutorials, visit https://makeapullrequest.com/ and https://www.firsttimersonly.com/
-
-At this point, you're ready to make your changes! Feel free to ask for help; everyone is a beginner at first :relaxed:
-
-Bumping zea version
----------------------
-
-Bumping and releasing a new version of zea is done by the maintainers of the repository. To bump the version, follow these steps:
-
-First check out the most recent version of the main branch and pull the latest changes:
-
-.. code-block:: shell
-
-   git checkout main
-   git pull
-
-Then run the following command to bump the version:
-
-.. code-block:: shell
-
-   ./post-release.sh <new_version> <snellius_username>
-
-The zea ``new_version`` should be a valid version number, e.g. ``v0.1.0``, with the ``v`` prefix and major, minor and patch version numbers. The ``snellius_username`` is the username you use to log in to the Snellius cluster.
-
-Make sure to follow the instructions in the ``post-release.sh`` script. This script will build the new (Docker) environment and version of zea.
-
-Adding models
--------------
 
 Please see the :doc:`models` section for more information on how to add new models to ``zea``.
 
-Adding ops
-----------
+Adding to ``zea.ops``
+~~~~~~~~~~~~~~~~~~~~~
 
 Please see the :doc:`pipeline` section for more information on how to add new ops to ``zea``.

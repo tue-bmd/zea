@@ -1,9 +1,9 @@
 # Building the Documentation
 
-To build the documentation for the `usbmd` package, follow these steps:
+To build the documentation for the `zea` package, follow these steps:
 
 ## 1. Install dependencies
-Install the `usbmd` package with documentation dependencies:
+Install the `zea` package with documentation dependencies:
 
 ```sh
 pip install -e .[docs]
