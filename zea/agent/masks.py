@@ -1,4 +1,8 @@
-"""Masks generation utilities."""
+"""
+Mask generation utilities.
+
+These masks are used as a measurement operator for focused scan-line subsampling.
+"""
 
 from typing import List
 

@@ -14,6 +14,8 @@ from statistics import mean, median, stdev
 import numpy as np
 import yaml
 from PIL import Image
+import keras.ops as ops
+
 
 from zea import log
 
@@ -47,18 +49,23 @@ def _assert_uint8_images(images: np.ndarray):
         )
 
 
-def translate(array, range_from, range_to):
+def translate(array, range_from=None, range_to=(0, 255)):
     """Map values in array from one range to other.
 
     Args:
         array (ndarray): input array.
-        range_from (Tuple): lower and upper bound of original array.
-        range_to (Tuple): lower and upper bound to which array should be mapped.
+        range_from (Tuple, optional): lower and upper bound of original array.
+            Defaults to min and max of array.
+        range_to (Tuple, optional): lower and upper bound to which array should be mapped.
+            Defaults to (0, 255).
 
     Returns:
         (ndarray): translated array
     """
-    left_min, left_max = range_from
+    if range_from is None:
+        left_min, left_max = ops.min(array), ops.max(array)
+    else:
+        left_min, left_max = range_from
     right_min, right_max = range_to
 
     # Convert the left range into a 0-1 range (float)

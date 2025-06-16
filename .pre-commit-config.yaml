@@ -29,6 +29,7 @@ repos:
     description: Check yaml files for parseable syntax
   - id: check-added-large-files
     description: Prevent large files from being committed
+    exclude: ^docs/source/notebooks/
   - id: check-merge-conflict
     description: Check for files that contain merge conflict strings
   - id: detect-private-key
@@ -38,3 +39,10 @@ repos:
     hooks:
     -   id: poetry-check
     -   id: poetry-lock
+-   repo: local
+    hooks:
+    -   id: run-parameters-doc
+        name: Run parameters_doc.py
+        entry: python docs/source/parameters_doc.py
+        language: system
+        files: ^docs/source/parameters_doc\.py$

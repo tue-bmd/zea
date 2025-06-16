@@ -1,7 +1,8 @@
-"""Agent subpackage for zea.
+"""Agent subpackage for closing action-perception loop in ultrasound imaging.
 
-This module provides tools and utilities for agent-based operations within the zea framework,
-including mask generation and action selection strategies.
+The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework, including mask generation and action selection strategies. See :mod:`zea.agent.masks` and :mod:`zea.agent.selection` for key functions implementing intelligent focused transmit selection, such as the :class:`zea.agent.selection.GreedyEntropy` algorithm.
+
+For a practical example, see :doc:`../notebooks/agent/agent_example`.
 
 Example usage of action selection strategies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

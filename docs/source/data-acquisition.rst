@@ -5,18 +5,18 @@ Data
 
 This page provides a comprehensive overview of how ultrasound data is acquired, structured, and managed within the **zea** toolbox.
 For a quick start, see :doc:`Getting Started <getting-started>`.
-For a full reference of all config parameters, see :doc:`Parameters <parameters>`.
+For a full reference of all config parameters, see :doc:`Parameters <parameters>`. Lastly, some example notebooks on data handling can be found in :doc:`Examples <examples>`.
 
 -------------------------------
-zea data format
+``zea`` data format
 -------------------------------
 
-The **zea** toolbox uses a custom data format based on the HDF5 standard to ensure consistency, reproducibility, and ease of use across different projects and platforms.
+The ``zea`` toolbox uses a custom data format based on the HDF5 standard to store ultrasound data. It is convenient as it allows for efficient storage and retrieval of large datasets, with easy indexing that does not require loading the entire dataset into memory.
 
 **Key Features:**
 - All data and metadata are stored in a single `.hdf5` file per sequence.
 - The format is designed to be extensible and self-describing.
-- Data is organized into logical groups: `data`, `scan`, and `settings`.
+- Data is organized into logical groups: `data` and `scan` (custom parameters allowed in `scan`).
 
 **File Structure Overview:**
 
@@ -30,23 +30,33 @@ The **zea** toolbox uses a custom data format based on the HDF5 standard to ensu
     │    ├── beamformed_data
     │    ├── image
     │    └── image_sc
-    ├── scan
-    │    ├── probe_geometry
-    │    ├── t0_delays
-    │    ├── n_frames
-    │    ├── n_tx
-    │    ├── n_el
-    │    ├── n_ax
-    │    ├── n_ch
-    │    ├── sampling_frequency
-    │    ├── center_frequency
-    │    ├── initial_times
-    │    ├── bandwidth_percent
-    │    └── time_to_next_transmit
-    └── settings
-         └── ... (all acquisition and processing parameters)
+    └── scan
+         ├── n_ax
+         ├── n_el
+         ├── n_tx
+         ├── n_ch
+         ├── n_frames
+         ├── sound_speed
+         ├── probe_geometry
+         ├── sampling_frequency
+         ├── center_frequency
+         ├── initial_times
+         ├── t0_delays
+         ├── tx_apodizations
+         ├── focus_distances
+         ├── polar_angles
+         ├── azimuth_angles
+         ├── bandwidth_percent
+         ├── time_to_next_transmit
+         ├── tgc_gain_curve
+         ├── element_width
+         ├── tx_waveform_indices
+         ├── waveforms_one_way
+         ├── waveforms_two_way
+         ├── lens_correction
+         └── ... (custom parameters allowed)
 
-**Key Groups and Entries:**
+**Parameter Descriptions:**
 
 .. list-table::
    :header-rows: 1
@@ -55,92 +65,162 @@ The **zea** toolbox uses a custom data format based on the HDF5 standard to ensu
    * - **Entry**
      - **Description**
    * - ``data/raw_data``
-     - Raw channel data as acquired from the ultrasound system. Contains either RF (radio-frequency) or IQ (in-phase/quadrature) samples for each element, transmit, and frame. Shape: [n_frames, n_tx, n_el, n_ax, n_ch]
+     - Raw channel data as acquired from the ultrasound system. Shape: [n_frames, n_tx, n_ax, n_el, n_ch]
    * - ``data/aligned_data``
-     - Time-of-flight corrected data. The raw data is shifted in time so that echoes from the same spatial location are aligned across channels. Shape: [n_frames, n_tx, n_el, n_ax, n_ch]
+     - Time-of-flight corrected data. Shape: [n_frames, n_tx, n_ax, n_el, n_ch]
    * - ``data/envelope_data``
-     - Envelope-detected data. The analytic signal is computed (e.g., via Hilbert transform) and the magnitude is taken, removing the carrier frequency. Shape: [n_frames, n_z, n_x]
+     - Envelope-detected data. Shape: [n_frames, n_z, n_x]
    * - ``data/beamformed_data``
-     - Data after beamforming. The aligned channel data is summed (with apodization) to form spatially resolved signals. Shape: [n_frames, n_z, n_x]
+     - Data after beamforming. Shape: [n_frames, n_z, n_x]
    * - ``data/image``
-     - Log-compressed image (in dB). The envelope data is compressed for visualization. Shape: [n_frames, n_z, n_x]
+     - Log-compressed image (in dB). Shape: [n_frames, n_z, n_x]
    * - ``data/image_sc``
-     - Scan-converted image (in dB). The image is mapped to a Cartesian grid, correcting for probe geometry (e.g., curved arrays). Shape: [n_frames, output_size_z, output_size_x]
-   * - ``scan/probe_geometry``
-     - 3D coordinates (in meters) of each transducer element in the probe, shape [n_el, 3].
-   * - ``scan/t0_delays``
-     - Time delays (in seconds) applied to each element for each transmit, shape [n_tx, n_el]. Determines beam steering and focusing.
-   * - ``scan/n_frames``
-     - Number of frames in the dataset (temporal dimension).
-   * - ``scan/n_tx``
-     - Number of transmit events per frame.
-   * - ``scan/n_el``
-     - Number of elements in the transducer array.
+     - Scan-converted image (in dB). Shape: [n_frames, output_size_z, output_size_x]
    * - ``scan/n_ax``
      - Number of axial (depth) samples per transmit.
+   * - ``scan/n_el``
+     - Number of elements in the transducer array.
+   * - ``scan/n_tx``
+     - Number of transmit events per frame.
    * - ``scan/n_ch``
      - Number of channels in the data (typically 1 for RF, 2 for IQ).
+   * - ``scan/n_frames``
+     - Number of frames in the dataset (temporal dimension).
+   * - ``scan/sound_speed``
+     - Speed of sound in m/s.
+   * - ``scan/probe_geometry``
+     - 3D coordinates (in meters) of each transducer element, shape [n_el, 3].
    * - ``scan/sampling_frequency``
      - Sampling frequency of the data acquisition (in Hz).
    * - ``scan/center_frequency``
      - Center frequency of the transducer (in Hz).
    * - ``scan/initial_times``
-     - Time (in seconds) when the A/D converter starts sampling for each transmit, shape [n_tx]. Represents the delay between transmit and first recorded sample.
+     - Time (in seconds) when the A/D converter starts sampling for each transmit, shape [n_tx].
+   * - ``scan/t0_delays``
+     - Time delays (in seconds) applied to each element for each transmit, shape [n_tx, n_el].
+   * - ``scan/tx_apodizations``
+     - Transmit apodization values, shape [n_tx, n_el].
+   * - ``scan/focus_distances``
+     - Transmit focus distances in meters, shape [n_tx].
+   * - ``scan/polar_angles``
+     - Polar angles of transmit beams in radians, shape [n_tx].
+   * - ``scan/azimuth_angles``
+     - Azimuthal angles of transmit beams in radians, shape [n_tx].
    * - ``scan/bandwidth_percent``
-     - Receive bandwidth of the RF signal, as a percentage of the center frequency.
+     - Receive bandwidth as a percentage of center frequency.
    * - ``scan/time_to_next_transmit``
-     - Time interval (in seconds) between subsequent transmit events, shape [n_tx * n_frames].
-   * - ``settings``
-     - All acquisition and processing parameters required to interpret the data (e.g., reconstruction settings, system configuration).
+     - Time interval (in seconds) between subsequent transmit events, shape [n_frames, n_tx].
+   * - ``scan/tgc_gain_curve``
+     - Time-gain-compensation curve, shape [n_ax].
+   * - ``scan/element_width``
+     - Width of the elements in the probe (meters).
+   * - ``scan/tx_waveform_indices``
+     - Indices for transmit waveforms, shape [n_tx].
+   * - ``scan/waveforms_one_way``
+     - List of one-way waveforms (simulated, 250MHz).
+   * - ``scan/waveforms_two_way``
+     - List of two-way waveforms (simulated, 250MHz).
+   * - ``scan/lens_correction``
+     - Lens correction parameter (optional).
+   * - ``scan/...``
+     - Any additional custom parameters.
 
-**Tips:**
+.. note::
 
-- Use :py:meth:`zea.File.summary` to inspect datasets.
-- Use :py:func:`zea.data.data_format.generate_zea_dataset` to create new datasets in the correct format.
-- `HDFView <https://www.hdfgroup.org/downloads/hdfview/>`__ can be used for manual inspection.
+  All datasets in the `scan` group should have `unit` and `description` attributes.
+  Custom parameters can be added directly to the `scan` group as needed.
 
+-------------------------------
+How to Generate a zea Dataset
+-------------------------------
+
+Here is a minimal example of how to generate and save a zea dataset:
+
+.. code-block:: python
+
+  import numpy as np
+  from zea.data.data_format import DatasetElement, generate_zea_dataset
+
+  # Example data (replace with your actual data)
+  raw_data = np.random.randn(2, 11, 2048, 128, 1)
+  image = np.random.randn(2, 512, 512)
+  probe_geometry = np.zeros((128, 3))
+  t0_delays = np.zeros((11, 128))
+  initial_times = np.zeros((11,))
+  sampling_frequency = 40e6
+  center_frequency = 7e6
+
+  # Optionally define a custom dataset element
+  custom_dataset_element = DatasetElement(
+      group_name="scan",
+      dataset_name="custom_element",
+      data=np.random.rand(10, 10),
+      description="custom description",
+      unit="m",
+  )
+
+  # Save the dataset to disk
+  generate_zea_dataset(
+      "output_file.hdf5",
+      raw_data=raw_data,
+      image=image,
+      probe_geometry=probe_geometry,
+      t0_delays=t0_delays,
+      initial_times=initial_times,
+      sampling_frequency=sampling_frequency,
+      center_frequency=center_frequency,
+      sound_speed=1540,
+      probe_name="generic",
+      description="Example dataset",
+      additional_elements=[custom_dataset_element],
+  )
+
+
+For more advanced usage, see :py:func:`zea.data.data_format.generate_zea_dataset`.
 
 -------------------------------
 Supported Datasets & Conversion
 -------------------------------
 
-The **zea** toolbox supports several public and research ultrasound datasets. For each, we provide scripts to download and convert the data into the zea format for integration with the toolbox.
+The ``zea`` toolbox supports several public and research ultrasound datasets. For each, we provide scripts to download and convert the data into the ``zea`` format for integration with the toolbox. In general any dataset can be converted to the ``zea`` format by following the structure outlined above.
 
 **Supported Datasets:**
 
 - **EchoNet-Dynamic**: Large-scale cardiac ultrasound dataset.
 - **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
 - **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
-- **Custom Datasets**: You can add your own datasets by following the zea format.
+- **Custom Datasets**: You can add your own datasets by following the ``zea`` format.
 
 **Conversion Scripts:**
-- Scripts are provided in the ``zea/data/convert/`` directory to automate downloading and conversion.
+
+- Scripts are provided in the `zea/data/convert/ <https://github.com/your-org/zea/tree/main/zea/data/convert/>`__ directory to automate downloading and conversion.
 - Example usage:
 
-  .. code-block:: bash
+  .. code-block:: shell
 
       python zea/data/convert/echonet.py --output-dir <your_data_dir>
       python zea/data/convert/camus.py --output-dir <your_data_dir>
       python zea/data/convert/picmus.py --output-dir <your_data_dir>
 
-- These scripts will fetch the raw data, process it, and store it in the standardized zea format.
+- These scripts will fetch the raw data, process it, and store it in the standardized ``zea`` format.
 
 -------------------------------
 Data Acquisition Platforms
 -------------------------------
 
-The **zea** toolbox is designed to work with data from multiple ultrasound acquisition systems. We provide tools and documentation for integrating data from the following platforms:
+One can also acquire data using various ultrasound platforms and convert it to the ``zea`` format. Of course this can be done manually, using a similar snippet as above, but we try to provide scripts for popular ultrasound systems to automate this process. Note that this is still a work in progress, and we will add more information in the future.
 
 **Verasonics**
+
 - Record data using your preferred Verasonics script.
 - Save entire workspace to a `.mat` file.
-- Use ``zea/data/convert/matlab.py`` to convert the MATLAB workspace files to zea format.
+- Use ``zea/data/convert/matlab.py`` to convert the MATLAB workspace files to ``zea`` format.
 - Example:
 
-  .. code-block:: bash
+  .. code-block:: shell
 
       python zea/data/convert/matlab.py --input <verasonics_mat_file> --output <zea_hdf5_file>
 
 **us4us**
-- TBA
+
 - See ``zea/data/convert/us4us.py`` for details.

@@ -1,6 +1,6 @@
 [project]
 name = "zea"
-version = "2.4.0"
+version = "0.0.0"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -62,6 +62,8 @@ dev = [
     "sphinx-autobuild",
     "sphinx-autodoc-typehints",
     "sphinx-copybutton",
+    "sphinx_design",
+    "sphinxcontrib-bibtex",
     "mock",
     "myst-parser",
     "nbsphinx",

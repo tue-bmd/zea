@@ -1,7 +1,4 @@
-"""Gumbel-Softmax trick implemented with the multi-backend `keras.ops`.
-
-TODO: implement tests for these functions.
-"""
+"""Gumbel-Softmax trick implemented with the multi-backend ``keras.ops``."""
 
 import keras
 import numpy as np
