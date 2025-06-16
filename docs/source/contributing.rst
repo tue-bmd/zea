@@ -3,7 +3,7 @@
 Contributing
 =============
 
-zea is an open-source project and we welcome contributions from the ultrasound community. Whether you want to report a bug, suggest a new feature, or contribute code, your input is valuable. This document outlines how you can contribute to the project.
+``zea`` is an open-source project and we welcome contributions from the ultrasound community. Whether you want to report a bug, suggest a new feature, or contribute code, your input is valuable. This document outlines how you can contribute to the project.
 
 How to contribute
 -----------------
