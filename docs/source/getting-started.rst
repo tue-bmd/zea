@@ -111,13 +111,13 @@ For example, to set the backend to JAX, you can use one of the following:
 
     .. tab-item:: Conda
 
-        .. code-block:: bash
+        .. code-block:: shell
 
             conda env config vars set KERAS_BACKEND=jax
 
     .. tab-item:: Shell
 
-        .. code-block:: bash
+        .. code-block:: shell
 
             export KERAS_BACKEND=jax
 
