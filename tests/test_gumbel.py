@@ -33,6 +33,4 @@ from zea.agent.gumbel import hard_straight_through
 def test_hard_straight_through(khot_orig, k, n_value_dims, expected_output):
     """Test the hard_straight_through function"""
     output = hard_straight_through(khot_orig, k, n_value_dims)
-    assert np.allclose(
-        output, expected_output
-    ), f"Expected {expected_output}, but got {output}"
+    assert np.allclose(output, expected_output), f"Expected {expected_output}, but got {output}"

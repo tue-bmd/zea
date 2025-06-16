@@ -63,9 +63,9 @@ def test_dataset_indexing(file_idx, idx, expected_shape, dummy_dataset_path):
     file = dataset[file_idx]
     data = file.load_data(config.data.dtype, idx)
 
-    assert (
-        data.shape == expected_shape
-    ), f"Data shape {data.shape} does not match expected shape {expected_shape}"
+    assert data.shape == expected_shape, (
+        f"Data shape {data.shape} does not match expected shape {expected_shape}"
+    )
 
 
 @pytest.mark.parametrize(

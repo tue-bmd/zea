@@ -30,9 +30,7 @@ def run_in_subprocess(func):
         process = ctx.Process(target=run_func, args=(pickle.dumps(func),))
         process.start()
         process.join()
-        assert (
-            process.exitcode == 0
-        ), f"Process failed with exit code {process.exitcode}"
+        assert process.exitcode == 0, f"Process failed with exit code {process.exitcode}"
 
     return wrapper
 
@@ -59,7 +57,7 @@ class BackendEqualityCheck:
         os.environ["KERAS_BACKEND"] = backend
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jaxs
-        import keras  # pylint: disable=import-outside-toplevel
+        import keras
 
         # start worker
         while True:
@@ -105,9 +103,7 @@ class BackendEqualityCheck:
             self.start_workers([backend])
         # Put the job in the job queue
         job_queue = self.job_queues[backend]
-        job_queue.put(
-            (job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs))
-        )
+        job_queue.put((job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs)))
 
     def collect_results(self, result_queues, timeout: int = 30):
         """
@@ -142,9 +138,7 @@ class BackendEqualityCheck:
         for backend, result in results.items():
             if isinstance(result, tuple) and isinstance(result[0], Exception):
                 raise RuntimeError(
-                    f"Child process traceback for backend {backend}:\n"
-                    + result[1]
-                    + "\n"
+                    f"Child process traceback for backend {backend}:\n" + result[1] + "\n"
                 ) from result[0]
         return results
 
@@ -207,12 +201,8 @@ class BackendEqualityCheck:
         if isinstance(decimal, int):
             decimal = [decimal] * len(backends)
         else:
-            assert len(decimal) == len(
-                backends
-            ), "decimal must be an integer or a list."
-        assert (
-            gt_backend not in backends
-        ), f"gt_backend: {gt_backend} is already tested."
+            assert len(decimal) == len(backends), "decimal must be an integer or a list."
+        assert gt_backend not in backends, f"gt_backend: {gt_backend} is already tested."
         all_backends = [gt_backend, *backends]
         if verbose:
             print(f"Running tests with backends: {backends}")
@@ -227,9 +217,7 @@ class BackendEqualityCheck:
                 self.start_func_in_backend(test_func, args, kwargs, backend, job_id)
 
             # Collect results before signaling the worker to stop
-            result_queues_local = {
-                backend: self.result_queues[backend] for backend in all_backends
-            }
+            result_queues_local = {backend: self.result_queues[backend] for backend in all_backends}
             output = self.collect_results(result_queues_local, timeout=timeout)
 
             # Check if the outputs from the individual test functions are equal
@@ -252,9 +240,7 @@ class BackendEqualityCheck:
                 except AssertionError as e:
                     errors.append(str(e))
             if errors:
-                raise AssertionError(
-                    "Errors occurred in backends:\n" + "\n".join(errors)
-                )
+                raise AssertionError("Errors occurred in backends:\n" + "\n".join(errors))
 
         return decorator.decorator(wrapper)
 

@@ -5,7 +5,6 @@ Or do not pass a config file to open a file dialog to choose a config file.
 
 """
 
-# pylint: disable=import-outside-toplevel
 import argparse
 import sys
 from pathlib import Path
@@ -17,9 +16,7 @@ from zea.visualize import set_mpl_style
 def get_args():
     """Command line argument parser"""
     parser = argparse.ArgumentParser(description="Process ultrasound data.")
-    parser.add_argument(
-        "-c", "--config", type=str, default=None, help="path to config file."
-    )
+    parser.add_argument("-c", "--config", type=str, default=None, help="path to config file.")
     parser.add_argument(
         "-t",
         "--task",
@@ -43,7 +40,6 @@ def get_args():
         action="store_true",
         help="Skip zea file integrity checks. Use with caution.",
     )
-    # pylint: disable=no-member
     parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     return args
@@ -83,9 +79,7 @@ def main():
         ui.run(plot=True)
 
     elif args.task == "generate":
-        destination_folder = keep_trying(
-            lambda: input(">> Give absolute destination folder path")
-        )
+        destination_folder = keep_trying(lambda: input(">> Give absolute destination folder path"))
         to_dtype = keep_trying(
             lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
             required_set=_DATA_TYPES,

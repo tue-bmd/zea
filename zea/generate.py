@@ -62,9 +62,7 @@ class GenerateDataSet:
         """
         self.config = Config(config)
         self.to_dtype = to_dtype
-        assert self.to_dtype in _DATA_TYPES, ValueError(
-            f"Unsupported dtype: {self.to_dtype}."
-        )
+        assert self.to_dtype in _DATA_TYPES, ValueError(f"Unsupported dtype: {self.to_dtype}.")
         self.retain_folder_structure = retain_folder_structure
         self.filetype = filetype
         assert self.filetype in ["hdf5", "png"], ValueError(
@@ -73,22 +71,19 @@ class GenerateDataSet:
 
         if self.to_dtype not in ["image", "image_sc"] and self.filetype == "png":
             raise ValueError(
-                "Cannot save to png if to_dtype is not image. "
-                "Please set filetype to hdf5."
+                "Cannot save to png if to_dtype is not image. Please set filetype to hdf5."
             )
         self.overwrite = overwrite
         self.verbose = verbose
 
         # intialize dataset
         self.dataset = Dataset.from_config(**self.config.data, **kwargs)
-        self.path = format_data_path(
-            self.config.data.dataset_folder, self.config.data.user
-        )
+        self.path = format_data_path(self.config.data.dataset_folder, self.config.data.user)
 
         # initialize Pipeline
-        assert (
-            "pipeline" in self.config
-        ), "Pipeline not found in config, please specify pipeline in config."
+        assert "pipeline" in self.config, (
+            "Pipeline not found in config, please specify pipeline in config."
+        )
 
         self.process = Pipeline.from_config(
             self.config.pipeline, with_batch_dim=False, jit_options=jit_options
@@ -247,7 +242,5 @@ class GenerateDataSet:
         # some scan parameters are not needed for the function and derived from
         # other parameters. we are only passing the necessary parameters
         func_args = get_function_args(generate_zea_dataset)
-        gen_kwargs = {
-            key: value for key, value in gen_kwargs.items() if key in func_args
-        }
+        gen_kwargs = {key: value for key, value in gen_kwargs.items() if key in func_args}
         generate_zea_dataset(path=path, **gen_kwargs)

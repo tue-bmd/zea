@@ -81,11 +81,7 @@ def compute_scan_convert_2d_coordinates(
     rho_min, rho_max = ops.min(rho), ops.max(rho)
     theta_min, theta_max = ops.min(theta), ops.max(theta)
     rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image_shape[-2] - 1)
-    theta_idx = (
-        (theta_grid_interp - theta_min)
-        / (theta_max - theta_min)
-        * (image_shape[-1] - 1)
-    )
+    theta_idx = (theta_grid_interp - theta_min) / (theta_max - theta_min) * (image_shape[-1] - 1)
     # Stack coordinates as required for map_coordinates
     coordinates = ops.stack([rho_idx, theta_idx], axis=0)
     parameters = {
@@ -152,9 +148,7 @@ def scan_convert_2d(
             image.shape, rho_range, theta_range, resolution, dtype=image.dtype
         )
 
-    images_sc = _interpolate_batch(
-        image, coordinates, fill_value, order=order, **kwargs
-    )
+    images_sc = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
 
     # swap axis to match z, x
     images_sc = ops.swapaxes(images_sc, -1, -2)
@@ -219,11 +213,7 @@ def compute_scan_convert_3d_coordinates(
     theta_min, theta_max = ops.min(theta), ops.max(theta)
     phi_min, phi_max = ops.min(phi), ops.max(phi)
     rho_idx = (rho_grid_interp - rho_min) / (rho_max - rho_min) * (image_shape[-3] - 1)
-    theta_idx = (
-        (theta_grid_interp - theta_min)
-        / (theta_max - theta_min)
-        * (image_shape[-2] - 1)
-    )
+    theta_idx = (theta_grid_interp - theta_min) / (theta_max - theta_min) * (image_shape[-2] - 1)
     phi_idx = (phi_grid_interp - phi_min) / (phi_max - phi_min) * (image_shape[-1] - 1)
 
     # Stack coordinates as required for map_coordinates
@@ -343,8 +333,7 @@ def scan_convert(
         )
     else:
         raise ValueError(
-            "Image must be 2D or 3D (with optional batch dim). "
-            f"Got shape: {image.shape}"
+            f"Image must be 2D or 3D (with optional batch dim). Got shape: {image.shape}"
         )
 
 
@@ -484,9 +473,7 @@ def cartesian_to_polar_matrix(
 
     # Inverse rotation to match original orientation
     polar_coords = ops.stack([ops.ravel(x_polar), ops.ravel(y_polar)], axis=0)
-    polar_coords_rotated = ops.transpose(
-        rotate_coordinates(ops.transpose(polar_coords), 90)
-    )
+    polar_coords_rotated = ops.transpose(rotate_coordinates(ops.transpose(polar_coords), 90))
 
     # Shift to image indices
     yq = polar_coords_rotated[1, :] + center_y

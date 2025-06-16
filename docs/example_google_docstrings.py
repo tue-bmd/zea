@@ -1,4 +1,3 @@
-# pylint: skip-file
 """Example Google style docstrings.
 
 This module demonstrates documentation as specified by the `Google Python
@@ -114,10 +113,7 @@ def module_level_function(param1, param2=None, *args, **kwargs):
         The ``Returns`` section supports any reStructuredText formatting,
         including literal blocks::
 
-            {
-                'param1': param1,
-                'param2': param2
-            }
+            {"param1": param1, "param2": param2}
 
     Raises:
         AttributeError: The ``Raises`` section is a list of all exceptions

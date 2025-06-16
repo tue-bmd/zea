@@ -1,7 +1,5 @@
 """Tests for the Operation and Pipeline classes in ops.py"""
 
-# pylint: disable=arguments-differ, abstract-class-instantiated, pointless-string-statement
-
 import json
 
 import keras
@@ -211,9 +209,7 @@ def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(
-        ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255))
-    )
+    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -222,9 +218,7 @@ def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     pipeline = ops.Pipeline.from_default(jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(
-        ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255))
-    )
+    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -462,23 +456,17 @@ def test_default_pipeline_from_json(config_fixture, request):
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(pipeline)
     else:
-        validate_default_pipeline(
-            pipeline, patched=config_fixture == "patched_pipeline_config"
-        )
+        validate_default_pipeline(pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
-@pytest.mark.parametrize(
-    "config_fixture", ["pipeline_config", "pipeline_config_with_params"]
-)
+@pytest.mark.parametrize("config_fixture", ["pipeline_config", "pipeline_config_with_params"])
 def test_pipeline_from_config(config_fixture, request):
     """Tests building a dummy pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
     pipeline = ops.pipeline_from_config(config, jit_options=None)
 
-    validate_basic_pipeline(
-        pipeline, with_params=config_fixture == "pipeline_config_with_params"
-    )
+    validate_basic_pipeline(pipeline, with_params=config_fixture == "pipeline_config_with_params")
 
 
 @pytest.mark.parametrize(
@@ -494,9 +482,7 @@ def test_default_pipeline_from_config(config_fixture, request):
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(pipeline)
     else:
-        validate_default_pipeline(
-            pipeline, patched=config_fixture == "patched_pipeline_config"
-        )
+        validate_default_pipeline(pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 @pytest.mark.parametrize(
@@ -518,9 +504,7 @@ def test_pipeline_to_config(config_fixture, request):
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(new_pipeline)
     else:
-        validate_default_pipeline(
-            new_pipeline, patched=config_fixture == "patched_pipeline_config"
-        )
+        validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 @pytest.mark.parametrize(
@@ -542,9 +526,7 @@ def test_pipeline_to_json(config_fixture, request):
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(new_pipeline)
     else:
-        validate_default_pipeline(
-            new_pipeline, patched=config_fixture == "patched_pipeline_config"
-        )
+        validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 @pytest.mark.parametrize(
@@ -567,9 +549,7 @@ def test_pipeline_to_yaml(config_fixture, request, tmp_path):
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(new_pipeline)
     else:
-        validate_default_pipeline(
-            new_pipeline, patched=config_fixture == "patched_pipeline_config"
-        )
+        validate_default_pipeline(new_pipeline, patched=config_fixture == "patched_pipeline_config")
 
 
 def get_probe():
@@ -599,10 +579,13 @@ def ultrasound_probe():
 
 
 def get_scan(ultrasound_probe, Nx=None, Nz=None):
-    """Returns a scan for ultrasound simulation tests."""
+    """Returns a scan for ultrasound simulation tests.
+
+    Note these parameters are not really realistic, but are used for testing purposes.
+    """
     n_el = ultrasound_probe.n_el
     n_tx = 2
-    n_ax = 513
+    n_ax = 100
 
     tx_apodizations = np.ones((n_tx, n_el)) * np.hanning(n_el)[None]
     probe_geometry = ultrasound_probe.probe_geometry
@@ -620,8 +603,8 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
-        center_frequency=ultrasound_probe.center_frequency,
-        sampling_frequency=ultrasound_probe.sampling_frequency,
+        center_frequency=ultrasound_probe.center_frequency / 100,
+        sampling_frequency=ultrasound_probe.sampling_frequency / 100,
         probe_geometry=probe_geometry,
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
@@ -644,7 +627,7 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
 @pytest.fixture
 def ultrasound_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
-    return get_scan(ultrasound_probe, Nx=100, Nz=100)
+    return get_scan(ultrasound_probe, Nx=20, Nz=20)
 
 
 def get_scatterers():

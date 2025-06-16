@@ -1,6 +1,7 @@
 """__init__ for tests"""
 
 import os
+import sys
 
 # Set default backend for tests
 DEFAULT_TEST_BACKEND = "tensorflow"

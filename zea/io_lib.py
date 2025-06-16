@@ -40,7 +40,7 @@ def load_video(filename):
         ValueError: If the file extension is not supported.
     """
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required for video loading. "
@@ -51,9 +51,7 @@ def load_video(filename):
     filename = Path(filename)
     assert Path(filename).exists(), f"File {filename} does not exist"
     extension = filename.suffix
-    assert (
-        extension in _SUPPORTED_VID_TYPES
-    ), f"File extension {extension} not supported"
+    assert extension in _SUPPORTED_VID_TYPES, f"File extension {extension} not supported"
 
     if extension in [".avi", ".mp4"]:
         cap = cv2.VideoCapture(filename)
@@ -92,7 +90,7 @@ def load_image(filename, grayscale=True, color_order="RGB"):
         ValueError: If the file extension is not supported.
     """
     try:
-        import cv2  # pylint: disable=import-outside-toplevel
+        import cv2
     except ImportError as exc:
         raise ImportError(
             "OpenCV is required for image loading. "
@@ -103,9 +101,7 @@ def load_image(filename, grayscale=True, color_order="RGB"):
     filename = Path(filename)
     assert Path(filename).exists(), f"File {filename} does not exist"
     extension = filename.suffix
-    assert (
-        extension in _SUPPORTED_IMG_TYPES
-    ), f"File extension {extension} not supported"
+    assert extension in _SUPPORTED_IMG_TYPES, f"File extension {extension} not supported"
 
     image = cv2.imread(str(filename))
 
@@ -173,9 +169,7 @@ def search_file_tree(
     directory = Path(directory)
     if not directory.is_dir():
         raise ValueError(
-            log.error(
-                f"Directory {directory} does not exist. Please provide a valid directory."
-            )
+            log.error(f"Directory {directory} does not exist. Please provide a valid directory.")
         )
     assert Path(dataset_info_filename).suffix == ".yaml", (
         "Currently only YAML files are supported for dataset info file when "
@@ -197,9 +191,7 @@ def search_file_tree(
             return dataset_info
 
     if redo and verbose:
-        log.info(
-            f"Overwriting dataset info file: {log.yellow(directory / dataset_info_filename)}"
-        )
+        log.info(f"Overwriting dataset info file: {log.yellow(directory / dataset_info_filename)}")
 
     # set default file type
     if filetypes is None:
@@ -211,9 +203,7 @@ def search_file_tree(
         filetypes = [filetypes]
 
     if hdf5_key_for_length is not None:
-        assert isinstance(
-            hdf5_key_for_length, str
-        ), "hdf5_key_for_length must be a string"
+        assert isinstance(hdf5_key_for_length, str), "hdf5_key_for_length must be a string"
         assert set(filetypes).issubset({".hdf5", ".h5"}), (
             "hdf5_key_for_length only works with when filetypes is set to "
             f"`.hdf5` or `.h5`, got {filetypes}"
@@ -266,9 +256,7 @@ def search_file_tree(
     assert len(file_paths) > 0, f"No image files were found in: {directory}"
     if verbose:
         log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
-        log.info(
-            f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}"
-        )
+        log.info(f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}")
 
     dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
     if len(file_shapes) > 0:
