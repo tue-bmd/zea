@@ -1,9 +1,12 @@
-"""Action selection strategies.
+"""
+Action selection strategies
+===========================
 
 These selection strategies implement a variety of policies for choosing which focused
 transmit to fire next, potentially given some beliefs about the state of tissue,
-as represented by 'particles'. For a comprehensive example usage, see:
-[Active Perception for Focused Transmit Selection](http://127.0.0.1:8000/notebooks/agent_example.html).
+as represented by ``particles``.
+
+For a comprehensive example usage, see: :doc:`../notebooks/agent/agent_example`
 
 All strategies are stateless, meaning that they do not maintain any internal state.
 """
