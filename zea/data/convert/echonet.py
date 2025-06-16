@@ -27,15 +27,18 @@ def get_args():
     parser.add_argument(
         "--source",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/EchoNet-Dynamic/Videos",
+        # path to EchoNet-Dynamic/Videos
+        required=True,
     )
     parser.add_argument(
-        "--output", type=str, default="/mnt/z/Ultrasound-BMd/data/Wessel/echonet_v2025"
+        "--output",
+        type=str,
+        required=True,
     )
     parser.add_argument(
         "--splits",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/_RAW/EchoNet-Dynamic/splits",
+        default=None,
     )
     parser.add_argument("--output_numpy", type=str, default=None)
     parser.add_argument("--no_hyperthreading", action="store_true")

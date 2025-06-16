@@ -45,3 +45,9 @@ docs-serve: docs-parameters docs-autosummary
 
 docs-test: docs-parameters
 	$(SPHINXBUILD) -b doctest "$(SOURCEDIR)" "$(BUILDDIR)/doctest" $(SPHINXOPTS)
+
+docs-clean:
+	rm -rf "$(BUILDDIR)"
+	echo "Cleaned build directory: $(BUILDDIR)"
+	find "$(SOURCEDIR)/_autosummary" -type f ! -name 'zea.rst' -name '*.rst' -delete
+	echo "Cleaned autosummary files in: $(SOURCEDIR)/_autosummary (except zea.rst)"

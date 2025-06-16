@@ -1,4 +1,4 @@
-"""zea: A Toolbox for Cognitive Ultrasound Imaging."""
+"""``zea``: *A Toolbox for Cognitive Ultrasound Imaging.*"""
 
 import importlib.util
 import os
@@ -7,7 +7,7 @@ from . import log
 
 # dynamically add __version__ attribute (see pyproject.toml)
 # __version__ = __import__("importlib.metadata").metadata.version(__package__)
-__version__ = "2.4.0"
+__version__ = "0.0.0"
 
 
 def setup():

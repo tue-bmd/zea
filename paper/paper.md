@@ -20,8 +20,8 @@ authors:
     orcid: 0009-0002-6939-7627
   - name: Beatrice Federici
     orcid: 0009-0003-2496-8825
-  # - name: Louis D. van Harten
-  #   orcid: /0009-0003-4095-8168
+  - name: Louis D. van Harten
+    orcid: 0000-0002-0943-2825
   - name: Simon W. Penninga
     orcid: 0009-0003-4095-8168
   - name: Noortje I.P. Schueler

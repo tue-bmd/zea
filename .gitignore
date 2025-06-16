@@ -3,6 +3,8 @@
 /custom_configs
 /data
 /log
+docs/source/_autosummary/*
+!docs/source/_autosummary/zea.rst
 
 # Temporary files
 temp/
