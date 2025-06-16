@@ -177,8 +177,6 @@ def _get_n_ax(ultrasound_probe):
     """
     is_low_frequency_probe = ultrasound_probe.center_frequency < 4e6
 
-    # Intentionally returns values that are not powers of 2 to catch potential bugs
-    # related to this.
     if is_low_frequency_probe:
         return 510
 
@@ -481,6 +479,7 @@ def ultrasound_scatterers():
         ("phased_array", "focused"),
     ],
 )
+@pytest.mark.heavy
 def test_transmit_schemes(
     default_pipeline,
     probe_kind,
