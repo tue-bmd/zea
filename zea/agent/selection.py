@@ -134,7 +134,7 @@ class GreedyEntropy(LinesActionModel):
         For more details see Section 4 here: https://arxiv.org/abs/2406.14388
 
         Args:
-            particles (Tensor): Particles of shape (n_particles, batch_size, height, width)
+            particles (Tensor): Particles of shape (batch_size, n_particles, height, width)
 
         Returns:
             Tensor: batch of pixelwise pairwise Gaussian errors,
