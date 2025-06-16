@@ -103,7 +103,7 @@ def load_dict_from_file(filename, squeeze=True):
     if filetype == ".mat":
         try:
             return load_mat(filename)
-        except:
+        except Exception:
             v_7_3 = True
 
     if (filetype == ".hdf5") or (v_7_3 is True):

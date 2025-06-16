@@ -154,9 +154,7 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def configure_console_logger(
-    level="INFO", name=None, color=True, name_color="darkgreen"
-):
+def configure_console_logger(level="INFO", name=None, color=True, name_color="darkgreen"):
     """
     Configures a simple console logger with the givel level.
     A usecase is to change the formatting of the default handler of the root logger
@@ -255,9 +253,7 @@ def deprecated(message, *args, **kwargs):
     """Prints a message with custom log level DEPRECATED."""
     logger.log(DEPRECATED_LEVEL_NUM, message, *args, **kwargs)
     if file_logger:
-        file_logger.log(
-            DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs
-        )
+        file_logger.log(DEPRECATED_LEVEL_NUM, remove_color_escape_codes(message), *args, **kwargs)
     return message
 
 
@@ -295,8 +291,6 @@ def critical(message, *args, **kwargs):
 
 def set_file_logger_directory(directory):
     """Sets the log level of the logger."""
-    # Add pylint exception
-    # pylint: disable=global-statement
     global LOG_DIR, file_logger
     LOG_DIR = directory
     # Remove all handlers from the file logger
@@ -309,8 +303,6 @@ def set_file_logger_directory(directory):
 
 def enable_file_logging():
     """Enables file logging"""
-    # Add pylint exception
-    # pylint: disable=global-statement
     global file_logger
     if not file_logger:
         file_logger = configure_file_logger(level="DEBUG")

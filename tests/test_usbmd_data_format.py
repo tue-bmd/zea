@@ -160,6 +160,4 @@ def test_additional_dataset_element(tmp_hdf5_path):
             )
         )
 
-    generate_zea_dataset(
-        path=tmp_hdf5_path, **DATASET_PARAMETERS, additional_elements=elements
-    )
+    generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS, additional_elements=elements)

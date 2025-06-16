@@ -104,9 +104,9 @@ class GaussianMixtureModel(GenerativeModel):
         # Update variances
         X_exp = ops.expand_dims(X, axis=1)  # (n_samples, 1, n_features)
         means_exp = ops.expand_dims(means, axis=0)  # (1, n_components, n_features)
-        vars_ = ops.sum(
-            gamma[..., None] * (X_exp - means_exp) ** 2, axis=0
-        ) / ops.expand_dims(Nk, -1)
+        vars_ = ops.sum(gamma[..., None] * (X_exp - means_exp) ** 2, axis=0) / ops.expand_dims(
+            Nk, -1
+        )
         # Update mixture weights
         pi = Nk / ops.sum(Nk)
         return means, vars_, pi
@@ -146,9 +146,7 @@ class GaussianMixtureModel(GenerativeModel):
 
     def sample(self, n_samples=1, seed=None, **kwargs):
         # Sample component indices
-        comp_idx = keras.random.categorical(
-            ops.log(self.pi[None, :]), n_samples, seed=seed
-        )
+        comp_idx = keras.random.categorical(ops.log(self.pi[None, :]), n_samples, seed=seed)
         comp_idx = ops.squeeze(comp_idx, axis=0)
         means = ops.take(self.means, comp_idx, axis=0)
         vars_ = ops.take(self.vars, comp_idx, axis=0)

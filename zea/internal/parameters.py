@@ -42,9 +42,7 @@ def cache_with_dependencies(*deps):
             result = func(self)
             self._computed.add(func.__name__)
             self._cache[func.__name__] = result
-            self._dependency_versions[func.__name__] = self._current_dependency_hash(
-                deps
-            )
+            self._dependency_versions[func.__name__] = self._current_dependency_hash(deps)
             return result
 
         return property(wrapper)
@@ -103,7 +101,7 @@ class Parameters(ZeaObject):
             VALID_PARAMS = {
                 "a": {"type": int, "default": 1},
                 "b": {"type": float, "default": 2.0},
-                "d": {"type": float, "default": None}, # optional dependency
+                "d": {"type": float, "default": None},  # optional dependency
             }
 
             @cache_with_dependencies("a", "b")
@@ -115,6 +113,7 @@ class Parameters(ZeaObject):
                 if self._params.get("d") is not None:
                     return self._params["d"]
                 return self.a * self.b
+
 
         p = MyParams(a=3)
         print(p.c)  # Computes and caches c
@@ -141,9 +140,7 @@ class Parameters(ZeaObject):
         super().__init__()
 
         if self.VALID_PARAMS is None:
-            raise NotImplementedError(
-                "VALID_PARAMS must be defined in subclasses of Parameters."
-            )
+            raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
 
         for param, config in self.VALID_PARAMS.items():
             if param not in kwargs and config["default"] is not None:
@@ -219,9 +216,7 @@ class Parameters(ZeaObject):
                     if seen is None:
                         seen = set()
                     attr = getattr(self.__class__, name, None)
-                    if isinstance(attr, property) and hasattr(
-                        attr.fget, "_dependencies"
-                    ):
+                    if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
                         leaves = set()
                         for dep in attr.fget._dependencies:
                             leaves |= find_leaf_params(dep, seen)
@@ -256,7 +251,8 @@ class Parameters(ZeaObject):
                 else:
                     if not isinstance(value, expected_type):
                         raise TypeError(
-                            f"Parameter '{key}' expected type {expected_type.__name__}, got {type(value).__name__}"
+                            f"Parameter '{key}' expected type {expected_type.__name__}, "
+                            f"got {type(value).__name__}"
                         )
 
             # Set the parameter and invalidate dependencies

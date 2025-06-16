@@ -40,9 +40,7 @@ _DEFAULT_ZEA_CACHE_DIR = Path.home() / ".cache" / "zea"
 def _disable_cache():
     """Disable caching by creating a temporary directory and setting the environment variable."""
     os.environ["ZEA_DISABLE_CACHE"] = "1"
-    _tmp_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
-        prefix="zea_cache_"
-    )
+    _tmp_dir = tempfile.TemporaryDirectory(prefix="zea_cache_")
     atexit.register(lambda: _tmp_dir.cleanup())
     return Path(_tmp_dir.name)
 
@@ -152,10 +150,7 @@ def get_function_source(func):
     for called_func_name in sorted(called_functions):
         try:
             called_func = func.__globals__.get(called_func_name)
-            if (
-                inspect.isfunction(called_func)
-                and called_func.__module__ != "zea.internal.cache"
-            ):
+            if inspect.isfunction(called_func) and called_func.__module__ != "zea.internal.cache":
                 nested_source = get_function_source(called_func)
                 if nested_source is None:
                     # If any nested function's source cannot be retrieved, do not cache
@@ -222,9 +217,7 @@ def cache_output(*arg_names, verbose=False):
                     log.info(f"Loading cached result for {func.__qualname__}.")
                 return joblib.load(cache_file)
             elif verbose:
-                log.info(
-                    f"Running {func.__qualname__} and caching the result to {cache_file}."
-                )
+                log.info(f"Running {func.__qualname__} and caching the result to {cache_file}.")
             result = func(*args, **kwargs)
             joblib.dump(result, cache_file)
             return result
@@ -261,10 +254,7 @@ def clear_cache(func_name=None):
                 f"from cache for function '{func_name}'."
             )
         else:
-            log.info(
-                f"Cleared {log.yellow(f'{total_cleared / (1024 * 1024):.2f}')} "
-                "MB from cache."
-            )
+            log.info(f"Cleared {log.yellow(f'{total_cleared / (1024 * 1024):.2f}')} MB from cache.")
     else:
         log.info("No cache files to clear.")
 
@@ -285,6 +275,5 @@ def cache_summary():
     log.info(f"zea cache summary at {_CACHE_DIR}:")
     for func_name, total_size in summary.items():
         log.info(
-            f"Function '{func_name}' has a total cache size of "
-            f"{total_size / (1024 * 1024):.2f} MB"
+            f"Function '{func_name}' has a total cache size of {total_size / (1024 * 1024):.2f} MB"
         )

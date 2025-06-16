@@ -29,9 +29,7 @@ def setup():
             "tensorflow": "https://www.tensorflow.org/install",
             "jax": "https://docs.jax.dev/en/latest/installation.html",
         }
-        guide_url = install_guide_urls.get(
-            backend_env, "https://keras.io/getting_started/"
-        )
+        guide_url = install_guide_urls.get(backend_env, "https://keras.io/getting_started/")
         raise AssertionError(
             "No ML backend (torch, tensorflow, jax) installed in current environment. "
             f"Please install at least one ML backend before importing {__package__} or "
@@ -42,7 +40,7 @@ def setup():
 
     _check_backend_installed()
 
-    import keras  # pylint: disable=import-outside-toplevel
+    import keras
 
     log.info(f"Using backend {keras.backend.backend()!r}")
 
@@ -51,7 +49,6 @@ def setup():
 setup()
 del setup
 
-# Main (isort: split)
 from .config import Config
 from .data.datasets import Dataset, Folder
 from .data.file import File, load_file

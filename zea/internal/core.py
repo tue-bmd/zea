@@ -130,8 +130,6 @@ class Object:
     @classmethod
     def safe_initialize(cls, **kwargs):
         """Safely initialize a class by removing any invalid arguments."""
-        # NOTE: we have the zea.utils.safe_initialize_class function, but do not use that here
-        # as pylint will not be able to detect the class type
         reduced_params = reduce_to_signature(cls.__init__, kwargs)
         return cls(**reduced_params)
 
@@ -143,16 +141,14 @@ class Object:
         return cls.safe_initialize(**params)
 
     @classmethod
-    def _tree_unflatten(cls, aux, children):  # pylint: disable=unused-argument
+    def _tree_unflatten(cls, aux, children):
         if cls is not Object:
             raise NotImplementedError(f"{cls.__name__} must implement _tree_unflatten.")
         return cls(*children)
 
     def _tree_flatten(self):
         if not isinstance(self, Object):
-            raise NotImplementedError(
-                f"{type(self).__name__} must implement _tree_flatten."
-            )
+            raise NotImplementedError(f"{type(self).__name__} must implement _tree_flatten.")
         return (), ()
 
     @classmethod
@@ -161,7 +157,7 @@ class Object:
         https://docs.jax.dev/en/latest/_autosummary/jax.tree_util.register_pytree_node.html
         """
         try:
-            from jax import tree_util  # pylint: disable=import-outside-toplevel
+            from jax import tree_util
         except ImportError as exc:
             raise ImportError(
                 "JAX is not installed. Please install JAX to use `register_pytree_node`."
@@ -218,18 +214,12 @@ def _to_tensor(key, val):
     if isinstance(val, dict):
         return {k: _to_tensor(k, v) for k, v in val.items()}
     # Use float precision for all floats (including np.float32/64)
-    if isinstance(val, float) or (
-        isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)
-    ):
+    if isinstance(val, float) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, float)):
         dtype = BASE_FLOAT_PRECISION
     # Use int precision for all ints (including np.int32/64)
-    elif isinstance(val, bool) or (
-        isinstance(val, np.ndarray) and np.issubdtype(val.dtype, bool)
-    ):
+    elif isinstance(val, bool) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, bool)):
         dtype = bool
-    elif isinstance(val, int) or (
-        isinstance(val, np.ndarray) and np.issubdtype(val.dtype, int)
-    ):
+    elif isinstance(val, int) or (isinstance(val, np.ndarray) and np.issubdtype(val.dtype, int)):
         dtype = BASE_INT_PRECISION
     else:
         dtype = None

@@ -16,7 +16,7 @@ from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
-import zea.metrics  # pylint: disable=unused-import
+import zea.metrics  # noqa: F401
 from zea import log
 from zea.config import Config
 from zea.internal.checks import _DATA_TYPES
@@ -29,12 +29,12 @@ any_number = Or(
     error="Must be a number, scientific notation should be of form x.xe+xx, "
     "otherwise interpreted as string",
 )
-list_of_size_two = And(list, lambda l: len(l) == 2)
+list_of_size_two = And(list, lambda _list: len(_list) == 2)
 positive_integer = And(int, lambda i: i > 0)
 positive_integer_and_zero = And(int, lambda i: i >= 0)
 positive_float = And(float, lambda f: f > 0)
-list_of_floats = And(list, lambda l: all(isinstance(_l, float) for _l in l))
-list_of_positive_integers = And(list, lambda l: all(_l >= 0 for _l in l))
+list_of_floats = And(list, lambda _list: all(isinstance(_l, float) for _l in _list))
+list_of_positive_integers = And(list, lambda _list: all(_l >= 0 for _l in _list))
 percentage = And(any_number, lambda f: 0 <= f <= 100)
 
 _ALLOWED_PLOT_LIBS = ("opencv", "matplotlib")
@@ -69,9 +69,7 @@ postprocess_schema = Schema(
             {
                 Optional("percentile", default=None): Or(None, percentage),
                 Optional("threshold", default=None): Or(None, any_number),
-                Optional("fill_value", default="min"): Or(
-                    "min", "max", "threshold", any_number
-                ),
+                Optional("fill_value", default="min"): Or("min", "max", "threshold", any_number),
                 Optional("below_threshold", default=True): bool,
                 Optional("threshold_type", default="hard"): Or("hard", "soft"),
             },
@@ -104,9 +102,7 @@ scan_schema = Schema(
         Optional("f_number", default=None): Or(None, positive_float),
         Optional("apply_lens_correction", default=False): bool,
         Optional("lens_thickness", default=1e-3): positive_float,
-        Optional("lens_sound_speed", default=1000): Or(
-            positive_float, positive_integer
-        ),
+        Optional("lens_sound_speed", default=1000): Or(positive_float, positive_integer),
         Optional("theta_range", default=None): Or(None, list_of_size_two),
         Optional("phi_range", default=None): Or(None, list_of_size_two),
         Optional("rho_range", default=None): Or(None, list_of_size_two),
@@ -124,9 +120,7 @@ plot_schema = Schema(
         Optional("tag", default=None): Or(None, str),
         Optional("headless", default=False): bool,
         Optional("selector", default=None): Or(None, "rectangle", "lasso"),
-        Optional("selector_metric", default="gcnr"): Or(
-            *metrics_registry.registered_names()
-        ),
+        Optional("selector_metric", default="gcnr"): Or(*metrics_registry.registered_names()),
         Optional("fliplr", default=False): bool,
         Optional("image_extension", default="png"): Or("png", "jpg"),
         Optional("video_extension", default="gif"): Or("mp4", "gif"),

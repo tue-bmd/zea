@@ -1,7 +1,5 @@
 """Mostly from keras_hub.src.models import preset_utils"""
 
-# pylint: disable=redefined-argument-from-local
-
 import collections
 import datetime
 import json
@@ -65,9 +63,7 @@ def builtin_presets(cls):
 def get_file(preset, path):
     """Download a preset file in necessary and return the local path."""
     if not isinstance(preset, str):
-        raise ValueError(
-            f"A preset identifier must be a string. Received: preset={preset}"
-        )
+        raise ValueError(f"A preset identifier must be a string. Received: preset={preset}")
 
     if preset in BUILTIN_PRESETS:
         if "hf_handle" in BUILTIN_PRESETS[preset]:
@@ -118,9 +114,7 @@ def get_file(preset, path):
         # Assume a local filepath
         local_path = Path(preset) / path
         if not local_path.exists():
-            raise FileNotFoundError(
-                f"`{path}` doesn't exist in preset directory `{preset}`."
-            )
+            raise FileNotFoundError(f"`{path}` doesn't exist in preset directory `{preset}`.")
         return str(local_path)
     else:
         raise ValueError(
@@ -262,15 +256,11 @@ class PresetLoader:
 
         return model_kwargs, kwargs
 
-    def load_model(
-        self, cls, load_weights, **kwargs
-    ):  # pylint: disable=unused-argument
+    def load_model(self, cls, load_weights, **kwargs):
         """Load the backbone model from the preset."""
         raise NotImplementedError
 
-    def load_preprocessor(
-        self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs
-    ):  # pylint: disable=unused-argument
+    def load_preprocessor(self, cls, config_file=PREPROCESSOR_CONFIG_FILE, **kwargs):
         """Load a prepocessor layer from the preset."""
         kwargs = cls._add_missing_kwargs(self, kwargs)
         return cls(**kwargs)
@@ -283,9 +273,7 @@ class KerasPresetLoader(PresetLoader):
         """Check the model class is correct for the preset."""
         return check_config_class(self.config)
 
-    def load_model(
-        self, cls, load_weights, **kwargs
-    ):  # pylint: disable=unused-argument
+    def load_model(self, cls, load_weights, **kwargs):
         """Load a model from a serialized Keras config."""
         model = load_serialized_object(self.config, **kwargs)
 
@@ -315,7 +303,7 @@ class KerasPresetLoader(PresetLoader):
 
         return model
 
-    def load_image_converter(self, cls, **kwargs):  # pylint: disable=unused-argument
+    def load_image_converter(self, cls, **kwargs):
         """Load an image converter from the preset."""
         converter_config = load_json(self.preset, IMAGE_CONVERTER_CONFIG_FILE)
         return load_serialized_object(converter_config, **kwargs)

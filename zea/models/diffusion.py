@@ -10,11 +10,7 @@ from keras import ops
 from zea.backend.autograd import AutoGrad
 from zea.internal.core import Object
 from zea.internal.operators import Operator
-from zea.internal.registry import (
-    diffusion_guidance_registry,
-    model_registry,
-    operator_registry,
-)
+from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
 from zea.models.dense import get_time_conditional_dense_network
 from zea.models.generative import DeepGenerativeModel
 from zea.models.preset_utils import register_presets
@@ -163,7 +159,6 @@ class DiffusionModel(DeepGenerativeModel):
                     f"DiffusionGuidance object, got {guidance}"
                 )
 
-    # pylint: disable=arguments-differ
     def call(self, inputs, training=False, **kwargs):
         """
         Calls the score network.
@@ -242,9 +237,7 @@ class DiffusionModel(DeepGenerativeModel):
         def _tile_with_sample_dim(tensor):
             """Tile the tensor with an additional sample dimension."""
             shape = ops.shape(tensor)
-            tensor = ops.repeat(
-                tensor[:, None], n_samples, axis=1
-            )  # (batch, n_samples, ...)
+            tensor = ops.repeat(tensor[:, None], n_samples, axis=1)  # (batch, n_samples, ...)
             return ops.reshape(tensor, (-1, *shape[1:]))
 
         measurements = _tile_with_sample_dim(measurements)
@@ -283,9 +276,7 @@ class DiffusionModel(DeepGenerativeModel):
             Approximate log-likelihood.
         """
         # This is a placeholder for likelihood estimation
-        raise NotImplementedError(
-            "Likelihood computation for diffusion models not implemented yet"
-        )
+        raise NotImplementedError("Likelihood computation for diffusion models not implemented yet")
 
     @property
     def metrics(self):
@@ -331,7 +322,6 @@ class DiffusionModel(DeepGenerativeModel):
         return {m.name: m.result() for m in self.metrics}
 
     def diffusion_schedule(self, diffusion_times):
-        # pylint: disable=line-too-long
         """Cosine diffusion schedule https://arxiv.org/abs/2102.09672
 
         Args:
@@ -342,19 +332,20 @@ class DiffusionModel(DeepGenerativeModel):
             signal_rates: tensor with signal rates
 
             according to:
-                - x_t = signal_rate * x_0 + noise_rate * noise
-                - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t) * noise
+            - x_t = signal_rate * x_0 + noise_rate * noise
+            - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t) * noise
 
             or with stochastic sampling:
-                - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t - sigma_t^2) * noise + sigma_t * epsilon
+            - x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t - sigma_t^2) * noise + sigma_t * epsilon
 
-            where sigma_t = sqrt((1 - alpha_t) / (1 - alpha_{t+1})) * sqrt(1 - alpha_{t+1} / alpha_t)
+            where:
+            - sigma_t = sqrt((1 - alpha_t) / (1 - alpha_{t+1})) * sqrt(1 - alpha_{t+1} / alpha_t)
 
         Note:
             t+1 = previous time step
             t = current time step
 
-        """
+        """  # noqa: E501
         # diffusion times -> angles
         start_angle = ops.cast(ops.arccos(self.max_signal_rate), "float32")
         end_angle = ops.cast(ops.arccos(self.min_signal_rate), "float32")
@@ -412,24 +403,18 @@ class DiffusionModel(DeepGenerativeModel):
             next_noisy_images: Noisy images after the reverse diffusion step.
         """
         if not stochastic_sampling:
-            next_noisy_images = (
-                next_signal_rates * pred_images + next_noise_rates * pred_noises
-            )
+            next_noisy_images = next_signal_rates * pred_images + next_noise_rates * pred_noises
             return next_noisy_images
 
         alpha_prev = signal_rates**2
         alpha = next_signal_rates**2
 
-        sigma_t = ops.sqrt((1 - alpha) / (1 - alpha_prev)) * ops.sqrt(
-            1 - alpha_prev / alpha
-        )
+        sigma_t = ops.sqrt((1 - alpha) / (1 - alpha_prev)) * ops.sqrt(1 - alpha_prev / alpha)
         epsilon = keras.random.normal(shape=shape, seed=seed)
 
         next_noise_rates = ops.sqrt(1 - alpha - sigma_t**2)
         next_noisy_images = (
-            next_signal_rates * pred_images
-            + next_noise_rates * pred_noises
-            + sigma_t * epsilon
+            next_signal_rates * pred_images + next_noise_rates * pred_noises + sigma_t * epsilon
         )
         return next_noisy_images
 
@@ -460,9 +445,7 @@ class DiffusionModel(DeepGenerativeModel):
             Generated images.
         """
         num_images, *input_shape = ops.shape(initial_noise)
-        step_size, progbar = self.prepare_diffusion(
-            diffusion_steps, initial_step, verbose
-        )
+        step_size, progbar = self.prepare_diffusion(diffusion_steps, initial_step, verbose)
 
         n_dims = len(input_shape)
 
@@ -485,9 +468,7 @@ class DiffusionModel(DeepGenerativeModel):
 
             # remix the predicted components using the next signal and noise rates
             next_diffusion_times = diffusion_times - step_size
-            next_noise_rates, next_signal_rates = self.diffusion_schedule(
-                next_diffusion_times
-            )
+            next_noise_rates, next_signal_rates = self.diffusion_schedule(next_diffusion_times)
 
             # denoise
             pred_noises, pred_images = self.denoise(
@@ -511,9 +492,7 @@ class DiffusionModel(DeepGenerativeModel):
             if progbar is not None:
                 progbar.update(step + 1)
 
-            self.store_progress(
-                step, track_progress_type, next_noisy_images, pred_images
-            )
+            self.store_progress(step, track_progress_type, next_noisy_images, pred_images)
 
             loop_state = (next_noisy_images, pred_images, seed)
 
@@ -596,9 +575,7 @@ class DiffusionModel(DeepGenerativeModel):
 
             # remix the predicted components using the next signal and noise rates
             next_diffusion_times = diffusion_times - step_size
-            next_noise_rates, next_signal_rates = self.diffusion_schedule(
-                next_diffusion_times
-            )
+            next_noise_rates, next_signal_rates = self.diffusion_schedule(next_diffusion_times)
 
             gradients, (error, (pred_noises, pred_images)) = self.guidance_fn(
                 noisy_images,
@@ -627,9 +604,7 @@ class DiffusionModel(DeepGenerativeModel):
             if verbose:
                 progbar.update(step + 1, [("error", error)])
 
-            self.store_progress(
-                step, track_progress_type, next_noisy_images, pred_images
-            )
+            self.store_progress(step, track_progress_type, next_noisy_images, pred_images)
 
             loop_state = (next_noisy_images, pred_images, seed)
 
@@ -650,9 +625,7 @@ class DiffusionModel(DeepGenerativeModel):
 
         return pred_images
 
-    def prepare_diffusion(
-        self, diffusion_steps, initial_step, verbose, disable_jit=False
-    ):
+    def prepare_diffusion(self, diffusion_steps, initial_step, verbose, disable_jit=False):
         """Prepare the diffusion process.
 
         This method sets up the parameters for the diffusion process, including
@@ -660,12 +633,10 @@ class DiffusionModel(DeepGenerativeModel):
         """
         # Asserts
         if not disable_jit:
-            assert (
-                initial_step >= 0
-            ), f"initial_step must be non-negative, got {initial_step}"
-            assert (
-                initial_step < diffusion_steps
-            ), f"initial_step must be less than diffusion_steps, got {initial_step}"
+            assert initial_step >= 0, f"initial_step must be non-negative, got {initial_step}"
+            assert initial_step < diffusion_steps, (
+                f"initial_step must be less than diffusion_steps, got {initial_step}"
+            )
 
         step_size = self.max_t / diffusion_steps
 
@@ -705,20 +676,12 @@ class DiffusionModel(DeepGenerativeModel):
         """
         # We can optionally start with a set of samples that are partially noised
         if initial_samples is not None and initial_step > 0:
-            starting_diffusion_times = base_diffusion_times - (
-                (initial_step - 1) * step_size
-            )
-            noise_rates, signal_rates = self.diffusion_schedule(
-                starting_diffusion_times
-            )
-            next_noisy_images = (
-                signal_rates * initial_samples + noise_rates * initial_noise
-            )
+            starting_diffusion_times = base_diffusion_times - ((initial_step - 1) * step_size)
+            noise_rates, signal_rates = self.diffusion_schedule(starting_diffusion_times)
+            next_noisy_images = signal_rates * initial_samples + noise_rates * initial_noise
         elif initial_samples is not None:
             noise_rates, signal_rates = self.diffusion_schedule(base_diffusion_times)
-            next_noisy_images = (
-                signal_rates * initial_samples + noise_rates * initial_noise
-            )
+            next_noisy_images = signal_rates * initial_samples + noise_rates * initial_noise
         elif initial_samples is None and initial_step == 0:
             # important line:
             # at the first sampling step, the "noisy image" is pure noise
@@ -848,9 +811,7 @@ class DPS(DiffusionGuidance):
             training=False,
         )
 
-        measurement_error = omega * L2(
-            measurements - self.operator.forward(pred_images, **kwargs)
-        )
+        measurement_error = omega * L2(measurements - self.operator.forward(pred_images, **kwargs))
 
         return measurement_error, (pred_noises, pred_images)
 

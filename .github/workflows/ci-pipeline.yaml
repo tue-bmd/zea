@@ -63,6 +63,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache,mode=max
 
   build-other-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
     strategy:
@@ -148,6 +149,31 @@ jobs:
           -e LOGNAME=$(id -un) \
           ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
           sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+
+
+  linter:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Ruff
+        run: |
+          pip install -U pip setuptools wheel
+          pip install ruff
+      - name: Run Linter
+        run: ruff check --config pyproject.toml --verbose
+
+      - name: Run Formatter
+        run: ruff format --config pyproject.toml --check --verbose
+
 
   build-docs:
     needs: [build-full-image, set-tag]

@@ -1,17 +1,12 @@
 """Structure containing parameters defining an ultrasound scan."""
 
-# pylint: disable=too-many-public-methods
-
 import numpy as np
 from keras import ops
 
 from zea import log
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import check_for_aliasing, get_grid
-from zea.display import (
-    compute_scan_convert_2d_coordinates,
-    compute_scan_convert_3d_coordinates,
-)
+from zea.display import compute_scan_convert_2d_coordinates, compute_scan_convert_3d_coordinates
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
@@ -303,9 +298,7 @@ class Scan(Parameters):
         if isinstance(selection, (int, np.integer)):
             selection = int(selection)  # Convert numpy integer to Python int
             if selection <= 0:
-                raise ValueError(
-                    f"Number of transmits must be positive, got {selection}"
-                )
+                raise ValueError(f"Number of transmits must be positive, got {selection}")
 
             if selection > n_tx_total:
                 raise ValueError(
@@ -339,9 +332,7 @@ class Scan(Parameters):
                 raise ValueError("All transmit indices must be integers")
 
             if any(i < 0 or i >= n_tx_total for i in selection):
-                raise ValueError(
-                    f"Transmit indices must be between 0 and {n_tx_total - 1}"
-                )
+                raise ValueError(f"Transmit indices must be between 0 and {n_tx_total - 1}")
 
             self._selected_transmits = [
                 int(i) for i in selection
@@ -474,9 +465,7 @@ class Scan(Parameters):
         )
         return coords
 
-    @cache_with_dependencies(
-        "rho_range", "theta_range", "phi_range", "resolution", "Nz", "Nx"
-    )
+    @cache_with_dependencies("rho_range", "theta_range", "phi_range", "resolution", "Nz", "Nx")
     def coordinates_3d(self):
         """The coordinates for scan conversion."""
         coords, _ = compute_scan_convert_3d_coordinates(

@@ -58,9 +58,7 @@ def test_metrics(y_true, y_pred):
         except NotImplementedError:
             continue
 
-        assert (
-            metric_value.shape == ()
-        ), f"{metric_name} function does not return a scalar"
+        assert metric_value.shape == (), f"{metric_name} function does not return a scalar"
 
 
 def test_metrics_registry():
@@ -88,7 +86,5 @@ def test_sector_reweight_image():
     # depths are set at the 'center' of each pixel index
     expected_depths = np.array([0.5, 1.5, 2.5])
     expected_reweighting_per_depth = np.pi  # (180 / 360) * 2 * pi = pi
-    expected_result = (
-        cube_of_ones * expected_depths[:, None] * expected_reweighting_per_depth
-    )
+    expected_result = cube_of_ones * expected_depths[:, None] * expected_reweighting_per_depth
     assert np.all(expected_result == reweighted_cube)

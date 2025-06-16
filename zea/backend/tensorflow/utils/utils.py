@@ -25,7 +25,6 @@ def tf_snapshot(obj) -> dict:
         if key[0] != "_" and key not in EXCEPTIONS:
             value = getattr(obj, key)
             if isinstance(value, (np.ndarray, int, float, list)):
-
                 # if data is of double precision, convert to float32
                 if isinstance(value, np.ndarray) and value.dtype == np.float64:
                     dtype = tf.float32

@@ -24,9 +24,7 @@ def no_ml_lib_import(backends: list = None, allow_keras_backend=True):
 
     if allow_keras_backend:
         curr_backend = os.environ.get("KERAS_BACKEND", None)
-        assert (
-            curr_backend is not None
-        ), "KERAS_BACKEND environment variable is not set."
+        assert curr_backend is not None, "KERAS_BACKEND environment variable is not set."
 
         # remove curr_backend from backends
         backends = [backend for backend in backends if backend != curr_backend]

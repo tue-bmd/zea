@@ -10,8 +10,8 @@ from schema import SchemaError
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from zea.config import Config
-from zea.config.validation import check_config
+from zea.config import Config  # noqa: E402
+from zea.config.validation import check_config  # noqa: E402
 
 # Define some dictionaries to test the Config class
 simple_dict = {"a": 1, "b": 2, "c": 3}
@@ -239,9 +239,9 @@ def test_config_update():
     config = Config(simple_dict)
     config.update(**nested_dict)  # update with kwargs
     config.update(nested_dict)  # update with dict
-    assert isinstance(
-        config.nested_dictionary, Config
-    ), "config.nested_dictionary should be a Config object not just a dictionary"
+    assert isinstance(config.nested_dictionary, Config), (
+        "config.nested_dictionary should be a Config object not just a dictionary"
+    )
 
 
 def test_config_recursive():

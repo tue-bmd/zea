@@ -84,9 +84,7 @@ def plot_image_grid(
         figsize = (ncols * 2, nrows * 2 / aspect_ratio)
 
     # either supply both fig and fig_contents or neither
-    assert (fig is None) == (
-        fig_contents is None
-    ), "Supply both fig and fig_contents or neither"
+    assert (fig is None) == (fig_contents is None), "Supply both fig and fig_contents or neither"
 
     if fig is None:
         fig = plt.figure(figsize=figsize, **kwargs)
@@ -102,27 +100,27 @@ def plot_image_grid(
     else:
         if cmap is None:
             cmap = [None] * len(images)
-        assert len(cmap) == len(
-            images
-        ), f"cmap must be a string or list of strings of length {len(images)}"
+        assert len(cmap) == len(images), (
+            f"cmap must be a string or list of strings of length {len(images)}"
+        )
 
     if isinstance(vmin, (int, float)):
         vmin = [vmin] * len(images)
     else:
         if vmin is None:
             vmin = [None] * len(images)
-        assert len(vmin) == len(
-            images
-        ), f"vmin must be a float or list of floats of length {len(images)}"
+        assert len(vmin) == len(images), (
+            f"vmin must be a float or list of floats of length {len(images)}"
+        )
 
     if isinstance(vmax, (int, float)):
         vmax = [vmax] * len(images)
     else:
         if vmax is None:
             vmax = [None] * len(images)
-        assert len(vmax) == len(
-            images
-        ), f"vmax must be a float or list of floats of length {len(images)}"
+        assert len(vmax) == len(images), (
+            f"vmax must be a float or list of floats of length {len(images)}"
+        )
 
     if fig_contents is None:
         fig_contents = [None for _ in range(len(images))]
@@ -308,9 +306,9 @@ def plot_biplanes(
         AssertionError: If none of slice_x, slice_y, or slice_z are provided.
     """
 
-    assert (
-        slice_x is not None or slice_y is not None or slice_z is not None
-    ), "At least one slice index must be set."
+    assert slice_x is not None or slice_y is not None or slice_z is not None, (
+        "At least one slice index must be set."
+    )
 
     volume = zoom(volume, (resolution, resolution, resolution), order=1)
 
@@ -422,9 +420,7 @@ def plot_frustum_vertices(
     """
     # Convert single values to lists
     phi_plane = [phi_plane] if isinstance(phi_plane, (int, float)) else phi_plane
-    theta_plane = (
-        [theta_plane] if isinstance(theta_plane, (int, float)) else theta_plane
-    )
+    theta_plane = [theta_plane] if isinstance(theta_plane, (int, float)) else theta_plane
     rho_plane = [rho_plane] if isinstance(rho_plane, (int, float)) else rho_plane
 
     # Ensure at least one plane is specified
@@ -475,9 +471,7 @@ def plot_frustum_vertices(
 
     def _plot_edges(edges, color, alpha=1.0, linestyle="-", **kwargs):
         for edge in edges:
-            rho_pts, theta_pts, phi_pts = generate_edge_points(
-                edge[0], edge[1], num_points
-            )
+            rho_pts, theta_pts, phi_pts = generate_edge_points(edge[0], edge[1], num_points)
             x, y, z = frustum_convert_rtp2xyz(rho_pts, theta_pts, phi_pts)
             ax.plot(x, y, -z, color=color, alpha=alpha, linestyle=linestyle, **kwargs)
 

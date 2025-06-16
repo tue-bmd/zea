@@ -2,12 +2,13 @@
 
 from pathlib import Path, PurePosixPath
 
-from huggingface_hub import HfApi, list_repo_files, login, snapshot_download
+from huggingface_hub import HfApi, login, snapshot_download
 
 from zea import log
 from zea.data.preset_utils import _hf_list_files, _hf_parse_path
 
 HF_PREFIX = "hf://"
+
 
 def load_model_from_hf(repo_id, revision="main", verbose=True):
     """
@@ -92,16 +93,12 @@ def upload_folder_to_hf(
         api.create_tag(repo_id, repo_type="model", tag=tag)
 
     if verbose:
-        msg = (
-            f"Uploaded files from '{local_dir}' to 'https://huggingface.co/{repo_id}'."
-        )
+        msg = f"Uploaded files from '{local_dir}' to 'https://huggingface.co/{repo_id}'."
         if tag:
             msg += f" Tagged as {tag}."
         log.info(log.yellow(msg))
 
     return f"https://huggingface.co/{repo_id}"
-
-
 
 
 class HFPath(PurePosixPath):
@@ -115,7 +112,7 @@ class HFPath(PurePosixPath):
         for arg in args:
             s = str(arg)
             if s.startswith(cls._scheme):
-                s = s[len(cls._scheme):]
+                s = s[len(cls._scheme) :]
             parts.append(s.strip("/"))
         combined = "/".join(parts)
         # Store path without scheme
@@ -130,7 +127,7 @@ class HFPath(PurePosixPath):
 
         # Remove any hf:/ prefix if it somehow got included
         if path_str.startswith("hf:/"):
-            path_str = path_str[len("hf:/"):]
+            path_str = path_str[len("hf:/") :]
 
         # Add our scheme prefix if this is meant to be an HF path
         if getattr(self, "_needs_scheme", True):
