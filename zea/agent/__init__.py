@@ -16,6 +16,6 @@ Example usage of action selection strategies
         img_height=112,
         **kwargs,
     )
-    particles = np.random.rand(10, 112, 112, 1) # 10 posterior samples
+    particles = np.random.rand(10, 112, 112, 1)  # 10 posterior samples
     lines, mask = agent(particles)
 """
