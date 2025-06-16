@@ -1,11 +1,13 @@
 """Huggingface hub (hf) tooling."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from huggingface_hub import HfApi, login, snapshot_download
+from huggingface_hub import HfApi, list_repo_files, login, snapshot_download
 
 from zea import log
+from zea.data.preset_utils import _hf_list_files, _hf_parse_path
 
+HF_PREFIX = "hf://"
 
 def load_model_from_hf(repo_id, revision="main", verbose=True):
     """
@@ -98,3 +100,78 @@ def upload_folder_to_hf(
         log.info(log.yellow(msg))
 
     return f"https://huggingface.co/{repo_id}"
+
+
+
+
+class HFPath(PurePosixPath):
+    """A path-like object that preserves the hf:// scheme and mimics Path API."""
+
+    _scheme = HF_PREFIX
+
+    def __new__(cls, *args):
+        # Strip "hf://" from all arguments and normalize
+        parts = []
+        for arg in args:
+            s = str(arg)
+            if s.startswith(cls._scheme):
+                s = s[len(cls._scheme):]
+            parts.append(s.strip("/"))
+        combined = "/".join(parts)
+        # Store path without scheme
+        self = super().__new__(cls, combined)
+        # Mark this as an HF path that needs a scheme when stringified
+        self._needs_scheme = True
+        return self
+
+    def __str__(self):
+        # Get the raw path string without any scheme
+        path_str = PurePosixPath.__str__(self)
+
+        # Remove any hf:/ prefix if it somehow got included
+        if path_str.startswith("hf:/"):
+            path_str = path_str[len("hf:/"):]
+
+        # Add our scheme prefix if this is meant to be an HF path
+        if getattr(self, "_needs_scheme", True):
+            return f"{self._scheme}{path_str}"
+        return path_str
+
+    def __truediv__(self, key):
+        return self.__class__(self, key)
+
+    def joinpath(self, *args):
+        """Join paths like Path.joinpath but preserve the hf:// scheme."""
+        return self.__class__(self, *args)
+
+    @property
+    def repo_id(self):
+        """Extract the repo ID (e.g., zeahub/camus-sample)."""
+        parts = [p for p in self.parts if p and p != "hf:"]
+        if len(parts) < 2:
+            raise ValueError("Invalid HFPath: cannot extract repo_id")
+        return f"{parts[0]}/{parts[1]}"
+
+    @property
+    def subpath(self):
+        """Get path inside the repo."""
+        return "/".join(self.parts[3:])
+
+    def is_file(self):
+        """Return True if this HFPath points to a file in the repo."""
+        repo_id, subpath = _hf_parse_path(str(self))
+        if not subpath:
+            return False
+        files = _hf_list_files(repo_id)
+        return any(f == subpath for f in files)
+
+    def is_dir(self):
+        """Return True if this HFPath points to a directory in the repo."""
+        repo_id, subpath = _hf_parse_path(str(self))
+        files = _hf_list_files(repo_id)
+        # If subpath is empty, it's the repo root, which is a directory
+        if not subpath:
+            return True
+        # If any file starts with subpath + '/', it's a directory
+        prefix = subpath.rstrip("/") + "/"
+        return any(f.startswith(prefix) for f in files)

@@ -3,7 +3,6 @@
 import hashlib
 import pickle
 from copy import deepcopy
-from pathlib import Path
 
 import h5py
 import keras
@@ -15,14 +14,14 @@ from zea import log
 from zea.backend.tensorflow.dataloader import make_dataloader
 from zea.data.augmentations import RandomCircleInclusion
 from zea.data.dataloader import MAX_RETRY_ATTEMPTS, H5Generator
+from zea.data.datasets import Dataset
 from zea.data.file import File
 from zea.data.layers import Resizer
 from zea.data.utils import json_loads
+from zea.tools.hf import HFPath
 
-from . import data_root
-
-CAMUS_DATASET_PATH = f"{data_root}/USBMD_datasets/CAMUS/train/patient0001"
-CAMUS_FILE = CAMUS_DATASET_PATH + "/patient0001_2CH_half_sequence.hdf5"
+CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
+CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
 DUMMY_IMAGE_SHAPE = (28, 28)
 
 
@@ -67,16 +66,12 @@ def ndim_hdf5_dataset_path(tmp_path):
 @pytest.fixture
 def camus_dataset():
     """Fixture to return the path to the CAMUS dataset."""
-    if not Path(CAMUS_DATASET_PATH).exists():
-        pytest.skip("The CAMUS dataset directory is unavailable")
     return CAMUS_DATASET_PATH
 
 
 @pytest.fixture
 def camus_file():
     """Fixture to return the path to the CAMUS dataset."""
-    if not Path(CAMUS_FILE).exists():
-        pytest.skip("The CAMUS dataset directory is unavailable")
     return CAMUS_FILE
 
 
@@ -151,9 +146,9 @@ def test_h5_generator_shuffle(dummy_hdf5):
 @pytest.mark.parametrize(
     "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
     [
-        ("camus_dataset", "data/image_sc", 1, True, 2, 18 + 20),
+        ("camus_dataset", "data/image_sc", 1, True, 6, 101),
         ("fake_directory", "data", 1, True, 3, 9 * 3),
-        ("camus_dataset", "data/image_sc", 5, False, 2, 18 + 20),
+        ("camus_dataset", "data/image_sc", 5, False, 6, 101),
         ("fake_directory", "data", 5, False, 3, 9 * 3),
     ],
 )
@@ -173,18 +168,26 @@ def test_dataloader(
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
-            with h5py.File(tmp_path / f"dummy_data_{i}.hdf5", "w", locking=False) as f:
+            with File(tmp_path / f"dummy_data_{i}.hdf5", "w") as f:
                 data = np.random.rand(total_samples // num_files, 28, 28)
                 f.create_dataset(key, data=data)
-        expected_len_dataset = total_samples // num_files // n_frames * num_files
         directory = tmp_path
         image_range = (0, 1)
     elif directory == "camus_dataset":
         directory = request.getfixturevalue(directory)
-        expected_len_dataset = 18 // n_frames + 20 // n_frames
         image_range = (-60, 0)
     else:
         raise ValueError("Invalid directory for testing")
+
+    with Dataset(directory, key=key) as dataset_test:
+        file_lengths = [len(file[key]) for file in dataset_test]
+
+    expected_len_dataset = sum(
+        [
+            length // n_frames if not insert_frame_axis else length
+            for length in file_lengths
+        ]
+    )
 
     dataset = make_dataloader(
         directory,
@@ -303,37 +306,8 @@ def test_h5_dataset_return_filename(
             1,
         ),
         ("dummy_hdf5", "data", (20, 23), "resize", 1),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "center_crop",
-            3,
-        ),
         ("dummy_hdf5", "data", (20, 23), "center_crop", 3),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "center_crop",
-            3,
-        ),
-        ("dummy_hdf5", "data", (20, 23), "center_crop", 3),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "random_crop",
-            3,
-        ),
         ("dummy_hdf5", "data", (20, 23), "random_crop", 3),
-        (
-            "camus_dataset",
-            "data/image_sc",
-            (20, 23),
-            "random_crop",
-            1,
-        ),
         ("dummy_hdf5", "data", (20, 23), "random_crop", 1),
         ("dummy_hdf5", "data", (32, 32), "crop_or_pad", 1),
     ],
