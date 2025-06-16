@@ -302,7 +302,8 @@ if __name__ == "__main__":
             print(f"- {k}")
     if extra:
         log.warning(
-            "The following parameters are described in PARAMETER_DESCRIPTIONS but do not exist in the config schema:"
+            "The following parameters are described in `zea.config.parameters.PARAMETER_DESCRIPTIONS` "
+            "but do not exist in the config schema:"
         )
         for k in extra:
             print(f"- {k}")

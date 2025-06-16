@@ -1,4 +1,4 @@
-"""zea: A Toolbox for Cognitive Ultrasound Imaging."""
+"""``zea``: *A Toolbox for Cognitive Ultrasound Imaging.*"""
 
 import importlib.util
 import os
