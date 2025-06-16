@@ -16,7 +16,7 @@ from zea.internal.checks import (
     get_check,
 )
 from zea.probes import Probe
-from zea.scan import Scan, cast_scan_parameters
+from zea.scan import Scan
 from zea.utils import reduce_to_signature
 
 
@@ -33,14 +33,15 @@ class File(h5py.File):
         """Initialize the file.
 
         Args:
-            name (str, Path): The path to the file. Can be a string or a Path object.
-                Additionally can be a string with the prefix 'hf://', in which case
-                it will be resolved to a huggingface path.
+            name (str, Path, HFPath): The path to the file.
+                Can be a string or a Path object. Additionally can be a string with
+                the prefix 'hf://', in which case it will be resolved to a
+                huggingface path.
             *args: Additional arguments to pass to h5py.File.
             **kwargs: Additional keyword arguments to pass to h5py.File.
         """
 
-        if isinstance(name, (str, Path)) and str(name).startswith(HF_PREFIX):
+        if str(name).startswith(HF_PREFIX):
             name = _hf_resolve_path(str(name))
 
         if "locking" not in kwargs and "mode" in kwargs and kwargs["mode"] == "r":
@@ -315,7 +316,6 @@ class File(h5py.File):
         else:
             log.warning("Could not find scan parameters in file.")
 
-        scan_parameters = cast_scan_parameters(scan_parameters)
         return scan_parameters
 
     def get_scan_parameters(self, event=None) -> dict:
@@ -328,7 +328,17 @@ class File(h5py.File):
         """
         file_scan_parameters = self.get_parameters(event)
 
-        scan_parameters = reduce_to_signature(Scan.__init__, file_scan_parameters)
+        scan_parameters = {}
+        for parameter, value in file_scan_parameters.items():
+            if parameter in Scan.VALID_PARAMS:
+                param_type = Scan.VALID_PARAMS[parameter]["type"]
+                if param_type in (bool, int, float):
+                    scan_parameters[parameter] = param_type(value)
+                elif isinstance(param_type, tuple) and float in param_type:
+                    scan_parameters[parameter] = float(value)
+                else:
+                    scan_parameters[parameter] = value
+
         if len(scan_parameters) == 0:
             log.info(f"Could not find proper scan parameters in {self}.")
         return scan_parameters

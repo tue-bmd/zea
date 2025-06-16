@@ -457,12 +457,12 @@ class Config(dict):
         .. code-block:: python
 
             config = Config.from_hf(
-                "zea/configs", "config_echonet.yaml", repo_type="dataset"
+                "zeahub/configs", "config_camus.yaml", repo_type="dataset"
             )
 
         Args:
             repo_id (str): huggingface hub repo id.
-                For example: "zea/configs"
+                For example: "zeahub/configs"
             path (str): path to the config file in the repo.
                 For example: "train_config.yaml"
             **kwargs: additional arguments to pass to the `hf_hub_download`
@@ -503,6 +503,7 @@ def _load_config_from_yaml(path, config_class=Config, loader=yaml.FullLoader):
 
 def _path_to_str(path):
     """Convert a Path object to a string."""
-    if isinstance(path, Path):
-        return str(path)
+    if hasattr(path, "as_posix"):
+        # If path is a Path object, convert to string
+        path = path.as_posix()
     return path
