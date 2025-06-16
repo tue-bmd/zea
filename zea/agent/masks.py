@@ -84,17 +84,15 @@ def random_uniform_lines(
         Tensor: k-hot-encoded line vectors of shape (n_masks, n_possible_actions).
                 Needs to be converted to image size.
     """
-    masks = keras.random.uniform(
-        [n_masks, n_possible_actions], seed=seed, dtype="float32"
-    )
+    masks = keras.random.uniform([n_masks, n_possible_actions], seed=seed, dtype="float32")
     masks = hard_straight_through(masks, n_actions)
     return ops.cast(masks, dtype=dtype)
 
 
 def _assert_equal_spacing(n_actions, n_possible_actions):
-    assert (
-        n_possible_actions % n_actions == 0
-    ), "Number of actions must divide evenly into possible actions to use equispaced sampling."
+    assert n_possible_actions % n_actions == 0, (
+        "Number of actions must divide evenly into possible actions to use equispaced sampling."
+    )
 
 
 def initial_equispaced_lines(
@@ -120,13 +118,9 @@ def initial_equispaced_lines(
     """
     if assert_equal_spacing:
         _assert_equal_spacing(n_actions, n_possible_actions)
-        selected_indices = ops.arange(
-            0, n_possible_actions, n_possible_actions // n_actions
-        )
+        selected_indices = ops.arange(0, n_possible_actions, n_possible_actions // n_actions)
     else:
-        selected_indices = ops.linspace(
-            0, n_possible_actions - 1, n_actions, dtype="int32"
-        )
+        selected_indices = ops.linspace(0, n_possible_actions - 1, n_actions, dtype="int32")
 
     return indices_to_k_hot(selected_indices, n_possible_actions, dtype=dtype)
 
@@ -153,9 +147,9 @@ def lines_to_im_size(lines, img_size: tuple):
     height, width = img_size
 
     remainder = width % ops.shape(lines)[1]
-    assert (
-        remainder == 0
-    ), f"Width must be divisible by number of actions. Got remainder: {remainder}."
+    assert remainder == 0, (
+        f"Width must be divisible by number of actions. Got remainder: {remainder}."
+    )
 
     # Repeat till width of image
     masks = ops.repeat(lines, width // ops.shape(lines)[1], axis=1)
