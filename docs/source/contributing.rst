@@ -100,7 +100,7 @@ The overall structure of the documentation is manually designed, but the API doc
    # if you didn't install the dependencies earlier
    pip install -e .[docs]
    cd docs
-   make clean && make docs-buid
+   make docs-clean && make docs-build
    # you can also serve the docs locally
    make docs-serve
    # and open them in your browser at http://localhost:8000
