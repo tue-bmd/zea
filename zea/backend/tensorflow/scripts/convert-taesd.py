@@ -45,7 +45,7 @@ input_decoder_tensor = torch.rand((1, 4, 32, 32), dtype=torch.float32)
 
 # Where to save the models
 timestamp = time.strftime("%Y%m%d-%H%M%S")
-save_to_path = Path(f"/mnt/z/Ultrasound-BMd/pretrained/taesdxl/wessel-{timestamp}")
+save_to_path = Path(f"./temp/zea/taesdxl-{timestamp}")
 save_to_path.mkdir()
 
 encoder_onnx_path = str(save_to_path / "taesdxl-encoder.onnx")
