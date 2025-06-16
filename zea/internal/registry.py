@@ -94,9 +94,9 @@ class RegisterDecorator:
         if isinstance(cls_or_name, str):
             cls_or_name = self.registry[cls_or_name.lower()]
         # Assert that key is a class type
-        assert isinstance(cls_or_name, type) or callable(
-            cls_or_name
-        ), "Key must be a class type or function"
+        assert isinstance(cls_or_name, type) or callable(cls_or_name), (
+            "Key must be a class type or function"
+        )
         return self.additional_registries[parameter.lower()][cls_or_name]
 
     def __str__(self) -> str:
@@ -127,8 +127,7 @@ class RegisterDecorator:
             return self.registry[key.lower()]
         except KeyError as exc:
             raise KeyError(
-                f"Name {key} not registered. Please choose from "
-                f"{self.registered_names()}."
+                f"Name {key} not registered. Please choose from {self.registered_names()}."
             ) from exc
 
     def get_name(self, cls):
@@ -193,9 +192,7 @@ tf_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework
 
 torch_beamformer_registry = RegisterDecorator(items_to_register=["name", "framework"])
 
-metrics_registry = RegisterDecorator(
-    items_to_register=["name", "framework", "supervised"]
-)
+metrics_registry = RegisterDecorator(items_to_register=["name", "framework", "supervised"])
 
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
 ops_registry = RegisterDecorator(items_to_register=["name"])

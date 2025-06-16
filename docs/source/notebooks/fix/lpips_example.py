@@ -80,9 +80,7 @@ if __name__ == "__main__":
         # process in batches
         torch_lpips_scores = []
         for example_image in example_images_torch:
-            score = torch_lpips(
-                reference_image_torch[None, ...], example_image[None, ...]
-            )
+            score = torch_lpips(reference_image_torch[None, ...], example_image[None, ...])
             torch_lpips_scores.append(score)
         torch_lpips_scores = ops.convert_to_numpy(torch_lpips_scores)
 
@@ -92,8 +90,7 @@ if __name__ == "__main__":
             torch_lpips_scores,
             decimal=4,
             err_msg=(
-                "LPIPS scores are not the same as the torch variant. "
-                "Please report this issue."
+                "LPIPS scores are not the same as the torch variant. Please report this issue."
             ),
         )
         log.success("LPIPS scores are the same as the torch variant.")

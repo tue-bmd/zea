@@ -13,9 +13,7 @@ def calculate_lens_corrected_delays(
     sound_speed,
     n_tx,
     n_el,
-    # pylint: disable=unused-argument
     focus_distances,
-    # pylint: disable=unused-argument
     polar_angles,
     lens_sound_speed=1000,
     lens_thickness=1e-3,
@@ -61,10 +59,7 @@ def calculate_lens_corrected_delays(
         # Add a large offset to elements that are not used in the transmit to
         # diqualify them from being the closest element
         apod_offset = ops.where(tx_apodizations[tx] == 0, 10.0, 0)
-        tx_min = (
-            ops.min(rx_delays + t0_delays[tx] + apod_offset, axis=-1)
-            + initial_times[tx]
-        )
+        tx_min = ops.min(rx_delays + t0_delays[tx] + apod_offset, axis=-1) + initial_times[tx]
         tx_delays.append(tx_min)
     tx_delays = ops.stack(tx_delays, axis=-1)
 
@@ -179,15 +174,9 @@ def dxl(xe, ze, xl, xs, zs, zl, c_lens, c_medium):
     )
 
     denominator = (
-        -(
-            (xe - xl) ** 2
-            / (c_lens * ((xe - xl) ** 2 + (ze - zl) ** 2) ** (3 / 2) + eps)
-        )
+        -((xe - xl) ** 2 / (c_lens * ((xe - xl) ** 2 + (ze - zl) ** 2) ** (3 / 2) + eps))
         + (1 / (c_lens * ops.sqrt((xe - xl) ** 2 + (ze - zl) ** 2)))
-        - (
-            (xl - xs) ** 2
-            / (c_medium * ((xl - xs) ** 2 + (zl - zs) ** 2) ** (3 / 2) + eps)
-        )
+        - ((xl - xs) ** 2 / (c_medium * ((xl - xs) ** 2 + (zl - zs) ** 2) ** (3 / 2) + eps))
         + (1 / (c_medium * ops.sqrt((xl - xs) ** 2 + (zl - zs) ** 2) + eps))
     )
 

@@ -24,9 +24,7 @@ HF_PREFIX = "hf://"
 def _hf_parse_path(hf_path: str):
     """Parse hf://repo_id[/subpath] into (repo_id, subpath or None)."""
     if not hf_path.startswith(HF_PREFIX):
-        raise ValueError(
-            f"Invalid hf_path: {hf_path}. It must start with '{HF_PREFIX}'."
-        )
+        raise ValueError(f"Invalid hf_path: {hf_path}. It must start with '{HF_PREFIX}'.")
     path = hf_path.removeprefix(HF_PREFIX)
     parts = path.split("/")
     repo_id = "/".join(parts[:2])
@@ -67,9 +65,7 @@ def _hf_get_snapshot_dir(repo_id, cache_dir=HF_DATASETS_DIR):
             raise FileNotFoundError(
                 f"No snapshots found in Hugging Face cache for {repo_id} after download attempt"
             )
-    snapshot_hashes = sorted(
-        snapshots_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
-    )
+    snapshot_hashes = sorted(snapshots_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
     if not snapshot_hashes:
         raise FileNotFoundError(f"No snapshot found for {repo_id} in cache.")
     return snapshot_hashes[0]
@@ -94,9 +90,7 @@ def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR):
                 if f.startswith(subpath + "/") and is_h5(f):
                     _hf_download(repo_id, f, cache_dir)
             if not local_dir.exists():
-                raise FileNotFoundError(
-                    f"Directory {local_dir} not found after download."
-                )
+                raise FileNotFoundError(f"Directory {local_dir} not found after download.")
             return local_dir
         # File
         elif any(f == subpath for f in files) and is_h5(subpath):

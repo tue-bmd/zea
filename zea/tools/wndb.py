@@ -13,9 +13,7 @@ def model_directory_from_wandb(workspace, name):
     if len(runs) == 0:
         raise ValueError(f"No runs found with name {name} in workspace {workspace}")
     if len(runs) > 1:
-        raise ValueError(
-            f"Multiple runs found with name {name} in workspace {workspace}"
-        )
+        raise ValueError(f"Multiple runs found with name {name} in workspace {workspace}")
     run = runs[0]
 
     if run.config.get("run_dir") is None:

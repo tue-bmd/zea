@@ -207,7 +207,7 @@ def test_to_tensor_only_computed(dummy_params):
 
 
 def test_to_tensor_partial_computed_subset(dummy_params):
-    """Test that to_tensor(compute_missing=True, compute_keys=[...]) only computes the requested subset."""
+    """Test that to_tensor only computes the requested subset."""
     # Access no computed properties yet
     tensors = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1"])
     # Only computed1 should be present (besides direct params)
@@ -215,16 +215,12 @@ def test_to_tensor_partial_computed_subset(dummy_params):
     assert "computed2" not in tensors
     assert "computed3" not in tensors
     # Now try with multiple keys
-    tensors2 = dummy_params.to_tensor(
-        compute_missing=True, compute_keys=["computed1", "computed3"]
-    )
+    tensors2 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1", "computed3"])
     assert "computed1" in tensors2
     assert "computed3" in tensors2
     assert "computed2" not in tensors2
     # If a key is not a computed property, it should be ignored (no error)
-    tensors3 = dummy_params.to_tensor(
-        compute_missing=True, compute_keys=["computed1", "param1"]
-    )
+    tensors3 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1", "param1"])
     assert "computed1" in tensors3
     assert "param1" in tensors3
     tensors4 = dummy_params.to_tensor(compute_missing=True, compute_keys=[])
@@ -262,9 +258,7 @@ def test_repr_and_str(dummy_params):
 def test_optional_param_leaf_or_dependency_behavior():
     """Test that optional_param can be set as a leaf or computed as a dependency."""
     # Case 1: optional_param provided, uses it directly
-    p = DummyParameters(
-        param1=10, param2=5, param3=1500.0, param4=5e6, optional_param=[1, 2]
-    )
+    p = DummyParameters(param1=10, param2=5, param3=1500.0, param4=5e6, optional_param=[1, 2])
     assert p.optional_param == [1, 2]
 
     # Case 2: optional_param not provided, computed from dependencies

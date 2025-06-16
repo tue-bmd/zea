@@ -30,25 +30,20 @@ def synthetic_2d_data(request):
     means = np.array(means)
     covs = np.array(covs)
     data_parts = [
-        rng.multivariate_normal(means[i], covs[i], size=n // n_centers)
-        for i in range(n_centers)
+        rng.multivariate_normal(means[i], covs[i], size=n // n_centers) for i in range(n_centers)
     ]
     data = np.concatenate(data_parts, axis=0)
     rng.shuffle(data)
     return data.astype("float32"), means, covs
 
 
-def plot_distributions(
-    data, samples, means=None, covs=None, title="", filename="test.png"
-):
+def plot_distributions(data, samples, means=None, covs=None, title="", filename="test.png"):
     """Plot data, model samples, and optionally GMM means/covariances."""
     plt.figure(figsize=(6, 6))
     plt.scatter(data[:, 0], data[:, 1], alpha=0.3, label="Data", s=20)
     plt.scatter(samples[:, 0], samples[:, 1], alpha=0.3, label="Model Samples", s=20)
     if means is not None:
-        plt.scatter(
-            means[:, 0], means[:, 1], c="red", marker="x", s=100, label="GMM Means"
-        )
+        plt.scatter(means[:, 0], means[:, 1], c="red", marker="x", s=100, label="GMM Means")
     if means is not None and covs is not None:
         for mean, cov in zip(means, covs):
             vals, vecs = np.linalg.eigh(cov)
@@ -108,8 +103,8 @@ def test_match_means_covariances_greedy():
     true_means = np.array([[2, 2], [0, 0], [1, 1]], dtype=np.float32)
     covs = [np.eye(2) for _ in range(3)]
     true_covs = [np.eye(2) * 2 for _ in range(3)]
-    matched_means, matched_true_means, matched_covs, matched_true_covs = (
-        match_means_covariances(means, true_means, covs, true_covs)
+    matched_means, matched_true_means, matched_covs, matched_true_covs = match_means_covariances(
+        means, true_means, covs, true_covs
     )
     assert np.allclose(matched_means, matched_true_means, atol=1e-6)
     for c, tc in zip(matched_covs, matched_true_covs):
@@ -135,9 +130,7 @@ def animate_diffusion_trajectory_2d(
     for i, samples in enumerate(model.track_progress):
         fig, ax = plt.subplots(figsize=(6, 6))
         if show_data:
-            ax.scatter(
-                data[:n_show, 0], data[:n_show, 1], alpha=0.2, label="Data", s=15
-            )
+            ax.scatter(data[:n_show, 0], data[:n_show, 1], alpha=0.2, label="Data", s=15)
         ax.scatter(
             samples[:n_show, 0],
             samples[:n_show, 1],
@@ -146,7 +139,7 @@ def animate_diffusion_trajectory_2d(
             s=15,
             color="tab:blue",
         )
-        ax.set_title(f"Diffusion Step {i+1}/{len(model.track_progress)}")
+        ax.set_title(f"Diffusion Step {i + 1}/{len(model.track_progress)}")
         ax.axis("equal")
         ax.set_xlim(data[:, 0].min() - 2, data[:, 0].max() + 2)
         ax.set_ylim(data[:, 1].min() - 2, data[:, 1].max() + 2)
@@ -198,9 +191,7 @@ def test_diffusion_fit_and_sample_2d(synthetic_2d_data, debug=False):
     means = keras.ops.convert_to_numpy(gmm.means)
     vars_ = keras.ops.convert_to_numpy(gmm.vars)
     covs = [np.diag(v) for v in vars_]
-    means_m, true_means_m, covs_m, true_covs_m = match_means_covariances(
-        means, means, covs, covs
-    )
+    means_m, true_means_m, covs_m, true_covs_m = match_means_covariances(means, means, covs, covs)
     assert np.allclose(means_m, true_means_m, atol=2)
     for c, tc in zip(covs_m, true_covs_m):
         assert np.allclose(c, tc, atol=2)
@@ -240,9 +231,7 @@ def test_diffusion_posterior_sample_shape():
         network_kwargs={"widths": [8], "output_dim": n_features},
     )
     # No training needed for shape test
-    measurements = keras.random.uniform(
-        (n_measurements, n_features), minval=-1, maxval=1
-    )
+    measurements = keras.random.uniform((n_measurements, n_features), minval=-1, maxval=1)
     mask = keras.random.uniform((n_measurements, n_features)) > 0.5
     mask = keras.ops.cast(mask, "float32")
     out = model.posterior_sample(

@@ -1,4 +1,3 @@
-# pylint: disable=ungrouped-imports
 """
 Script to convert the EchoNet-LVH database to zea format.
 
@@ -16,7 +15,7 @@ os.environ["KERAS_BACKEND"] = "jax"
 
 
 if __name__ == "__main__":
-    from zea import init_device  # pylint: disable=import-outside-toplevel
+    from zea import init_device
 
     init_device("auto:1")
 
@@ -49,9 +48,7 @@ def get_args():
     parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--output_numpy", type=str, default=None)
     parser.add_argument("--file_list", type=str, help="Optional path to list of files")
-    parser.add_argument(
-        "--use_hyperthreading", action="store_true", help="Enable hyperthreading"
-    )
+    parser.add_argument("--use_hyperthreading", action="store_true", help="Enable hyperthreading")
     parser.add_argument(
         "--batch",
         type=str,
@@ -69,9 +66,7 @@ def get_args():
         action="store_true",
         help="Only convert measurements CSV file",
     )
-    parser.add_argument(
-        "--convert_images", action="store_true", help="Only convert image files"
-    )
+    parser.add_argument("--convert_images", action="store_true", help="Only convert image files")
     return parser.parse_args()
 
 
@@ -217,7 +212,7 @@ class LVHProcessor(H5Processor):
         # Store the pre-computed cone parameters
         self.cone_parameters = cone_params or {}
 
-    def get_split(self, avi_file: str, sequence):  # pylint: disable=arguments-renamed
+    def get_split(self, avi_file: str, sequence):
         """
         Get the split (train/val/test) for a given AVI file.
 
@@ -250,9 +245,7 @@ class LVHProcessor(H5Processor):
             # Apply pre-computed cropping parameters
             sequence = crop_sequence_with_params(sequence, cone_params)
         else:
-            print(
-                f"Warning: No cone parameters for {avi_filename}, using original sequence"
-            )
+            print(f"Warning: No cone parameters for {avi_filename}, using original sequence")
 
         # Convert to JAX array for polar conversion
         sequence = jnp.array(sequence)
@@ -265,14 +258,14 @@ class LVHProcessor(H5Processor):
         zea_dataset = {
             "path": out_h5,
             # store as uint8 for memory efficiency
-            "image_sc": translate(
-                np.array(sequence), self._process_range, (0, 255)
-            ).astype(np.uint8),
+            "image_sc": translate(np.array(sequence), self._process_range, (0, 255)).astype(
+                np.uint8
+            ),
             "probe_name": "generic",
             "description": "EchoNet-LVH dataset converted to zea format",
-            "image": translate(
-                np.array(polar_im_set), self._process_range, (0, 255)
-            ).astype(np.uint8),
+            "image": translate(np.array(polar_im_set), self._process_range, (0, 255)).astype(
+                np.uint8
+            ),
             "cast_to_float": False,
         }
         return generate_zea_dataset(**zea_dataset)
@@ -331,9 +324,7 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
     )
 
     if is_out_of_bounds:
-        print(
-            f"Warning: Transformed coordinates out of bounds for file {row['HashedFileName']}"
-        )
+        print(f"Warning: Transformed coordinates out of bounds for file {row['HashedFileName']}")
 
     # Convert back to string if original was string
     for k in ["X1", "X2", "Y1", "Y2"]:
@@ -362,9 +353,7 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
         if cone_params_csv and Path(cone_params_csv).exists():
             cone_parameters = load_cone_parameters(cone_params_csv)
         else:
-            print(
-                "Warning: No cone parameters file found. Measurements will not be transformed."
-            )
+            print("Warning: No cone parameters file found. Measurements will not be transformed.")
 
         # Apply coordinate transformation and track skipped rows
         transformed_rows = []
@@ -382,9 +371,7 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
                 else:
                     skipped_files.add(row["HashedFileName"])
             except Exception as e:
-                print(
-                    f"Error processing row for file {row['HashedFileName']}: {str(e)}"
-                )
+                print(f"Error processing row for file {row['HashedFileName']}: {str(e)}")
                 skipped_files.add(row["HashedFileName"])
 
         # Save to new CSV file
@@ -445,9 +432,7 @@ if __name__ == "__main__":
         for split_files in splits.values():
             for avi_filename in split_files:
                 # Strip .avi if present
-                base_filename = (
-                    avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-                )
+                base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
                 avi_file = find_avi_file(args.source, base_filename, batch=args.batch)
                 if avi_file:
                     files_to_process.append(avi_file)
@@ -470,9 +455,7 @@ if __name__ == "__main__":
         # Limit files if max_files is specified
         if args.max_files is not None:
             files_to_process = files_to_process[: args.max_files]
-            print(
-                f"Limited to processing {args.max_files} files due to max_files parameter"
-            )
+            print(f"Limited to processing {args.max_files} files due to max_files parameter")
 
         print(f"Files left to process: {len(files_to_process)}")
 
@@ -488,9 +471,7 @@ if __name__ == "__main__":
 
         if args.use_hyperthreading:
             with ProcessPoolExecutor() as executor:
-                futures = {
-                    executor.submit(processor, file): file for file in files_to_process
-                }
+                futures = {executor.submit(processor, file): file for file in files_to_process}
                 for future in tqdm(as_completed(futures), total=len(files_to_process)):
                     try:
                         future.result()

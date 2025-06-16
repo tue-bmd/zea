@@ -79,9 +79,7 @@ def tof_correction(
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
 
-    delay_fn = (
-        calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
-    )
+    delay_fn = calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
     txdel, rxdel = delay_fn(
         flatgrid,
         t0_delays,
@@ -152,7 +150,6 @@ def calculate_delays(
     n_el,
     focus_distances,
     polar_angles,
-    # pylint: disable=unused-argument
     **kwargs,
 ):
     """Calculates the delays in samples to every pixel in the grid.
@@ -214,9 +211,7 @@ def calculate_delays(
     def _rx_distances(probe_geometry):
         return distance_Rx(grid, probe_geometry)
 
-    rx_distances = safe_vectorize(_rx_distances, signature="(3)->(n_pix)")(
-        probe_geometry
-    )
+    rx_distances = safe_vectorize(_rx_distances, signature="(3)->(n_pix)")(probe_geometry)
     rx_distances = ops.transpose(rx_distances, (1, 0))
     # rx_distances shape is now (n_pix, n_el)
 

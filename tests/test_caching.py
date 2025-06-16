@@ -6,12 +6,7 @@ import keras
 import numpy as np
 import pytest
 
-from zea.internal.cache import (
-    cache_output,
-    cache_summary,
-    clear_cache,
-    get_function_source,
-)
+from zea.internal.cache import cache_output, cache_summary, clear_cache, get_function_source
 from zea.internal.core import Object
 
 # Global variable for the expected duration of the expensive operation
@@ -19,7 +14,7 @@ EXPECTED_DURATION = 0.05
 
 
 @cache_output("x")
-def _expensive_operation_x(x, y):  # pylint: disable=unused-argument
+def _expensive_operation_x(x, y):
     # Simulate an expensive operation
     result = x
     time.sleep(EXPECTED_DURATION)
@@ -27,7 +22,7 @@ def _expensive_operation_x(x, y):  # pylint: disable=unused-argument
 
 
 @cache_output("y")
-def _expensive_operation_y(x, y):  # pylint: disable=unused-argument
+def _expensive_operation_y(x, y):
     # Simulate an expensive operation
     result = y
     time.sleep(EXPECTED_DURATION)
@@ -64,7 +59,7 @@ def _some_random_func():
 
 
 @cache_output("x")
-def _expensive_nested_operation(x, y):  # pylint: disable=unused-argument
+def _expensive_nested_operation(x, y):
     result = x + _some_random_func()
     time.sleep(EXPECTED_DURATION)
     return result
@@ -95,12 +90,8 @@ def test_get_function_source():
         _some_random_func()
 
     src = get_function_source(some_nested_func)
-    assert (
-        "# This comment is also required for some tests!" in src
-    ), "Did not get source code"
-    assert (
-        "# This comment is required for some tests!" in src
-    ), "Did not get nested source code"
+    assert "# This comment is also required for some tests!" in src, "Did not get source code"
+    assert "# This comment is required for some tests!" in src, "Did not get nested source code"
 
 
 def test_caching_x():
@@ -108,25 +99,23 @@ def test_caching_x():
     start_time = time.time()
     result = _expensive_operation_x(2, 10)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 2, f"Expected 2, got {result}"
 
     start_time = time.time()
     result = _expensive_operation_x(2, 20)
     duration = time.time() - start_time
-    assert (
-        duration < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert duration < EXPECTED_DURATION, f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2, f"Expected 2, got {result}"
 
     start_time = time.time()
     result = _expensive_operation_x(3, 10)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 3, f"Expected 3, got {result}"
 
 
@@ -136,25 +125,23 @@ def test_caching_y():
     start_time = time.time()
     result = _expensive_operation_y(2, 10)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 10, f"Expected 10, got {result}"
 
     start_time = time.time()
     result = _expensive_operation_y(3, 10)
     duration = time.time() - start_time
-    assert (
-        duration < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert duration < EXPECTED_DURATION, f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 10, f"Expected 10, got {result}"
 
     start_time = time.time()
     result = _expensive_operation_y(2, 20)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 20, f"Expected 20, got {result}"
 
 
@@ -163,33 +150,31 @@ def test_caching():
     start_time = time.time()
     result = _expensive_operation(2, 10)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
     start_time = time.time()
     result = _expensive_operation(2, 10)
     duration = time.time() - start_time
-    assert (
-        duration < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert duration < EXPECTED_DURATION, f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
     start_time = time.time()
     result = _expensive_operation(3, 10)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 3 + 10, f"Expected 3 + 10, got {result}"
 
     start_time = time.time()
     result = _expensive_operation(2, 20)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 2 + 20, f"Expected 2 + 20, got {result}"
 
 
@@ -201,27 +186,23 @@ def test_caching_custom_object():
     start_time = time.time()
     result = _expensive_operation_obj(obj1)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
     # Second time should be cached
     start_time = time.time()
     result = _expensive_operation_obj(obj1)
     duration = time.time() - start_time
-    assert (
-        duration < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert duration < EXPECTED_DURATION, f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
     # If we use kwarg instead of arg should still be cached, see #561
     start_time = time.time()
     result = _expensive_operation_obj(obj=obj1)
     duration = time.time() - start_time
-    assert (
-        duration < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert duration < EXPECTED_DURATION, f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
     # Another instance with the same values should also be cached
@@ -229,9 +210,7 @@ def test_caching_custom_object():
     start_time = time.time()
     result = _expensive_operation_obj(obj1_identical)
     duration = time.time() - start_time
-    assert (
-        duration < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert duration < EXPECTED_DURATION, f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result == 2 + 10, f"Expected 2 + 10, got {result}"
 
     # Another object with different values should not be cached
@@ -239,9 +218,9 @@ def test_caching_custom_object():
     start_time = time.time()
     result = _expensive_operation_obj(obj2)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 3 + 10, f"Expected 3 + 10, got {result}"
 
     # Another object with different values should not be cached
@@ -249,9 +228,9 @@ def test_caching_custom_object():
     start_time = time.time()
     result = _expensive_operation_obj(obj3)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result == 2 + 20, f"Expected 2 + 20, got {result}"
 
 
@@ -272,16 +251,16 @@ def test_nested_cache():
     start_time = time.time()
     result1 = _expensive_nested_operation(2, 10)
     duration1 = time.time() - start_time
-    assert (
-        duration1 >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration1}"
+    assert duration1 >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration1}"
+    )
 
     start_time = time.time()
     result2 = _expensive_nested_operation(2, 10)
     duration2 = time.time() - start_time
-    assert (
-        duration2 < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration2}"
+    assert duration2 < EXPECTED_DURATION, (
+        f"Expected duration < {EXPECTED_DURATION}, got {duration2}"
+    )
     assert result1 == result2, "Results should be equal"
 
 
@@ -293,18 +272,18 @@ def test_caching_seed_generator():
     start_time = time.time()
     result1 = _expensive_operation_seed(seed_gen)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
 
     # Second time should not be cached unless we reset seed_gen
 
     start_time = time.time()
     result2 = _expensive_operation_seed(seed_gen)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )
     assert result1 != result2, "Results should not be equal"
 
     # Reset seed_gen
@@ -312,9 +291,7 @@ def test_caching_seed_generator():
     start_time = time.time()
     result3 = _expensive_operation_seed(seed_gen)
     duration = time.time() - start_time
-    assert (
-        duration < EXPECTED_DURATION
-    ), f"Expected duration < {EXPECTED_DURATION}, got {duration}"
+    assert duration < EXPECTED_DURATION, f"Expected duration < {EXPECTED_DURATION}, got {duration}"
     assert result1 == result3, "Results should be equal"
 
     # Different seed_gen should not be cached
@@ -322,6 +299,6 @@ def test_caching_seed_generator():
     start_time = time.time()
     _expensive_operation_seed(seed_gen)
     duration = time.time() - start_time
-    assert (
-        duration >= EXPECTED_DURATION
-    ), f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    assert duration >= EXPECTED_DURATION, (
+        f"Expected duration >= {EXPECTED_DURATION}, got {duration}"
+    )

@@ -87,9 +87,9 @@ def _verify_user_config_and_get_paths(config, system, local):
     """
     # Check if set os system matches with the current system
     if "system" in config:
-        assert (
-            config["system"] == system
-        ), f'Current OS {system} does not match user settings: {config["system"]}'
+        assert config["system"] == system, (
+            f"Current OS {system} does not match user settings: {config['system']}"
+        )
         config.pop("system")
 
     # Only keep data_root and output keys, the rest are ignored.
@@ -173,7 +173,7 @@ def _load_users_yaml(user_config, local, username, hostname):
 
         try:
             create_new_user(local=local)
-        except:
+        except Exception:
             log.warning(
                 f"Could not create user profile for {username} on {hostname}, using default."
             )
@@ -309,27 +309,19 @@ def _build_user_profile_string(data_paths, local: bool = None):
         + f"    system: {data_paths['system']}\n"
     )
     if local is None:
-        return base_string + f'{tab}data_root: {data_paths["data_root"]}'
+        return base_string + f"{tab}data_root: {data_paths['data_root']}"
     elif local is False:
-        return base_string + (
-            f"{tab}data_root:\n" + f'{tab}{tab}remote: {data_paths["data_root"]}'
-        )
+        return base_string + (f"{tab}data_root:\n" + f"{tab}{tab}remote: {data_paths['data_root']}")
     elif local is True:
-        return base_string + (
-            f"{tab}data_root:\n" + f'{tab}{tab}local: {data_paths["data_root"]}'
-        )
+        return base_string + (f"{tab}data_root:\n" + f"{tab}{tab}local: {data_paths['data_root']}")
     else:
         raise ValueError("local should set to a boolean or None.")
 
 
-def _to_write_user_profile_to_file(
-    user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH
-):
+def _to_write_user_profile_to_file(user_profile_string, user_config_path=DEFAULT_USERS_CONFIG_PATH):
     with open(user_config_path, "a", encoding="utf-8") as file:
         file.write("\n\n" + user_profile_string + "\n")
-    print(
-        "\n✅ Your user profile was successfully added to" f" `{user_config_path}`.\n"
-    )
+    print(f"\n✅ Your user profile was successfully added to `{user_config_path}`.\n")
 
 
 def _pretty_print_data_paths(data_paths):
@@ -350,9 +342,7 @@ def _prompt_user_for_data_root():
 def _acquire_and_validate_data_root():
     data_root_input = _prompt_user_for_data_root()
     while not os.path.isdir(data_root_input):
-        print(
-            "\n The path you entered does not point to a directory, please try again."
-        )
+        print("\n The path you entered does not point to a directory, please try again.")
         data_root_input = _prompt_user_for_data_root()
     return data_root_input
 
@@ -446,18 +436,14 @@ def create_new_user(user_config_path: str = None, local: bool = None):
 
         # If there was no profile found in users.yaml for the current user,
         # give them the option to create a user profile automatically
-        user_warning_was_thrown = _warning_type_was_thrown(
-            UnknownUsernameWarning, list_of_warnings
-        )
+        user_warning_was_thrown = _warning_type_was_thrown(UnknownUsernameWarning, list_of_warnings)
         hostname_warning_was_thrown = _warning_type_was_thrown(
             UnknownHostnameWarning, list_of_warnings
         )
         local_remote_warning_was_thrown = _warning_type_was_thrown(
             UnknownLocalRemoteWarning, list_of_warnings
         )
-        no_yaml_file_error_was_thrown = _warning_type_was_thrown(
-            NoYamlFileError, list_of_warnings
-        )
+        no_yaml_file_error_was_thrown = _warning_type_was_thrown(NoYamlFileError, list_of_warnings)
 
         if user_warning_was_thrown or no_yaml_file_error_was_thrown:
             print("ℹ️  Follow the instructions below to create your user profile.")
@@ -522,9 +508,9 @@ def create_new_user(user_config_path: str = None, local: bool = None):
             users_yaml_dict = _try(_to_read_yaml_file, {"path_str": user_config_path})
             ## now update the data_root for the user and hostname in the yaml file
             ## use local or remote subkey depending on the local parameter
-            users_yaml_dict[data_paths["username"]][data_paths["hostname"]][
-                "data_root"
-            ].update({local_remote_str: data_root})
+            users_yaml_dict[data_paths["username"]][data_paths["hostname"]]["data_root"].update(
+                {local_remote_str: data_root}
+            )
             user_response = input(
                 "\n"
                 + yaml.dump(users_yaml_dict[data_paths["username"]])

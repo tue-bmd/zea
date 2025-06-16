@@ -35,9 +35,7 @@ def test_get_default_scan_paramters(probe_name):
     if probe_name == "generic":
         return
 
-    assert isinstance(
-        probe.probe_geometry, np.ndarray
-    ), "Element positions must be a numpy array"
+    assert isinstance(probe.probe_geometry, np.ndarray), "Element positions must be a numpy array"
     assert probe.probe_geometry.shape == (
         probe.n_el,
         3,

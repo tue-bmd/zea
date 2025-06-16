@@ -7,8 +7,6 @@
 		"context": "..",
 		"dockerfile": "../Dockerfile"
 	},
-	// Ensure the .env file exists
-	"initializeCommand": "touch ${localWorkspaceFolder}/.env",
 	"runArgs": [
 		"--gpus", "all",
 		"-m",
@@ -35,8 +33,8 @@
 		"vscode": {
 			"extensions": [
 				"ms-python.python",
-				"ms-python.black-formatter",
-				"ms-python.isort",
+				"charliermarsh.ruff",
+				"tamasfe.even-better-toml",
 				"sleistner.vscode-fileutils",
 				"github.copilot",
 				"adpyke.codesnap",

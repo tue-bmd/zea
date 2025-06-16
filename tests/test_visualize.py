@@ -27,9 +27,7 @@ def quadrant_params():
         "nx": 70,
         "ny": 100,
         "nz": 50,
-        "array": (
-            np.mgrid[-1 : 1 : 1j * 70, -1 : 1 : 1j * 100, -1 : 1 : 1j * 50] ** 2
-        ).sum(0),
+        "array": (np.mgrid[-1 : 1 : 1j * 70, -1 : 1 : 1j * 100, -1 : 1 : 1j * 50] ** 2).sum(0),
     }
 
 
