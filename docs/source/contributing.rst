@@ -41,7 +41,7 @@ Most contributors will not have write access to the main repository. Instead, yo
 
    gh repo fork tue-bmd/zea --clone
 
-1. Setup environment
+3. Setup environment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Check out a new branch for your changes.
