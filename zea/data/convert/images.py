@@ -112,8 +112,8 @@ def convert_image_dataset(
         .. code-block:: python
 
             convert_image_dataset(
-                "/mnt/z/Ultrasound-BMd/data/oisin/camus_test",
-                "/mnt/z/Ultrasound-BMd/data/oisin/camus_test_h5",
+                "./temp/data/camus_test",
+                "./temp/data/oisin/camus_test_h5",
                 group_pattern=re.compile(r"(patient\d+)_\d+\.png"),
                 sort_pattern=re.compile(r"patient\d+_(\d+)\.png"),
             )

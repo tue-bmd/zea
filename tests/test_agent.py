@@ -86,9 +86,7 @@ def test_greedy_entropy():
 
     particles = np.stack([rand_img_1, rand_img_2], axis=0)
     particles = np.expand_dims(particles, axis=0)  # add batch dim
-    particles = np.squeeze(
-        particles, axis=-1
-    )  # remove channel dim --> (batch, n_particles, h, w)
+    particles = np.squeeze(particles, axis=-1)  # remove channel dim --> (batch, n_particles, h, w)
 
     n_actions = 1
     agent = selection.GreedyEntropy(n_actions, w, h, w)

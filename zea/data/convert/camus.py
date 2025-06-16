@@ -193,10 +193,13 @@ def get_args():
     parser.add_argument(
         "--source",
         type=str,
-        default="/mnt/z/Ultrasound-BMd/data/CAMUS_public/database_nifti",
+        # path to CAMUS_public/database_nifti
+        required=True,
     )
     parser.add_argument(
-        "--output", type=str, default="/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS"
+        "--output",
+        type=str,
+        required=True,
     )
     args = parser.parse_args()
     return args

@@ -50,7 +50,6 @@ EJECTION_FRACTION_WEIGHTS_URL = (
     "https://github.com/douyang/EchoNetDynamic/releases"
     "/download/v1.0.0/r2plus1d_18_32_2_pretrained.pt"
 )
-# NOTE: can also be downloaded from /mnt/z/Ultrasound-BMd/pretrained/echonet-dynamic/original
 
 
 def download_weights(weights_folder):
@@ -111,7 +110,7 @@ input_tensor = input_tensor.to(device)
 
 # Where to save the models
 timestamp = time.strftime("%Y%m%d-%H%M%S")
-save_to_path = Path(f"/mnt/z/Ultrasound-BMd/pretrained/echonet-dynamic/tristan-{timestamp}")
+save_to_path = Path(f"./temp/zea/echonet-dynamic-{timestamp}")
 save_to_path.mkdir(parents=True, exist_ok=True)
 
 output_onnx_path = str(save_to_path / "echonet-dynamic.onnx")
