@@ -62,11 +62,15 @@ def test_mask_action_model():
 
 def test_lines_action_model():
     """Test LinesActionModel."""
-    model = selection.LinesActionModel(n_actions=2, n_possible_actions=4, img_width=8, img_height=8)
+    model = selection.LinesActionModel(
+        n_actions=2, n_possible_actions=4, img_width=8, img_height=8
+    )
     assert model.stack_n_cols == 2
 
     with pytest.raises(AssertionError):
-        selection.LinesActionModel(n_actions=2, n_possible_actions=3, img_width=8, img_height=8)
+        selection.LinesActionModel(
+            n_actions=2, n_possible_actions=3, img_width=8, img_height=8
+        )
 
 
 def test_greedy_entropy():
@@ -160,7 +164,7 @@ def test_maximum_actions():
     """Test maximum actions."""
     np.random.seed(2)
     h, w = 8, 8
-    particles = np.random.rand(2, 1, h, w).astype(np.float32)
+    particles = np.random.rand(1, 2, h, w).astype(np.float32)
 
     agent = selection.GreedyEntropy(w, w, h, w)
     selected_lines, mask = agent.sample(particles)
