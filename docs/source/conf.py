@@ -65,4 +65,4 @@ html_favicon = "../_static/zea-logo-fav-32px.png"
 modindex_common_prefix = ["zea."]
 
 # for bibtex
-bibtex_bibfiles = ["references.bib"]
+bibtex_bibfiles = ["../../paper/paper.bib"]

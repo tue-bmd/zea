@@ -128,13 +128,18 @@ For example, to set the backend to JAX, you can use one of the following:
 Citation
 --------
 
-If you use `zea` in your research, please cite:
+If you use `zea` in your research, please cite using :cite:p:`started-stevens2025zea` and :cite:p:`started-van2024active`.
 
-.. bibliography::
-   :all:
+.. bibliography:: ../../paper/paper.bib
    :style: unsrt
+   :keyprefix: started-
+   :labelprefix: B-
+
+   stevens2025zea
+   van2024active
 
 Or you can use the following BibTeX entry:
 
-.. literalinclude:: references.bib
+.. literalinclude:: ../../paper/paper.bib
    :language: bibtex
+   :lines: 1-6
