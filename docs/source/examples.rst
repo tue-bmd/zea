@@ -1,49 +1,49 @@
 Examples
 ========
 
-Explore practical usage of zea with the following example notebooks.
+Explore practical usage of ``zea`` with the following example notebooks.
 
 Data
----------------
+----
 
 .. toctree::
-   :maxdepth: 1
-   :glob:
+    :maxdepth: 1
+    :glob:
 
-   notebooks/data/*
+    notebooks/data/*
 
 Pipeline
 --------
 
 .. toctree::
-   :maxdepth: 1
-   :glob:
+    :maxdepth: 1
+    :glob:
 
-   notebooks/pipeline/*
+    notebooks/pipeline/*
 
 Models
 ------
 
 .. toctree::
-   :maxdepth: 1
-   :glob:
+    :maxdepth: 1
+    :glob:
 
-   notebooks/models/*
+    notebooks/models/*
 
 Metrics
 -------
 
 .. toctree::
-   :maxdepth: 1
-   :glob:
+    :maxdepth: 1
+    :glob:
 
-   notebooks/metrics/*
+    notebooks/metrics/*
 
 Agent
-------
+-----
 
 .. toctree::
-   :maxdepth: 1
-   :glob:
+    :maxdepth: 1
+    :glob:
 
-   notebooks/agent/*
+    notebooks/agent/*

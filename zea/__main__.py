@@ -21,7 +21,7 @@ def get_args():
         "-t",
         "--task",
         default="view",
-        choices=["view", "generate"],
+        choices=["view"],
         type=str,
         help="which task to run",
     )
@@ -61,11 +61,8 @@ def main():
 
     import keras
 
-    from zea.generate import GenerateDataSet
     from zea.interface import Interface
-    from zea.internal.checks import _DATA_TYPES
     from zea.internal.setup_zea import setup
-    from zea.utils import keep_trying, strtobool
 
     config = setup(args.config)
 
@@ -77,31 +74,8 @@ def main():
 
         log.info(f"Using {keras.backend.backend()} backend")
         cli.run(plot=True)
-
-    elif args.task == "generate":
-        destination_folder = keep_trying(lambda: input(">> Give absolute destination folder path"))
-        to_dtype = keep_trying(
-            lambda: input(f">> Specify data type \n{_DATA_TYPES}: "),
-            required_set=_DATA_TYPES,
-        )
-        retain_folder_structure = keep_trying(
-            lambda: strtobool(input(">> Retain folder structure? (Y/N): "))
-        )
-        if to_dtype in ["image", "image_sc"]:
-            filetype = keep_trying(
-                lambda: input(">> Filetype (hdf5, png): "), required_set=["hdf5", "png"]
-            )
-        else:
-            filetype = "hdf5"
-
-        generator = GenerateDataSet(
-            config,
-            to_dtype=to_dtype,
-            destination_folder=destination_folder,
-            retain_folder_structure=retain_folder_structure,
-            filetype=filetype,
-        )
-        generator.generate()
+    else:
+        raise ValueError(f"Unknown task {args.task}, see `zea --help` for available tasks.")
 
 
 if __name__ == "__main__":
