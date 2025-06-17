@@ -11,7 +11,7 @@ from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config.config import Config
 from zea.internal.core import DataTypes
 from zea.internal.registry import ops_registry
-from zea.probes import Dummy, Probe
+from zea.probes import Probe
 from zea.scan import Scan
 
 """Some operations for testing"""
@@ -380,7 +380,7 @@ def test_pipeline_validation():
 def test_pipeline_with_scan_probe_config():
     """Tests the Pipeline with Scan, Probe, and Config objects as inputs."""
 
-    probe = Dummy()
+    probe = Probe.from_name("generic")
     scan = Scan(
         n_tx=128,
         n_ax=256,
@@ -390,8 +390,6 @@ def test_pipeline_with_scan_probe_config():
         sampling_frequency=5.0,
         xlims=(-2e-3, 2e-3),
     )
-
-    # TODO: Add Config object as input to the Pipeline, currently config is not an Object
 
     operations = [MultiplyOperation(), AddOperation()]
     pipeline = ops.Pipeline(operations=operations)
