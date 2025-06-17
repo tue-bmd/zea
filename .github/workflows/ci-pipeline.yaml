@@ -205,7 +205,7 @@ jobs:
             sh -c "\
               sudo apt-get update && \
               sudo apt-get install -y pandoc && \
-              pip install -e .. && \
+              pip install -e ..[docs] && \
               export PATH=\"/tmp/.local/bin:\$PATH\" && \
               make docs-clean && \
               make docs-build SPHINXOPTS='-W --keep-going' \
