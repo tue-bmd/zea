@@ -87,6 +87,7 @@ docs = [
     "sphinx-autobuild",
     "sphinx-autodoc-typehints",
     "sphinx-copybutton",
+    "sphinx_design",
     "mock",
     "myst-parser",
     "nbsphinx",
