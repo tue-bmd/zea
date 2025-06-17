@@ -8,19 +8,19 @@
 [![Documentation Status](https://readthedocs.org/projects/zea/badge/?version=latest)](https://zea.readthedocs.io/en/latest/?badge=latest)
 [![License](https://img.shields.io/github/license/tue-bmd/zea)](https://github.com/tue-bmd/zea/blob/main/LICENSE) -->
 
-The ultrasound toolbox (``zea``) is a collection of ultrasound tools (Python) such as beamforming code, visualization tools and deep learning scripts. Check out the full documentation [here](https://usbmd-toolbox.web.app/).
+Welcome to the documentation for the `zea` package: *A Toolbox for Cognitive Ultrasound Imaging.*
 
-The idea of this toolbox is that it is self-sustained, meaning ultrasound researchers can use the tools to create new models / algorithms and after completed, can add them to the toolbox. This repository is being maintained by researchers from the [BM/d lab](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab/) at Eindhoven University of Technology. Currently for [internal](LICENSE) use only.
+`zea` is a Python library that offers ultrasound signal processing, image reconstruction, and deep learning. Currently, `zea` offers:
 
-Currently ``zea`` offers:
+- A flexible ultrasound signal processing and image reconstruction pipeline written in your favorite deep learning framework.
+- A complete set of data acquisition loading tools for ultrasound data and acquisition parameters, designed for deep learning workflows.
+- A collection of pretrained models for ultrasound image and signal processing.
+- **Multi-Backend Support via [Keras3](https://keras.io/keras_3/):** You can use [PyTorch](https://github.com/pytorch/pytorch), [TensorFlow](https://github.com/tensorflow/tensorflow), or [JAX](https://github.com/google/jax).
 
-- Complete ultrasound signal processing and image reconstruction [pipeline](zea/ops.py).
-- A collection of [models](zea/models) for ultrasound image and signal processing.
-- Multi-Backend Support via [Keras3](https://keras.io/keras_3/): You can use [PyTorch](https://github.com/pytorch/pytorch), [TensorFlow](https://github.com/tensorflow/tensorflow), or [JAX](https://github.com/google/jax)
+> [!WARNING]
+> **Beta!**
+> This package is highly experimental and under active development. It is mainly used to support [our research](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab) and as a basis for our publications. That being said, we are happy to share it with the ultrasound community and hope it will be useful for your research as well.
 
-
-### 📖 Citation
-
-If you use **zea** in your research, please cite our work.
-
-You can find the citation information by clicking the **"Cite this repository"** button on the top right of this page.
+> [!NOTE]
+> 📖 If you use `zea` in your research, please cite our work.
+> You can find the citation information by clicking the **"Cite this repository"** button on the top right of this page.
