@@ -4458,7 +4458,7 @@ description = "A sphinx extension for designing beautiful, view size responsive 
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"dev\""
+markers = "extra == \"dev\" or extra == \"docs\""
 files = [
     {file = "sphinx_design-0.6.1-py3-none-any.whl", hash = "sha256:b11f37db1a802a183d61b159d9a202314d4d2fe29c163437001324fe2f19549c"},
     {file = "sphinx_design-0.6.1.tar.gz", hash = "sha256:b44eea3719386d04d765c1a8257caca2b3e6f8421d7b3a5e742c0fd45f84e632"},
@@ -5324,11 +5324,11 @@ propcache = ">=0.2.1"
 dev = ["PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "mock", "myst-parser", "nbsphinx", "opencv-python-headless", "papermill", "pre-commit", "pytest", "ruff", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx_design", "sphinxcontrib-bibtex"]
 display = ["opencv-python"]
 display-headless = ["opencv-python-headless"]
-docs = ["PyStemmer", "furo", "mock", "myst-parser", "nbsphinx", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton"]
+docs = ["PyStemmer", "furo", "mock", "myst-parser", "nbsphinx", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx_design"]
 jax = ["jax"]
 tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "pytest", "ruff"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.13"
-content-hash = "8583d5660769771b13a02eb17c1f0ee5bfa175228cec9eaf98cb1b80251c57c7"
+content-hash = "676aa9a63fe7d9195f3b29648eb6dffcf6a8e531475a9ed23e306731bfd7b28d"
