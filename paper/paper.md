@@ -138,7 +138,7 @@ Which will generate the following output:
 ![Diffusion posterior samples](diffusion_prior_samples.png){ width=90% }
 
 ## Agent
-The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework. In particular, the current functions support intelligent focused transmit scheme design via _active perception_, with implementations of key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to create measurement models mapping from fully-observed to subsampled images.
+The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework. In particular, the current functions support intelligent focused transmit scheme design via _active perception_ [@van2024active], with implementations of key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to create measurement models mapping from fully-observed to subsampled images.
 
 
 # References
