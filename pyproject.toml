@@ -88,6 +88,7 @@ docs = [
     "sphinx-autodoc-typehints",
     "sphinx-copybutton",
     "sphinx_design",
+    "sphinxcontrib-bibtex",
     "mock",
     "myst-parser",
     "nbsphinx",
@@ -114,10 +115,6 @@ zea = "zea.__main__:main"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-# To update the poetry.lock file run `sudo /opt/poetry-venv/bin/python3 -m poetry lock` inside the zea container (where poetry is installed)
-# Otherwise a simple `poetry lock` will suffice.
-# Rebuild docker image afterwards to match the lock file!
 
 [tool.ruff]
 # We use ruff to lint and auto-format code
