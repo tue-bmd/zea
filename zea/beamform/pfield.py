@@ -1,6 +1,4 @@
-"""
-Pressure Field Computation for Ultrasound Imaging
-=================================================
+"""Pressure field computation for ultrasound imaging.
 
 This module provides routines for automatic computation of the acoustic pressure field
 used for compounding multiple transmit (Tx) events in ultrasound imaging.

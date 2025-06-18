@@ -1,4 +1,4 @@
-"""config.py
+"""Config module for managing configuration settings.
 
 This module provides the :class:`Config` class for managing configuration settings,
 with support for loading from YAML files, HuggingFace Hub, and dot notation access.
@@ -11,14 +11,14 @@ Features
 - Attribute access logging and suggestion of similar attribute names.
 - Freezing/unfreezing to prevent/allow new attributes.
 - Serialization to YAML/JSON.
-- Integration with HuggingFace Hub.
+- Integration with Hugging Face Hub.
 
 Example Usage
--------------
+^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from zea.config.config import Config
+    from zea import Config
 
     # Load from YAML
     config = Config.from_yaml("config.yaml")

@@ -1,4 +1,4 @@
-"""Beamformer functions."""
+"""Main beamforming functions for ultrasound imaging."""
 
 import numpy as np
 from keras import ops

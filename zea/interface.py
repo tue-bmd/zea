@@ -1,4 +1,19 @@
-"""Convenience interface for loading and displaying ultrasound data."""
+"""Convenience interface for loading and displaying ultrasound data.
+
+Example usage
+^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    import zea
+    from zea.internal.setup_zea import setup_config
+
+    config = setup_config("hf://zeahub/configs/config_camus.yaml")
+
+    interface = zea.Interface(config)
+    interface.run(plot=True)
+
+"""
 
 import asyncio
 import time

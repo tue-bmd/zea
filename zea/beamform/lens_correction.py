@@ -1,4 +1,4 @@
-"""Ops module for computing lens corrected delays."""
+"""Lens corrected delay computation for ultrasound beamforming."""
 
 from keras import ops
 
