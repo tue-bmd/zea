@@ -13,6 +13,8 @@ Besides installation through `PyPI <https://pypi.org/project/zea>`_, we also pro
                conda create -n zea python=3.12 # 3.10, 3.11, or 3.12
                conda activate zea
                pip install zea
+               # ! note, you still need to install a backend
+               # see below for details
 
     .. tab-item:: Docker
 
