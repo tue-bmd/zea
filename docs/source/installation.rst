@@ -13,6 +13,8 @@ Besides installation through `PyPI <https://pypi.org/project/zea>`_, we also pro
                conda create -n zea python=3.12 # 3.10, 3.11, or 3.12
                conda activate zea
                pip install zea
+               # ! note, you still need to install a backend
+               # see below for details
 
     .. tab-item:: Docker
 
@@ -108,8 +110,3 @@ Run a container with one of the built images. Ensure you mount your repository a
 
    The Docker container sets a random hostname by default. You can set a hostname with the ``--hostname`` flag. This is useful for the ``users.yaml`` file. Alternatively, you can use the hostname wildcard in the ``users.yaml`` file.
 
-
-Development using VSCode
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-You can use the VSCode Remote Containers extension to attach to the running container for development. A `devcontainer.json <https://github.com/zeahub/ultrasound-toolbox/blob/main/.devcontainer/devcontainer.json>`__ file is provided in our repository, which specifies the Docker image to use, the volumes to mount, and the extensions to install. If you want to work on ``zea`` inside the development container, you can open the repository in VSCode, and use "Dev Containers: Rebuild Container" from the command palette (Ctrl+Shift+P).
