@@ -1,4 +1,24 @@
-"""Utility functions for handling data paths."""
+"""Utility functions for handling local data paths.
+
+This module provides utilities for managing local and remote data paths in ``zea`` projects.
+It supports user- and machine-specific configuration via a ``users.yaml`` file, allowing
+dynamic resolution of data roots for portable and reproducible workflows.
+
+See the notebook :doc:`../notebooks/data/zea_local_data` for an extensive example of how
+to set up your local data paths.
+
+
+Example usage
+^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    from zea.datapaths import set_data_paths
+
+    user = set_data_paths("users.yaml")
+    print(user.data_root)
+
+"""
 
 import copy
 import getpass

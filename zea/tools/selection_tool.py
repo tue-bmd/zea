@@ -1,7 +1,4 @@
-"""
-=========================================================
-zea.tools.selection_tool — Interactive Selection Tools
-=========================================================
+"""Interactive selection tools.
 
 This module provides interactive tools for selecting regions of interest (ROIs)
 from 2D arrays or images displayed with matplotlib. It is designed for use in

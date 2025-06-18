@@ -1,10 +1,10 @@
-"""Custom zea python logging module.
+"""Custom ``zea`` python logging module.
 
 Wrapper around python logging module to provide a simple interface for logging both
 to the console and to a file with color support.
 
 Example usage
--------------
+^^^^^^^^^^^^^^
 
 .. code-block:: python
 

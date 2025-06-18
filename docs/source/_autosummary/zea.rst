@@ -12,6 +12,7 @@ zea
 
    agent
    backend
+   beamform
    config
    data
    datapaths

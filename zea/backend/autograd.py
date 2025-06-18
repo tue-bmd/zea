@@ -1,4 +1,4 @@
-"""Allow different backends for autograd."""
+"""Autograd wrapper for different backends."""
 
 import functools
 
