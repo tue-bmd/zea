@@ -91,35 +91,110 @@ If you are unsure which backend to use, we recommend JAX as it is currently the 
 
 After installing a backend, set the ``KERAS_BACKEND`` environment variable to one of the following:
 
-- ``KERAS_BACKEND=jax``
-- ``KERAS_BACKEND=torch``
-- ``KERAS_BACKEND=tensorflow``
-- ``KERAS_BACKEND=numpy`` (possible, but with limited functionality)
-
-For example, to set the backend to JAX, you can use one of the following:
-
 .. tab-set::
 
-    .. tab-item:: Python
+   .. tab-item:: JAX
 
-        .. code-block:: python
+      .. tab-set::
 
-            # at the top of your script before other imports
-            import os
-            os.environ["KERAS_BACKEND"] = "jax"
-            import zea
+         .. tab-item:: Python
 
-    .. tab-item:: Conda
+            .. code-block:: python
 
-        .. code-block:: shell
+               # at the top of your script before other imports
+               import os
+               os.environ["KERAS_BACKEND"] = "jax"
+               import zea
 
-            conda env config vars set KERAS_BACKEND=jax
+         .. tab-item:: Conda
 
-    .. tab-item:: Shell
+            .. code-block:: shell
 
-        .. code-block:: shell
+               conda env config vars set KERAS_BACKEND=jax
 
-            export KERAS_BACKEND=jax
+         .. tab-item:: Shell
+
+            .. code-block:: shell
+
+               export KERAS_BACKEND=jax
+
+   .. tab-item:: PyTorch
+
+      .. tab-set::
+
+         .. tab-item:: Python
+
+            .. code-block:: python
+
+               # at the top of your script before other imports
+               import os
+               os.environ["KERAS_BACKEND"] = "torch"
+               import zea
+
+         .. tab-item:: Conda
+
+            .. code-block:: shell
+
+               conda env config vars set KERAS_BACKEND=torch
+
+         .. tab-item:: Shell
+
+            .. code-block:: shell
+
+               export KERAS_BACKEND=torch
+
+   .. tab-item:: TensorFlow
+
+      .. tab-set::
+
+         .. tab-item:: Python
+
+            .. code-block:: python
+
+               # at the top of your script before other imports
+               import os
+               os.environ["KERAS_BACKEND"] = "tensorflow"
+               import zea
+
+         .. tab-item:: Conda
+
+            .. code-block:: shell
+
+               conda env config vars set KERAS_BACKEND=tensorflow
+
+         .. tab-item:: Shell
+
+            .. code-block:: shell
+
+               export KERAS_BACKEND=tensorflow
+
+   .. tab-item:: NumPy
+
+      .. tab-set::
+
+         .. tab-item:: Python
+
+            .. code-block:: python
+
+               # at the top of your script before other imports
+               # note NumPy backend has limited functionality
+               import os
+               os.environ["KERAS_BACKEND"] = "numpy"
+               import zea
+
+         .. tab-item:: Conda
+
+            .. code-block:: shell
+
+               # note NumPy backend has limited functionality
+               conda env config vars set KERAS_BACKEND=numpy
+
+         .. tab-item:: Shell
+
+            .. code-block:: shell
+
+               # note NumPy backend has limited functionality
+               export KERAS_BACKEND=numpy
 
 .. backend-installation-end
 
