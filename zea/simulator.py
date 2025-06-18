@@ -10,6 +10,7 @@ repeatedly with different scatterer positions and magnitudes and then stack the 
 Examples
 ^^^^^^^^
 .. code-block:: python
+
 raw_data = simulate_rf(
     scatterer_positions=np.array([[0, 0, 20e-3]]),
     scatterer_magnitudes=np.array([1.0]),
@@ -27,6 +28,7 @@ raw_data = simulate_rf(
     attenuation_coef=0.5,
     tx_apodizations=np.ones((1, 64)),
 )
+
 """
 
 import numpy as np
