@@ -1,4 +1,29 @@
-"""Backend module for zea."""
+"""Backend subpackage for ``zea``.
+
+This subpackage provides backend-specific utilities for the ``zea`` library. Most backend logic is handled by Keras 3, but a few features require custom wrappers to ensure compatibility and performance across JAX, TensorFlow, and PyTorch.
+
+.. note::
+    Most backend-specific logic is handled by Keras 3, so this subpackage is intentionally minimal. Only features not natively supported by Keras (such as JIT and autograd) are implemented here.
+
+Key Features
+------------
+
+- **JIT Compilation (:func:`zea.backend.jit`):**
+  Provides a unified interface for just-in-time (JIT) compilation of functions, dispatching to the appropriate backend (JAX or TensorFlow) as needed. This enables accelerated execution of computationally intensive routines.
+
+- **Automatic Differentiation (:class:`zea.backend.AutoGrad`):**
+  Offers a backend-agnostic wrapper for automatic differentiation, allowing gradient computation regardless of the underlying ML library.
+
+- **Backend Submodules:**
+
+  - :mod:`zea.backend.jax` -- JAX-specific utilities and device management.
+  - :mod:`zea.backend.torch` -- PyTorch-specific utilities and device management.
+  - :mod:`zea.backend.tensorflow` -- TensorFlow-specific utilities, and device management, as well as data loading utilities.
+
+- **Data Loading (`make_dataloader`):**
+  The :func:`zea.backend.tensorflow.make_dataloader` function is implemented using TensorFlow's efficient data pipeline utilities. It provides a convenient way to load and preprocess data for machine learning workflows, leveraging TensorFlow's `tf.data.Dataset` API.
+
+"""
 
 import keras
 

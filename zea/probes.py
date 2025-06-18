@@ -1,5 +1,4 @@
-"""
-Module containing parameters and classes for different ultrasound probes.
+"""Module containing parameters and classes for different ultrasound probes.
 
 All probes are based on the base :class:`Probe` class.
 
@@ -10,6 +9,18 @@ Supported probes
 - :class:`Verasonics_l11_4v` -- Verasonics L11-4V linear ultrasound transducer
 - :class:`Verasonics_l11_5v` -- Verasonics L11-5V linear ultrasound transducer
 - :class:`Esaote_sll1543` -- Esaote SLL1543 linear ultrasound transducer
+
+
+Example usage
+^^^^^^^^^^^^^^
+
+We can initialize a generic probe with the following code:
+
+... code-block:: python
+
+    import zea
+    probe = zea.Probe.from_name("generic")
+    print(probe.get_parameters())
 
 """
 

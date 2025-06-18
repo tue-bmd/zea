@@ -1,4 +1,4 @@
-"""Input/output functions.
+"""Input / output functions for reading and writing files.
 
 Use to quickly read and write files or interact with file system.
 """
