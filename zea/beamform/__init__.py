@@ -13,9 +13,7 @@ Modules
 - :mod:`zea.beamform.pixelgrid` -- Pixel grid generation for scan conversion and beamforming.
 
 For practical usage and examples of integrating beamforming operations into a processing pipeline,
-see the pipeline example notebook:
-
-    - :doc:`../notebooks/pipeline/zea_pipeline_example`
+see the pipeline example notebook: :doc:`../notebooks/pipeline/zea_pipeline_example`
 
 """
 

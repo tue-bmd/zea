@@ -8,10 +8,10 @@ This subpackage provides backend-specific utilities for the ``zea`` library. Mos
 Key Features
 ------------
 
-- **JIT Compilation (:func:`zea.backend.jit`):**
+- **JIT Compilation** (:func:`zea.backend.jit`):
   Provides a unified interface for just-in-time (JIT) compilation of functions, dispatching to the appropriate backend (JAX or TensorFlow) as needed. This enables accelerated execution of computationally intensive routines.
 
-- **Automatic Differentiation (:class:`zea.backend.AutoGrad`):**
+- **Automatic Differentiation** (:class:`zea.backend.AutoGrad`):
   Offers a backend-agnostic wrapper for automatic differentiation, allowing gradient computation regardless of the underlying ML library.
 
 - **Backend Submodules:**
@@ -20,8 +20,8 @@ Key Features
   - :mod:`zea.backend.torch` -- PyTorch-specific utilities and device management.
   - :mod:`zea.backend.tensorflow` -- TensorFlow-specific utilities, and device management, as well as data loading utilities.
 
-- **Data Loading (`make_dataloader`):**
-  The :func:`zea.backend.tensorflow.make_dataloader` function is implemented using TensorFlow's efficient data pipeline utilities. It provides a convenient way to load and preprocess data for machine learning workflows, leveraging TensorFlow's `tf.data.Dataset` API.
+- **Data Loading** (:func:`zea.backend.tensorflow.make_dataloader`):
+  This function is implemented using TensorFlow's efficient data pipeline utilities. It provides a convenient way to load and preprocess data for machine learning workflows, leveraging TensorFlow's ``tf.data.Dataset`` API.
 
 """
 
