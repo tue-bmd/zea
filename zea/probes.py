@@ -16,9 +16,10 @@ Example usage
 
 We can initialize a generic probe with the following code:
 
-... code-block:: python
+.. code-block:: python
 
     import zea
+
     probe = zea.Probe.from_name("generic")
     print(probe.get_parameters())
 
