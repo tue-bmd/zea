@@ -1,11 +1,38 @@
-"""Frequency domain ultrasound simulator based on linear scattering."""
+"""Frequency domain ultrasound simulator.
+
+The simulator works in the frequency domain (RFFT domain) and simulates RF data as a superposition
+of scatterer responses. Every scatterer has a location and a magnitude.
+
+To use it in your code, simply call the `simulate_rf` function with the desired transmit scheme
+parameters and scatterers. To simulate a sequence of multiple frames, you can call `simulate_rf`
+repeatedly with different scatterer positions and magnitudes and then stack the results.
+
+Examples
+^^^^^^^^
+.. code-block:: python
+raw_data = simulate_rf(
+    scatterer_positions=np.array([[0, 0, 20e-3]]),
+    scatterer_magnitudes=np.array([1.0]),
+    probe_geometry=np.stack([np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1),
+    apply_lens_correction=True,
+    lens_thickness=1e-3,
+    lens_sound_speed=1000,
+    sound_speed=1540,
+    n_ax=1024,
+    center_frequency=5e6,
+    sampling_frequency=20e6,
+    t0_delays=np.zeros((1, 64)),
+    initial_times=np.zeros(1),
+    element_width=0.2e-3,
+    attenuation_coef=0.5,
+    tx_apodizations=np.ones((1, 64)),
+)
+"""
 
 import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
-
-PI = np.pi
 
 
 def simulate_rf(
@@ -29,10 +56,8 @@ def simulate_rf(
     Simulates RF data for a given set of scatterers.
 
     Args:
-        scatterer_positions (array-like): The positions of the scatterers [m] of shape
-            (n_scat, 3).
-        scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape
-            (n_scat,).
+        scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
+        scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape (n_scat,).
         probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
         apply_lens_correction (bool): Whether to apply lens correction.
         lens_thickness (float): The thickness of the lens [m].
@@ -41,8 +66,7 @@ def simulate_rf(
         n_ax (int): The number of samples in the RF data.
         center_frequency (float): The center frequency of the pulse [Hz].
         sampling_frequency (float): The sampling frequency of the RF data [Hz].
-        t0_delays (array-like): The delays of the transmitting elements [s] of shape
-            (n_tx, n_el).
+        t0_delays (array-like): The delays of the transmitting elements [s] of shape (n_tx, n_el).
         initial_times (array-like): The initial times of the transmitting elements [s] of
             shape (n_tx,).
         element_width (float): The width of the elements [m].
@@ -200,7 +224,7 @@ def delay2(f, tau, n_fft, sampling_frequency):
     Returns:
         array-like: The spectrum of the delay.
     """
-    arg = ops.array(-1j, dtype="complex64") * ops.cast(2 * PI * tau * f, "complex64")
+    arg = ops.array(-1j, dtype="complex64") * ops.cast(2 * np.pi * tau * f, "complex64")
     return ops.where(
         tau < n_fft / sampling_frequency,
         ops.exp(arg),
@@ -224,7 +248,15 @@ def attenuate(f, attenuation_coef, dist):
 
 
 def spread(dist, mindist=1e-4):
-    """Function modeling geometric spreading of the wavefront."""
+    """Function modeling geometric spreading of the wavefront.
+
+    Args:
+        dist (array-like): The distance the wave has traveled.
+        mindist (float): The minimum distance to prevent division by zero.
+
+    Returns:
+        array-like: The geometric spreading factor of same shape as `dist`.
+    """
     dist = ops.clip(dist, mindist, float("inf"))
     return mindist / dist
 
@@ -250,7 +282,7 @@ def hann_unnormalized(x, width):
     Returns:
         hann_vals (array-like): The values of the Hann window function.
     """
-    return ops.where(ops.abs(x) < width / 2, ops.cos(PI * x / width) ** 2, 0)
+    return ops.where(ops.abs(x) < width / 2, ops.cos(np.pi * x / width) ** 2, 0)
 
 
 def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
@@ -261,8 +293,8 @@ def get_pulse_spectrum_fn(center_frequency, n_period=3.0):
         n_period (float): The number of periods to include in the pulse.
 
     Returns:
-        spectrum_fn (callable): A function that computes the spectrum of the pulse for the
-            input frequencies in Hz.
+        spectrum_fn (callable): A function that computes the spectrum of the pulse
+        for the input frequencies in Hz.
     """
     period = n_period / center_frequency
 
@@ -283,8 +315,8 @@ def get_transducer_bandwidth_fn(center_frequency, bandwidth):
         bandwidth (float): The bandwidth of the probe.
 
     Returns
-        spectrum_fn (callable): A function that computes the spectrum of the pulse for the
-            input frequencies in Hz.
+        spectrum_fn (callable): A function that computes the spectrum of the pulse for
+        the input frequencies in Hz.
     """
 
     def bandwidth_fn(f):
@@ -294,8 +326,8 @@ def get_transducer_bandwidth_fn(center_frequency, bandwidth):
 
 
 def sinc(x):
-    """The normalized sinc function with a small offset to precent division by zero."""
-    x = ops.abs(PI * x) + 1e-9
+    """The normalized sinc function with a small offset to prevent division by zero."""
+    x = ops.abs(np.pi * x) + 1e-9
     return ops.sin(x) / x
 
 
