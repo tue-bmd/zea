@@ -1,4 +1,4 @@
-"""Display functionality."""
+"""Display functionality, including scan conversion frustrum conversion, etc."""
 
 from functools import partial
 from typing import Tuple, Union

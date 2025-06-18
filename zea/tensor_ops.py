@@ -1,4 +1,4 @@
-"""Basic tensor operations implemented with the multi-backend `keras.ops`."""
+"""Basic tensor operations implemented with the multi-backend ``keras.ops``."""
 
 from typing import Tuple, Union
 

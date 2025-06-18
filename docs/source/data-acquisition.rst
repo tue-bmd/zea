@@ -3,9 +3,16 @@
 Data
 ================================
 
-This page provides a comprehensive overview of how ultrasound data is acquired, structured, and managed within the **zea** toolbox.
+This page provides a comprehensive overview of how ultrasound data is acquired, structured, and managed within the ``zea`` toolbox.
+
 For a quick start, see :doc:`Getting Started <getting-started>`.
 For a full reference of all config parameters, see :doc:`Parameters <parameters>`. Lastly, some example notebooks on data handling can be found in :doc:`Examples <examples>`.
+
+-------------------------------
+``zea`` data handling
+-------------------------------
+
+For information on how to handle data in the ``zea`` toolbox, see the :mod:`zea.data` module documentation.
 
 -------------------------------
 ``zea`` data format

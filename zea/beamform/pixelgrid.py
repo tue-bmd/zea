@@ -1,4 +1,4 @@
-"""Pixel grid calculation for beamforming"""
+"""Pixel grid calculation for ultrasound beamforming."""
 
 import numpy as np
 
