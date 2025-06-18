@@ -140,7 +140,7 @@ Which will generate the following output:
 ## Agent
 The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework. In particular,
 the current functions support intelligent focused transmit scheme design via _active perception_, with implementations of
-key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to provide measurement models
+key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to create measurement models
 mapping from fully-observed to subsampled images.
 
 
