@@ -3,31 +3,38 @@
 The simulator works in the frequency domain (RFFT domain) and simulates RF data as a superposition
 of scatterer responses. Every scatterer has a location and a magnitude.
 
-To use it in your code, simply call the `simulate_rf` function with the desired transmit scheme
-parameters and scatterers. To simulate a sequence of multiple frames, you can call `simulate_rf`
-repeatedly with different scatterer positions and magnitudes and then stack the results.
+To use it in your code, simply call the :func:`simulate_rf` function with the desired
+transmit scheme parameters and scatterers. To simulate a sequence of multiple frames,
+you can call :func:`simulate_rf` repeatedly with different scatterer positions and magnitudes
+and then stack the results.
 
-Examples
-^^^^^^^^
+Example usage
+^^^^^^^^^^^^^
+
+A simple example of simulating RF data with a single scatterer at the center of the probe. For a
+more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_example`.
+
 .. code-block:: python
 
-raw_data = simulate_rf(
-    scatterer_positions=np.array([[0, 0, 20e-3]]),
-    scatterer_magnitudes=np.array([1.0]),
-    probe_geometry=np.stack([np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1),
-    apply_lens_correction=True,
-    lens_thickness=1e-3,
-    lens_sound_speed=1000,
-    sound_speed=1540,
-    n_ax=1024,
-    center_frequency=5e6,
-    sampling_frequency=20e6,
-    t0_delays=np.zeros((1, 64)),
-    initial_times=np.zeros(1),
-    element_width=0.2e-3,
-    attenuation_coef=0.5,
-    tx_apodizations=np.ones((1, 64)),
-)
+    raw_data = simulate_rf(
+        scatterer_positions=np.array([[0, 0, 20e-3]]),
+        scatterer_magnitudes=np.array([1.0]),
+        probe_geometry=np.stack(
+            [np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1
+        ),
+        apply_lens_correction=True,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000,
+        sound_speed=1540,
+        n_ax=1024,
+        center_frequency=5e6,
+        sampling_frequency=20e6,
+        t0_delays=np.zeros((1, 64)),
+        initial_times=np.zeros(1),
+        element_width=0.2e-3,
+        attenuation_coef=0.5,
+        tx_apodizations=np.ones((1, 64)),
+    )
 
 """
 
