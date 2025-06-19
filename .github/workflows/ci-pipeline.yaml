@@ -38,6 +38,16 @@ jobs:
     needs: [set-tag, linter]
     runs-on: ubuntu-latest
     steps:
+      - name: Free up disk space
+        run : |
+            echo "Disk space before cleanup:"
+            df -h
+            sudo rm -rf "/usr/local/share/boost"
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+            sudo rm -rf /opt/hostedtoolcache
+            echo "Disk space after cleanup:"
+            df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
