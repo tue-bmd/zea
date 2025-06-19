@@ -84,7 +84,7 @@ from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
 from zea import log
 from zea.backend import jit
 from zea.beamform.beamformer import tof_correction
-from zea.config.config import Config
+from zea.config import Config
 from zea.display import scan_convert
 from zea.internal.checks import _assert_keys_and_axes
 from zea.internal.core import STATIC, DataTypes, ZEADecoderJSON, ZEAEncoderJSON

@@ -13,9 +13,8 @@ from statistics import mean, median, stdev
 
 import numpy as np
 import yaml
+from keras import ops
 from PIL import Image
-import keras.ops as ops
-
 
 from zea import log
 
@@ -78,6 +77,7 @@ def translate(array, range_from=None, range_to=(0, 255)):
 def map_negative_indices(indices: list, length: int):
     """Maps negative indices for array indexing to positive indices.
     Example:
+        >>> from zea.utils import map_negative_indices
         >>> map_negative_indices([-1, -2], 5)
         [4, 3]
     """
@@ -388,6 +388,7 @@ def deprecated(replacement=None):
         DeprecationWarning: A warning is issued when the deprecated item is called or accessed.
 
     Example:
+        >>> from zea.utils import deprecated
         >>> class MyClass:
         ...     @deprecated(replacement="new_method")
         ...     def old_method(self):
@@ -406,17 +407,11 @@ def deprecated(replacement=None):
         >>> obj = MyClass()
         >>> obj.old_method()
         This is the old method.
-
         >>> # Accessing the deprecated attribute
         >>> print(obj.old_property)
         Old value
-
         >>> # Setting value to the deprecated attribute
         >>> obj.old_property = "New value"
-        __main__:28: DeprecationWarning: Access to deprecated attribute old_property.
-        __main__:29: DeprecationWarning: Use new_property instead.
-        __main__:32: DeprecationWarning: Setting value to deprecated attribute old_property.
-        __main__:33: DeprecationWarning: Use new_property instead.
     """
 
     def decorator(item):
@@ -601,9 +596,11 @@ class FunctionTimer:
     A decorator class for timing the execution of functions.
 
     Example:
+        >>> from zea.utils import FunctionTimer
         >>> timer = FunctionTimer()
+        >>> my_function = lambda: sum(range(10))
         >>> my_function = timer(my_function)
-        >>> my_function()
+        >>> _ = my_function()
         >>> print(timer.get_stats("my_function"))
     """
 

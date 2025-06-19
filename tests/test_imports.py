@@ -36,7 +36,11 @@ def no_ml_lib_import(backends: list = None, allow_keras_backend=True):
     def import_fail_on_ml_libs(name, *args, **kwargs):
         """Raise an error if a disallowed backend is imported."""
         if name.lower() in backends:
-            raise ImportError(f"{name} is not allowed to be imported in this program.")
+            raise ImportError(
+                f"Disallowed backend import detected: '{name}'. "
+                f"The following backends are not allowed: {backends}. "
+                f"Current KERAS_BACKEND is set to '{curr_backend}'."
+            )
         return original_import_func(name, *args, **kwargs)
 
     # Override the built-in import function
