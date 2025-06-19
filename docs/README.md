@@ -27,7 +27,7 @@ export LC_ALL=C.UTF-8
 From the `docs` directory (`cd docs`), run:
 
 ```sh
-make docs-build
+make docs-clean && make docs-build
 ```
 
 This will generate the HTML documentation in `docs/_build/html`.
@@ -45,7 +45,7 @@ docs/_build/html/index.html
 For a live preview that automatically reloads on changes, use:
 
 ```sh
-make docs-serve
+make docs-clean && make docs-serve
 ```
 
 This uses `sphinx-autobuild` to serve the docs at [http://127.0.0.1:8000](http://127.0.0.1:8000).
