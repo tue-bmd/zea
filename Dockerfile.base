@@ -1,30 +1,144 @@
 # syntax=docker/dockerfile:1
 
 ##############################
-# Builder: install deps on slim Python 3.12
+# 0) Declare build-time args
 ##############################
-FROM python:3.12-slim-bullseye AS builder
-ARG BACKEND=all
-ARG GPU=false
+ARG INSTALL_JAX=cpu
+ARG INSTALL_TORCH=cpu
+ARG INSTALL_TF=cpu
+ARG DEV=true
+
+##############################
+# 1) Base builder: non-backend deps
+##############################
+FROM python:3.12-slim-bullseye AS builder-base
+
 ARG DEBIAN_FRONTEND=noninteractive
-
-# Prevent Python from writing .pyc files and use C locale
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV LC_ALL=C
-
-# Poetry and cache settings
-ENV POETRY_VERSION=2.1.3 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    LC_ALL=C \
+    POETRY_VERSION=2.1.3 \
     POETRY_VENV=/opt/poetry-venv \
     POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=0 \
     POETRY_VIRTUALENVS_CREATE=0 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache \
-    PIP_CACHE_DIR=/root/.cache/pip
-# Ensure poetry venv is on PATH
+    POETRY_VIRTUALENVS_IN_PROJECT=0 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
+
+# Install Poetry in its own venv (but disable venv for project deps)
+RUN python3 -m venv $POETRY_VENV \
+ && $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
+
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
+WORKDIR /ultrasound-toolbox
+COPY pyproject.toml poetry.lock ./
 
-# 1. Install system packages and create non-root users (as before)
+# Install all non-backend dependencies, installing dev extras only if DEV is true.
+ARG DEV
+RUN if [ "$DEV" = "true" ]; then \
+      poetry install --no-root --compile -E dev; \
+    else \
+      poetry install --no-root --compile; \
+    fi
+
+# If DEV is not true, clear out the contents of the poetry venv but keep the directory
+RUN if [ "$DEV" != "true" ]; then find $POETRY_VENV -mindepth 1 -delete; fi
+
+##############################
+# 2) JAX variants
+##############################
+FROM builder-base AS builder-jax-cpu
+WORKDIR /wheels
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels jax
+
+FROM builder-base AS builder-jax-gpu
+WORKDIR /wheels
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels "jax[cuda12]==0.6.0"
+
+FROM builder-base AS builder-jax-false
+RUN mkdir /wheels
+
+##############################
+# 3) PyTorch variants
+##############################
+FROM builder-base AS builder-torch-cpu
+WORKDIR /wheels
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
+      torch==2.6.0+cpu torchvision==0.21.0+cpu torchaudio==2.6.0+cpu \
+      --index-url https://download.pytorch.org/whl/cpu
+
+FROM builder-base AS builder-torch-gpu
+WORKDIR /wheels
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
+      torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
+      --index-url https://download.pytorch.org/whl/cu124
+
+FROM builder-base AS builder-torch-false
+RUN mkdir /wheels
+
+##############################
+# 4) TensorFlow variants
+##############################
+FROM builder-base AS builder-tf-cpu
+WORKDIR /wheels
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels tensorflow==2.19.0
+
+FROM builder-base AS builder-tf-gpu
+WORKDIR /wheels
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
+      --extra-index-url https://pypi.nvidia.com \
+      "tensorflow[and-cuda]==2.19.0"
+
+FROM builder-base AS builder-tf-false
+RUN mkdir /wheels
+
+##############################
+# 5) Pick the right variant via ARG+FROM
+##############################
+ARG INSTALL_JAX
+ARG INSTALL_TORCH
+ARG INSTALL_TF
+
+FROM builder-jax-${INSTALL_JAX}     AS jax-selected
+FROM builder-torch-${INSTALL_TORCH} AS torch-selected
+FROM builder-tf-${INSTALL_TF}       AS tf-selected
+
+##############################
+# 6) Install all wheels in a single layer
+##############################
+FROM builder-base AS builder-backends
+
+# Copy in all wheels from each backend
+COPY --from=jax-selected   /wheels /wheels
+COPY --from=torch-selected /wheels /wheels
+COPY --from=tf-selected    /wheels /wheels
+
+# preserve runtime flags
+ARG INSTALL_JAX
+ARG INSTALL_TORCH
+ARG INSTALL_TF
+
+# Install all wheels at once in a clean Python environment
+# We install jax last to avoid a version conflict with cuda
+RUN set -e; \
+    for pkg in \
+        $( [ "$INSTALL_TORCH" = "cpu" ] && echo "torch==2.6.0+cpu torchvision==0.21.0+cpu torchaudio==2.6.0+cpu" ) \
+        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0" ) \
+        $( [ "$INSTALL_TF" = "cpu" ] && echo "tensorflow==2.19.0" ) \
+        $( [ "$INSTALL_TF" = "gpu" ] && echo "tensorflow[and-cuda]==2.19.0" ) \
+        $( [ "$INSTALL_JAX" = "cpu" ] && echo "jax" ) \
+        $( [ "$INSTALL_JAX" = "gpu" ] && echo "jax[cuda12]==0.6.0" ); \
+    do \
+        pip install --no-cache-dir --no-index --find-links=/wheels $pkg; \
+    done
+
+##############################
+# 7) Final runtime image
+##############################
+FROM python:3.12-slim-bullseye AS runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
       python3-tk \
@@ -44,96 +158,62 @@ RUN apt-get update && \
       echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
     done
 
-# 2. Create a dedicated virtualenv for Poetry
-RUN python3 -m venv $POETRY_VENV \
- && $POETRY_VENV/bin/pip install --no-cache-dir poetry==${POETRY_VERSION}
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
-
 WORKDIR /ultrasound-toolbox
-COPY pyproject.toml poetry.lock ./
 
-# 3. Install all dependencies
-RUN --mount=type=cache,target=$POETRY_CACHE_DIR \
-  if [ "$BACKEND" = "all" ]; then \
-    # Only install full dev stack if "all" backend is requested
-    poetry install --no-root --compile -E dev; \
+# Copy over installed Python packages and entrypoints from builder
+COPY --from=builder-backends /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder-backends /usr/local/bin /usr/local/bin
+
+# Copy over Jupyter configuration and kernelspecs
+COPY --from=builder-backends /usr/local/share/jupyter /usr/local/share/jupyter
+
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
+
+# Copy the poetry virtual environment
+COPY --from=builder-base /opt/poetry-venv /opt/poetry-venv
+# Set up the PATH to include the poetry venv
+ENV PATH="${PATH}:/opt/poetry-venv/bin"
+
+# preserve runtime flags
+ARG INSTALL_JAX
+ARG INSTALL_TORCH
+ARG INSTALL_TF
+ARG DEV
+ENV INSTALL_JAX=${INSTALL_JAX} \
+    INSTALL_TORCH=${INSTALL_TORCH} \
+    INSTALL_TF=${INSTALL_TF} \
+    DEV=${DEV}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    LC_ALL=C \
+    POETRY_VERSION=2.1.3 \
+    POETRY_VENV=/opt/poetry-venv \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=0 \
+    POETRY_VIRTUALENVS_IN_PROJECT=0 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+# status + drop into shell with KERAS_BACKEND set according to preference order
+CMD ["/bin/bash", "-c", "\
+  if [ \"${INSTALL_JAX}\" != \"false\" ]; then \
+      KERAS_BACKEND=jax; \
+  elif [ \"${INSTALL_TF}\" != \"false\" ]; then \
+      KERAS_BACKEND=tensorflow; \
+  elif [ \"${INSTALL_TORCH}\" != \"false\" ]; then \
+      KERAS_BACKEND=torch; \
   else \
-    # Keep individual backend installations lightweight
-    poetry install --no-root --compile; \
-  fi
-
-# 4. Always install numpy
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    pip install --no-cache-dir numpy
-
-# 5. JAX (if requested) 0.6.0 latest compatible version
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    if [ "$BACKEND" = "jax" ] || [ "$BACKEND" = "all" ]; then \
-      if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir -U "jax[cuda12]==0.6.0"; \
-      else \
-        pip install --no-cache-dir -U jax; \
-      fi; \
-    fi
-
-# 6. PyTorch (if requested)
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    if [ "$BACKEND" = "torch" ] || [ "$BACKEND" = "all" ]; then \
-      if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir \
-          torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
-          --index-url https://download.pytorch.org/whl/cu124; \
-      else \
-        pip install --no-cache-dir \
-          torch==2.6.0+cpu torchvision==0.21.0+cpu torchaudio==2.6.0+cpu \
-          --index-url https://download.pytorch.org/whl/cpu; \
-      fi; \
-    fi
-
-# 7. TensorFlow (if requested)
-RUN --mount=type=cache,target=$PIP_CACHE_DIR \
-    if [ "$BACKEND" = "tensorflow" ] || [ "$BACKEND" = "all" ]; then \
-      if [ "$GPU" = "true" ]; then \
-        pip install --no-cache-dir \
-          --extra-index-url https://pypi.nvidia.com \
-          "tensorflow[and-cuda]==2.19.0"; \
-      else \
-        pip install --no-cache-dir tensorflow==2.19.0; \
-      fi; \
-    fi
-
-
-##############################
-# CPU runtime image
-##############################
-FROM builder AS cpu
-ARG BACKEND=all
-ENV BACKEND=${BACKEND}
-
-CMD ["/bin/bash", "-c", "echo \"CPU image ready → BACKEND=${BACKEND}\"; exec /bin/bash"]
-
-##############################
-# GPU runtime image
-##############################
-FROM builder AS gpu
-ARG BACKEND=all
-ARG GPU=false
-
-# Add CUDA paths
-ENV PATH="/usr/local/cuda/bin:${PATH}" \
-    BACKEND=${BACKEND}
-
-# Install CUDA runtime libraries
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends gnupg2 curl && \
-    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/cuda-keyring_1.1-1_all.deb \
-      -o /tmp/cuda-keyring.deb && \
-    dpkg -i /tmp/cuda-keyring.deb && \
-    rm /tmp/cuda-keyring.deb && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-      cuda-libraries-12-5 libcudnn9-cuda-12 && \
-    rm -rf /var/lib/apt/lists/*
-
-WORKDIR /ultrasound-toolbox
-CMD ["/bin/bash", "-c", "echo \"GPU image ready → BACKEND=${BACKEND}\"; exec /bin/bash"]
+      KERAS_BACKEND=numpy; \
+  fi; \
+  echo \"KERAS_BACKEND is set to $KERAS_BACKEND\"; \
+  if [ \"${INSTALL_JAX}\" = \"gpu\" ]; then echo \"JAX → GPU enabled\"; \
+  elif [ \"${INSTALL_JAX}\" = \"cpu\" ]; then echo \"JAX → CPU only\"; \
+  else echo \"JAX → disabled\"; fi; \
+  if [ \"${INSTALL_TORCH}\" = \"gpu\" ]; then echo \"PyTorch → GPU enabled\"; \
+  elif [ \"${INSTALL_TORCH}\" = \"cpu\" ]; then echo \"PyTorch → CPU only\"; \
+  else echo \"PyTorch → disabled\"; fi; \
+  if [ \"${INSTALL_TF}\" = \"gpu\" ]; then echo \"TensorFlow → GPU enabled\"; \
+  elif [ \"${INSTALL_TF}\" = \"cpu\" ]; then echo \"TensorFlow → CPU only\"; \
+  else echo \"TensorFlow → disabled\"; fi; \
+  if [ \"${DEV}\" = \"true\" ]; then echo \"Developer tools installed!\"; fi; \
+  exec /bin/bash\
+"]
