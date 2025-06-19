@@ -16,7 +16,7 @@ authors:
     orcid: 0000-0002-1797-8721
   - name: Vincent van de Schaft
     orcid: 0000-0002-8515-5372
-  - name: Oisín I. Nolan
+  - name: Oisín Nolan
     orcid: 0009-0002-6939-7627
   - name: Beatrice Federici
     orcid: 0009-0003-2496-8825
@@ -44,6 +44,9 @@ We present `zea` (pronounced *ze-yah*), a Python package for cognitive ultrasoun
 
 The ultrasound research community has benefited from the development of several excellent toolboxes, such as `Field II` [@jensen2004simulation], `k-wave` [@treeby2010k], `USTB` [@rodriguez2017ultrasound], `MUST` [@garcia2021make], `ARRUS` [@jarosik2020arrus], and `FAST` [@smistad2021fast]. These toolboxes have enabled significant advances in simulation, data acquisition, and real-time processing for a wide range of ultrasound applications. However, most existing solutions are not specifically designed for cognitive ultrasound imaging, where the integration of deep learning and dynamic, closed-loop ultrasound reconstruction pipelines is essential. Our aim with `zea` is not to directly compare with these established tools, but rather to provide a complementary, highly flexible pipeline written in a modern deep learning framework, as well as offer a convenient platform to provide several pretrained models. This addresses the need for a modular and extensible library that supports cognitive ultrasound workflows and seamless integration with state-of-the-art machine learning models.
 
+See \autoref{fig:diagram}.
+
+![Schematic overview of the action-perception loop in ultrasound imaging.\label{fig:diagram}](diagram.svg){ width=90% }
 
 # Overview of functionality
 `zea` is an open-source Python package, available at [http://github.com/tue-bmd/zea](http://github.com/tue-bmd/zea), that consists of the following core components:
