@@ -316,7 +316,8 @@ def set_level(level):
     Also sets the log level for the file logger if it exists.
 
     Example:
-        >>> with set_level("WARNING"):
+        >>> from zea import log
+        >>> with log.set_level("WARNING"):
         ...     log.info("This will not be shown")
         ...     log.warning("This will be shown")
 
