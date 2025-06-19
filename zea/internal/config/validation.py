@@ -12,13 +12,10 @@ Also if that parameter is optional, add a default value.
 """
 
 from pathlib import Path
-from typing import Union
 
 from schema import And, Optional, Or, Regex, Schema
 
 import zea.metrics  # noqa: F401
-from zea import log
-from zea.config import Config
 from zea.internal.checks import _DATA_TYPES
 from zea.internal.registry import metrics_registry
 
@@ -166,30 +163,3 @@ config_schema = Schema(
         Optional("git", default=None): Or(None, str),
     }
 )
-
-
-def check_config(config: Union[dict, Config], verbose: bool = False):
-    """Check a config given dictionary"""
-
-    def _try_validate_config(config):
-        try:
-            config = config_schema.validate(config)
-            return config
-        except Exception as e:
-            log.error(f"Config is not valid: {e}")
-            raise e
-
-    assert type(config) in [
-        dict,
-        Config,
-    ], f"Config must be a dictionary or Config object, not {type(config)}"
-    if isinstance(config, Config):
-        config = config.serialize()
-        config = _try_validate_config(config)
-        config = Config(config)
-        config.freeze()  # freeze because schema will add all defaults
-    else:
-        config = _try_validate_config(config)
-    if verbose:
-        log.success("Config is correct")
-    return config

@@ -477,7 +477,7 @@ def load_file(
             which case all frames are loaded. If an int is provided, it will be used
             as a single index. If a list is provided, it will be used as a list of
             indices.
-        scan_kwargs (utils.config.Config, dict, optional): Additional keyword arguments
+        scan_kwargs (Config, dict, optional): Additional keyword arguments
             to pass to the Scan object. These will override the parameters from the file
             if they are present in the file. Defaults to None.
 
