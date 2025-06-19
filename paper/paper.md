@@ -40,7 +40,7 @@ Ultrasound imaging is a powerful medical imaging modality that is widely used in
 
 We present `zea` (pronounced *ze-yah*), a Python package for cognitive ultrasound imaging that provides a flexible, modular and differentiable pipeline for ultrasound data processing, as well as a collection of pre-defined models for ultrasound image and signal processing. The toolbox is designed to be easy to use, with a high-level interface that allows users to define their own ultrasound reconstruction pipelines, and to integrate deep learning models into the pipeline. The toolbox is built on top of Keras 3 [@chollet2015keras], which provides a framework for building and training deep learning models with the three major deep learning frameworks as backend: TensorFlow [@abadi2016tensorflow], PyTorch [@NEURIPS2019_9015] and JAX [@jax2018github]. This means that it is easy to integrate a custom ultrasound reconstruction pipeline in a machine learning workflow. In the past few years, several works have used and contributed to `zea`, including @van2024off, @stevens2024dehazing, @nolan2024active, @federici2024active, @stevens2025sequential, @penninga2025deep and @stevens2025high.
 
-![Schematic overview of the action-perception loop in ultrasound imaging.\label{fig:diagram}](diagram.svg){ width=100% }
+![Schematic overview of the action-perception loop in ultrasound imaging.\label{fig:diagram}](zea_perception_action-Light.svg){ width=100% }
 
 # Statement of need
 The ultrasound research community has advanced significantly due to a variety of high-quality software, including simulation tools such as `Field II` [@jensen2004simulation] and `k-wave` [@treeby2010k], as well as reconstruction and real-time processing libraries like `USTB` [@rodriguez2017ultrasound], `MUST` [@garcia2021make], `ARRUS` [@jarosik2020arrus], `FAST` [@smistad2021fast], `QUPS` [@brevett2024qups], and `vbeam` [@magnus2023vbeam]. However, most existing solutions are not designed for cognitive ultrasound imaging, where the integration of deep learning and dynamic, closed-loop ultrasound reconstruction pipelines is essential. Our aim with `zea` is to provide a complementary, highly flexible and differentiable pipeline written in a modern deep learning framework, as well as offer a convenient platform to provide several pretrained models. This addresses the need for a modular and extensible library that supports cognitive ultrasound workflows and seamless integration with state-of-the-art machine learning models. While the full realization of cognitive ultrasound imaging remains an ongoing effort, we hope this toolbox will help spur further research and development in the field.
@@ -175,8 +175,6 @@ Which will generate the samples as seen in \autoref{fig:samples}.
 
 ## Agent
 The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework. They provide tools to alter pipeline or model parameters, select a subset of acquired data, or perform other actions that are necessary to close the action-perception loop in cognitive ultrasound imaging. Currently, the current functions support intelligent focused transmit scheme design via _active perception_ [@van2024active], with implementations of key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to create measurement models mapping from fully-observed to subsampled data.
-
-![`zea` perception-action loop.\label{fig:perception-action}](zea_perception_action-Light.svg){ width=100% }
 
 ```python
 import zea
