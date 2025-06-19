@@ -5,6 +5,37 @@ About
 
 While the full realization of cognitive ultrasound imaging remains an ongoing effort, we hope this toolbox will help spur further research and development in the field.
 
+.. raw:: html
+
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
+     <!-- Dark mode image -->
+     <img
+       src="../_static/zea_perception_action-Dark.svg"
+       alt="Closing the action-perception loop in ultrasound imaging"
+       style="display: none; width: 80%; padding-bottom: 1em;"
+       class="only-dark"
+     />
+     <!-- Light mode image -->
+     <img
+       src="../_static/zea_perception_action-Light.svg"
+       alt="Closing the action-perception loop in ultrasound imaging"
+       style="display: none; width: 80%; padding-bottom: 1em;"
+       class="only-light"
+     />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+       Conceptual overview of the action-perception loop in ultrasound imaging.
+     </div>
+   </div>
+   <style>
+     @media (prefers-color-scheme: dark) {
+       .only-dark { display: block !important; }
+     }
+     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+       .only-light { display: block !important; }
+     }
+   </style>
+
+
 .. note::
     **What's in a name?**
 
