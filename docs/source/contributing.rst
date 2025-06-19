@@ -102,10 +102,10 @@ The overall structure of the documentation is manually designed, but the API doc
    cd docs
    make docs-clean && make docs-build
    # you can also serve the docs locally
-   make docs-serve
+   make docs-clean && make docs-serve
    # and open them in your browser at http://localhost:8000
 
-See the `README.md <https://github.com/tue-bmd/zea/blob/main/README.md>`_ for more information.
+See the `README.md <https://github.com/tue-bmd/zea/blob/main/docs/README.md>`_ for more information.
 
 
 6. Make a pull request

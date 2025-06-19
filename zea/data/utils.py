@@ -10,6 +10,8 @@ class ZeaJSONEncoder(json.JSONEncoder):
     """Wrapper for json.dumps to encode range and slice objects.
 
     Example:
+        >>> import json
+        >>> from zea.data.utils import ZeaJSONEncoder
         >>> json.dumps(range(10), cls=ZeaJSONEncoder)
         '{"__type__": "range", "start": 0, "stop": 10, "step": 1}'
 

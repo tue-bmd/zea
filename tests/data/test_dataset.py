@@ -3,8 +3,7 @@
 import numpy as np
 import pytest
 
-from zea.config import Config
-from zea.config.validation import check_config
+from zea.config import Config, check_config
 from zea.data.datasets import Dataset
 
 from .. import DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_X, DUMMY_DATASET_N_Z

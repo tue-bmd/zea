@@ -8,7 +8,7 @@ While the full realization of cognitive ultrasound imaging remains an ongoing ef
 .. note::
     **What's in a name?**
 
-    It's just a name, but if we have to give it some meaning: ``zea`` is derived from the scientific name for corn, *Zea mays*, a staple food crop. Just as corn is a fundamental resource for many, we hope that ``zea`` will serve as a foundational tool for researchers in the field of cognitive ultrasound imaging. If you look at the logo, you can see that the kernels of the corn cob have some resemblance with either a sensing matrix or maybe the elements of an array. The high-dimensional and structured nature of the corn cob also reflects the complexity of ultrasound data (*long live LLMs!*).
+    It's just a name... If we have to give it some meaning: ``zea`` is derived from the scientific name for corn, *Zea mays*, a staple food crop. If you look at the logo, you can see that the kernels of the corn cob have some resemblance with either a sensing matrix or possibly the elements of an array. The high-dimensional and structured nature of the corn cob also reflects the complexity of ultrasound data.
 
 
 Core maintainers
