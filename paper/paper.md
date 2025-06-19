@@ -176,6 +176,8 @@ Which will generate the samples as seen in \autoref{fig:samples}.
 ## Agent
 The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework. They provide tools to alter pipeline or model parameters, select a subset of acquired data, or perform other actions that are necessary to close the action-perception loop in cognitive ultrasound imaging. Currently, the current functions support intelligent focused transmit scheme design via _active perception_ [@van2024active], with implementations of key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to create measurement models mapping from fully-observed to subsampled data.
 
+![`zea` perception-action loop.\label{fig:perception-action}](zea_perception_action-Light.svg){ width=100% }
+
 ```python
 import zea
 import numpy as np
