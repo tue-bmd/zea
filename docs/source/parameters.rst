@@ -22,7 +22,7 @@ Here is a minimal example of how to load and save a config file using zea:
 .. code-block:: python
 
     from zea import Config
-    from zea.config.validation import check_config
+    from zea.config import check_config
 
     # Load a config from file
     config = Config.from_yaml("configs/config_picmus_rf.yaml")
