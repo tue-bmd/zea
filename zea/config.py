@@ -1,4 +1,4 @@
-"""config.py
+"""Config module for managing configuration settings.
 
 This module provides the :class:`Config` class for managing configuration settings,
 with support for loading from YAML files, HuggingFace Hub, and dot notation access.
@@ -11,14 +11,14 @@ Features
 - Attribute access logging and suggestion of similar attribute names.
 - Freezing/unfreezing to prevent/allow new attributes.
 - Serialization to YAML/JSON.
-- Integration with HuggingFace Hub.
+- Integration with Hugging Face Hub.
 
 Example Usage
--------------
+^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from zea.config.config import Config
+    from zea import Config
 
     # Load from YAML
     config = Config.from_yaml("config.yaml")
@@ -41,11 +41,13 @@ import difflib
 import inspect
 import json
 from pathlib import Path
+from typing import Union
 
 import yaml
 from huggingface_hub import hf_hub_download
 
 from zea import log
+from zea.internal.config.validation import config_schema
 from zea.internal.core import object_to_tensor
 
 
@@ -461,6 +463,33 @@ class Config(dict):
     def to_tensor(self):
         """Convert the attributes in the object to keras tensors"""
         return object_to_tensor(self)
+
+
+def check_config(config: Union[dict, Config], verbose: bool = False):
+    """Check a config given dictionary"""
+
+    def _try_validate_config(config):
+        try:
+            config = config_schema.validate(config)
+            return config
+        except Exception as e:
+            log.error(f"Config is not valid: {e}")
+            raise e
+
+    assert type(config) in [
+        dict,
+        Config,
+    ], f"Config must be a dictionary or Config object, not {type(config)}"
+    if isinstance(config, Config):
+        config = config.serialize()
+        config = _try_validate_config(config)
+        config = Config(config)
+        config.freeze()  # freeze because schema will add all defaults
+    else:
+        config = _try_validate_config(config)
+    if verbose:
+        log.success("Config is correct")
+    return config
 
 
 def _load_config_from_yaml(path, config_class=Config, loader=yaml.FullLoader):

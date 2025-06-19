@@ -1,11 +1,35 @@
-"""Allow different backends for autograd."""
+"""Autograd wrapper for different backends."""
 
 import functools
 
-import jax
 import keras
-import tensorflow as tf
-import torch
+
+
+def _import_tf():
+    try:
+        import tensorflow as tf
+
+        return tf
+    except ImportError:
+        return None
+
+
+def _import_jax():
+    try:
+        import jax
+
+        return jax
+    except ImportError:
+        return None
+
+
+def _import_torch():
+    try:
+        import torch
+
+        return torch
+    except ImportError:
+        return None
 
 
 class AutoGrad:
@@ -54,19 +78,28 @@ class AutoGrad:
         ], f"Unsupported backend: {self.backend}"
 
         if self.backend == "torch":
+            torch_mod = _import_torch()
+            if torch_mod is None:
+                raise ImportError("PyTorch is not installed.")
             variable = variable.detach().requires_grad_(True)
             out = self.function(variable, **kwargs)
-            gradients = torch.autograd.grad(out, variable)[0]
+            gradients = torch_mod.autograd.grad(out, variable)[0]
             return gradients
         elif self.backend == "tensorflow":
+            tf = _import_tf()
+            if tf is None:
+                raise ImportError("TensorFlow is not installed.")
             with tf.GradientTape() as tape:
                 tape.watch(variable)
                 out = self.function(variable, **kwargs)
             gradients = tape.gradient(out, variable)
             return gradients
         elif self.backend == "jax":
+            jax_mod = _import_jax()
+            if jax_mod is None:
+                raise ImportError("JAX is not installed.")
             func = functools.partial(self.function, **kwargs)
-            return jax.grad(func)(variable)
+            return jax_mod.grad(func)(variable)
 
     def gradient_and_value(self, variable, has_aux: bool = False, **kwargs):
         """Returns both the gradients w.r.t. variable and outputs of the function.
@@ -98,14 +131,19 @@ class AutoGrad:
 
         aux = None
         if self.backend == "torch":
-            # We can use: https://pytorch.org/docs/stable/generated/torch.func.grad_and_value.html
+            torch_mod = _import_torch()
+            if torch_mod is None:
+                raise ImportError("PyTorch is not installed.")
             variable = variable.detach().requires_grad_(True)
             if has_aux:
                 out, aux = self.function(variable, **kwargs)
             else:
                 out = self.function(variable, **kwargs)
-            gradients = torch.autograd.grad(out, variable)[0]
+            gradients = torch_mod.autograd.grad(out, variable)[0]
         elif self.backend == "tensorflow":
+            tf = _import_tf()
+            if tf is None:
+                raise ImportError("TensorFlow is not installed.")
             with tf.GradientTape() as tape:
                 tape.watch(variable)
                 if has_aux:
@@ -114,7 +152,10 @@ class AutoGrad:
                     out = self.function(variable, **kwargs)
             gradients = tape.gradient(out, variable)
         elif self.backend == "jax":
-            out, gradients = jax.value_and_grad(self.function, argnums=0, has_aux=has_aux)(
+            jax_mod = _import_jax()
+            if jax_mod is None:
+                raise ImportError("JAX is not installed.")
+            out, gradients = jax_mod.value_and_grad(self.function, argnums=0, has_aux=has_aux)(
                 variable, **kwargs
             )
             if has_aux:
@@ -129,11 +170,20 @@ class AutoGrad:
     def get_gradient_jit_fn(self):
         """Returns a jitted function for calculating the gradients."""
         if self.backend == "jax":
-            return jax.jit(self.gradient)
+            jax_mod = _import_jax()
+            if jax_mod is None:
+                raise ImportError("JAX is not installed.")
+            return jax_mod.jit(self.gradient)
         elif self.backend == "tensorflow":
+            tf = _import_tf()
+            if tf is None:
+                raise ImportError("TensorFlow is not installed.")
             return tf.function(self.gradient, jit_compile=True)
         elif self.backend == "torch":
-            return torch.compile(self.gradient)
+            torch_mod = _import_torch()
+            if torch_mod is None:
+                raise ImportError("PyTorch is not installed.")
+            return torch_mod.compile(self.gradient)
 
     def get_gradient_and_value_jit_fn(self, has_aux: bool = False, disable_jit=False):
         """Returns a jitted function for calculating the gradients and function outputs."""
@@ -141,15 +191,21 @@ class AutoGrad:
         if disable_jit:
             return func
         if self.backend == "jax":
-            return jax.jit(func)
-
+            jax_mod = _import_jax()
+            if jax_mod is None:
+                raise ImportError("JAX is not installed.")
+            return jax_mod.jit(func)
         elif self.backend == "tensorflow":
+            tf = _import_tf()
+            if tf is None:
+                raise ImportError("TensorFlow is not installed.")
             return tf.function(
                 func,
                 jit_compile=True,
             )
         elif self.backend == "torch":
             raise NotImplementedError("Jitting not supported for torch backend.")
-            # return torch.compile(func)
+            # torch_mod = _import_torch()
+            # return torch_mod.compile(func)
         else:
             raise UserWarning("You haven't set a jittable keras backend!")

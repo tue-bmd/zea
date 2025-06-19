@@ -8,7 +8,7 @@ import pytest
 
 from zea import ops
 from zea.beamform.delays import compute_t0_delays_planewave
-from zea.config.config import Config
+from zea.config import Config
 from zea.internal.core import DataTypes
 from zea.internal.registry import ops_registry
 from zea.probes import Probe

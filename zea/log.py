@@ -1,10 +1,10 @@
-"""Custom zea python logging module.
+"""Custom ``zea`` python logging module.
 
 Wrapper around python logging module to provide a simple interface for logging both
 to the console and to a file with color support.
 
 Example usage
--------------
+^^^^^^^^^^^^^^
 
 .. code-block:: python
 
@@ -316,7 +316,8 @@ def set_level(level):
     Also sets the log level for the file logger if it exists.
 
     Example:
-        >>> with set_level("WARNING"):
+        >>> from zea import log
+        >>> with log.set_level("WARNING"):
         ...     log.info("This will not be shown")
         ...     log.warning("This will be shown")
 
