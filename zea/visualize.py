@@ -405,6 +405,7 @@ def plot_frustum_vertices(
         ValueError: If no plane is specified (phi_plane, theta_plane, or rho_plane).
 
     Example:
+        >>> from zea.visualize import plot_frustum_vertices
         >>> rho_range = [0.1, 10]  # in mm
         >>> theta_range = [-0.6, 0.6]  # in rad
         >>> phi_range = [-0.6, 0.6]  # in rad
