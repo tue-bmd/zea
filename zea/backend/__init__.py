@@ -1,8 +1,60 @@
-"""Backend module for zea."""
+"""Backend subpackage for ``zea``.
+
+This subpackage provides backend-specific utilities for the ``zea`` library. Most backend logic is handled by Keras 3, but a few features require custom wrappers to ensure compatibility and performance across JAX, TensorFlow, and PyTorch.
+
+.. note::
+    Most backend-specific logic is handled by Keras 3, so this subpackage is intentionally minimal. Only features not natively supported by Keras (such as JIT and autograd) are implemented here.
+
+Key Features
+------------
+
+- **JIT Compilation** (:func:`zea.backend.jit`):
+  Provides a unified interface for just-in-time (JIT) compilation of functions, dispatching to the appropriate backend (JAX or TensorFlow) as needed. This enables accelerated execution of computationally intensive routines.
+
+- **Automatic Differentiation** (:class:`zea.backend.AutoGrad`):
+  Offers a backend-agnostic wrapper for automatic differentiation, allowing gradient computation regardless of the underlying ML library.
+
+- **Backend Submodules:**
+
+  - :mod:`zea.backend.jax` -- JAX-specific utilities and device management.
+  - :mod:`zea.backend.torch` -- PyTorch-specific utilities and device management.
+  - :mod:`zea.backend.tensorflow` -- TensorFlow-specific utilities, and device management, as well as data loading utilities.
+
+- **Data Loading** (:func:`zea.backend.tensorflow.make_dataloader`):
+  This function is implemented using TensorFlow's efficient data pipeline utilities. It provides a convenient way to load and preprocess data for machine learning workflows, leveraging TensorFlow's ``tf.data.Dataset`` API.
+
+"""
 
 import keras
 
 from zea import log
+
+
+def _import_tf():
+    try:
+        import tensorflow as tf
+
+        return tf
+    except ImportError:
+        return None
+
+
+def _import_jax():
+    try:
+        import jax
+
+        return jax
+    except ImportError:
+        return None
+
+
+def _import_torch():
+    try:
+        import torch
+
+        return torch
+    except ImportError:
+        return None
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
@@ -37,28 +89,17 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
 def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     backend = keras.backend.backend()
 
-    # Jit with TensorFlow
     if backend == "tensorflow" and tensorflow:
-        try:
-            import tensorflow as tf
-
-            jit_compile = kwargs.pop("jit_compile", True)
-            return tf.function(func, jit_compile=jit_compile, **kwargs)
-        except ImportError as exc:
-            raise ImportError(
-                "TensorFlow is not installed. Please install it to use this backend."
-            ) from exc
-    # Jit with JAX
+        tf = _import_tf()
+        if tf is None:
+            raise ImportError("TensorFlow is not installed. Please install it to use this backend.")
+        jit_compile = kwargs.pop("jit_compile", True)
+        return tf.function(func, jit_compile=jit_compile, **kwargs)
     elif backend == "jax" and jax:
-        try:
-            import jax
-
-            return jax.jit(func, **kwargs)
-        except ImportError as exc:
-            raise ImportError(
-                "JAX is not installed. Please install it to use this backend."
-            ) from exc
-    # No JIT compilation, because disabled
+        jax_mod = _import_jax()
+        if jax_mod is None:
+            raise ImportError("JAX is not installed. Please install it to use this backend.")
+        return jax_mod.jit(func, **kwargs)
     elif backend == "tensorflow" and not tensorflow:
         return func
     elif backend == "jax" and not jax:

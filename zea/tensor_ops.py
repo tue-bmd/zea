@@ -1,4 +1,4 @@
-"""Basic tensor operations implemented with the multi-backend `keras.ops`."""
+"""Basic tensor operations implemented with the multi-backend ``keras.ops``."""
 
 from typing import Tuple, Union
 
@@ -13,11 +13,17 @@ from zea.utils import map_negative_indices
 
 
 def split_seed(seed, n):
-    """Split seed into n seeds.
+    """Split a seed into n seeds for reproducible random ops.
 
-    With support for keras SeedGenerator and jax.random.key.
-        - https://docs.jax.dev/en/latest/_autosummary/jax.random.split.html
-        - https://keras.io/api/random/seed_generator/
+    Supports `keras.random.SeedGenerator <https://keras.io/api/random/#seedgenerator-class>`_
+    and `JAX random keys <https://jax.readthedocs.io/en/latest/jax.random.html#jax.random.PRNGKey>`_.
+
+    Args:
+        seed: None, jax.Array, or keras.random.SeedGenerator.
+        n (int): Number of seeds to generate.
+
+    Returns:
+        list: List of n seeds (JAX keys, SeedGenerator, or None).
     """
     # If seed is None, return a list of None
     if seed is None:
@@ -638,12 +644,14 @@ def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number:
         Tensor: Reshaped tensor with data stacked along stack_axis.
 
     Example:
-        >>> keras.random.uniform((10, 20, 30))
-        >>> # stacking along 1st axis with 2 frames per block
-        >>> stacked_data = stack_volume_data_along_axis(data, 0, 1, 2)
-        >>> stacked_data.shape
-        (20, 10, 30)
+        .. code-block:: python
 
+            import keras
+
+            data = keras.random.uniform((10, 20, 30))
+            # stacking along 1st axis with 2 frames per block
+            stacked_data = stack_volume_data_along_axis(data, 0, 1, 2)
+            stacked_data.shape
     """
     blocks = int(ops.ceil(data.shape[batch_axis] / number))
     data = pad_array_to_divisible(data, axis=batch_axis, N=blocks, mode="reflect")
@@ -678,12 +686,13 @@ def split_volume_data_from_axis(data, batch_axis: int, stack_axis: int, number: 
         Tensor: Reshaped tensor with data split back to original format.
 
     Example:
-        >>> data = keras.random.uniform((20, 10, 30))
-        >>> # splitting along 1st axis with 2 frames per block and padding of 2
-        >>> split_data = split_volume_data_from_axis(data, 0, 1, 2, 2)
-        >>> split_data.shape
-        (10, 20, 30)
+        .. code-block:: python
 
+            import keras
+
+            data = keras.random.uniform((20, 10, 30))
+            split_data = split_volume_data_from_axis(data, 0, 1, 2, 2)
+            split_data.shape
     """
     if data.shape[stack_axis] == 1:
         # in this case it was a broadcasted axis which does not need to be split
@@ -799,14 +808,14 @@ def check_patches_fit(
         in the original image and the new image shape if the patches do not fit.
 
     Example:
-        >>> image_shape = (10, 10)
-        >>> patch_shape = (4, 4)
-        >>> overlap = (2, 2)
-        >>> patches_fit, new_shape = check_patches_fit(image_shape, patch_shape, overlap)
-        >>> patches_fit
-        False
-        >>> new_shape
-        (10, 10)
+        .. code-block:: python
+
+            image_shape = (10, 10)
+            patch_shape = (4, 4)
+            overlap = (2, 2)
+            patches_fit, new_shape = check_patches_fit(image_shape, patch_shape, overlap)
+            patches_fit
+            new_shape
     """
     if overlap:
         stride = (np.array(patch_shape) - np.array(overlap)).astype(int)
@@ -863,10 +872,13 @@ def images_to_patches(
             [batch, #patch_y, #patch_x, patch_size_y, patch_size_x, #channels].
 
     Example:
-        >>> images = keras.random.uniform((2, 8, 8, 3))
-        >>> patches = images_to_patches(images, patch_shape=(4, 4), overlap=(2, 2))
-        >>> patches.shape
-        (2, 3, 3, 4, 4, 3)
+        .. code-block:: python
+
+            import keras
+
+            images = keras.random.uniform((2, 8, 8, 3))
+            patches = images_to_patches(images, patch_shape=(4, 4), overlap=(2, 2))
+            patches.shape
     """
     assert len(images.shape) == 4, (
         f"input array should have 4 dimensions, but has {len(images.shape)} dimensions"
@@ -944,10 +956,13 @@ def patches_to_images(
         images (Tensor): Reconstructed batch of images from batch of patches.
 
     Example:
-        >>> patches = keras.random.uniform((2, 3, 3, 4, 4, 3))
-        >>> images = patches_to_images(patches, image_shape=(8, 8, 3), overlap=(2, 2))
-        >>> images.shape
-        (2, 8, 8, 3)
+        .. code-block:: python
+
+            import keras
+
+            patches = keras.random.uniform((2, 3, 3, 4, 4, 3))
+            images = patches_to_images(patches, image_shape=(8, 8, 3), overlap=(2, 2))
+            images.shape
     """
     # Input validation
     assert len(image_shape) == 3, "image_shape must have 3 dimensions: (height, width, channels)."
@@ -1027,11 +1042,14 @@ def reshape_axis(data, newshape: tuple, axis: int):
         axis (int): axis to reshape.
 
     Example:
-        >>> data = keras.random.uniform((3, 4, 5))
-        >>> newshape = (2, 2)
-        >>> reshaped_data = reshape_axis(data, newshape, axis=1)
-        >>> reshaped_data.shape
-        (3, 2, 2, 5)
+        .. code-block:: python
+
+            import keras
+
+            data = keras.random.uniform((3, 4, 5))
+            newshape = (2, 2)
+            reshaped_data = reshape_axis(data, newshape, axis=1)
+            reshaped_data.shape
     """
     axis = map_negative_indices([axis], data.ndim)[0]
     shape = list(ops.shape(data))  # list

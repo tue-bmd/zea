@@ -8,11 +8,11 @@ import yaml
 from huggingface_hub import list_repo_files
 from schema import SchemaError
 
+from zea.config import Config, check_config
+
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
 
-from zea.config import Config  # noqa: E402
-from zea.config.validation import check_config  # noqa: E402
 
 # Define some dictionaries to test the Config class
 simple_dict = {"a": 1, "b": 2, "c": 3}
@@ -41,7 +41,7 @@ def config_check_equal_recursive(config, dictionary):
     https://stackoverflow.com/questions/4527942/comparing-two-dictionaries-and-checking-how-many-key-value-pairs-are-equal
 
     Args:
-        config (utils.config.Config): The config to check.
+        config (Config): The config to check.
         dictionary (dict): The dictionary to check against.
 
     Raises:

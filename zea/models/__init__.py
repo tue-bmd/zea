@@ -1,15 +1,14 @@
-"""
-zea models
-============
+"""Collection of (generative) models for ultrasound imaging.
 
-zea contains a collection of models for various tasks, all located in the :mod:`zea.models` package.
+``zea`` contains a collection of models for various tasks, all located in the :mod:`zea.models` package.
 
-Currently, the following models are available (all inherited from :class:`zea.models.base.Model`):
+Currently, the following models are available (all inherited from :class:`zea.models.BaseModel`):
 
 - :class:`zea.models.echonet.EchoNetDynamic`: A model for echocardiography segmentation.
 - :class:`zea.models.carotid_segmenter.CarotidSegmenter`: A model for carotid artery segmentation.
 - :class:`zea.models.unet.UNet`: A simple U-Net implementation.
 - :class:`zea.models.lpips.LPIPS`: A model implementing the perceptual similarity metric.
+- :class:`zea.models.taesd.TinyAutoencoder`: A tiny autoencoder model for image compression.
 
 Presets for these models can be found in :mod:`zea.models.presets`.
 
@@ -72,3 +71,18 @@ The following steps are recommended when adding a new model:
 4. Add a preset for the model in :mod:`zea.models.presets`. This basically allows you to have multiple weights presets for a given model architecture.
 5. Make sure to register the presets in your model module by importing the presets module and calling ``register_presets`` with the model class as an argument.
 """
+
+from . import (
+    carotid_segmenter,
+    dense,
+    diffusion,
+    echonet,
+    generative,
+    gmm,
+    layers,
+    lpips,
+    presets,
+    taesd,
+    unet,
+    utils,
+)

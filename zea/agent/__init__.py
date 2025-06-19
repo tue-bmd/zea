@@ -4,18 +4,24 @@ The `agent` subpackage provides tools and utilities for agent-based algorithms w
 
 For a practical example, see :doc:`../notebooks/agent/agent_example`.
 
-Example usage of action selection strategies
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Example usage
+^^^^^^^^^^^^^
 
 .. code-block:: python
+
+    import zea
+    import numpy as np
 
     agent = zea.agent.selection.GreedyEntropy(
         n_actions=7,
         n_possible_actions=112,
         img_width=112,
         img_height=112,
-        **kwargs,
     )
-    particles = np.random.rand(10, 112, 112, 1)  # 10 posterior samples
-    lines, mask = agent(particles)
+
+    # (batch, samples, height, width)
+    particles = np.random.rand(1, 10, 112, 112)
+    lines, mask = agent.sample(particles)
 """
+
+from . import masks, selection

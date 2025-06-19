@@ -1,6 +1,6 @@
 """Parameter descriptions for the config file."""
 
-from zea.config.validation import _ALLOWED_PLOT_LIBS, _DATA_TYPES
+from zea.internal.config.validation import _ALLOWED_PLOT_LIBS, _DATA_TYPES
 
 
 def allows_type_to_str(allowed_types):

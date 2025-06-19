@@ -6,8 +6,8 @@ from pathlib import Path
 import schema
 
 from zea.config import Config
-from zea.config.parameters import PARAMETER_DESCRIPTIONS
-from zea.config.validation import check_config, config_schema
+from zea.internal.config.parameters import PARAMETER_DESCRIPTIONS
+from zea.internal.config.validation import check_config, config_schema
 from zea.log import green, red
 from zea.utils import get_date_string, strtobool
 

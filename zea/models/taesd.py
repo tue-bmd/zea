@@ -1,7 +1,10 @@
 """Tiny Autoencoder (TAESD) model converted to Tensorflow.
 
-Source: https://github.com/madebyollin/taesd
-See example usage in [examples/taesd](examples/taesd).
+For the original implementation, see the `TAESD repository <https://github.com/madebyollin/taesd>`_.
+
+You can see an example of how to use this model in the example notebook:
+:doc:`../notebooks/models/taesd_autoencoder_example`.
+
 """
 
 from pathlib import Path

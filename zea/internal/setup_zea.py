@@ -61,7 +61,7 @@ import keras
 import yaml
 
 from zea import Config, log
-from zea.config.validation import check_config
+from zea.config import check_config
 from zea.data.preset_utils import HF_PREFIX, _hf_parse_path
 from zea.datapaths import create_new_user, set_data_paths
 from zea.internal.device import init_device
