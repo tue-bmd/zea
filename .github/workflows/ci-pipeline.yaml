@@ -77,13 +77,23 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache,mode=max
 
   build-other-images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         backend: [all, jax, torch, tensorflow, numpy]
     steps:
+      - name: Free up disk space
+        run : |
+            echo "Disk space before cleanup:"
+            df -h
+            sudo rm -rf "/usr/local/share/boost"
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+            sudo rm -rf /opt/hostedtoolcache
+            echo "Disk space after cleanup:"
+            df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -110,7 +120,6 @@ jobs:
             INSTALL_TF=${{ contains('all,tensorflow', matrix.backend) && 'cpu' || 'false' }}
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache,mode=max
-
 
       - name: Build and push GPU Docker image
         if: ${{ matrix.backend != 'numpy' }}
