@@ -35,7 +35,7 @@ jobs:
           echo "Determined image tag: $TAG_VALUE"
 
   build-full-image:
-    needs: set-tag
+    needs: [set-tag, linter]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -55,10 +55,14 @@ jobs:
         with:
           context: .
           file: Dockerfile.base
-          target: cpu
+          build-args: |
+            INSTALL_JAX=cpu
+            INSTALL_TORCH=cpu
+            INSTALL_TF=cpu
+            DEV=true
           push: true
+          load: true          # load to host daemon
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=all
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache,mode=max
 
@@ -68,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        backend: [numpy, jax, torch, tensorflow, all]
+        backend: [all, jax, torch, tensorflow, numpy]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -87,22 +91,30 @@ jobs:
         with:
           context: .
           file: Dockerfile.base
-          target: cpu
           push: true
+          load: true          # load to host daemon
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ matrix.backend }}
+          build-args: |
+            INSTALL_JAX=${{ contains('all,jax', matrix.backend) && 'cpu' || 'false' }}
+            INSTALL_TORCH=${{ contains('all,torch', matrix.backend) && 'cpu' || 'false' }}
+            INSTALL_TF=${{ contains('all,tensorflow', matrix.backend) && 'cpu' || 'false' }}
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache,mode=max
 
+
       - name: Build and push GPU Docker image
+        if: ${{ matrix.backend != 'numpy' }}
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile.base
-          target: gpu
           push: true
+          load: true          # load to host daemon
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ matrix.backend }}
+          build-args: |
+            INSTALL_JAX=${{ (matrix.backend == 'all' || matrix.backend == 'jax') && 'gpu' || 'false' }}
+            INSTALL_TORCH=${{ (matrix.backend == 'all' || matrix.backend == 'torch') && 'gpu' || 'false' }}
+            INSTALL_TF=${{ (matrix.backend == 'all' || matrix.backend == 'tensorflow') && 'gpu' || 'false' }}
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache,mode=max
 
