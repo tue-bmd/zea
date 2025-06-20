@@ -16,11 +16,11 @@ ARG DEV=true
 FROM python:3.12-slim-bullseye AS builder-base
 
 # Backend versions
-ENV JAX_VERSION=0.5.2 \
+ENV JAX_VERSION=0.6.0 \
     TORCH_VERSION=2.6.0 \
     TORCHVISION_VERSION=0.21.0 \
     TORCHAUDIO_VERSION=2.6.0 \
-    TF_VERSION=2.18.0
+    TF_VERSION=2.19.0
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -133,7 +133,7 @@ ARG INSTALL_TF
 RUN set -e; \
     for pkg in \
         $( [ "$INSTALL_TORCH" = "cpu" ] && echo "torch==${TORCH_VERSION}+cpu torchvision==${TORCHVISION_VERSION}+cpu torchaudio==${TORCHAUDIO_VERSION}+cpu" ) \
-        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION}" ) \
+        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCH_VERSION}" ) \
         $( [ "$INSTALL_TF" = "cpu" ] && echo "tensorflow==${TF_VERSION}" ) \
         $( [ "$INSTALL_TF" = "gpu" ] && echo "tensorflow[and-cuda]==${TF_VERSION}" ) \
         $( [ "$INSTALL_JAX" = "cpu" ] && echo "jax==${JAX_VERSION}" ) \
