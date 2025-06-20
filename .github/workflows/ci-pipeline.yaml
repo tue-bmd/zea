@@ -86,22 +86,13 @@ jobs:
     steps:
       - name: Free up disk space
         run : |
-          echo "Disk space before cleanup:"
-          df -h
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo rm -rf /opt/hostedtoolcache
-          # Remove .NET, Android, and Haskell (very large on GitHub runners)
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          # Remove APT caches and package lists
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-          # Remove pip cache
-          rm -rf ~/.cache/pip
-          echo "Disk space after cleanup:"
-          df -h
+            echo "Disk space before cleanup:"
+            df -h
+            sudo rm -rf "/usr/local/share/boost"
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+            sudo rm -rf /opt/hostedtoolcache
+            echo "Disk space after cleanup:"
+            df -h
 
       - name: Checkout repository
         uses: actions/checkout@v4
