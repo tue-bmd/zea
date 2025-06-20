@@ -48,7 +48,7 @@ The ultrasound research community has advanced significantly due to a variety of
 # Overview of functionality
 `zea` is an open-source Python package, available at [http://github.com/tue-bmd/zea](http://github.com/tue-bmd/zea), that consists of the following core components:
 
-- **Data**: A set of utility classes and functions such as `zea.data.File`, `zea.data.Dataset` and `make_dataloader()`, to handle data for machine learning workflows. `zea` works with HDF5 files, with data and acquisition parameters stored together in a single file. Finally, we provide some examples on popular ultrasound datasets, such as CAMUS [@leclerc2019deep], PICMUS [@liebgott2016plane], and the EchoNet-dynamic datasets [@ouyang2019echonet].
+- **Data**: A set of utility classes and functions such as `zea.data.File`, `zea.data.Dataset` and `make_dataloader()`, to handle data for machine learning workflows. `zea` works with HDF5 files, with data and acquisition parameters stored together in a single file. Finally, we provide some examples on popular ultrasound datasets, such as CAMUS [@leclerc2019deep], PICMUS [@liebgott2016plane], and EchoNet-dynamic [@ouyang2019echonet].
 - **Pipeline**: A modular and differentiable pipeline class that allows users to define a sequence of operations to process ultrasound data. The pipeline is stateless and supports *Just in Time* (JIT) compilation for maximum performance. Ultimately this allows for dynamic parameter adjustment, as well as real-time integration of deep learning models inside the ultrasound reconstruction pipeline.
 - **Models**: A collection of pre-defined models for ultrasound image and signal processing. Similar to the data, these models can be loaded locally or from the Hugging Face Hub. Besides more commonly supervised models, `zea` also provides a set of (deep) generative models, with an interface to solve inverse problems in ultrasound imaging within a probabilistic machine learning framework.
 - **Agents**: A set of tools to interact with the pipeline and models. These agents can be used to alter the pipeline parameters, or select a subset of acquired data. The agent module closes the action-perception loop, tying together acquisition and reconstruction of ultrasound data.
@@ -60,11 +60,11 @@ Below, we will show a brief overview of how to use the main components of `zea`,
 `zea` stores data as well as acquisition parameters together in HDF5 files, which can be easily loaded and saved through the `zea.data` API.
 
 ```python
-# path to a local or remote HDF5 file in zea format
 import zea
+# path to a local or remote HDF5 file in zea format
 path = "hf://zeahub/..."
 
-# read data and acquisition parameters from the file
+# read data and acquisition parameters an HDF5 file
 with zea.File(path, mode="r") as file:
     file.summary()
 
