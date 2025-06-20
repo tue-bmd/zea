@@ -1,4 +1,5 @@
-# zea <img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" style="float: right; width: 20%; height: 20%;" align="right" alt="zea Logo" />
+# zea <img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="120" height="120" align="right" alt="zea Logo" />
+
 
 [![Continuous integration](https://github.com/tue-bmd/zea/actions/workflows/ci-pipeline.yaml/badge.svg)](https://github.com/tue-bmd/zea/actions/workflows/ci-pipeline.yaml)
 [![PyPI version](https://img.shields.io/pypi/v/zea)](https://pypi.org/project/zea/)
