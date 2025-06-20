@@ -40,7 +40,7 @@ RUN python3 -m venv $POETRY_VENV \
 
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
-WORKDIR /ultrasound-toolbox
+WORKDIR /zea
 COPY pyproject.toml poetry.lock ./
 
 # Install all non-backend dependencies, installing dev extras only if DEV is true.
@@ -167,7 +167,7 @@ RUN apt-get update && \
       echo "export PATH=\$PATH:/home/$USERNAME/.local/bin" >> /home/$USERNAME/.bashrc; \
     done
 
-WORKDIR /ultrasound-toolbox
+WORKDIR /zea
 
 # Copy over installed Python packages and entrypoints from builder
 COPY --from=builder-backends /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
