@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# example of install all backends with gpu
+# docker build -t zea/all-gpu:latest --build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu .
 
 ##############################
 # 0) Declare build-time args
@@ -7,6 +9,13 @@ ARG INSTALL_JAX=cpu
 ARG INSTALL_TORCH=cpu
 ARG INSTALL_TF=cpu
 ARG DEV=true
+
+# Backend versions
+ENV JAX_VERSION=0.5.2 \
+    TORCH_VERSION=2.6.0 \
+    TORCHVISION_VERSION=0.21.0 \
+    TORCHAUDIO_VERSION=2.6.0 \
+    TF_VERSION=2.18.0
 
 ##############################
 # 1) Base builder: non-backend deps
@@ -50,11 +59,11 @@ RUN if [ "$DEV" != "true" ]; then find $POETRY_VENV -mindepth 1 -delete; fi
 ##############################
 FROM builder-base AS builder-jax-cpu
 WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels jax
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels jax==${JAX_VERSION}
 
 FROM builder-base AS builder-jax-gpu
 WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels "jax[cuda12]==0.6.0"
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels "jax[cuda12]==${JAX_VERSION}"
 
 FROM builder-base AS builder-jax-false
 RUN mkdir /wheels
@@ -65,13 +74,13 @@ RUN mkdir /wheels
 FROM builder-base AS builder-torch-cpu
 WORKDIR /wheels
 RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
-      torch==2.6.0+cpu torchvision==0.21.0+cpu torchaudio==2.6.0+cpu \
+      torch==${TORCH_VERSION}+cpu torchvision==${TORCHVISION_VERSION}+cpu torchaudio==${TORCHAUDIO_VERSION}+cpu \
       --index-url https://download.pytorch.org/whl/cpu
 
 FROM builder-base AS builder-torch-gpu
 WORKDIR /wheels
 RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
-      torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
+      torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION} \
       --index-url https://download.pytorch.org/whl/cu124
 
 FROM builder-base AS builder-torch-false
@@ -82,13 +91,13 @@ RUN mkdir /wheels
 ##############################
 FROM builder-base AS builder-tf-cpu
 WORKDIR /wheels
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels tensorflow==2.19.0
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels tensorflow==${TF_VERSION}
 
 FROM builder-base AS builder-tf-gpu
 WORKDIR /wheels
 RUN pip wheel --no-cache-dir --wheel-dir=/wheels \
       --extra-index-url https://pypi.nvidia.com \
-      "tensorflow[and-cuda]==2.19.0"
+      "tensorflow[and-cuda]==${TF_VERSION}"
 
 FROM builder-base AS builder-tf-false
 RUN mkdir /wheels
@@ -123,12 +132,12 @@ ARG INSTALL_TF
 # We install jax last to avoid a version conflict with cuda
 RUN set -e; \
     for pkg in \
-        $( [ "$INSTALL_TORCH" = "cpu" ] && echo "torch==2.6.0+cpu torchvision==0.21.0+cpu torchaudio==2.6.0+cpu" ) \
-        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0" ) \
-        $( [ "$INSTALL_TF" = "cpu" ] && echo "tensorflow==2.19.0" ) \
-        $( [ "$INSTALL_TF" = "gpu" ] && echo "tensorflow[and-cuda]==2.19.0" ) \
-        $( [ "$INSTALL_JAX" = "cpu" ] && echo "jax" ) \
-        $( [ "$INSTALL_JAX" = "gpu" ] && echo "jax[cuda12]==0.6.0" ); \
+        $( [ "$INSTALL_TORCH" = "cpu" ] && echo "torch==${TORCH_VERSION}+cpu torchvision==${TORCHVISION_VERSION}+cpu torchaudio==${TORCHAUDIO_VERSION}+cpu" ) \
+        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION}" ) \
+        $( [ "$INSTALL_TF" = "cpu" ] && echo "tensorflow==${TF_VERSION}" ) \
+        $( [ "$INSTALL_TF" = "gpu" ] && echo "tensorflow[and-cuda]==${TF_VERSION}" ) \
+        $( [ "$INSTALL_JAX" = "cpu" ] && echo "jax==${JAX_VERSION}" ) \
+        $( [ "$INSTALL_JAX" = "gpu" ] && echo "jax[cuda12]==${JAX_VERSION}" ); \
     do \
         pip install --no-cache-dir --no-index --find-links=/wheels $pkg; \
     done
