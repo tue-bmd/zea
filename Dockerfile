@@ -16,7 +16,7 @@ ARG DEV=true
 FROM python:3.12-slim-bullseye AS builder-base
 
 # Backend versions
-ENV JAX_VERSION=0.6.0 \
+ENV JAX_VERSION=0.5.2 \
     TORCH_VERSION=2.6.0 \
     TORCHVISION_VERSION=0.21.0 \
     TORCHAUDIO_VERSION=2.6.0 \
