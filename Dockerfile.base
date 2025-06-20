@@ -10,17 +10,17 @@ ARG INSTALL_TORCH=cpu
 ARG INSTALL_TF=cpu
 ARG DEV=true
 
+##############################
+# 1) Base builder: non-backend deps
+##############################
+FROM python:3.12-slim-bullseye AS builder-base
+
 # Backend versions
 ENV JAX_VERSION=0.5.2 \
     TORCH_VERSION=2.6.0 \
     TORCHVISION_VERSION=0.21.0 \
     TORCHAUDIO_VERSION=2.6.0 \
     TF_VERSION=2.18.0
-
-##############################
-# 1) Base builder: non-backend deps
-##############################
-FROM python:3.12-slim-bullseye AS builder-base
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1 \
