@@ -25,6 +25,8 @@ python:
       path: .
       extra_requirements:
         - docs
-    - jax
-    - tensorflow
-    - torch
+    - method: pip
+      packages:
+        - jax
+        - tensorflow
+        - torch
