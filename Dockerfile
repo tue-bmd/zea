@@ -41,7 +41,8 @@ RUN python3 -m venv $POETRY_VENV \
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
 WORKDIR /zea
-COPY pyproject.toml poetry.lock ./
+# copy entire project directory to the container
+COPY . .
 
 # Install all non-backend dependencies, installing dev extras only if DEV is true.
 ARG DEV
@@ -203,7 +204,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_CACHE_DIR=/tmp/poetry_cache
 
 # Install zea
-RUN pip install -e .
+# in editable mode WITHOUT installing dependencies (which are already installed by Poetry)
+RUN pip install --no-deps -e .
 
 # Source working/installation directory and add motd (message of the day)
 ENV INSTALL=/usr/local/src
