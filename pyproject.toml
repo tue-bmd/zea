@@ -57,6 +57,7 @@ dev = [
     "ipywidgets",
     "pre-commit",
     "ruff",
+    "pytest-cov",
     # docs
     "sphinx",
     "sphinx-autobuild",
@@ -81,6 +82,7 @@ tests = [
     "ipywidgets",
     "pre-commit",
     "ruff",
+    "pytest-cov",
 ]
 docs = [
     "sphinx",
