@@ -8,7 +8,7 @@ IMAGE_PREFIX="zeahub"
 echo "Building CPU images..."
 for backend in "${BACKENDS[@]}"; do
   tag="${IMAGE_PREFIX}/${backend}-cpu"
-  docker build -f Dockerfile.base --target cpu \
+  docker build -f Dockerfile --target cpu \
     --build-arg BACKEND="$backend" \
     -t "$tag" .
 done
@@ -16,7 +16,7 @@ done
 echo "Building GPU images..."
 for backend in "${BACKENDS[@]}"; do
   tag="${IMAGE_PREFIX}/${backend}"
-  docker build -f Dockerfile.base --target gpu \
+  docker build -f Dockerfile --target gpu \
     --build-arg BACKEND="$backend" \
     -t "$tag" .
 done
