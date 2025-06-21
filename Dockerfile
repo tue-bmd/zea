@@ -134,7 +134,7 @@ ARG INSTALL_TF
 RUN set -e; \
     for pkg in \
         $( [ "$INSTALL_TORCH" = "cpu" ] && echo "torch==${TORCH_VERSION}+cpu torchvision==${TORCHVISION_VERSION}+cpu torchaudio==${TORCHAUDIO_VERSION}+cpu" ) \
-        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCH_VERSION}" ) \
+        $( [ "$INSTALL_TORCH" = "gpu" ] && echo "torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION}" ) \
         $( [ "$INSTALL_TF" = "cpu" ] && echo "tensorflow==${TF_VERSION}" ) \
         $( [ "$INSTALL_TF" = "gpu" ] && echo "tensorflow[and-cuda]==${TF_VERSION}" ) \
         $( [ "$INSTALL_JAX" = "cpu" ] && echo "jax==${JAX_VERSION}" ) \
@@ -204,49 +204,28 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_CACHE_DIR=/tmp/poetry_cache
 
 # Install zea
-# in editable mode WITHOUT installing dependencies (which are already installed by Poetry)
 
 # Copy source code to /zea (needed for editable install)
 COPY . .
+# in editable mode WITHOUT installing dependencies (which are already installed by Poetry)
 RUN pip install --no-deps -e .
 
+# Set KERAS_BACKEND in bashrc before motd.sh is called
+RUN echo 'export KERAS_BACKEND=$( \
+    if [ "$INSTALL_JAX" != "false" ]; then \
+        echo jax; \
+    elif [ "$INSTALL_TORCH" != "false" ]; then \
+        echo torch; \
+    elif [ "$INSTALL_TF" != "false" ]; then \
+        echo tf; \
+    else \
+        echo numpy; \
+    fi )' >> /etc/bash.bashrc && \
+    echo '[ ! -z "$TERM" -a -r /etc/motd.sh ] && KERAS_BACKEND=$KERAS_BACKEND INSTALL_JAX=$INSTALL_JAX INSTALL_TORCH=$INSTALL_TORCH INSTALL_TF=$INSTALL_TF DEV=$DEV bash /etc/motd.sh' \
+    >> /etc/bash.bashrc
+
 # Source working/installation directory and add motd (message of the day)
-ENV INSTALL=/usr/local/src
-RUN echo '[ ! -z "$TERM" -a -r /etc/motd ] && cat /etc/motd' \
-    >> /etc/bash.bashrc \
-    ; echo "\
-=========================================\n\
-  ZZZZZ   EEEEE   AAAAA     \e[31mv$(pip show zea | grep Version | cut -d ' ' -f 2)\e[0m\n\
-     ZZ   EE     AA   AA\n\
-    ZZ    EEEE   AAAAAAA\n\
-   ZZ     EE     AA   AA\n\
-  ZZZZZ   EEEEE  AA   AA    \e[31mTU/e 2021\e[0m\n\
-=========================================\n\
-"\
-    > /etc/motd
+COPY motd.sh /etc/motd.sh
+RUN chmod +x /etc/motd.sh
 
-# status + drop into shell with KERAS_BACKEND set according to preference order
-CMD ["/bin/bash", "-c", "\
-  if [ \"${INSTALL_JAX}\" != \"false\" ]; then \
-      KERAS_BACKEND=jax; \
-  elif [ \"${INSTALL_TF}\" != \"false\" ]; then \
-      KERAS_BACKEND=tensorflow; \
-  elif [ \"${INSTALL_TORCH}\" != \"false\" ]; then \
-      KERAS_BACKEND=torch; \
-  else \
-      KERAS_BACKEND=numpy; \
-  fi; \
-  echo \"KERAS_BACKEND is set to $KERAS_BACKEND\"; \
-  if [ \"${INSTALL_JAX}\" = \"gpu\" ]; then echo \"JAX → GPU enabled\"; \
-  elif [ \"${INSTALL_JAX}\" = \"cpu\" ]; then echo \"JAX → CPU only\"; \
-  else echo \"JAX → disabled\"; fi; \
-  if [ \"${INSTALL_TORCH}\" = \"gpu\" ]; then echo \"PyTorch → GPU enabled\"; \
-  elif [ \"${INSTALL_TORCH}\" = \"cpu\" ]; then echo \"PyTorch → CPU only\"; \
-  else echo \"PyTorch → disabled\"; fi; \
-  if [ \"${INSTALL_TF}\" = \"gpu\" ]; then echo \"TensorFlow → GPU enabled\"; \
-  elif [ \"${INSTALL_TF}\" = \"cpu\" ]; then echo \"TensorFlow → CPU only\"; \
-  else echo \"TensorFlow → disabled\"; fi; \
-  if [ \"${DEV}\" = \"true\" ]; then echo \"Developer tools installed!\"; fi; \
-  exec /bin/bash\
-"]
-
+CMD ["/bin/bash"]
