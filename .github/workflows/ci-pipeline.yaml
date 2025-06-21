@@ -79,7 +79,7 @@ jobs:
   build-other-images:
     # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-full-image, set-tag]
-    runs-on: ${{ matrix.backend == 'all' && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on: self-hosted
     strategy:
       matrix:
         backend: [all, jax, torch, tensorflow, numpy]
