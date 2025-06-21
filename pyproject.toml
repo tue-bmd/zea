@@ -104,6 +104,10 @@ display = [
 display-headless = [
     "opencv-python-headless>=4",
 ]
+# these are just here for .readthedocs.yaml
+# please for proper install (with GPU support)
+# install manually
+backends = ["jax", "tensorflow", "torch"]
 
 [project.urls]
 Homepage = "https://github.com/tue-bmd/ultrasound-toolbox/"
