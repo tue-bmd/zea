@@ -141,6 +141,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          slug: tue-bmd/zea
 
       - name: Run heavy Pytest (allowed to fail)
         continue-on-error: true
