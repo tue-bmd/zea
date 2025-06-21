@@ -79,7 +79,7 @@ jobs:
   build-other-images:
     # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.backend == 'all' && 'self-hosted' || 'ubuntu-latest' }}
     strategy:
       matrix:
         backend: [all, jax, torch, tensorflow, numpy]
@@ -112,7 +112,6 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          load: true          # load to host daemon
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.set-tag.outputs.docker_tag }}
           build-args: |
             INSTALL_JAX=${{ contains('all,jax', matrix.backend) && 'cpu' || 'false' }}
@@ -128,7 +127,6 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          load: true          # load to host daemon
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
           build-args: |
             INSTALL_JAX=${{ (matrix.backend == 'all' || matrix.backend == 'jax') && 'gpu' || 'false' }}
@@ -159,8 +157,8 @@ jobs:
       - name: Run Pytest in container
         run: |
           docker run --rm \
-            -v "${{ github.workspace }}:/ultrasound-toolbox" \
-            -w /ultrasound-toolbox \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
             -u $(id -u):$(id -g) \
             -e HOME=/tmp \
             -e USER=$(id -un) \
@@ -172,8 +170,8 @@ jobs:
         continue-on-error: true
         run: |
           docker run --rm \
-          -v "${{ github.workspace }}:/ultrasound-toolbox" \
-          -w /ultrasound-toolbox \
+          -v "${{ github.workspace }}:/zea" \
+          -w /zea \
           -u $(id -u):$(id -g) \
           -e HOME=/tmp \
           -e USER=$(id -un) \
@@ -181,6 +179,36 @@ jobs:
           ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
           sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
 
+  heavy-tests:
+    if: github.event_name == 'pull_request'
+    needs: [build-full-image, set-tag]
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - name: Pull full Docker image
+        run: |
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
+            echo "Image tag not set!" && exit 1
+          fi
+          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
+
+      - name: Run heavy Pytest
+        run: |
+          docker run --rm \
+          -v "${{ github.workspace }}:/zea" \
+          -w /zea \
+          -u $(id -u):$(id -g) \
+          -e HOME=/tmp \
+          -e USER=$(id -un) \
+          -e LOGNAME=$(id -un) \
+          ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
+          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
 
   linter:
     runs-on: ubuntu-latest
@@ -224,8 +252,8 @@ jobs:
       - name: Build documentation with Sphinx (fail on warnings)
         run: |
           docker run --rm \
-            -v "${{ github.workspace }}:/ultrasound-toolbox" \
-            -w /ultrasound-toolbox/docs \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea/docs \
             -u $(id -u):$(id -g) \
             -e HOME=/tmp \
             -e USER=$(id -un) \
