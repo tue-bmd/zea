@@ -28,6 +28,7 @@ __pycache__/
 /.vscode
 .DS_Store
 /.ideas
+.devcontainer
 
 # C extensions
 *.so
