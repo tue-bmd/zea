@@ -23,7 +23,7 @@ While the full realization of cognitive ultrasound imaging remains an ongoing ef
        class="only-light"
      />
      <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
-       Conceptual overview of the action-perception loop in ultrasound imaging.
+       High-level overview of an ultrasound perception-action loop implemented in zea.
      </div>
    </div>
    <style>
