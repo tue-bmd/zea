@@ -267,3 +267,12 @@ jobs:
               make docs-clean && \
               make docs-build SPHINXOPTS='-W --keep-going' \
             "
+
+  test-self-hosted-runner:
+    runs-on: self-hosted
+    steps:
+      - name: Say Hello from self-hosted runner
+        run: |
+          echo "✅ Hello from self-hosted runner!"
+          uname -a
+          whoami
