@@ -72,8 +72,8 @@ jobs:
             DEV=true
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
-          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache
-          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
   build-other-images:
     # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -106,8 +106,8 @@ jobs:
             INSTALL_JAX=${{ contains('all,jax', matrix.backend) && 'cpu' || 'false' }}
             INSTALL_TORCH=${{ contains('all,torch', matrix.backend) && 'cpu' || 'false' }}
             INSTALL_TF=${{ contains('all,tensorflow', matrix.backend) && 'cpu' || 'false' }}
-          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache
-          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
       - name: Build and push GPU Docker image
         if: ${{ matrix.backend != 'numpy' }}
@@ -121,8 +121,8 @@ jobs:
             INSTALL_JAX=${{ (matrix.backend == 'all' || matrix.backend == 'jax') && 'gpu' || 'false' }}
             INSTALL_TORCH=${{ (matrix.backend == 'all' || matrix.backend == 'torch') && 'gpu' || 'false' }}
             INSTALL_TF=${{ (matrix.backend == 'all' || matrix.backend == 'tensorflow') && 'gpu' || 'false' }}
-          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache
-          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
   tests:
     if: github.event_name == 'pull_request'
