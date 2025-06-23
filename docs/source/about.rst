@@ -68,15 +68,16 @@ The following list contains some of the papers that have been published using ``
 
 
 .. bibliography:: ../../paper/paper.bib
-   :style: unsrt
-   :keyprefix: about-
-   :labelprefix: A-
+  :style: unsrt
+  :keyprefix: about-
+  :labelprefix: A-
 
-   van2024active
-   van2024off
-   nolan2024active
-   stevens2024dehazing
-   federici2024active
-   stevens2025sequential
-   stevens2025high
-   penninga2025deep
+  van2024active
+  luijten2020adaptive
+  van2024off
+  nolan2024active
+  stevens2024dehazing
+  federici2024active
+  stevens2025sequential
+  stevens2025high
+  penninga2025deep

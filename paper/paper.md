@@ -38,19 +38,19 @@ bibliography: paper.bib
 # Summary
 Ultrasound imaging is a powerful medical imaging modality that is widely used in clinical settings for various applications, including obstetrics, cardiology, and abdominal imaging. While ultrasound imaging is non-invasive, real-time, and relatively low-cost compared to other imaging modalities such as MRI or CT, it still faces challenges in terms of image quality, and interpretation. Many signal processing steps are required to extract useful information from the raw ultrasound data, such as filtering, beamforming, and image reconstruction. Traditional ultrasound imaging techniques often suffer from reduced image quality as naive assumptions are made in these processing steps which do not account for the complex nature of ultrasound signals. Furthermore, acquisition (action) and reconstruction (perception) of ultrasound is often performed disjointly. Cognitive ultrasound imaging [@van2024active], see \autoref{fig:diagram}, is a novel approach that aims to address these challenges by leveraging more powerful generative models, enabled by advances in deep learning, to close the action-perception loop. This approach requires a redesign of current common ultrasound imaging pipeline, where parameters are expected to be changed dynamically based on past and current observations. Furthermore, the high-dimensional nature of ultrasound data requires powerful deep generative models to learn the structured distribution of ultrasound signals and to effectively solve inverse problems that capture the challenges of ultrasound imaging [@stevens2025deep]. This necessitates a flexible and efficient toolbox that can handle the complexities of cognitive ultrasound imaging, including a real-time ultrasound reconstruction pipeline, dynamic parameter adjustment, and advanced generative modeling.
 
-We present `zea` (pronounced *ze-yah*), a Python package for cognitive ultrasound imaging that provides a flexible, modular and differentiable pipeline for ultrasound data processing, as well as a collection of pre-defined models for ultrasound image and signal processing. The toolbox is designed to be easy to use, with a high-level interface that allows users to define their own ultrasound reconstruction pipelines, and to integrate deep learning models into the pipeline. The toolbox is built on top of Keras 3 [@chollet2015keras], which provides a framework for building and training deep learning models with the three major deep learning frameworks as backend: TensorFlow [@abadi2016tensorflow], PyTorch [@NEURIPS2019_9015] and JAX [@jax2018github]. This means that it is easy to integrate a custom ultrasound reconstruction pipeline in a machine learning workflow. In the past few years, several works have used and contributed to `zea`, including @van2024off, @stevens2024dehazing, @nolan2024active, @federici2024active, @stevens2025sequential, @penninga2025deep and @stevens2025high.
+We present `zea` (pronounced *ze-yah*), a Python package for cognitive ultrasound imaging that provides a flexible, modular and differentiable pipeline for ultrasound data processing, as well as a collection of pre-defined models for ultrasound image and signal processing. The toolbox is designed to be easy to use, with a high-level interface that allows users to define their own ultrasound reconstruction pipelines, and to integrate deep learning models into the pipeline. The toolbox is built on top of Keras 3 [@chollet2015keras], which provides a framework for building and training deep learning models with the three major deep learning frameworks as backend: TensorFlow [@abadi2016tensorflow], PyTorch [@NEURIPS2019_9015] and JAX [@jax2018github]. This means that it is easy to integrate a custom ultrasound reconstruction pipeline in a machine learning workflow. In the past few years, several works have used and contributed to `zea`, including @luijten2020adaptive, @van2024off, @stevens2024dehazing, @nolan2024active, @federici2024active, @stevens2025sequential, @penninga2025deep and @stevens2025high.
 
-![High-level overview of an ultrasound perception-action loop implemented in zea.\label{fig:diagram}](assets/zea_perception_action-Light.svg){ width=100% }
+![High-level overview of an ultrasound perception-action loop implemented in zea.\label{fig:diagram}](assets/zea_perception_action-Light.pdf){ width=100% }
 
 # Statement of need
-The ultrasound research community has advanced significantly due to publically available high-quality software, including simulation tools such as `Field II` [@jensen2004simulation] and `k-wave` [@treeby2010k], as well as reconstruction and real-time processing libraries like `USTB` [@rodriguez2017ultrasound], `MUST` [@garcia2021make], `ARRUS` [@jarosik2020arrus], `FAST` [@smistad2021fast], `QUPS` [@brevett2024qups], and `vbeam` [@magnus2023vbeam]. However, most existing solutions are not designed for cognitive ultrasound imaging, where the integration of deep learning and dynamic, closed-loop ultrasound reconstruction pipelines is essential. Our aim with `zea` is to provide a complementary, highly flexible and differentiable pipeline written in a modern deep learning framework, as well as offer a convenient platform to provide several pretrained models. This addresses the need for a modular and extensible library that supports cognitive ultrasound workflows and seamless integration with state-of-the-art machine learning models. While the full realization of cognitive ultrasound imaging remains an ongoing effort, we hope this toolbox will help spur further research and development in the field.
+The ultrasound research community has advanced significantly due to publically available high-quality software, including simulation tools such as `Field II` [@jensen2004simulation] and `k-wave` [@treeby2010k], as well as reconstruction and real-time processing libraries like `USTB` [@rodriguez2017ultrasound], `MUST` [@garcia2021make], `ARRUS` [@jarosik2020arrus], `FAST` [@smistad2021fast], `QUPS` [@brevett2024qups], and `vbeam` [@magnus2023vbeam]. However, existing solutions are not well equipped for cognitive ultrasound imaging, where the integration of deep learning and dynamic, closed-loop ultrasound reconstruction pipelines is essential. Our aim with `zea` is to provide a complementary, highly flexible and differentiable pipeline written in a modern deep learning framework, as well as offer a convenient platform for pretrained models. This addresses the need for a modular and extensible library that supports cognitive ultrasound workflows and seamless integration with state-of-the-art machine learning models. While the full realization of cognitive ultrasound imaging remains an ongoing effort, we hope this toolbox will help spur further research and development in the field.
 
 # Overview of functionality
 `zea` is an open-source Python package, available at [http://github.com/tue-bmd/zea](http://github.com/tue-bmd/zea), that consists of the following core components:
 
 - **Data**: A set of data handling classes such as `zea.data.File`, `zea.data.Dataset` and `make_dataloader()`, suited for machine learning workflows. `zea` works with HDF5 files, storing data and acquisition parameters together in a single file. Additionally, we provide examples and conversion scripts for popular ultrasound datasets, such as CAMUS [@leclerc2019deep], PICMUS [@liebgott2016plane], and EchoNet [@ouyang2019echonet].
-- **Pipeline**: A modular and differentiable pipeline class that allows users to define a sequence of operations to process ultrasound data. The pipeline is stateless and supports *Just in Time* (JIT) compilation. Ultimately this allows for dynamic parameter adjustment, as well as real-time integration of deep learning models inside the ultrasound reconstruction pipeline.
-- **Models**: A collection of pre-defined models for ultrasound image and signal processing. Similar to the data, these models can be loaded locally or from the Hugging Face Hub. Besides supervised models, `zea` also provides a set of (deep) generative models, with an interface to solve inverse problems in ultrasound imaging within a probabilistic machine learning framework.
+- **Pipeline**: A modular and differentiable pipeline class that allows users to define a sequence of operations (`zea.Operation`) to process ultrasound data. The pipeline is stateless and supports *Just in Time* (JIT) compilation. Ultimately this allows for dynamic parameter adjustment, as well as real-time integration of deep learning models inside the ultrasound reconstruction pipeline.
+- **Models**: A collection of pre-defined models for ultrasound image and signal processing. Similar to the data, these models can be loaded locally or from the [Hugging Face Hub](https://huggingface.co/zeahub). Besides supervised models, `zea` also provides a set of (deep) generative models, with an interface to solve inverse problems in ultrasound imaging within a probabilistic machine learning framework.
 - **Agents**: A set of tools to interact with the pipeline and models. These agents can be used to alter the pipeline parameters, or select a subset of acquired data. The agent module closes the action-perception loop, tying together acquisition and reconstruction of ultrasound data.
 
 # Example usage
@@ -73,7 +73,7 @@ with zea.File(path, mode="r") as file:
     probe = file.probe()
 ```
 
-While loading individual data files with `zea.File` or managing multiple files using `zea.Dataset` is convenient for rapid prototyping and exploration, efficient data-driven workflows, such as training deep learning models, require robust data loading utilities. To address this, `zea` offers the `make_dataloader()` function, which is fully compatible with `zea` formatted HDF5 files. This utility streamlines the preparation of data for training by supporting essential features like batching, shuffling, caching, and preprocessing.
+Using `zea.File` to load individual data files or `zea.Dataset` to manage multiple files is convenient for rapid prototyping and exploration. However, more demanding workflows, such as training deep learning models, benefit from more robust data loading utilities. To address this, `zea` offers the `make_dataloader()` function, which is fully compatible with `zea` formatted HDF5 files. This utility streamlines the preparation of data for training by supporting essential features like batching, shuffling, caching, and preprocessing.
 
 ```python
 from zea.backend.tensorflow import make_dataloader
@@ -98,7 +98,7 @@ for batch in dataloader:
 ```
 
 ## Pipeline
-The core of `zea` is a modular and differentiable pipeline class designed for ultrasound data processing. Built on modern deep learning frameworks, this pipeline enables users to compose both built-in and custom operations, including the integration of deep learning models within the processing workflow. The pipeline is stateless, meaning it does not retain information between operations, which facilitates dynamic parameter adjustment and supports real-time reconstruction scenarios. Additionally, the pipeline offers *Just-in-Time* (JIT) compilation, which can significantly enhance performance by optimizing the execution of operations at runtime.
+The core of `zea` is a modular and differentiable pipeline class designed for ultrasound data processing. Built on modern deep learning frameworks, this pipeline enables users to compose both built-in and custom operations derived from base class `zea.Operation`, e.g. `DelayAndSum`, including the integration of deep learning models within the processing workflow. The pipeline is stateless, meaning it does not retain information between operations, which facilitates dynamic parameter adjustment and supports real-time reconstruction scenarios. Additionally, the pipeline offers *Just-in-Time* (JIT) compilation, which can significantly enhance performance by optimizing the execution of operations at runtime.
 
 ```python
 import zea
@@ -132,15 +132,14 @@ data, scan, probe = zea.load_file(
     scan_kwargs={"xlims": (-20e-3, 20e-3), "zlims": (0e-3, 80e-3)},
 )
 
+# place parameters on e.g. GPU
 parameters = pipeline.prepare_parameters(probe, scan)
 
 inputs = {pipeline.key: data}
 
-# parameters can be dynamically passed here as keyword arguments
-# e.g. rx_apo
-rx_apo = np.hanning(scan.n_el).reshape((1, 1, scan.n_el, 1))
-rx_apo = keras.ops.convert_to_tensor(rx_apo)
-outputs = pipeline(**inputs, **parameters, rx_apo=rx_apo)
+# parameters can be dynamically passed here as keyword arguments, e.g. sound_speed
+sound_speed = 1540  # m/s
+outputs = pipeline(**inputs, **parameters, sound_speed=sound_speed)
 
 image = outputs[pipeline.output_key]
 ```
@@ -179,32 +178,17 @@ fig, _ = zea.visualize.plot_image_grid(images, vmin=-1, vmax=1)
 
 Which will generate the samples as seen in \autoref{fig:samples}.
 
-![Diffusion posterior samples.\label{fig:samples}](assets/diffusion_prior_samples.png){ width=70% }
+![Diffusion posterior samples of a model trained on the EchoNet-dynamic dataset.\label{fig:samples}](assets/diffusion_prior_samples.png){ width=70% }
 
 ## Agent
-The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework. They provide tools to alter pipeline or model parameters, select a subset of acquired data, or perform other actions that are necessary to close the action-perception loop in cognitive ultrasound imaging. Currently, it supports intelligent focused transmit scheme design via _active perception_ [@van2024active], with implementations of key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to create measurement models mapping from fully-observed to subsampled data.
+The `agent` subpackage provides tools and utilities for agent-based algorithms within the ``zea`` framework. These agents consist of tools that can alter pipeline or model parameters, select a subset of acquired data, or perform other actions that are necessary to close the action-perception loop in cognitive ultrasound imaging. Currently, it supports intelligent focused transmit scheme design via _active perception_ [@van2024active], with implementations of key algorithms such as _Greedy Entropy Minimization_, and mask generation functions to create measurement models mapping from fully-observed to subsampled data.
 
 ```python
 import keras
 import zea
 
-# load some data
-frame_nr = 0
-batch_size = 4
-image_size = (128, 128)
-dynamic_range = (-60, 0)
-height, width = image_size
-data = []
-with zea.Dataset("hf://zeahub/camus-sample", key="image") as dataset:
-    file_nrs = keras.random.randint((batch_size,), 0, len(dataset))
-    for file_nr in file_nrs:
-        _data = dataset[file_nr]["data"]["image"][frame_nr]
-        _data = keras.ops.image.resize(_data[..., None], image_size)
-        data.append(_data[..., 0])
-
-# batch of frames
-data = keras.ops.stack(data, axis=0)
-data = keras.ops.clip(data, *dynamic_range)
+# (batch, height, width)
+data = ...
 
 # create a Greedy Entropy Minimization agent
 agent = zea.agent.selection.GreedyEntropy(
@@ -218,14 +202,18 @@ agent = zea.agent.selection.GreedyEntropy(
 particles = keras.random.uniform((batch_size, 10, height, width))
 lines, mask = agent.sample(particles)
 
-measurement = keras.ops.where(mask, data, -60)
+measurement = keras.ops.where(mask, data, min_val)
 images = keras.ops.concatenate([data, measurement], axis=0)
 scanconvert = zea.ops.ScanConvert(order=2)
-images = scanconvert(data=images, rho_range=[0, 1], theta_range=[-0.78, 0.78])["data"]
+images = scanconvert(
+  data=images, rho_range=[0, 1], theta_range=[-0.78, 0.78]
+)["data"]
 
 # visualize
 vmin, vmax = dynamic_range
-fig, _ = zea.visualize.plot_image_grid(images, vmin=vmin, vmax=vmax, cmap="gray")
+fig, _ = zea.visualize.plot_image_grid(
+  images, vmin=vmin, vmax=vmax, cmap="gray"
+)
 ```
 
 ![Selected scan-lines as chosen by a Greedy Entropy Minimization agent.\label{fig:agent}](assets/agent_example.png){ width=80% }
