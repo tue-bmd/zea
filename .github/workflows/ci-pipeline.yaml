@@ -80,6 +80,7 @@ jobs:
     needs: [build-full-image, set-tag]
     runs-on: self-hosted
     strategy:
+      max-parallel: 1
       matrix:
         backend: [all, jax, torch, tensorflow, numpy]
     steps:
