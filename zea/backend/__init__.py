@@ -57,6 +57,10 @@ def _import_torch():
         return None
 
 
+tf = _import_tf()
+jax = _import_jax()
+
+
 def tf_function(func=None, jit_compile=False, **kwargs):
     """Applies default tf.function to the given function. Only in TensorFlow backend."""
     return jit(func, jax=False, jit_compile=jit_compile, **kwargs)
@@ -90,16 +94,14 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
     backend = keras.backend.backend()
 
     if backend == "tensorflow" and tensorflow:
-        tf = _import_tf()
         if tf is None:
             raise ImportError("TensorFlow is not installed. Please install it to use this backend.")
         jit_compile = kwargs.pop("jit_compile", True)
         return tf.function(func, jit_compile=jit_compile, **kwargs)
     elif backend == "jax" and jax:
-        jax_mod = _import_jax()
-        if jax_mod is None:
+        if jax is None:
             raise ImportError("JAX is not installed. Please install it to use this backend.")
-        return jax_mod.jit(func, **kwargs)
+        return jax.jit(func, **kwargs)
     elif backend == "tensorflow" and not tensorflow:
         return func
     elif backend == "jax" and not jax:

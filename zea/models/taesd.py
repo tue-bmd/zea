@@ -10,13 +10,15 @@ You can see an example of how to use this model in the example notebook:
 from pathlib import Path
 
 import keras
-import tensorflow as tf
 from keras import backend, ops
 
+from zea.backend import _import_tf
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import taesdxl_decoder_presets, taesdxl_encoder_presets, taesdxl_presets
+
+tf = _import_tf()
 
 
 @model_registry(name="taesdxl")
@@ -34,6 +36,11 @@ class TinyAutoencoder(BaseModel):
             raise NotImplementedError(
                 "TinyDecoder is only currently supported with the TensorFlow or Jax backend."
             )
+
+        assert tf is not None, (
+            "TensorFlow is not installed. Please install TensorFlow to use EchoNetDynamic. This is "
+            "required even if you are using the Jax backend, the model is built using TensorFlow."
+        )
 
         _fix_tf_to_jax_resize_nearest_neighbor()
 
