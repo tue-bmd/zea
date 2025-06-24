@@ -1,4 +1,82 @@
-"""Structure containing parameters defining an ultrasound scan."""
+"""Structure containing parameters defining an ultrasound scan.
+
+This module provides the :class:`Scan` class, a flexible structure
+for managing all parameters related to an ultrasound scan acquisition.
+
+Features
+^^^^^^^^
+
+- **Flexible initialization:** The :class:`Scan` class supports lazy initialization,
+  allowing you to specify any combination of supported parameters. You can pass only
+  the parameters you have, and the rest will be computed or set to defaults as needed.
+
+- **Automatic computation:** Many scan properties (such as
+  grid, number of pixels, wavelength, etc.) are computed automatically from the
+  provided parameters. This enables you to work with minimal input and still obtain
+  all necessary scan configuration details.
+
+- **Dependency tracking and lazy evaluation:** Derived properties are computed only
+  when accessed, and are automatically invalidated and recomputed if their dependencies
+  change. This ensures efficient memory usage and avoids unnecessary computations.
+
+- **Parameter validation:** All parameters are type-checked and validated against
+  a predefined schema, reducing errors and improving robustness.
+
+- **Selection of transmits:** The scan supports flexible selection of transmit events,
+  using the :meth:`set_transmits` method. You can select all, a specific number,
+  or specific transmit indices. The selection is stored and can be accessed via
+  the :attr:`selected_transmits` property.
+
+Comparison to ``zea.Config`` and ``zea.Probe``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- :class:`zea.config.Config`: A general-purpose parameter dictionary for experiment and pipeline
+  configuration. It is not specific to ultrasound acquisition and does not compute
+  derived parameters.
+
+- :class:`zea.probes.Probe`: Contains only probe-specific parameters (e.g., geometry, frequency).
+
+- :class:`zea.scan.Scan`: Combines all parameters relevant to an ultrasound acquisition,
+  including probe, acquisition, and scan region. It also provides automatic computation
+  of derived properties and dependency management.
+
+Example Usage
+^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    from zea import Config, Probe, Scan
+
+    # Initialize Scan from a Probe's parameters
+    probe = Probe.from_name("verasonics_l11_4v")
+    scan = Scan(**probe.get_parameters(), Nz=256)
+
+    # Or initialize from a Config object
+    config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
+    scan = Scan(**config.scan, n_tx=11)
+
+    # Or manually specify parameters
+    scan = Scan(
+        Nx=128,
+        Nz=256,
+        xlims=(-0.02, 0.02),
+        zlims=(0.0, 0.06),
+        center_frequency=6.25e6,
+        sound_speed=1540.0,
+        sampling_frequency=25e6,
+        n_el=128,
+        n_tx=11,
+    )
+
+    # Access a derived property (computed lazily)
+    grid = scan.grid  # shape: (Nz, Nx, 3)
+
+    # Select a subset of transmit events
+    scan.set_transmits(3)  # Use 3 evenly spaced transmits
+    scan.set_transmits([0, 2, 4])  # Use specific transmit indices
+    scan.set_transmits("all")  # Use all transmits
+
+"""
 
 import numpy as np
 from keras import ops
@@ -68,25 +146,6 @@ class Scan(Parameters):
             - "center": Use only the center transmit.
             - int: Select this many evenly spaced transmits.
             - list/array: Use these specific transmit indices.
-
-    Properties:
-        grid (np.ndarray): Meshgrid of x and z coordinates, shape (Nx, Nz, 3).
-        grid_spacing (tuple): Grid spacing in x and z directions (dx, dz).
-        wavelength (float): Wavelength based on sound speed and center frequency.
-        z_axis (np.ndarray): The z-axis of the beamforming grid [m].
-        flatgrid (np.ndarray): Flattened beamforming grid of shape (Nz*Nx, 3).
-        selected_transmits (list): List of selected transmit indices.
-        n_tx_total (int): Total number of transmits in the full dataset.
-        n_tx (int): Number of currently selected transmits.
-        demodulation_frequency (float): Demodulation frequency in Hz.
-        polar_angles (np.ndarray): Polar angles of selected transmits in radians.
-        azimuth_angles (np.ndarray): Azimuth angles of selected transmits in radians.
-        t0_delays (np.ndarray): Transmit delays of selected transmits in seconds.
-        tx_apodizations (np.ndarray): Transmit apodizations of selected transmits.
-        focus_distances (np.ndarray): Focus distances of selected transmits in meters.
-        initial_times (np.ndarray): Initial times of selected transmits in seconds.
-        time_to_next_transmit (np.ndarray): Time between selected transmit events.
-
     """
 
     VALID_PARAMS = {
