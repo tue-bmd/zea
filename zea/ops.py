@@ -264,7 +264,7 @@ class Operation(keras.Operation):
         input_json = json.dumps(kwargs, sort_keys=True, default=str)
         return hashlib.md5(input_json.encode()).hexdigest()
 
-    def __call__(self, **kwargs) -> Dict:
+    def __call__(self, *args, **kwargs) -> Dict:
         """
         Process the input keyword arguments and return the processed results.
 
@@ -274,6 +274,20 @@ class Operation(keras.Operation):
         Returns:
             Combined input and output as kwargs.
         """
+        if args:
+            example_usage = f"    result = {ops_registry.get_name(self)}({self.key}=my_data"
+            if self.valid_keys:
+                example_usage += f", {list(self.valid_keys)[0]}=param1, ..., **kwargs)"
+            else:
+                example_usage += ", **kwargs)"
+            raise TypeError(
+                f"{self.__class__.__name__}.__call__() only accepts keyword arguments. "
+                "Positional arguments are not allowed. "
+                f"Received positional arguments: {args}\n"
+                "Example usage:\n"
+                f"{example_usage}"
+            )
+
         # Merge cached inputs with provided ones
         merged_kwargs = {**self._input_cache, **kwargs}
 
