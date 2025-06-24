@@ -98,7 +98,7 @@ def test_package_only_imports_keras_backend():
         importlib.import_module("zea")
 
 
-def _simulate_backend_availability(backends_available):
+def _simulate_backend_availability(backends_available):  # pragma: no cover
     """
     Context manager to simulate only certain backends being available for import.
     backends_available: list of backend names (e.g., ["jax", "tensorflow", "torch"])
