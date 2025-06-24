@@ -98,50 +98,6 @@ def test_package_only_imports_keras_backend():
         importlib.import_module("zea")
 
 
-def _simulate_backend_availability(backends_available):  # pragma: no cover
-    """
-    Context manager to simulate only certain backends being available for import.
-    backends_available: list of backend names (e.g., ["jax", "tensorflow", "torch"])
-    """
-    import builtins
-    from unittest import mock
-
-    all_backends = {"jax", "tensorflow", "torch"}
-    orig_sys_modules = sys.modules.copy()
-    orig_find_spec = importlib.util.find_spec
-    orig_import = builtins.__import__
-
-    def fake_find_spec(name, *args, **kwargs):
-        if name in all_backends:
-            if name in backends_available:
-                return orig_find_spec(name, *args, **kwargs)
-            else:
-                return None
-        return orig_find_spec(name, *args, **kwargs)
-
-    def fake_import(name, *args, **kwargs):
-        # Block import if not in allowed backends
-        if name in all_backends and name not in backends_available:
-            raise ImportError(f"Simulated: No module named '{name}'")
-        return orig_import(name, *args, **kwargs)
-
-    # Remove all backend modules from sys.modules to force import
-    for backend in all_backends:
-        sys.modules.pop(backend, None)
-
-    patch_find_spec = mock.patch("importlib.util.find_spec", side_effect=fake_find_spec)
-    patch_import = mock.patch("builtins.__import__", side_effect=fake_import)
-    patch_find_spec.start()
-    patch_import.start()
-    try:
-        yield
-    finally:
-        patch_find_spec.stop()
-        patch_import.stop()
-        sys.modules.clear()
-        sys.modules.update(orig_sys_modules)
-
-
 def _subprocess_import_zea_with_only_backend(backend):
     """
     This function is run in a subprocess to test zea import with only one backend available.
