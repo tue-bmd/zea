@@ -282,7 +282,7 @@ class Operation(keras.Operation):
                 example_usage += ", **kwargs)"
             raise TypeError(
                 f"{self.__class__.__name__}.__call__() only accepts keyword arguments. "
-                "Positional arguments are not allowed. "
+                "Positional arguments are not allowed.\n"
                 f"Received positional arguments: {args}\n"
                 "Example usage:\n"
                 f"{example_usage}"
