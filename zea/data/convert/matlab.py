@@ -369,7 +369,12 @@ def read_sampling_frequency(file):
     """
     # Read the sampling frequency from the file
     adc_rate = dereference_index(file, file["Receive"]["decimSampleRate"], 0)
-    quaddecim = dereference_index(file, file["Receive"]["quadDecim"], 0)
+
+    # The Vantage NXT has renamed this field to sampleSkip
+    if "quadDecim" in file["Receive"]:
+        quaddecim = dereference_index(file, file["Receive"]["quadDecim"], 0)
+    else:
+        quaddecim = 1.0
 
     sampling_frequency = adc_rate / quaddecim * 1e6
 
