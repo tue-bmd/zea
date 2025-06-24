@@ -98,7 +98,7 @@ def test_package_only_imports_keras_backend():
         importlib.import_module("zea")
 
 
-def _subprocess_import_zea_with_only_backend(backend):
+def _subprocess_import_zea_with_only_backend(backend):  # pragma: no cover
     """
     This function is run in a subprocess to test zea import with only one backend available.
     """
