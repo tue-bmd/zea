@@ -84,8 +84,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Check if previous all-cpu image exists (for retag fallback)
+        if: needs.docker-init.outputs.build_needed == 'false'
+        id: prev_image
+        run: |
+          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
+            echo "found=false" >> $GITHUB_OUTPUT
+          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push all-cpu Docker image
-        if: needs.docker-init.outputs.build_needed == 'true'
+        if: needs.docker-init.outputs.build_needed == 'true' || steps.prev_image.outputs.found == 'false'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -101,7 +113,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
       - name: Retag all-cpu Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false'
+        if: needs.docker-init.outputs.build_needed == 'false' && steps.prev_image.outputs.found == 'true'
         run: |
           docker buildx imagetools create \
             --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
@@ -127,8 +139,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Check if previous CPU image exists (for retag fallback)
+        if: needs.docker-init.outputs.build_needed == 'false'
+        id: prev_cpu_image
+        run: |
+          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
+            echo "found=false" >> $GITHUB_OUTPUT
+          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push CPU Docker image
-        if: needs.docker-init.outputs.build_needed == 'true'
+        if: needs.docker-init.outputs.build_needed == 'true' || steps.prev_cpu_image.outputs.found == 'false'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -143,14 +167,26 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
       - name: Retag CPU Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false'
+        if: needs.docker-init.outputs.build_needed == 'false' && steps.prev_cpu_image.outputs.found == 'true'
         run: |
           docker buildx imagetools create \
             --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.docker_tag }} \
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.prev_tag }}
 
+      - name: Check if previous GPU image exists (for retag fallback)
+        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy'
+        id: prev_gpu_image
+        run: |
+          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
+            echo "found=false" >> $GITHUB_OUTPUT
+          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push GPU Docker image
-        if: needs.docker-init.outputs.build_needed == 'true' && matrix.backend != 'numpy'
+        if: (needs.docker-init.outputs.build_needed == 'true' || (matrix.backend != 'numpy' && steps.prev_gpu_image.outputs.found == 'false')) && matrix.backend != 'numpy'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -165,7 +201,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
       - name: Retag GPU Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy'
+        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy' && steps.prev_gpu_image.outputs.found == 'true'
         run: |
           docker buildx imagetools create \
             --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.docker_tag }} \
