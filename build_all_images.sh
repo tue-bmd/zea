@@ -8,16 +8,53 @@ IMAGE_PREFIX="zeahub"
 echo "Building CPU images..."
 for backend in "${BACKENDS[@]}"; do
   tag="${IMAGE_PREFIX}/${backend}-cpu"
-  docker build -f Dockerfile.base --target cpu \
-    --build-arg BACKEND="$backend" \
+  # Set build args per backend for CPU
+  case "$backend" in
+    all)
+      BUILD_ARGS="--build-arg INSTALL_JAX=cpu --build-arg INSTALL_TORCH=cpu --build-arg INSTALL_TF=cpu --build-arg DEV=true"
+      ;;
+    jax)
+      BUILD_ARGS="--build-arg INSTALL_JAX=cpu --build-arg INSTALL_TORCH=false --build-arg INSTALL_TF=false"
+      ;;
+    torch)
+      BUILD_ARGS="--build-arg INSTALL_JAX=false --build-arg INSTALL_TORCH=cpu --build-arg INSTALL_TF=false"
+      ;;
+    tensorflow)
+      BUILD_ARGS="--build-arg INSTALL_JAX=false --build-arg INSTALL_TORCH=false --build-arg INSTALL_TF=cpu"
+      ;;
+    numpy)
+      BUILD_ARGS="--build-arg INSTALL_JAX=false --build-arg INSTALL_TORCH=false --build-arg INSTALL_TF=false"
+      ;;
+  esac
+  docker build -f Dockerfile \
+    $BUILD_ARGS \
     -t "$tag" .
 done
 
 echo "Building GPU images..."
 for backend in "${BACKENDS[@]}"; do
+  # No GPU image for numpy
+  if [[ "$backend" == "numpy" ]]; then
+    continue
+  fi
   tag="${IMAGE_PREFIX}/${backend}"
-  docker build -f Dockerfile.base --target gpu \
-    --build-arg BACKEND="$backend" \
+  # Set build args per backend for GPU
+  case "$backend" in
+    all)
+      BUILD_ARGS="--build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu"
+      ;;
+    jax)
+      BUILD_ARGS="--build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=false --build-arg INSTALL_TF=false"
+      ;;
+    torch)
+      BUILD_ARGS="--build-arg INSTALL_JAX=false --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=false"
+      ;;
+    tensorflow)
+      BUILD_ARGS="--build-arg INSTALL_JAX=false --build-arg INSTALL_TORCH=false --build-arg INSTALL_TF=gpu"
+      ;;
+  esac
+  docker build -f Dockerfile \
+    $BUILD_ARGS \
     -t "$tag" .
 done
 

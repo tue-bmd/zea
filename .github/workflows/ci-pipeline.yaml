@@ -35,9 +35,19 @@ jobs:
           echo "Determined image tag: $TAG_VALUE"
 
   build-full-image:
-    needs: set-tag
+    needs: [set-tag, linter]
     runs-on: ubuntu-latest
     steps:
+      - name: Free up disk space
+        run : |
+            echo "Disk space before cleanup:"
+            df -h
+            sudo rm -rf "/usr/local/share/boost"
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+            sudo rm -rf /opt/hostedtoolcache
+            echo "Disk space after cleanup:"
+            df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -54,21 +64,25 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile.base
-          target: cpu
+          file: Dockerfile
+          build-args: |
+            INSTALL_JAX=cpu
+            INSTALL_TORCH=cpu
+            INSTALL_TF=cpu
+            DEV=true
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=all
-          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache
-          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/all-cpu:cache,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
   build-other-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-full-image, set-tag]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
+      max-parallel: 1
       matrix:
-        backend: [numpy, jax, torch, tensorflow, all]
+        backend: [all, jax, torch, tensorflow, numpy]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -86,25 +100,30 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile.base
-          target: cpu
+          file: Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ matrix.backend }}
-          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache
-          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:cache,mode=max
+          build-args: |
+            INSTALL_JAX=${{ contains('all,jax', matrix.backend) && 'cpu' || 'false' }}
+            INSTALL_TORCH=${{ contains('all,torch', matrix.backend) && 'cpu' || 'false' }}
+            INSTALL_TF=${{ contains('all,tensorflow', matrix.backend) && 'cpu' || 'false' }}
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
       - name: Build and push GPU Docker image
+        if: ${{ matrix.backend != 'numpy' }}
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: Dockerfile.base
-          target: gpu
+          file: Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
-          build-args: BACKEND=${{ matrix.backend }}
-          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache
-          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:cache,mode=max
+          build-args: |
+            INSTALL_JAX=${{ (matrix.backend == 'all' || matrix.backend == 'jax') && 'gpu' || 'false' }}
+            INSTALL_TORCH=${{ (matrix.backend == 'all' || matrix.backend == 'torch') && 'gpu' || 'false' }}
+            INSTALL_TF=${{ (matrix.backend == 'all' || matrix.backend == 'tensorflow') && 'gpu' || 'false' }}
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
   tests:
     if: github.event_name == 'pull_request'
@@ -128,8 +147,8 @@ jobs:
       - name: Run Pytest in container
         run: |
           docker run --rm \
-            -v "${{ github.workspace }}:/ultrasound-toolbox" \
-            -w /ultrasound-toolbox \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
             -u $(id -u):$(id -g) \
             -e HOME=/tmp \
             -e USER=$(id -un) \
@@ -147,8 +166,8 @@ jobs:
         continue-on-error: true
         run: |
           docker run --rm \
-          -v "${{ github.workspace }}:/ultrasound-toolbox" \
-          -w /ultrasound-toolbox \
+          -v "${{ github.workspace }}:/zea" \
+          -w /zea \
           -u $(id -u):$(id -g) \
           -e HOME=/tmp \
           -e USER=$(id -un) \
@@ -156,6 +175,36 @@ jobs:
           ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
           sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
 
+  heavy-tests:
+    if: github.event_name == 'pull_request'
+    needs: [build-full-image, set-tag]
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - name: Pull full Docker image
+        run: |
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
+            echo "Image tag not set!" && exit 1
+          fi
+          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
+
+      - name: Run heavy Pytest
+        run: |
+          docker run --rm \
+          -v "${{ github.workspace }}:/zea" \
+          -w /zea \
+          -u $(id -u):$(id -g) \
+          -e HOME=/tmp \
+          -e USER=$(id -un) \
+          -e LOGNAME=$(id -un) \
+          ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
+          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
 
   linter:
     runs-on: ubuntu-latest
@@ -199,8 +248,8 @@ jobs:
       - name: Build documentation with Sphinx (fail on warnings)
         run: |
           docker run --rm \
-            -v "${{ github.workspace }}:/ultrasound-toolbox" \
-            -w /ultrasound-toolbox/docs \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea/docs \
             -u $(id -u):$(id -g) \
             -e HOME=/tmp \
             -e USER=$(id -un) \
