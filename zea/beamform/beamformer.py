@@ -31,10 +31,18 @@ def fnum_window_fn_tukey(normalized_angle, alpha=0.5):
             rectangular window, 1.0 corresponds to a Hann window. Defaults to 0.5.
     """
     # Use a Tukey window function to smoothly transition the mask
+    normalized_angle = ops.clip(ops.abs(normalized_angle), 0.0, 1.0)
+
+    beta = 1.0 - alpha
+
     return ops.where(
-        normalized_angle <= 1.0,
-        0.5 * (1 + ops.cos(np.pi * normalized_angle / alpha)),
-        0.0,
+        normalized_angle < beta,
+        1.0,
+        ops.where(
+            normalized_angle < 1.0,
+            0.5 * (1 + ops.cos(np.pi * (normalized_angle - beta) / (ops.abs(alpha) + 1e-6))),
+            0.0,
+        ),
     )
 
 
