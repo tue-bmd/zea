@@ -35,19 +35,6 @@ jobs:
             echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
           fi
 
-          # Print out the tag we just set for debugging
-          TAG_VALUE=$(grep '^tag=' "$GITHUB_OUTPUT" | cut -d'=' -f2-)
-          echo "Determined image tag: $TAG_VALUE"
-
-      - name: Check if Docker build is needed
-        id: check
-        run: |
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E 'Dockerfile|poetry.lock|pyproject.toml'; then
-            echo "build_needed=true" >> $GITHUB_OUTPUT
-          else
-            echo "build_needed=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Set previous image tag
         id: prev_tag
         run: |
@@ -56,6 +43,19 @@ jobs:
             echo "prev_tag=${{ github.event.before }}" >> $GITHUB_OUTPUT
           else
             echo "prev_tag=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if Docker build is needed
+        id: check
+        run: |
+          prev_tag="${{ steps.prev_tag.outputs.prev_tag }}"
+          # If prev_tag is empty, force build
+          if [ -z "$prev_tag" ]; then
+            echo "build_needed=true" >> $GITHUB_OUTPUT
+          elif git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E 'Dockerfile|poetry.lock|pyproject.toml'; then
+            echo "build_needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "build_needed=false" >> $GITHUB_OUTPUT
           fi
 
   build-full-image:
