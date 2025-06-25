@@ -42,7 +42,9 @@ def cache_with_dependencies(*deps):
             result = func(self)
             self._computed.add(func.__name__)
             self._cache[func.__name__] = result
-            self._dependency_versions[func.__name__] = self._current_dependency_hash(deps)
+            self._dependency_versions[func.__name__] = self._current_dependency_hash(
+                deps
+            )
             return result
 
         return property(wrapper)
@@ -140,7 +142,9 @@ class Parameters(ZeaObject):
         super().__init__()
 
         if self.VALID_PARAMS is None:
-            raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
+            raise NotImplementedError(
+                "VALID_PARAMS must be defined in subclasses of Parameters."
+            )
 
         for param, config in self.VALID_PARAMS.items():
             if param not in kwargs and config["default"] is not None:
@@ -175,6 +179,10 @@ class Parameters(ZeaObject):
         self._dependency_versions = {}
         for k, v in kwargs.items():
             self._params[k] = v
+
+        # Tensor cache stores converted tensors for parameters and computed properties
+        # to avoid converting them multiple times if there are no changes.
+        self._tensor_cache = {}
 
     def __getattr__(self, item):
         # First check regular params
@@ -216,7 +224,9 @@ class Parameters(ZeaObject):
                     if seen is None:
                         seen = set()
                     attr = getattr(self.__class__, name, None)
-                    if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
+                    if isinstance(attr, property) and hasattr(
+                        attr.fget, "_dependencies"
+                    ):
                         leaves = set()
                         for dep in attr.fget._dependencies:
                             leaves |= find_leaf_params(dep, seen)
@@ -285,10 +295,12 @@ class Parameters(ZeaObject):
             return dependents
 
         to_invalidate = find_all_dependents(changed_key)
+        to_invalidate.add(changed_key)  # Always invalidate the changed key itself
         for key in to_invalidate:
             self._cache.pop(key, None)
             self._computed.discard(key)
             self._dependency_versions.pop(key, None)
+            self._tensor_cache.pop(key, None)
 
     def _current_dependency_hash(self, deps):
         relevant = [str(self._params.get(dep, None)) for dep in deps]
@@ -322,37 +334,50 @@ class Parameters(ZeaObject):
             failed.add(name)
             return False
 
-    def to_tensor(self, compute_missing=False, compute_keys=None):
+    def to_tensor(self, include=None, exclude=None):
         """
-        Convert all parameters (and optionally computed properties) to tensors.
+        Convert parameters and computed properties to tensors.
 
         Args:
-            compute_missing (bool): If True, compute missing computed properties.
-            compute_keys (list or None): If not None, only compute these
-                computed properties (by name).
+            include (None, "all", or list): Only include these parameter/computed property names.
+                If None or "all", include all.
+            exclude (None or list): Exclude these parameter/computed property names.
+                Only one of include or exclude can be set.
         """
-        tensor_dict = {k: _to_tensor(k, v) for k, v in self._params.items()}
+        if include is not None and exclude is not None:
+            raise ValueError("Only one of 'include' or 'exclude' can be set.")
 
-        # Compute missing properties if requested
-        if compute_missing:
-            for name in dir(self.__class__):
-                if compute_keys is not None and name not in compute_keys:
-                    continue
-                attr = getattr(self.__class__, name)
-                if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
-                    failed = set()
-                    if self._resolve_dependency_tree(name, failed):
-                        try:
-                            val = getattr(self, name)
-                            if val is not None:
-                                pass
-                        except Exception as e:
-                            log.warning(f"Could not compute '{name}': {str(e)}")
+        # Determine which keys to include
+        param_keys = set(self._params.keys())
+        computed_keys = set(self._computed)
+        all_keys = param_keys | computed_keys
 
-        # Always include all already computed properties
-        for key in self._computed:
+        if include is None or include == "all":
+            keys = set(all_keys)
+        else:
+            keys = set(include)
+        if exclude is not None:
+            keys = keys - set(exclude)
+
+        tensor_dict = {}
+        # Parameters
+        for k in param_keys & keys:
+            v = self._params[k]
+            if k in self._tensor_cache:
+                tensor_dict[k] = self._tensor_cache[k]
+            else:
+                tensor_val = _to_tensor(k, v)
+                tensor_dict[k] = tensor_val
+                self._tensor_cache[k] = tensor_val
+        # Computed properties
+        for key in computed_keys & keys:
             val = getattr(self, key)
-            tensor_dict[key] = _to_tensor(key, val)
+            if key in self._tensor_cache:
+                tensor_dict[key] = self._tensor_cache[key]
+            else:
+                tensor_val = _to_tensor(key, val)
+                tensor_dict[key] = tensor_val
+                self._tensor_cache[key] = tensor_val
 
         return tensor_dict
 
