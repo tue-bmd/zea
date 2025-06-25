@@ -4,9 +4,9 @@ import abc
 from typing import Literal
 
 import keras
-import tensorflow as tf
 from keras import ops
 
+from zea.backend import _import_tf
 from zea.backend.autograd import AutoGrad
 from zea.internal.core import Object
 from zea.internal.operators import Operator
@@ -19,6 +19,8 @@ from zea.models.unet import get_time_conditional_unetwork
 from zea.models.utils import LossTrackerWrapper
 from zea.tensor_ops import L2, fori_loop, split_seed
 from zea.utils import fn_requires_argument
+
+tf = _import_tf()
 
 
 @model_registry(name="diffusion")
@@ -288,6 +290,11 @@ class DiffusionModel(DeepGenerativeModel):
         Note:
             - Only implemented for the TensorFlow backend.
         """
+        if tf is None:
+            raise NotImplementedError(
+                "DiffusionModel.train_step is only implemented for the TensorFlow backend."
+            )
+
         # Get batch size and image shape
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
