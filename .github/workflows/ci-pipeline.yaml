@@ -242,7 +242,13 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
-            sh -c "pip install -e . && pytest -p no:cacheprovider -m 'not heavy' ./tests"
+            sh -c "pip install -e . && pytest -p no:cacheprovider --cov --cov-branch --cov-report=xml  -m 'not heavy' ./tests"
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: tue-bmd/zea
 
       - name: Run heavy Pytest (allowed to fail)
         continue-on-error: true
