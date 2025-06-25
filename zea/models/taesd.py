@@ -38,8 +38,9 @@ class TinyAutoencoder(BaseModel):
             )
 
         assert tf is not None, (
-            "TensorFlow is not installed. Please install TensorFlow to use EchoNetDynamic. This is "
-            "required even if you are using the Jax backend, the model is built using TensorFlow."
+            "TensorFlow is not installed. Please install TensorFlow to use TinyAutoencoder. "
+            "This is required even if you are using the Jax backend, the model is built "
+            "using TensorFlow."
         )
 
         _fix_tf_to_jax_resize_nearest_neighbor()
