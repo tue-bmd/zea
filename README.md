@@ -1,12 +1,11 @@
-<!-- This is the readme for the github page (more complete readme for pdocs can be found in usmbd/README.md) -->
-# zea <img src="docs/_static/zea-logo.svg" style="float: right; width: 20%; height: 20%;" align="right" alt="zea Logo" />
+# zea <img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="120" height="120" align="right" alt="zea Logo" />
 
-<!-- https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png -->
 
-<!-- [![Continuous integration](https://github.com/tue-bmd/zea/actions/workflows/ci-build.yaml/badge.svg)](https://github.com/tue-bmd/zea/actions/workflows/ci-pipeline.yaml)
 [![PyPI version](https://img.shields.io/pypi/v/zea)](https://pypi.org/project/zea/)
+[![Continuous integration](https://github.com/tue-bmd/zea/actions/workflows/ci-pipeline.yaml/badge.svg)](https://github.com/tue-bmd/zea/actions/workflows/ci-pipeline.yaml)
 [![Documentation Status](https://readthedocs.org/projects/zea/badge/?version=latest)](https://zea.readthedocs.io/en/latest/?badge=latest)
-[![License](https://img.shields.io/github/license/tue-bmd/zea)](https://github.com/tue-bmd/zea/blob/main/LICENSE) -->
+[![License](https://img.shields.io/github/license/tue-bmd/zea)](https://github.com/tue-bmd/zea/blob/main/LICENSE)
+[![codecov](https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg)](https://codecov.io/gh/tue-bmd/zea)
 
 Welcome to the documentation for the `zea` package: *A Toolbox for Cognitive Ultrasound Imaging.*
 
