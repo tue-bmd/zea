@@ -19,7 +19,6 @@ jobs:
     outputs:
       docker_tag: ${{ steps.set.outputs.tag }}
       build_needed: ${{ steps.check.outputs.build_needed }}
-      prev_tag: ${{ steps.prev_tag.outputs.prev_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,39 +28,33 @@ jobs:
         run: |
           echo "files=Dockerfile poetry.lock pyproject.toml motd.sh" >> $GITHUB_OUTPUT
 
+      - name: Compute Docker context hash
+        id: docker_hash
+        run: |
+          HASH=$(cat Dockerfile poetry.lock pyproject.toml motd.sh | sha256sum | cut -c1-12)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+
       - name: Set image tag
         id: set
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == 'refs/heads/main' ]]; then
-            echo "tag=latest" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "release" ]]; then
-            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          fi
+          echo "tag=${{ steps.docker_hash.outputs.hash }}" >> $GITHUB_OUTPUT
 
-      - name: Set previous image tag
-        id: prev_tag
+      - name: Check if Docker image exists
+        id: image_exists
         run: |
-          # Use previous commit SHA for PRs and non-main pushes, else use 'latest'
-          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "prev_tag=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          if docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ steps.set.outputs.tag }} > /dev/null 2>&1; then
+            echo "found=true" >> $GITHUB_OUTPUT
           else
-            echo "prev_tag=latest" >> $GITHUB_OUTPUT
+            echo "found=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Check if Docker build is needed
         id: check
         run: |
-          prev_tag="${{ steps.prev_tag.outputs.prev_tag }}"
-          build_triggers="${{ steps.build_triggers.outputs.files }}"
-          # If prev_tag is empty, force build
-          if [ -z "$prev_tag" ]; then
-            echo "build_needed=true" >> $GITHUB_OUTPUT
-          elif git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E "$(echo $build_triggers | sed 's/ /|/g')"; then
-            echo "build_needed=true" >> $GITHUB_OUTPUT
-          else
+          if [[ "${{ steps.image_exists.outputs.found }}" == "true" ]]; then
             echo "build_needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "build_needed=true" >> $GITHUB_OUTPUT
           fi
 
   build-full-image:
@@ -90,20 +83,8 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Check if previous all-cpu image exists (for retag fallback)
-        if: needs.docker-init.outputs.build_needed == 'false'
-        id: prev_image
-        run: |
-          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
-            echo "found=false" >> $GITHUB_OUTPUT
-          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build and push all-cpu Docker image
-        if: needs.docker-init.outputs.build_needed == 'true' || steps.prev_image.outputs.found == 'false'
+        if: needs.docker-init.outputs.build_needed == 'true'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -118,12 +99,10 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
-      - name: Retag all-cpu Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false' && steps.prev_image.outputs.found == 'true'
+      - name: Pull all-cpu Docker image (no build)
+        if: needs.docker-init.outputs.build_needed == 'false'
         run: |
-          docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.prev_tag }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }}
 
   build-other-images:
     needs: [build-full-image, docker-init]
@@ -145,20 +124,8 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Check if previous CPU image exists (for retag fallback)
-        if: needs.docker-init.outputs.build_needed == 'false'
-        id: prev_cpu_image
-        run: |
-          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
-            echo "found=false" >> $GITHUB_OUTPUT
-          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build and push CPU Docker image
-        if: needs.docker-init.outputs.build_needed == 'true' || steps.prev_cpu_image.outputs.found == 'false'
+        if: needs.docker-init.outputs.build_needed == 'true'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -172,27 +139,13 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
-      - name: Retag CPU Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false' && steps.prev_cpu_image.outputs.found == 'true'
+      - name: Pull CPU Docker image (no build)
+        if: needs.docker-init.outputs.build_needed == 'false'
         run: |
-          docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.docker_tag }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.prev_tag }}
-
-      - name: Check if previous GPU image exists (for retag fallback)
-        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy'
-        id: prev_gpu_image
-        run: |
-          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
-            echo "found=false" >> $GITHUB_OUTPUT
-          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.docker_tag }}
 
       - name: Build and push GPU Docker image
-        if: (needs.docker-init.outputs.build_needed == 'true' || (matrix.backend != 'numpy' && steps.prev_gpu_image.outputs.found == 'false')) && matrix.backend != 'numpy'
+        if: needs.docker-init.outputs.build_needed == 'true' && matrix.backend != 'numpy'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -206,12 +159,10 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
-      - name: Retag GPU Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy' && steps.prev_gpu_image.outputs.found == 'true'
+      - name: Pull GPU Docker image (no build)
+        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy'
         run: |
-          docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.docker_tag }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.prev_tag }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.docker_tag }}
 
   tests:
     if: github.event_name == 'pull_request'
