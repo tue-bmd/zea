@@ -719,3 +719,15 @@ def test_default_ultrasound_pipeline(
         rtol=1e-3,
         atol=1e-3,
     )
+
+
+def test_ops_pass_positional_arg():
+    """Test that passing positional arguments to Operation raises a custom error."""
+    op = AddOperation()
+    with pytest.raises(TypeError) as excinfo:
+        op(1, 2)
+    assert "Positional arguments are not allowed." in str(excinfo.value)
+    op = ops.Lambda(lambda x: x + 1)
+    with pytest.raises(TypeError) as excinfo:
+        op(1)
+    assert "Positional arguments are not allowed." in str(excinfo.value)
