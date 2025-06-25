@@ -24,6 +24,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set files that trigger Docker build
+        id: build_triggers
+        run: |
+          echo "files=Dockerfile poetry.lock pyproject.toml motd.sh" >> $GITHUB_OUTPUT
+
       - name: Set image tag
         id: set
         run: |
@@ -49,10 +54,11 @@ jobs:
         id: check
         run: |
           prev_tag="${{ steps.prev_tag.outputs.prev_tag }}"
+          build_triggers="${{ steps.build_triggers.outputs.files }}"
           # If prev_tag is empty, force build
           if [ -z "$prev_tag" ]; then
             echo "build_needed=true" >> $GITHUB_OUTPUT
-          elif git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E 'Dockerfile|poetry.lock|pyproject.toml'; then
+          elif git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E "$(echo $build_triggers | sed 's/ /|/g')"; then
             echo "build_needed=true" >> $GITHUB_OUTPUT
           else
             echo "build_needed=false" >> $GITHUB_OUTPUT
