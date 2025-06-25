@@ -13,7 +13,6 @@ import hashlib
 
 import numpy as np
 
-from zea import log
 from zea.internal.core import Object as ZeaObject
 from zea.internal.core import _to_tensor
 
