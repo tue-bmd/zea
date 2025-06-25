@@ -14,21 +14,11 @@ env:
   IMAGE_PREFIX: zeahub
 
 jobs:
-  docker-init:
+  set-tag:
     runs-on: ubuntu-latest
     outputs:
       docker_tag: ${{ steps.set.outputs.tag }}
-      build_needed: ${{ steps.check.outputs.build_needed }}
-      prev_tag: ${{ steps.prev_tag.outputs.prev_tag }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set files that trigger Docker build
-        id: build_triggers
-        run: |
-          echo "files=Dockerfile poetry.lock pyproject.toml motd.sh" >> $GITHUB_OUTPUT
-
       - name: Set image tag
         id: set
         run: |
@@ -40,32 +30,12 @@ jobs:
             echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set previous image tag
-        id: prev_tag
-        run: |
-          # Use previous commit SHA for PRs and non-main pushes, else use 'latest'
-          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "prev_tag=${{ github.event.before }}" >> $GITHUB_OUTPUT
-          else
-            echo "prev_tag=latest" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Check if Docker build is needed
-        id: check
-        run: |
-          prev_tag="${{ steps.prev_tag.outputs.prev_tag }}"
-          build_triggers="${{ steps.build_triggers.outputs.files }}"
-          # If prev_tag is empty, force build
-          if [ -z "$prev_tag" ]; then
-            echo "build_needed=true" >> $GITHUB_OUTPUT
-          elif git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E "$(echo $build_triggers | sed 's/ /|/g')"; then
-            echo "build_needed=true" >> $GITHUB_OUTPUT
-          else
-            echo "build_needed=false" >> $GITHUB_OUTPUT
-          fi
+          # Print out the tag we just set for debugging
+          TAG_VALUE=$(grep '^tag=' "$GITHUB_OUTPUT" | cut -d'=' -f2-)
+          echo "Determined image tag: $TAG_VALUE"
 
   build-full-image:
-    needs: [docker-init, linter]
+    needs: [set-tag, linter]
     runs-on: ubuntu-latest
     steps:
       - name: Free up disk space
@@ -90,20 +60,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Check if previous all-cpu image exists (for retag fallback)
-        if: needs.docker-init.outputs.build_needed == 'false'
-        id: prev_image
-        run: |
-          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
-            echo "found=false" >> $GITHUB_OUTPUT
-          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build and push all-cpu Docker image
-        if: needs.docker-init.outputs.build_needed == 'true' || steps.prev_image.outputs.found == 'false'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -114,19 +71,13 @@ jobs:
             INSTALL_TF=cpu
             DEV=true
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
-      - name: Retag all-cpu Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false' && steps.prev_image.outputs.found == 'true'
-        run: |
-          docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.prev_tag }}
-
   build-other-images:
-    needs: [build-full-image, docker-init]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [set-tag]
     runs-on: self-hosted
     strategy:
       max-parallel: 1
@@ -145,26 +96,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Check if previous CPU image exists (for retag fallback)
-        if: needs.docker-init.outputs.build_needed == 'false'
-        id: prev_cpu_image
-        run: |
-          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
-            echo "found=false" >> $GITHUB_OUTPUT
-          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build and push CPU Docker image
-        if: needs.docker-init.outputs.build_needed == 'true' || steps.prev_cpu_image.outputs.found == 'false'
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.docker_tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.set-tag.outputs.docker_tag }}
           build-args: |
             INSTALL_JAX=${{ contains('all,jax', matrix.backend) && 'cpu' || 'false' }}
             INSTALL_TORCH=${{ contains('all,torch', matrix.backend) && 'cpu' || 'false' }}
@@ -172,33 +110,14 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
-      - name: Retag CPU Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false' && steps.prev_cpu_image.outputs.found == 'true'
-        run: |
-          docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.docker_tag }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.docker-init.outputs.prev_tag }}
-
-      - name: Check if previous GPU image exists (for retag fallback)
-        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy'
-        id: prev_gpu_image
-        run: |
-          if [ -z "${{ needs.docker-init.outputs.prev_tag }}" ]; then
-            echo "found=false" >> $GITHUB_OUTPUT
-          elif docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.prev_tag }} > /dev/null 2>&1; then
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build and push GPU Docker image
-        if: (needs.docker-init.outputs.build_needed == 'true' || (matrix.backend != 'numpy' && steps.prev_gpu_image.outputs.found == 'false')) && matrix.backend != 'numpy'
+        if: ${{ matrix.backend != 'numpy' }}
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.docker_tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.set-tag.outputs.docker_tag }}
           build-args: |
             INSTALL_JAX=${{ (matrix.backend == 'all' || matrix.backend == 'jax') && 'gpu' || 'false' }}
             INSTALL_TORCH=${{ (matrix.backend == 'all' || matrix.backend == 'torch') && 'gpu' || 'false' }}
@@ -206,16 +125,9 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache
           cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/cache,mode=max
 
-      - name: Retag GPU Docker image (no build)
-        if: needs.docker-init.outputs.build_needed == 'false' && matrix.backend != 'numpy' && steps.prev_gpu_image.outputs.found == 'true'
-        run: |
-          docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.docker_tag }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.docker-init.outputs.prev_tag }}
-
   tests:
     if: github.event_name == 'pull_request'
-    needs: [build-full-image, docker-init]
+    needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -227,10 +139,10 @@ jobs:
 
       - name: Pull full Docker image
         run: |
-          if [ -z "${{ needs.docker-init.outputs.docker_tag }}" ]; then
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }}
+          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run Pytest in container
         run: |
@@ -241,8 +153,8 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
-            sh -c "pip install -e . && pytest -p no:cacheprovider --cov --cov-branch --cov-report=xml  -m 'not heavy' ./tests"
+            ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
+            sh -c "pip install -e . && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy' ./tests"
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
@@ -260,12 +172,12 @@ jobs:
           -e HOME=/tmp \
           -e USER=$(id -un) \
           -e LOGNAME=$(id -un) \
-          ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
+          ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
           sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
 
   heavy-tests:
     if: github.event_name == 'pull_request'
-    needs: [build-full-image, docker-init]
+    needs: [build-full-image, set-tag]
     runs-on: self-hosted
     timeout-minutes: 30
     steps:
@@ -277,10 +189,10 @@ jobs:
 
       - name: Pull full Docker image
         run: |
-          if [ -z "${{ needs.docker-init.outputs.docker_tag }}" ]; then
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }}
+          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Run heavy Pytest
         run: |
@@ -291,7 +203,7 @@ jobs:
           -e HOME=/tmp \
           -e USER=$(id -un) \
           -e LOGNAME=$(id -un) \
-          ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
+          ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
           sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
 
   linter:
@@ -317,7 +229,7 @@ jobs:
 
 
   build-docs:
-    needs: [build-full-image, docker-init]
+    needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -328,10 +240,10 @@ jobs:
 
       - name: Pull full Docker image
         run: |
-          if [ -z "${{ needs.docker-init.outputs.docker_tag }}" ]; then
+          if [ -z "${{ needs.set-tag.outputs.docker_tag }}" ]; then
             echo "Image tag not set!" && exit 1
           fi
-          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }}
+          docker pull ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }}
 
       - name: Build documentation with Sphinx (fail on warnings)
         run: |
@@ -342,7 +254,7 @@ jobs:
             -e HOME=/tmp \
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
-            ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.docker-init.outputs.docker_tag }} \
+            ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
             sh -c "\
               sudo apt-get update && \
               sudo apt-get install -y pandoc && \

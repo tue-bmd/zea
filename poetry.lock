@@ -6310,4 +6310,4 @@ tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "p
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.13"
-content-hash = "cf5aebc25adaa42ee46fe763c19ec24afe60e75a8f390a8b55a43d1ffc881027"
+content-hash = "496b7bde0c3951083f88dcc23b7f4e861ea8dedffd16c80e83c883883bd2a1ec"
