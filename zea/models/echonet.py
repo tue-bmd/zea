@@ -6,10 +6,10 @@ https://github.com/bryanhe/dynamic
 from pathlib import Path
 
 import keras
-import tensorflow as tf
 import wget
 from keras import backend, ops
 
+from zea.backend import _import_tf
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
@@ -25,6 +25,8 @@ EJECTION_FRACTION_WEIGHTS_URL = (
     "https://github.com/douyang/EchoNetDynamic/releases"
     "/download/v1.0.0/r2plus1d_18_32_2_pretrained.pt"
 )
+
+tf = _import_tf()
 
 
 @model_registry(name="echonet-dynamic")
@@ -45,6 +47,10 @@ class EchoNetDynamic(BaseModel):
             raise NotImplementedError(
                 "EchoNetDynamic is only currently supported with the TensorFlow or Jax backend."
             )
+        assert tf is not None, (
+            "TensorFlow is not installed. Please install TensorFlow to use EchoNetDynamic. This is "
+            "required even if you are using the Jax backend, the model is built using TensorFlow."
+        )
 
         super().__init__(**kwargs)
 

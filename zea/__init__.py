@@ -30,7 +30,7 @@ def setup():
             "jax": "https://docs.jax.dev/en/latest/installation.html",
         }
         guide_url = install_guide_urls.get(backend_env, "https://keras.io/getting_started/")
-        raise AssertionError(
+        raise ImportError(
             "No ML backend (torch, tensorflow, jax) installed in current environment. "
             f"Please install at least one ML backend before importing {__package__} or "
             f"any other library. Current KERAS_BACKEND is set to '{backend_env}', "
