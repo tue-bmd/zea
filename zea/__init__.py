@@ -7,7 +7,7 @@ from . import log
 
 # dynamically add __version__ attribute (see pyproject.toml)
 # __version__ = __import__("importlib.metadata").metadata.version(__package__)
-__version__ = "0.0.0"
+__version__ = "0.0.1"
 
 
 def setup():
@@ -30,7 +30,7 @@ def setup():
             "jax": "https://docs.jax.dev/en/latest/installation.html",
         }
         guide_url = install_guide_urls.get(backend_env, "https://keras.io/getting_started/")
-        raise AssertionError(
+        raise ImportError(
             "No ML backend (torch, tensorflow, jax) installed in current environment. "
             f"Please install at least one ML backend before importing {__package__} or "
             f"any other library. Current KERAS_BACKEND is set to '{backend_env}', "
