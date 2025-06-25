@@ -276,8 +276,9 @@ class Operation(keras.Operation):
         """
         if args:
             example_usage = f"    result = {ops_registry.get_name(self)}({self.key}=my_data"
-            if self.valid_keys:
-                example_usage += f", {list(self.valid_keys)[0]}=param1, ..., **kwargs)"
+            valid_keys_no_kwargs = self.valid_keys - {"kwargs"}
+            if valid_keys_no_kwargs:
+                example_usage += f", {list(valid_keys_no_kwargs)[0]}=param1, ..., **kwargs)"
             else:
                 example_usage += ", **kwargs)"
             raise TypeError(

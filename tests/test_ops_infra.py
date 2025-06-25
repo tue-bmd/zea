@@ -727,3 +727,7 @@ def test_ops_pass_positional_arg():
     with pytest.raises(TypeError) as excinfo:
         op(1, 2)
     assert "Positional arguments are not allowed." in str(excinfo.value)
+    op = ops.Lambda(lambda x: x + 1)
+    with pytest.raises(TypeError) as excinfo:
+        op(1)
+    assert "Positional arguments are not allowed." in str(excinfo.value)
