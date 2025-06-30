@@ -321,6 +321,16 @@ class Scan(Parameters):
         if n_tx_total is None:
             raise ValueError("n_tx must be set before calling set_transmits")
 
+        # Handle array-like - convert to list of indices
+        if isinstance(selection, np.ndarray):
+            if len(selection.shape) == 0:
+                # Handle scalar numpy array
+                return self.set_transmits(int(selection))
+            elif len(selection.shape) == 1:
+                selection = selection.tolist()
+            else:
+                raise ValueError(f"Invalid array shape: {selection.shape}")
+
         # Handle None and "all" - use all transmits
         if selection is None or selection == "all":
             self._selected_transmits = None
@@ -356,16 +366,6 @@ class Scan(Parameters):
             self._invalidate("selected_transmits")
             self._invalidate_dependents("selected_transmits")
             return self
-
-        # Handle array-like - convert to list of indices
-        if isinstance(selection, np.ndarray):
-            if len(selection.shape) == 0:
-                # Handle scalar numpy array
-                return self.set_transmits(int(selection))
-            elif len(selection.shape) == 1:
-                selection = selection.tolist()
-            else:
-                raise ValueError(f"Invalid array shape: {selection.shape}")
 
         # Handle list of indices
         if isinstance(selection, list):
