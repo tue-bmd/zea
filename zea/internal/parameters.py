@@ -215,6 +215,9 @@ class Parameters(ZeaObject):
                 def find_leaf_params(name, seen=None):
                     if seen is None:
                         seen = set()
+                    if name in seen:
+                        return set()
+                    seen.add(name)
                     attr = getattr(self.__class__, name, None)
                     if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
                         leaves = set()
@@ -259,36 +262,44 @@ class Parameters(ZeaObject):
             self._params[key] = value
 
             # Invalidate cache for this parameter if it is also a computed property
-            self._cache.pop(key, None)
-            self._computed.discard(key)
-            self._dependency_versions.pop(key, None)
+            self._invalidate(key)
 
             self._invalidate_dependents(key)
+
+    def _find_all_dependents(self, target, seen=None):
+        """
+        Find all computed properties that depend (directly or indirectly) on the target parameter.
+        Returns a set of property names that depend on the target.
+        """
+        dependents = set()
+        if seen is None:
+            seen = set()
+        if target in seen:
+            return dependents
+        seen.add(target)
+        for name in self.__class__.__dict__:
+            attr = getattr(self.__class__, name, None)
+            if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
+                deps = attr.fget._dependencies
+                if target in deps:
+                    dependents.add(name)
+                    # Recursively add dependents of this property
+                    dependents |= self._find_all_dependents(name, seen)
+        return dependents
+
+    def _invalidate(self, key):
+        """Invalidate a specific cached computed property and its dependencies."""
+        self._cache.pop(key, None)
+        self._computed.discard(key)
+        self._dependency_versions.pop(key, None)
 
     def _invalidate_dependents(self, changed_key):
         """
         Invalidate all cached computed properties that (directly or indirectly)
         depend on the changed_key.
         """
-
-        # Find all computed properties that depend (directly or indirectly) on changed_key
-        def find_all_dependents(target):
-            dependents = set()
-            for name in self.__class__.__dict__:
-                attr = getattr(self.__class__, name, None)
-                if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
-                    deps = attr.fget._dependencies
-                    if target in deps:
-                        dependents.add(name)
-                        # Recursively add dependents of this property
-                        dependents |= find_all_dependents(name)
-            return dependents
-
-        to_invalidate = find_all_dependents(changed_key)
-        for key in to_invalidate:
-            self._cache.pop(key, None)
-            self._computed.discard(key)
-            self._dependency_versions.pop(key, None)
+        for key in self._find_all_dependents(changed_key):
+            self._invalidate(key)
 
     def _current_dependency_hash(self, deps):
         relevant = [str(self._params.get(dep, None)) for dep in deps]
