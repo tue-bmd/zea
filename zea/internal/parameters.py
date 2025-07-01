@@ -338,7 +338,7 @@ class Parameters(ZeaObject):
                 properties.add(name)
         return properties
 
-    def to_tensor(self, include="all", exclude=None, compute=True):
+    def to_tensor(self, include="all", exclude=None, compute=True, skip_missing=True):
         """
         Convert parameters and computed properties to tensors.
 
@@ -350,6 +350,7 @@ class Parameters(ZeaObject):
 
                 Only one of include or exclude can be set.
             compute (bool): If True, compute properties that are not yet cached.
+            skip_missing (bool): If True, skip parameters that are not set or missing.
         """
         if include is not None and exclude is not None:
             raise ValueError("Only one of 'include' or 'exclude' can be set.")
@@ -369,7 +370,16 @@ class Parameters(ZeaObject):
         tensor_dict = {}
         # Convert parameters and computed properties to tensors
         for key in keys:
-            val = getattr(self, key)
+
+            # Get the value from params or computed properties
+            try:
+                val = getattr(self, key)
+            except AttributeError as e:
+                if skip_missing: 
+                    continue
+                else:
+                    raise e
+
             if key in self._tensor_cache:
                 tensor_dict[key] = self._tensor_cache[key]
             else:
