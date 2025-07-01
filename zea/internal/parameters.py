@@ -41,9 +41,7 @@ def cache_with_dependencies(*deps):
             result = func(self)
             self._computed.add(func.__name__)
             self._cache[func.__name__] = result
-            self._dependency_versions[func.__name__] = self._current_dependency_hash(
-                deps
-            )
+            self._dependency_versions[func.__name__] = self._current_dependency_hash(deps)
             return result
 
         return property(wrapper)
@@ -141,9 +139,7 @@ class Parameters(ZeaObject):
         super().__init__()
 
         if self.VALID_PARAMS is None:
-            raise NotImplementedError(
-                "VALID_PARAMS must be defined in subclasses of Parameters."
-            )
+            raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
 
         for param, config in self.VALID_PARAMS.items():
             if param not in kwargs and config["default"] is not None:
@@ -224,9 +220,7 @@ class Parameters(ZeaObject):
                     if seen is None:
                         seen = set()
                     attr = getattr(self.__class__, name, None)
-                    if isinstance(attr, property) and hasattr(
-                        attr.fget, "_dependencies"
-                    ):
+                    if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
                         leaves = set()
                         for dep in attr.fget._dependencies:
                             leaves |= find_leaf_params(dep, seen)
@@ -344,7 +338,7 @@ class Parameters(ZeaObject):
                 properties.add(name)
         return properties
 
-    def to_tensor(self, include='all', exclude=None, compute=True):
+    def to_tensor(self, include="all", exclude=None, compute=True):
         """
         Convert parameters and computed properties to tensors.
 

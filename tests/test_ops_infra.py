@@ -400,7 +400,7 @@ def test_pipeline_with_scan_probe_config():
     assert "z" in result
     # FIX: The following assertion is commented out because we only convert self.valid_keys
     # from Scan to tensors. In this case, this is only x and y, not n_tx.
-    #assert "n_tx" in result  # Check if we parsed the scan object correctly
+    # assert "n_tx" in result  # Check if we parsed the scan object correctly
     assert "probe_geometry" in result  # Check if we parsed the probe object correctly
 
 
