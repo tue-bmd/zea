@@ -370,7 +370,6 @@ class Parameters(ZeaObject):
         tensor_dict = {}
         # Convert parameters and computed properties to tensors
         for key in keys:
-
             # Get the value from params or computed properties
             try:
                 val = getattr(self, key)
