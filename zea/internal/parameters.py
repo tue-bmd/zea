@@ -41,7 +41,9 @@ def cache_with_dependencies(*deps):
             result = func(self)
             self._computed.add(func.__name__)
             self._cache[func.__name__] = result
-            self._dependency_versions[func.__name__] = self._current_dependency_hash(deps)
+            self._dependency_versions[func.__name__] = self._current_dependency_hash(
+                deps
+            )
             return result
 
         return property(wrapper)
@@ -139,7 +141,9 @@ class Parameters(ZeaObject):
         super().__init__()
 
         if self.VALID_PARAMS is None:
-            raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
+            raise NotImplementedError(
+                "VALID_PARAMS must be defined in subclasses of Parameters."
+            )
 
         for param, config in self.VALID_PARAMS.items():
             if param not in kwargs and config["default"] is not None:
@@ -169,6 +173,7 @@ class Parameters(ZeaObject):
                         )
 
         self._params = {}
+        self._properties = self.get_properties()
         self._computed = set()
         self._cache = {}
         self._dependency_versions = {}
@@ -219,7 +224,9 @@ class Parameters(ZeaObject):
                     if seen is None:
                         seen = set()
                     attr = getattr(self.__class__, name, None)
-                    if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
+                    if isinstance(attr, property) and hasattr(
+                        attr.fget, "_dependencies"
+                    ):
                         leaves = set()
                         for dep in attr.fget._dependencies:
                             leaves |= find_leaf_params(dep, seen)
@@ -327,43 +334,47 @@ class Parameters(ZeaObject):
             failed.add(name)
             return False
 
-    def to_tensor(self, include=None, exclude=None):
+    def get_properties(self):
+        """
+        Get all properties of this class
+        """
+        properties = set()
+        for name, attr in self.__class__.__dict__.items():
+            if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
+                properties.add(name)
+        return properties
+
+    def to_tensor(self, include='all', exclude=None, compute=True):
         """
         Convert parameters and computed properties to tensors.
 
         Args:
-            include (None, "all", or list): Only include these parameter/computed property names.
-                If None or "all", include all.
-            exclude (None or list): Exclude these parameter/computed property names.
+            include ("all", or list): Only include these parameter/property names.
+                If "all", include all parameters and computed properties. Default is "all".
+            exclude (None or list): Exclude these parameter/property names.
+                If provided, these keys will be excluded from the output.
+
                 Only one of include or exclude can be set.
+            compute (bool): If True, compute properties that are not yet cached.
         """
         if include is not None and exclude is not None:
             raise ValueError("Only one of 'include' or 'exclude' can be set.")
 
         # Determine which keys to include
         param_keys = set(self._params.keys())
-        computed_keys = set(self._computed)
-        all_keys = param_keys | computed_keys
+        property_keys = set(self._properties) if compute else set(self._computed)
+        all_keys = param_keys | property_keys
 
-        if include is None or include == "all":
-            keys = set(all_keys)
+        if include is not None and include != "all":
+            keys = set(include) & all_keys
         else:
-            keys = set(include)
+            keys = set(all_keys)
         if exclude is not None:
             keys = keys - set(exclude)
 
         tensor_dict = {}
-        # Parameters
-        for k in param_keys & keys:
-            v = self._params[k]
-            if k in self._tensor_cache:
-                tensor_dict[k] = self._tensor_cache[k]
-            else:
-                tensor_val = _to_tensor(k, v)
-                tensor_dict[k] = tensor_val
-                self._tensor_cache[k] = tensor_val
-        # Computed properties
-        for key in computed_keys & keys:
+        # Convert parameters and computed properties to tensors
+        for key in keys:
             val = getattr(self, key)
             if key in self._tensor_cache:
                 tensor_dict[key] = self._tensor_cache[key]

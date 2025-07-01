@@ -857,6 +857,12 @@ class Pipeline:
             probe: Probe object.
             scan: Scan object.
             config: Config object.
+            include (None, "all", or list): Only include these parameter/computed property names.
+                If None or "all", include all.
+            exclude (None or list): Exclude these parameter/computed property names.
+                If provided, these keys will be excluded from the output.
+                Only one of include or exclude can be set.
+
             **kwargs: Additional keyword arguments to be included in the inputs.
 
         Returns:
@@ -877,10 +883,7 @@ class Pipeline:
             assert isinstance(scan, Scan), (
                 f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
             )
-            scan_dict = scan.to_tensor(
-                compute_missing=True,
-                compute_keys=self.valid_keys,
-            )
+            scan_dict = scan.to_tensor(include=self.valid_keys)
 
         if config is not None:
             assert isinstance(config, Config), (
