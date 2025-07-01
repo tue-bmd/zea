@@ -83,8 +83,12 @@ from keras import ops
 
 from zea import log
 from zea.beamform.pfield import compute_pfield
-from zea.beamform.pixelgrid import check_for_aliasing, get_grid
-from zea.display import compute_scan_convert_2d_coordinates, compute_scan_convert_3d_coordinates
+from zea.beamform.pixelgrid import cartesian_pixel_grid, check_for_aliasing, polar_pixel_grid
+from zea.display import (
+    compute_scan_convert_2d_coordinates,
+    compute_scan_convert_3d_coordinates,
+)
+from zea.internal.core import DEFAULT_DYNAMIC_RANGE
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
@@ -125,7 +129,8 @@ class Scan(Parameters):
         downsample (int, optional): Downsampling factor for the data. Defaults to 1.
         element_width (float, optional): Width of each transducer element in meters.
             Defaults to 0.2e-3.
-        resolution (float, optional): Desired spatial resolution in meters.
+        resolution (float, optional): Resolution for scan conversion in mm / pixel.
+            If None, it is calculated based on the input image.
         pfield_kwargs (dict, optional): Additional parameters for pressure field computation.
             See `zea.beamform.pfield.compute_pfield` for details.
         apply_lens_correction (bool, optional): Whether to apply lens correction to
@@ -146,6 +151,8 @@ class Scan(Parameters):
             - "center": Use only the center transmit.
             - int: Select this many evenly spaced transmits.
             - list/array: Use these specific transmit indices.
+        grid_type (str, optional): Type of grid to use for beamforming.
+            Can be "cartesian" or "polar". Defaults to "cartesian".
     """
 
     VALID_PARAMS = {
@@ -162,6 +169,9 @@ class Scan(Parameters):
         "apply_lens_correction": {"type": bool, "default": False},
         "lens_sound_speed": {"type": (float, int), "default": None},
         "lens_thickness": {"type": float, "default": None},
+        "grid_type": {"type": str, "default": "cartesian"},
+        "polar_limits": {"type": (tuple, list), "default": None},
+        "dynamic_range": {"type": (tuple, list), "default": DEFAULT_DYNAMIC_RANGE},
         # acquisition parameters
         "sound_speed": {"type": (float, int), "default": 1540.0},
         "sampling_frequency": {"type": float, "default": None},
@@ -213,22 +223,25 @@ class Scan(Parameters):
         "sound_speed",
         "center_frequency",
         "pixels_per_wavelength",
+        "grid_type",
     )
     def grid(self):
         """The beamforming grid of shape (Nz, Nx, 3)."""
-        return get_grid(
-            self.xlims,
-            self.zlims,
-            self.Nx,
-            self.Nz,
-            self.sound_speed,
-            self.center_frequency,
-            self.pixels_per_wavelength,
-        )
+        if self.grid_type == "polar":
+            # NOTE: Nr is set to Nx for polar grid, not sure if this is clean.
+            return polar_pixel_grid(self.polar_limits, self.zlims, Nz=self.Nz, Nr=self.Nx)
+        elif self.grid_type == "cartesian":
+            return cartesian_pixel_grid(self.xlims, self.zlims, Nx=self.Nx, Nz=self.Nz)
+        else:
+            raise ValueError(
+                f"Unsupported grid type: {self.grid_type}. Supported types are "
+                "'cartesian' and 'polar'."
+            )
 
     @cache_with_dependencies(
         "xlims",
         "wavelength",
+        "pixels_per_wavelength",
     )
     def Nx(self):
         """Number of lateral (x) pixels, set to prevent aliasing if not provided."""
@@ -236,13 +249,18 @@ class Scan(Parameters):
         if Nx is not None:
             return Nx
 
-        width = self.xlims[1] - self.xlims[0]
-        min_Nx = int(np.ceil(width / (self.wavelength / 2)))
-        return max(min_Nx, 1)
+        if self.grid_type == "cartesian":
+            width = self.xlims[1] - self.xlims[0]
+            min_Nx = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
+            return max(min_Nx, 1)
+        elif self.grid_type == "polar":
+            # TODO: hardcoded 2x oversampling of number of rays
+            return self.n_tx * 2
 
     @cache_with_dependencies(
         "zlims",
         "wavelength",
+        "pixels_per_wavelength",
     )
     def Nz(self):
         """Number of axial (z) pixels, set to prevent aliasing if not provided."""
@@ -251,7 +269,7 @@ class Scan(Parameters):
             return Nz
 
         depth = self.zlims[1] - self.zlims[0]
-        min_Nz = int(np.ceil(depth / (self.wavelength / 2)))
+        min_Nz = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength)))
         return max(min_Nz, 1)
 
     @cache_with_dependencies("sound_speed", "center_frequency")
@@ -407,6 +425,14 @@ class Scan(Parameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("polar_angles")
+    def polar_limits(self):
+        """The limits of the polar angles."""
+        value = self._params.get("polar_limits")
+        if value is None and self.polar_angles is not None:
+            return self.polar_angles.min(), self.polar_angles.max()
+        return value
+
     @cache_with_dependencies("selected_transmits")
     def azimuth_angles(self):
         """The azimuth angles of transmits in radians."""
@@ -496,6 +522,24 @@ class Scan(Parameters):
     def flat_pfield(self):
         """Flattened pfield for weighting."""
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
+
+    @cache_with_dependencies("zlims")
+    def rho_range(self):
+        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
+        Used for scan conversion."""
+        value = self._params.get("rho_range")
+        if value is None:
+            return self.zlims
+        return value
+
+    @cache_with_dependencies("polar_limits")
+    def theta_range(self):
+        """A tuple specifying the range of theta values (min_theta, max_theta).
+        Defined in radians. Used for scan conversion."""
+        value = self._params.get("theta_range")
+        if value is None and self.polar_limits is not None:
+            return self.polar_limits
+        return value
 
     @cache_with_dependencies("rho_range", "theta_range", "resolution", "Nz", "Nx")
     def coordinates_2d(self):
