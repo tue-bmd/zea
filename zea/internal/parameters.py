@@ -375,7 +375,7 @@ class Parameters(ZeaObject):
             try:
                 val = getattr(self, key)
             except AttributeError as e:
-                if skip_missing: 
+                if skip_missing:
                     continue
                 else:
                     raise e
