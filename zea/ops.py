@@ -411,6 +411,7 @@ class Pipeline:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
         self.with_batch_dim = with_batch_dim
+        self._validate_flag = validate
 
         if validate:
             self.validate()
@@ -482,15 +483,33 @@ class Pipeline:
         ]
         return cls(operations, **kwargs)
 
+    def copy(self) -> "Pipeline":
+        """Create a copy of the pipeline."""
+        return Pipeline(
+            self._pipeline_layers,
+            with_batch_dim=self.with_batch_dim,
+            jit_options=self.jit_options,
+            jit_kwargs=self.jit_kwargs,
+            name=self.name,
+            validate=self._validate_flag,
+        )
+
     def prepend(self, operation: Operation):
         """Prepend an operation to the pipeline."""
         self._pipeline_layers.insert(0, operation)
-        self.reset_jit()
+        self.copy()
 
     def append(self, operation: Operation):
         """Append an operation to the pipeline."""
         self._pipeline_layers.append(operation)
-        self.reset_jit()
+        self.copy()
+
+    def insert(self, index: int, operation: Operation):
+        """Insert an operation at a specific index in the pipeline."""
+        if index < 0 or index > len(self._pipeline_layers):
+            raise IndexError("Index out of bounds for inserting operation.")
+        self._pipeline_layers.insert(index, operation)
+        return self.copy()
 
     @property
     def operations(self):
@@ -550,11 +569,6 @@ class Pipeline:
             }
 
         return outputs
-
-    def reset_jit(self):
-        """Reset the JIT compilation of the pipeline."""
-        # TODO: kind of hacky...
-        self.jit_options = self._jit_options
 
     @property
     def jit_options(self):
