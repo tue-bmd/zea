@@ -15,7 +15,7 @@ import numpy as np
 
 from zea import log
 from zea.internal.core import Object as ZeaObject
-from zea.internal.core import _to_tensor
+from zea.internal.core import _to_tensor, dict_to_tensor
 
 
 def cache_with_dependencies(*deps):
@@ -342,7 +342,7 @@ class Parameters(ZeaObject):
             compute_keys (list or None): If not None, only compute these
                 computed properties (by name).
         """
-        tensor_dict = {k: _to_tensor(k, v) for k, v in self._params.items()}
+        tensor_dict = dict_to_tensor(self._params)
 
         # Compute missing properties if requested
         if compute_missing:

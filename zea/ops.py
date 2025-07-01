@@ -87,7 +87,13 @@ from zea.beamform.beamformer import tof_correction
 from zea.config import Config
 from zea.display import scan_convert
 from zea.internal.checks import _assert_keys_and_axes
-from zea.internal.core import STATIC, DataTypes, ZEADecoderJSON, ZEAEncoderJSON
+from zea.internal.core import (
+    DEFAULT_DYNAMIC_RANGE,
+    STATIC,
+    DataTypes,
+    ZEADecoderJSON,
+    ZEAEncoderJSON,
+)
 from zea.internal.core import Object as ZEAObject
 from zea.internal.registry import ops_registry
 from zea.probes import Probe
@@ -95,8 +101,6 @@ from zea.scan import Scan
 from zea.simulator import simulate_rf
 from zea.tensor_ops import patched_map, resample, reshape_axis
 from zea.utils import deep_compare, map_negative_indices, translate
-
-DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
 
 def get_ops(ops_name):
