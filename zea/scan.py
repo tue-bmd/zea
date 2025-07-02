@@ -298,26 +298,6 @@ class Scan(Parameters):
         """The number of currently selected transmits."""
         return len(self.selected_transmits)
 
-    def _invalidate_selected_transmits(self):
-        """Explicitly invalidate the selected_transmits cache and its dependents."""
-        for key in [
-            "selected_transmits",
-            # also invalidate properties that depend on selected_transmits
-            "polar_angles",
-            "azimuth_angles",
-            "t0_delays",
-            "tx_apodizations",
-            "focus_distances",
-            "initial_times",
-            "time_to_next_transmit",
-            "pfield",
-            "flat_pfield",
-        ]:
-            if key in self._cache:
-                self._cache.pop(key)
-                self._computed.discard(key)
-                self._dependency_versions.pop(key, None)
-
     def set_transmits(self, selection):
         """Select which transmit events to use.
 
@@ -341,16 +321,28 @@ class Scan(Parameters):
         if n_tx_total is None:
             raise ValueError("n_tx must be set before calling set_transmits")
 
+        # Handle array-like - convert to list of indices
+        if isinstance(selection, np.ndarray):
+            if len(selection.shape) == 0:
+                # Handle scalar numpy array
+                return self.set_transmits(int(selection))
+            elif len(selection.shape) == 1:
+                selection = selection.tolist()
+            else:
+                raise ValueError(f"Invalid array shape: {selection.shape}")
+
         # Handle None and "all" - use all transmits
         if selection is None or selection == "all":
             self._selected_transmits = None
-            self._invalidate_selected_transmits()
+            self._invalidate("selected_transmits")
+            self._invalidate_dependents("selected_transmits")
             return self
 
         # Handle "center" - use center transmit
         if selection == "center":
             self._selected_transmits = [n_tx_total // 2]
-            self._invalidate_selected_transmits()
+            self._invalidate("selected_transmits")
+            self._invalidate_dependents("selected_transmits")
             return self
 
         # Handle integer - select evenly spaced transmits
@@ -371,18 +363,9 @@ class Scan(Parameters):
                 tx_indices = np.linspace(0, n_tx_total - 1, selection)
                 self._selected_transmits = list(np.rint(tx_indices).astype(int))
 
-            self._invalidate_selected_transmits()
+            self._invalidate("selected_transmits")
+            self._invalidate_dependents("selected_transmits")
             return self
-
-        # Handle array-like - convert to list of indices
-        if isinstance(selection, np.ndarray):
-            if len(selection.shape) == 0:
-                # Handle scalar numpy array
-                return self.set_transmits(int(selection))
-            elif len(selection.shape) == 1:
-                selection = selection.tolist()
-            else:
-                raise ValueError(f"Invalid array shape: {selection.shape}")
 
         # Handle list of indices
         if isinstance(selection, list):
@@ -396,7 +379,8 @@ class Scan(Parameters):
             self._selected_transmits = [
                 int(i) for i in selection
             ]  # Convert numpy integers to Python ints
-            self._invalidate_selected_transmits()
+            self._invalidate("selected_transmits")
+            self._invalidate_dependents("selected_transmits")
             return self
 
         # Aliasing check
@@ -559,3 +543,10 @@ class Scan(Parameters):
         time = np.mean(np.sum(self.time_to_next_transmit, axis=1))
         fps = 1 / time
         return fps
+
+    def __setattr__(self, key, value):
+        if key == "selected_transmits":
+            # If setting selected_transmits, call set_transmits to handle logic
+            self.set_transmits(value)
+            return
+        return super().__setattr__(key, value)

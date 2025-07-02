@@ -108,3 +108,13 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
         assert val.shape[0] == expected_shape[0]
     else:
         assert val.shape == (expected_shape[0],)
+
+
+def test_set_attributes():
+    """Test setting attributes of Scan class."""
+    scan = Scan(**scan_args)
+
+    scan.selected_transmits = [0]
+
+    with pytest.raises(AttributeError):
+        scan.grid = np.zeros((10, 10))
