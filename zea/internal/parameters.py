@@ -101,7 +101,7 @@ class Parameters(ZeaObject):
             VALID_PARAMS = {
                 "a": {"type": int, "default": 1},
                 "b": {"type": float, "default": 2.0},
-                "d": {"type": float, "default": None},  # optional dependency
+                "d": {"type": float},  # optional dependency
             }
 
             @cache_with_dependencies("a", "b")
