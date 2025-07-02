@@ -109,6 +109,22 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     else:
         assert val.shape == (expected_shape[0],)
 
+    # Select with some numpy array
+    scan.set_transmits(np.arange(3))
+    val = getattr(scan, attr)
+    if val.ndim == 2:
+        assert val.shape[0] == 3
+    else:
+        assert val.shape == (3,)
+
+    # Select with a list
+    scan.set_transmits([1, 2, 3])
+    val = getattr(scan, attr)
+    if val.ndim == 2:
+        assert val.shape[0] == 3
+    else:
+        assert val.shape == (3,)
+
 
 def test_set_attributes():
     """Test setting attributes of Scan class."""
