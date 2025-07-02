@@ -486,7 +486,7 @@ class Pipeline:
     def copy(self) -> "Pipeline":
         """Create a copy of the pipeline."""
         return Pipeline(
-            self._pipeline_layers,
+            self._pipeline_layers.copy(),
             with_batch_dim=self.with_batch_dim,
             jit_options=self.jit_options,
             jit_kwargs=self.jit_kwargs,
