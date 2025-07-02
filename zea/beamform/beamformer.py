@@ -454,7 +454,7 @@ def distance_Tx_generic(
 def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
     """Apodization mask for the receive beamformer.
 
-    Computes a binary mask to disregard pixels outside of the vision cone of a
+    Computes a mask to disregard pixels outside of the vision cone of a
     transducer element. Transducer elements can only accurately measure
     signals within some range of incidence angles. Waves coming in from the
     side do not register correctly leading to a worse image.
