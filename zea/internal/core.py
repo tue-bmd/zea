@@ -25,6 +25,7 @@ STATIC = [
     "Nx",
     "Nz",
     "fill_value",
+    "n_ax",
 ]
 
 

@@ -342,4 +342,4 @@ def sinc(x):
 
 def _round_up_to_power_of_two(x):
     """Rounds up to the next power of two."""
-    return 2 ** ops.ceil(ops.log2(x))
+    return 2 ** np.ceil(np.log2(x))
