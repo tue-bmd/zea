@@ -183,7 +183,7 @@ class Scan(Parameters):
         "n_ch": {"type": int},
         "bandwidth_percent": {"type": float, "default": 200.0},
         "demodulation_frequency": {"type": float},
-        "element_width": {"type": float, "default": 0.2e-3},
+        "element_width": {"type": float},
         "attenuation_coef": {"type": float, "default": 0.0},
         "f_number": {"type": float, "default": 1.0},
         # array parameters
@@ -289,7 +289,7 @@ class Scan(Parameters):
         """The beamforming grid of shape (Nz*Nx, 3)."""
         return self.grid.reshape(-1, 3)
 
-    @cache_with_dependencies("n_tx")
+    @property
     def selected_transmits(self):
         """Get the currently selected transmit indices.
 
@@ -304,7 +304,7 @@ class Scan(Parameters):
             return []
         return self._selected_transmits
 
-    @cache_with_dependencies("n_tx")
+    @property
     def n_tx_total(self):
         """The total number of transmits in the full dataset."""
         return self._params["n_tx"]
@@ -430,8 +430,8 @@ class Scan(Parameters):
         if value is None and self.polar_angles is not None:
             value = self.polar_angles.min(), self.polar_angles.max()
             diff = value[1] - value[0]
-            # add 10% margin to the limits
-            value = (value[0] - 0.1 * diff, value[1] + 0.1 * diff)
+            # add 15% margin to the limits
+            value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
         return value
 
     @cache_with_dependencies("selected_transmits")
@@ -594,6 +594,14 @@ class Scan(Parameters):
         time = np.mean(np.sum(self.time_to_next_transmit, axis=1))
         fps = 1 / time
         return fps
+
+    @cache_with_dependencies("probe_geometry")
+    def element_width(self):
+        """The width of each transducer element in meters."""
+        value = self._params.get("element_width")
+        if value is None:
+            return np.linalg.norm(self.probe_geometry[1] - self.probe_geometry[0])
+        return value
 
     def __setattr__(self, key, value):
         if key == "selected_transmits":
