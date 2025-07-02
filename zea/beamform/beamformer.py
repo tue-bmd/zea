@@ -451,7 +451,7 @@ def distance_Tx_generic(
     return dist
 
 
-def fnumber_mask(grid, probe_geometry, f_number, fnum_window_fn):
+def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
     """Apodization mask for the receive beamformer.
 
     Computes a binary mask to disregard pixels outside of the vision cone of a
@@ -460,7 +460,7 @@ def fnumber_mask(grid, probe_geometry, f_number, fnum_window_fn):
     side do not register correctly leading to a worse image.
 
     Args:
-        grid (ops.Tensor): The flattened image grid `(n_pix, 3)`.
+        flatgrid (ops.Tensor): The flattened image grid `(n_pix, 3)`.
         probe_geometry (ops.Tensor): The transducer element positions of shape
             `(n_el, 3)`.
         f_number (int): The receive f-number. Set to zero to not use masking and
@@ -476,7 +476,7 @@ def fnumber_mask(grid, probe_geometry, f_number, fnum_window_fn):
         Tensor: Mask of shape `(n_pix, n_el, 1)`
     """
 
-    grid_relative_to_probe = grid[:, None] - probe_geometry[None]
+    grid_relative_to_probe = flatgrid[:, None] - probe_geometry[None]
 
     grid_relative_to_probe_norm = ops.linalg.norm(grid_relative_to_probe, axis=-1)
 
