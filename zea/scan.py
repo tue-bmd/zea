@@ -153,52 +153,54 @@ class Scan(Parameters):
             - list/array: Use these specific transmit indices.
         grid_type (str, optional): Type of grid to use for beamforming.
             Can be "cartesian" or "polar". Defaults to "cartesian".
+        dynamic_range (tuple, optional): Dynamic range for image display.
+            Defined in dB as (min_dB, max_dB). Defaults to (-60, 0).
     """
 
     VALID_PARAMS = {
         # beamforming related parameters
-        "Nx": {"type": int, "default": None},
-        "Nz": {"type": int, "default": None},
-        "xlims": {"type": (tuple, list), "default": None},
-        "ylims": {"type": (tuple, list), "default": None},
-        "zlims": {"type": (tuple, list), "default": None},
+        "Nx": {"type": int},
+        "Nz": {"type": int},
+        "xlims": {"type": (tuple, list)},
+        "ylims": {"type": (tuple, list)},
+        "zlims": {"type": (tuple, list)},
         "pixels_per_wavelength": {"type": int, "default": 4},
         "downsample": {"type": int, "default": 1},
-        "resolution": {"type": float, "default": None},
         "pfield_kwargs": {"type": dict, "default": {}},
         "apply_lens_correction": {"type": bool, "default": False},
-        "lens_sound_speed": {"type": (float, int), "default": None},
-        "lens_thickness": {"type": float, "default": None},
+        "lens_sound_speed": {"type": (float, int)},
+        "lens_thickness": {"type": float},
         "grid_type": {"type": str, "default": "cartesian"},
-        "polar_limits": {"type": (tuple, list), "default": None},
+        "polar_limits": {"type": (tuple, list)},
         "dynamic_range": {"type": (tuple, list), "default": DEFAULT_DYNAMIC_RANGE},
         # acquisition parameters
         "sound_speed": {"type": (float, int), "default": 1540.0},
-        "sampling_frequency": {"type": float, "default": None},
-        "center_frequency": {"type": float, "default": None},
-        "n_el": {"type": int, "default": None},
-        "n_tx": {"type": int, "default": None},
-        "n_ax": {"type": int, "default": None},
-        "n_ch": {"type": int, "default": None},
+        "sampling_frequency": {"type": float},
+        "center_frequency": {"type": float},
+        "n_el": {"type": int},
+        "n_tx": {"type": int},
+        "n_ax": {"type": int},
+        "n_ch": {"type": int},
         "bandwidth_percent": {"type": float, "default": 200.0},
-        "demodulation_frequency": {"type": float, "default": None},
+        "demodulation_frequency": {"type": float},
         "element_width": {"type": float, "default": 0.2e-3},
         "attenuation_coef": {"type": float, "default": 0.0},
         "f_number": {"type": float, "default": 1.0},
         # array parameters
-        "probe_geometry": {"type": np.ndarray, "default": None},
-        "polar_angles": {"type": np.ndarray, "default": None},
-        "azimuth_angles": {"type": np.ndarray, "default": None},
-        "t0_delays": {"type": np.ndarray, "default": None},
-        "tx_apodizations": {"type": np.ndarray, "default": None},
-        "focus_distances": {"type": np.ndarray, "default": None},
-        "initial_times": {"type": np.ndarray, "default": None},
-        "time_to_next_transmit": {"type": np.ndarray, "default": None},
+        "probe_geometry": {"type": np.ndarray},
+        "polar_angles": {"type": np.ndarray},
+        "azimuth_angles": {"type": np.ndarray},
+        "t0_delays": {"type": np.ndarray},
+        "tx_apodizations": {"type": np.ndarray},
+        "focus_distances": {"type": np.ndarray},
+        "initial_times": {"type": np.ndarray},
+        "time_to_next_transmit": {"type": np.ndarray},
         # scan conversion parameters
-        "theta_range": {"type": (tuple, list), "default": None},
-        "phi_range": {"type": (tuple, list), "default": None},
-        "rho_range": {"type": (tuple, list), "default": None},
+        "theta_range": {"type": (tuple, list)},
+        "phi_range": {"type": (tuple, list)},
+        "rho_range": {"type": (tuple, list)},
         "fill_value": {"type": float, "default": 0.0},
+        "resolution": {"type": float, "default": None},
     }
 
     def __init__(self, **kwargs):
@@ -443,7 +445,7 @@ class Scan(Parameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("selected_transmits")
+    @cache_with_dependencies("selected_transmits", "n_el")
     def t0_delays(self):
         """The transmit delays in seconds."""
         value = self._params.get("t0_delays")
@@ -563,6 +565,12 @@ class Scan(Parameters):
             self.resolution,
         )
         return coords
+
+    @property
+    def coordinates(self):
+        """Get the coordinates for scan conversion, will be 3D if phi_range is set,
+        otherwise 2D."""
+        return self.coordinates_3d if getattr(self, "phi_range", None) else self.coordinates_2d
 
     @cache_with_dependencies("time_to_next_transmit")
     def frames_per_second(self):

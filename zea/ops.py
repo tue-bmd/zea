@@ -1732,12 +1732,13 @@ class LogCompress(Operation):
         data = kwargs[self.key]
 
         if dynamic_range is None:
-            dynamic_range = DEFAULT_DYNAMIC_RANGE
+            dynamic_range = ops.array(DEFAULT_DYNAMIC_RANGE)
+        dynamic_range = ops.cast(dynamic_range, data.dtype)
 
         small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
         data = ops.where(data == 0, small_number, data)
         compressed_data = 20 * ops.log10(data)
-        compressed_data = ops.clip(compressed_data, *dynamic_range)
+        compressed_data = ops.clip(compressed_data, dynamic_range[0], dynamic_range[1])
 
         return {self.output_key: compressed_data}
 
