@@ -201,70 +201,79 @@ class Parameters(ZeaObject):
         raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{item}'")
 
     def __setattr__(self, key, value):
+        # Give clear error message on assignment to methods
+        class_attr = getattr(type(self), key, None)
+        if callable(class_attr):
+            raise AttributeError(
+                f"Cannot assign to method '{key}'. "
+                f"'{key}' is a method, not an attribute. "
+                f"To use it, call it as a function, e.g.: '{self.__class__.__name__}.{key}(...)'"
+            )
+
         if key.startswith("_"):
             super().__setattr__(key, value)
-        else:
-            cls_attr = getattr(self.__class__, key, None)
-            # Allow setting if it's a valid parameter, even if it's also a computed property
-            if (
-                isinstance(cls_attr, property)
-                and hasattr(cls_attr.fget, "_dependencies")
-                and key not in self.VALID_PARAMS
-            ):
-                # Only block if not a leaf parameter
-                def find_leaf_params(name, seen=None):
-                    if seen is None:
-                        seen = set()
-                    if name in seen:
-                        return set()
-                    seen.add(name)
-                    attr = getattr(self.__class__, name, None)
-                    if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
-                        leaves = set()
-                        for dep in attr.fget._dependencies:
-                            leaves |= find_leaf_params(dep, seen)
-                        return leaves
-                    else:
-                        if name in self.VALID_PARAMS:
-                            return {name}
-                        return set()
+            return
 
-                leaf_params = sorted(find_leaf_params(key))
-                raise AttributeError(
-                    f"Cannot set computed property '{key}'. Only leaf parameters can be set. "
-                    f"To change '{key}', set one or more of its leaf parameters: {leaf_params}"
-                )
-
-            # Validate that parameter is in VALID_PARAMS
-            if key not in self.VALID_PARAMS:
-                raise ValueError(
-                    f"Invalid parameter: {key}. "
-                    f"Valid parameters are: {list(self.VALID_PARAMS.keys())}"
-                )
-
-            # Validate parameter type
-            expected_type = self.VALID_PARAMS[key]["type"]
-            if expected_type is not None and value is not None:
-                if isinstance(expected_type, tuple):
-                    if not isinstance(value, expected_type):
-                        allowed = ", ".join([t.__name__ for t in expected_type])
-                        raise TypeError(
-                            f"Parameter '{key}' expected type {allowed}, got {type(value).__name__}"
-                        )
+        cls_attr = getattr(self.__class__, key, None)
+        # Allow setting if it's a valid parameter, even if it's also a computed property
+        if (
+            isinstance(cls_attr, property)
+            and hasattr(cls_attr.fget, "_dependencies")
+            and key not in self.VALID_PARAMS
+        ):
+            # Only block if not a leaf parameter
+            def find_leaf_params(name, seen=None):
+                if seen is None:
+                    seen = set()
+                if name in seen:
+                    return set()
+                seen.add(name)
+                attr = getattr(self.__class__, name, None)
+                if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
+                    leaves = set()
+                    for dep in attr.fget._dependencies:
+                        leaves |= find_leaf_params(dep, seen)
+                    return leaves
                 else:
-                    if not isinstance(value, expected_type):
-                        raise TypeError(
-                            f"Parameter '{key}' expected type {expected_type.__name__}, "
-                            f"got {type(value).__name__}"
-                        )
+                    if name in self.VALID_PARAMS:
+                        return {name}
+                    return set()
 
-            # Set the parameter and invalidate dependencies
-            self._params[key] = value
+            leaf_params = sorted(find_leaf_params(key))
+            raise AttributeError(
+                f"Cannot set computed property '{key}'. Only leaf parameters can be set. "
+                f"To change '{key}', set one or more of its leaf parameters: {leaf_params}"
+            )
 
-            # Invalidate cache for this parameter if it is also a computed property
-            self._invalidate(key)
+        # Validate that parameter is in VALID_PARAMS
+        if key not in self.VALID_PARAMS:
+            raise ValueError(
+                f"Invalid parameter: {key}. Valid parameters are: {list(self.VALID_PARAMS.keys())}"
+            )
 
-            self._invalidate_dependents(key)
+        # Validate parameter type
+        expected_type = self.VALID_PARAMS[key]["type"]
+        if expected_type is not None and value is not None:
+            if isinstance(expected_type, tuple):
+                if not isinstance(value, expected_type):
+                    allowed = ", ".join([t.__name__ for t in expected_type])
+                    raise TypeError(
+                        f"Parameter '{key}' expected type {allowed}, got {type(value).__name__}"
+                    )
+            else:
+                if not isinstance(value, expected_type):
+                    raise TypeError(
+                        f"Parameter '{key}' expected type {expected_type.__name__}, "
+                        f"got {type(value).__name__}"
+                    )
+
+        # Set the parameter and invalidate dependencies
+        self._params[key] = value
+
+        # Invalidate cache for this parameter if it is also a computed property
+        self._invalidate(key)
+
+        self._invalidate_dependents(key)
 
     def _find_all_dependents(self, target, seen=None):
         """
