@@ -36,7 +36,7 @@ bibliography: paper.bib
 ---
 
 # Summary
-Ultrasound imaging is a powerful medical imaging modality that is widely used in clinical settings for various applications, including obstetrics, cardiology, and abdominal imaging. While ultrasound imaging is non-invasive, real-time, and relatively low-cost compared to other imaging modalities such as MRI or CT, it still faces challenges in terms of image quality, and interpretation. Many signal processing steps are required to extract useful information from the raw ultrasound data, such as filtering, beamforming, and image reconstruction. Traditional ultrasound imaging techniques often suffer from reduced image quality as naive assumptions are made in these processing steps which do not account for the complex nature of ultrasound signals. Furthermore, acquisition (action) and reconstruction (perception) of ultrasound is often performed disjointly. Cognitive ultrasound imaging [@van2024active], see \autoref{fig:diagram}, is a novel approach that aims to address these challenges by leveraging more powerful generative models, enabled by advances in deep learning, to close the action-perception loop. This approach requires a redesign of current common ultrasound imaging pipeline, where parameters are expected to be changed dynamically based on past and current observations. Furthermore, the high-dimensional nature of ultrasound data requires powerful deep generative models to learn the structured distribution of ultrasound signals and to effectively solve inverse problems that capture the challenges of ultrasound imaging [@stevens2025deep]. This necessitates a flexible and efficient toolbox that can handle the complexities of cognitive ultrasound imaging, including a real-time ultrasound reconstruction pipeline, dynamic parameter adjustment, and advanced generative modeling.
+Ultrasound imaging is a powerful medical imaging modality that is widely used in clinical settings for various applications, including obstetrics, cardiology, and abdominal imaging. While ultrasound imaging is non-invasive, real-time, and relatively low-cost compared to other imaging modalities such as MRI or CT, it still faces challenges in terms of image quality and interpretation. Many signal processing steps are required to extract useful information from the raw ultrasound data, such as filtering, beamforming, and image reconstruction. Traditional ultrasound imaging techniques often suffer from reduced image quality as naive assumptions are made in these processing steps, which do not account for the complex nature of ultrasound signals. Furthermore, acquisition (action) and reconstruction (perception) of ultrasound is often performed disjointly. Cognitive ultrasound imaging [@van2024active], see \autoref{fig:diagram}, is a novel approach that aims to address these challenges by leveraging more powerful generative models, enabled by advances in deep learning, to close the action-perception loop. This approach requires a redesign of current common ultrasound imaging pipeline, where parameters are expected to be changed dynamically based on past and current observations. Furthermore, the high-dimensional nature of ultrasound data requires powerful deep generative models to learn the structured distribution of ultrasound signals and to effectively solve inverse problems that capture the challenges of ultrasound imaging [@stevens2025deep]. This necessitates a flexible and efficient toolbox that can handle the complexities of cognitive ultrasound imaging, including a real-time ultrasound reconstruction pipeline, dynamic parameter adjustment, and advanced generative modeling.
 
 We present `zea` (pronounced *ze-yah*), a Python package for cognitive ultrasound imaging that provides a flexible, modular and differentiable pipeline for ultrasound data processing, as well as a collection of pre-defined models for ultrasound image and signal processing. The toolbox is designed to be easy to use, with a high-level interface that allows users to define their own ultrasound reconstruction pipelines, and to integrate deep learning models into the pipeline. The toolbox is built on top of Keras 3 [@chollet2015keras], which provides a framework for building and training deep learning models with the three major deep learning frameworks as backend: TensorFlow [@abadi2016tensorflow], PyTorch [@NEURIPS2019_9015] and JAX [@jax2018github]. This means that it is easy to integrate a custom ultrasound reconstruction pipeline in a machine learning workflow. In the past few years, several works have used and contributed to `zea`, including @luijten2020adaptive, @van2024off, @stevens2024dehazing, @nolan2024active, @federici2024active, @stevens2025sequential, @penninga2025deep and @stevens2025high.
 
@@ -49,7 +49,7 @@ The ultrasound research community has advanced significantly due to publically a
 `zea` is an open-source Python package, available at [http://github.com/tue-bmd/zea](http://github.com/tue-bmd/zea), that consists of the following core components:
 
 - **Data**: A set of data handling classes such as `zea.data.File`, `zea.data.Dataset` and `make_dataloader()`, suited for machine learning workflows. `zea` works with HDF5 files, storing data and acquisition parameters together in a single file. Additionally, we provide examples and conversion scripts for popular ultrasound datasets, such as CAMUS [@leclerc2019deep], PICMUS [@liebgott2016plane], and EchoNet [@ouyang2019echonet].
-- **Pipeline**: A modular and differentiable pipeline class that allows users to define a sequence of operations (`zea.Operation`) to process ultrasound data. The pipeline is stateless and supports *Just in Time* (JIT) compilation. Ultimately this allows for dynamic parameter adjustment, as well as real-time integration of deep learning models inside the ultrasound reconstruction pipeline.
+- **Pipeline**: A modular and differentiable pipeline class that allows users to define a sequence of operations (`zea.Operation`) to process ultrasound data. The pipeline is stateless and supports *Just in Time* (JIT) compilation. Ultimately, this allows for dynamic parameter adjustment, as well as real-time integration of deep learning models inside the ultrasound reconstruction pipeline.
 - **Models**: A collection of pre-defined models for ultrasound image and signal processing. Similar to the data, these models can be loaded locally or from the [Hugging Face Hub](https://huggingface.co/zeahub). Besides supervised models, `zea` also provides a set of (deep) generative models, with an interface to solve inverse problems in ultrasound imaging within a probabilistic machine learning framework.
 - **Agents**: A set of tools to interact with the pipeline and models. These agents can be used to alter the pipeline parameters, or select a subset of acquired data. The agent module closes the action-perception loop, tying together acquisition and reconstruction of ultrasound data.
 
@@ -64,7 +64,7 @@ import zea
 # path to a local or remote HDF5 file in zea format
 path = "hf://zeahub/..."
 
-# read data and acquisition parameters an HDF5 file
+# read data and acquisition parameters from an HDF5 file
 with zea.File(path, mode="r") as file:
     file.summary()
 
@@ -98,7 +98,7 @@ for batch in dataloader:
 ```
 
 ## Pipeline
-The core of `zea` is a modular and differentiable pipeline class designed for ultrasound data processing. Built on modern deep learning frameworks, this pipeline enables users to compose both built-in and custom operations derived from base class `zea.Operation`, e.g. `DelayAndSum`, including the integration of deep learning models within the processing workflow. The pipeline is stateless, meaning it does not retain information between operations, which facilitates dynamic parameter adjustment and supports real-time reconstruction scenarios. Additionally, the pipeline offers *Just-in-Time* (JIT) compilation, which can significantly enhance performance by optimizing the execution of operations at runtime.
+The core of `zea` is a modular and differentiable pipeline class designed for ultrasound data processing. Built on modern deep learning frameworks, this pipeline enables users to compose both built-in and custom operations derived from the base class `zea.Operation`, e.g. `DelayAndSum`, including the integration of deep learning models within the processing workflow. The pipeline is stateless, meaning it does not retain information between operations, which facilitates dynamic parameter adjustment and supports real-time reconstruction scenarios. Additionally, the pipeline offers *Just-in-Time* (JIT) compilation, which can significantly enhance performance by optimizing the execution of operations at runtime.
 
 ```python
 import zea
@@ -137,7 +137,7 @@ parameters = pipeline.prepare_parameters(probe, scan)
 
 inputs = {pipeline.key: data}
 
-# parameters can be dynamically passed here as keyword arguments, e.g. sound_speed
+# parameters can be dynamically passed here as keyword arguments, e.g., sound_speed
 sound_speed = 1540  # m/s
 outputs = pipeline(**inputs, **parameters, sound_speed=sound_speed)
 
@@ -219,6 +219,6 @@ fig, _ = zea.visualize.plot_image_grid(
 ![Selected scan-lines as chosen by a Greedy Entropy Minimization agent.\label{fig:agent}](assets/agent_example.png){ width=80% }
 
 # Availability, Development, and Documentation
-`zea` is available through PyPI via `pip install zea`, the development version is available via GitHub. GitHub Actions manage continuous integration through automated code testing (PyTest), code linting and formatting (Ruff), and documentation generation (Sphinx). The documentation is hosted on ReadTheDocs. At the time of writing, 15 example notebooks are available, covering the various discussed components of the toolbox. The package is licensed under the Apache License 2.0, which allows for both academic and commercial use.
+`zea` is available through PyPI via `pip install zea`, and the development version is available via GitHub. GitHub Actions manage continuous integration through automated code testing (PyTest), code linting and formatting (Ruff), and documentation generation (Sphinx). The documentation is hosted on ReadTheDocs. At the time of writing, 15 example notebooks are available, covering the various discussed components of the toolbox. The package is licensed under the Apache License 2.0, which allows for both academic and commercial use.
 
 # References
