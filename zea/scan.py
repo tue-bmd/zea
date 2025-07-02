@@ -251,13 +251,9 @@ class Scan(Parameters):
         if Nx is not None:
             return Nx
 
-        if self.grid_type == "cartesian":
-            width = self.xlims[1] - self.xlims[0]
-            min_Nx = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
-            return max(min_Nx, 1)
-        elif self.grid_type == "polar":
-            # TODO: hardcoded 2x oversampling of number of rays
-            return self.n_tx * 2
+        width = self.xlims[1] - self.xlims[0]
+        min_Nx = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
+        return max(min_Nx, 1)
 
     @cache_with_dependencies(
         "zlims",
@@ -432,7 +428,10 @@ class Scan(Parameters):
         """The limits of the polar angles."""
         value = self._params.get("polar_limits")
         if value is None and self.polar_angles is not None:
-            return self.polar_angles.min(), self.polar_angles.max()
+            value = self.polar_angles.min(), self.polar_angles.max()
+            diff = value[1] - value[0]
+            # add 10% margin to the limits
+            value = (value[0] - 0.1 * diff, value[1] + 0.1 * diff)
         return value
 
     @cache_with_dependencies("selected_transmits")
