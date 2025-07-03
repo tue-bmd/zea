@@ -192,7 +192,7 @@ class Folder:
 
         super().__init__(**kwargs)
 
-        self.folder_path = folder_path
+        self.folder_path = Path(folder_path)
         self.key = key
         self.search_file_tree_kwargs = search_file_tree_kwargs
         self.validate = validate
@@ -346,35 +346,7 @@ class Folder:
     def __str__(self):
         return f"Folder with {self.n_files} files in '{self.folder_path}' (key='{self.key}')"
 
-    @staticmethod
-    def _copy_key_to_file(src: File, dst: File, key: str, copy_scan: bool = True):
-        """Copy a specific key from an HDF5 file to another file."""
-        key = src.format_key(key)
-
-        # Copy the key if it does not already exist in the destination file
-        if key in dst:
-            log.warning(f"Skipping key '{key}' because it already exists in dst file {dst.path}.")
-        elif key in src:
-            src.copy(key, dst, name=key)
-        else:
-            log.warning(f"Key '{key}' not found in src file {src.file_path}. Skipping copy.")
-
-        # Copy attributes from src to dst
-        for attr_key, attr_value in src.attrs.items():
-            dst[key].attrs[attr_key] = attr_value
-
-        # Copy scan data if requested
-        if copy_scan and "scan" in src and "scan" not in dst:
-            # Copy the scan data if it exists
-            src.copy("scan", dst)
-
-    def copy(
-        self,
-        to_path: str | Path,
-        all_keys: bool = False,
-        copy_scan: bool = True,
-        mode: str | None = None,
-    ):
+    def copy(self, to_path: str | Path, all_keys: bool = False, mode: str | None = None):
         """Copy the data for all or a specific key to a new location.
 
         Has the option to copy all keys or only a specific key. By default, it only copies if the
@@ -385,8 +357,6 @@ class Folder:
             to_path (str or Path): The destination path where files will be copied.
             all_keys (bool): If True, copy all keys from the files. If False,
                 only copy the specified key. Defaults to False.
-            copy_scan (bool): If True, copy the scan data if it exists in the file.
-                Defaults to True.
             mode (str): The mode in which to open the destination files.
                 Defaults to 'a' (append mode), and 'w' (write mode) if all_keys is True.
                 See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
@@ -396,10 +366,6 @@ class Folder:
 
         if all_keys:
             key_msg = "Including all keys."
-            assert copy_scan, (
-                "If you want to copy all keys, this means the scan data is also copied. "
-                "Set copy_scan=True if that is okay."
-            )
             assert mode in ["w", "x"], (
                 "If you want to copy all keys, the destination file must be opened "
                 "in 'w' or 'x' mode, which means it will be overwritten or created."
@@ -423,7 +389,7 @@ class Folder:
                     for obj in src.keys():
                         src.copy(obj, dst)
                 else:
-                    self._copy_key_to_file(src, dst, self.key, copy_scan, mode=mode)
+                    src.copy_key(self.key, dst)
 
 
 class Dataset(H5FileHandleCache):
