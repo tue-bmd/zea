@@ -82,48 +82,40 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     scan = Scan(**scan_args)
     # Check initial shape
     val = getattr(scan, attr)
-    assert val.shape == expected_shape
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+    assert val.shape == val_tensor.shape == expected_shape
 
     # Select 3 transmits
     scan.set_transmits(3)
     val = getattr(scan, attr)
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+
     # For 2D arrays, first dimension is always n_tx
-    if val.ndim == 2:
-        assert val.shape[0] == 3
-    else:
-        assert val.shape == (3,)
+    assert val.shape[0] == val_tensor.shape[0] == 3
 
     # Select center transmit
     scan.set_transmits("center")
     val = getattr(scan, attr)
-    if val.ndim == 2:
-        assert val.shape[0] == 1
-    else:
-        assert val.shape == (1,)
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+    assert val.shape[0] == val_tensor.shape[0] == 1
 
     # Select all again
     scan.set_transmits("all")
     val = getattr(scan, attr)
-    if val.ndim == 2:
-        assert val.shape[0] == expected_shape[0]
-    else:
-        assert val.shape == (expected_shape[0],)
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+    assert val.shape[0] == val_tensor.shape[0] == expected_shape[0]
 
     # Select with some numpy array
     scan.set_transmits(np.arange(3))
     val = getattr(scan, attr)
-    if val.ndim == 2:
-        assert val.shape[0] == 3
-    else:
-        assert val.shape == (3,)
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+    assert val.shape[0] == val_tensor.shape[0] == 3
 
     # Select with a list
     scan.set_transmits([1, 2, 3])
     val = getattr(scan, attr)
-    if val.ndim == 2:
-        assert val.shape[0] == 3
-    else:
-        assert val.shape == (3,)
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+    assert val.shape[0] == val_tensor.shape[0] == 3
 
 
 def test_set_attributes():

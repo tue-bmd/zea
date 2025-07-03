@@ -176,7 +176,7 @@ def test_missing_dependency_error_message():
 
 def test_to_tensor_includes_all(dummy_params):
     """Test that to_tensor includes all parameters and computed properties."""
-    tensors = dummy_params.to_tensor(compute_missing=True)
+    tensors = dummy_params.to_tensor()
     # Should include all direct params and computed1, computed2, computed3
     for key in [
         "param1",
@@ -196,36 +196,37 @@ def test_to_tensor_includes_all(dummy_params):
 
 
 def test_to_tensor_only_computed(dummy_params):
-    """Test that to_tensor(compute_missing=False) only includes already computed properties."""
+    """Test that to_tensor(compute=False) only includes already computed properties."""
     # Before accessing any computed property
-    tensors = dummy_params.to_tensor(compute_missing=False)
+    tensors = dummy_params.to_tensor(compute=False)
     assert set(tensors.keys()) == {"param1", "param2", "param3", "param4"}
     # After accessing computed1
     _ = dummy_params.computed1
-    tensors2 = dummy_params.to_tensor(compute_missing=False)
+    tensors2 = dummy_params.to_tensor(compute=False)
     assert "computed1" in tensors2
 
 
 def test_to_tensor_partial_computed_subset(dummy_params):
     """Test that to_tensor only computes the requested subset."""
     # Access no computed properties yet
-    tensors = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1"])
+    tensors = dummy_params.to_tensor(compute=True, include=["computed1"])
     # Only computed1 should be present (besides direct params)
     assert "computed1" in tensors
     assert "computed2" not in tensors
     assert "computed3" not in tensors
     # Now try with multiple keys
-    tensors2 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1", "computed3"])
+    tensors2 = dummy_params.to_tensor(compute=True, include=["computed1", "computed3"])
     assert "computed1" in tensors2
     assert "computed3" in tensors2
     assert "computed2" not in tensors2
     # If a key is not a computed property, it should be ignored (no error)
-    tensors3 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1", "param1"])
+    tensors3 = dummy_params.to_tensor(compute=True, include=["computed1", "param1"])
     assert "computed1" in tensors3
     assert "param1" in tensors3
-    tensors4 = dummy_params.to_tensor(compute_missing=True, compute_keys=[])
 
-    assert set(tensors4.keys()) == {
+    # An empty include list should not return an empty dict, since no keys are specified.
+    tensors4 = dummy_params.to_tensor(compute=True, include=[])
+    assert set(tensors4.keys()) != {
         "param1",
         "param2",
         "param3",
@@ -236,12 +237,12 @@ def test_to_tensor_partial_computed_subset(dummy_params):
 
     # Access computed2 manually
     _ = dummy_params.computed2
-    # Now call to_tensor with compute_keys requesting computed2
-    tensors5 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed2"])
+    # Now call to_tensor with include requesting computed2
+    tensors5 = dummy_params.to_tensor(compute=True, include=["computed2"])
     # It should be present, and should not be recomputed (counter stays the same)
     assert "computed2" in tensors5
     count = dummy_params._computed2_count
-    _ = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed2"])
+    _ = dummy_params.to_tensor(compute=True, include=["computed2"])
     assert dummy_params._computed2_count == count  # No recompute
 
 
