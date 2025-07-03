@@ -347,28 +347,33 @@ class Folder:
         return f"Folder with {self.n_files} files in '{self.folder_path}' (key='{self.key}')"
 
     @staticmethod
-    def _copy_key_to_file(
-        file: File, to_filepath: str | Path, key: str, copy_scan: bool = True, mode: str = "a"
-    ):
+    def _copy_key_to_file(src: File, dst: File, key: str, copy_scan: bool = True):
         """Copy a specific key from an HDF5 file to another file."""
-        key = file.format_key(key)
+        key = src.format_key(key)
 
-        with File(to_filepath, mode) as to_file:
-            if key in to_file:
-                log.warning(
-                    f"Skipping key '{key}' because it already exists in dst file {to_file.path}."
-                )
-            elif key in file:
-                file.copy(key, to_file, name=key)
-            else:
-                log.warning(f"Key '{key}' not found in src file {file.file_path}. Skipping copy.")
+        # Copy the key if it does not already exist in the destination file
+        if key in dst:
+            log.warning(f"Skipping key '{key}' because it already exists in dst file {dst.path}.")
+        elif key in src:
+            src.copy(key, dst, name=key)
+        else:
+            log.warning(f"Key '{key}' not found in src file {src.file_path}. Skipping copy.")
 
-            if copy_scan and "scan" in file and "scan" not in to_file:
-                # Copy the scan data if it exists
-                file.copy("scan", to_file)
+        # Copy attributes from src to dst
+        for attr_key, attr_value in src.attrs.items():
+            dst[key].attrs[attr_key] = attr_value
+
+        # Copy scan data if requested
+        if copy_scan and "scan" in src and "scan" not in dst:
+            # Copy the scan data if it exists
+            src.copy("scan", dst)
 
     def copy(
-        self, to_path: str | Path, all_keys: bool = False, copy_scan: bool = True, mode: str = "a"
+        self,
+        to_path: str | Path,
+        all_keys: bool = False,
+        copy_scan: bool = True,
+        mode: str | None = None,
     ):
         """Copy the data for all or a specific key to a new location.
 
@@ -383,31 +388,42 @@ class Folder:
             copy_scan (bool): If True, copy the scan data if it exists in the file.
                 Defaults to True.
             mode (str): The mode in which to open the destination files.
-                Defaults to 'a' (append mode).
+                Defaults to 'a' (append mode), and 'w' (write mode) if all_keys is True.
+                See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
         """
+        if mode is None:
+            mode = "a" if not all_keys else "w"
+
         if all_keys:
             key_msg = "Including all keys."
             assert copy_scan, (
                 "If you want to copy all keys, this means the scan data is also copied. "
                 "Set copy_scan=True if that is okay."
             )
+            assert mode in ["w", "x"], (
+                "If you want to copy all keys, the destination file must be opened "
+                "in 'w' or 'x' mode, which means it will be overwritten or created."
+            )
         else:
             key_msg = f"Only copying key '{self.key}'."
+            assert mode in ["a", "w", "r+", "x"], (
+                f"Invalid mode '{mode}'. Must be one of 'a', 'w', 'r+', or 'x'."
+            )
 
         to_path = Path(to_path)
+        to_path.mkdir(parents=True, exist_ok=True)
 
         for file_path in tqdm.tqdm(
             self.file_paths,
             total=self.n_files,
             desc=f"Copying dataset from {self.folder_path} to {to_path}. {key_msg}",
         ):
-            with File(file_path) as file:
+            with File(file_path) as src, File(to_path / src.name, mode) as dst:
                 if all_keys:
-                    file.copy(to_path / file.name)
+                    for obj in src.keys():
+                        src.copy(obj, dst)
                 else:
-                    self._copy_key_to_file(
-                        file, to_path / file.name, self.key, copy_scan, mode=mode
-                    )
+                    self._copy_key_to_file(src, dst, self.key, copy_scan, mode=mode)
 
 
 class Dataset(H5FileHandleCache):
@@ -645,3 +661,10 @@ def count_samples_per_directory(file_names, directories):
     )
 
     return counts
+
+
+if __name__ == "__main__":
+    src_folder = Folder(
+        "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/val/patient0450", "image", validate=False
+    )
+    src_folder.copy("./CAMIUS", all_keys=True)
