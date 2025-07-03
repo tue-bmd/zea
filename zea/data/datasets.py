@@ -351,7 +351,8 @@ class Folder:
 
         Has the option to copy all keys or only a specific key. By default, it only copies if the
         destination file does not already contain the key. You can change the mode to 'w' to
-        overwrite the destination file.
+        overwrite the destination file. Will always copy metadata such as dataset attributes and
+        scan object.
 
         Args:
             to_path (str or Path): The destination path where files will be copied.
