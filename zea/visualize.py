@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from keras.ops.image import crop_images
 from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy.ndimage import zoom
 
@@ -575,3 +576,59 @@ def visualize_matrix(matrix, font_color="white", **kwargs):
     for (j, i), label in np.ndenumerate(matrix):
         ax.text(i, j, f"{label:.2f}", ha="center", va="center", color=font_color)
     return fig
+
+
+def pad_or_crop_extent(image, extent, target_extent):
+    """Pads and/or crops the extent of an image to match a target extent.
+
+    This is useful for side by side comparison of images with different extents.
+
+    Args:
+        image (np.ndarray): The input image to be padded and/or cropped.
+            Only 2D images are supported. Image shape must be (Nz, Nx).
+        extent (tuple): The current extent of the image in the format
+            (x_min, x_max, z_min, z_max).
+        target_extent (tuple): The target extent to match in the format
+            (x_min, x_max, z_min, z_max).
+
+    Returns:
+        np.ndarray: The padded and/or cropped image.
+    """
+    x_min, x_max, z_min, z_max = extent
+    target_x_min, target_x_max, target_z_min, target_z_max = target_extent
+
+    pixel_per_mm = np.array(image.shape) / np.array([z_max - z_min, x_max - x_min])
+
+    pixels_to_add_left = int((x_min - target_x_min) * pixel_per_mm[1])
+    pixels_to_add_right = int((target_x_max - x_max) * pixel_per_mm[1])
+    pixels_to_add_top = int((z_min - target_z_min) * pixel_per_mm[0])
+    pixels_to_add_bottom = int((target_z_max - z_max) * pixel_per_mm[0])
+
+    # crop if negative, pad if positive
+    pixels_to_crop_left = max(0, -pixels_to_add_left)
+    pixels_to_crop_right = max(0, -pixels_to_add_right)
+    pixels_to_crop_top = max(0, -pixels_to_add_top)
+    pixels_to_crop_bottom = max(0, -pixels_to_add_bottom)
+    pixels_to_pad_left = max(0, pixels_to_add_left)
+    pixels_to_pad_right = max(0, pixels_to_add_right)
+    pixels_to_pad_top = max(0, pixels_to_add_top)
+    pixels_to_pad_bottom = max(0, pixels_to_add_bottom)
+
+    # Crop the image
+    image_cropped = crop_images(
+        image[..., None],
+        pixels_to_crop_top,
+        pixels_to_crop_left,
+        pixels_to_crop_bottom,
+        pixels_to_crop_right,
+        data_format="channels_last",
+    )[..., 0]
+
+    # Pad the image
+    image_padded = np.pad(
+        image_cropped,
+        ((pixels_to_pad_top, pixels_to_pad_bottom), (pixels_to_pad_left, pixels_to_pad_right)),
+        mode="constant",
+        constant_values=0,
+    )
+    return image_padded

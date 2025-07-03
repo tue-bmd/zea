@@ -13,6 +13,7 @@ from zea.utils import reduce_to_signature, update_dictionary
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_FLOAT_PRECISION = "float32"
 BASE_INT_PRECISION = "int32"
+DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
 # TODO: make static more neat
 # These are global static attributes for all ops. Ops specific
@@ -24,6 +25,7 @@ STATIC = [
     "Nx",
     "Nz",
     "fill_value",
+    "n_ax",
 ]
 
 
@@ -170,29 +172,50 @@ class Object:
         )
 
 
+def _skip_to_tensor(value):
+    """Check if the value should be skipped for conversion to tensor."""
+    # Skip str (because JIT does not support it)
+    # Skip methods and functions
+    # Skip byte strings
+    if isinstance(value, str) or callable(value) or isinstance(value, bytes):
+        return True
+    return False
+
+
 def object_to_tensor(obj):
     """Convert an object to a dictionary of tensors."""
     snapshot = {}
 
     for key in dir(obj):
-        # Skip dunder/hidden methods and excepted tensors
+        # Skip dunder/hidden methods
         if key.startswith("_"):
             continue
 
         value = getattr(obj, key, None)
 
-        # Skip methods and functions
-        if callable(value):
+        # Skip certain types
+        if _skip_to_tensor(value):
             continue
 
-        # if a dict is passed
-        if isinstance(value, dict):
-            # If the value is a dict, we recursively convert it to a tensor
-            snapshot[key] = object_to_tensor(value)
+        # Convert the value to a tensor
+        snapshot[key] = _to_tensor(key, value)
+
+    return snapshot
+
+
+def dict_to_tensor(dictionary):
+    """Convert an object to a dictionary of tensors."""
+    snapshot = {}
+
+    for key in dictionary:
+        # Skip dunder/hidden methods
+        if key.startswith("_"):
             continue
 
-        # Skip byte strings
-        if isinstance(value, bytes):
+        value = dictionary[key]
+
+        # Skip certain types
+        if _skip_to_tensor(value):
             continue
 
         # Convert the value to a tensor

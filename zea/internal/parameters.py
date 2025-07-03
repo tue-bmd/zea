@@ -9,13 +9,13 @@ See the Parameters class docstring for details on features and usage.
 """
 
 import functools
-import hashlib
 
 import numpy as np
 
 from zea import log
+from zea.internal.cache import serialize_elements
 from zea.internal.core import Object as ZeaObject
-from zea.internal.core import _to_tensor
+from zea.internal.core import _to_tensor, dict_to_tensor
 
 
 def cache_with_dependencies(*deps):
@@ -25,7 +25,7 @@ def cache_with_dependencies(*deps):
         func._dependencies = deps
 
         @functools.wraps(func)
-        def wrapper(self):
+        def wrapper(self: Parameters):
             failed = set()
             if not self._resolve_dependency_tree(func.__name__, failed):
                 raise AttributeError(
@@ -101,7 +101,7 @@ class Parameters(ZeaObject):
             VALID_PARAMS = {
                 "a": {"type": int, "default": 1},
                 "b": {"type": float, "default": 2.0},
-                "d": {"type": float, "default": None},  # optional dependency
+                "d": {"type": float},  # optional dependency
             }
 
             @cache_with_dependencies("a", "b")
@@ -142,8 +142,9 @@ class Parameters(ZeaObject):
         if self.VALID_PARAMS is None:
             raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
 
+        # Initialize parameters with defaults
         for param, config in self.VALID_PARAMS.items():
-            if param not in kwargs and config["default"] is not None:
+            if param not in kwargs and "default" in config:
                 kwargs[param] = config["default"]
 
         # Validate parameter types
@@ -196,6 +197,12 @@ class Parameters(ZeaObject):
                 raise AttributeError(
                     f"Cannot access '{item}' due to missing base dependencies: {sorted(failed)}"
                 )
+        elif isinstance(cls_attr, property):
+            # If it's a property without dependencies, just return it
+            try:
+                return cls_attr.__get__(self, self.__class__)
+            except Exception as e:
+                raise AttributeError(f"Error accessing property '{item}': {str(e)}")
 
         # Otherwise raise normal attribute error
         raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{item}'")
@@ -311,8 +318,8 @@ class Parameters(ZeaObject):
             self._invalidate(key)
 
     def _current_dependency_hash(self, deps):
-        relevant = [str(self._params.get(dep, None)) for dep in deps]
-        return hashlib.sha1("".join(relevant).encode()).hexdigest()
+        values = [self._params.get(dep, None) for dep in deps]
+        return serialize_elements(values)
 
     def _resolve_dependency_tree(self, name, failed=None):
         if failed is None:
@@ -351,7 +358,7 @@ class Parameters(ZeaObject):
             compute_keys (list or None): If not None, only compute these
                 computed properties (by name).
         """
-        tensor_dict = {k: _to_tensor(k, v) for k, v in self._params.items()}
+        tensor_dict = dict_to_tensor(self._params)
 
         # Compute missing properties if requested
         if compute_missing:
@@ -368,6 +375,9 @@ class Parameters(ZeaObject):
                                 pass
                         except Exception as e:
                             log.warning(f"Could not compute '{name}': {str(e)}")
+                elif isinstance(attr, property):
+                    val = getattr(self, name, None)
+                    tensor_dict[name] = _to_tensor(name, val)
 
         # Always include all already computed properties
         for key in self._computed:

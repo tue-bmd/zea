@@ -43,13 +43,13 @@ class DummyParameters(Parameters):
     """
 
     VALID_PARAMS = {
-        "param1": {"type": int, "default": None},
-        "param2": {"type": int, "default": None},
+        "param1": {"type": int},
+        "param2": {"type": int},
         "param3": {"type": float, "default": 1540.0},
-        "param4": {"type": float, "default": None},
-        "param5": {"type": float, "default": None},
-        "param6": {"type": float, "default": None},
-        "optional_param": {"type": (list, type(None)), "default": None},
+        "param4": {"type": float},
+        "param5": {"type": float},
+        "param6": {"type": float},
+        "optional_param": {"type": (list, type(None))},
     }
 
     def _timestamp(self):
