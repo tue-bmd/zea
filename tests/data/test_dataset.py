@@ -103,7 +103,7 @@ def test_folder_copy_all_keys(dummy_dataset_path, tmp_path):
 
     # Copy the folder
     folder = Folder(dummy_dataset_path, some_key, validate=False)
-    folder.copy(tmp_path, all_keys=True)
+    folder.copy(tmp_path / "copy", all_keys=True)
 
     # Check required keys in the copied folder
     with Dataset(tmp_path / "copy", some_key, validate=False) as copied_folder:
