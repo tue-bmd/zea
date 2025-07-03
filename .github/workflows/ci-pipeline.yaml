@@ -129,7 +129,6 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -154,7 +153,7 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "pip install -e . && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy' ./tests"
+            sh -c "pip install -e . && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
@@ -179,7 +178,7 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
     runs-on: self-hosted
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -205,6 +204,18 @@ jobs:
           -e LOGNAME=$(id -un) \
           ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
           sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+
+      - name: Run notebook tests with Pytest
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
+            -u $(id -u):$(id -g) \
+            -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
+            ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
+            sh -c "pip install -e .[dev] && pytest -m 'notebook'"
 
   linter:
     runs-on: ubuntu-latest
