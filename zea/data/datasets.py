@@ -346,6 +346,51 @@ class Folder:
     def __str__(self):
         return f"Folder with {self.n_files} files in '{self.folder_path}' (key='{self.key}')"
 
+    def _copy_key_to_file(file: File, to_filepath: str | Path, key: str, copy_scan: bool = True):
+        """Copy a specific key from an HDF5 file to another file."""
+        with File(to_filepath, "w") as to_file:
+            if key in file:
+                file[key].copy(to_file[key])
+            else:
+                log.warning(f"Key '{key}' not found in file {file.file_path}. Skipping copy.")
+            if copy_scan and "scan" in file:
+                # Copy the scan data if it exists
+                file["scan"].copy(to_file["scan"])
+
+    def copy(self, to_path: str | Path, all_keys: bool = False, copy_scan: bool = True):
+        """Copy the folder's files to a new location.
+
+        Has the option to copy all keys or only a specific key.
+
+        Args:
+            to_path (str or Path): The destination path where files will be copied.
+            all_keys (bool): If True, copy all keys from the files. If False,
+                only copy the specified key. Defaults to False.
+            copy_scan (bool): If True, copy the scan data if it exists in the file.
+                Defaults to True.
+        """
+        if all_keys:
+            key_msg = "Including all keys."
+            assert copy_scan, (
+                "If you want to copy all keys, this means the scan data is also copied. "
+                "Set copy_scan=True if that is okay."
+            )
+        else:
+            key_msg = f"Only copying key '{self.key}'."
+
+        to_path = Path(to_path)
+
+        for file_path in tqdm.tqdm(
+            self.file_paths,
+            total=self.n_files,
+            desc=f"Copying dataset from {self.folder_path} to {to_path}. {key_msg}",
+        ):
+            with File(file_path) as file:
+                if all_keys:
+                    file.copy(to_path / file.name)
+                else:
+                    self._copy_key_to_file(file, to_path / file.name, self.key, copy_scan)
+
 
 class Dataset(H5FileHandleCache):
     """Iterate over File(s) and Folder(s)."""
