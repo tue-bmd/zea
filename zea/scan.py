@@ -161,6 +161,7 @@ class Scan(Parameters):
         # beamforming related parameters
         "Nx": {"type": int},
         "Nz": {"type": int},
+        "Nr": {"type": int},
         "xlims": {"type": (tuple, list)},
         "ylims": {"type": (tuple, list)},
         "zlims": {"type": (tuple, list)},
@@ -230,15 +231,22 @@ class Scan(Parameters):
     def grid(self):
         """The beamforming grid of shape (Nz, Nx, 3)."""
         if self.grid_type == "polar":
-            # NOTE: Nr is set to Nx for polar grid, not sure if this is clean.
-            return polar_pixel_grid(self.polar_limits, self.zlims, Nz=self.Nz, Nr=self.Nx)
+            return polar_pixel_grid(self.polar_limits, self.zlims, Nz=self.Nz, Nr=self.Nr)
         elif self.grid_type == "cartesian":
-            return cartesian_pixel_grid(self.xlims, self.zlims, Nx=self.Nx, Nz=self.Nz)
+            return cartesian_pixel_grid(self.xlims, self.zlims, Nz=self.Nz, Nx=self.Nx)
         else:
             raise ValueError(
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
+
+    @cache_with_dependencies("Nx")
+    def Nr(self):
+        """Number of azimuthal (r) pixels for polar grid. Defaults to Nx if not provided."""
+        Nr = self._params.get("Nr")
+        if Nr is not None:
+            return Nr
+        return self.Nx
 
     @cache_with_dependencies(
         "xlims",
