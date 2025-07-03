@@ -585,10 +585,11 @@ def pad_or_crop_extent(image, extent, target_extent):
 
     Args:
         image (np.ndarray): The input image to be padded and/or cropped.
+            Only 2D images are supported. Image shape must be (Nz, Nx).
         extent (tuple): The current extent of the image in the format
             (x_min, x_max, z_min, z_max).
         target_extent (tuple): The target extent to match in the format
-            (target_x_min, target_x_max, target_z_min, target_z_max).
+            (x_min, x_max, z_min, z_max).
 
     Returns:
         np.ndarray: The padded and/or cropped image.
@@ -596,12 +597,12 @@ def pad_or_crop_extent(image, extent, target_extent):
     x_min, x_max, z_min, z_max = extent
     target_x_min, target_x_max, target_z_min, target_z_max = target_extent
 
-    pixel_per_mm = np.array(image.shape) / np.array([x_max - x_min, z_max - z_min])
+    pixel_per_mm = np.array(image.shape) / np.array([z_max - z_min, x_max - x_min])
 
-    pixels_to_add_left = int((x_min - target_x_min) * pixel_per_mm[0])
-    pixels_to_add_right = int((target_x_max - x_max) * pixel_per_mm[0])
-    pixels_to_add_top = int((z_min - target_z_min) * pixel_per_mm[1])
-    pixels_to_add_bottom = int((target_z_max - z_max) * pixel_per_mm[1])
+    pixels_to_add_left = int((x_min - target_x_min) * pixel_per_mm[1])
+    pixels_to_add_right = int((target_x_max - x_max) * pixel_per_mm[1])
+    pixels_to_add_top = int((z_min - target_z_min) * pixel_per_mm[0])
+    pixels_to_add_bottom = int((target_z_max - z_max) * pixel_per_mm[0])
 
     # crop if negative, pad if positive
     pixels_to_crop_left = max(0, -pixels_to_add_left)
@@ -620,6 +621,7 @@ def pad_or_crop_extent(image, extent, target_extent):
         pixels_to_crop_left,
         pixels_to_crop_bottom,
         pixels_to_crop_right,
+        data_format="channels_last",
     )[..., 0]
 
     # Pad the image
