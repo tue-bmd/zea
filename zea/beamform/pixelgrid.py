@@ -7,67 +7,27 @@ from zea import log
 eps = 1e-10
 
 
-def get_grid(
-    xlims,
-    zlims,
-    Nx: int,
-    Nz: int,
-    sound_speed,
-    center_frequency,
-    pixels_per_wavelength,
-    verbose=False,
-):
-    """Creates a pixelgrid based on scan class parameters."""
-
-    if Nx and Nz:
-        grid = cartesian_pixel_grid(xlims, zlims, Nx=int(Nx), Nz=int(Nz))
-    else:
-        wvln = sound_speed / center_frequency
-        dx = wvln / pixels_per_wavelength
-        dz = dx
-        grid = cartesian_pixel_grid(xlims, zlims, dx=dx, dz=dz)
-        if verbose:
-            print(
-                f"Pixelgrid was set automatically to Nx: {grid.shape[1]}, Nz: {grid.shape[0]}, "
-                f"using {pixels_per_wavelength} pixels per wavelength."
-            )
-    return grid
-
-
 def check_for_aliasing(scan):
     """Checks if the scan class parameters will cause spatial aliasing due to a too low pixel
     density. If so, a warning is printed with a suggestion to increase the pixel density by either
     increasing the number of pixels, or decreasing the pixel spacing, depending on which parameter
     was set by the user."""
-    wvln = scan.sound_speed / scan.center_frequency
-    dx = wvln / scan.pixels_per_wavelength
-    dz = dx
-
     width = scan.xlims[1] - scan.xlims[0]
     depth = scan.zlims[1] - scan.zlims[0]
+    wvln = scan.wavelength
 
-    if scan.Nx and scan.Nz:
-        if width / scan.Nx > wvln / 2:
-            log.warning(
-                f"width/Nx = {width / scan.Nx:.7f} < wvln/2 = {wvln / 2}. "
-                f"Consider increasing scan.Nx to {int(np.ceil(width / (wvln / 2)))} or more."
-            )
-        if depth / scan.Nz > wvln / 2:
-            log.warning(
-                f"depth/Nz = {depth / scan.Nz:.7f} < wvln/2 = {wvln / 2:.7f}. "
-                f"Consider increasing scan.Nz to {int(np.ceil(depth / (wvln / 2)))} or more."
-            )
-    else:
-        if dx > wvln / 2:
-            log.warning(
-                f"dx = {dx:.7f} > wvln/2 = {wvln / 2:.7f}. "
-                f"Consider increasing scan.pixels_per_wavelength to 2 or more"
-            )
-        if dz > wvln / 2:
-            log.warning(
-                f"dz = {dz:.7f} > wvln/2 = {wvln / 2:.7f}. "
-                f"Consider increasing scan.pixels_per_wavelength to 2 or more"
-            )
+    if width / scan.Nx > wvln / 2:
+        log.warning(
+            f"width/Nx = {width / scan.Nx:.7f} < wavelength/2 = {wvln / 2}. "
+            f"Consider either increasing scan.Nx to {int(np.ceil(width / (wvln / 2)))} or more, or "
+            "increasing scan.pixels_per_wavelength to 2 or more."
+        )
+    if depth / scan.Nz > wvln / 2:
+        log.warning(
+            f"depth/Nz = {depth / scan.Nz:.7f} < wavelength/2 = {wvln / 2:.7f}. "
+            f"Consider either increasing scan.Nz to {int(np.ceil(depth / (wvln / 2)))} or more, or "
+            "increasing scan.pixels_per_wavelength to 2 or more."
+        )
 
 
 def cartesian_pixel_grid(xlims, zlims, Nx=None, Nz=None, dx=None, dz=None):
@@ -130,7 +90,7 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
             Cartesian coordinates (x, y, z), with nr being the number of radial pixels.
     """
     # Get focusing positions in rho-theta coordinates
-    r = np.arange(rlims[0], rlims[1] + eps, dr)  # Depth rho
+    r = np.arange(rlims[0], rlims[1], dr)  # Depth rho
     t = dirs[:, 0]  # Use azimuthal angle theta (ignore elevation angle)
     tt, rr = np.meshgrid(t, r, indexing="ij")
 
@@ -140,3 +100,31 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
     yy = 0 * xx
     grid = np.stack((xx, yy, zz), axis=-1)
     return grid
+
+
+def polar_pixel_grid(polar_limits, zlims, Nz: int, Nr: int):
+    """Generate a polar grid.
+
+    Uses radial_pixel_grid but based on parameters that are present in the scan class.
+
+    Args:
+        polar_limits (tuple): Azimuthal limits of pixel grid ([azimuth_min, azimuth_max])
+        zlims (tuple): Depth limits of pixel grid ([zmin, zmax])
+        Nz (int, optional): Number of depth pixels.
+        Nr (int, optional): Number of azimuthal pixels.
+
+    Returns:
+        grid (np.ndarray): Pixel grid of size (Nz, Nr, 3) in Cartesian coordinates (x, y, z)
+    """
+    assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
+    assert len(zlims) == 2, "zlims must be a tuple of length 2."
+
+    dr = (zlims[1] - zlims[0]) / Nz
+
+    oris = np.array([0, 0, 0])
+    oris = np.tile(oris, (Nr, 1))
+    dirs_az = np.linspace(*polar_limits, Nr)
+
+    dirs_el = np.zeros(Nr)
+    dirs = np.vstack((dirs_az, dirs_el)).T
+    return radial_pixel_grid(zlims, dr, oris, dirs).transpose(1, 0, 2)
