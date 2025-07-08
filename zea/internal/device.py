@@ -322,20 +322,21 @@ def selected_gpu_ids_to_device(selected_gpu_ids, backend):
     if selected_gpu_ids is None or len(selected_gpu_ids) == 0:
         return "cpu"
 
-    if len(selected_gpu_ids) > 1:
-        log.warning(
-            (
-                "Specified multiple GPU's but this function will just return "
-                f"one GPU: {selected_gpu_ids[0]}"
-            )
-        )
-
     key = backend_key(backend)
-    if backend == "jax":
-        # Because jax hides the other gpus, we need to set the device number to 0
-        return f"{key}:0"
+    if len(selected_gpu_ids) > 1:
+        if backend == "jax":
+            # For jax, return a list of device strings with sequential numbers
+            return [f"{key}:{i}" for i in range(len(selected_gpu_ids))]
+        else:
+            # For other backends, return a list of device strings with actual GPU IDs
+            return [f"{key}:{gpu_id}" for gpu_id in selected_gpu_ids]
     else:
-        return f"{key}:{selected_gpu_ids[0]}"
+        # Single GPU case
+        if backend == "jax":
+            # Because jax hides the other gpus, we need to set the device number to 0
+            return f"{key}:0"
+        else:
+            return f"{key}:{selected_gpu_ids[0]}"
 
 
 def set_memory_growth_tf():
