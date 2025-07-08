@@ -7,6 +7,45 @@ from zea.beamform.lens_correction import calculate_lens_corrected_delays
 from zea.tensor_ops import safe_vectorize
 
 
+def fnum_window_fn_rect(normalized_angle):
+    """Rectangular window function for f-number masking."""
+    return ops.where(normalized_angle <= 1.0, 1.0, 0.0)
+
+
+def fnum_window_fn_hann(normalized_angle):
+    """Hann window function for f-number masking."""
+    # Use a Hann window function to smoothly transition the mask
+    return ops.where(
+        normalized_angle <= 1.0,
+        0.5 * (1 + ops.cos(np.pi * normalized_angle)),
+        0.0,
+    )
+
+
+def fnum_window_fn_tukey(normalized_angle, alpha=0.5):
+    """Tukey window function for f-number masking.
+
+    Args:
+        normalized_angle (ops.Tensor): Normalized angle values in the range [0, 1].
+        alpha (float, optional): The alpha parameter for the Tukey window. 0.0 corresponds to a
+            rectangular window, 1.0 corresponds to a Hann window. Defaults to 0.5.
+    """
+    # Use a Tukey window function to smoothly transition the mask
+    normalized_angle = ops.clip(ops.abs(normalized_angle), 0.0, 1.0)
+
+    beta = 1.0 - alpha
+
+    return ops.where(
+        normalized_angle < beta,
+        1.0,
+        ops.where(
+            normalized_angle < 1.0,
+            0.5 * (1 + ops.cos(np.pi * (normalized_angle - beta) / (ops.abs(alpha) + 1e-6))),
+            0.0,
+        ),
+    )
+
+
 def tof_correction(
     data,
     flatgrid,
@@ -24,6 +63,7 @@ def tof_correction(
     apply_lens_correction=False,
     lens_thickness=1e-3,
     lens_sound_speed=1000,
+    fnum_window_fn=fnum_window_fn_rect,
 ):
     """Time-of-flight correction for a flat grid.
 
@@ -54,6 +94,9 @@ def tof_correction(
             lens correction. Defaults to 1e-3.
         lens_sound_speed (float, optional): Speed of sound in the lens in m/s. Used
             for lens correction Defaults to 1000.
+        fnum_window_fn (callable, optional): F-number function to define the transition from
+            straight in front of the element (fn(0.0)) to the largest angle within the f-number cone
+            (fn(1.0)). The function should be zero for fn(x>1.0).
 
     Returns:
         (ops.Tensor): time-of-flight corrected data
@@ -100,7 +143,7 @@ def tof_correction(
     mask = ops.cond(
         fnum == 0,
         lambda: ops.ones((n_pix, n_el, 1)),
-        lambda: apod_mask(flatgrid, probe_geometry, fnum),
+        lambda: fnumber_mask(flatgrid, probe_geometry, fnum, fnum_window_fn=fnum_window_fn),
     )
 
     def _apply_delays(data_tx, txdel):
@@ -408,64 +451,48 @@ def distance_Tx_generic(
     return dist
 
 
-def apod_mask(grid, probe_geometry, f_number):
+def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
     """Apodization mask for the receive beamformer.
 
-    Computes a binary mask to disregard pixels outside of the vision cone of a
+    Computes a mask to disregard pixels outside of the vision cone of a
     transducer element. Transducer elements can only accurately measure
     signals within some range of incidence angles. Waves coming in from the
     side do not register correctly leading to a worse image.
 
     Args:
-        grid (ops.Tensor): The flattened image grid `(n_pix, 3)`.
+        flatgrid (ops.Tensor): The flattened image grid `(n_pix, 3)`.
         probe_geometry (ops.Tensor): The transducer element positions of shape
             `(n_el, 3)`.
         f_number (int): The receive f-number. Set to zero to not use masking and
             return 1. (The f-number is the  ratio between distance from the transducer
             and the size of the aperture below which transducer elements contribute to
             the signal for a pixel.).
+        fnum_window_fn (callable): F-number function to define the transition from
+            straight in front of the element (fn(0.0)) to the largest angle within the f-number cone
+            (fn(1.0)). The function should be zero for fn(x>1.0).
+
 
     Returns:
         Tensor: Mask of shape `(n_pix, n_el, 1)`
     """
-    n_pix = ops.shape(grid)[0]
-    n_el = ops.shape(probe_geometry)[0]
 
-    # Get the depth of every pixel
-    z_pixel = grid[:, 2]
-    # Get the lateral location of each pixel
-    x_pixel = grid[:, 0]
-    # Get the lateral location of each element
-    x_element = ops.cast(probe_geometry[:, 0], dtype="float32")
+    grid_relative_to_probe = flatgrid[:, None] - probe_geometry[None]
 
-    # Compute the aperture size for every pixel
-    # The f-number is by definition f=z/aperture
-    aperture = z_pixel / f_number
+    grid_relative_to_probe_norm = ops.linalg.norm(grid_relative_to_probe, axis=-1)
 
-    # Use matrix multiplication to expand aperture tensor, x_pixel tensor, and
-    # x_element tensor to shape (n_pix, n_el)
-    ones_aperture = ops.ones(
-        (1, n_el), dtype=ops.dtype(aperture)
-    )  # getting error here? pip install -U keras ;)
-    ones_x_pixel = ops.ones((1, n_el), dtype=ops.dtype(x_pixel))
-    ones_x_element = ops.ones((n_pix, 1), dtype=ops.dtype(x_element))
+    grid_relative_to_probe_z = grid_relative_to_probe[..., 2] / (grid_relative_to_probe_norm + 1e-6)
 
-    aperture = ops.matmul(aperture[..., None], ones_aperture)
-    expanded_x_pixel = ops.matmul(x_pixel[..., None], ones_x_pixel)
-    expanded_x_element = ops.matmul(ones_x_element, x_element[None])
+    alpha = ops.arccos(grid_relative_to_probe_z)
 
-    # Compute the lateral distance between elements and pixels
-    # Of shape (n_pix, n_el)
-    distance = ops.abs(expanded_x_pixel - expanded_x_element)
+    # The f-number is fnum = z/aperture = 1/(2 * tan(alpha))
+    # Rearranging gives us alpha = arctan(1/(2 * fnum))
+    # We can use this to compute the maximum angle alpha that is allowed
+    max_alpha = ops.arctan(1 / (2 * f_number))
 
-    # Compute binary mask for which the lateral pixel distance is less than
-    # half
-    # the aperture i.e. where the pixel lies within the vision cone of the
-    # element
-    mask = distance <= aperture / 2
-    mask = ops.cast(mask, "float32")
+    normalized_angle = alpha / max_alpha
+    mask = fnum_window_fn(normalized_angle)
 
-    # Add dummy dimension for RF/IQ channel channel
+    # Add dummy channel dimension
     mask = mask[..., None]
 
     return mask
