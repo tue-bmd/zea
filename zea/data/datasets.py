@@ -113,14 +113,14 @@ class H5FileHandleCache:
             self._file_handle_cache = OrderedDict()
 
 
-def find_h5_files(paths: str | list, key: str, search_file_tree_kwargs: dict | None = None):
+def find_h5_files(paths: str | list, key: str = None, search_file_tree_kwargs: dict | None = None):
     """
-    Find HDF5 files from a directory or list of directories and retrieve their shapes.
+    Find HDF5 files from a directory or list of directories and optionally retrieve their shapes.
 
     Args:
         paths (str or list): A single directory path, a list of directory paths,
             or a single HDF5 file path.
-        key (str): The key to access the HDF5 dataset.
+        key (str, optional): The key to get the file shapes for.
         search_file_tree_kwargs (dict, optional): Additional keyword arguments for the
             search_file_tree function. Defaults to None.
 
@@ -147,7 +147,8 @@ def find_h5_files(paths: str | list, key: str, search_file_tree_kwargs: dict | N
         if Path(path).is_file():
             path = Path(path)
             # If the path is a file, get its shape directly
-            file_shapes.append(File.get_shape(path, key))
+            if key is not None:
+                file_shapes.append(File.get_shape(path, key))
             file_paths.append(str(path))
             continue
 
@@ -171,7 +172,7 @@ class Folder:
     def __init__(
         self,
         folder_path: list[str] | list[Path],
-        key: str,
+        key: str = None,
         search_file_tree_kwargs: dict | None = None,
         validate: bool = True,
         hf_cache_dir: str = HF_DATASETS_DIR,
@@ -192,7 +193,7 @@ class Folder:
 
         super().__init__(**kwargs)
 
-        self.folder_path = folder_path
+        self.folder_path = Path(folder_path)
         self.key = key
         self.search_file_tree_kwargs = search_file_tree_kwargs
         self.validate = validate
@@ -345,6 +346,64 @@ class Folder:
 
     def __str__(self):
         return f"Folder with {self.n_files} files in '{self.folder_path}' (key='{self.key}')"
+
+    def copy(self, to_path: str | Path, key: str = None, mode: str | None = None):
+        """Copy the data for all or a specific key to a new location.
+
+        Has the option to copy all keys or only a specific key. By default, it only copies if the
+        destination file does not already contain the key. You can change the mode to 'w' to
+        overwrite the destination file. Will always copy metadata such as dataset attributes and
+        scan object.
+
+        Args:
+            to_path (str or Path): The destination path where files will be copied.
+            key (str, optional): The key to copy from the source files.
+                If 'all' or '*', all keys will be copied. Defaults to None, which
+                uses the key set in the Folder instance.
+            mode (str): The mode in which to open the destination files.
+                Defaults to 'a' (append mode), and 'w' (write mode) if key is 'all' or '*'.
+                See: https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
+        """
+        if key is None and self.key is None:
+            raise ValueError(
+                "No key specified. Please provide a key to copy the data for, or set the "
+                "key attribute of the Folder instance."
+            )
+        elif key is None:
+            key = self.key
+
+        all_keys = key == "all" or key == "*"
+
+        if mode is None:
+            mode = "a" if not all_keys else "w"
+
+        if all_keys:
+            key_msg = "Including all keys."
+            assert mode in ["w", "x"], (
+                "If you want to copy all keys, the destination file must be opened "
+                "in 'w' or 'x' mode, which means it will be overwritten or created."
+            )
+        else:
+            key_msg = f"Only copying key '{key}'."
+            assert mode in ["a", "w", "r+", "x"], (
+                f"Invalid mode '{mode}'. Must be one of 'a', 'w', 'r+', or 'x'."
+            )
+
+        to_path = Path(to_path)
+        to_path.mkdir(parents=True, exist_ok=True)
+
+        for file_path in tqdm.tqdm(
+            self.file_paths,
+            total=self.n_files,
+            desc=f"Copying dataset from {self.folder_path} to {to_path}. {key_msg}",
+        ):
+            dst_path = Path(file_path).relative_to(self.folder_path)
+            with File(file_path) as src, File(to_path / dst_path, mode) as dst:
+                if all_keys:
+                    for obj in src.keys():
+                        src.copy(obj, dst)
+                else:
+                    src.copy_key(key, dst)
 
 
 class Dataset(H5FileHandleCache):
@@ -582,3 +641,10 @@ def count_samples_per_directory(file_names, directories):
     )
 
     return counts
+
+
+if __name__ == "__main__":
+    src_folder = Folder(
+        "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/val/patient0450", "image", validate=False
+    )
+    src_folder.copy("./CAMIUS", key="all")

@@ -87,7 +87,13 @@ from zea.beamform.beamformer import tof_correction
 from zea.config import Config
 from zea.display import scan_convert
 from zea.internal.checks import _assert_keys_and_axes
-from zea.internal.core import STATIC, DataTypes, ZEADecoderJSON, ZEAEncoderJSON
+from zea.internal.core import (
+    DEFAULT_DYNAMIC_RANGE,
+    STATIC,
+    DataTypes,
+    ZEADecoderJSON,
+    ZEAEncoderJSON,
+)
 from zea.internal.core import Object as ZEAObject
 from zea.internal.registry import ops_registry
 from zea.probes import Probe
@@ -95,8 +101,6 @@ from zea.scan import Scan
 from zea.simulator import simulate_rf
 from zea.tensor_ops import patched_map, resample, reshape_axis
 from zea.utils import deep_compare, map_negative_indices, translate
-
-DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
 
 def get_ops(ops_name):
@@ -407,6 +411,7 @@ class Pipeline:
             raise ValueError("jit_options must be 'pipeline', 'ops', or None")
 
         self.with_batch_dim = with_batch_dim
+        self._validate_flag = validate
 
         if validate:
             self.validate()
@@ -478,15 +483,33 @@ class Pipeline:
         ]
         return cls(operations, **kwargs)
 
+    def copy(self) -> "Pipeline":
+        """Create a copy of the pipeline."""
+        return Pipeline(
+            self._pipeline_layers.copy(),
+            with_batch_dim=self.with_batch_dim,
+            jit_options=self.jit_options,
+            jit_kwargs=self.jit_kwargs,
+            name=self.name,
+            validate=self._validate_flag,
+        )
+
     def prepend(self, operation: Operation):
         """Prepend an operation to the pipeline."""
         self._pipeline_layers.insert(0, operation)
-        self.reset_jit()
+        self.copy()
 
     def append(self, operation: Operation):
         """Append an operation to the pipeline."""
         self._pipeline_layers.append(operation)
-        self.reset_jit()
+        self.copy()
+
+    def insert(self, index: int, operation: Operation):
+        """Insert an operation at a specific index in the pipeline."""
+        if index < 0 or index > len(self._pipeline_layers):
+            raise IndexError("Index out of bounds for inserting operation.")
+        self._pipeline_layers.insert(index, operation)
+        return self.copy()
 
     @property
     def operations(self):
@@ -546,11 +569,6 @@ class Pipeline:
             }
 
         return outputs
-
-    def reset_jit(self):
-        """Reset the JIT compilation of the pipeline."""
-        # TODO: kind of hacky...
-        self.jit_options = self._jit_options
 
     @property
     def jit_options(self):
@@ -1714,12 +1732,13 @@ class LogCompress(Operation):
         data = kwargs[self.key]
 
         if dynamic_range is None:
-            dynamic_range = DEFAULT_DYNAMIC_RANGE
+            dynamic_range = ops.array(DEFAULT_DYNAMIC_RANGE)
+        dynamic_range = ops.cast(dynamic_range, data.dtype)
 
         small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
         data = ops.where(data == 0, small_number, data)
         compressed_data = 20 * ops.log10(data)
-        compressed_data = ops.clip(compressed_data, *dynamic_range)
+        compressed_data = ops.clip(compressed_data, dynamic_range[0], dynamic_range[1])
 
         return {self.output_key: compressed_data}
 

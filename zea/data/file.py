@@ -175,6 +175,8 @@ class File(h5py.File):
         if isinstance(key, enum.Enum):
             key = key.value
 
+        assert isinstance(key, str), f"Key must be a string, got {type(key)}. "
+
         # Return the key if it is in the file
         if key in self.keys():
             return key
@@ -447,6 +449,35 @@ class File(h5py.File):
 
     def __str__(self):
         return f"zea HDF5 File: '{self.path.name}' (mode={self.mode})"
+
+    def copy_key(self, key: str, dst: "File"):
+        """Copy a specific key to another file.
+
+        Will always copy the attributes and the scan data if it exists. Will warn if the key is
+        not in this file or if the key already exists in the destination file.
+
+        Args:
+            key (str): The key to copy.
+            dst (File): The destination file to copy the key to.
+        """
+        key = self.format_key(key)
+
+        # Copy the key if it does not already exist in the destination file
+        if key in dst:
+            log.warning(f"Skipping key '{key}' because it already exists in dst file {dst.path}.")
+        elif key in self:
+            self.copy(key, dst, name=key)
+        else:
+            log.warning(f"Key '{key}' not found in src file {self.path}. Skipping copy.")
+
+        # Copy attributes from src to dst
+        for attr_key, attr_value in self.attrs.items():
+            dst[key].attrs[attr_key] = attr_value
+
+        # Copy scan data if requested
+        if "scan" in self and "scan" not in dst:
+            # Copy the scan data if it exists
+            self.copy("scan", dst)
 
     def summary(self):
         """Print the contents of the file."""

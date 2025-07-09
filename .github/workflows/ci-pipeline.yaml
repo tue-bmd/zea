@@ -178,7 +178,7 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: [build-full-image, set-tag]
     runs-on: self-hosted
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -215,7 +215,7 @@ jobs:
             -e USER=$(id -un) \
             -e LOGNAME=$(id -un) \
             ${{ env.IMAGE_PREFIX }}/all-cpu:${{ needs.set-tag.outputs.docker_tag }} \
-            sh -c "pip install -e .[dev] && pytest -m 'notebook'"
+            sh -c "pip install -e .[dev] && pytest -s -m 'notebook'"
 
   linter:
     runs-on: ubuntu-latest

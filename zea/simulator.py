@@ -106,11 +106,9 @@ def simulate_rf(
             * sound_speed
         )
 
-    n_ax_rounded = _round_up_to_power_of_two(int(n_ax))
+    n_ax_rounded = _round_up_to_power_of_two(int(n_ax)).astype("float32")
 
-    freqs = (
-        ops.cast(ops.arange(n_ax_rounded // 2 + 1) / n_ax_rounded, "float32") * sampling_frequency
-    )
+    freqs = ops.arange(n_ax_rounded // 2 + 1, dtype="float32") / n_ax_rounded * sampling_frequency
 
     waveform_spectrum = pulse_spectrum_fn(freqs)
     parts = []
@@ -342,4 +340,4 @@ def sinc(x):
 
 def _round_up_to_power_of_two(x):
     """Rounds up to the next power of two."""
-    return 2 ** ops.ceil(ops.log2(x))
+    return 2 ** np.ceil(np.log2(x))

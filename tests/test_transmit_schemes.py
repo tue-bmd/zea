@@ -6,6 +6,7 @@ import pytest
 
 from zea import ops
 from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
+from zea.beamform.phantoms import fish
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -86,48 +87,6 @@ def default_pipeline():
     pipeline.prepend(ops.Simulate())
     pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
-
-
-def _get_fish_phantom():
-    """Returns a scatterer phantom for ultrasound simulation tests.
-
-    Returns:
-        ndarray: The scatterer positions of shape (n_scat, 3).
-    """
-    # The size is the height of the fish
-    size = 11e-3
-    z_offset = 2.0 * size
-
-    # See https://en.wikipedia.org/wiki/Fish_curve
-    def fish_curve(t, size=1):
-        x = size * (np.cos(t) - np.sin(t) ** 2 / np.sqrt(2))
-        y = size * np.cos(t) * np.sin(t)
-        return x, y
-
-    scat_x, scat_z = fish_curve(np.linspace(0, 2 * np.pi, 100), size=size)
-
-    scat_x = np.concatenate(
-        [
-            scat_x,
-            np.array([size * 0.7]),
-            np.array([size * 1.1]),
-            np.array([size * 1.4]),
-            np.array([size * 1.2]),
-        ]
-    )
-    scat_y = np.zeros_like(scat_x)
-    scat_z = np.concatenate(
-        [
-            scat_z,
-            np.array([-size * 0.1]),
-            np.array([-size * 0.25]),
-            np.array([-size * 0.6]),
-            np.array([-size * 1.0]),
-        ]
-    )
-
-    scat_z += z_offset
-    return np.stack([scat_x, scat_y, scat_z], axis=1)
 
 
 def _get_linear_probe():
@@ -216,7 +175,7 @@ def _get_lims_and_gridsize(center_frequency, sound_speed):
     return {"xlims": xlims, "zlims": zlims, "Nx": gridsize[0], "Nz": gridsize[1]}
 
 
-def _get_planewave_scan(ultrasound_probe):
+def _get_planewave_scan(ultrasound_probe, grid_type):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
@@ -246,12 +205,13 @@ def _get_planewave_scan(ultrasound_probe):
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
+        grid_type=grid_type,
         **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
 
-def _get_multistatic_scan(ultrasound_probe):
+def _get_multistatic_scan(ultrasound_probe, grid_type):
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
     n_tx = 8
@@ -279,6 +239,7 @@ def _get_multistatic_scan(ultrasound_probe):
         polar_angles=np.zeros(n_tx),
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
+        grid_type=grid_type,
         **_get_lims_and_gridsize(
             ultrasound_probe.center_frequency, constant_scan_kwargs["sound_speed"]
         ),
@@ -286,7 +247,7 @@ def _get_multistatic_scan(ultrasound_probe):
     )
 
 
-def _get_diverging_scan(ultrasound_probe):
+def _get_diverging_scan(ultrasound_probe, grid_type):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
@@ -322,12 +283,13 @@ def _get_diverging_scan(ultrasound_probe):
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
+        grid_type=grid_type,
         **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
 
-def _get_focused_scan(ultrasound_probe):
+def _get_focused_scan(ultrasound_probe, grid_type):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
@@ -363,12 +325,13 @@ def _get_focused_scan(ultrasound_probe):
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
+        grid_type=grid_type,
         **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
 
-def _get_linescan_scan(ultrasound_probe):
+def _get_linescan_scan(ultrasound_probe, grid_type):
     """Returns a scan for ultrasound simulation tests."""
     constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
@@ -418,22 +381,23 @@ def _get_linescan_scan(ultrasound_probe):
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
+        grid_type=grid_type,
         **_get_lims_and_gridsize(ultrasound_probe.center_frequency, sound_speed),
         **constant_scan_kwargs,
     )
 
 
-def _get_scan(ultrasound_probe, kind):
+def _get_scan(ultrasound_probe, kind, grid_type="cartesian"):
     if kind == "planewave":
-        return _get_planewave_scan(ultrasound_probe)
+        return _get_planewave_scan(ultrasound_probe, grid_type)
     elif kind == "multistatic":
-        return _get_multistatic_scan(ultrasound_probe)
+        return _get_multistatic_scan(ultrasound_probe, grid_type)
     elif kind == "diverging":
-        return _get_diverging_scan(ultrasound_probe)
+        return _get_diverging_scan(ultrasound_probe, grid_type)
     elif kind == "focused":
-        return _get_focused_scan(ultrasound_probe)
+        return _get_focused_scan(ultrasound_probe, grid_type)
     elif kind == "linescan":
-        return _get_linescan_scan(ultrasound_probe)
+        return _get_linescan_scan(ultrasound_probe, grid_type)
     else:
         raise ValueError(f"Unknown scan kind: {kind}")
 
@@ -455,7 +419,7 @@ def _test_location(image, extent, true_position):
 @pytest.fixture
 def ultrasound_scatterers():
     """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
-    scat_positions = _get_fish_phantom()
+    scat_positions = fish()
     n_scat = scat_positions.shape[0]
 
     return {
@@ -522,8 +486,54 @@ def test_transmit_schemes(
         true_position=ultrasound_scatterers["positions"][target_scatterer_index],
     )
     # Check that the pipeline produced the expected outputs
-    assert "data" in output_default
     assert output_default["data"].shape[0] == 1  # Batch dimension
     # Verify the normalized image has values between 0 and 255
     assert np.nanmin(output_default["data"]) >= 0.0
     assert np.nanmax(output_default["data"]) <= 255.0
+
+
+@pytest.mark.heavy
+def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
+    """Tests the polar grid generation."""
+    ultrasound_probe = _get_linear_probe()
+    ultrasound_scan = _get_scan(ultrasound_probe, "focused", grid_type="polar")
+
+    # Check if the grid type is set correctly
+    assert ultrasound_scan.grid_type == "polar"
+
+    default_pipeline.append(ops.ScanConvert(order=3))
+
+    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+
+    # all dynamic parameters are set in the call method of the operations
+    # or equivalently in the pipeline call (which is passed to the operations)
+    output_default = default_pipeline(
+        **parameters,
+        scatterer_positions=ultrasound_scatterers["positions"],
+        scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
+    )
+
+    image = output_default["data"][0]
+
+    # Convert to numpy
+    image = keras.ops.convert_to_numpy(image)
+
+    assert ultrasound_scan.zlims[0] == 0.0
+
+    # xlims for polar grid can be computed as follows, think about the unit circle :)
+    radius = ultrasound_scan.zlims[1]
+    xlims = (
+        radius * np.cos(-np.pi / 2 + ultrasound_scan.theta_range[0]),
+        radius * np.cos(-np.pi / 2 + ultrasound_scan.theta_range[1]),
+    )
+    extent = [*xlims, *ultrasound_scan.zlims]
+
+    # Target the scatterer that forms the eye
+    target_scatterer_index = -4
+
+    # Check if the scatterer is in the right location in the image
+    _test_location(
+        image.T,
+        extent=extent,
+        true_position=ultrasound_scatterers["positions"][target_scatterer_index],
+    )

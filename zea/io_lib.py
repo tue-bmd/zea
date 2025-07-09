@@ -16,7 +16,7 @@ import pydicom
 import tqdm
 import yaml
 from PIL import Image
-from pydicom.pixel_data_handlers import convert_color_space
+from pydicom.pixels import convert_color_space
 
 from zea import log
 from zea.data.file import File

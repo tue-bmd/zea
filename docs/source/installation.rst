@@ -60,17 +60,19 @@ These images are uploaded to Docker Hub via the CI pipeline and can be used dire
 Build
 ~~~~~
 
-One can build an image for a specific backend using the provided `Dockerfile` and the `BACKEND` build argument.
+One can build an image for a specific backend using the provided `Dockerfile` and build arguments.
 
 .. code-block:: shell
 
-   docker build -f Dockerfile --build-arg BACKEND=jax . -t zeahub/jax:latest
+   docker build --build-arg INSTALL_JAX=gpu . -t zeahub/jax:latest
 
-To build the full image with all backends, use `BACKEND=all`.
+To build the full image including all backends with GPU support:
 
 .. code-block:: shell
 
-   docker build -f Dockerfile --build-arg BACKEND=all . -t zeahub/all:latest
+   docker build --build-arg INSTALL_JAX=gpu --build-arg INSTALL_TORCH=gpu --build-arg INSTALL_TF=gpu . -t zeahub/all:latest
+
+Note that these build arguments can be set to either `cpu` or `gpu` depending on your needs.
 
 Run
 ~~~

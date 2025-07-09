@@ -153,7 +153,6 @@ exclude = [
     "node_modules",
     "site-packages",
     "venv",
-    "*.ipynb",  # ignore jupyter notebooks completely for now
 ]
 
 # more lenient line width than Black

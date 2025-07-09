@@ -52,7 +52,7 @@ def clean_cache_dir():
 def dummy_dataset_path(tmp_path):
     """Fixture to create a temporary dataset"""
     for i in range(2):
-        temp_file = tmp_path / f"test{i}.hdf5"
+        temp_file = tmp_path / "dummy_dataset_path" / f"test{i}.hdf5"
         generate_example_dataset(
             temp_file,
             add_optional_dtypes=True,
@@ -61,4 +61,4 @@ def dummy_dataset_path(tmp_path):
             n_x=DUMMY_DATASET_N_X,
         )
 
-    yield str(tmp_path)
+    yield str(temp_file.parent)
