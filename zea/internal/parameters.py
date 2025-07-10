@@ -317,7 +317,7 @@ class Parameters(ZeaObject):
         for key in self._find_all_dependents(changed_key):
             self._invalidate(key)
 
-    def _current_dependency_hash(self, deps):
+    def _current_dependency_hash(self, deps) -> str:
         values = [self._params.get(dep, None) for dep in deps]
         return serialize_elements(values)
 

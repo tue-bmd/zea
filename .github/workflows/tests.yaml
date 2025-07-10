@@ -1,0 +1,196 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  BASE_IMAGE: ghcr.io/tue-bmd/zea/all-cpu
+  MAIN_REPO: tue-bmd/zea
+
+jobs:
+  tag:
+    uses: ./.github/workflows/set-tag.yaml
+
+  image:
+    needs: [tag]
+    runs-on: ubuntu-latest
+    outputs:
+      docker_image: ${{ steps.set-image.outputs.docker_image }}
+    steps:
+      - name: Debug repository context
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Is main repo: ${{ github.repository == 'tue-bmd/zea' }}"
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Event name: ${{ github.event_name }}"
+          echo "PR head repo: ${{ github.event.pull_request.head.repo.full_name }}"
+          echo "PR base repo: ${{ github.event.pull_request.base.repo.full_name }}"
+          echo "Is fork PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}"
+
+      - name: Free up disk space
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /opt/hostedtoolcache
+          echo "Disk space after cleanup:"
+          df -h
+
+      - name: Checkout repository
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push CI Docker image
+        id: build
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            INSTALL_JAX=cpu
+            INSTALL_TORCH=cpu
+            INSTALL_TF=cpu
+            DEV=true
+          push: true
+          tags: ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set Docker image for tests
+        id: set-image
+        run: |
+          # Check if this is a fork PR or main repo
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            # Fork PR - use latest public image
+            DOCKER_IMAGE="${{ env.BASE_IMAGE }}:latest"
+            echo "✅ Fork PR: Using latest public image: $DOCKER_IMAGE"
+          else
+            # Main repo (push or PR from same repo) - use newly built tagged image
+            DOCKER_IMAGE="${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}"
+            echo "✅ Main repo: Using newly built tagged image: $DOCKER_IMAGE"
+          fi
+          echo "docker_image=$DOCKER_IMAGE" >> $GITHUB_OUTPUT
+
+  tests:
+    needs: [image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - name: Run Pytest in container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
+            -u $(id -u):$(id -g) \
+            -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
+            ${{ needs.image.outputs.docker_image }} \
+            sh -c "pip install -e . && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: ${{ env.MAIN_REPO }}
+
+      - name: Run heavy Pytest (allowed to fail)
+        continue-on-error: true
+        run: |
+          docker run --rm \
+          -v "${{ github.workspace }}:/zea" \
+          -w /zea \
+          -u $(id -u):$(id -g) \
+          -e HOME=/tmp \
+          -e USER=$(id -un) \
+          -e LOGNAME=$(id -un) \
+          ${{ needs.image.outputs.docker_image }} \
+          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+
+  heavy-tests:
+    needs: [image]
+    runs-on: self-hosted
+    timeout-minutes: 100
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - name: Run heavy Pytest
+        run: |
+          docker run --rm \
+          -v "${{ github.workspace }}:/zea" \
+          -w /zea \
+          -u $(id -u):$(id -g) \
+          -e HOME=/tmp \
+          -e USER=$(id -un) \
+          -e LOGNAME=$(id -un) \
+          ${{ needs.image.outputs.docker_image }} \
+          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+
+      - name: Run notebook tests with Pytest
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea \
+            -u $(id -u):$(id -g) \
+            -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
+            ${{ needs.image.outputs.docker_image }} \
+            sh -c "pip install -e .[dev] && pytest -s -m 'notebook'"
+
+  test-docs-build:
+    needs: [image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: git config --global safe.directory $GITHUB_WORKSPACE
+
+      - name: Build documentation with Sphinx (fail on warnings)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zea" \
+            -w /zea/docs \
+            -u $(id -u):$(id -g) \
+            -e HOME=/tmp \
+            -e USER=$(id -un) \
+            -e LOGNAME=$(id -un) \
+            ${{ needs.image.outputs.docker_image }} \
+            sh -c "\
+              sudo apt-get update && \
+              sudo apt-get install -y pandoc && \
+              pip install -e ..[docs] && \
+              export PATH=\"/tmp/.local/bin:\$PATH\" && \
+              make docs-clean && \
+              make docs-build SPHINXOPTS='-W --keep-going' \
+            "

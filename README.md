@@ -2,7 +2,7 @@
 
 
 [![PyPI version](https://img.shields.io/pypi/v/zea)](https://pypi.org/project/zea/)
-[![Continuous integration](https://github.com/tue-bmd/zea/actions/workflows/ci-pipeline.yaml/badge.svg)](https://github.com/tue-bmd/zea/actions/workflows/ci-pipeline.yaml)
+[![Continuous integration](https://github.com/tue-bmd/zea/actions/workflows/tests.yaml/badge.svg)](https://github.com/tue-bmd/zea/actions/workflows/tests.yaml)
 [![Documentation Status](https://readthedocs.org/projects/zea/badge/?version=latest)](https://zea.readthedocs.io/en/latest/?badge=latest)
 [![License](https://img.shields.io/github/license/tue-bmd/zea)](https://github.com/tue-bmd/zea/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg)](https://codecov.io/gh/tue-bmd/zea)

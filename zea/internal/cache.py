@@ -80,7 +80,7 @@ _CACHE_DIR = ZEA_CACHE_DIR / "cached_funcs"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def serialize_elements(key_elements: list):
+def serialize_elements(key_elements: list, shorten: bool = False) -> str:
     """Serialize elements of a list to generate a cache key.
 
     In general uses the string representation of the elements unless
@@ -90,18 +90,18 @@ def serialize_elements(key_elements: list):
     Args:
         key_elements (list): List of elements to serialize. Can be nested lists
             or tuples. In this case the elements are serialized recursively.
+        shorten (bool): If True, the serialized string is hashed to a shorter
+            representation using MD5. Defaults to False.
 
     Returns:
-        list[str]: List of serialized elements. In cases where the elements were
-            lists of tuples those are combined into a single string.
+        str: A serialized string representation of the elements, joined by underscores.
 
     """
     serialized_elements = []
     for element in key_elements:
         if isinstance(element, (list, tuple)):
             # If element is a list or tuple, serialize its elements recursively
-            element = serialize_elements(element)
-            serialized_elements.append("_".join(element))
+            serialized_elements.append(serialize_elements(element))
         elif hasattr(element, "serialized"):
             # Use the serialized attribute if it exists (e.g. for zea.core.Object)
             serialized_elements.append(str(element.serialized))
@@ -120,7 +120,10 @@ def serialize_elements(key_elements: list):
             element = hashlib.md5(element).hexdigest()
             serialized_elements.append(element)
 
-    return serialized_elements
+    serialized = "_".join(serialized_elements)
+    if shorten:
+        return hashlib.md5(serialized.encode()).hexdigest()
+    return serialized
 
 
 def get_function_source(func):
@@ -182,8 +185,10 @@ def generate_cache_key(func, args, kwargs, arg_names):
             if name in bound_args.arguments:
                 key_elements.append(bound_args.arguments[name])
 
-    key = "_".join(serialize_elements(key_elements))
-    return f"{func.__qualname__}_" + hashlib.md5(key.encode()).hexdigest()
+    # Add keras backend
+    key_elements.append(keras.backend.backend())
+
+    return f"{func.__qualname__}_" + serialize_elements(key_elements, shorten=True)
 
 
 def cache_output(*arg_names, verbose=False):
