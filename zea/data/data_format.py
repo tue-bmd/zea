@@ -84,10 +84,12 @@ def generate_example_dataset(
         aligned_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
         envelope_data = np.ones((n_frames, n_z, n_x))
         beamformed_data = np.ones((n_frames, n_z, n_x, n_ch))
+        image_sc = np.ones_like(image)
     else:
         aligned_data = None
         envelope_data = None
         beamformed_data = None
+        image_sc = None
 
     generate_zea_dataset(
         path,
@@ -96,6 +98,7 @@ def generate_example_dataset(
         envelope_data=envelope_data,
         beamformed_data=beamformed_data,
         image=image,
+        image_sc=image_sc,
         probe_geometry=probe_geometry,
         sampling_frequency=sampling_frequency,
         center_frequency=center_frequency,

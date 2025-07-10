@@ -1,0 +1,34 @@
+name: Set Docker Tag
+
+on:
+  workflow_call:
+    outputs:
+      docker_tag:
+        description: "The Docker tag to use for images"
+        value: ${{ jobs.set-tag.outputs.docker_tag }}
+
+jobs:
+  set-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_tag: ${{ steps.set.outputs.tag }}
+    steps:
+      - name: Set image tag
+        id: set
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" || ("${{ github.event_name }}" == "push" && "${{ github.ref }}" != "refs/heads/main" && ! "${{ github.ref }}" =~ ^refs/tags/) ]]; then
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/ ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "Unhandled event: ${{ github.event_name }}, ref: ${{ github.ref }}"
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+          # Print out the tag we just set for debugging
+          TAG_VALUE=$(grep '^tag=' "$GITHUB_OUTPUT" | cut -d'=' -f2-)
+          echo "Determined image tag: $TAG_VALUE"

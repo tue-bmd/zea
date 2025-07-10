@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from zea.visualize import plot_biplanes, plot_frustum_vertices, plot_quadrants
+from zea.visualize import pad_or_crop_extent, plot_biplanes, plot_frustum_vertices, plot_quadrants
 
 
 @pytest.fixture
@@ -77,3 +77,21 @@ def test_plot_biplanes():
     assert fig is not None, "Figure is None"
     assert ax is not None, "Axis is None"
     plt.close()
+
+
+def test_pad_or_crop_extent():
+    """Tests the pad_or_crop_extent function."""
+
+    # image_1.shape = (12, 10)
+    image_1 = np.random.rand(12, 10)
+    extent_1 = (-5, 5, -6, 6)  # (xmin, xmax, ymin, ymax)
+
+    # image_2.shape = (14, 14)
+    image_2 = np.pad(image_1, ((1, 1), (2, 2)), mode="constant", constant_values=0)
+    extent_2 = np.array(extent_1) + np.array([-2, 2, -1, 1])
+
+    image_1_to_2 = pad_or_crop_extent(image_1, extent_1, extent_2)
+    image_2_to_1 = pad_or_crop_extent(image_2, extent_2, extent_1)
+
+    np.testing.assert_array_equal(image_1_to_2, image_2)
+    np.testing.assert_array_equal(image_2_to_1, image_1)
