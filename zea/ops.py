@@ -1868,85 +1868,60 @@ class ScanConvert(Operation):
 @ops_registry("gaussian_blur")
 class GaussianBlur(Operation):
     """
-    GaussianBlur is an operation that applies a Gaussian blur to an input image.
-    Uses scipy.ndimage.gaussian_filter to create a kernel.
+    GaussianBlur is an operation that applies a Gaussian blur to N-dimensional input data.
+    Uses keras.ops-based gaussian_filter from utils.tensor_ops for GPU acceleration
+    and support for N-dimensional tensors (2D, 3D, etc.).
     """
 
     def __init__(
         self,
-        sigma: float,
-        kernel_size: int | None = None,
-        pad_mode="symmetric",
+        sigma: float | list | tuple,
+        order=0,
+        mode="symmetric",
+        cval=None,
         truncate=4.0,
+        axes=None,
         **kwargs,
     ):
         """
         Args:
-            sigma (float): Standard deviation for Gaussian kernel.
-            kernel_size (int, optional): The size of the kernel. If None, the kernel
-                size is calculated based on the sigma and truncate. Default is None.
-            pad_mode (str): Padding mode for the input image. Default is 'symmetric'.
+            sigma (float, list, or tuple): Standard deviation for Gaussian kernel.
+                Can be a scalar for isotropic filtering or a sequence for different
+                sigma values per axis.
+            order (int): Order of the filter (0 for Gaussian blur). Default is 0.
+            mode (str): Padding mode for the input. Default is 'symmetric'.
+                See keras.ops.pad documentation for available modes.
+            cval (float): Constant value for 'constant' padding mode. Default is None.
             truncate (float): Truncate the filter at this many standard deviations.
+                Default is 4.0.
+            axes (None, int, or sequence of ints): Axes along which to apply the filter.
+                If None, filter is applied to all spatial axes. Default is None.
         """
         super().__init__(**kwargs)
-        if kernel_size is None:
-            radius = round(truncate * sigma)
-            self.kernel_size = 2 * radius + 1
-        else:
-            self.kernel_size = kernel_size
         self.sigma = sigma
-        self.pad_mode = pad_mode
-        self.radius = self.kernel_size // 2
-        self.kernel = self.get_kernel()
-
-    def get_kernel(self):
-        """
-        Create a gaussian kernel for blurring.
-
-        Returns:
-            kernel (Tensor): A gaussian kernel for blurring.
-                Shape is (kernel_size, kernel_size, 1, 1).
-        """
-        n = np.zeros((self.kernel_size, self.kernel_size))
-        n[self.radius, self.radius] = 1
-        kernel = scipy.ndimage.gaussian_filter(n, sigma=self.sigma, mode="constant").astype(
-            np.float32
-        )
-        kernel = kernel[:, :, None, None]
-        return ops.convert_to_tensor(kernel)
+        self.order = order
+        self.mode = mode
+        self.cval = cval
+        self.truncate = truncate
+        self.axes = axes
 
     def call(self, **kwargs):
+        from utils.tensor_ops import gaussian_filter
+
         data = kwargs[self.key]
 
-        # Add batch dimension if not present
-        if not self.with_batch_dim:
-            data = data[None]
-
-        # Add channel dimension to kernel
-        kernel = ops.tile(self.kernel, (1, 1, data.shape[-1], data.shape[-1]))
-
-        # Pad the input image according to the padding mode
-        padded = ops.pad(
+        # Apply Gaussian filtering using keras.ops-based implementation
+        filtered = gaussian_filter(
             data,
-            [[0, 0], [self.radius, self.radius], [self.radius, self.radius], [0, 0]],
-            mode=self.pad_mode,
+            sigma=self.sigma,
+            order=self.order,
+            mode=self.mode,
+            cval=self.cval,
+            truncate=self.truncate,
+            axes=self.axes,
         )
 
-        # Apply the gaussian kernel to the padded image
-        out = ops.conv(padded, kernel, padding="valid", data_format="channels_last")
-
-        # Remove padding
-        out = ops.slice(
-            out,
-            [0, 0, 0, 0],
-            [out.shape[0], data.shape[1], data.shape[2], data.shape[3]],
-        )
-
-        # Remove batch dimension if it was not present before
-        if not self.with_batch_dim:
-            out = ops.squeeze(out, axis=0)
-
-        return {self.output_key: out}
+        return {self.output_key: filtered}
 
 
 @ops_registry("lee_filter")
@@ -1960,24 +1935,24 @@ class LeeFilter(Operation):
     IEEE Transactions on Pattern Analysis and Machine Intelligence, (2), 165-168.
     """
 
-    def __init__(self, sigma=3, kernel_size=None, pad_mode="symmetric", **kwargs):
+    def __init__(self, sigma=3, mode="symmetric", truncate=4.0, **kwargs):
         """
         Args:
             sigma (float): Standard deviation for Gaussian kernel. Default is 3.
-            kernel_size (int, optional): Size of the Gaussian kernel. If None,
-                it will be calculated based on sigma.
-            pad_mode (str): Padding mode to be used for Gaussian blur. Default is "symmetric".
+            mode (str): Padding mode for the Gaussian filter. Default is "symmetric".
+            truncate (float): Truncate the filter at this many standard deviations.
+                Default is 4.0.
         """
         super().__init__(**kwargs)
         self.sigma = sigma
-        self.kernel_size = kernel_size
-        self.pad_mode = pad_mode
+        self.mode = mode
+        self.truncate = truncate
 
         # Create a GaussianBlur instance for computing local statistics
         self.gaussian_blur = GaussianBlur(
             sigma=self.sigma,
-            kernel_size=self.kernel_size,
-            pad_mode=self.pad_mode,
+            mode=self.mode,
+            truncate=self.truncate,
             with_batch_dim=self.with_batch_dim,
             jittable=self._jittable,
             key=self.key,
