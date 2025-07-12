@@ -10,26 +10,38 @@ tags:
 authors:
   - name: Tristan S.W. Stevens
     orcid: 0000-0002-8563-5931
+    affiliation: 1
+    corresponding: true
   - name: Wessel L. van Nierop
     orcid: 0009-0003-3141-3369
+    affiliation: 1
   - name: Ben Luijten
     orcid: 0000-0002-1797-8721
+    affiliation: 1
   - name: Vincent van de Schaft
     orcid: 0000-0002-8515-5372
+    affiliation: 1
   - name: Oisín Nolan
     orcid: 0009-0002-6939-7627
+    affiliation: 1
   - name: Beatrice Federici
     orcid: 0009-0003-2496-8825
+    affiliation: 1
   - name: Louis D. van Harten
     orcid: 0000-0002-0943-2825
+    affiliation: 1
   - name: Simon W. Penninga
     orcid: 0009-0003-4095-8168
+    affiliation: 1
   - name: Noortje I.P. Schueler
+    affiliation: 1
     orcid: 0009-0003-7134-6850
   - name: Ruud J.G. van Sloun
     orcid: 0000-0003-2845-0495
+    affiliation: 1
 affiliations:
- - name: Eindhoven University of Technology, the Netherlands
+  - index: 1
+    name: Eindhoven University of Technology, the Netherlands
 date: 20 June 2025
 bibliography: paper.bib
 
