@@ -61,6 +61,11 @@ License
 This project is licensed under the `Apache License 2.0 <https://www.apache.org/licenses/LICENSE-2.0>`_.
 
 
+Citation
+--------
+
+Please see the :ref:`citation` guide for citation information of `zea`.
+
 Papers
 ------
 

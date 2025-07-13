@@ -112,8 +112,8 @@ display-headless = [
 backends = ["jax", "tensorflow", "torch"]
 
 [project.urls]
-Homepage = "https://github.com/tue-bmd/ultrasound-toolbox/"
-Repository = "https://github.com/tue-bmd/ultrasound-toolbox/"
+Homepage = "https://github.com/tue-bmd/zea/"
+Repository = "https://github.com/tue-bmd/zea/"
 
 [project.scripts]
 zea = "zea.__main__:main"

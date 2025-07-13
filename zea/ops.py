@@ -1773,13 +1773,13 @@ class Normalize(Operation):
                 of the input data will be computed. Defaults to None.
 
         Returns:
-            dict: Dictionary containing normalized data
+            dict: Dictionary containing normalized data, along with the computed
+                  or provided input range (minval and maxval).
         """
         data = kwargs[self.key]
 
         # If input_range is not provided, try to get it from kwargs
-        # This allows you to normalize based on the first frame in a sequence:
-        # Example: https://github.com/tue-bmd/ultrasound-toolbox/pull/662
+        # This allows you to normalize based on the first frame in a sequence and avoid flicker
         if self.input_range is None:
             maxval = kwargs.get("maxval", None)
             minval = kwargs.get("minval", None)
