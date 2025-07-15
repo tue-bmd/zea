@@ -12,16 +12,14 @@ from pathlib import Path
 
 import imageio
 import numpy as np
-import pydicom
 import tqdm
 import yaml
 from PIL import Image
-from pydicom.pixels import convert_color_space
 
 from zea import log
 from zea.data.file import File
 
-_SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif", ""]
+_SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif"]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
 _SUPPORTED_ZEA_TYPES = [".hdf5", ".h5"]
 
@@ -29,7 +27,7 @@ _SUPPORTED_ZEA_TYPES = [".hdf5", ".h5"]
 def load_video(filename):
     """Load a video file and return a numpy array of frames.
 
-    Supported file types: avi, mp4, gif, dcm.
+    Supported file types: avi, mp4, gif.
 
     Args:
         filename (str): The path to the video file.
@@ -64,9 +62,6 @@ def load_video(filename):
         cap.release()
     elif extension == ".gif":
         frames = imageio.mimread(filename)
-    elif extension == "":
-        ds = pydicom.dcmread(filename)
-        frames = convert_color_space(ds.pixel_array, "YBR_FULL", "RGB")
     else:
         raise ValueError("Unsupported file extension")
     frames = [cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) for frame in frames]

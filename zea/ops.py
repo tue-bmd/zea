@@ -470,7 +470,7 @@ class Pipeline:
 
         # Optionally add patching
         if num_patches > 1:
-            beamforming = [PatchedGrid(operations=beamforming, num_patches=num_patches)]
+            beamforming = [PatchedGrid(operations=beamforming, num_patches=num_patches, **kwargs)]
 
         # Add beamforming ops
         operations += beamforming

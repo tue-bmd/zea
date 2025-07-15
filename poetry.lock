@@ -3898,24 +3898,12 @@ files = [
 [package.dependencies]
 typing-extensions = ">=4.6.0,<4.7.0 || >4.7.0"
 
-[[package]]
-name = "pydicom"
-version = "3.0.1"
-description = "A pure Python package for reading and writing DICOM data"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "pydicom-3.0.1-py3-none-any.whl", hash = "sha256:db32f78b2641bd7972096b8289111ddab01fb221610de8d7afa835eb938adb41"},
-    {file = "pydicom-3.0.1.tar.gz", hash = "sha256:7b8be344b5b62493c9452ba6f5a299f78f8a6ab79786c729b0613698209603ec"},
-]
-
 [package.extras]
-basic = ["numpy", "types-pydicom"]
-dev = ["black (==24.8.0)", "mypy (==1.11.2)", "pre-commit", "pydicom-data", "pytest", "pytest-cov", "ruff (==0.6.3)", "types-requests"]
+basic = ["numpy"]
+dev = ["black (==24.8.0)", "mypy (==1.11.2)", "pre-commit", "pytest", "pytest-cov", "ruff (==0.6.3)", "types-requests"]
 docs = ["matplotlib", "numpy", "numpydoc", "pillow", "sphinx", "sphinx-copybutton", "sphinx-gallery", "sphinx_rtd_theme", "sphinxcontrib-jquery", "sphinxcontrib-napoleon"]
 gpl-license = ["pylibjpeg[libjpeg]"]
-pixeldata = ["numpy", "pillow", "pyjpegls", "pylibjpeg[openjpeg]", "pylibjpeg[rle]", "python-gdcm"]
+pixeldata = ["numpy", "pillow", "pyjpegls", "pylibjpeg[openjpeg]", "pylibjpeg[rle]"]
 
 [[package]]
 name = "pygments"

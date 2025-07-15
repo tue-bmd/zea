@@ -43,7 +43,6 @@ dependencies = [
     "wandb >=0.18",
     "wget >=3.2",
     # can we make these optional or remove?
-    "pydicom >=2.4",
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
 ]

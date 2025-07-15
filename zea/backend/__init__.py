@@ -1,4 +1,4 @@
-"""Backend subpackage for ``zea``.
+"""Backend-specific utilities.
 
 This subpackage provides backend-specific utilities for the ``zea`` library. Most backend logic is handled by Keras 3, but a few features require custom wrappers to ensure compatibility and performance across JAX, TensorFlow, and PyTorch.
 
@@ -9,7 +9,7 @@ Key Features
 ------------
 
 - **JIT Compilation** (:func:`zea.backend.jit`):
-  Provides a unified interface for just-in-time (JIT) compilation of functions, dispatching to the appropriate backend (JAX or TensorFlow) as needed. This enables accelerated execution of computationally intensive routines.
+  Provides a unified interface for just-in-time (JIT) compilation of functions, dispatching to the appropriate backend (JAX or TensorFlow) as needed. This enables accelerated execution of computationally intensive routines. Note that jit compilation is not yet supported when using the `torch` backend.
 
 - **Automatic Differentiation** (:class:`zea.backend.AutoGrad`):
   Offers a backend-agnostic wrapper for automatic differentiation, allowing gradient computation regardless of the underlying ML library.
@@ -108,7 +108,9 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
         return func
     else:
         log.warning(
-            f"Unsupported backend: {backend}. Supported backends are 'tensorflow' and 'jax'."
+            f"JIT compilation not currently supported for backend {backend}. "
+            "Supported backends are 'tensorflow' and 'jax'."
         )
+        log.warning("Initialize zea.Pipeline with jit_options=None to suppress this warning.")
         log.warning("Falling back to non-compiled mode.")
         return func

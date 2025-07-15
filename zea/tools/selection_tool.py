@@ -729,7 +729,7 @@ def update_imshow_with_mask(
 def main():
     """Main function for interactive selector on multiple images."""
     print(
-        "Select as many images as you like, OR select 1 video / gif / dicom, "
+        "Select as many images as you like, OR select 1 video / gif, "
         "and close window to continue..."
     )
     images = []
