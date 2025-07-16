@@ -6,8 +6,14 @@
 [![Documentation Status](https://readthedocs.org/projects/zea/badge/?version=latest)](https://zea.readthedocs.io/en/latest/?badge=latest)
 [![License](https://img.shields.io/github/license/tue-bmd/zea)](https://github.com/tue-bmd/zea/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg)](https://codecov.io/gh/tue-bmd/zea)
+[![status](https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d/status.svg)](https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d)
+[![GitHub stars](https://img.shields.io/github/stars/tue-bmd/zea?style=social)](https://github.com/tue-bmd/zea/stargazers)
 
-Welcome to the documentation for the `zea` package: *A Toolbox for Cognitive Ultrasound Imaging.*
+Welcome to the `zea` package: *A Toolbox for Cognitive Ultrasound Imaging.*
+
+- 📚 Full documentation: [zea.readthedocs.io](https://zea.readthedocs.io)
+- 🔬 Try hands-on examples (with Colab): [Examples & Tutorials](https://zea.readthedocs.io/en/latest/examples.html)
+- ⚙️ Installation guide: [Installation](https://zea.readthedocs.io/en/latest/installation.html)
 
 `zea` is a Python library that offers ultrasound signal processing, image reconstruction, and deep learning. Currently, `zea` offers:
 
@@ -21,5 +27,4 @@ Welcome to the documentation for the `zea` package: *A Toolbox for Cognitive Ult
 > This package is highly experimental and under active development. It is mainly used to support [our research](https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab) and as a basis for our publications. That being said, we are happy to share it with the ultrasound community and hope it will be useful for your research as well.
 
 > [!NOTE]
-> 📖 If you use `zea` in your research, please cite our work.
-> You can find the citation information by clicking the **"Cite this repository"** button on the top right of this page.
+> 📖 Please cite `zea` in your publications if it helps your research. You can find citation info [here](https://zea.readthedocs.io/en/latest/getting-started.html#citation).

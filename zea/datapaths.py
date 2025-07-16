@@ -257,13 +257,13 @@ def set_data_paths(
 
     Returns:
         dict: Absolute paths to location of data. Stores the following parameters:
-            ``data_root``, ``repo_root``, ``output``, ``system``, ``username``, ``hostname``
+            ``data_root``, ``zea_root``, ``output``, ``system``, ``username``, ``hostname``
 
     """
     username = getpass.getuser()
     system = platform.system().lower()
     hostname = socket.gethostname()
-    repo_root = importlib.resources.files("zea")  # ultrasound-toolbox/zea
+    zea_root = importlib.resources.files("zea")
 
     # If user_config is None, use the default users.yaml file
     if isinstance(user_config, type(None)):
@@ -304,7 +304,7 @@ def set_data_paths(
 
     data_path = {
         "data_root": Path(data_root),
-        "repo_root": repo_root,
+        "zea_root": zea_root,
         "output": Path(output),
         "system": system,
         "username": username,

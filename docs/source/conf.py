@@ -45,7 +45,7 @@ html_theme = "furo"
 html_theme_options = {
     # "announcement": """
     #     <a style=\"text-decoration: none; color: white;\"
-    #        href=\"https://github.com/tue-bmd/ultrasound-toolbox">
+    #        href=\"https://github.com/tue-bmd/zea">
     #        <img src=\"_static/zea-logo.svg\"/> An example of an announcement!
     #     </a>
     # """,
