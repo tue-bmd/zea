@@ -48,7 +48,7 @@ from huggingface_hub import hf_hub_download
 
 from zea import log
 from zea.internal.config.validation import config_schema
-from zea.internal.core import object_to_tensor
+from zea.internal.core import dict_to_tensor
 
 
 class Config(dict):
@@ -462,7 +462,7 @@ class Config(dict):
 
     def to_tensor(self):
         """Convert the attributes in the object to keras tensors"""
-        return object_to_tensor(self)
+        return dict_to_tensor(self.serialize())
 
 
 def check_config(config: Union[dict, Config], verbose: bool = False):

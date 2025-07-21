@@ -1,7 +1,17 @@
 """Minimal tests for the HFPath class in zea.tools.hf module."""
 
+# Create the directory structure for testing
+import tempfile
+from pathlib import Path
+
 import pytest
 
+from zea.data.preset_utils import (
+    _download_files_in_path,
+    _get_snapshot_dir_from_downloaded_file,
+    _hf_parse_path,
+    _hf_resolve_path,
+)
 from zea.tools.hf import HFPath
 
 REPO_ID = "zeahub/camus-sample"
@@ -94,3 +104,106 @@ def test_is_file_and_is_dir(file, folder, fake_files, monkeypatch):
     # non-existent dir
     non_dir = folder / "notareal"
     assert non_dir.is_dir() is False
+
+
+def test_hf_resolve_path(folder, fake_files, monkeypatch):
+    """Test _hf_resolve_path function with mocked HF calls."""
+
+    def fake_parse_path(path_str):
+        if path_str == FOLDER_STR:
+            return REPO_ID, None
+        if path_str == f"{FOLDER_STR}/val":
+            return REPO_ID, "val"
+        if path_str.startswith(FOLDER_STR + "/"):
+            return REPO_ID, path_str[len(FOLDER_STR) + 1 :]
+        return REPO_ID, None
+
+    def fake_list_files(repo_id):
+        assert repo_id == REPO_ID
+        return fake_files
+
+    def fake_download(repo_id, filename, cache_dir):
+        # Simulate HF Hub download path structure
+        mock_path = (
+            cache_dir
+            / f"datasets--{repo_id.replace('/', '--')}"
+            / "snapshots"
+            / "abc123"
+            / filename
+        )
+        return str(mock_path)
+
+    monkeypatch.setattr("zea.data.preset_utils._hf_parse_path", fake_parse_path)
+    monkeypatch.setattr("zea.data.preset_utils._hf_list_files", fake_list_files)
+    monkeypatch.setattr("zea.data.preset_utils._hf_download", fake_download)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        cache_dir = Path(tmp_dir)
+
+        # Create mock directory structure
+        snapshot_dir = (
+            cache_dir / f"datasets--{REPO_ID.replace('/', '--')}" / "snapshots" / "abc123"
+        )
+        val_dir = snapshot_dir / "val"
+        val_dir.mkdir(parents=True, exist_ok=True)
+
+        result = _hf_resolve_path(f"{FOLDER_STR}/val", cache_dir)
+        assert isinstance(result, Path)
+        assert result.name == "val"
+
+
+def test_hf_parse_path():
+    """Test HF path parsing."""
+
+    # Test repo only
+    repo_id, subpath = _hf_parse_path("hf://zeahub/camus-sample")
+    assert repo_id == "zeahub/camus-sample"
+    assert subpath is None
+
+    # Test repo with subpath
+    repo_id, subpath = _hf_parse_path("hf://zeahub/camus-sample/val/patient0401")
+    assert repo_id == "zeahub/camus-sample"
+    assert subpath == "val/patient0401"
+
+    # Test invalid path
+    with pytest.raises(ValueError):
+        _hf_parse_path("invalid://path")
+
+
+def test_download_files_in_path(fake_files, monkeypatch):
+    """Test file filtering and download logic."""
+
+    downloaded_files = []
+
+    def fake_download(repo_id, filename, cache_dir):
+        downloaded_files.append(filename)
+        return f"/mock/path/{filename}"
+
+    monkeypatch.setattr("zea.data.preset_utils._hf_download", fake_download)
+
+    # Test downloading files with path filter
+    result = _download_files_in_path(REPO_ID, fake_files, "val/patient0401/", "/tmp")
+
+    # Should download 2 files that start with "val/patient0401/"
+    assert len(result) == 2
+    assert len(downloaded_files) == 2
+    assert all(f.startswith("val/patient0401/") for f in downloaded_files)
+
+
+def test_get_snapshot_dir_from_downloaded_file():
+    """Test snapshot directory extraction from file path."""
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        snapshots_dir = tmp_path / "snapshots"
+        snapshot_hash_dir = snapshots_dir / "abc123def"
+        file_dir = snapshot_hash_dir / "val" / "patient0401"
+        file_dir.mkdir(parents=True)
+
+        # Create the mock file
+        mock_file = file_dir / "file.hdf5"
+        mock_file.touch()
+
+        result = _get_snapshot_dir_from_downloaded_file(str(mock_file))
+        assert result == snapshot_hash_dir
+        assert result.name == "abc123def"

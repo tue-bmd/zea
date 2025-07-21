@@ -45,6 +45,14 @@ class AddOperation(ops.Operation):
         return {"z": keras.ops.add(x, y)}
 
 
+@ops_registry("add_transmits")
+class AddTransmitsOperation(ops.Operation):
+    """Add Transmits Operation for testing purposes."""
+
+    def call(self, x, n_tx):
+        return {"z": keras.ops.add(x, n_tx)}
+
+
 @ops_registry("large_matrix_multiplication")
 class LargeMatrixMultiplicationOperation(ops.Operation):
     """Large Matrix Multiplication Operation for testing purposes."""
@@ -398,8 +406,17 @@ def test_pipeline_with_scan_probe_config():
     result = pipeline(**parameters, x=2, y=3)
 
     assert "z" in result
-    assert "n_tx" in result  # Check if we parsed the scan object correctly
     assert "probe_geometry" in result  # Check if we parsed the probe object correctly
+    assert "n_tx" not in result  # n_tx is not needed in the pipeline
+
+    # Now let's use n_tx, such that it has to be in the pipeline
+    pipeline.append(AddTransmitsOperation())
+    parameters = pipeline.prepare_parameters(probe, scan)
+    result = pipeline(**parameters, x=2, y=3)
+
+    assert "z" in result
+    assert "probe_geometry" in result  # Check if we parsed the probe object correctly
+    assert "n_tx" in result  # now we actually need to have n_tx in the result
 
 
 """Pipeline build from config / json tests"""

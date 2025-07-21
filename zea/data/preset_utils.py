@@ -50,60 +50,74 @@ def _hf_download(repo_id, filename, cache_dir=HF_DATASETS_DIR):
     )
 
 
-def _hf_get_snapshot_dir(repo_id, cache_dir=HF_DATASETS_DIR):
-    repo_cache_dir = Path(cache_dir) / f"datasets--{repo_id.replace('/', '--')}"
-    snapshots_dir = repo_cache_dir / "snapshots"
-    if not snapshots_dir.exists() or not any(snapshots_dir.iterdir()):
-        # Try to trigger a download to populate the cache
-        files = _hf_list_files(repo_id)
-        # Pick the first file (prefer .h5/.hdf5 if possible)
-        h5_files = [f for f in files if f.endswith(".h5") or f.endswith(".hdf5")]
-        target_file = h5_files[0] if h5_files else files[0]
-        _hf_download(repo_id, target_file, cache_dir)
-        # Now try again
-        if not snapshots_dir.exists() or not any(snapshots_dir.iterdir()):
-            raise FileNotFoundError(
-                f"No snapshots found in Hugging Face cache for {repo_id} after download attempt"
-            )
-    snapshot_hashes = sorted(snapshots_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not snapshot_hashes:
-        raise FileNotFoundError(f"No snapshot found for {repo_id} in cache.")
-    return snapshot_hashes[0]
+def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> Path:
+    """Extract the snapshot directory from a downloaded file's path.
+
+    HF Hub downloads to: cache_dir/datasets--org--repo/snapshots/{hash}/path/to/filename
+    This navigates up to find the {hash} directory (the snapshot directory).
+    """
+    file_path = Path(downloaded_file_path)
+
+    # Navigate up the path until we find the snapshots directory
+    current = file_path.parent
+    while current.name != "snapshots" and current.parent != current:
+        current = current.parent
+
+    if current.name == "snapshots":
+        # Return the snapshot hash directory (first subdirectory of snapshots)
+        snapshot_dirs = [d for d in current.iterdir() if d.is_dir()]
+        if snapshot_dirs:
+            # Return the most recent snapshot directory
+            return max(snapshot_dirs, key=lambda p: p.stat().st_mtime)
+
+    raise FileNotFoundError(f"Could not find snapshot directory for {downloaded_file_path}")
+
+
+def _download_files_in_path(
+    repo_id: str, files: list, path_filter: str = None, cache_dir=HF_DATASETS_DIR
+) -> list[str]:
+    """Download all files matching the path filter."""
+    downloaded_files = []
+    for f in files:
+        if path_filter is None or f.startswith(path_filter):
+            downloaded_path = _hf_download(repo_id, f, cache_dir)
+            downloaded_files.append(downloaded_path)
+
+    return downloaded_files
 
 
 def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR):
-    """Download a file or directory from Hugging Face Hub to a local cache directory.
-    Returns the local path to the downloaded file or directory.
+    """Resolve a Hugging Face path to a local cache directory path.
+
+    Downloads files from a HuggingFace dataset repository and returns
+    the local path where they are cached. Handles:
+    - hf://org/repo/subdir/ - Downloads all files in subdirectory
+    - hf://org/repo/file.h5 - Downloads specific file
+    - hf://org/repo - Downloads all files in repo
     """
     repo_id, subpath = _hf_parse_path(hf_path)
     files = _hf_list_files(repo_id)
-    snapshot_dir = _hf_get_snapshot_dir(repo_id, cache_dir)
-
-    def is_h5(f):
-        return f.endswith(".h5") or f.endswith(".hdf5")
 
     if subpath:
-        # Directory
+        # Directory case
         if any(f.startswith(subpath + "/") for f in files):
-            local_dir = snapshot_dir / subpath
-            for f in files:
-                if f.startswith(subpath + "/") and is_h5(f):
-                    _hf_download(repo_id, f, cache_dir)
-            if not local_dir.exists():
-                raise FileNotFoundError(f"Directory {local_dir} not found after download.")
-            return local_dir
-        # File
-        elif any(f == subpath for f in files) and is_h5(subpath):
-            _hf_download(repo_id, subpath, cache_dir)
-            local_file = snapshot_dir / subpath
-            if not local_file.exists():
-                raise FileNotFoundError(f"File {local_file} not found after download.")
-            return local_file
+            downloaded_files = _download_files_in_path(repo_id, files, subpath + "/", cache_dir)
+            if not downloaded_files:
+                raise FileNotFoundError(f"No files found in directory {subpath}")
+
+            snapshot_dir = _get_snapshot_dir_from_downloaded_file(downloaded_files[0])
+            return snapshot_dir / subpath
+
+        # File case
+        elif subpath in files:
+            downloaded_file = _hf_download(repo_id, subpath, cache_dir)
+            return Path(downloaded_file)
         else:
             raise FileNotFoundError(f"{subpath} not found in {repo_id}")
     else:
-        # All .h5/.hdf5 files in repo
-        for f in files:
-            if is_h5(f):
-                _hf_download(repo_id, f, cache_dir)
-        return snapshot_dir
+        # All files in repo
+        downloaded_files = _download_files_in_path(repo_id, files, None, cache_dir)
+        if not downloaded_files:
+            raise FileNotFoundError(f"No files found in repository {repo_id}")
+
+        return _get_snapshot_dir_from_downloaded_file(downloaded_files[0])

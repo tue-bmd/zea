@@ -28,7 +28,7 @@ We can initialize a generic probe with the following code:
 import numpy as np
 
 from zea import log
-from zea.internal.core import Object
+from zea.internal.core import Object, dict_to_tensor
 from zea.internal.registry import probe_registry
 
 
@@ -137,6 +137,11 @@ class Probe(Object):
             probe_class = probe_registry["generic"]
 
         return probe_class(**kwargs)
+
+    def to_tensor(self):
+        """Convert the attributes in the object to tensors."""
+        # TODO: merge this with Parameters.to_tensor()
+        return dict_to_tensor(self.get_parameters())
 
 
 @probe_registry(name="verasonics_l11_4v")

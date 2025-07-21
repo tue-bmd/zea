@@ -12,10 +12,9 @@ import functools
 
 import numpy as np
 
-from zea import log
 from zea.internal.cache import serialize_elements
 from zea.internal.core import Object as ZeaObject
-from zea.internal.core import _to_tensor, dict_to_tensor
+from zea.internal.core import _to_tensor
 
 
 def cache_with_dependencies(*deps):
@@ -28,10 +27,7 @@ def cache_with_dependencies(*deps):
         def wrapper(self: Parameters):
             failed = set()
             if not self._resolve_dependency_tree(func.__name__, failed):
-                raise AttributeError(
-                    f"Cannot access '{func.__name__}' due to missing base dependencies: "
-                    f"{sorted(failed)}"
-                )
+                raise MissingDependencyError(func.__name__, failed)
 
             if func.__name__ in self._cache:
                 # Check if dependencies changed
@@ -48,6 +44,16 @@ def cache_with_dependencies(*deps):
         return property(wrapper)
 
     return decorator
+
+
+class MissingDependencyError(AttributeError):
+    """Exception indicating that a dependency of an attribute was not met."""
+
+    def __init__(self, attribute: str, missing_dependencies: set):
+        super().__init__(
+            f"Cannot access '{attribute}' due to missing dependencies: "
+            + f"{sorted(missing_dependencies)}"
+        )
 
 
 class Parameters(ZeaObject):
@@ -171,11 +177,16 @@ class Parameters(ZeaObject):
                         )
 
         self._params = {}
+        self._properties_with_dependencies, self._properties = self.get_properties()
         self._computed = set()
         self._cache = {}
         self._dependency_versions = {}
         for k, v in kwargs.items():
             self._params[k] = v
+
+        # Tensor cache stores converted tensors for parameters and computed properties
+        # to avoid converting them multiple times if there are no changes.
+        self._tensor_cache = {}
 
     def __getattr__(self, item):
         # First check regular params
@@ -194,9 +205,7 @@ class Parameters(ZeaObject):
                 except Exception as e:
                     raise AttributeError(f"Error computing '{item}': {str(e)}")
             else:
-                raise AttributeError(
-                    f"Cannot access '{item}' due to missing base dependencies: {sorted(failed)}"
-                )
+                raise MissingDependencyError(item, failed)
         elif isinstance(cls_attr, property):
             # If it's a property without dependencies, just return it
             try:
@@ -280,8 +289,6 @@ class Parameters(ZeaObject):
         # Invalidate cache for this parameter if it is also a computed property
         self._invalidate(key)
 
-        self._invalidate_dependents(key)
-
     def _find_all_dependents(self, target, seen=None):
         """
         Find all computed properties that depend (directly or indirectly) on the target parameter.
@@ -308,6 +315,8 @@ class Parameters(ZeaObject):
         self._cache.pop(key, None)
         self._computed.discard(key)
         self._dependency_versions.pop(key, None)
+        self._tensor_cache.pop(key, None)
+        self._invalidate_dependents(key)
 
     def _invalidate_dependents(self, changed_key):
         """
@@ -349,40 +358,70 @@ class Parameters(ZeaObject):
             failed.add(name)
             return False
 
-    def to_tensor(self, compute_missing=False, compute_keys=None):
+    def get_properties(self):
         """
-        Convert all parameters (and optionally computed properties) to tensors.
+        Get all properties of this class
+        """
+        properties_with_dependencies = set()
+        properties = set()
+        for name, attr in self.__class__.__dict__.items():
+            if isinstance(attr, property):
+                if hasattr(attr.fget, "_dependencies"):
+                    properties_with_dependencies.add(name)
+                else:
+                    properties.add(name)
+        return properties_with_dependencies, properties
+
+    def to_tensor(self, include=None, exclude=None):
+        """
+        Convert parameters and computed properties to tensors.
+
+        Only one of `include` or `exclude` can be set.
 
         Args:
-            compute_missing (bool): If True, compute missing computed properties.
-            compute_keys (list or None): If not None, only compute these
-                computed properties (by name).
+            include ("all", or list): Only include these parameter/property names.
+                If "all", include all available parameters (i.e. their dependencies are met).
+                Default is "all".
+            exclude (None or list): Exclude these parameter/property names.
+                If provided, these keys will be excluded from the output.
         """
-        tensor_dict = dict_to_tensor(self._params)
+        if include is None and exclude is None:
+            include = "all"
 
-        # Compute missing properties if requested
-        if compute_missing:
-            for name in dir(self.__class__):
-                if compute_keys is not None and name not in compute_keys:
+        if include is not None and exclude is not None:
+            raise ValueError("Only one of 'include' or 'exclude' can be set.")
+
+        # Determine which keys to include
+        param_keys = set(self._params.keys())
+        property_keys = set(self._properties_with_dependencies)
+        all_keys = param_keys | property_keys | set(self._properties)
+
+        if include == "all":
+            keys = all_keys
+        elif include is not None:
+            keys = set(include).intersection(all_keys)
+        elif exclude is not None:
+            keys = all_keys - set(exclude)
+
+        tensor_dict = {}
+        # Convert parameters and computed properties to tensors
+        for key in keys:
+            # Get the value from params or computed properties
+            try:
+                val = getattr(self, key)
+            except MissingDependencyError as exc:
+                if include == "all" or exclude is not None:
+                    # If we are including all, we can skip this key
                     continue
-                attr = getattr(self.__class__, name)
-                if isinstance(attr, property) and hasattr(attr.fget, "_dependencies"):
-                    failed = set()
-                    if self._resolve_dependency_tree(name, failed):
-                        try:
-                            val = getattr(self, name)
-                            if val is not None:
-                                pass
-                        except Exception as e:
-                            log.warning(f"Could not compute '{name}': {str(e)}")
-                elif isinstance(attr, property):
-                    val = getattr(self, name, None)
-                    tensor_dict[name] = _to_tensor(name, val)
+                else:
+                    raise exc
 
-        # Always include all already computed properties
-        for key in self._computed:
-            val = getattr(self, key)
-            tensor_dict[key] = _to_tensor(key, val)
+            if key in self._tensor_cache:
+                tensor_dict[key] = self._tensor_cache[key]
+            else:
+                tensor_val = _to_tensor(key, val)
+                tensor_dict[key] = tensor_val
+                self._tensor_cache[key] = tensor_val
 
         return tensor_dict
 

@@ -69,6 +69,7 @@ dev = [
     "nbsphinx",
     "furo",
     "PyStemmer",
+    "IPython",
     # display
     "opencv-python-headless>=4",
 ]
@@ -95,6 +96,7 @@ docs = [
     "nbsphinx",
     "furo",
     "PyStemmer",
+    "IPython",
 ]
 jax = [
     "jax[cuda12_pip]>=0.4.26"

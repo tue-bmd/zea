@@ -172,6 +172,7 @@ def deserialize_zea_object(config):
 def _retrieve_class(module, class_name, config):
     # Attempt to retrieve the class object given the `module`
     # and `class_name`. Import the module, find the class.
+    assert module is not None, f"Module must be specified in the config.json, but got {module}."
 
     package = module.split(".", maxsplit=1)[0]
     if package in {"zea", "zea-addons"}:

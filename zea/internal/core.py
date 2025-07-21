@@ -125,10 +125,6 @@ class Object:
     def __delitem__(self, key):
         delattr(self, key)
 
-    def to_tensor(self):
-        """Convert the attributes in the object to keras tensors"""
-        return object_to_tensor(self)
-
     @classmethod
     def safe_initialize(cls, **kwargs):
         """Safely initialize a class by removing any invalid arguments."""
@@ -182,29 +178,9 @@ def _skip_to_tensor(value):
     return False
 
 
-def object_to_tensor(obj):
-    """Convert an object to a dictionary of tensors."""
-    snapshot = {}
-
-    for key in dir(obj):
-        # Skip dunder/hidden methods
-        if key.startswith("_"):
-            continue
-
-        value = getattr(obj, key, None)
-
-        # Skip certain types
-        if _skip_to_tensor(value):
-            continue
-
-        # Convert the value to a tensor
-        snapshot[key] = _to_tensor(key, value)
-
-    return snapshot
-
-
 def dict_to_tensor(dictionary):
-    """Convert an object to a dictionary of tensors."""
+    """Convert elements of a dictionary to tensors.
+    Skips certain types and keys starting with '_'."""
     snapshot = {}
 
     for key in dictionary:
@@ -212,6 +188,7 @@ def dict_to_tensor(dictionary):
         if key.startswith("_"):
             continue
 
+        # Get the value from the dictionary
         value = dictionary[key]
 
         # Skip certain types
