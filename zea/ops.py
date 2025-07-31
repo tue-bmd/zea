@@ -87,14 +87,9 @@ from zea.beamform.beamformer import tof_correction
 from zea.config import Config
 from zea.display import scan_convert
 from zea.internal.checks import _assert_keys_and_axes
-from zea.internal.core import (
-    DEFAULT_DYNAMIC_RANGE,
-    DataTypes,
-    ZEADecoderJSON,
-    ZEAEncoderJSON,
-    dict_to_tensor,
-)
+from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.core import Object as ZEAObject
+from zea.internal.core import ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
@@ -1722,6 +1717,7 @@ class LogCompress(Operation):
 
     def __init__(
         self,
+        dynamic_range=None,
         **kwargs,
     ):
         super().__init__(
@@ -1729,6 +1725,10 @@ class LogCompress(Operation):
             output_data_type=DataTypes.IMAGE,
             **kwargs,
         )
+        if not isinstance(dynamic_range, (tuple, list)):
+            raise TypeError(f"dynamic_range must be a tuple or list, got {type(dynamic_range)}")
+
+        self.dynamic_range = dynamic_range if dynamic_range is not None else DEFAULT_DYNAMIC_RANGE
 
     def call(self, dynamic_range=None, **kwargs):
         """Apply logarithmic compression to data.
@@ -1742,7 +1742,8 @@ class LogCompress(Operation):
         data = kwargs[self.key]
 
         if dynamic_range is None:
-            dynamic_range = ops.array(DEFAULT_DYNAMIC_RANGE)
+            dynamic_range = ops.array(self.dynamic_range)
+
         dynamic_range = ops.cast(dynamic_range, data.dtype)
 
         small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
@@ -1750,7 +1751,7 @@ class LogCompress(Operation):
         compressed_data = 20 * ops.log10(data)
         compressed_data = ops.clip(compressed_data, dynamic_range[0], dynamic_range[1])
 
-        return {self.output_key: compressed_data}
+        return {self.output_key: compressed_data, "dynamic_range": dynamic_range}
 
 
 @ops_registry("normalize")
@@ -2224,6 +2225,39 @@ class Pad(Operation, TFDataLayer):
         return {self.output_key: padded_data}
 
 
+@ops_registry("translate")
+class Translate(Operation):
+    """Translate data from one range to another."""
+
+    def __init__(self, output_range=None, input_range=None, **kwargs):
+        super().__init__(**kwargs)
+        self.output_range = output_range if output_range is not None else (0, 1)
+        self.input_range = input_range
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        input_range = kwargs.get("input_range", self.input_range)
+        output_range = kwargs.get("output_range", self.output_range)
+
+        result = translate(data, range_from=input_range, range_to=output_range)
+        return {self.output_key: result}
+
+
+@ops_registry("to_8bit")
+class To8Bit(Operation):
+    """Convert input data to 8-bit format."""
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        dynamic_range = kwargs.get("dynamic_range", DEFAULT_DYNAMIC_RANGE)
+
+        image = ops.clip(data, dynamic_range[0], dynamic_range[1])
+        image = translate(image, dynamic_range, (0, 255))
+        image = ops.cast(image, "uint8")
+
+        return {self.output_key: image, "dynamic_range": dynamic_range}
+
+
 @ops_registry("companding")
 class Companding(Operation):
     """Companding according to the A- or μ-law algorithm.
@@ -2296,6 +2330,27 @@ class Companding(Operation):
 
         data_out = self._compand_func(data, mu=mu, A=A)
         return {self.output_key: data_out}
+
+
+@ops_registry("constant")
+class Constant(Operation):
+    """Constant operation that outputs fixed values."""
+
+    def __init__(self, items: dict, **kwargs):
+        """
+        Args:
+            items (dict): Dictionary of key-value pairs to return.
+                The keys will be used as output keys, and the values are the corresponding outputs.
+        """
+        if not isinstance(items, dict):
+            raise ValueError("Items must be a dictionary of key-value pairs.")
+        if not items:
+            raise ValueError("Items dictionary cannot be empty.")
+        super().__init__(**kwargs)
+        self.items = items
+
+    def call(self, **kwargs):
+        return {self.output_key: self.items}
 
 
 @ops_registry("downsample")
@@ -2706,8 +2761,6 @@ def demodulate_not_jitable(
             if filter_coeff are provided. Instead the given filter_coeff is directly used.
             If not provided, a filter is derived from the other params (sampling_frequency,
             center_frequency, bandwidth).
-            see https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.lfilter.html
-
     Returns:
         iq_data (ndarray): complex valued base-band signal.
 
