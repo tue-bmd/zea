@@ -1744,6 +1744,9 @@ class LogCompress(Operation):
         if dynamic_range is None:
             dynamic_range = ops.array(self.dynamic_range)
 
+        if dynamic_range.size == 1:
+            dynamic_range = (dynamic_range, 0) # if single value, assume 0 as upper bound
+
         dynamic_range = ops.cast(dynamic_range, data.dtype)
 
         small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
