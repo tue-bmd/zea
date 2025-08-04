@@ -7,7 +7,7 @@ from zea.config import Config, check_config
 from zea.data.datasets import Dataset, Folder
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 
-from .. import DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_X, DUMMY_DATASET_N_Z
+from .. import DUMMY_DATASET_GRID_SIZE_X, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_N_FRAMES
 
 _ALL_DATA_TYPES = _IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES
 
@@ -18,37 +18,37 @@ _ALL_DATA_TYPES = _IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES
         (
             0,
             "all",
-            (DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+            (DUMMY_DATASET_N_FRAMES, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_GRID_SIZE_X),
         ),
         (
             -1,
             (1, 2, 3),
-            (3, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+            (3, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_GRID_SIZE_X),
         ),
         (
             0,
             [1, 2, 3],
-            (3, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+            (3, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_GRID_SIZE_X),
         ),
         (
             -1,
             np.array([1, 2, 3]),
-            (3, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+            (3, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_GRID_SIZE_X),
         ),
         (
             0,
             slice(1, 3),
-            (2, DUMMY_DATASET_N_Z, DUMMY_DATASET_N_X),
+            (2, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_GRID_SIZE_X),
         ),
         (
             -1,
             [0, range(5)],
-            (5, DUMMY_DATASET_N_X),
+            (5, DUMMY_DATASET_GRID_SIZE_X),
         ),
         (
             0,
             (np.array([1, 2]), slice(10)),
-            (2, 10, DUMMY_DATASET_N_X),
+            (2, 10, DUMMY_DATASET_GRID_SIZE_X),
         ),
     ],
 )

@@ -8,12 +8,13 @@ import traceback
 from queue import Empty
 
 import cloudpickle as pickle
+import debugpy
 import decorator
 import jax
 import numpy as np
 import pytest
 
-debugging = sys.gettrace() is not None
+debugging = sys.gettrace() or debugpy.is_client_connected() is not None
 
 
 def run_func(func):

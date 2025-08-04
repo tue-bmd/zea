@@ -24,9 +24,9 @@ scan:
   # select from the frame.
   selected_transmits: all
   # The number of pixels in the beamforming grid in the x-direction
-  Nx: 400
+  grid_size_x: 400
   # The number of pixels in the beamforming grid in the z-direction
-  Nz: 600
+  grid_size_z: 600
   # The number of channels in the raw data (1 for rf data, 2 for iq data)
   n_ch: 1
   # Set to true to apply lens correction in the time-of-flight calculation

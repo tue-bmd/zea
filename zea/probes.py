@@ -107,9 +107,7 @@ class Probe(Object):
         self.filter = None
 
     def get_parameters(self):
-        """Returns a dictionary with default parameters to make it easy to generate
-        a scan object with compatible values.
-        """
+        """Returns a dictionary with default parameters."""
         return {
             "probe_geometry": self.probe_geometry,
             "center_frequency": self.center_frequency,
@@ -119,7 +117,22 @@ class Probe(Object):
         }
 
     @classmethod
-    def from_name(cls, probe_name, fallback=True, **kwargs):
+    def from_parameters(cls, probe_name: str, parameters: dict) -> "Probe":
+        """Instantiate a probe by name, overriding with parameters from dict."""
+        if probe_name in probe_registry:
+            probe = probe_registry[probe_name]()  # instantiate with class defaults
+            for key, value in parameters.items():
+                if hasattr(probe, key):
+                    setattr(probe, key, value)
+                else:
+                    raise ValueError(f"Unknown parameter {key} for probe {probe_name}")
+            return probe
+
+        # Fallback to generic probe with file parameters
+        return probe_registry["generic"](**parameters)
+
+    @classmethod
+    def from_name(cls, probe_name, fallback=False, **kwargs) -> "Probe":
         """Create a probe from its name.
 
         Args:
@@ -138,10 +151,10 @@ class Probe(Object):
 
         return probe_class(**kwargs)
 
-    def to_tensor(self):
+    def to_tensor(self, keep_as_is=None):
         """Convert the attributes in the object to tensors."""
         # TODO: merge this with Parameters.to_tensor()
-        return dict_to_tensor(self.get_parameters())
+        return dict_to_tensor(self.get_parameters(), keep_as_is=keep_as_is)
 
 
 @probe_registry(name="verasonics_l11_4v")

@@ -102,11 +102,8 @@ def test_greedy_entropy():
     assert np.count_nonzero(first_row) == n_actions
     assert np.count_nonzero(selected_lines[0]) == n_actions
 
-
-def test_covariance_sampling_lines():
-    """Test CovarianceSamplingLines action selection."""
-    np.random.seed(2)
-    h, w = 8, 8
+    # Test that the algorithm hasn't changed by comparing to a correct hard-coded value
+    h, w = 64, 64
     rand_img_1 = np.random.rand(h, w, 1).astype(np.float32)
     rand_img_2 = np.random.rand(h, w, 1).astype(np.float32)
 
@@ -114,23 +111,61 @@ def test_covariance_sampling_lines():
     rand_img_1[:, 2] = rand_img_1[:, 3]
     rand_img_2[:, 2] = rand_img_2[:, 3]
 
-    particles = np.stack([rand_img_1, rand_img_2], axis=0)[None, ...]
-    particles = np.squeeze(particles, axis=-1)  # shape (n_particles, 1, h, w)
+    particles = np.stack([rand_img_1, rand_img_2], axis=0)
+    particles = np.expand_dims(particles, axis=0)
+    particles = np.squeeze(particles, axis=-1)
 
     n_actions = 1
-    agent = selection.CovarianceSamplingLines(n_actions, w, h, w, n_masks=200)
-    _, mask = agent.sample(particles)
-    assert mask.shape == (1, h, w)
-    first_row = mask[0, 0]
-    assert np.count_nonzero(first_row) == n_actions
+    agent = selection.GreedyEntropy(n_actions, w, h, w)
+    selected_lines, mask = agent.sample(particles)
 
+    correct_line_index = 17
+    correct_selected_lines = [False] * 64
+    correct_selected_lines[correct_line_index] = True
+    correct_selected_lines = [correct_selected_lines]
+    assert np.all(selected_lines == correct_selected_lines)
+
+
+def test_covariance_sampling_lines():
+    """Test CovarianceSamplingLines action selection."""
+    rng = np.random.default_rng(2)
+    h, w = 16, 16
+    rand_img_1 = rng.uniform(0, 1, (h, w)).astype(np.float32)
+    rand_img_2 = rng.uniform(0, 1, (h, w)).astype(np.float32)
+
+    # manually make lines 2 and 3 very correlated
+    rand_img_1[:, 2] = rand_img_1[:, 3]
+    rand_img_2[:, 2] = rand_img_2[:, 3]
+
+    # manually add a line on the right edge (i.e. high variance with eachother)
+    rand_img_1[:, -1] = 1.0
+    rand_img_2[:, -1] = 0.0
+
+    particles = np.stack([rand_img_1, rand_img_2], axis=0)[None]  # (batch, n_particles, h, w)
+
+    # CASE 1: Single action
+    n_actions = 1
+    agent = selection.CovarianceSamplingLines(n_actions, w, h, w, n_masks=200)
+    selected_lines, mask = agent.sample(particles)
+    assert selected_lines.ndim == 2
+    selected_lines = ops.squeeze(selected_lines, axis=0)  # remove batch dim
+    assert mask.shape == (1, h, w)
+    assert np.count_nonzero(selected_lines) == n_actions
+
+    # regression
+    assert 15 in np.flatnonzero(selected_lines)
+
+    # CASE 2: Two actions
     n_actions = 2
     agent = selection.CovarianceSamplingLines(n_actions, w, h, w, n_masks=200)
-    _, mask = agent.sample(particles)
+    selected_lines, mask = agent.sample(particles)
+    assert selected_lines.ndim == 2
+    selected_lines = ops.squeeze(selected_lines, axis=0)  # remove batch dim
     assert mask.shape == (1, h, w)
-    first_row = mask[0, 0]
-    first_row = mask[0, 0]
-    assert np.count_nonzero(first_row) == n_actions
+    assert np.count_nonzero(selected_lines) == n_actions
+
+    # regression
+    assert 15 in np.flatnonzero(selected_lines) and 0 in np.flatnonzero(selected_lines)
 
 
 def test_single_action():

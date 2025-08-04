@@ -47,6 +47,7 @@ import yaml
 from huggingface_hub import hf_hub_download
 
 from zea import log
+from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.internal.config.validation import config_schema
 from zea.internal.core import dict_to_tensor
 
@@ -430,8 +431,22 @@ class Config(dict):
                         v._recursive_setattr(set_key, set_value)
 
     @classmethod
-    def from_yaml(cls, path, **kwargs):
-        """Load config object from yaml file"""
+    def from_path(cls, path, **kwargs):
+        """Load config object from a file path.
+
+        Args:
+            path (str or Path): The path to the config file.
+                Can be a string or a Path object. Additionally can be a string with
+                the prefix 'hf://', in which case it will be resolved to a
+                huggingface path.
+
+        Returns:
+            Config: config object.
+        """
+        if str(path).startswith(HF_PREFIX):
+            path = _hf_resolve_path(str(path))
+        if isinstance(path, str):
+            path = Path(path)
         return _load_config_from_yaml(path, config_class=cls, **kwargs)
 
     @classmethod
@@ -460,9 +475,14 @@ class Config(dict):
         local_path = hf_hub_download(repo_id, path, **kwargs)
         return _load_config_from_yaml(local_path, config_class=cls)
 
-    def to_tensor(self):
+    @classmethod
+    def from_yaml(cls, path, **kwargs):
+        """Load config object from yaml file."""
+        return cls.from_path(path, **kwargs)
+
+    def to_tensor(self, keep_as_is=None):
         """Convert the attributes in the object to keras tensors"""
-        return dict_to_tensor(self.serialize())
+        return dict_to_tensor(self.serialize(), keep_as_is=keep_as_is)
 
 
 def check_config(config: Union[dict, Config], verbose: bool = False):

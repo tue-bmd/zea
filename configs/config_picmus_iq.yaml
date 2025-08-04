@@ -23,9 +23,9 @@ scan:
   # select from the frame.
   selected_transmits: all
   # The number of pixels in the beamforming grid in the x-direction
-  Nx: 300
+  grid_size_x: 300
   # The number of pixels in the beamforming grid in the z-direction
-  Nz: 500
+  grid_size_z: 500
   # Set to true to apply lens correction in the time-of-flight calculation
   apply_lens_correction: false
   # The speed of sound in the lens in m/s. Usually around 1000 m/s

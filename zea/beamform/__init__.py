@@ -17,4 +17,4 @@ see the pipeline example notebook: :doc:`../notebooks/pipeline/zea_pipeline_exam
 
 """
 
-from . import beamformer, delays, lens_correction, pfield, pixelgrid
+from . import beamformer, delays, lens_correction, pfield, phantoms, pixelgrid

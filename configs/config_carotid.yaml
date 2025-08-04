@@ -28,9 +28,9 @@ scan:
   # The number of channels in the raw data (1 for rf data, 2 for iq data)
   n_ch: 1
   # The number of pixels in the beamforming grid in the x-direction
-  Nx: 400
+  grid_size_x: 400
   # The number of pixels in the beamforming grid in the z-direction
-  Nz: 600
+  grid_size_z: 600
 
 # This section contains the necessary parameters for building the pipeline.
 pipeline:

@@ -17,15 +17,14 @@ scan_args = {
     "demodulation_frequency": 0.0,
     "sound_speed": 1540.0,
     "n_ax": 3328,
-    "Nx": 64,
-    "Nz": 128,
+    "grid_size_x": 64,
+    "grid_size_z": 128,
     "pixels_per_wavelength": 4,
     "polar_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
     "azimuth_angles": np.linspace(-np.pi / 2, np.pi / 2, 10),
     "t0_delays": np.repeat(np.linspace(0, 1e-6, 10)[..., None], 10, axis=-1),
     "tx_apodizations": np.ones((10, 10)),
     "focus_distances": np.ones(10) * 0.04,
-    "downsample": 1,
     "initial_times": np.zeros((10,)),
 }
 
@@ -39,6 +38,16 @@ def test_scan_compare():
 
     assert scan == scan2
     assert scan != scan3
+
+
+def test_scan_copy():
+    """Test copying of Scan objects."""
+    scan = Scan(**scan_args)
+    scan_copy = scan.copy()
+
+    assert scan == scan_copy
+    scan.n_tx = 20
+    assert scan != scan_copy
 
 
 def test_initialization():
@@ -56,8 +65,8 @@ def test_initialization():
     assert scan.demodulation_frequency == scan_args["demodulation_frequency"]
     assert scan.sound_speed == scan_args["sound_speed"]
     assert scan.n_ax == scan_args["n_ax"]
-    assert scan.Nx == scan_args["Nx"]
-    assert scan.Nz == scan_args["Nz"]
+    assert scan.grid_size_x == scan_args["grid_size_x"]
+    assert scan.grid_size_z == scan_args["grid_size_z"]
     assert np.all(scan.polar_angles == scan_args["polar_angles"])
     assert np.all(scan.azimuth_angles == scan_args["azimuth_angles"])
     assert np.all(scan.t0_delays == scan_args["t0_delays"])

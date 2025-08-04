@@ -131,15 +131,23 @@ class RegisterDecorator:
             ) from exc
 
     def get_name(self, cls):
-        """Retrieve the registry key name associated with the given class or instance."""
+        """Retrieve the registry key name associated with the given class or instance.
+        Subclasses of the class are also considered."""
+        # If class is an instance, get its type
+        if not isinstance(cls, type):
+            cls = type(cls)
+
+        # First check if the class is directly
         for name, registered_class in self.registry.items():
-            if isinstance(cls, type):  # cls is a class
-                if issubclass(cls, registered_class):
-                    return name
-            else:  # cls is an instance
-                if isinstance(cls, registered_class):
-                    return name
-        raise KeyError(f"Class or instance {cls} not registered.")
+            if cls is registered_class:
+                return name
+
+        # If not found, check if the class is a subclass of any registered class
+        for name, registered_class in self.registry.items():
+            if issubclass(cls, registered_class):
+                return name
+
+        raise KeyError(f"Class {cls} not registered.")
 
     def get_additional_registries(self):
         """Returns a list of the names of the additional registries."""

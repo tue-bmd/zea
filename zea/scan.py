@@ -49,7 +49,7 @@ Example Usage
 
     # Initialize Scan from a Probe's parameters
     probe = Probe.from_name("verasonics_l11_4v")
-    scan = Scan(**probe.get_parameters(), Nz=256)
+    scan = Scan(**probe.get_parameters(), grid_size_z=256)
 
     # Or initialize from a Config object
     config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
@@ -57,8 +57,8 @@ Example Usage
 
     # Or manually specify parameters
     scan = Scan(
-        Nx=128,
-        Nz=256,
+        grid_size_x=128,
+        grid_size_z=256,
         xlims=(-0.02, 0.02),
         zlims=(0.0, 0.06),
         center_frequency=6.25e6,
@@ -69,7 +69,7 @@ Example Usage
     )
 
     # Access a derived property (computed lazily)
-    grid = scan.grid  # shape: (Nz, Nx, 3)
+    grid = scan.grid  # shape: (grid_size_z, grid_size_x, 3)
 
     # Select a subset of transmit events
     scan.set_transmits(3)  # Use 3 evenly spaced transmits
@@ -96,8 +96,11 @@ class Scan(Parameters):
     """Represents an ultrasound scan configuration with computed properties.
 
     Args:
-        Nx (int): Number of samples in the x-direction (lateral).
-        Nz (int): Number of samples in the z-direction (axial).
+        grid_size_x (int): Grid width in pixels. For a cartesian grid, this is the lateral (x)
+            pixels in the grid, set to prevent aliasing if not provided. For a polar grid, this can
+            be thought of as the number for rays in the polar direction.
+        grid_size_z (int): Grid height in pixels. This is the number of axial (z) pixels in the
+            grid, set to prevent aliasing if not provided.
         sound_speed (float, optional): Speed of sound in the medium in m/s.
             Defaults to 1540.0.
         sampling_frequency (float): Sampling frequency in Hz.
@@ -106,7 +109,6 @@ class Scan(Parameters):
         n_tx (int): Number of transmit events in the dataset.
         n_ax (int): Number of axial samples in the received signal.
         n_ch (int, optional): Number of channels (1 for RF, 2 for IQ data).
-            Defaults to 1.
         xlims (tuple of float): Lateral (x) limits of the imaging region in
             meters (min, max).
         ylims (tuple of float, optional): Elevation (y) limits of the imaging
@@ -114,21 +116,23 @@ class Scan(Parameters):
         zlims (tuple of float): Axial (z) limits of the imaging region
             in meters (min, max).
         probe_geometry (np.ndarray): Element positions as array of shape (n_el, 3).
-        polar_angles (np.ndarray): Polar angles for each transmit event in radians.
-        azimuth_angles (np.ndarray): Azimuth angles for each transmit event in radians.
-        t0_delays (np.ndarray): Transmit delays in seconds for each event.
-        tx_apodizations (np.ndarray): Transmit apodizations for each event.
-        focus_distances (np.ndarray): Focus distances in meters for each event.
-        initial_times (np.ndarray): Initial times in seconds for each event.
+        polar_angles (np.ndarray): Polar angles for each transmit event in radians of shape (n_tx,).
+            These angles are often used in 2D imaging.
+        azimuth_angles (np.ndarray): Azimuth angles for each transmit event in radians
+            of shape (n_tx,). These angles are often used in 3D imaging.
+        t0_delays (np.ndarray): Transmit delays in seconds of
+            shape (n_tx, n_el), shifted such that the smallest delay is 0.
+        tx_apodizations (np.ndarray): Transmit apodizations of shape (n_tx, n_el).
+        focus_distances (np.ndarray): Focus distances in meters for each event of shape (n_tx,).
+        initial_times (np.ndarray): Initial times in seconds for each event of shape (n_tx,).
         bandwidth_percent (float, optional): Bandwidth as percentage of center
             frequency. Defaults to 200.0.
         demodulation_frequency (float, optional): Demodulation frequency in Hz.
-        time_to_next_transmit (np.ndarray): Time between transmit events.
+        time_to_next_transmit (np.ndarray): The time between subsequent
+            transmit events of shape (n_frames, n_tx).
         pixels_per_wavelength (int, optional): Number of pixels per wavelength.
             Defaults to 4.
-        downsample (int, optional): Downsampling factor for the data. Defaults to 1.
         element_width (float, optional): Width of each transducer element in meters.
-            Defaults to 0.2e-3.
         resolution (float, optional): Resolution for scan conversion in mm / pixel.
             If None, it is calculated based on the input image.
         pfield_kwargs (dict, optional): Additional parameters for pressure field computation.
@@ -159,14 +163,12 @@ class Scan(Parameters):
 
     VALID_PARAMS = {
         # beamforming related parameters
-        "Nx": {"type": int},
-        "Nz": {"type": int},
-        "Nr": {"type": int},
+        "grid_size_x": {"type": int},
+        "grid_size_z": {"type": int},
         "xlims": {"type": (tuple, list)},
         "ylims": {"type": (tuple, list)},
         "zlims": {"type": (tuple, list)},
         "pixels_per_wavelength": {"type": int, "default": 4},
-        "downsample": {"type": int, "default": 1},
         "pfield_kwargs": {"type": dict, "default": {}},
         "apply_lens_correction": {"type": bool, "default": False},
         "lens_sound_speed": {"type": (float, int)},
@@ -221,80 +223,103 @@ class Scan(Parameters):
     @cache_with_dependencies(
         "xlims",
         "zlims",
-        "Nx",
-        "Nz",
+        "grid_size_x",
+        "grid_size_z",
         "sound_speed",
         "center_frequency",
         "pixels_per_wavelength",
         "grid_type",
     )
     def grid(self):
-        """The beamforming grid of shape (Nz, Nx, 3)."""
+        """The beamforming grid of shape (grid_size_z, grid_size_x, 3)."""
         if self.grid_type == "polar":
-            return polar_pixel_grid(self.polar_limits, self.zlims, Nz=self.Nz, Nr=self.Nr)
+            return polar_pixel_grid(
+                self.polar_limits, self.zlims, self.grid_size_z, self.grid_size_x
+            )
         elif self.grid_type == "cartesian":
-            return cartesian_pixel_grid(self.xlims, self.zlims, Nz=self.Nz, Nx=self.Nx)
+            return cartesian_pixel_grid(
+                self.xlims, self.zlims, grid_size_z=self.grid_size_z, grid_size_x=self.grid_size_x
+            )
         else:
             raise ValueError(
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
 
-    @cache_with_dependencies("Nx")
-    def Nr(self):
-        """Number of azimuthal (r) pixels for polar grid. Defaults to Nx if not provided."""
-        Nr = self._params.get("Nr")
-        if Nr is not None:
-            return Nr
-        return self.Nx
-
     @cache_with_dependencies(
         "xlims",
         "wavelength",
         "pixels_per_wavelength",
+        "grid_type",
     )
-    def Nx(self):
-        """Number of lateral (x) pixels, set to prevent aliasing if not provided."""
-        Nx = self._params.get("Nx")
-        if Nx is not None:
-            return Nx
+    def grid_size_x(self):
+        """Grid width in pixels. For a cartesian grid, this is the lateral (x) pixels in the grid,
+        set to prevent aliasing if not provided. For a polar grid, this can be thought of as
+        the number for rays in the polar direction.
+        """
+        grid_size_x = self._params.get("grid_size_x")
+        if grid_size_x is not None:
+            return grid_size_x
 
         width = self.xlims[1] - self.xlims[0]
-        min_Nx = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
-        return max(min_Nx, 1)
+        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
+        return max(min_grid_size_x, 1)
 
     @cache_with_dependencies(
         "zlims",
         "wavelength",
         "pixels_per_wavelength",
     )
-    def Nz(self):
-        """Number of axial (z) pixels, set to prevent aliasing if not provided."""
-        Nz = self._params.get("Nz")
-        if Nz is not None:
-            return Nz
+    def grid_size_z(self):
+        """Grid height in pixels. This is the number of axial (z) pixels in the grid,
+        set to prevent aliasing if not provided."""
+        grid_size_z = self._params.get("grid_size_z")
+        if grid_size_z is not None:
+            return grid_size_z
 
         depth = self.zlims[1] - self.zlims[0]
-        min_Nz = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength)))
-        return max(min_Nz, 1)
+        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength)))
+        return max(min_grid_size_z, 1)
 
     @cache_with_dependencies("sound_speed", "center_frequency")
     def wavelength(self):
         """Calculate the wavelength based on sound speed and center frequency."""
         return self.sound_speed / self.center_frequency
 
+    @cache_with_dependencies("zlims", "grid_type", "polar_limits", "probe_geometry")
+    def xlims(self):
+        """The x-limits of the beamforming grid [m]. If not explicitly set, it is computed based
+        on the polar limits and probe geometry.
+        """
+        xlims = self._params.get("xlims")
+        if xlims is None:
+            radius = max(self.zlims)
+            xlims_polar = (
+                radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
+                radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
+            )
+            xlims_plane = (self.probe_geometry[0, 0], self.probe_geometry[-1, 0])
+            xlims = min(xlims_polar[0], xlims_plane[0]), max(xlims_polar[1], xlims_plane[1])
+        return xlims
+
     @cache_with_dependencies("sound_speed", "sampling_frequency", "n_ax")
-    def z_axis(self):
-        """The z-axis of the beamforming grid [m]."""
-        if self.zlims is None:
-            zlims = [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
-        else:
-            zlims = self.zlims
-        return np.linspace(zlims[0], zlims[1], self.n_ax)
+    def zlims(self):
+        """The z-limits of the beamforming grid [m]."""
+        zlims = self._params.get("zlims")
+        if zlims is None:
+            return [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
+        return zlims
+
+    @cache_with_dependencies("xlims", "zlims")
+    def extent(self):
+        """The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
+        Can be directly used with `plt.imshow(x, extent=scan.extent)` for visualization.
+        """
+        return np.array([self.xlims[0], self.xlims[1], self.zlims[1], self.zlims[0]])
 
     @cache_with_dependencies("grid")
     def flatgrid(self):
-        """The beamforming grid of shape (Nz*Nx, 3)."""
+        """The beamforming grid of shape (grid_size_z*grid_size_x, 3)."""
         return self.grid.reshape(-1, 3)
 
     @property
@@ -423,11 +448,11 @@ class Scan(Parameters):
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
-        """The polar angles of transmits in radians."""
+        """Polar angles for each transmit event in radians of shape (n_tx,).
+        These angles are often used in 2D imaging."""
         value = self._params.get("polar_angles")
         if value is None:
-            log.warning("No polar angles provided, using zeros")
-            value = np.zeros(self.n_tx_total)
+            return None
 
         return value[self.selected_transmits]
 
@@ -444,7 +469,8 @@ class Scan(Parameters):
 
     @cache_with_dependencies("selected_transmits")
     def azimuth_angles(self):
-        """The azimuth angles of transmits in radians."""
+        """Azimuth angles for each transmit event in radians
+        of shape (n_tx,). These angles are often used in 3D imaging."""
         value = self._params.get("azimuth_angles")
         if value is None:
             log.warning("No azimuth angles provided, using zeros")
@@ -454,7 +480,8 @@ class Scan(Parameters):
 
     @cache_with_dependencies("selected_transmits", "n_el")
     def t0_delays(self):
-        """The transmit delays in seconds."""
+        """Transmit delays in seconds of
+        shape (n_tx, n_el), shifted such that the smallest delay is 0."""
         value = self._params.get("t0_delays")
         if value is None:
             log.warning("No transmit delays provided, using zeros")
@@ -464,7 +491,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("selected_transmits")
     def tx_apodizations(self):
-        """The transmit apodizations."""
+        """Transmit apodizations of shape (n_tx, n_el)."""
         value = self._params.get("tx_apodizations")
         if value is None:
             log.warning("No transmit apodizations provided, using ones")
@@ -474,7 +501,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("selected_transmits")
     def focus_distances(self):
-        """The focus distances in meters."""
+        """Focus distances in meters for each event of shape (n_tx,)."""
         value = self._params.get("focus_distances")
         if value is None:
             log.warning("No focus distances provided, using zeros")
@@ -484,7 +511,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("selected_transmits")
     def initial_times(self):
-        """The initial times in seconds."""
+        """Initial times in seconds for each event of shape (n_tx,)."""
         value = self._params.get("initial_times")
         if value is None:
             log.warning("No initial times provided, using zeros")
@@ -494,7 +521,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):
-        """Time between transmit events."""
+        """The time between subsequent transmit events of shape (n_frames, n_tx)."""
         value = self._params.get("time_to_next_transmit")
         if value is None:
             return None
@@ -550,22 +577,24 @@ class Scan(Parameters):
             return self.polar_limits
         return value
 
-    @cache_with_dependencies("rho_range", "theta_range", "resolution", "Nz", "Nx")
+    @cache_with_dependencies("rho_range", "theta_range", "resolution", "grid_size_z", "grid_size_x")
     def coordinates_2d(self):
         """The coordinates for scan conversion."""
         coords, _ = compute_scan_convert_2d_coordinates(
-            (self.Nz, self.Nx),
+            (self.grid_size_z, self.grid_size_x),
             self.rho_range,
             self.theta_range,
             self.resolution,
         )
         return coords
 
-    @cache_with_dependencies("rho_range", "theta_range", "phi_range", "resolution", "Nz", "Nx")
+    @cache_with_dependencies(
+        "rho_range", "theta_range", "phi_range", "resolution", "grid_size_z", "grid_size_x"
+    )
     def coordinates_3d(self):
         """The coordinates for scan conversion."""
         coords, _ = compute_scan_convert_3d_coordinates(
-            (self.Nz, self.Nx),
+            (self.grid_size_z, self.grid_size_x),
             self.rho_range,
             self.theta_range,
             self.phi_range,

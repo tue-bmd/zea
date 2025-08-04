@@ -92,6 +92,7 @@ class GreedyEntropy(LinesActionModel):
         mean: float = 0,
         std_dev: float = 1,
         num_lines_to_update: int = 5,
+        entropy_sigma: float = 1.0,
     ):
         """Initialize the GreedyEntropy action selection model.
 
@@ -104,6 +105,8 @@ class GreedyEntropy(LinesActionModel):
             std_dev (float, optional): The standard deviation of the RBF. Defaults to 1.
             num_lines_to_update (int, optional): The number of lines around the selected line
                 to update. Must be odd.
+            entropy_sigma (float, optional): The standard deviation of the Gaussian
+                Mixture components used to approximate the posterior.
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
 
@@ -124,7 +127,7 @@ class GreedyEntropy(LinesActionModel):
             self.num_lines_to_update,
         )
         self.upside_down_gaussian = upside_down_gaussian(points_to_evaluate)
-        self.entropy_sigma = 1
+        self.entropy_sigma = entropy_sigma
 
     @staticmethod
     def compute_pairwise_pixel_gaussian_error(
@@ -157,15 +160,18 @@ class GreedyEntropy(LinesActionModel):
         # This way we can just sum across the height axis and get the entropy
         # for each pixel in a given line
         batch_size, n_particles, _, height, _ = gaussian_error_per_pixel_i_j.shape
-        gaussian_error_per_pixel_stacked = ops.reshape(
-            gaussian_error_per_pixel_i_j,
-            [
-                batch_size,
-                n_particles,
-                n_particles,
-                height * stack_n_cols,
-                n_possible_actions,
-            ],
+        gaussian_error_per_pixel_stacked = ops.transpose(
+            ops.reshape(
+                ops.transpose(gaussian_error_per_pixel_i_j, (0, 1, 2, 4, 3)),
+                [
+                    batch_size,
+                    n_particles,
+                    n_particles,
+                    n_possible_actions,
+                    height * stack_n_cols,
+                ],
+            ),
+            (0, 1, 2, 4, 3),
         )
         # [n_particles, n_particles, batch, height, width]
         return gaussian_error_per_pixel_stacked
@@ -428,9 +434,14 @@ class CovarianceSamplingLines(LinesActionModel):
                 generation. Defaults to None.
 
         Returns:
-            Tensor: The mask of shape (batch_size, img_size, img_size)
+            Tuple[Tensor, Tensor]:
+                - Newly selected lines as k-hot vectors, shaped (batch_size, n_possible_actions)
+                - Masks of shape (batch_size, img_height, img_width)
         """
         batch_size, n_particles, rows, _ = ops.shape(particles)
+
+        # [batch_size, rows, cols, n_particles]
+        particles = ops.transpose(particles, (0, 2, 3, 1))
 
         # [batch_size, rows * stack_n_cols, n_possible_actions, n_particles]
         shape = [
@@ -441,7 +452,7 @@ class CovarianceSamplingLines(LinesActionModel):
         ]
         particles = ops.reshape(particles, shape)
 
-        # [batch_size, rows, n_possible_actions, n_possible_actions]
+        # [batch_size, rows * stack_n_cols, n_possible_actions, n_possible_actions]
         cov_matrix = tensor_ops.batch_cov(particles)
 
         # Sum over the row dimension [batch_size, n_possible_actions, n_possible_actions]

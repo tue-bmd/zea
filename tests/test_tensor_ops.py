@@ -230,7 +230,7 @@ def _test_function():
 
 
 @pytest.mark.parametrize(
-    "array, batch_dims, batched_kwargs",
+    "array, batch_size, batched_kwargs",
     [
         [np.random.normal(size=(2, 3, 4, 5)), 2, {}],
         [
@@ -241,7 +241,7 @@ def _test_function():
     ],
 )
 @backend_equality_check()
-def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
+def test_batched_map(_test_function, array, batch_size, batched_kwargs):
     """Test the batched_map function using _test_function fixture."""
     from keras import ops
 
@@ -257,32 +257,71 @@ def test_batched_map(_test_function, array, batch_dims, batched_kwargs):
     out_jit = tensor_ops.batched_map(
         _test_function,
         array,
-        batch_dims,
+        batch_size,
         jit=True,
         **batched_kwargs,
     )
     out_no_jit = tensor_ops.batched_map(
         _test_function,
         array,
-        batch_dims,
+        batch_size,
         jit=False,
         **batched_kwargs,
     )
 
-    # Compute expected result manually
-    expected = []
-    batch_shape = array.shape[:batch_dims]
-    for idx in np.ndindex(*batch_shape):
-        slicing = tuple(slice(None) if i >= len(idx) else idx[i] for i in range(array.ndim))
-        if batched_kwargs:
-            # For each keyword, extract the corresponding slice.
-            kw_slicing = {k: v[idx] for k, v in batched_kwargs.items()}
-            expected.append(_test_function(array[slicing], **kw_slicing))
-        else:
-            expected.append(_test_function(array[slicing]))
+    # Check against python's map function
+    # this does not do batching, but the output should be the same
+    expected = np.stack(list(map(_test_function, array, *batched_kwargs.values())))
 
-    expected = ops.stack(expected, axis=0)
-    expected = ops.reshape(expected, batch_shape + array.shape[batch_dims:])
+    np.testing.assert_allclose(out_jit, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(out_no_jit, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(out_jit, out_no_jit, rtol=1e-5, atol=1e-5)
+    return out_jit
+
+
+@pytest.mark.parametrize(
+    "array, patches, batched_kwargs",
+    [
+        [np.random.normal(size=(2, 3, 4, 5)), 2, {}],
+        [
+            np.random.normal(size=(3, 4, 5, 6)),
+            1,
+            {"extra_tensor": np.random.normal(size=(3, 4, 5, 6))},
+        ],
+    ],
+)
+@backend_equality_check()
+def test_patched_map(_test_function, array, patches, batched_kwargs):
+    """Test the patched_map function using _test_function fixture."""
+    from keras import ops
+
+    from zea import tensor_ops
+
+    array = ops.convert_to_tensor(array)
+    # Convert any numpy arrays in batched_kwargs to tensors.
+    batched_kwargs = {
+        k: ops.convert_to_tensor(v) if isinstance(v, np.ndarray) else v
+        for k, v in batched_kwargs.items()
+    }
+
+    out_jit = tensor_ops.patched_map(
+        _test_function,
+        array,
+        patches,
+        jit=True,
+        **batched_kwargs,
+    )
+    out_no_jit = tensor_ops.patched_map(
+        _test_function,
+        array,
+        patches,
+        jit=False,
+        **batched_kwargs,
+    )
+
+    # Check against python's map function
+    # this does not do batching, but the output should be the same
+    expected = np.stack(list(map(_test_function, array, *batched_kwargs.values())))
 
     np.testing.assert_allclose(out_jit, expected, rtol=1e-5, atol=1e-5)
     np.testing.assert_allclose(out_no_jit, expected, rtol=1e-5, atol=1e-5)

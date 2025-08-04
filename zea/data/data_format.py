@@ -42,8 +42,8 @@ def generate_example_dataset(
     sound_speed=1540,
     center_frequency=7e6,
     sampling_frequency=40e6,
-    n_z=512,
-    n_x=512,
+    grid_size_z=512,
+    grid_size_x=512,
 ):
     """Generates an example dataset that contains all the necessary fields.
     Note: This dataset does not contain actual data, but is filled with random
@@ -60,7 +60,7 @@ def generate_example_dataset(
     # creating some fake raw and image data
     raw_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
     # image data is in dB
-    image = np.ones((n_frames, n_z, n_x)) * -40
+    image = np.ones((n_frames, grid_size_z, grid_size_x)) * -40
 
     # creating some fake scan parameters
     t0_delays = np.zeros((n_tx, n_el), dtype=np.float32)
@@ -82,8 +82,8 @@ def generate_example_dataset(
 
     if add_optional_dtypes:
         aligned_data = np.ones((n_frames, n_tx, n_ax, n_el, n_ch))
-        envelope_data = np.ones((n_frames, n_z, n_x))
-        beamformed_data = np.ones((n_frames, n_z, n_x, n_ch))
+        envelope_data = np.ones((n_frames, grid_size_z, grid_size_x))
+        beamformed_data = np.ones((n_frames, grid_size_z, grid_size_x, n_ch))
         image_sc = np.ones_like(image)
     else:
         aligned_data = None
@@ -123,10 +123,11 @@ def validate_input_data(raw_data, aligned_data, envelope_data, beamformed_data, 
         aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
             shape (n_frames, n_tx, n_ax, n_el, n_ch).
         envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
-            shape (n_frames, n_z, n_x).
+            shape (n_frames, grid_size_z, grid_size_x).
         beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
-            shape (n_frames, n_z, n_x).
-        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
+            shape (n_frames, grid_size_z, grid_size_x).
+        image (np.ndarray): The ultrasound images to be saved
+            of shape (n_frames, grid_size_z, grid_size_x).
         image_sc (np.ndarray): The scan converted ultrasound images to be saved
             of shape (n_frames, output_size_z, output_size_x).
     """
@@ -254,7 +255,7 @@ def _write_datasets(
         group_name=data_group_name,
         name="envelope_data",
         data=_convert_datatype(envelope_data),
-        description="The envelope_data of shape (n_frames, n_z, n_x).",
+        description="The envelope_data of shape (n_frames, grid_size_z, grid_size_x).",
         unit="unitless",
     )
 
@@ -262,7 +263,7 @@ def _write_datasets(
         group_name=data_group_name,
         name="beamformed_data",
         data=_convert_datatype(beamformed_data),
-        description="The beamformed_data of shape (n_frames, n_z, n_x).",
+        description="The beamformed_data of shape (n_frames, grid_size_z, grid_size_x).",
         unit="unitless",
     )
 
@@ -271,7 +272,7 @@ def _write_datasets(
         name="image",
         data=_convert_datatype(image),
         unit="unitless",
-        description="The images of shape [n_frames, n_z, n_x]",
+        description="The images of shape [n_frames, grid_size_z, grid_size_x]",
     )
 
     _add_dataset(
@@ -546,10 +547,11 @@ def generate_zea_dataset(
         aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
             shape (n_frames, n_tx, n_ax, n_el, n_ch).
         envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
-            shape (n_frames, n_z, n_x).
+            shape (n_frames, grid_size_z, grid_size_x).
         beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
-            shape (n_frames, n_z, n_x, n_ch).
-        image (np.ndarray): The ultrasound images to be saved of shape (n_frames, n_z, n_x).
+            shape (n_frames, grid_size_z, grid_size_x, n_ch).
+        image (np.ndarray): The ultrasound images to be saved
+            of shape (n_frames, grid_size_z, grid_size_x).
         image_sc (np.ndarray): The scan converted ultrasound images to be saved
             of shape (n_frames, output_size_z, output_size_x).
         probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).

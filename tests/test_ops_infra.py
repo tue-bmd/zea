@@ -593,7 +593,7 @@ def ultrasound_probe():
     return get_probe()
 
 
-def get_scan(ultrasound_probe, Nx=None, Nz=None):
+def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
     """Returns a scan for ultrasound simulation tests.
 
     Note these parameters are not really realistic, but are used for testing purposes.
@@ -613,8 +613,8 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
     )
 
     return Scan(
-        Nx=Nx,
-        Nz=Nz,
+        grid_size_x=grid_size_x,
+        grid_size_z=grid_size_z,
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
@@ -642,7 +642,7 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
 @pytest.fixture
 def ultrasound_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
-    return get_scan(ultrasound_probe, Nx=20, Nz=20)
+    return get_scan(ultrasound_probe, grid_size_x=20, grid_size_z=20)
 
 
 def get_scatterers():
@@ -715,6 +715,8 @@ def test_default_ultrasound_pipeline(
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
+
+    parameters = patched_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
 
     output_patched = patched_pipeline(
         **parameters,

@@ -312,8 +312,8 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
         ddof = 0 if bias else 1
 
     # Subtract the mean from each observation
-    mean_x = ops.mean(x, axis=-1, keepdims=True)
-    x_centered = x - mean_x
+    meagrid_size_x = ops.mean(x, axis=-1, keepdims=True)
+    x_centered = x - meagrid_size_x
 
     # Compute the covariance using einsum
     cov_matrices = ops.einsum("...ik,...jk->...ij", x_centered, x_centered) / (num_obs - ddof)
@@ -328,7 +328,7 @@ def patched_map(f, xs, patches: int, jit=True, **batch_kwargs):
     assert patches > 0, "Number of patches must be greater than 0."
 
     if patches == 1:
-        return f(xs)
+        return f(xs, **batch_kwargs)
     else:
         length = ops.shape(xs)[0]
         batch_size = np.ceil(length / patches).astype(int)

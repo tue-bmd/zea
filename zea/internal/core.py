@@ -15,19 +15,6 @@ BASE_FLOAT_PRECISION = "float32"
 BASE_INT_PRECISION = "int32"
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
-# TODO: make static more neat
-# These are global static attributes for all ops. Ops specific
-# static attributes should be defined in the respective ops class
-STATIC = [
-    "f_number",
-    "apply_lens_correction",
-    "apply_phase_rotation",
-    "Nx",
-    "Nz",
-    "fill_value",
-    "n_ax",
-]
-
 
 class DataTypes(enum.Enum):
     """Enum class for zea data types.
@@ -178,9 +165,8 @@ def _skip_to_tensor(value):
     return False
 
 
-def dict_to_tensor(dictionary):
-    """Convert elements of a dictionary to tensors.
-    Skips certain types and keys starting with '_'."""
+def dict_to_tensor(dictionary, keep_as_is=None):
+    """Convert an object to a dictionary of tensors."""
     snapshot = {}
 
     for key in dictionary:
@@ -190,6 +176,9 @@ def dict_to_tensor(dictionary):
 
         # Get the value from the dictionary
         value = dictionary[key]
+
+        if isinstance(value, Object):
+            snapshot[key] = value.to_tensor(keep_as_is=keep_as_is)
 
         # Skip certain types
         if _skip_to_tensor(value):
@@ -201,8 +190,11 @@ def dict_to_tensor(dictionary):
     return snapshot
 
 
-def _to_tensor(key, val):
-    if key in STATIC:
+def _to_tensor(key, val, keep_as_is: list = None):
+    if keep_as_is is None:
+        keep_as_is = []
+
+    if key in keep_as_is:
         return val
 
     if not isinstance(val, CONVERT_TO_KERAS_TYPES):

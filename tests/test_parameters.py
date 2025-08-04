@@ -20,6 +20,22 @@ import pytest
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
+class DummyCircularParameters(Parameters):
+    """A simple test class with a circular dependency."""
+
+    VALID_PARAMS = {
+        "param1": {"type": int},
+    }
+
+    @cache_with_dependencies("param1", "computed2")
+    def computed1(self):
+        return self.computed2 + self.param1
+
+    @cache_with_dependencies("computed1")
+    def computed2(self):
+        return self.computed1
+
+
 class DummyParameters(Parameters):
     """A simple test class with parameters and computed properties.
 
@@ -27,8 +43,8 @@ class DummyParameters(Parameters):
     dependencies between properties.
 
     Args:
-        param1: First parameter (equivalent to Nx in the original)
-        param2: Second parameter (equivalent to Nz in the original)
+        param1: First parameter (equivalent to grid_size_x in the original)
+        param2: Second parameter (equivalent to grid_size_z in the original)
         param3: Third parameter with default value (like sound_speed)
         param4: Fourth parameter (like sampling_frequency)
         param5: Optional fifth parameter
@@ -107,6 +123,12 @@ def dummy_params():
     return DummyParameters(param1=5, param2=10, param3=1500.0, param4=5e6)
 
 
+def test_catch_circular_dependency():
+    """Test that circular dependencies raise an error."""
+    with pytest.raises(RuntimeError, match="Circular dependency detected"):
+        DummyCircularParameters(param1=5)
+
+
 def test_type_validation_on_init():
     """Test that invalid parameter names and types raise errors on init."""
     with pytest.raises(ValueError, match="Invalid parameter: invalid_param"):
@@ -174,7 +196,7 @@ def test_missing_dependency_error_message():
     assert "param1" in msg and "param2" in msg
 
 
-def test_to_tensor_includes_all(dummy_params: Parameters):
+def test_to_tensor_includes_all(dummy_params: DummyParameters):
     """Test that to_tensor includes all parameters and computed properties."""
     tensors = dummy_params.to_tensor()
     # Should include all direct params and computed1, computed2, computed3

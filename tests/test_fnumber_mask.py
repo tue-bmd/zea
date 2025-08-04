@@ -24,7 +24,9 @@ def probe_geometry():
 @pytest.fixture
 def flatgrid():
     return (
-        cartesian_pixel_grid(xlims=(-10e-3, 10e-3), zlims=(0, 20e-3), Nx=65, Nz=65)
+        cartesian_pixel_grid(
+            xlims=(-10e-3, 10e-3), zlims=(0, 20e-3), grid_size_x=65, grid_size_z=65
+        )
         .reshape(-1, 3)
         .astype(np.float32)
     )

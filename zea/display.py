@@ -130,7 +130,7 @@ def scan_convert_2d(
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
-            Has dimensions (n_z, n_x). Coordinates outside the input image
+            Has dimensions (grid_size_z, grid_size_x). Coordinates outside the input image
             ranges are filled with NaNs.
         parameters (dict): A dictionary containing information about the scan conversion.
             Contains the resolution, x, and z limits, rho and theta ranges.
@@ -269,7 +269,7 @@ def scan_convert_3d(
 
     Returns:
         ndarray: The scan-converted 3D ultrasound image in Cartesian coordinates.
-            Has dimensions (n_z, n_x, n_y). Coordinates outside the input image
+            Has dimensions (grid_size_z, grid_size_x, n_y). Coordinates outside the input image
             ranges are filled with NaNs.
         parameters (dict): A dictionary containing information about the scan conversion.
             Contains the resolution, x, y, and z limits, rho, theta, and phi ranges.
