@@ -83,12 +83,15 @@ from keras import ops
 
 from zea import log
 from zea.beamform.pfield import compute_pfield
-from zea.beamform.pixelgrid import cartesian_pixel_grid, check_for_aliasing, polar_pixel_grid
+from zea.beamform.pixelgrid import (
+    cartesian_pixel_grid,
+    check_for_aliasing,
+    polar_pixel_grid,
+)
 from zea.display import (
     compute_scan_convert_2d_coordinates,
     compute_scan_convert_3d_coordinates,
 )
-from zea.internal.core import DEFAULT_DYNAMIC_RANGE
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
@@ -161,49 +164,93 @@ class Scan(Parameters):
             Defined in dB as (min_dB, max_dB). Defaults to (-60, 0).
     """
 
+    # VALID_PARAMS = {
+    #     # beamforming related parameters
+    #     "grid_size_x": {"type": int},
+    #     "grid_size_z": {"type": int},
+    #     "xlims": {"type": (tuple, list)},
+    #     "ylims": {"type": (tuple, list)},
+    #     "zlims": {"type": (tuple, list)},
+    #     "pixels_per_wavelength": {"type": int, "default": 4},
+    #     "pfield_kwargs": {"type": dict, "default": {}},
+    #     "apply_lens_correction": {"type": bool, "default": False},
+    #     "lens_sound_speed": {"type": (float, int)},
+    #     "lens_thickness": {"type": float},
+    #     "grid_type": {"type": str, "default": "cartesian"},
+    #     "polar_limits": {"type": (tuple, list)},
+    #     "dynamic_range": {"type": (tuple, list), "default": DEFAULT_DYNAMIC_RANGE},
+    #     # acquisition parameters
+    #     "sound_speed": {"type": (float, int), "default": 1540.0},
+    #     "sampling_frequency": {"type": float},
+    #     "center_frequency": {"type": float},
+    #     "n_el": {"type": int},
+    #     "n_tx": {"type": int},
+    #     "n_ax": {"type": int},
+    #     "n_ch": {"type": int},
+    #     "bandwidth_percent": {"type": float, "default": 200.0},
+    #     "demodulation_frequency": {"type": float},
+    #     "element_width": {"type": float},
+    #     "attenuation_coef": {"type": float, "default": 0.0},
+    #     "f_number": {"type": float, "default": 1.0},
+    #     # array parameters
+    #     "probe_geometry": {"type": np.ndarray},
+    #     "polar_angles": {"type": np.ndarray},
+    #     "azimuth_angles": {"type": np.ndarray},
+    #     "t0_delays": {"type": np.ndarray},
+    #     "tx_apodizations": {"type": np.ndarray},
+    #     "focus_distances": {"type": np.ndarray},
+    #     "initial_times": {"type": np.ndarray},
+    #     "time_to_next_transmit": {"type": np.ndarray},
+    #     # scan conversion parameters
+    #     "theta_range": {"type": (tuple, list)},
+    #     "phi_range": {"type": (tuple, list)},
+    #     "rho_range": {"type": (tuple, list)},
+    #     "fill_value": {"type": float, "default": 0.0},
+    #     "resolution": {"type": float, "default": None},
+    # }
+
     VALID_PARAMS = {
         # beamforming related parameters
-        "grid_size_x": {"type": int},
-        "grid_size_z": {"type": int},
-        "xlims": {"type": (tuple, list)},
-        "ylims": {"type": (tuple, list)},
-        "zlims": {"type": (tuple, list)},
-        "pixels_per_wavelength": {"type": int, "default": 4},
-        "pfield_kwargs": {"type": dict, "default": {}},
-        "apply_lens_correction": {"type": bool, "default": False},
-        "lens_sound_speed": {"type": (float, int)},
-        "lens_thickness": {"type": float},
+        "Nx": {"type": (int, np.integer, np.ndarray), "default": None},
+        "Nz": {"type": (int, np.integer, np.ndarray), "default": None},
+        "xlims": {"type": ((tuple, list, np.ndarray)), "default": None},
+        "ylims": {"type": ((tuple, list, np.ndarray)), "default": None},
+        "zlims": {"type": ((tuple, list, np.ndarray)), "default": None},
+        "pixels_per_wavelength": {"type": (int, np.integer, np.ndarray), "default": 4},
+        "downsample": {"type": (int, np.integer, np.ndarray), "default": 1},
+        "resolution": {"type": (float, np.ndarray), "default": None},
+        "pfield_kwargs": {"type": (dict, np.ndarray), "default": {}},
+        "apply_lens_correction": {"type": (bool, np.ndarray), "default": False},
+        "lens_sound_speed": {"type": (float, int, np.integer, np.ndarray), "default": None},
+        "lens_thickness": {"type": (float, np.ndarray), "default": None},
         "grid_type": {"type": str, "default": "cartesian"},
-        "polar_limits": {"type": (tuple, list)},
-        "dynamic_range": {"type": (tuple, list), "default": DEFAULT_DYNAMIC_RANGE},
         # acquisition parameters
-        "sound_speed": {"type": (float, int), "default": 1540.0},
-        "sampling_frequency": {"type": float},
-        "center_frequency": {"type": float},
-        "n_el": {"type": int},
-        "n_tx": {"type": int},
-        "n_ax": {"type": int},
-        "n_ch": {"type": int},
-        "bandwidth_percent": {"type": float, "default": 200.0},
-        "demodulation_frequency": {"type": float},
-        "element_width": {"type": float},
-        "attenuation_coef": {"type": float, "default": 0.0},
-        "f_number": {"type": float, "default": 1.0},
+        "sound_speed": {"type": (float, int, np.integer, np.ndarray), "default": 1540.0},
+        "sampling_frequency": {"type": (float, np.ndarray), "default": None},
+        "center_frequency": {"type": (float, np.ndarray), "default": None},
+        "n_el": {"type": (int, np.integer, np.ndarray), "default": None},
+        "n_tx": {"type": (int, np.integer, np.ndarray), "default": None},
+        "n_ax": {"type": (int, np.integer, np.ndarray), "default": None},
+        "n_ch": {"type": (int, np.integer, np.ndarray), "default": None},
+        "bandwidth_percent": {"type": (float, np.ndarray), "default": 200.0},
+        "demodulation_frequency": {"type": (float, np.ndarray), "default": None},
+        "element_width": {"type": (float, np.ndarray), "default": 0.2e-3},
+        "attenuation_coef": {"type": (float, np.ndarray), "default": 0.0},
+        "f_number": {"type": (float, np.ndarray), "default": 1.0},
         # array parameters
-        "probe_geometry": {"type": np.ndarray},
-        "polar_angles": {"type": np.ndarray},
-        "azimuth_angles": {"type": np.ndarray},
-        "t0_delays": {"type": np.ndarray},
-        "tx_apodizations": {"type": np.ndarray},
-        "focus_distances": {"type": np.ndarray},
-        "initial_times": {"type": np.ndarray},
-        "time_to_next_transmit": {"type": np.ndarray},
+        "probe_geometry": {"type": (np.ndarray,), "default": None},
+        "polar_angles": {"type": (np.ndarray,), "default": None},
+        "azimuth_angles": {"type": (np.ndarray,), "default": None},
+        "t0_delays": {"type": (np.ndarray,), "default": None},
+        "tx_apodizations": {"type": (np.ndarray,), "default": None},
+        "focus_distances": {"type": (np.ndarray,), "default": None},
+        "initial_times": {"type": (np.ndarray,), "default": None},
+        "time_to_next_transmit": {"type": (np.ndarray,), "default": None},
         # scan conversion parameters
-        "theta_range": {"type": (tuple, list)},
-        "phi_range": {"type": (tuple, list)},
-        "rho_range": {"type": (tuple, list)},
-        "fill_value": {"type": float, "default": 0.0},
-        "resolution": {"type": float, "default": None},
+        "theta_range": {"type": ((tuple, list, np.ndarray)), "default": None},
+        "phi_range": {"type": ((tuple, list, np.ndarray)), "default": None},
+        "rho_range": {"type": ((tuple, list, np.ndarray)), "default": None},
+        "fill_value": {"type": (float, np.ndarray), "default": 0.0},
     }
 
     def __init__(self, **kwargs):
@@ -238,7 +285,10 @@ class Scan(Parameters):
             )
         elif self.grid_type == "cartesian":
             return cartesian_pixel_grid(
-                self.xlims, self.zlims, grid_size_z=self.grid_size_z, grid_size_x=self.grid_size_x
+                self.xlims,
+                self.zlims,
+                grid_size_z=self.grid_size_z,
+                grid_size_x=self.grid_size_x,
             )
         else:
             raise ValueError(
@@ -589,7 +639,12 @@ class Scan(Parameters):
         return coords
 
     @cache_with_dependencies(
-        "rho_range", "theta_range", "phi_range", "resolution", "grid_size_z", "grid_size_x"
+        "rho_range",
+        "theta_range",
+        "phi_range",
+        "resolution",
+        "grid_size_z",
+        "grid_size_x",
     )
     def coordinates_3d(self):
         """The coordinates for scan conversion."""
