@@ -662,3 +662,34 @@ class FunctionTimer:
             yaml.dump(cropped_timings, f, default_flow_style=False)
 
         self.last_append = len(self.timings[func_name])
+
+    def print(self, drop_first: bool | int = False):
+        """Print timing statistics for all recorded functions using formatted output."""
+
+        # Print title
+        print(log.bold("Function Timing Statistics"))
+        header = (
+            f"{log.cyan('Function'):<30} {log.green('Mean'):<22} "
+            f"{log.green('Median'):<22} {log.green('Std Dev'):<22} "
+            f"{log.yellow('Min'):<22} {log.yellow('Max'):<22} {log.magenta('Count'):<18}"
+        )
+        length = len(log.remove_color_escape_codes(header))
+        print("=" * length)
+
+        # Print header
+        print(header)
+        print("-" * length)
+
+        # Print data rows
+        for func_name in self.timings.keys():
+            stats = self.get_stats(func_name, drop_first=drop_first)
+            row = (
+                f"{log.cyan(func_name):<30} "
+                f"{log.green(log.number_to_str(stats['mean'], 6)):<22} "
+                f"{log.green(log.number_to_str(stats['median'], 6)):<22} "
+                f"{log.green(log.number_to_str(stats['std_dev'], 6)):<22} "
+                f"{log.yellow(log.number_to_str(stats['min'], 6)):<22} "
+                f"{log.yellow(log.number_to_str(stats['max'], 6)):<22} "
+                f"{log.magenta(str(stats['count'])):<18}"
+            )
+            print(row)

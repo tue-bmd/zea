@@ -28,7 +28,7 @@ def plt_window_has_been_closed(fig):
     return not plt.fignum_exists(fig.number)
 
 
-def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None):
+def filename_from_window_dialog(window_name=None, filetypes=None, initialdir=None) -> Path:
     """Get filename through dialog window
     Args:
         window_name: string with name of window

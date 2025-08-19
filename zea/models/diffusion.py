@@ -161,16 +161,15 @@ class DiffusionModel(DeepGenerativeModel):
                     f"DiffusionGuidance object, got {guidance}"
                 )
 
-    def call(self, inputs, training=False, **kwargs):
-        """
-        Calls the score network.
+    def call(self, inputs, training=False, network=None, **kwargs):
+        """Calls the score network.
 
-        Will use the exponential moving average network if training is False,
-        otherwise the regular network."""
-        if training:
-            network = self.network
-        else:
-            network = self.ema_network
+        If network is not provided, will use the exponential moving
+        average network if training is False, otherwise the regular network.
+        """
+        if network is None:
+            network = self.network if training else self.ema_network
+
         return network(inputs, training=training, **kwargs)
 
     def sample(self, n_samples=1, n_steps=20, seed=None, **kwargs):
@@ -367,18 +366,27 @@ class DiffusionModel(DeepGenerativeModel):
 
     def linear_diffusion_schedule(self, diffusion_times):
         """Create a linear diffusion schedule"""
-        compute_alpha_t = lambda t: ops.prod(
-            1 - diffusion_times[:t], axis=diffusion_times.shape[1:]
-        )
-        alphas = ops.vectorized_map(compute_alpha_t, ops.arange(len(diffusion_times)))
+
+        def _compute_alpha_t(t):
+            """Compute alpha_t for linear diffusion schedule"""
+            return ops.prod(1 - diffusion_times[:t], axis=diffusion_times.shape[1:])
+
+        alphas = ops.vectorized_map(_compute_alpha_t, ops.arange(len(diffusion_times)))
         signal_rates = ops.sqrt(alphas)
         noise_rates = ops.sqrt(1 - alphas)
         return signal_rates, noise_rates
 
-    def denoise(self, noisy_images, noise_rates, signal_rates, training):
-        """Predict noise component and calculate the image component using it"""
+    def denoise(
+        self,
+        noisy_images,
+        noise_rates,
+        signal_rates,
+        training,
+        network=None,
+    ):
+        """Predict noise component and calculate the image component using it."""
 
-        pred_noises = self([noisy_images, noise_rates**2], training=training)
+        pred_noises = self([noisy_images, noise_rates**2], training=training, network=network)
         pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
 
         return pred_noises, pred_images
@@ -435,6 +443,9 @@ class DiffusionModel(DeepGenerativeModel):
         seed: keras.random.SeedGenerator | None = None,
         verbose: bool = True,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
+        disable_jit: bool = False,
+        training: bool = False,
+        network_type: Literal[None, "main", "ema"] = None,
     ):
         """Reverse diffusion process to generate images from noise.
 
@@ -447,6 +458,10 @@ class DiffusionModel(DeepGenerativeModel):
             seed: Random seed generator.
             verbose: Whether to show a progress bar.
             track_progress_type: Type of progress tracking ("x_0" or "x_t").
+            disable_jit: Whether to disable JIT compilation.
+            training: Whether to use the training mode of the network.
+            network_type: Which network to use ("main" or "ema"). If None, uses the
+                network based on the `training` argument.
 
         Returns:
             Generated images.
@@ -478,8 +493,19 @@ class DiffusionModel(DeepGenerativeModel):
             next_noise_rates, next_signal_rates = self.diffusion_schedule(next_diffusion_times)
 
             # denoise
+            if network_type == "ema":
+                network = self.ema_network
+            elif network_type == "main":
+                network = self.network
+            else:
+                network = None
+
             pred_noises, pred_images = self.denoise(
-                noisy_images, noise_rates, signal_rates, training=False
+                noisy_images,
+                noise_rates,
+                signal_rates,
+                training=training,
+                network=network,
             )
 
             seed, seed1 = split_seed(seed, 2)
@@ -515,7 +541,7 @@ class DiffusionModel(DeepGenerativeModel):
                 seed,
             ),
             # can't jit this with progbar or tracking intermediate values
-            disable_jit=verbose or track_progress_type,
+            disable_jit=verbose or track_progress_type or disable_jit,
         )
 
         return pred_images

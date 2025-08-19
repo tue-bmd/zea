@@ -468,32 +468,34 @@ def _write_datasets(
             ),
             unit="-",
         )
-        n_waveforms = len(waveforms_one_way)
-        for n, waveform_1way, waveform_2way in zip(
-            range(n_waveforms), waveforms_one_way, waveforms_two_way
-        ):
-            _add_dataset(
-                group_name=scan_group_name + "/waveforms_one_way",
-                name=f"waveform_{str(n).zfill(3)}",
-                data=waveform_1way,
-                description=(
-                    "One-way waveform as simulated by the Verasonics system, "
-                    "sampled at 250MHz. This is the waveform after being filtered "
-                    "by the tranducer bandwidth once."
-                ),
-                unit="V",
-            )
-            _add_dataset(
-                group_name=scan_group_name + "/waveforms_two_way",
-                name=f"waveform_{str(n).zfill(3)}",
-                data=waveform_2way,
-                description=(
-                    "Two-way waveform as simulated by the Verasonics system, "
-                    "sampled at 250MHz. This is the waveform after being filtered "
-                    "by the tranducer bandwidth twice."
-                ),
-                unit="V",
-            )
+
+        if waveforms_one_way is not None:
+            for n in range(len(waveforms_one_way)):
+                _add_dataset(
+                    group_name=scan_group_name + "/waveforms_one_way",
+                    name=f"waveform_{str(n).zfill(3)}",
+                    data=waveforms_one_way[n],
+                    description=(
+                        "One-way waveform as simulated by the Verasonics system, "
+                        "sampled at 250MHz. This is the waveform after being filtered "
+                        "by the tranducer bandwidth once."
+                    ),
+                    unit="V",
+                )
+
+        if waveforms_two_way is not None:
+            for n in range(len(waveforms_two_way)):
+                _add_dataset(
+                    group_name=scan_group_name + "/waveforms_two_way",
+                    name=f"waveform_{str(n).zfill(3)}",
+                    data=waveforms_two_way[n],
+                    description=(
+                        "Two-way waveform as simulated by the Verasonics system, "
+                        "sampled at 250MHz. This is the waveform after being filtered "
+                        "by the tranducer bandwidth twice."
+                    ),
+                    unit="V",
+                )
 
     # Add additional elements
     if additional_elements is not None:

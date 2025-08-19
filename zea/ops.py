@@ -100,7 +100,7 @@ from zea.probes import Probe
 from zea.scan import Scan
 from zea.simulator import simulate_rf
 from zea.tensor_ops import batched_map, patched_map, resample, reshape_axis
-from zea.utils import deep_compare, map_negative_indices, translate
+from zea.utils import FunctionTimer, deep_compare, map_negative_indices, translate
 
 
 def get_ops(ops_name):
@@ -378,6 +378,7 @@ class Pipeline:
         jit_kwargs: dict | None = None,
         name="pipeline",
         validate=True,
+        timed: bool = False,
     ):
         """Initialize a pipeline
 
@@ -399,6 +400,8 @@ class Pipeline:
         """
         self._call_pipeline = self.call
         self.name = name
+        self.timer = FunctionTimer()
+        self.timed = timed
 
         self._pipeline_layers = operations
 
@@ -519,6 +522,30 @@ class Pipeline:
         """Alias for self.layers to match the zea naming convention"""
         return self._pipeline_layers
 
+    def timed_call(self, **inputs):
+        """Process input data through the pipeline."""
+
+        for op in self._pipeline_layers:
+            timed_op = self.timer(op, name=op.__class__.__name__)
+            try:
+                outputs = timed_op(**inputs)
+            except KeyError as exc:
+                raise KeyError(
+                    f"[zea.Pipeline] Operation '{op.__class__.__name__}' "
+                    f"requires input key '{exc.args[0]}', "
+                    "but it was not provided in the inputs.\n"
+                    "Check whether the objects (such as `zea.Scan`) passed to "
+                    "`pipeline.prepare_parameters()` contain all required keys.\n"
+                    f"Current list of all passed keys: {list(inputs.keys())}\n"
+                    f"Valid keys for this pipeline: {self.valid_keys}"
+                ) from exc
+            except Exception as exc:
+                raise RuntimeError(
+                    f"[zea.Pipeline] Error in operation '{op.__class__.__name__}': {exc}"
+                ) from exc
+            inputs = outputs
+        return outputs
+
     def call(self, **inputs):
         """Process input data through the pipeline."""
         for operation in self._pipeline_layers:
@@ -605,13 +632,18 @@ class Pipeline:
                 if operation.jittable and operation._jit_compile:
                     operation.set_jit(value == "ops")
 
+    @property
+    def _call_fn(self):
+        """Get the call function of the pipeline."""
+        return self.call if not self.timed else self.timed_call
+
     def jit(self):
         """JIT compile the pipeline."""
-        self._call_pipeline = jit(self.call, **self.jit_kwargs)
+        self._call_pipeline = jit(self._call_fn, **self.jit_kwargs)
 
     def unjit(self):
         """Un-JIT compile the pipeline."""
-        self._call_pipeline = self.call
+        self._call_pipeline = self._call_fn
 
     @property
     def jittable(self):
@@ -2090,7 +2122,7 @@ class Demodulate(Operation):
 
 @ops_registry("lambda")
 class Lambda(Operation):
-    """Use any funcion as an operation."""
+    """Use any function as an operation."""
 
     def __init__(self, func, func_kwargs=None, **kwargs):
         super().__init__(**kwargs)

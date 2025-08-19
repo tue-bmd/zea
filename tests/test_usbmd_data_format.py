@@ -36,6 +36,9 @@ DATASET_PARAMETERS = {
     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32),
     "bandwidth_percent": 200.0,
+    "waveforms_one_way": [np.zeros((512), dtype=np.float32)],
+    "waveforms_two_way": [np.zeros((512,), dtype=np.float32)],
+    "tx_waveform_indices": np.zeros((n_tx,), dtype=np.int32),
 }
 
 
@@ -120,6 +123,20 @@ def test_existing_path(tmp_hdf5_path):
 
     with pytest.raises(FileExistsError):
         generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS)
+
+
+def test_only_waveforms_one_way(tmp_hdf5_path):
+    """Tests if passing only waveforms_one_way works correctly."""
+    parameters = DATASET_PARAMETERS.copy()
+    parameters["waveforms_one_way"] = None
+    generate_zea_dataset(path=tmp_hdf5_path, **parameters)
+
+
+def test_only_waveforms_two_way(tmp_hdf5_path):
+    """Tests if passing only waveforms_two_way works correctly."""
+    parameters = DATASET_PARAMETERS.copy()
+    parameters["waveforms_two_way"] = None
+    generate_zea_dataset(path=tmp_hdf5_path, **parameters)
 
 
 def test_additional_dataset_element(tmp_hdf5_path):
