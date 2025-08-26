@@ -593,10 +593,11 @@ def interpolate_masks(
     assert all(mask.shape == mask_shape for mask in masks), "All masks must have the same shape."
 
     # distribute number of frames over number of masks
-    num_frames_per_segment = [num_frames // (number_of_masks - 1)] * (number_of_masks - 1)
-    if num_frames % num_frames_per_segment[0] != 0:
-        # make sure that number of frames per mask adds up to total number of frames
-        num_frames_per_segment[-1] += num_frames - sum(num_frames_per_segment)
+    base_frames = num_frames // (number_of_masks - 1)
+    remainder = num_frames % (number_of_masks - 1)
+    num_frames_per_segment = [base_frames] * (number_of_masks - 1)
+    for i in range(remainder):
+        num_frames_per_segment[i] += 1
 
     if rectangle:
         # get the rectangles
@@ -615,7 +616,6 @@ def interpolate_masks(
         for _rectangle in rectangles:
             interpolated_masks.append(reconstruct_mask_from_rectangle(_rectangle, mask_shape))
         return interpolated_masks
-
     # get the contours
     polygons = []
     for mask in masks:
@@ -726,6 +726,17 @@ def update_imshow_with_mask(
     return imshow_obj, mask_obj
 
 
+def ask_for_title():
+    print("What are you selecting?")
+    title = input("Enter a title for the selection: ")
+    if not title:
+        raise ValueError("Title cannot be empty.")
+    # Convert title to snake_case
+    title = title.strip().replace(" ", "_").lower()
+    print(f"Title set to: {title}")
+    return title
+
+
 def main():
     """Main function for interactive selector on multiple images."""
     print(
@@ -751,6 +762,7 @@ def main():
             raise e
         print("No more images selected. Continuing...")
 
+    title = ask_for_title()
     selector = ask_for_selection_tool()
 
     if same_images is True:
@@ -829,6 +841,10 @@ def main():
         else:
             add_shape_from_mask(axs, interpolated_masks[0], alpha=0.5)
 
+        filestem = Path(file.parent / f"{file.stem}_{title}_annotations.gif")
+        np.save(filestem.with_suffix(".npy"), interpolated_masks)
+        print(f"Succesfully saved interpolated masks to {log.yellow(filestem.with_suffix('.npy'))}")
+
         fps = ask_save_animation_with_fps()
 
         ani = FuncAnimation(
@@ -838,9 +854,9 @@ def main():
             fargs=(axs, imshow_obj, images, interpolated_masks, selector),
             interval=1000 / fps,
         )
-        filename = Path(file.parent.stem + "_" + f"{file.stem}_interpolated_masks.gif")
+        filename = filestem.with_suffix(".gif")
         ani.save(filename, writer="pillow")
-        print(f"Succesfully saved animation as {filename}")
+        print(f"Succesfully saved animation as {log.yellow(filename)}")
 
 
 if __name__ == "__main__":

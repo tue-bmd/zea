@@ -52,7 +52,7 @@ def load_video(filename):
     assert extension in _SUPPORTED_VID_TYPES, f"File extension {extension} not supported"
 
     if extension in [".avi", ".mp4"]:
-        cap = cv2.VideoCapture(filename)
+        cap = cv2.VideoCapture(str(filename))
         frames = []
         while True:
             ret, frame = cap.read()
@@ -61,7 +61,7 @@ def load_video(filename):
             frames.append(frame)
         cap.release()
     elif extension == ".gif":
-        frames = imageio.mimread(filename)
+        frames = imageio.mimread(str(filename))
     else:
         raise ValueError("Unsupported file extension")
     frames = [cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) for frame in frames]

@@ -185,7 +185,7 @@ def dict_to_tensor(dictionary, keep_as_is=None):
             continue
 
         # Convert the value to a tensor
-        snapshot[key] = _to_tensor(key, value)
+        snapshot[key] = _to_tensor(key, value, keep_as_is=keep_as_is)
 
     return snapshot
 

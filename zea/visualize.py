@@ -169,7 +169,7 @@ def plot_image_grid(
     return fig, fig_contents
 
 
-def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1, centroid=None):
+def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1, centroid=None, **kwargs):
     """
     For a given 3D array, plot a plane with fixed_coord using four individual quadrants.
 
@@ -183,6 +183,7 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1, centroid
         stride (int, optional): The stride step for plotting. Defaults to 1.
         centroid (tuple, optional): centroid around which to break the quadrants.
             If None, the middle of the image is used.
+        **kwargs: Additional keyword arguments for the plot_surface method.
 
     Returns:
         matplotlib.axes.Axes3DSubplot: The axis with the plotted quadrants.
@@ -238,6 +239,7 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1, centroid
                 cstride=stride,
                 facecolors=facecolors,
                 shade=False,
+                **kwargs,
             )
         elif fixed_coord == "y":
             X, Z = np.mgrid[: quadrant.shape[0] + 1, : quadrant.shape[1] + 1]
@@ -252,6 +254,7 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1, centroid
                 cstride=stride,
                 facecolors=facecolors,
                 shade=False,
+                **kwargs,
             )
         elif fixed_coord == "z":
             X, Y = np.mgrid[: quadrant.shape[0] + 1, : quadrant.shape[1] + 1]
@@ -266,6 +269,7 @@ def plot_quadrants(ax, array, fixed_coord, cmap, slice_index, stride=1, centroid
                 cstride=stride,
                 facecolors=facecolors,
                 shade=False,
+                **kwargs,
             )
     return ax
 
@@ -281,6 +285,7 @@ def plot_biplanes(
     show_axes=None,
     fig=None,
     ax=None,
+    **kwargs,
 ):
     """
     Plot three intersecting planes from a 3D volume in 3D space.
@@ -301,6 +306,7 @@ def plot_biplanes(
             Defaults to None. Can be used to reuse the figure in a loop.
         ax (matplotlib.axes.Axes3DSubplot, optional): Matplotlib 3D axes object.
             Defaults to None. Can be used to reuse the axes in a loop.
+        **kwargs: Additional keyword arguments for the plot_surface method.
 
     Returns:
         tuple: A tuple containing the figure and axes objects (fig, ax).
@@ -340,11 +346,11 @@ def plot_biplanes(
         ax.zaxis.pane.fill = False
 
     if slice_x is not None:
-        plot_quadrants(ax, volume, "x", cmap=cmap, slice_index=slice_x, stride=stride)
+        plot_quadrants(ax, volume, "x", cmap=cmap, slice_index=slice_x, stride=stride, **kwargs)
     if slice_y is not None:
-        plot_quadrants(ax, volume, "y", cmap=cmap, slice_index=slice_y, stride=stride)
+        plot_quadrants(ax, volume, "y", cmap=cmap, slice_index=slice_y, stride=stride, **kwargs)
     if slice_z is not None:
-        plot_quadrants(ax, volume, "z", cmap=cmap, slice_index=slice_z, stride=stride)
+        plot_quadrants(ax, volume, "z", cmap=cmap, slice_index=slice_z, stride=stride, **kwargs)
 
     # Optionally show axes
     if show_axes:
