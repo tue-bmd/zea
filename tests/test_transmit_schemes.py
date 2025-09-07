@@ -172,7 +172,7 @@ def _get_lims_and_gridsize(center_frequency, sound_speed):
         int(width / (0.5 * wavelength)) + 1,
         int(height / (0.5 * wavelength)) + 1,
     )
-    return {"xlims": xlims, "zlims": zlims, "Nx": gridsize[0], "Nz": gridsize[1]}
+    return {"xlims": xlims, "zlims": zlims, "grid_size_x": gridsize[0], "grid_size_z": gridsize[1]}
 
 
 def _get_planewave_scan(ultrasound_probe, grid_type):

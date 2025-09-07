@@ -60,7 +60,8 @@ def compute_pfield(
         n_el (int): Number of elements in the probe.
         probe_geometry (array): Geometry of the probe elements.
         tx_apodizations (array): Transmit apodization values.
-        grid (array): Grid points where the pressure field is computed of shape (Nz, Nx, 3).
+        grid (array): Grid points where the pressure field is computed
+            of shape (grid_size_z, grid_size_x, 3).
         t0_delays (array): Transmit delays for each transmit event.
         frequency_step (int, optional): Frequency step. Default is 4.
             Higher is faster but less accurate.
@@ -78,7 +79,8 @@ def compute_pfield(
         verbose (bool, optional): Whether to print progress.
 
     Returns:
-        ops.array: The (normalized) pressure field (across tx events) of shape (n_tx, Nz, Nx).
+        ops.array: The (normalized) pressure field (across tx events)
+            of shape (n_tx, grid_size_z, grid_size_x).
     """
     # medium params
     alpha_db = 0  # currently we ignore attenuation in the compounding
@@ -293,7 +295,8 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
     Normalize the input array of intensities by zeroing out values below a given percentile.
 
     Args:
-        pfield (array): The unnormalized pressure field array of shape (n_tx, Nz, Nx).
+        pfield (array): The unnormalized pressure field array
+            of shape (n_tx, grid_size_z, grid_size_x).
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting.
             Higher values result in sharper weighting. Default is 1.0.
         percentile (int, optional): minimum percentile threshold to keep in the weighting.

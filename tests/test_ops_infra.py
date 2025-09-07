@@ -45,6 +45,14 @@ class AddOperation(ops.Operation):
         return {"z": keras.ops.add(x, y)}
 
 
+@ops_registry("add_transmits")
+class AddTransmitsOperation(ops.Operation):
+    """Add Transmits Operation for testing purposes."""
+
+    def call(self, x, n_tx):
+        return {"z": keras.ops.add(x, n_tx)}
+
+
 @ops_registry("large_matrix_multiplication")
 class LargeMatrixMultiplicationOperation(ops.Operation):
     """Large Matrix Multiplication Operation for testing purposes."""
@@ -398,8 +406,17 @@ def test_pipeline_with_scan_probe_config():
     result = pipeline(**parameters, x=2, y=3)
 
     assert "z" in result
-    assert "n_tx" in result  # Check if we parsed the scan object correctly
     assert "probe_geometry" in result  # Check if we parsed the probe object correctly
+    assert "n_tx" not in result  # n_tx is not needed in the pipeline
+
+    # Now let's use n_tx, such that it has to be in the pipeline
+    pipeline.append(AddTransmitsOperation())
+    parameters = pipeline.prepare_parameters(probe, scan)
+    result = pipeline(**parameters, x=2, y=3)
+
+    assert "z" in result
+    assert "probe_geometry" in result  # Check if we parsed the probe object correctly
+    assert "n_tx" in result  # now we actually need to have n_tx in the result
 
 
 """Pipeline build from config / json tests"""
@@ -576,7 +593,7 @@ def ultrasound_probe():
     return get_probe()
 
 
-def get_scan(ultrasound_probe, Nx=None, Nz=None):
+def get_scan(ultrasound_probe, grid_size_x=None, grid_size_z=None):
     """Returns a scan for ultrasound simulation tests.
 
     Note these parameters are not really realistic, but are used for testing purposes.
@@ -596,8 +613,8 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
     )
 
     return Scan(
-        Nx=Nx,
-        Nz=Nz,
+        grid_size_x=grid_size_x,
+        grid_size_z=grid_size_z,
         n_tx=n_tx,
         n_ax=n_ax,
         n_el=n_el,
@@ -625,7 +642,7 @@ def get_scan(ultrasound_probe, Nx=None, Nz=None):
 @pytest.fixture
 def ultrasound_scan(ultrasound_probe):
     """Returns a scan for ultrasound simulation tests."""
-    return get_scan(ultrasound_probe, Nx=20, Nz=20)
+    return get_scan(ultrasound_probe, grid_size_x=20, grid_size_z=20)
 
 
 def get_scatterers():
@@ -698,6 +715,8 @@ def test_default_ultrasound_pipeline(
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
+
+    parameters = patched_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
 
     output_patched = patched_pipeline(
         **parameters,

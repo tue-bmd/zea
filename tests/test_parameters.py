@@ -20,6 +20,22 @@ import pytest
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
+class DummyCircularParameters(Parameters):
+    """A simple test class with a circular dependency."""
+
+    VALID_PARAMS = {
+        "param1": {"type": int},
+    }
+
+    @cache_with_dependencies("param1", "computed2")
+    def computed1(self):
+        return self.computed2 + self.param1
+
+    @cache_with_dependencies("computed1")
+    def computed2(self):
+        return self.computed1
+
+
 class DummyParameters(Parameters):
     """A simple test class with parameters and computed properties.
 
@@ -27,8 +43,8 @@ class DummyParameters(Parameters):
     dependencies between properties.
 
     Args:
-        param1: First parameter (equivalent to Nx in the original)
-        param2: Second parameter (equivalent to Nz in the original)
+        param1: First parameter (equivalent to grid_size_x in the original)
+        param2: Second parameter (equivalent to grid_size_z in the original)
         param3: Third parameter with default value (like sound_speed)
         param4: Fourth parameter (like sampling_frequency)
         param5: Optional fifth parameter
@@ -107,6 +123,12 @@ def dummy_params():
     return DummyParameters(param1=5, param2=10, param3=1500.0, param4=5e6)
 
 
+def test_catch_circular_dependency():
+    """Test that circular dependencies raise an error."""
+    with pytest.raises(RuntimeError, match="Circular dependency detected"):
+        DummyCircularParameters(param1=5)
+
+
 def test_type_validation_on_init():
     """Test that invalid parameter names and types raise errors on init."""
     with pytest.raises(ValueError, match="Invalid parameter: invalid_param"):
@@ -174,9 +196,9 @@ def test_missing_dependency_error_message():
     assert "param1" in msg and "param2" in msg
 
 
-def test_to_tensor_includes_all(dummy_params):
+def test_to_tensor_includes_all(dummy_params: DummyParameters):
     """Test that to_tensor includes all parameters and computed properties."""
-    tensors = dummy_params.to_tensor(compute_missing=True)
+    tensors = dummy_params.to_tensor()
     # Should include all direct params and computed1, computed2, computed3
     for key in [
         "param1",
@@ -195,37 +217,41 @@ def test_to_tensor_includes_all(dummy_params):
     )
 
 
-def test_to_tensor_only_computed(dummy_params):
-    """Test that to_tensor(compute_missing=False) only includes already computed properties."""
-    # Before accessing any computed property
-    tensors = dummy_params.to_tensor(compute_missing=False)
-    assert set(tensors.keys()) == {"param1", "param2", "param3", "param4"}
-    # After accessing computed1
-    _ = dummy_params.computed1
-    tensors2 = dummy_params.to_tensor(compute_missing=False)
-    assert "computed1" in tensors2
+def test_to_tensor_excludes(dummy_params: Parameters):
+    """Test that to_tensor excludes specified keys."""
+    # Exclude computed1 and param2
+    tensors = dummy_params.to_tensor(exclude=["computed1", "param2"])
+    assert "computed1" not in tensors
+    assert "param2" not in tensors
+    # Should still include other params and computed properties
+    for key in ["param1", "param3", "param4", "computed2", "computed3"]:
+        assert key in tensors
+
+    # Exclude a non-existent key, should not raise error
+    dummy_params.to_tensor(exclude=["non_existent"])
 
 
 def test_to_tensor_partial_computed_subset(dummy_params):
     """Test that to_tensor only computes the requested subset."""
     # Access no computed properties yet
-    tensors = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1"])
+    tensors = dummy_params.to_tensor(include=["computed1"])
     # Only computed1 should be present (besides direct params)
     assert "computed1" in tensors
     assert "computed2" not in tensors
     assert "computed3" not in tensors
     # Now try with multiple keys
-    tensors2 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1", "computed3"])
+    tensors2 = dummy_params.to_tensor(include=["computed1", "computed3"])
     assert "computed1" in tensors2
     assert "computed3" in tensors2
     assert "computed2" not in tensors2
     # If a key is not a computed property, it should be ignored (no error)
-    tensors3 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed1", "param1"])
+    tensors3 = dummy_params.to_tensor(include=["computed1", "param1"])
     assert "computed1" in tensors3
     assert "param1" in tensors3
-    tensors4 = dummy_params.to_tensor(compute_missing=True, compute_keys=[])
 
-    assert set(tensors4.keys()) == {
+    # An empty include list should not return an empty dict, since no keys are specified.
+    tensors4 = dummy_params.to_tensor(include=[])
+    assert set(tensors4.keys()) != {
         "param1",
         "param2",
         "param3",
@@ -236,12 +262,12 @@ def test_to_tensor_partial_computed_subset(dummy_params):
 
     # Access computed2 manually
     _ = dummy_params.computed2
-    # Now call to_tensor with compute_keys requesting computed2
-    tensors5 = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed2"])
+    # Now call to_tensor with include requesting computed2
+    tensors5 = dummy_params.to_tensor(include=["computed2"])
     # It should be present, and should not be recomputed (counter stays the same)
     assert "computed2" in tensors5
     count = dummy_params._computed2_count
-    _ = dummy_params.to_tensor(compute_missing=True, compute_keys=["computed2"])
+    _ = dummy_params.to_tensor(include=["computed2"])
     assert dummy_params._computed2_count == count  # No recompute
 
 

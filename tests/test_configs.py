@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from huggingface_hub import list_repo_files
 from schema import SchemaError
 
 from zea.config import Config, check_config
@@ -75,29 +74,6 @@ def test_all_configs_valid(file):
 
     except SchemaError as se:
         raise ValueError(f"Error in config {file}") from se
-
-
-def test_all_configs_valid_hf():
-    """Test if configs in the HF repo are valid according to schema"""
-
-    files = list_repo_files("zeahub/configs", repo_type="dataset")
-
-    for file in files:
-        if not file.endswith(".yaml"):
-            continue
-        configuration = Config.from_hf("zeahub/configs", file, repo_type="dataset")
-        try:
-            configuration = check_config(configuration)
-            # check another time, since defaults are now set, which are not
-            # checked by the first check_config. Basically this checks if the
-            # config_validation.py entries are correct.
-            check_config(configuration)
-
-        except SchemaError as se:
-            raise ValueError(
-                f"Error in config {file} on Hugging Face Hub. If you changed "
-                "configs files in the repository locally, please also update them on HF."
-            ) from se
 
 
 def test_dot_indexing():

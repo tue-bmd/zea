@@ -80,7 +80,7 @@ class Interface:
             with_batch_dim=False,
             jit_options=None,
         )
-        self.parameters = self.process.prepare_parameters(self.probe, self.scan, self.config)
+        self.parameters = self.process.prepare_parameters(self.probe, self.scan, self.config.scan)
 
         # initialize attributes for UI class
         self.data = None

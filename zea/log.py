@@ -289,6 +289,14 @@ def critical(message, *args, **kwargs):
     return message
 
 
+def number_to_str(number, decimals=2):
+    """Formats a number to a string with the given number of decimals."""
+    if isinstance(number, (int, float)):
+        return f"{number:.{decimals}f}"
+    else:
+        raise ValueError(f"Expected a number, got {type(number)}: {number}")
+
+
 def set_file_logger_directory(directory):
     """Sets the log level of the logger."""
     global LOG_DIR, file_logger

@@ -51,11 +51,12 @@ def test_pfield():
     # have been changed.
     dx = scan.wavelength / 4
     dz = scan.wavelength / 4
-    scan.Nx = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
-    scan.Nz = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
+    scan.grid_size_x = int(np.ceil((scan.xlims[1] - scan.xlims[0]) / dx))
+    scan.grid_size_z = int(np.ceil((scan.zlims[1] - scan.zlims[0]) / dz))
 
     pfield = scan.pfield
 
-    assert pfield.shape == (n_tx, scan.Nz, scan.Nx), (
-        f"Expected pfield shape {(n_tx, scan.Nz, scan.Nx)}, but got {pfield.shape}"
+    assert pfield.shape == (n_tx, scan.grid_size_z, scan.grid_size_x), (
+        f"Expected pfield shape {(n_tx, scan.grid_size_z, scan.grid_size_x)}, "
+        f"but got {pfield.shape}"
     )

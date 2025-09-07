@@ -15,18 +15,13 @@ from . import backend_equality_check
         ((512, 512), 0.1, 1),
         ((40, 20, 20), None, 1),
         ((40, 20, 20), 0.5, 1),
-        ((112, 112), None, 3),
+        ((112, 112), None, 3),  # will use scipy ndimage for order > 1
     ],
 )
-@backend_equality_check(decimal=[0, 2], backends=["torch", "jax"])
+@backend_equality_check(decimal=[0, 2, 0], backends=["torch", "jax", "tensorflow"])
 def test_scan_conversion(size, resolution, order):
-    """
-    Tests the scan_conversion function with random data.
-
-    TODO: This test fails for tensorflow on cpu because of `keras.ops.image.map_coordinates`.
-    Therefore tensorflow is not included in the backends. Maybe in the future we can check
-    if the error is fixed with a new keras or tensorflow version.
-    """
+    """Tests the scan_conversion function with random data."""
+    import keras
     from keras import ops
 
     from zea import display
@@ -67,7 +62,9 @@ def test_scan_conversion(size, resolution, order):
 
     # make sure outputs are not all nans or zeros
     assert not np.all(np.isnan(out)), "scan conversion is all nans"
-    assert not np.all(out == 0), "scan conversion is all zeros"
+    assert not np.all(out == 0), (
+        f"scan conversion is all zeros for backend {keras.backend.backend()}"
+    )
     out = np.nan_to_num(out, nan=0)
     return out
 
@@ -76,14 +73,16 @@ def create_radial_pattern(size):
     """Creates a radial pattern for testing scan conversion."""
     x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
     r = np.sqrt(x**2 + y**2)
-    return np.exp(-(r**2))
+    image = np.exp(-(r**2))
+    return image.astype("float32")
 
 
 def create_concentric_rings(size):
     """Creates a ring pattern for testing scan conversion."""
     x, y = np.meshgrid(np.linspace(-1, 1, size[0]), np.linspace(-1, 1, size[1]))
     r = np.sqrt(x**2 + y**2)
-    return np.sin(10 * r) ** 2
+    image = np.sin(10 * r) ** 2
+    return image.astype("float32")
 
 
 @pytest.mark.parametrize(
@@ -95,14 +94,10 @@ def create_concentric_rings(size):
         ((100, 333), "create_concentric_rings", 0.1),
     ],
 )
-@backend_equality_check(decimal=2, backends=["torch", "jax"])
+@backend_equality_check(decimal=2)
 def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     """Tests the scan_conversion function with structured test patterns and
     inverts the data with inverse_scan_convert_2d.
-
-    TODO: This test fails for tensorflow on cpu because of `keras.ops.image.map_coordinates`.
-    Therefore tensorflow is not included in the backends. Maybe in the future we can check
-    if the error is fixed with a new keras or tensorflow version.
 
     Note:
         The allowed_error is set to 0.1 for concentric rings because the MSE is
@@ -144,16 +139,12 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
         ((100, 333), "create_concentric_rings", 0.1),
     ],
 )
-@backend_equality_check(decimal=2, backends=["torch", "jax"])
+@backend_equality_check(decimal=2)
 def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error):
     """Tests the scan_conversion function with structured test patterns and
     inverts the data with inverse_scan_convert_2d. In this case, the scan cone is
     padded such that it is no longer centered and cropped. find_scan_cone=True is
     used to automatically crop and center the scan cone.
-
-    TODO: This test fails for tensorflow on cpu because of `keras.ops.image.map_coordinates`.
-    Therefore tensorflow is not included in the backends. Maybe in the future we can check
-    if the error is fixed with a new keras or tensorflow version.
     """
     from keras import ops
 

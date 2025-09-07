@@ -366,9 +366,7 @@ class File(h5py.File):
         """
         file_scan_parameters = self.get_parameters(event)
 
-        probe_parameters = reduce_to_signature(
-            Probe.from_name("generic").__init__, file_scan_parameters
-        )
+        probe_parameters = reduce_to_signature(Probe.__init__, file_scan_parameters)
         return probe_parameters
 
     def probe(self, event=None) -> Probe:
@@ -387,21 +385,8 @@ class File(h5py.File):
         Returns:
             Probe: The probe object.
         """
-        probe_parameters = self.get_probe_parameters(event)
-        if self.probe_name == "generic":
-            return Probe.from_name(self.probe_name, **probe_parameters)
-        else:
-            probe = Probe.from_name(self.probe_name)
-
-            probe_geometry = probe_parameters.get("probe_geometry", None)
-            if not np.allclose(probe_geometry, probe.probe_geometry):
-                probe.probe_geometry = probe_geometry
-                log.warning(
-                    "The probe geometry in the data file does not "
-                    "match the probe geometry of the probe. The probe "
-                    "geometry has been updated to match the data file."
-                )
-        return probe
+        probe_parameters_file = self.get_probe_parameters(event)
+        return Probe.from_parameters(self.probe_name, probe_parameters_file)
 
     def recursively_load_dict_contents_from_group(self, path: str, squeeze: bool = False) -> dict:
         """Load dict from contents of group

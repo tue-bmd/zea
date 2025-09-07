@@ -1,6 +1,6 @@
 [project]
 name = "zea"
-version = "0.0.2"
+version = "0.0.4"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "keras >=3.9",
+    "keras >=3.11",
     "h5py >=3.11",
     "numpy >= 1.24",
     "matplotlib >=3.8",
@@ -42,6 +42,7 @@ dependencies = [
     "huggingface_hub >=0.26",
     "wandb >=0.18",
     "wget >=3.2",
+    "imageio[ffmpeg] >=2.0",
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
@@ -69,6 +70,7 @@ dev = [
     "nbsphinx",
     "furo",
     "PyStemmer",
+    "IPython",
     # display
     "opencv-python-headless>=4",
 ]
@@ -95,6 +97,7 @@ docs = [
     "nbsphinx",
     "furo",
     "PyStemmer",
+    "IPython",
 ]
 jax = [
     "jax[cuda12_pip]>=0.4.26"

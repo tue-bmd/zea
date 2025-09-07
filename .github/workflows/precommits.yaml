@@ -1,0 +1,43 @@
+name: Precommithooks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  precommithooks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install -U pip setuptools wheel
+          pip install ruff pre-commit
+
+      - name: Run pre-commit hooks
+        id: precommithooks
+        run: |
+          pre-commit run check-yaml --all-files
+          pre-commit run check-merge-conflict --all-files
+          pre-commit run detect-private-key --all-files
+          pre-commit run poetry-check --all-files
+          pre-commit run poetry-lock --all-files
+        continue-on-error: true
+
+      - name: Check pre-commit result
+        if: ${{ steps.precommithooks.outcome == 'failure' }}
+        run: |
+          echo "pre-commit hooks failed; did you forget to set up the pre-commit hooks?"
+          echo "see the contributing page for more info: https://zea.readthedocs.io/en/latest/contributing.html"
+          exit 1
+
+

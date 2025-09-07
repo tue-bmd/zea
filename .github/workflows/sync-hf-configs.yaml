@@ -1,0 +1,97 @@
+name: Sync Configs to Hugging Face
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - 'configs/**'
+  release:
+    types: [published]
+
+jobs:
+  sync-configs:
+    runs-on: ubuntu-latest
+    if: github.repository == 'tue-bmd/zea'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install huggingface_hub
+
+      - name: Sync configs to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python << 'EOF'
+          import os
+          from huggingface_hub import HfApi, create_repo
+
+          # Initialize HF API
+          print("[HF SYNC] Starting Hugging Face sync workflow...")
+          hf_token = os.environ.get("HF_TOKEN")
+          if not hf_token:
+              print("[HF SYNC][ERROR] HF_TOKEN is not set!")
+              exit(1)
+          api = HfApi(token=hf_token)
+
+          repo_id = "zeahub/configs"
+
+          # Ensure repo exists
+          create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True)
+
+          print("[HF SYNC] Listing configs/ directory contents:")
+          for root, dirs, files in os.walk("configs"):
+              for name in files:
+                  print(os.path.join(root, name))
+
+          # Determine revision and commit message
+          if "${{ github.event_name }}" == "release":
+              revision = "${{ github.event.release.tag_name }}"
+              commit_message = f"Sync configs for release {revision}"
+          else:
+              branch = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF", "refs/heads/main").split("/")[-1]
+              revision = branch
+              short_sha = "${{ github.sha }}"[:7]
+              commit_message = f"Sync configs from branch {branch} (commit: {short_sha})"
+
+          # Create branch if it does not exist (except for main)
+          if revision != "main":
+              api.create_branch(repo_id=repo_id, branch=revision, repo_type="dataset", exist_ok=True)
+
+          # Determine revision and commit message
+          if "${{ github.event_name }}" == "release":
+              revision = "${{ github.event.release.tag_name }}"
+              commit_message = f"Sync configs for release {revision}"
+          else:
+              branch = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF", "refs/heads/main").split("/")[-1]
+              revision = branch
+              short_sha = "${{ github.sha }}"[:7]
+              commit_message = f"Sync configs from branch {branch} (commit: {short_sha})"
+
+          print(f"[HF SYNC] Syncing configs to {repo_id} at revision {revision}...")
+          print(f"[HF SYNC] Commit message: {commit_message}")
+
+          # Upload configs folder
+          commitinfo = api.upload_folder(
+              folder_path="configs",
+              repo_id=repo_id,
+              repo_type="dataset",
+              commit_message=commit_message,
+              revision=revision,
+              create_pr=False
+          )
+
+          print(f"[HF SYNC] Commit info: {commitinfo}")
+
+          print(f"✅ Configs synced to: https://huggingface.co/datasets/{repo_id}")
+          if "${{ github.event_name }}" == "release":
+              print(f"📦 Release configs at: https://huggingface.co/datasets/{repo_id}/tree/{revision}")
+          EOF

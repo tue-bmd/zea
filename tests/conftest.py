@@ -13,9 +13,9 @@ os.environ["ZEA_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing zea
 from zea.data.data_format import generate_example_dataset  # noqa: E402
 
 from . import (  # noqa: E402
+    DUMMY_DATASET_GRID_SIZE_X,
+    DUMMY_DATASET_GRID_SIZE_Z,
     DUMMY_DATASET_N_FRAMES,
-    DUMMY_DATASET_N_X,
-    DUMMY_DATASET_N_Z,
     backend_workers,
 )
 
@@ -57,8 +57,8 @@ def dummy_dataset_path(tmp_path):
             temp_file,
             add_optional_dtypes=True,
             n_frames=DUMMY_DATASET_N_FRAMES,
-            n_z=DUMMY_DATASET_N_Z,
-            n_x=DUMMY_DATASET_N_X,
+            grid_size_z=DUMMY_DATASET_GRID_SIZE_Z,
+            grid_size_x=DUMMY_DATASET_GRID_SIZE_X,
         )
 
     yield str(temp_file.parent)

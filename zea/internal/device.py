@@ -64,24 +64,43 @@ def get_gpu_memory(verbose=True):
 
     Returns:
         memory_free_values: list of available memory for each gpu in MiB.
+        Returns empty list if nvidia-smi is not available.
     """
     if not check_nvidia_smi():
         log.warning(
             "nvidia-smi is not available. Please install nvidia-utils. "
-            "Cannot retrieve GPU memory. Falling back to CPU.."
+            "Cannot retrieve GPU memory. Falling back to CPU."
         )
-        return None
+        return []
 
     def _output_to_list(x):
         return x.decode("ascii").split("\n")[:-1]
 
-    COMMAND = "nvidia-smi --query-gpu=memory.free --format=csv"
+    COMMAND = [
+        "nvidia-smi",
+        "--query-gpu=memory.free",
+        "--format=csv,noheader,nounits",
+    ]
+    # Fail-safe timeout (seconds). Override with ZEA_NVIDIA_SMI_TIMEOUT; set <=0 to disable.
+    smi_timeout = float(os.getenv("ZEA_NVIDIA_SMI_TIMEOUT", "30"))
     try:
-        memory_free_info = _output_to_list(sp.check_output(COMMAND.split()))[1:]
-    except Exception as e:
-        print(f"An error occurred: {e}")
+        if smi_timeout > 0:
+            raw = sp.check_output(COMMAND, timeout=smi_timeout)
+        else:
+            raw = sp.check_output(COMMAND)
+        memory_free_info = _output_to_list(raw)
+    except sp.TimeoutExpired:
+        log.warning(f"nvidia-smi timed out after {smi_timeout}s. Falling back to CPU.")
+        return []
+    except sp.SubprocessError as e:
+        log.warning(f"Failed to retrieve GPU memory: {e}")
+        return []
 
-    memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    memory_free_values = [int(x) for x in memory_free_info]
+
+    if verbose:
+        header = "GPU settings"
+        print("-" * 2 + header.center(50 - 4, "-") + "-" * 2)
 
     # only show enabled devices
     if os.environ.get("CUDA_VISIBLE_DEVICES", "") != "":
@@ -89,10 +108,12 @@ def get_gpu_memory(verbose=True):
         gpus = [int(gpu) for gpu in gpus.split(",")][: len(memory_free_values)]
         if verbose:
             # Report the number of disabled GPUs out of the total
-            num_disabled_gpus = len(memory_free_values) - len(gpus)
             num_gpus = len(memory_free_values)
-
-            print(f"{num_disabled_gpus / num_gpus} GPUs were disabled")
+            num_disabled_gpus = num_gpus - len(gpus)
+            if num_gpus > 0:
+                print(f"{num_disabled_gpus}/{num_gpus} GPUs were disabled")
+            else:
+                print("No GPUs detected by nvidia-smi.")
 
         memory_free_values = [memory_free_values[gpu] for gpu in gpus]
 
@@ -253,15 +274,11 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
         # returns None to indicate CPU
 
-    if device.lower() == "cpu":
+    if isinstance(device, str) and device.lower() == "cpu":
         return _cpu_case()
 
-    if verbose:
-        header = "GPU settings"
-        print("-" * 2 + header.center(50 - 4, "-") + "-" * 2)
-
     memory = get_gpu_memory(verbose=verbose)
-    if memory is None:  # nvidia-smi not working, fallback to CPU
+    if len(memory) == 0:  # nvidia-smi not working, fallback to CPU
         return _cpu_case()
 
     gpu_ids = list(range(len(memory)))

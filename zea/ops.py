@@ -89,18 +89,18 @@ from zea.display import scan_convert
 from zea.internal.checks import _assert_keys_and_axes
 from zea.internal.core import (
     DEFAULT_DYNAMIC_RANGE,
-    STATIC,
     DataTypes,
     ZEADecoderJSON,
     ZEAEncoderJSON,
+    dict_to_tensor,
 )
 from zea.internal.core import Object as ZEAObject
 from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
 from zea.simulator import simulate_rf
-from zea.tensor_ops import patched_map, resample, reshape_axis
-from zea.utils import deep_compare, map_negative_indices, translate
+from zea.tensor_ops import batched_map, patched_map, resample, reshape_axis
+from zea.utils import FunctionTimer, deep_compare, map_negative_indices, translate
 
 
 def get_ops(ops_name):
@@ -170,20 +170,10 @@ class Operation(keras.Operation):
         self._trace_signatures()
 
         if jit_kwargs is None:
-            # TODO: set static_argnames only for operations that require it
+            jit_kwargs = {}
 
-            # Get global static parameters
-            static_params = list(STATIC)
-
-            # Add operation-specific static parameters
-            op_static = list(getattr(self.__class__, "STATIC_PARAMS", []))
-            if op_static:
-                static_params = list(set(static_params + op_static))
-
-            if keras.backend.backend() == "jax":
-                jit_kwargs = {"static_argnames": static_params}
-            else:
-                jit_kwargs = {}
+        if keras.backend.backend() == "jax" and self.static_params:
+            jit_kwargs |= {"static_argnames": self.static_params}
 
         self.jit_kwargs = jit_kwargs
 
@@ -195,6 +185,11 @@ class Operation(keras.Operation):
         # torch not being able to compile the function
         with log.set_level("ERROR"):
             self.set_jit(jit_compile)
+
+    @property
+    def static_params(self):
+        """Get the static parameters of the operation."""
+        return getattr(self.__class__, "STATIC_PARAMS", [])
 
     def set_jit(self, jit_compile: bool):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
@@ -383,6 +378,7 @@ class Pipeline:
         jit_kwargs: dict | None = None,
         name="pipeline",
         validate=True,
+        timed: bool = False,
     ):
         """Initialize a pipeline
 
@@ -404,6 +400,8 @@ class Pipeline:
         """
         self._call_pipeline = self.call
         self.name = name
+        self.timer = FunctionTimer()
+        self.timed = timed
 
         self._pipeline_layers = operations
 
@@ -419,25 +417,33 @@ class Pipeline:
             log.warning("Pipeline validation is disabled, make sure to validate manually.")
 
         if jit_kwargs is None:
-            if keras.backend.backend() == "jax":
-                jit_kwargs = {"static_argnames": STATIC}
-            else:
-                jit_kwargs = {}
+            jit_kwargs = {}
+
+        if keras.backend.backend() == "jax" and self.static_params:
+            jit_kwargs = {"static_argnames": self.static_params}
+
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
-    def needs(self, key):
+    def needs(self, key) -> bool:
         """Check if the pipeline needs a specific key."""
-        if key in self.valid_keys:
-            return True
+        return key in self.valid_keys
 
     @property
-    def valid_keys(self):
+    def valid_keys(self) -> set:
         """Get a set of valid keys for the pipeline."""
         valid_keys = set()
         for operation in self.operations:
             valid_keys.update(operation.valid_keys)
         return valid_keys
+
+    @property
+    def static_params(self) -> List[str]:
+        """Get a list of static parameters for the pipeline."""
+        static_params = []
+        for operation in self.operations:
+            static_params.extend(operation.static_params)
+        return list(set(static_params))
 
     @classmethod
     def from_default(cls, num_patches=100, baseband=False, pfield=False, **kwargs) -> "Pipeline":
@@ -516,6 +522,30 @@ class Pipeline:
         """Alias for self.layers to match the zea naming convention"""
         return self._pipeline_layers
 
+    def timed_call(self, **inputs):
+        """Process input data through the pipeline."""
+
+        for op in self._pipeline_layers:
+            timed_op = self.timer(op, name=op.__class__.__name__)
+            try:
+                outputs = timed_op(**inputs)
+            except KeyError as exc:
+                raise KeyError(
+                    f"[zea.Pipeline] Operation '{op.__class__.__name__}' "
+                    f"requires input key '{exc.args[0]}', "
+                    "but it was not provided in the inputs.\n"
+                    "Check whether the objects (such as `zea.Scan`) passed to "
+                    "`pipeline.prepare_parameters()` contain all required keys.\n"
+                    f"Current list of all passed keys: {list(inputs.keys())}\n"
+                    f"Valid keys for this pipeline: {self.valid_keys}"
+                ) from exc
+            except Exception as exc:
+                raise RuntimeError(
+                    f"[zea.Pipeline] Error in operation '{op.__class__.__name__}': {exc}"
+                ) from exc
+            inputs = outputs
+        return outputs
+
     def call(self, **inputs):
         """Process input data through the pipeline."""
         for operation in self._pipeline_layers:
@@ -531,6 +561,10 @@ class Pipeline:
                     f"Current list of all passed keys: {list(inputs.keys())}\n"
                     f"Valid keys for this pipeline: {self.valid_keys}"
                 ) from exc
+            except Exception as exc:
+                raise RuntimeError(
+                    f"[zea.Pipeline] Error in operation '{operation.__class__.__name__}': {exc}"
+                )
             inputs = outputs
         return outputs
 
@@ -598,13 +632,18 @@ class Pipeline:
                 if operation.jittable and operation._jit_compile:
                     operation.set_jit(value == "ops")
 
+    @property
+    def _call_fn(self):
+        """Get the call function of the pipeline."""
+        return self.call if not self.timed else self.timed_call
+
     def jit(self):
         """JIT compile the pipeline."""
-        self._call_pipeline = jit(self.call, **self.jit_kwargs)
+        self._call_pipeline = jit(self._call_fn, **self.jit_kwargs)
 
     def unjit(self):
         """Un-JIT compile the pipeline."""
-        self._call_pipeline = self.call
+        self._call_pipeline = self._call_fn
 
     @property
     def jittable(self):
@@ -619,11 +658,12 @@ class Pipeline:
     @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
-        return self.operations[0].with_batch_dim
+        return self._with_batch_dim
 
     @with_batch_dim.setter
     def with_batch_dim(self, value):
         """Set the with_batch_dim property of the pipeline."""
+        self._with_batch_dim = value
         for operation in self.operations:
             operation.with_batch_dim = value
 
@@ -890,6 +930,12 @@ class Pipeline:
             probe: Probe object.
             scan: Scan object.
             config: Config object.
+            include (None, "all", or list): Only include these parameter/computed property names.
+                If None or "all", include all.
+            exclude (None or list): Exclude these parameter/computed property names.
+                If provided, these keys will be excluded from the output.
+                Only one of include or exclude can be set.
+
             **kwargs: Additional keyword arguments to be included in the inputs.
 
         Returns:
@@ -897,46 +943,28 @@ class Pipeline:
         """
         # Initialize dictionaries for probe, scan, and config
         probe_dict, scan_dict, config_dict = {}, {}, {}
-        other_dicts = {}
 
         # Process args to extract Probe, Scan, and Config objects
         if probe is not None:
             assert isinstance(probe, Probe), (
                 f"Expected an instance of `zea.probes.Probe`, got {type(probe)}"
             )
-            probe_dict = probe.to_tensor()
+            probe_dict = probe.to_tensor(keep_as_is=self.static_params)
 
         if scan is not None:
             assert isinstance(scan, Scan), (
                 f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
             )
-            scan_dict = scan.to_tensor(
-                compute_missing=True,
-                compute_keys=self.valid_keys,
-            )
+            scan_dict = scan.to_tensor(include=self.valid_keys, keep_as_is=self.static_params)
 
         if config is not None:
             assert isinstance(config, Config), (
                 f"Expected an instance of `zea.config.Config`, got {type(config)}"
             )
-            config_dict.update(config.to_tensor())
+            config_dict.update(config.to_tensor(keep_as_is=self.static_params))
 
         # Convert all kwargs to tensors
-        tensor_kwargs = {}
-        for key, value in kwargs.items():
-            try:
-                # TODO: maybe some logic of convert_to_tensor is needed
-                if isinstance(value, ZEAObject):
-                    tensor_kwargs[key] = value.to_tensor()
-                elif value is None:
-                    tensor_kwargs[key] = None
-                else:
-                    tensor_kwargs[key] = ops.convert_to_tensor(value)
-            except Exception as e:
-                raise ValueError(
-                    f"Error converting key '{key}' to tensor: {e}. "
-                    f"Please ensure all inputs are convertible to tensors."
-                ) from e
+        tensor_kwargs = dict_to_tensor(kwargs, keep_as_is=self.static_params)
 
         # combine probe, scan, config and kwargs
         # explicitly so we know which keys overwrite which
@@ -945,13 +973,8 @@ class Pipeline:
             **probe_dict,
             **scan_dict,
             **config_dict,
-            **other_dicts,
             **tensor_kwargs,
         }
-
-        # Dropping str inputs as they are not supported in jax.jit
-        # TODO: will this break any operations?
-        inputs.pop("probe_type", None)
 
         return inputs
 
@@ -1182,24 +1205,40 @@ class PatchedGrid(Pipeline):
     @property
     def with_batch_dim(self):
         """Get the with_batch_dim property of the pipeline."""
-        return self.pipeline_batched
+        return self._with_batch_dim
 
     @with_batch_dim.setter
     def with_batch_dim(self, value):
         """Set the with_batch_dim property of the pipeline.
         The class handles the batching so the operations have to be set to False."""
-        self.pipeline_batched = value
+        self._with_batch_dim = value
         for operation in self.operations:
             operation.with_batch_dim = False
 
+    @property
+    def valid_keys(self) -> set:
+        """Get a set of valid keys for the pipeline. Adds the parameters that PatchedGrid itself
+        operates on (even if not used by operations inside it)."""
+        return super().valid_keys.union({"flatgrid", "grid_size_x", "grid_size_z"})
+
     def call_item(self, inputs):
         """Process data in patches."""
-        Nx = inputs["Nx"]
-        Nz = inputs["Nz"]
+        # Extract necessary parameters
+        # make sure to add those as valid keys above!
+        grid_size_x = inputs["grid_size_x"]
+        grid_size_z = inputs["grid_size_z"]
         flatgrid = inputs.pop("flatgrid")
 
+        # TODO: maybe using n_tx and n_el from kwargs is better but these are tensors now
+        # and this is not supported in broadcast_to
+        n_tx = inputs[self.key].shape[0]
+        n_pix = flatgrid.shape[0]
+        n_el = inputs[self.key].shape[2]
+        inputs["rx_apo"] = ops.broadcast_to(inputs.get("rx_apo", 1.0), (n_tx, n_pix, n_el))
+        inputs["rx_apo"] = ops.swapaxes(inputs["rx_apo"], 0, 1)  # put n_pix first
+
         # Define a list of keys to look up for patching
-        patch_keys = ["flat_pfield"]
+        patch_keys = ["flat_pfield", "rx_apo"]
 
         patch_arrays = {}
         for key in patch_keys:
@@ -1208,6 +1247,7 @@ class PatchedGrid(Pipeline):
 
         def patched_call(flatgrid, **patch_kwargs):
             patch_args = {k: v for k, v in patch_kwargs.items() if v is not None}
+            patch_args["rx_apo"] = ops.swapaxes(patch_args["rx_apo"], 0, 1)
             out = super(PatchedGrid, self).call(flatgrid=flatgrid, **patch_args, **inputs)
             return out[self.output_key]
 
@@ -1218,11 +1258,11 @@ class PatchedGrid(Pipeline):
             **patch_arrays,
             jit=bool(self.jit_options),
         )
-        return ops.reshape(out, (Nz, Nx, *ops.shape(out)[1:]))
+        return ops.reshape(out, (grid_size_z, grid_size_x, *ops.shape(out)[1:]))
 
     def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
-        if self.pipeline_batched:
+        if self._with_batch_dim:
             input_data = inputs.pop(self.key)
             output = ops.map(
                 lambda x: self.call_item({self.key: x, **inputs}),
@@ -1355,7 +1395,7 @@ class Simulate(Operation):
     """Simulate RF data."""
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax"]
+    STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
 
     def __init__(self, **kwargs):
         super().__init__(
@@ -1400,6 +1440,7 @@ class Simulate(Operation):
                 attenuation_coef=attenuation_coef,
                 tx_apodizations=tx_apodizations,
             ),
+            "n_ch": 1,  # Simulate always returns RF data (so single channel)
         }
 
 
@@ -1412,8 +1453,8 @@ class TOFCorrection(Operation):
         "f_number",
         "apply_lens_correction",
         "apply_phase_rotation",
-        "Nx",
-        "Nz",
+        "grid_size_x",
+        "grid_size_z",
     ]
 
     def __init__(self, apply_phase_rotation=True, **kwargs):
@@ -1471,7 +1512,7 @@ class TOFCorrection(Operation):
             "flatgrid": flatgrid,
             "sound_speed": sound_speed,
             "angles": polar_angles,
-            "vfocus": focus_distances,
+            "focus_distances": focus_distances,
             "sampling_frequency": sampling_frequency,
             "fnum": f_number,
             "apply_phase_rotation": self.apply_phase_rotation,
@@ -1566,18 +1607,16 @@ class DelayAndSum(Operation):
         )
         self.reshape_grid = reshape_grid
 
-    def process_image(self, data, rx_apo, tx_apo):
+    def process_image(self, data, rx_apo):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
             data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_pix, n_el, n_ch)`
+            rx_apo (ops.Tensor): Receive apodization window of shape `(n_tx, n_pix, n_el, n_ch)`.
 
         Returns:
             ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
         """
-        # Apply tx_apo
-        data = tx_apo * data
-
         # Sum over the channels, i.e. DAS
         data = ops.sum(rx_apo * data, -2)
 
@@ -1589,40 +1628,42 @@ class DelayAndSum(Operation):
     def call(
         self,
         rx_apo=None,
-        tx_apo=None,
-        Nz=None,
-        Nx=None,
+        grid=None,
         **kwargs,
     ):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
             tof_corrected_data (ops.Tensor): The TOF corrected input of shape
-                `(n_tx, n_z*n_x, n_el, n_ch)` with optional batch dimension.
-            rx_apo (ops.Tensor, optional): Receive apodization window. Defaults to 1.0.
-            tx_apo (ops.Tensor, optional): Transmit apodization window. Defaults to 1.0.
+                `(n_tx, grid_size_z*grid_size_x, n_el, n_ch)` with optional batch dimension.
+            rx_apo (ops.Tensor): Receive apodization window
+                of shape `(n_tx, grid_size_z*grid_size_x, n_el)`
+                with optional batch dimension. Defaults to 1.0.
 
         Returns:
-            dict: Dictionary containing beamformed_data of shape `(n_z*n_x, n_ch)`
-                when reshape_grid is False or `(n_z, n_x, n_ch)` when reshape_grid is True,
+            dict: Dictionary containing beamformed_data
+                of shape `(grid_size_z*grid_size_x, n_ch)` when reshape_grid is False
+                or `(grid_size_z, grid_size_x, n_ch)` when reshape_grid is True,
                 with optional batch dimension.
         """
-        if rx_apo is None:
-            rx_apo = 1.0
-
-        if tx_apo is None:
-            tx_apo = 1.0
-
         data = kwargs[self.key]
 
+        if rx_apo is None:
+            rx_apo = ops.ones(1, dtype=ops.dtype(data))
+        rx_apo = ops.broadcast_to(rx_apo[..., None], data.shape)
+
         if not self.with_batch_dim:
-            beamformed_data = self.process_image(data, rx_apo, tx_apo)
+            beamformed_data = self.process_image(data, rx_apo)
         else:
             # Apply process_image to each item in the batch
-            beamformed_data = ops.map(lambda data: self.process_image(data, rx_apo, tx_apo), data)
+            beamformed_data = batched_map(
+                lambda data, rx_apo: self.process_image(data, rx_apo), data, rx_apo=rx_apo
+            )
 
         if self.reshape_grid:
-            beamformed_data = reshape_axis(beamformed_data, (Nz, Nx), axis=int(self.with_batch_dim))
+            beamformed_data = reshape_axis(
+                beamformed_data, grid.shape[:2], axis=int(self.with_batch_dim)
+            )
 
         return {self.output_key: beamformed_data}
 
@@ -1646,9 +1687,10 @@ class EnvelopeDetect(Operation):
     def call(self, **kwargs):
         """
         Args:
-            - data (Tensor): The beamformed data of shape (..., n_z, n_x, n_ch).
+            - data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
         Returns:
-            - envelope_data (Tensor): The envelope detected data of shape (..., n_z, n_x).
+            - envelope_data (Tensor): The envelope detected data
+                of shape (..., grid_size_z, grid_size_x).
         """
         data = kwargs[self.key]
 
@@ -1977,6 +2019,18 @@ class LeeFilter(Operation):
             key=self.key,
         )
 
+    @property
+    def with_batch_dim(self):
+        """Get the with_batch_dim property of the LeeFilter operation."""
+        return self._with_batch_dim
+
+    @with_batch_dim.setter
+    def with_batch_dim(self, value):
+        """Set the with_batch_dim property of the LeeFilter operation."""
+        self._with_batch_dim = value
+        if hasattr(self, "gaussian_blur"):
+            self.gaussian_blur.with_batch_dim = value
+
     def call(self, **kwargs):
         data = kwargs[self.key]
 
@@ -2008,7 +2062,8 @@ class LeeFilter(Operation):
 
 @ops_registry("demodulate")
 class Demodulate(Operation):
-    """Demodulates the input data to baseband."""
+    """Demodulates the input data to baseband. After this operation, the carrier frequency
+    is removed (0 Hz) and the data is in IQ format stored in two real valued channels."""
 
     def __init__(self, axis=-3, **kwargs):
         super().__init__(
@@ -2035,13 +2090,14 @@ class Demodulate(Operation):
         return {
             self.output_key: iq_data_two_channel,
             "demodulation_frequency": demodulation_frequency,
+            "center_frequency": 0.0,
             "n_ch": 2,
         }
 
 
 @ops_registry("lambda")
 class Lambda(Operation):
-    """Use any funcion as an operation."""
+    """Use any function as an operation."""
 
     def __init__(self, func, func_kwargs=None, **kwargs):
         super().__init__(**kwargs)
@@ -2261,21 +2317,21 @@ class Downsample(Operation):
         self.phase = phase
         self.axis = axis
 
-    def call(self, **kwargs):
+    def call(self, sampling_frequency=None, n_ax=None, **kwargs):
         data = kwargs[self.key]
         length = ops.shape(data)[self.axis]
         sample_idx = ops.arange(self.phase, length, self.factor)
         data_downsampled = ops.take(data, sample_idx, axis=self.axis)
 
+        output = {self.output_key: data_downsampled}
         # downsampling also affects the sampling frequency
-        if "sampling_frequency" in kwargs:
-            kwargs["sampling_frequency"] = kwargs["sampling_frequency"] / self.factor
-            kwargs["n_ax"] = kwargs["n_ax"] // self.factor
-        return {
-            self.output_key: data_downsampled,
-            "sampling_frequency": kwargs["sampling_frequency"],
-            "n_ax": kwargs["n_ax"],
-        }
+        if sampling_frequency is not None:
+            sampling_frequency = sampling_frequency / self.factor
+            output["sampling_frequency"] = sampling_frequency
+        if n_ax is not None:
+            n_ax = n_ax // self.factor
+            output["n_ax"] = n_ax
+        return output
 
 
 @ops_registry("branched_pipeline")
@@ -2604,6 +2660,24 @@ class AnisotropicDiffusion(Operation):
         return result
 
 
+class ChannelsToComplex(Operation):
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        output = channels_to_complex(data)
+        return {self.output_key: output}
+
+
+class ComplexToChannels(Operation):
+    def __init__(self, axis=-1, **kwargs):
+        super().__init__(**kwargs)
+        self.axis = axis
+
+    def call(self, **kwargs):
+        data = kwargs[self.key]
+        output = complex_to_channels(data, axis=self.axis)
+        return {self.output_key: output}
+
+
 def demodulate_not_jitable(
     rf_data,
     sampling_frequency=None,
@@ -2800,30 +2874,34 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
 
 
 def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
-    """Design low pass filter.
+    """Design complex low-pass filter.
 
-    LPF with num_taps points and cutoff at bw / 2
+    The filter is a low-pass FIR filter modulated to the center frequency.
 
     Args:
         num_taps (int): number of taps in filter.
         sampling_frequency (float): sample frequency.
         f (float): center frequency.
         bw (float): bandwidth in Hz.
+
     Raises:
-        AssertionError: if cutoff frequency (bw / 2) is not within (0, sampling_frequency / 2)
+        ValueError: if cutoff frequency (bw / 2) is not within (0, sampling_frequency / 2)
 
     Returns:
-        ndarray: fx LP filter
+        ndarray: Complex-valued low-pass filter
     """
-    assert (bw / 2 > 0) & (bw / 2 < sampling_frequency / 2), log.error(
-        "Cutoff frequency must be within (0, sampling_frequency / 2), "
-        f"got {bw / 2} Hz, must be within (0, {sampling_frequency / 2}) Hz"
-    )
-    t_qbp = np.arange(num_taps) / sampling_frequency
-    lpf = scipy.signal.firwin(num_taps, bw / 2, pass_zero=True, fs=sampling_frequency) * np.exp(
-        1j * 2 * np.pi * f * t_qbp
-    )
-    return lpf
+    cutoff = bw / 2
+    if not (0 < cutoff < sampling_frequency / 2):
+        raise ValueError(
+            f"Cutoff frequency must be within (0, sampling_frequency / 2), "
+            f"got {cutoff} Hz, must be within (0, {sampling_frequency / 2}) Hz"
+        )
+    # Design real-valued low-pass filter
+    lpf = scipy.signal.firwin(num_taps, cutoff, pass_zero=True, fs=sampling_frequency)
+    # Modulate to center frequency to make it complex
+    time_points = np.arange(num_taps) / sampling_frequency
+    lpf_complex = lpf * np.exp(1j * 2 * np.pi * f * time_points)
+    return lpf_complex
 
 
 def complex_to_channels(complex_data, axis=-1):
@@ -2865,7 +2943,7 @@ def channels_to_complex(data):
 
 
 def hilbert(x, N: int = None, axis=-1):
-    """Manual implementation of the Hilbert transform function. Tje function
+    """Manual implementation of the Hilbert transform function. The function
     returns the analytical signal.
 
     Operated in the Fourier domain.

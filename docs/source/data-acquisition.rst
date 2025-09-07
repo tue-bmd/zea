@@ -76,11 +76,11 @@ The ``zea`` toolbox uses a custom data format based on the HDF5 standard to stor
    * - ``data/aligned_data``
      - Time-of-flight corrected data. Shape: [n_frames, n_tx, n_ax, n_el, n_ch]
    * - ``data/envelope_data``
-     - Envelope-detected data. Shape: [n_frames, n_z, n_x]
+     - Envelope-detected data. Shape: [n_frames, grid_size_z, grid_size_x]
    * - ``data/beamformed_data``
-     - Data after beamforming. Shape: [n_frames, n_z, n_x]
+     - Data after beamforming. Shape: [n_frames, grid_size_z, grid_size_x]
    * - ``data/image``
-     - Log-compressed image (in dB). Shape: [n_frames, n_z, n_x]
+     - Log-compressed image (in dB). Shape: [n_frames, grid_size_z, grid_size_x]
    * - ``data/image_sc``
      - Scan-converted image (in dB). Shape: [n_frames, output_size_z, output_size_x]
    * - ``scan/n_ax``

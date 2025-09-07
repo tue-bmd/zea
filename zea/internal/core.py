@@ -15,19 +15,6 @@ BASE_FLOAT_PRECISION = "float32"
 BASE_INT_PRECISION = "int32"
 DEFAULT_DYNAMIC_RANGE = (-60, 0)
 
-# TODO: make static more neat
-# These are global static attributes for all ops. Ops specific
-# static attributes should be defined in the respective ops class
-STATIC = [
-    "f_number",
-    "apply_lens_correction",
-    "apply_phase_rotation",
-    "Nx",
-    "Nz",
-    "fill_value",
-    "n_ax",
-]
-
 
 class DataTypes(enum.Enum):
     """Enum class for zea data types.
@@ -125,10 +112,6 @@ class Object:
     def __delitem__(self, key):
         delattr(self, key)
 
-    def to_tensor(self):
-        """Convert the attributes in the object to keras tensors"""
-        return object_to_tensor(self)
-
     @classmethod
     def safe_initialize(cls, **kwargs):
         """Safely initialize a class by removing any invalid arguments."""
@@ -182,28 +165,7 @@ def _skip_to_tensor(value):
     return False
 
 
-def object_to_tensor(obj):
-    """Convert an object to a dictionary of tensors."""
-    snapshot = {}
-
-    for key in dir(obj):
-        # Skip dunder/hidden methods
-        if key.startswith("_"):
-            continue
-
-        value = getattr(obj, key, None)
-
-        # Skip certain types
-        if _skip_to_tensor(value):
-            continue
-
-        # Convert the value to a tensor
-        snapshot[key] = _to_tensor(key, value)
-
-    return snapshot
-
-
-def dict_to_tensor(dictionary):
+def dict_to_tensor(dictionary, keep_as_is=None):
     """Convert an object to a dictionary of tensors."""
     snapshot = {}
 
@@ -212,20 +174,27 @@ def dict_to_tensor(dictionary):
         if key.startswith("_"):
             continue
 
+        # Get the value from the dictionary
         value = dictionary[key]
+
+        if isinstance(value, Object):
+            snapshot[key] = value.to_tensor(keep_as_is=keep_as_is)
 
         # Skip certain types
         if _skip_to_tensor(value):
             continue
 
         # Convert the value to a tensor
-        snapshot[key] = _to_tensor(key, value)
+        snapshot[key] = _to_tensor(key, value, keep_as_is=keep_as_is)
 
     return snapshot
 
 
-def _to_tensor(key, val):
-    if key in STATIC:
+def _to_tensor(key, val, keep_as_is: list = None):
+    if keep_as_is is None:
+        keep_as_is = []
+
+    if key in keep_as_is:
         return val
 
     if not isinstance(val, CONVERT_TO_KERAS_TYPES):
