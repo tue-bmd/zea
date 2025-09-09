@@ -108,33 +108,33 @@ def get_matplotlib_figure_props(figure):
             position (tuple): x and y position of figure in pixels
             size (tuple): width and height of figure in pixels
     """
-    # Get size and position in the format of "widthxheight+X+Y"
-    geometry = figure.canvas.manager.window.geometry()
-
-    # Get the geometry object based on the backend
-    backend_name = matplotlib.get_backend()
-
+    position, size = None, None
     try:
-        if backend_name == "TkAgg":
-            assert isinstance(geometry, str), (
-                f"Unsupported geometry type: {type(geometry)} for backend: {backend_name}"
-            )
-            # format: "widthxheight+X+Y"
-            # Split the geometry string by '+' to extract size and position
-            size_str, *pos_str = geometry.split("+")
-            # Extract width and height from the size string
-            size = map(int, size_str.split("x"))
-            # Extract X and Y position values as integers
-            position = map(int, pos_str)
-        elif backend_name == "QtAgg":
-            # format: QRect object
-            position = geometry.x(), geometry.y()
-            size = geometry.size().width(), geometry.size().height()
-        else:
-            raise ValueError(f"Unsupported backend: {backend_name}")
+        manager = figure.canvas.manager
+        window = getattr(manager, "window", None)
+        if window is not None:
+            # Try geometry() method (TkAgg, Qt)
+            geom = getattr(window, "geometry", None)
+            if callable(geom):
+                g = geom()
+                if isinstance(g, str):
+                    # TkAgg: "widthxheight+X+Y"
+                    size_str, *pos_str = g.split("+")
+                    width, height = map(int, size_str.split("x"))
+                    x, y = map(int, pos_str)
+                    position, size = (x, y), (width, height)
+                elif hasattr(g, "x") and hasattr(g, "y"):
+                    # Qt: QRect
+                    position, size = (g.x(), g.y()), (g.width(), g.height())
+            # Try frameGeometry() method (MacOS, Qt)
+            elif hasattr(window, "frameGeometry"):
+                fg = window.frameGeometry()
+                position, size = (fg.x(), fg.y()), (fg.width(), fg.height())
+            # WXAgg
+            elif hasattr(window, "GetPosition") and hasattr(window, "GetSize"):
+                position, size = window.GetPosition(), window.GetSize()
     except Exception as error:
         log.warning(f"Could not get figure properties: {error}")
-        position, size = None, None
 
     return position, size
 

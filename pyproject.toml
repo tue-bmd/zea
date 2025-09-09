@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "keras >=3.9",
+    "keras >=3.11",
     "h5py >=3.11",
     "numpy >= 1.24",
     "matplotlib >=3.8",
@@ -42,6 +42,7 @@ dependencies = [
     "huggingface_hub >=0.26",
     "wandb >=0.18",
     "wget >=3.2",
+    "imageio[ffmpeg] >=2.0",
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",

@@ -39,6 +39,16 @@ class Operator(abc.ABC, Object):
         raise NotImplementedError
 
 
+class IdentityOperator(Operator):
+    """Identity operator class."""
+
+    def forward(self, data):
+        return data
+
+    def __str__(self):
+        return "y = x"
+
+
 @operator_registry(name="inpainting")
 class InpaintingOperator(Operator):
     """Inpainting operator class.

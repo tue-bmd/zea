@@ -1270,6 +1270,14 @@ def L2(x):
     return ops.sqrt(ops.sum(x**2))
 
 
+def L1(x):
+    """L1 norm of a tensor.
+
+    Implementation of L1 norm: https://mathworld.wolfram.com/L1-Norm.html
+    """
+    return ops.sum(ops.abs(x))
+
+
 def linear_sum_assignment(cost):
     """Greedy linear sum assignment.
 
@@ -1325,3 +1333,145 @@ else:
     def safe_vectorize(pyfunc, excluded=None, signature=None):
         """Just a wrapper around ops.vectorize."""
         return ops.vectorize(pyfunc, excluded=excluded, signature=signature)
+
+
+def apply_along_axis(func1d, axis, arr, *args, **kwargs):
+    """Apply a function to 1D array slices along an axis.
+
+    Keras implementation of numpy.apply_along_axis using keras.ops.vectorized_map.
+
+    Args:
+        func1d: A callable function with signature ``func1d(arr, /, *args, **kwargs)``
+            where ``*args`` and ``**kwargs`` are the additional positional and keyword
+            arguments passed to apply_along_axis.
+        axis: Integer axis along which to apply the function.
+        arr: The array over which to apply the function.
+        *args: Additional positional arguments passed through to func1d.
+        **kwargs: Additional keyword arguments passed through to func1d.
+
+    Returns:
+        The result of func1d applied along the specified axis.
+    """
+    # Convert to keras tensor
+    arr = ops.convert_to_tensor(arr)
+
+    # Get array dimensions
+    num_dims = len(arr.shape)
+
+    # Canonicalize axis (handle negative indices)
+    if axis < 0:
+        axis = num_dims + axis
+
+    if axis < 0 or axis >= num_dims:
+        raise ValueError(f"axis {axis} is out of bounds for array of dimension {num_dims}")
+
+    # Create a wrapper function that applies func1d with the additional arguments
+    def func(slice_arr):
+        return func1d(slice_arr, *args, **kwargs)
+
+    # Recursively build up vectorized maps following the JAX pattern
+    # For dimensions after the target axis (right side)
+    for i in range(1, num_dims - axis):
+        prev_func = func
+
+        def make_func(f, dim_offset):
+            def vectorized_func(x):
+                # Move the dimension we want to map over to the front
+                perm = list(range(len(x.shape)))
+                perm[0], perm[dim_offset] = perm[dim_offset], perm[0]
+                x_moved = ops.transpose(x, perm)
+                result = ops.vectorized_map(f, x_moved)
+                # Move the result dimension back if needed
+                if len(result.shape) > 0:
+                    result_perm = list(range(len(result.shape)))
+                    if len(result_perm) > dim_offset:
+                        result_perm[0], result_perm[dim_offset] = (
+                            result_perm[dim_offset],
+                            result_perm[0],
+                        )
+                        result = ops.transpose(result, result_perm)
+                return result
+
+            return vectorized_func
+
+        func = make_func(prev_func, i)
+
+    # For dimensions before the target axis (left side)
+    for i in range(axis):
+        prev_func = func
+
+        def make_func(f):
+            return lambda x: ops.vectorized_map(f, x)
+
+        func = make_func(prev_func)
+
+    return func(arr)
+
+
+def correlate(x, y, mode="full"):
+    """
+    Complex correlation via splitting real and imaginary parts.
+    Equivalent to np.correlate(x, y, mode).
+
+    NOTE: this function exists because tensorflow does not support complex correlation.
+    NOTE: tensorflow also handles padding differently than numpy, so we manually pad the input.
+
+    Args:
+        x: np.ndarray (complex or real)
+        y: np.ndarray (complex or real)
+        mode: "full", "valid", or "same"
+    """
+    x = ops.convert_to_tensor(x)
+    y = ops.convert_to_tensor(y)
+
+    is_complex = "complex" in ops.dtype(x) or "complex" in ops.dtype(y)
+
+    # Split into real and imaginary
+    xr, xi = ops.real(x), ops.imag(x)
+    yr, yi = ops.real(y), ops.imag(y)
+
+    # Pad to do full correlation
+    pad_left = ops.shape(y)[0] - 1
+    pad_right = ops.shape(y)[0] - 1
+    xr = ops.pad(xr, [[pad_left, pad_right]])
+    xi = ops.pad(xi, [[pad_left, pad_right]])
+
+    # Correlation: sum over x[n] * conj(y[n+k])
+    rr = ops.correlate(xr, yr, mode="valid")
+    ii = ops.correlate(xi, yi, mode="valid")
+    ri = ops.correlate(xr, yi, mode="valid")
+    ir = ops.correlate(xi, yr, mode="valid")
+
+    real_part = rr + ii
+    imag_part = ir - ri
+
+    real_part = ops.cast(real_part, "complex64")
+    imag_part = ops.cast(imag_part, "complex64")
+
+    complex_tensor = real_part + 1j * imag_part
+
+    # Extract relevant part based on mode
+    full_length = ops.shape(real_part)[0]
+    x_len = ops.shape(x)[0]
+    y_len = ops.shape(y)[0]
+
+    if mode == "same":
+        # Return output of length max(M, N)
+        target_len = ops.maximum(x_len, y_len)
+        start = ops.floor((full_length - target_len) / 2)
+        start = ops.cast(start, "int32")
+        end = start + target_len
+        complex_tensor = complex_tensor[start:end]
+    elif mode == "valid":
+        # Return output of length max(M, N) - min(M, N) + 1
+        target_len = ops.maximum(x_len, y_len) - ops.minimum(x_len, y_len) + 1
+        start = ops.ceil((full_length - target_len) / 2)
+        start = ops.cast(start, "int32")
+        end = start + target_len
+        complex_tensor = complex_tensor[start:end]
+    # For "full" mode, use the entire result (no slicing needed)
+
+    if is_complex:
+        return complex_tensor
+    else:
+        return ops.real(complex_tensor)

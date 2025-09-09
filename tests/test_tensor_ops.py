@@ -476,3 +476,72 @@ def test_linear_sum_assignment_greedy():
     # Should assign 0->0, 1->1, 2->2
     assert np.all(row_ind == np.array([0, 1, 2]))
     assert np.all(col_ind == np.array([0, 1, 2]))
+
+
+@pytest.mark.parametrize(
+    "array, axis, fn",
+    [
+        [default_rng(seed=1).normal(size=(2, 3)), 0, "sum"],
+        [default_rng(seed=2).normal(size=(2, 3, 4)), 1, "argmax"],
+        [default_rng(seed=3).normal(size=(2, 3, 4, 5)), 2, "var"],
+    ],
+)
+def test_apply_along_axis(array, axis, fn):
+    """Test the apply_along_axis function."""
+    from keras import ops
+
+    from zea import tensor_ops
+
+    if fn == "sum":
+        fn = ops.sum
+        np_fn = np.sum
+    elif fn == "var":
+        fn = ops.var
+        np_fn = np.var
+    elif fn == "argmax":
+        fn = ops.argmax
+        np_fn = np.argmax
+    else:
+        raise ValueError(f"Function {fn} not recognized.")
+
+    # Simple test: sum along axis
+    array = array.astype(np.float32)
+    result = tensor_ops.apply_along_axis(fn, axis, array)
+    expected = np.apply_along_axis(np_fn, axis, array)
+    np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("mode", ["valid", "same", "full"])
+def test_correlate(mode):
+    """Test the correlate function with random complex vectors against np.correlate."""
+    from zea import tensor_ops
+
+    # Set random seed for reproducibility
+    np.random.seed(42)
+
+    # Test with real vectors
+    a_real = np.random.randn(10).astype(np.float32)
+    v_real = np.random.randn(7).astype(np.float32)
+
+    result_real = tensor_ops.correlate(a_real, v_real, mode=mode)
+    expected_real = np.correlate(a_real, v_real, mode=mode)
+
+    np.testing.assert_allclose(result_real, expected_real, rtol=1e-5, atol=1e-5)
+
+    # Test with complex vectors
+    a_complex = (np.random.randn(8) + 1j * np.random.randn(8)).astype(np.complex64)
+    v_complex = (np.random.randn(5) + 1j * np.random.randn(5)).astype(np.complex64)
+
+    result_complex = tensor_ops.correlate(a_complex, v_complex, mode=mode)
+    expected_complex = np.correlate(a_complex, v_complex, mode=mode)
+
+    np.testing.assert_allclose(result_complex, expected_complex, rtol=1e-5, atol=1e-5)
+
+    # Test edge case: different lengths
+    a_short = np.random.randn(3).astype(np.float32)
+    v_long = np.random.randn(12).astype(np.float32)
+
+    result_edge = tensor_ops.correlate(a_short, v_long, mode=mode)
+    expected_edge = np.correlate(a_short, v_long, mode=mode)
+
+    np.testing.assert_allclose(result_edge, expected_edge, rtol=1e-5, atol=1e-5)

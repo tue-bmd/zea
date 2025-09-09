@@ -17,6 +17,7 @@ zea
    data
    datapaths
    display
+   doppler
    interface
    io_lib
    log

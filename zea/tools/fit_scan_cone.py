@@ -83,8 +83,7 @@ def filter_edge_points_by_boundary(edge_points, is_left=True, min_cone_half_angl
 
 
 def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
-    """
-    Detect the ultrasound cone parameters from a grayscale image.
+    """Detect the ultrasound cone parameters from a grayscale image.
 
     This function performs the following steps:
     1. Thresholds the image to create a binary mask
@@ -209,6 +208,7 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     apex_x = left_a + left_b * apex_y
 
     # Calculate cone height
+    max_y = ops.cast(max_y, apex_y.dtype)
     cone_height = max_y - apex_y
 
     # Calculate opening angle from the line slopes

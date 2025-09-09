@@ -3,7 +3,6 @@
 from functools import partial
 from typing import Tuple, Union
 
-import keras
 import numpy as np
 import scipy
 from keras import ops
@@ -342,6 +341,7 @@ def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value
     """map_coordinates using keras.ops or scipy.ndimage when order > 1."""
     if order > 1:
         inputs = ops.convert_to_numpy(inputs)
+        coordinates = ops.convert_to_numpy(coordinates)
         out = scipy.ndimage.map_coordinates(
             inputs, coordinates, order=order, mode=fill_mode, cval=fill_value
         )
@@ -358,10 +358,6 @@ def map_coordinates(inputs, coordinates, order, fill_mode="constant", fill_value
 
 def _interpolate_batch(images, coordinates, fill_value=0.0, order=1, vectorize=True):
     """Interpolate a batch of images."""
-
-    # TODO: figure out why tensorflow map_coordinates is broken
-    if keras.backend.backend() == "tensorflow":
-        assert order > 1, "Some bug in tensorflow in map_coordinates, set order > 1 to use scipy."
 
     image_shape = images.shape
     num_image_dims = coordinates.shape[0]

@@ -56,12 +56,23 @@ NOTEBOOK_PARAMETERS = {
     "zea_local_data.ipynb": {
         "config_picmus_rf": f"{CONFIG_DIR}/config_picmus_rf.yaml",
     },
+    "doppler_example.ipynb": {
+        "n_frames": 3,
+        "n_transmits": 2,
+    },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
     #     "param1": value1,
     #     "param2": value2,
     # },
 }
+
+_notebook_names = [nb.name for nb in NOTEBOOKS]
+for nbp_name in NOTEBOOK_PARAMETERS.keys():
+    assert nbp_name in _notebook_names, (
+        f"Notebook {nbp_name} not found in {NOTEBOOKS_DIR}. "
+        "Wrong definition in NOTEBOOK_PARAMETERS?"
+    )
 
 
 def pytest_sessionstart(session):
