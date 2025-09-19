@@ -13,6 +13,8 @@ from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 import zea
 from zea.internal.cache import ZEA_CACHE_DIR
 from zea.internal.registry import model_registry
+import os
+import requests
 
 HF_PREFIX = "hf://"
 
@@ -83,7 +85,16 @@ def get_file(preset, path):
             )
         hf_handle = preset.removeprefix(HF_SCHEME + "://")
 
-        def _download_from_hf(repo_id, filename):
+        def _download_from_hf(repo_id, filename,
+                              save_dir=HF_MODELS_DIR):
+            if filename.endswith('.onnx'):
+                r = requests.get(filename)
+                model_path = os.path.join(save_dir, filename.basename)
+                with open(model_path, "wb") as f:
+                    f.write(r.content)
+                print(f"Downloaded onnx model to {model_path}")
+                return model_path
+
             return huggingface_hub.hf_hub_download(
                 repo_id=repo_id,
                 filename=filename,

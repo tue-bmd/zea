@@ -47,6 +47,20 @@ echonet_dynamic_presets = {
     },
 }
 
+camus_presets = {
+    "augmented_camus_seg": {
+        "metadata": {
+            "description": (
+                "Augmented CAMUS segmentation model for cardiac ultrasound segmentation. "
+                "Original paper and code: https://arxiv.org/abs/2502.20100"
+            ),
+            "params": 0,
+            "path": "augmented_camus_seg",
+        },
+        "hf_handle": "hf://gillesvdv/augmented_camus_seg",
+    },
+}
+
 echonet_lvh_presets = {
     "echonetlvh": {
         "metadata": {
