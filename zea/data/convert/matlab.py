@@ -517,6 +517,15 @@ def read_raw_data(file, event=None, frames="all"):
 
     frame_indices = get_frame_indices(file, frames)
 
+    if raw_data.ndim == 2:
+        # If there is only a single frame, we need to add a frame dimension
+        raw_data = np.expand_dims(raw_data, axis=0)
+    elif raw_data.ndim != 3:
+        raise ValueError(
+            f"Raw data has {raw_data.ndim} dimensions, but should have 2 or 3. "
+            "Please check the input file."
+        )
+
     raw_data = raw_data[frame_indices]
 
     raw_data = raw_data[:, :, : n_ax * n_tx]
