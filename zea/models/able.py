@@ -61,7 +61,7 @@ class ABLE(BaseModel):
     .. code-block:: python
 
         # create a 4-layer ABLE model with default (1,1) kernels.
-        model = ABLE(elements=128, latent_dim=32, num_layers=4, kernel_size=(1,1))
+        model = ABLE(elements=128, latent_dim=32, num_layers=4, kernel_size=(1, 1))
     """
 
     def __init__(
@@ -91,10 +91,6 @@ class ABLE(BaseModel):
         """
         super().__init__(name=name, **kwargs)
 
-        # network will be constructed by an external builder; leave as None
-        # or construct with a helper if/when available
-        self.network = None
-
         # initialize and validate layer dims and kernel sizes using helpers
         self.layer_dims = self._init_layers(layers, num_layers, elements, latent_dim)
         self.kernel_sizes = self._init_kernels(kernel_size, len(self.layer_dims))
@@ -103,6 +99,8 @@ class ABLE(BaseModel):
         self.elements = elements
         self.latent_dim = latent_dim
         self.num_layers = len(self.layer_dims)
+
+        self.network = self._get_network(self.layer_dims, self.kernel_sizes)
 
     def _init_kernels(self, kernel_size, n_layers):
         """Normalize kernel_size into a list of (h, w) tuples of length n_layers.
@@ -163,19 +161,23 @@ class ABLE(BaseModel):
         return [elements] + middle + [elements]
 
     def _get_network(self, layer_dims, kernel_sizes):
-        """Builds the internal network based on layer dimensions and kernel sizes."""
-
-        # build a simple sequential stack of Conv2D layers.
-        # input channels are layer_dims[0]; create an Input layer accordingly.
-        inp = Input(shape=(None, None, None, layer_dims[0]))
-        x = inp
-
-        for idx, (layer_dim, kernel_size) in enumerate(zip(layer_dims, kernel_sizes)):
-            # last layer: no activation; intermediate layers: use antirectifier
+        """Return a callable network function based on layer and kernel specs."""
+        conv_layers = []
+        for idx, (dim, kernel) in enumerate(zip(layer_dims, kernel_sizes)):
             activation = None if idx == (len(layer_dims) - 1) else self.antirectifier
-            x = Conv2D(layer_dim, kernel_size, activation=activation, padding="same")(x)
+            conv_layers.append(Conv2D(dim, kernel, activation=activation, padding="same"))
 
-        return keras.Model(inputs=inp, outputs=x)
+        def apply_network(x):
+            out = x
+            for conv in conv_layers:
+                out = conv(out)
+
+            # multiply input with output (apply adaptive weighting)
+            out = ops.multiply(x, out)
+
+            return out
+
+        return apply_network
 
     def antirectifier(self, x):
         """Applies the anti-rectifier activation function."""
