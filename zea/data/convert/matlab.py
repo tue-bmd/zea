@@ -101,10 +101,8 @@ data from the file and returns a ``DatasetElement``. Then pass the function to t
 import argparse
 import os
 import sys
-import tkinter as tk
 import traceback
 from pathlib import Path
-from tkinter import filedialog
 
 import h5py
 import numpy as np
@@ -396,8 +394,8 @@ def read_waveforms(file, tx_order, event=None):
     waveforms_two_way_list = []
 
     # Read all the waveforms from the file
-    n_tw = get_reference_size(file["TW"]["Wvfm1Wy"])
-    for n in range(n_tw):
+    n_waveforms = get_reference_size(file["TW"]["Wvfm1Wy"])
+    for n in range(n_waveforms):
         # Get the row vector of the 1-way waveform
         waveform_one_way = dereference_index(file, file["TW"]["Wvfm1Wy"], n)[:]
         # Turn into 1d array
@@ -1096,10 +1094,19 @@ if __name__ == "__main__":
         log.info("Select a directory containing Verasonics matlab raw files.")
         # Create a Tkinter root window
         try:
+            import tkinter as tk
+            from tkinter import filedialog
+
             root = tk.Tk()
             root.withdraw()
             # Prompt the user to select a file or directory
             selected_path = filedialog.askdirectory()
+        except ImportError as e:
+            raise ImportError(
+                log.error(
+                    "tkinter is not installed. Please install it with 'apt install python3-tk'."
+                )
+            ) from e
         except Exception as e:
             raise ValueError(
                 log.error(

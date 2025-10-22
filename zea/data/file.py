@@ -6,6 +6,7 @@ from typing import List
 
 import h5py
 import numpy as np
+from keras.utils import pad_sequences
 
 from zea import log
 from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
@@ -219,6 +220,27 @@ class File(h5py.File):
     def load_data(self, data_type, indices: str | int | List[int] = "all"):
         """Load data from the file.
 
+        The indices parameter can be used to load a subset of the data. This can be
+
+        - 'all' to load all data
+
+        - an int to load a single frame
+
+        - a list of ints to load specific frames
+
+        - a tuple of lists, ranges or slices to index frames and transmits. Note that
+          indexing with lists of indices for both axes is not supported. In that case,
+          try to define one of the axes with a slice.
+
+        .. code-block:: python
+
+            # Load frame 5
+            File.load_data("raw_data", indices=5)
+            # Load frames 0, 2 and 4
+            File.load_data("raw_data", indices=[0, 2, 4])
+            # Load frames 0-9 and transmits 0, 2 and 4
+            File.load_data("raw_data", indices=(slice(10), [0, 2, 4]))
+
         Args:
             data_type (str): The type of data to load. Options are 'raw_data', 'aligned_data',
                 'beamformed_data', 'envelope_data', 'image' and 'image_sc'.
@@ -290,7 +312,7 @@ class File(h5py.File):
         """
         scan_parameters = {}
         if "scan" in self:
-            scan_parameters = recursively_load_dict_contents_from_group(self, "scan")
+            scan_parameters = self.recursively_load_dict_contents_from_group("scan")
         elif "event" in list(self.keys())[0]:
             if event is None:
                 raise ValueError(
@@ -305,38 +327,17 @@ class File(h5py.File):
                 f"Found number of events: {len(self.keys())}."
             )
 
-            scan_parameters = recursively_load_dict_contents_from_group(self, f"event_{event}/scan")
+            scan_parameters = self.recursively_load_dict_contents_from_group(f"event_{event}/scan")
         else:
             log.warning("Could not find scan parameters in file.")
 
         return scan_parameters
 
     def get_scan_parameters(self, event=None) -> dict:
-        """Returns a dictionary of default parameters to initialize a scan
-        object that works with the file.
+        """Returns a dictionary of scan parameters stored in the file."""
+        return self.get_parameters(event)
 
-        Returns:
-            dict: The default parameters (the keys are identical to the
-                __init__ parameters of the Scan class).
-        """
-        file_scan_parameters = self.get_parameters(event)
-
-        scan_parameters = {}
-        for parameter, value in file_scan_parameters.items():
-            if parameter in Scan.VALID_PARAMS:
-                param_type = Scan.VALID_PARAMS[parameter]["type"]
-                if param_type in (bool, int, float):
-                    scan_parameters[parameter] = param_type(value)
-                elif isinstance(param_type, tuple) and float in param_type:
-                    scan_parameters[parameter] = float(value)
-                else:
-                    scan_parameters[parameter] = value
-
-        if len(scan_parameters) == 0:
-            log.info(f"Could not find proper scan parameters in {self}.")
-        return scan_parameters
-
-    def scan(self, event=None, **kwargs) -> Scan:
+    def scan(self, event=None, safe=True, **kwargs) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
 
         Args:
@@ -348,6 +349,9 @@ class File(h5py.File):
                     ...
 
                 Defaults to None. In that case no event structure is expected.
+            safe (bool, optional): If True, will only use parameters that are
+                defined in the Scan class. If False, will use all parameters
+                from the file. Defaults to True.
             **kwargs: Additional keyword arguments to pass to the Scan object.
                 These will override the parameters from the file if they are
                 present in the file.
@@ -355,7 +359,7 @@ class File(h5py.File):
         Returns:
             Scan: The scan object.
         """
-        return Scan.merge(self.get_scan_parameters(event), kwargs)
+        return Scan.merge(_reformat_waveforms(self.get_scan_parameters(event)), kwargs, safe=safe)
 
     def get_probe_parameters(self, event=None) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe
@@ -388,21 +392,24 @@ class File(h5py.File):
         probe_parameters_file = self.get_probe_parameters(event)
         return Probe.from_parameters(self.probe_name, probe_parameters_file)
 
-    def recursively_load_dict_contents_from_group(self, path: str, squeeze: bool = False) -> dict:
+    def recursively_load_dict_contents_from_group(self, path: str) -> dict:
         """Load dict from contents of group
 
         Values inside the group are converted to numpy arrays
-        or primitive types (int, float, str). Single element
-        arrays are converted to the corresponding primitive type (if squeeze=True)
+        or primitive types (int, float, str).
 
         Args:
             path (str): path to group
-            squeeze (bool, optional): squeeze arrays with single element.
-                Defaults to False.
         Returns:
             dict: dictionary with contents of group
         """
-        return recursively_load_dict_contents_from_group(self, path, squeeze)
+        ans = {}
+        for key, item in self[path].items():
+            if isinstance(item, h5py.Dataset):
+                ans[key] = item[()]
+            elif isinstance(item, h5py.Group):
+                ans[key] = self.recursively_load_dict_contents_from_group(path + "/" + key + "/")
+        return ans
 
     @classmethod
     def get_shape(cls, path: str, key: str) -> tuple:
@@ -519,52 +526,12 @@ def load_file(
         # the number of selected transmits
         if data_type in ["raw_data", "aligned_data"]:
             indices = File._prepare_indices(indices)
-            n_tx = data.shape[1]
             if isinstance(indices, tuple) and len(indices) > 1:
-                tx_idx = indices[1]
-                transmits = np.arange(n_tx)[tx_idx]
-                scan_kwargs["selected_transmits"] = transmits
+                scan_kwargs["selected_transmits"] = indices[1]
 
         scan = file.scan(**scan_kwargs)
 
         return data, scan, probe
-
-
-def recursively_load_dict_contents_from_group(
-    h5file: h5py._hl.files.File, path: str, squeeze: bool = False
-) -> dict:
-    """Load dict from contents of group
-
-    Values inside the group are converted to numpy arrays
-    or primitive types (int, float, str). Single element
-    arrays are converted to the corresponding primitive type (if squeeze=True)
-
-    Args:
-        h5file (h5py._hl.files.File): h5py file object
-        path (str): path to group
-        squeeze (bool, optional): squeeze arrays with single element.
-            Defaults to False.
-    Returns:
-        dict: dictionary with contents of group
-    """
-    ans = {}
-    for key, item in h5file[path].items():
-        if isinstance(item, h5py._hl.dataset.Dataset):
-            ans[key] = item[()]
-            # all ones in shape
-            if squeeze:
-                if ans[key].shape == () or all(i == 1 for i in ans[key].shape):
-                    # check for strings
-                    if isinstance(ans[key], str):
-                        ans[key] = str(ans[key])
-                    # check for integers
-                    elif int(ans[key]) == float(ans[key]):
-                        ans[key] = int(ans[key])
-                    else:
-                        ans[key] = float(ans[key])
-        elif isinstance(item, h5py._hl.group.Group):
-            ans[key] = recursively_load_dict_contents_from_group(h5file, path + "/" + key + "/")
-    return ans
 
 
 def _print_hdf5_attrs(hdf5_obj, prefix=""):
@@ -827,3 +794,71 @@ def _assert_unit_and_description_present(hdf5_file, _prefix=""):
             assert "description" in hdf5_file[key].attrs.keys(), (
                 f"The file {_prefix}/{key} does not have a description attribute."
             )
+
+
+def _reformat_waveforms(scan_kwargs: dict) -> dict:
+    """Reformat waveforms from dict to array if needed. This is for backwards compatibility and will
+    be removed in a future version of zea.
+
+    Args:
+        scan_kwargs (dict): The scan parameters.
+
+    Returns:
+        scan_kwargs (dict): The scan parameters with the keys waveforms_one_way and
+            waveforms_two_way reformatted to arrays if they were stored as dicts.
+    """
+
+    # TODO: remove this in a future version of zea
+    if "waveforms_one_way" in scan_kwargs and isinstance(scan_kwargs["waveforms_one_way"], dict):
+        log.warning(
+            "The waveforms_one_way parameter is stored as a dictionary in the file. "
+            "Converting to array. This will be deprecated in future versions of zea. "
+            "Please update your files to store waveforms as arrays of shape `(n_tx, n_samples)`."
+        )
+        scan_kwargs["waveforms_one_way"] = _waveforms_dict_to_array(
+            scan_kwargs["waveforms_one_way"]
+        )
+
+    if "waveforms_two_way" in scan_kwargs and isinstance(scan_kwargs["waveforms_two_way"], dict):
+        log.warning(
+            "The waveforms_two_way parameter is stored as a dictionary in the file. "
+            "Converting to array. This will be deprecated in future versions of zea. "
+            "Please update your files to store waveforms as arrays of shape `(n_tx, n_samples)`."
+        )
+        scan_kwargs["waveforms_two_way"] = _waveforms_dict_to_array(
+            scan_kwargs["waveforms_two_way"]
+        )
+    return scan_kwargs
+
+
+def _waveforms_dict_to_array(waveforms_dict: dict):
+    """Convert waveforms stored as a dictionary to a padded numpy array."""
+    waveforms = dict_to_sorted_list(waveforms_dict)
+    return pad_sequences(waveforms, dtype=np.float32, padding="post")
+
+
+def dict_to_sorted_list(dictionary: dict):
+    """Convert a dictionary with sortable keys to a sorted list of values.
+
+    .. note::
+
+        This function operates on the top level of the dictionary only.
+        If the dictionary contains nested dictionaries, those will not be sorted.
+
+    .. code-block:: python
+
+        # Example usage
+        input_dict = {"number_000": 5, "number_001": 1, "number_002": 23}
+        output_list = dict_to_sorted_list(input_dict)
+        # output_list will be:
+        # [
+        #     5, 1, 23
+        # ]
+
+    Args:
+        dictionary (dict): The dictionary to convert. The keys must be sortable.
+
+    Returns:
+        list: The sorted list of values.
+    """
+    return [value for _, value in sorted(dictionary.items())]

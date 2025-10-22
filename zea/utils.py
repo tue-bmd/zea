@@ -11,6 +11,7 @@ from functools import wraps
 from pathlib import Path
 from statistics import mean, median, stdev
 
+import keras
 import numpy as np
 import yaml
 from keras import ops
@@ -591,6 +592,43 @@ def deep_compare(obj1, obj2):
     return obj1 == obj2
 
 
+def block_until_ready(func):
+    """Decorator that ensures asynchronous (gpu) operations complete before returning."""
+    if keras.backend.backend() == "jax":
+        import jax
+
+        def _block(value):
+            if hasattr(value, "__array__"):
+                return jax.block_until_ready(value)
+            else:
+                return value
+    else:
+
+        def _block(value):
+            if hasattr(value, "__array__"):
+                # convert to numpy but return as original type
+                _ = ops.convert_to_numpy(value)
+            return value
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+
+        # Handle different return types
+        if isinstance(result, (list, tuple)):
+            # For multiple outputs, block each one
+            blocked_results = [_block(r) for r in result]
+            return type(result)(blocked_results)
+        elif isinstance(result, dict):
+            # For dict outputs, block array values
+            return {k: _block(v) for k, v in result.items()}
+        else:
+            # Single output
+            return _block(result)
+
+    return wrapper
+
+
 class FunctionTimer:
     """
     A decorator class for timing the execution of functions.
@@ -599,7 +637,7 @@ class FunctionTimer:
         >>> from zea.utils import FunctionTimer
         >>> timer = FunctionTimer()
         >>> my_function = lambda: sum(range(10))
-        >>> my_function = timer(my_function)
+        >>> my_function = timer(my_function, name="my_function")
         >>> _ = my_function()
         >>> print(timer.get_stats("my_function"))
     """
@@ -607,8 +645,38 @@ class FunctionTimer:
     def __init__(self):
         self.timings = {}
         self.last_append = 0
+        self.decorated_functions = {}  # Track decorated functions
 
     def __call__(self, func, name=None):
+        _name = name if name is not None else func.__name__
+
+        # Create a unique identifier for this function
+        func_id = id(func)
+
+        # Check if this exact function has already been decorated
+        if func_id in self.decorated_functions:
+            existing_name = self.decorated_functions[func_id]
+            raise ValueError(
+                f"Function '{func.__name__}' (id: {func_id}) has already been "
+                f"decorated with timer name '{existing_name}'. "
+                f"Cannot decorate the same function instance multiple times."
+            )
+
+        # Handle name conflicts by appending a suffix
+        original_name = _name
+        counter = 1
+        while _name in self.timings:
+            _name = f"{original_name}_{counter}"
+            counter += 1
+
+        # Initialize timing storage for this function
+        self.timings[_name] = []
+
+        # Track this decorated function
+        self.decorated_functions[func_id] = _name
+
+        func = block_until_ready(func)
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.perf_counter()
@@ -617,27 +685,27 @@ class FunctionTimer:
             elapsed_time = end_time - start_time
 
             # Store the timing result
-            _name = name if name is not None else func.__name__
-            if _name not in self.timings:
-                self.timings[_name] = []
             self.timings[_name].append(elapsed_time)
 
             return result
 
         return wrapper
 
-    def get_stats(self, func_name, drop_first: bool | int = False):
-        """Calculate statistics for the given function."""
-        if func_name not in self.timings:
-            raise ValueError(f"No timings recorded for function '{func_name}'.")
-
+    def _parse_drop_first(self, drop_first: bool | int):
         if isinstance(drop_first, bool):
             idx = 1 if drop_first else 0
         elif isinstance(drop_first, int):
             idx = drop_first
         else:
             raise ValueError("drop_first must be a boolean or an integer.")
+        return idx
 
+    def get_stats(self, func_name, drop_first: bool | int = False):
+        """Calculate statistics for the given function."""
+        if func_name not in self.timings:
+            raise ValueError(f"No timings recorded for function '{func_name}'.")
+
+        idx = self._parse_drop_first(drop_first)
         times = self.timings[func_name][idx:]
         return {
             "mean": mean(times),
@@ -663,7 +731,7 @@ class FunctionTimer:
 
         self.last_append = len(self.timings[func_name])
 
-    def print(self, drop_first: bool | int = False):
+    def print(self, drop_first: bool | int = False, total_time: bool = False):
         """Print timing statistics for all recorded functions using formatted output."""
 
         # Print title
@@ -693,3 +761,9 @@ class FunctionTimer:
                 f"{log.magenta(str(stats['count'])):<18}"
             )
             print(row)
+
+        if total_time:
+            idx = self._parse_drop_first(drop_first)
+            total = sum(mean(times[idx:]) for times in self.timings.values())
+            print("-" * length)
+            print(f"{log.bold('Mean Total Time:')} {log.bold(log.number_to_str(total, 6))} seconds")

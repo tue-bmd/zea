@@ -10,14 +10,13 @@ See the Parameters class docstring for details on features and usage.
 
 import functools
 import inspect
-import pickle
 from copy import deepcopy
 
 import numpy as np
 
-from zea.internal.cache import serialize_elements
+from zea import log
 from zea.internal.core import Object as ZeaObject
-from zea.internal.core import _to_tensor
+from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
 
 def cache_with_dependencies(*deps):
@@ -146,47 +145,90 @@ class Parameters(ZeaObject):
     def __init__(self, **kwargs):
         super().__init__()
 
+        # Check if VALID_PARAMS is defined
         if self.VALID_PARAMS is None:
             raise NotImplementedError("VALID_PARAMS must be defined in subclasses of Parameters.")
+
+        # Check if the definition of the class has circular dependencies
+        for name in self.__class__.__dict__:
+            self._check_for_circular_dependencies(name)
+
+        # Internal state
+        self._params = {}
+        self._properties = self.get_properties()
+        self._computed = set()
+        self._cache = {}
+        self._dependency_versions = {}
+
+        # Tensor cache stores converted tensors for parameters and computed properties
+        # to avoid converting them multiple times if there are no changes.
+        self._tensor_cache = {}
 
         # Initialize parameters with defaults
         for param, config in self.VALID_PARAMS.items():
             if param not in kwargs and "default" in config:
                 kwargs[param] = config["default"]
 
-        # Validate parameter types
+        # Set provided parameters
         for key, value in kwargs.items():
-            self._validate_parameter(key, value)
-
-        self._params = {}
-        self._properties = self.get_properties()
-        self._computed = set()
-        self._cache = {}
-        self._dependency_versions = {}
-        for k, v in kwargs.items():
-            self._params[k] = v
-
-        # Tensor cache stores converted tensors for parameters and computed properties
-        # to avoid converting them multiple times if there are no changes.
-        self._tensor_cache = {}
-
-        # Check if the definition of the class has circular dependencies
-        for name in self.__class__.__dict__:
-            self._check_for_circular_dependencies(name)
+            setattr(self, key, value)
 
     @classmethod
     def _validate_parameter(cls, key, value):
-        """Validate parameter against the VALID_PARAMS definition."""
+        # Check if the parameter is valid
         if key not in cls.VALID_PARAMS:
             raise ValueError(
                 f"Invalid parameter: {key}. Valid parameters are: {list(cls.VALID_PARAMS.keys())}"
             )
+
+        # Cast the value if needed and possible
         expected_type = cls.VALID_PARAMS[key]["type"]
+        if expected_type is not None and value is not None and not isinstance(value, expected_type):
+            value = cls._cast(key, value)
+
+        # Check again
         if expected_type is not None and value is not None and not isinstance(value, expected_type):
             allowed = cls._human_readable_type(expected_type)
             raise TypeError(
                 f"Parameter '{key}' expected type {allowed}, got {type(value).__name__}"
             )
+
+        return value
+
+    @classmethod
+    def _cast(cls, key, value):
+        """Cast parameter to the expected type if 'cast_from' is specified.
+
+        Additionally, int to float conversion is allowed implicitly."""
+        # If the value is a single-element array, convert it to a scalar
+        # If it's a numpy scalar, convert it to a native Python type
+        if (isinstance(value, np.ndarray) and value.size == 1) or isinstance(value, np.generic):
+            value = value.item()
+
+        # Assume the key exists in VALID_PARAMS
+        config = cls.VALID_PARAMS[key]
+
+        if value is None:
+            return value
+
+        cast_to = config["type"]
+        if isinstance(cast_to, tuple):
+            raise ValueError(f"Casting to multiple types is not supported for parameter '{key}'.")
+
+        if "cast_from" not in config:
+            if isinstance(value, int) and cast_to is float:
+                # Allow implicit conversion from int to float
+                return float(value)
+            return value
+
+        cast_types = config["cast_from"]
+        if not isinstance(cast_types, tuple):
+            cast_types = (cast_types,)
+
+        if any(isinstance(value, t) for t in cast_types):
+            value = cast_to(value)
+
+        return value
 
     @staticmethod
     def _human_readable_type(type):
@@ -203,7 +245,7 @@ class Parameters(ZeaObject):
     def serialized(self):
         """Compute the checksum of the object only if not already done"""
         if self._serialized is None:
-            self._serialized = pickle.dumps(self._params)
+            self._serialized = serialize_elements([self._params])
         return self._serialized
 
     @classmethod
@@ -239,14 +281,18 @@ class Parameters(ZeaObject):
             raise AttributeError(f"'{name}' is not a valid parameter or computed property.")
 
     def __getattr__(self, item):
+        # Handle case during unpickling when internal attributes may not be set yet
+        if "_params" not in self.__dict__:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+
         # First check regular params
         if item in self._params:
             return self._params[item]
 
         # Check if it's a property
-        if item not in self._properties:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'. ")
-
+        props = self.__dict__.get("_properties")
+        if not props or item not in props:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
         self._assert_dependencies_met(item)
 
         # Return property value
@@ -276,7 +322,7 @@ class Parameters(ZeaObject):
             )
 
         # Validate new value
-        self._validate_parameter(key, value)
+        value = self._validate_parameter(key, value)
 
         # Set the parameter
         self._params[key] = value
@@ -344,7 +390,7 @@ class Parameters(ZeaObject):
 
     def _current_dependency_hash(self, deps) -> str:
         values = [self._params.get(dep, None) for dep in deps]
-        return serialize_elements(values)
+        return hash_elements(values)
 
     def _assert_dependencies_met(self, name):
         """Assert that all dependencies for a computed property are met."""
@@ -458,9 +504,21 @@ class Parameters(ZeaObject):
         return f"{self.__class__.__name__}(\n{param_str}\n)"
 
     @classmethod
-    def safe_initialize(cls, **kwargs):
-        """Overwrite safe initialize from zea.core.Object.
+    def standardize_params(cls, **kwargs) -> dict:
+        """Return a dict with only valid parameters set and cast to the right type."""
+        params = {}
+        for parameter, value in kwargs.items():
+            if parameter in cls.VALID_PARAMS:
+                params[parameter] = value
+            else:
+                log.debug(f"Skipping invalid parameter '{parameter}'.")
+        return params
 
-        We do not want safe initialization here.
-        """
-        return cls(**kwargs)
+    @classmethod
+    def safe_initialize(cls, **kwargs):
+        """Reduce kwargs to only valid parameters and convert types as needed."""
+        params = cls.standardize_params(**kwargs)
+
+        if len(params) == 0:
+            log.info(f"Could not find proper scan parameters in {kwargs}.")
+        return cls(**params)

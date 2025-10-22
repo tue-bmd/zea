@@ -15,6 +15,8 @@ def calculate_lens_corrected_delays(
     n_el,
     focus_distances,
     polar_angles,
+    t_peak,
+    tx_waveform_indices,
     lens_sound_speed=1000,
     lens_thickness=1e-3,
     n_iter=2,
@@ -33,6 +35,9 @@ def calculate_lens_corrected_delays(
         n_el (int): The number of elements.
         focus_distances (ndarray): The focus distances of shape (n_tx,).
         polar_angles (ndarray): The polar angles of shape (n_tx,).
+        t_peak (ndarray): The time of the peak of the pulse in seconds of shape (n_waveforms,).
+        tx_waveform_indices (ndarray): The indices of the waveforms used for each transmit
+            of shape (n_tx,).
         lens_sound_speed (float): The speed of sound in the lens in m/s.
         lens_thickness (float): The thickness of the lens in meters.
         n_iter (int): The number of iterations to run the Newton-Raphson method.
@@ -59,9 +64,11 @@ def calculate_lens_corrected_delays(
         # Add a large offset to elements that are not used in the transmit to
         # diqualify them from being the closest element
         apod_offset = ops.where(tx_apodizations[tx] == 0, 10.0, 0)
-        tx_min = ops.min(rx_delays + t0_delays[tx] + apod_offset, axis=-1) + initial_times[tx]
+        tx_min = ops.min(rx_delays + t0_delays[tx] + apod_offset, axis=-1) - initial_times[tx]
         tx_delays.append(tx_min)
-    tx_delays = ops.stack(tx_delays, axis=-1)
+    tx_delays = ops.stack(tx_delays, axis=-1) + ops.take(t_peak, tx_waveform_indices)[None]
+    tx_delays = ops.nan_to_num(tx_delays, nan=0.0, posinf=0.0, neginf=0.0)
+    rx_delays = ops.nan_to_num(rx_delays, nan=0.0, posinf=0.0, neginf=0.0)
 
     tx_delays *= sampling_frequency
     rx_delays *= sampling_frequency

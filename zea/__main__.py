@@ -9,30 +9,22 @@ import argparse
 import sys
 from pathlib import Path
 
-from zea import log
 from zea.visualize import set_mpl_style
 
 
-def get_args():
+def get_parser():
     """Command line argument parser"""
-    parser = argparse.ArgumentParser(description="Process ultrasound data.")
-    parser.add_argument("-c", "--config", type=str, default=None, help="path to config file.")
+    parser = argparse.ArgumentParser(
+        description="Load and process ultrasound data based on a configuration file."
+    )
+    parser.add_argument("-c", "--config", type=str, default=None, help="path to the config file.")
     parser.add_argument(
         "-t",
         "--task",
         default="view",
         choices=["view"],
         type=str,
-        help="which task to run",
-    )
-    parser.add_argument(
-        "--backend",
-        default=None,
-        type=str,
-        help=(
-            "Keras backend to use. Default is the one set by the environment "
-            "variable KERAS_BACKEND."
-        ),
+        help="Which task to run. Currently only 'view' is supported.",
     )
     parser.add_argument(
         "--skip_validate_file",
@@ -40,26 +32,17 @@ def get_args():
         action="store_true",
         help="Skip zea file integrity checks. Use with caution.",
     )
-    parser.add_argument("--gui", default=False, action=argparse.BooleanOptionalAction)
-    args = parser.parse_args()
-    return args
+    return parser
 
 
 def main():
     """main entrypoint for zea"""
-    args = get_args()
+    args = get_parser().parse_args()
 
     set_mpl_style()
 
-    if args.backend:
-        from zea.internal.setup_zea import set_backend
-
-        set_backend(args.backend)
-
     wd = Path(__file__).parent.resolve()
     sys.path.append(str(wd))
-
-    import keras
 
     from zea.interface import Interface
     from zea.internal.setup_zea import setup
@@ -72,7 +55,6 @@ def main():
             validate_file=not args.skip_validate_file,
         )
 
-        log.info(f"Using {keras.backend.backend()} backend")
         cli.run(plot=True)
     else:
         raise ValueError(f"Unknown task {args.task}, see `zea --help` for available tasks.")

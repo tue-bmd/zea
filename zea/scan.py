@@ -130,6 +130,15 @@ class Scan(Parameters):
         demodulation_frequency (float, optional): Demodulation frequency in Hz.
         time_to_next_transmit (np.ndarray): The time between subsequent
             transmit events of shape (n_frames, n_tx).
+        tgc_gain_curve (np.ndarray): Time gain compensation (TGC) curve of shape (n_ax,).
+        waveforms_one_way (np.ndarray): The one-way transmit waveforms of shape
+            (n_waveforms, n_samples).
+        waveforms_two_way (np.ndarray): The two-way transmit waveforms of shape
+            (n_waveforms, n_samples).
+        tx_waveform_indices (np.ndarray): Indices of the waveform used for each
+            transmit event of shape (n_tx,).
+        t_peak (np.ndarray, optional): The time of the peak of the pulse of every transmit waveform
+            of shape (n_waveforms,).
         pixels_per_wavelength (int, optional): Number of pixels per wavelength.
             Defaults to 4.
         element_width (float, optional): Width of each transducer element in meters.
@@ -149,16 +158,18 @@ class Scan(Parameters):
             Defaults to 0.0.
         attenuation_coef (float, optional): Attenuation coefficient in dB/(MHz*cm).
             Defaults to 0.0.
-        selected_transmits (None, str, int, list, or np.ndarray, optional):
+        selected_transmits (None, str, int, list, slice, or np.ndarray, optional):
             Specifies which transmit events to select.
             - None or "all": Use all transmits.
             - "center": Use only the center transmit.
             - int: Select this many evenly spaced transmits.
             - list/array: Use these specific transmit indices.
+            - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2)).
         grid_type (str, optional): Type of grid to use for beamforming.
             Can be "cartesian" or "polar". Defaults to "cartesian".
         dynamic_range (tuple, optional): Dynamic range for image display.
             Defined in dB as (min_dB, max_dB). Defaults to (-60, 0).
+
     """
 
     VALID_PARAMS = {
@@ -171,13 +182,14 @@ class Scan(Parameters):
         "pixels_per_wavelength": {"type": int, "default": 4},
         "pfield_kwargs": {"type": dict, "default": {}},
         "apply_lens_correction": {"type": bool, "default": False},
-        "lens_sound_speed": {"type": (float, int)},
+        "lens_sound_speed": {"type": float},
         "lens_thickness": {"type": float},
         "grid_type": {"type": str, "default": "cartesian"},
         "polar_limits": {"type": (tuple, list)},
         "dynamic_range": {"type": (tuple, list), "default": DEFAULT_DYNAMIC_RANGE},
+        "selected_transmits": {"type": (type(None), str, int, list, slice, np.ndarray)},
         # acquisition parameters
-        "sound_speed": {"type": (float, int), "default": 1540.0},
+        "sound_speed": {"type": float, "default": 1540.0},
         "sampling_frequency": {"type": float},
         "center_frequency": {"type": float},
         "n_el": {"type": int},
@@ -198,6 +210,11 @@ class Scan(Parameters):
         "focus_distances": {"type": np.ndarray},
         "initial_times": {"type": np.ndarray},
         "time_to_next_transmit": {"type": np.ndarray},
+        "tgc_gain_curve": {"type": np.ndarray},
+        "waveforms_one_way": {"type": np.ndarray},
+        "waveforms_two_way": {"type": np.ndarray},
+        "tx_waveform_indices": {"type": np.ndarray},
+        "t_peak": {"type": np.ndarray},
         # scan conversion parameters
         "theta_range": {"type": (tuple, list)},
         "phi_range": {"type": (tuple, list)},
@@ -207,8 +224,9 @@ class Scan(Parameters):
     }
 
     def __init__(self, **kwargs):
-        # Store the current selection state before initialization
-        selected_transmits_input = kwargs.pop("selected_transmits", None)
+        # Ensure that selected_transmits is present and set to None by default
+        selected_transmits_input = kwargs.get("selected_transmits", None)
+        kwargs["selected_transmits"] = None
 
         # Initialize parent class
         super().__init__(**kwargs)
@@ -342,6 +360,11 @@ class Scan(Parameters):
         """The total number of transmits in the full dataset."""
         return self._params["n_tx"]
 
+    @property
+    def n_tx_selected(self):
+        """The number of currently selected transmits."""
+        return len(self.selected_transmits)
+
     @cache_with_dependencies("selected_transmits")
     def n_tx(self):
         """The number of currently selected transmits."""
@@ -359,6 +382,7 @@ class Scan(Parameters):
                 - "center": Use only the center transmit
                 - int: Select this many evenly spaced transmits
                 - list/array: Use these specific transmit indices
+                - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
 
         Returns:
             The current instance for method chaining.
@@ -384,14 +408,12 @@ class Scan(Parameters):
         if selection is None or selection == "all":
             self._selected_transmits = None
             self._invalidate("selected_transmits")
-            self._invalidate_dependents("selected_transmits")
             return self
 
         # Handle "center" - use center transmit
         if selection == "center":
             self._selected_transmits = [n_tx_total // 2]
             self._invalidate("selected_transmits")
-            self._invalidate_dependents("selected_transmits")
             return self
 
         # Handle integer - select evenly spaced transmits
@@ -413,8 +435,11 @@ class Scan(Parameters):
                 self._selected_transmits = list(np.rint(tx_indices).astype(int))
 
             self._invalidate("selected_transmits")
-            self._invalidate_dependents("selected_transmits")
             return self
+
+        # Handle slice - convert to list of indices
+        if isinstance(selection, slice):
+            selection = list(range(n_tx_total))[selection]
 
         # Handle list of indices
         if isinstance(selection, list):
@@ -429,7 +454,6 @@ class Scan(Parameters):
                 int(i) for i in selection
             ]  # Convert numpy integers to Python ints
             self._invalidate("selected_transmits")
-            self._invalidate_dependents("selected_transmits")
             return self
 
         # Aliasing check
@@ -474,7 +498,7 @@ class Scan(Parameters):
         value = self._params.get("azimuth_angles")
         if value is None:
             log.warning("No azimuth angles provided, using zeros")
-            value = np.zeros(self.n_tx_total)
+            value = np.zeros(self.n_tx_selected)
 
         return value[self.selected_transmits]
 
@@ -485,7 +509,7 @@ class Scan(Parameters):
         value = self._params.get("t0_delays")
         if value is None:
             log.warning("No transmit delays provided, using zeros")
-            return np.zeros((self.n_tx_total, self.n_el))
+            return np.zeros((self.n_tx_selected, self.n_el))
 
         return value[self.selected_transmits]
 
@@ -495,7 +519,7 @@ class Scan(Parameters):
         value = self._params.get("tx_apodizations")
         if value is None:
             log.warning("No transmit apodizations provided, using ones")
-            value = np.ones((self.n_tx_total, self.n_el))
+            value = np.ones((self.n_tx_selected, self.n_el))
 
         return value[self.selected_transmits]
 
@@ -505,7 +529,7 @@ class Scan(Parameters):
         value = self._params.get("focus_distances")
         if value is None:
             log.warning("No focus distances provided, using zeros")
-            value = np.zeros(self.n_tx_total)
+            value = np.zeros(self.n_tx_selected)
 
         return value[self.selected_transmits]
 
@@ -515,9 +539,18 @@ class Scan(Parameters):
         value = self._params.get("initial_times")
         if value is None:
             log.warning("No initial times provided, using zeros")
-            value = np.zeros(self.n_tx_total)
+            value = np.zeros(self.n_tx_selected)
 
         return value[self.selected_transmits]
+
+    @property
+    def t_peak(self):
+        """The time of the peak of the pulse in seconds of shape (n_waveforms,)."""
+        t_peak = self._params.get("t_peak")
+        if t_peak is None:
+            t_peak = np.array([1 / self.center_frequency])
+
+        return t_peak
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):
@@ -529,6 +562,23 @@ class Scan(Parameters):
         selected = self.selected_transmits
         return value[:, selected]
 
+    @cache_with_dependencies("n_ax")
+    def tgc_gain_curve(self):
+        """Time gain compensation (TGC) curve of shape (n_ax,)."""
+        value = self._params.get("tgc_gain_curve")
+        if value is None:
+            return np.ones(self.n_ax)
+        return value[: self.n_ax]
+
+    @cache_with_dependencies("selected_transmits")
+    def tx_waveform_indices(self):
+        """Indices of the waveform used for each transmit event of shape (n_tx,)."""
+        value = self._params.get("tx_waveform_indices")
+        if value is None:
+            return np.zeros(self.n_tx_selected, dtype=int)
+
+        return value[self.selected_transmits]
+
     @cache_with_dependencies(
         "sound_speed",
         "center_frequency",
@@ -538,6 +588,7 @@ class Scan(Parameters):
         "tx_apodizations",
         "grid",
         "t0_delays",
+        "pfield_kwargs",
     )
     def pfield(self):
         """Compute or return the pressure field (pfield) for weighting."""
@@ -644,5 +695,5 @@ class Scan(Parameters):
         if key == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)
-            return
+            return super().__setattr__(key, self.selected_transmits)
         return super().__setattr__(key, value)

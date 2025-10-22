@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from zea.data.file import File
+from zea.data.file import File, dict_to_sorted_list, load_file
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -101,3 +101,29 @@ def test_file_attributes():
         assert isinstance(file.scan(), Scan), "Scan should be an instance of Scan class"
 
         file.validate()
+
+
+def test_load_file_function(dummy_file):
+    """Test the load_file function."""
+
+    selected_transmits = [0, 2, 4]
+    data, scan, probe = load_file(dummy_file, indices=[slice(2), selected_transmits])
+
+    assert data.shape[0] == 2, "Data should have 2 frames"
+    assert data.shape[1] == 3, "Data should have 3 selected transmits"
+    assert isinstance(scan, Scan), "Scan should be an instance of Scan class"
+    assert isinstance(probe, Probe), "Probe should be an instance of Probe class"
+    assert scan.selected_transmits == selected_transmits, (
+        "Selected transmits should match expected value"
+    )
+
+
+def test_dict_to_sorted_list():
+    """Test dict_to_sorted_list utility function."""
+
+    test_dict = {"b": 2, "a": 1, "c": 3}
+    sorted_list = dict_to_sorted_list(test_dict)
+
+    assert sorted_list == [1, 2, 3], "The sorted list should be [1, 2, 3]"
+
+    assert dict_to_sorted_list({}) == [], "The sorted list of an empty dict should be []"

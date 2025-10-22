@@ -26,6 +26,10 @@ scan_args = {
     "tx_apodizations": np.ones((10, 10)),
     "focus_distances": np.ones(10) * 0.04,
     "initial_times": np.zeros((10,)),
+    "tx_waveform_indices": np.zeros(10, dtype=int),
+    "waveforms_one_way": np.zeros((2, 64)),
+    "waveforms_two_way": np.zeros((2, 64)),
+    "tgc_gain_curve": np.ones((3328,)),
 }
 
 
@@ -85,6 +89,7 @@ def test_initialization():
         ("tx_apodizations", (10, 10)),
         ("focus_distances", (10,)),
         ("initial_times", (10,)),
+        ("tx_waveform_indices", (10,)),
     ],
 )
 def test_selected_transmits_affects_shape(attr, expected_shape):
@@ -126,6 +131,12 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     val_tensor = scan.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == 3
 
+    # Select with a slice
+    scan.set_transmits(slice(0, 5, 2))
+    val = getattr(scan, attr)
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+    assert val.shape[0] == val_tensor.shape[0] == 3
+
 
 def test_set_attributes():
     """Test setting attributes of Scan class."""
@@ -135,3 +146,22 @@ def test_set_attributes():
 
     with pytest.raises(AttributeError):
         scan.grid = np.zeros((10, 10))
+
+
+def test_accessing_valid_but_unset_attributes():
+    """Test accessing valid but unset attributes of Scan class."""
+
+    scan = Scan(n_tx=5)
+    scan.focus_distances
+
+
+def test_scan_pickle():
+    """Test pickling and unpickling of Scan class."""
+    import pickle
+
+    scan = Scan(**scan_args)
+    scan_pickled = pickle.dumps(scan)
+    scan_unpickled = pickle.loads(scan_pickled)
+
+    assert scan == scan_unpickled, "Unpickled Scan object does not match the original"
+    assert scan is not scan_unpickled, "Unpickled Scan object is the same instance as the original"

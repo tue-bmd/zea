@@ -21,6 +21,7 @@ repos:
       args: [ --fix ]
     # Run the formatter.
     - id: ruff-format
+
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v5.0.0
   hooks:
@@ -34,15 +35,29 @@ repos:
     description: Check for files that contain merge conflict strings
   - id: detect-private-key
     description: Detects the presence of private keys
--   repo: https://github.com/python-poetry/poetry
-    rev: 2.1.3
-    hooks:
-    -   id: poetry-check
-    -   id: poetry-lock
--   repo: local
-    hooks:
-    -   id: run-parameters-doc
-        name: Run parameters_doc.py
-        entry: python docs/source/parameters_doc.py
-        language: system
-        files: ^docs/source/parameters_doc\.py$
+
+- repo: https://github.com/python-poetry/poetry
+  rev: 2.1.3
+  hooks:
+  - id: poetry-check
+  - id: poetry-lock
+
+- repo: local
+  hooks:
+  - id: run-parameters-doc
+    name: Run parameters_doc.py
+    entry: python docs/source/parameters_doc.py
+    language: system
+    files: ^docs/source/parameters_doc\.py$
+  - id: generate-keras-ops
+    name: Generate Keras Operations
+    entry: python -m zea.internal._generate_keras_ops
+    language: system
+    files: ^(.*/)?(poetry\.lock|pyproject\.toml|zea/internal/_generate_keras_ops\.py)$
+    pass_filenames: false
+  - id: notebook-clean-and-check
+    name: Notebook Clean and Check
+    entry: python docs/source/notebook_clean_and_check.py
+    language: system
+    files: ^docs/source/notebooks/.*\.ipynb$
+    pass_filenames: true

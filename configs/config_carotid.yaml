@@ -17,7 +17,6 @@ data:
   # The frame number to load when running the UI (null, int, 'all')
   frame_no: all
 
-
 # The scan section contains the parameters pertaining to the reconstruction.
 scan:
   # The number of transmits in a frame. Can be 'all' for all transmits, an
@@ -42,8 +41,6 @@ pipeline:
       params:
         operations:
           - name: tof_correction
-            params:
-              apply_phase_rotation: true
           - name: pfield_weighting
           - name: delay_and_sum
         num_patches: 100

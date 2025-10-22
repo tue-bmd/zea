@@ -377,7 +377,11 @@ def init_device(
     allow_preallocate: bool = True,
     verbose: bool = True,
 ):
-    """Selects a GPU or CPU device based on the config.
+    """Automatically selects a GPU or CPU device.
+
+    Useful to call at the start of a script to set the device for
+    tensorflow, jax or pytorch. The function will select a GPU based
+    on available memory, or fall back to CPU if no GPU is available.
 
     Args:
         backend (str): String indicating which backend to use. Can be
@@ -412,7 +416,7 @@ def init_device(
     elif backend in ["numpy", "cpu"]:
         device = "cpu"
     else:
-        raise ValueError(f"Unknown backend ({backend}) in config.")
+        raise ValueError(f"Unknown backend ({backend}).")
 
     # Early exit if device is CPU
     if device == "cpu":

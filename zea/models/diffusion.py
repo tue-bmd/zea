@@ -6,7 +6,7 @@ from typing import Literal
 import keras
 from keras import ops
 
-from zea.backend import _import_tf
+from zea.backend import _import_tf, jit
 from zea.backend.autograd import AutoGrad
 from zea.internal.core import Object
 from zea.internal.operators import Operator
@@ -182,7 +182,7 @@ class DiffusionModel(DeepGenerativeModel):
             **kwargs: Additional arguments.
 
         Returns:
-            Generated samples.
+            Generated samples of shape `(n_samples, *input_shape)`.
         """
         seed, seed1 = split_seed(seed, 2)
 
@@ -233,7 +233,8 @@ class DiffusionModel(DeepGenerativeModel):
                 `(batch_size, n_samples, *input_shape)`.
 
         """
-        shape = ops.shape(measurements)
+        batch_size = ops.shape(measurements)[0]
+        shape = (batch_size, n_samples, *self.input_shape)
 
         def _tile_with_sample_dim(tensor):
             """Tile the tensor with an additional sample dimension."""
@@ -250,7 +251,7 @@ class DiffusionModel(DeepGenerativeModel):
         seed1, seed2 = split_seed(seed, 2)
 
         initial_noise = keras.random.normal(
-            shape=ops.shape(measurements),
+            shape=(batch_size * n_samples, *self.input_shape),
             seed=seed1,
         )
 
@@ -262,9 +263,9 @@ class DiffusionModel(DeepGenerativeModel):
             initial_step=initial_step,
             seed=seed2,
             **kwargs,
-        )
-        # returns: (batch_size, n_samples, *input_shape)
-        return ops.reshape(out, (shape[0], n_samples, *shape[1:]))
+        )  # ( batch_size * n_samples, *self.input_shape)
+
+        return ops.reshape(out, shape)  # (batch_size, n_samples, *input_shape)
 
     def log_likelihood(self, data, **kwargs):
         """Approximate log-likelihood of the data under the model.
@@ -776,7 +777,12 @@ register_presets(diffusion_model_presets, DiffusionModel)
 class DiffusionGuidance(abc.ABC, Object):
     """Base class for diffusion guidance methods."""
 
-    def __init__(self, diffusion_model, operator, disable_jit=False):
+    def __init__(
+        self,
+        diffusion_model: DiffusionModel,
+        operator: Operator,
+        disable_jit: bool = False,
+    ):
         """Initialize the diffusion guidance.
 
         Args:
@@ -823,12 +829,12 @@ class DPS(DiffusionGuidance):
         omega,
         **kwargs,
     ):
-        """Compute measurement error for diffusion posterior sampling.
+        """
+        Compute measurement error for diffusion posterior sampling.
 
         Args:
             noisy_images: Noisy images.
-            measurement: Target measurement.
-            operator: Forward operator.
+            measurements: Target measurement.
             noise_rates: Current noise rates.
             signal_rates: Current signal rates.
             omega: Weight for the measurement error.
@@ -849,20 +855,164 @@ class DPS(DiffusionGuidance):
         return measurement_error, (pred_noises, pred_images)
 
     def __call__(self, noisy_images, **kwargs):
-        """Call the gradient function.
+        """
+        Call the gradient function.
 
-        Returns a function with the following signature:
-            (
-                noisy_images,
-                measurement,
-                operator,
-                noise_rates,
-                signal_rates,
-                omega,
-                **operator_kwargs,
-            ) -> gradients, (error, (pred_noises, pred_images))
+        Args:
+            noisy_images: Noisy images.
+            measurement: Target measurement.
+            operator: Forward operator.
+            noise_rates: Current noise rates.
+            signal_rates: Current signal rates.
+            omega: Weight for the measurement error.
+            **kwargs: Additional arguments for the operator.
 
-        where operator_kwargs are the kwargs for the operator.
-
+        Returns:
+            Tuple of (gradients, (measurement_error, (pred_noises, pred_images)))
         """
         return self.gradient_fn(noisy_images, **kwargs)
+
+
+@diffusion_guidance_registry(name="dds")
+class DDS(DiffusionGuidance):
+    """
+    Decomposed Diffusion Sampling guidance.
+
+    Reference paper: https://arxiv.org/pdf/2303.05754
+    """
+
+    def setup(self):
+        """Setup DDS guidance function."""
+        if not self.disable_jit:
+            self.call = jit(self.call)
+
+    def Acg(self, x, **op_kwargs):
+        # we transform the operator from A(x) to A.T(A(x)) to get the normal equations,
+        # so that it is suitable for conjugate gradient. (symmetric, positive definite)
+        # Normal equations: A^T y = A^T A x
+        return self.operator.transpose(self.operator.forward(x, **op_kwargs), **op_kwargs)
+
+    def conjugate_gradient_inner_loop(self, i, loop_state, eps=1e-5):
+        """
+        A single iteration of the conjugate gradient method.
+        This involves minimizing the error of x along the current search
+        vector p, and then choosing the next search vector.
+
+        Reference code from: https://github.com/svi-diffusion/
+        """
+        p, rs_old, r, x, eps, op_kwargs = loop_state
+
+        # compute alpha
+        Ap = self.Acg(p, **op_kwargs)  # transform search vector p by A
+        a = rs_old / ops.sum(p * Ap)  # minimize f along the line p
+
+        x_new = x + a * p  # set new x at the minimum of f along line p
+        r_new = r - a * Ap  # shortcut to compute next residual
+
+        # compute Gram-Schmidt coefficient beta to choose next search vector
+        # so that p_new is A-orthogonal to p_current.
+        rs_new = ops.sum(r_new * r_new)
+        p_new = r_new + (rs_new / rs_old) * p
+
+        # this is like a jittable 'break' -- if the residual
+        # is less than eps, then we just return the old
+        # loop state rather than the updated one.
+        next_loop_state = ops.cond(
+            ops.abs(ops.sqrt(rs_old)) < eps,
+            lambda: (p, rs_old, r, x, eps, op_kwargs),
+            lambda: (p_new, rs_new, r_new, x_new, eps, op_kwargs),
+        )
+
+        return next_loop_state
+
+    def call(
+        self,
+        noisy_images,
+        measurements,
+        noise_rates,
+        signal_rates,
+        n_inner,
+        eps,
+        verbose,
+        **op_kwargs,
+    ):
+        """
+        Call the DDS guidance function
+
+        Args:
+            noisy_images: Noisy images.
+            measurement: Target measurement.
+            noise_rates: Current noise rates.
+            signal_rates: Current signal rates.
+            n_inner: Number of conjugate gradient steps.
+            verbose: Whether to calculate error.
+
+        Returns:
+            Tuple of (gradients, (measurement_error, (pred_noises, pred_images)))
+        """
+        pred_noises, pred_images = self.diffusion_model.denoise(
+            noisy_images,
+            noise_rates,
+            signal_rates,
+            training=False,
+        )
+        measurements_cg = self.operator.transpose(measurements, **op_kwargs)
+        r = measurements_cg - self.Acg(pred_images, **op_kwargs)  # residual
+        p = ops.copy(r)  # initial search vector = residual
+        rs_old = ops.sum(r * r)  # residual dot product
+        _, _, _, pred_images_updated_cg, _, _ = fori_loop(
+            0,
+            n_inner,
+            self.conjugate_gradient_inner_loop,
+            (p, rs_old, r, pred_images, eps, op_kwargs),
+        )
+
+        # Not strictly necessary, just for debugging
+        error = ops.cond(
+            verbose,
+            lambda: L2(measurements - self.operator.forward(pred_images_updated_cg, **op_kwargs)),
+            lambda: 0.0,
+        )
+
+        pred_images = pred_images_updated_cg
+        # we have already performed the guidance steps in self.conjugate_gradient_method, so
+        # we can set these gradients to zero.
+        gradients = ops.zeros_like(pred_images)
+        return gradients, (error, (pred_noises, pred_images))
+
+    def __call__(
+        self,
+        noisy_images,
+        measurements,
+        noise_rates,
+        signal_rates,
+        n_inner=5,
+        eps=1e-5,
+        verbose=False,
+        **op_kwargs,
+    ):
+        """
+        Call the DDS guidance function
+
+        Args:
+            noisy_images: Noisy images.
+            measurement: Target measurement.
+            noise_rates: Current noise rates.
+            signal_rates: Current signal rates.
+            n_inner: Number of conjugate gradient steps.
+            verbose: Whether to calculate error.
+            **kwargs: Additional arguments for the operator.
+
+        Returns:
+            Tuple of (gradients, (measurement_error, (pred_noises, pred_images)))
+        """
+        return self.call(
+            noisy_images,
+            measurements,
+            noise_rates,
+            signal_rates,
+            n_inner,
+            eps,
+            verbose,
+            **op_kwargs,
+        )

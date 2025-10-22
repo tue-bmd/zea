@@ -3,72 +3,37 @@
 Initialize modules for registries.
 """
 
-import numpy as np
 import torch
 
 
-def on_device_torch(func, inputs, device, return_numpy=False, **kwargs):
-    """Applies a Torch function to inputs on a specified device.
+def func_on_device(func, device, *args, **kwargs):
+    """Moves all tensor arguments of a function to a specified device before calling it.
 
     Args:
-        func (function): Function to apply to the input data.
-        inputs (ndarray): Input array.
-        device (str): Device string, e.g. ``'cuda'``, ``'gpu'``, or ``'cpu'``.
-        return_numpy (bool, optional): Whether to convert output
-            data back to numpy. Defaults to False.
-        **kwargs: Additional keyword arguments to be passed to the ``func``.
-
+        func (callable): Function to be called.
+        device (str or torch.device): Device to move tensors to.
+        *args: Positional arguments to be passed to the function.
+        **kwargs: Keyword arguments to be passed to the function.
     Returns:
-        torch.Tensor or ndarray: The output data.
-
-    Raises:
-        AssertionError: If ``func`` is not a function from the torch library.
-
-    Note:
-        This function converts the ``inputs`` array to a torch.Tensor and moves it to
-        the specified ``device``. It then applies the ``func`` function to the inputs and
-        returns the output data. If the output is a dictionary, it extracts the first value
-        from the dictionary. If ``return_numpy`` is True, it converts the output data back to a
-        numpy array before returning.
-
-    Example:
-        .. code-block:: python
-
-            import torch
-
-
-            def square(x):
-                return x**2
-
-
-            inputs = [1, 2, 3, 4, 5]
-            device = "cuda"
-            output = on_device_torch(square, inputs, device)
-            print(output)
+        The output of the function.
     """
-    device = device.replace("gpu", "cuda")
+    if device is None:
+        return func(*args, **kwargs)
 
-    if not isinstance(inputs, torch.Tensor):
-        inputs = torch.tensor(inputs)
+    if isinstance(device, str):
+        device = torch.device(device)
 
-    inputs = inputs.to(device)
+    def move_to_device(x):
+        if isinstance(x, torch.Tensor):
+            return x.to(device)
+        elif isinstance(x, (list, tuple)):
+            return type(x)(move_to_device(i) for i in x)
+        elif isinstance(x, dict):
+            return {k: move_to_device(v) for k, v in x.items()}
+        else:
+            return x
 
-    # check that function is a function from torch library
-    # assert "torch" in str(type(func)), f"func: {func} should be a torch function"
-    if hasattr(func, "to"):
-        func = func.to(device)
+    args = move_to_device(args)
+    kwargs = move_to_device(kwargs)
 
-    with torch.device(device):
-        outputs = func(inputs, **kwargs)
-
-    if isinstance(outputs, dict):
-        # depends a bit how flexible we want to be...
-        # but for now quick and dirty solution
-        key = list(outputs.keys())[0]
-        outputs = outputs[key]
-
-    if return_numpy:
-        if not isinstance(outputs, np.ndarray):
-            outputs = outputs.cpu().numpy()
-
-    return outputs
+    return func(*args, **kwargs)

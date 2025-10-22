@@ -57,10 +57,11 @@ def tof_correction(
     initial_times,
     sampling_frequency,
     demodulation_frequency,
-    fnum,
-    angles,
+    f_number,
+    polar_angles,
     focus_distances,
-    apply_phase_rotation=False,
+    t_peak,
+    tx_waveform_indices,
     apply_lens_correction=False,
     lens_thickness=1e-3,
     lens_sound_speed=1000,
@@ -73,21 +74,19 @@ def tof_correction(
         flatgrid (ops.Tensor): Pixel locations x, y, z of shape `(n_pix, 3)`
         t0_delays (ops.Tensor): Times at which the elements fire shifted such
             that the first element fires at t=0 of shape `(n_tx, n_el)`
-        tx_apodizations (ops.Tensor): Transmit apodizations of shape
-            `(n_tx, n_el)`
+        tx_apodizations (ops.Tensor): Transmit apodizations of shape `(n_tx, n_el)`
         sound_speed (float): Speed-of-sound.
-        probe_geometry (ops.Tensor): Element positions x, y, z of shape
-        (num_samples, 3)
-        initial_times (ops.Tensor): Time-ofsampling_frequencyet per transmission of shape
-            `(n_tx,)`.
+        probe_geometry (ops.Tensor): Element positions x, y, z of shape (n_el, 3)
+        initial_times (Tensor): The probe transmit time offsets of shape `(n_tx,)`.
         sampling_frequency (float): Sampling frequency.
         demodulation_frequency (float): Demodulation frequency.
-        fnum (int, optional): Focus number. Defaults to 1.
-        angles (ops.Tensor): The angles of the plane waves in radians of shape
-            `(n_tx,)`
+        f_number (float): Focus number (ratio of focal depth to aperture size).
+        polar_angles (ops.Tensor): The angles of the waves in radians of shape `(n_tx,)`
         focus_distances (ops.Tensor): The focus distance of shape `(n_tx,)`
-        apply_phase_rotation (bool, optional): Whether to apply phase rotation to
-            time-of-flights. Defaults to False.
+        t_peak (ops.Tensor): Time of the peak of the pulse in seconds.
+            Shape `(n_waveforms,)`.
+        tx_waveform_indices (ops.Tensor): The indices of the waveform used for each
+            transmit of shape `(n_tx,)`.
         apply_lens_correction (bool, optional): Whether to apply lens correction to
             time-of-flights. This makes it slower, but more accurate in the near-field.
             Defaults to False.
@@ -101,14 +100,12 @@ def tof_correction(
 
     Returns:
         (ops.Tensor): time-of-flight corrected data
-        with shape: `(n_tx, n_pix, n_el, num_rf_iq_channels)`.
+        with shape: `(n_tx, n_pix, n_el, n_ch)`.
     """
 
     assert len(data.shape) == 4, (
         "The input data should have 4 dimensions, "
-        f"namely num_transmits, num_elements, num_samples, "
-        f"num_rf_iq_channels, got {len(data.shape)} dimensions: ."
-        f"{data.shape}"
+        f"namely n_tx, n_ax, n_el, n_ch, got {len(data.shape)} dimensions: {data.shape}"
     )
 
     n_tx, n_ax, n_el, _ = ops.shape(data)
@@ -135,19 +132,33 @@ def tof_correction(
         n_tx,
         n_el,
         focus_distances,
-        angles,
+        polar_angles,
+        t_peak=t_peak,
+        tx_waveform_indices=tx_waveform_indices,
         lens_thickness=lens_thickness,
         lens_sound_speed=lens_sound_speed,
     )
 
     n_pix = ops.shape(flatgrid)[0]
     mask = ops.cond(
-        fnum == 0,
+        f_number == 0,
         lambda: ops.ones((n_pix, n_el, 1)),
-        lambda: fnumber_mask(flatgrid, probe_geometry, fnum, fnum_window_fn=fnum_window_fn),
+        lambda: fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn=fnum_window_fn),
     )
 
     def _apply_delays(data_tx, txdel):
+        """Applies the delays to TOF correct a single transmit.
+
+        Args:
+            data_tx (ops.Tensor): The RF/IQ data for a single transmit of shape
+                `(n_ax, n_el, n_ch)`.
+            txdel (ops.Tensor): The transmit delays for a single transmit in samples
+                (not in seconds) of shape `(n_pix, 1)`.
+
+        Returns:
+            ops.Tensor: The time-of-flight corrected data of shape
+            `(n_pix, n_el, n_ch)`.
+        """
         # data_tx is of shape (num_elements, num_samples, 1 or 2)
 
         # Take receive delays and add the transmit delays for this transmit
@@ -164,12 +175,15 @@ def tof_correction(
         # Apply the mask
         tof_tx = tof_tx * mask
 
-        # Phase correction
+        # Apply phase rotation if using IQ data
+        # This is needed because interpolating the IQ data without phase rotation
+        # is not equivalent to interpolating the RF data and then IQ demodulating
+        # See the docstring from complex_rotate for more details
+        apply_phase_rotation = data_tx.shape[-1] == 2
         if apply_phase_rotation:
-            tshift = delays[:, :] / sampling_frequency
-            tdemod = flatgrid[:, None, 2] * 2 / sound_speed
-            theta = 2 * np.pi * demodulation_frequency * (tshift - tdemod)
-            tof_tx = _complex_rotate(tof_tx, theta)
+            total_delay_seconds = delays[:, :] / sampling_frequency
+            theta = 2 * np.pi * demodulation_frequency * total_delay_seconds
+            tof_tx = complex_rotate(tof_tx, theta)
         return tof_tx
 
     # Reshape to (n_tx, n_pix, 1)
@@ -194,6 +208,8 @@ def calculate_delays(
     n_el,
     focus_distances,
     polar_angles,
+    t_peak,
+    tx_waveform_indices,
     **kwargs,
 ):
     """Calculates the delays in samples to every pixel in the grid.
@@ -225,12 +241,18 @@ def calculate_delays(
             assume plane wave transmission.
         polar_angles (Tensor): The polar angles of the plane waves in radians
             of shape `(n_tx,)`.
+        t_peak (Tensor): Time of the peak of the pulse in seconds of shape
+            `(n_waveforms,)`.
+        tx_waveform_indices (Tensor): The indices of the waveform used for each
+            transmit of shape `(n_tx,)`.
+
 
     Returns:
-        transmit_delays (Tensor): The tensor of transmit delays to every pixel,
-            shape `(n_pix, n_tx)`.
+        transmit_delays (Tensor): The tensor of transmit delays to every pixel
+            in samples (not in seconds), of shape `(n_pix, n_tx)`.
         receive_delays (Tensor): The tensor of receive delays from every pixel
-            back to the transducer element, shape `(n_pix, n_el)`.
+            back to the transducer element in samples (not in seconds), of shape
+            `(n_pix, n_el)`.
     """
 
     def _tx_distances(polar_angles, t0_delays, tx_apodizations, focus_distances):
@@ -262,7 +284,11 @@ def calculate_delays(
     # Compute the delays [in samples] from the distances
     # The units here are ([m]/[m/s]-[s])*[1/s] resulting in a unitless quantity
     # TODO: Add pulse width to transmit delays
-    tx_delays = (tx_distances / sound_speed - initial_times[None]) * sampling_frequency
+    tx_delays = (
+        tx_distances / sound_speed
+        - initial_times[None]
+        + ops.take(t_peak, tx_waveform_indices)[None]
+    ) * sampling_frequency
     rx_delays = (rx_distances / sound_speed) * sampling_frequency
 
     return tx_delays, rx_delays
@@ -288,11 +314,11 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
 
     Returns:
         ops.Tensor: The samples received by each transducer element corresponding to the
-            reflections of each pixel in the image of shape `(n_el, n_pix, n_ch)`.
+            reflections of each pixel in the image of shape `(n_pix, n_el, n_ch)`.
     """
 
     # Add a dummy channel dimension to the delays tensor to ensure it has the
-    # same number of dimensions as the data. The new shape is (1, n_el, n_pix)
+    # same number of dimensions as the data. The new shape is (n_pix, n_el, 1)
     delays = delays[..., None]
 
     # Get the integer values above and below the exact delay values
@@ -318,7 +344,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
 
     # Gather pixel values
     # Here we extract for each transducer element the sample containing the
-    # reflection from each pixel. These are of shape `(n_el, n_pix, n_ch)`.
+    # reflection from each pixel. These are of shape `(n_pix, n_el, n_ch)`.
     data0 = ops.take_along_axis(data, d0, 0)
     data1 = ops.take_along_axis(data, d1, 0)
 
@@ -332,7 +358,7 @@ def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):
     return reflection_samples
 
 
-def _complex_rotate(iq, theta):
+def complex_rotate(iq, theta):
     """Performs a simple phase rotation of I and Q component.
 
     Args:
@@ -341,11 +367,41 @@ def _complex_rotate(iq, theta):
 
     Returns:
         Tensor: The rotated tensor of shape `(..., 2)`.
+
+    .. dropdown:: Explanation
+
+        The IQ data is related to the RF data as follows:
+
+        .. math::
+
+            x(t) &= I(t)\\cos(\\omega_c t) + Q(t)\\cos(\\omega_c t + \\pi/2)\\\\
+            &= I(t)\\cos(\\omega_c t) - Q(t)\\sin(\\omega_c t)
+
+
+        If we want to delay the RF data `x(t)` by `Δt` we can substitute in
+        :math:`t=t+\\Delta t`. We also define :math:`I'(t) = I(t + \\Delta t)`,
+        :math:`Q'(t) = Q(t + \\Delta t)`, and :math:`\\theta=\\omega_c\\Delta t`.
+        This gives us:
+
+        .. math::
+
+            x(t + \\Delta t) &= I'(t) \\cos(\\omega_c (t + \\Delta t)) 
+            - Q'(t) \\sin(\\omega_c (t + \\Delta t))\\\\
+            &=  \\overbrace{(I'(t)\\cos(\\theta)
+            - Q'(t)\\sin(\\theta) )}^{I_\\Delta(t)} \\cos(\\omega_c t)\\\\
+            &- \\overbrace{(Q'(t)\\cos(\\theta)
+            + I'(t)\\sin(\\theta))}^{Q_\\Delta(t)} \\sin(\\omega_c t)
+
+        This means that to correctly interpolate the IQ data to the new components
+        :math:`I_\\Delta(t)` and :math:`Q_\\Delta(t)`, it is not sufficient to just
+        interpolate the I- and Q-channels independently. We also need to rotate the
+        I- and Q-channels by the angle :math:`\\theta`. This function performs this
+        rotation.
     """
-    # assert iq.shape[-1] == 2, (
-    #     "The last dimension of the input tensor should be 2, "
-    #     f"got {iq.shape[-1]} dimensions and shape {iq.shape}."
-    # )
+    assert iq.shape[-1] == 2, (
+        "The last dimension of the input tensor should be 2, "
+        f"got {iq.shape[-1]} dimensions and shape {iq.shape}."
+    )
     # Select i and q channels
     i = iq[..., 0]
     q = iq[..., 1]
@@ -485,8 +541,8 @@ def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):
 
     alpha = ops.arccos(grid_relative_to_probe_z)
 
-    # The f-number is fnum = z/aperture = 1/(2 * tan(alpha))
-    # Rearranging gives us alpha = arctan(1/(2 * fnum))
+    # The f-number is f_number = z/aperture = 1/(2 * tan(alpha))
+    # Rearranging gives us alpha = arctan(1/(2 * f_number))
     # We can use this to compute the maximum angle alpha that is allowed
     max_alpha = ops.arctan(1 / (2 * f_number + keras.backend.epsilon()))
 

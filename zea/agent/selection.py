@@ -11,11 +11,14 @@ For a comprehensive example usage, see: :doc:`../notebooks/agent/agent_example`
 All strategies are stateless, meaning that they do not maintain any internal state.
 """
 
+from typing import Callable
+
 import keras
 from keras import ops
 
 from zea import tensor_ops
 from zea.agent import masks
+from zea.backend.autograd import AutoGrad
 from zea.internal.registry import action_selection_registry
 
 
@@ -493,3 +496,166 @@ class CovarianceSamplingLines(LinesActionModel):
         best_mask = ops.squeeze(best_mask, axis=0)
 
         return best_mask, self.lines_to_im_size(best_mask)
+
+
+class TaskBasedLines(GreedyEntropy):
+    """Task-based line selection for maximizing information gain.
+
+    This action selection strategy chooses lines to maximize information gain with respect
+    to a downstream task outcome. It uses gradient-based saliency to identify which image
+    regions contribute most to task uncertainty, then selects lines accordingly.
+    """
+
+    def __init__(
+        self,
+        n_actions: int,
+        n_possible_actions: int,
+        img_width: int,
+        img_height: int,
+        downstream_task_function: Callable,
+        mean: float = 0,
+        std_dev: float = 1,
+        num_lines_to_update: int = 5,
+        **kwargs,
+    ):
+        """Initialize the TaskBasedLines action selection model.
+
+        Args:
+            n_actions (int): The number of actions the agent can take.
+            n_possible_actions (int): The number of possible actions (line positions).
+            img_width (int): The width of the input image.
+            img_height (int): The height of the input image.
+            downstream_task_function (Callable): A differentiable function that takes a
+                batch of inputs and produces scalar outputs. This represents the downstream
+                task for which information gain should be maximized.
+            mean (float, optional): The mean of the RBF used for reweighting. Defaults to 0.
+            std_dev (float, optional): The standard deviation of the RBF used for reweighting.
+                Defaults to 1.
+            num_lines_to_update (int, optional): The number of lines around the selected line
+                to update during reweighting. Must be odd. Defaults to 5.
+            **kwargs: Additional keyword arguments passed to the parent class.
+        """
+        super().__init__(
+            n_actions,
+            n_possible_actions,
+            img_width,
+            img_height,
+            mean,
+            std_dev,
+            num_lines_to_update,
+        )
+        self.downstream_task_function = downstream_task_function
+
+    def compute_output_and_saliency_propagation(self, particles):
+        """Compute saliency-weighted posterior variance for task-based selection.
+
+        This method computes how much each pixel contributes to the variance of the
+        downstream task output. It uses automatic differentiation to compute gradients
+        of the task function with respect to each particle, then weights the posterior
+        variance by the squared mean gradient.
+
+        Args:
+            particles (Tensor): Particles of shape (batch_size, n_particles, height, width)
+                representing the posterior distribution over images.
+
+        Returns:
+            Tensor: Pixelwise contribution to downstream task variance,
+                of shape (batch_size, height, width). Higher values indicate pixels
+                that contribute more to task uncertainty.
+        """
+        autograd = AutoGrad()
+
+        autograd.set_function(self.downstream_task_function)
+        downstream_grad_and_value_fn = autograd.get_gradient_and_value_jit_fn()
+        jacobian, _ = ops.vectorized_map(
+            lambda p: ops.vectorized_map(
+                downstream_grad_and_value_fn,
+                p,
+            ),
+            particles,
+        )
+
+        posterior_variance = ops.var(particles, axis=1)
+        mean_jacobian = ops.mean(jacobian, axis=1)
+        return posterior_variance * (mean_jacobian**2)
+
+    def sum_neighbouring_columns_into_n_possible_actions(self, full_linewise_salience):
+        """Aggregate column-wise saliency into line-wise saliency scores.
+
+        This method groups neighboring columns together to create saliency scores
+        for each possible line action. Since each line action may correspond to
+        multiple image columns, this aggregation is necessary to match the action space.
+
+        Args:
+            full_linewise_salience (Tensor): Saliency values for each column,
+                of shape (batch_size, full_image_width).
+
+        Returns:
+            Tensor: Aggregated saliency scores for each possible action,
+                of shape (batch_size, n_possible_actions).
+
+        Raises:
+            AssertionError: If the image width is not evenly divisible by n_possible_actions.
+        """
+        batch_size = ops.shape(full_linewise_salience)[0]
+        full_image_width = ops.shape(full_linewise_salience)[1]
+        assert full_image_width % self.n_possible_actions == 0, (
+            "n_possible_actions must divide evenly into image width"
+        )
+        cols_per_action = full_image_width // self.n_possible_actions
+        stacked_linewise_salience = ops.reshape(
+            full_linewise_salience,
+            (batch_size, self.n_possible_actions, cols_per_action),
+        )
+        return ops.sum(stacked_linewise_salience, axis=2)
+
+    def sample(self, particles):
+        """Sample actions using task-based information gain maximization.
+
+        This method computes which lines would provide the most information about
+        the downstream task by:
+        1. Computing pixelwise contribution to task variance using gradients
+        2. Aggregating contributions into line-wise scores
+        3. Greedily selecting lines with highest contribution scores
+        4. Reweighting scores around selected lines (inherited from GreedyEntropy)
+
+        Args:
+            particles (Tensor): Particles representing the posterior distribution,
+                of shape (batch_size, n_particles, height, width).
+
+        Returns:
+            Tuple[Tensor, Tensor, Tensor]:
+                - selected_lines_k_hot: Selected lines as k-hot vectors,
+                  shaped (batch_size, n_possible_actions)
+                - masks: Binary masks of shape (batch_size, img_height, img_width)
+                - pixelwise_contribution_to_var_dst: Pixelwise contribution to downstream
+                  task variance, of shape (batch_size, height, width)
+
+        Note:
+            Unlike the parent GreedyEntropy class, this method returns an additional
+            tensor containing the pixelwise contribution scores for analysis.
+        """
+        pixelwise_contribution_to_var_dst = self.compute_output_and_saliency_propagation(particles)
+        linewise_contribution_to_var_dst = ops.sum(pixelwise_contribution_to_var_dst, axis=1)
+        actionwise_contribution_to_var_dst = self.sum_neighbouring_columns_into_n_possible_actions(
+            linewise_contribution_to_var_dst
+        )
+
+        # Greedily select best line, reweight entropies, and repeat
+        all_selected_lines = []
+        for _ in range(self.n_actions):
+            max_contribution_line, actionwise_contribution_to_var_dst = ops.vectorized_map(
+                self.select_line_and_reweight_entropy,
+                actionwise_contribution_to_var_dst,
+            )
+            all_selected_lines.append(max_contribution_line)
+
+        selected_lines_k_hot = ops.any(
+            ops.one_hot(all_selected_lines, self.n_possible_actions, dtype=masks._DEFAULT_DTYPE),
+            axis=0,
+        )
+        return (
+            selected_lines_k_hot,
+            self.lines_to_im_size(selected_lines_k_hot),
+            pixelwise_contribution_to_var_dst,
+        )
