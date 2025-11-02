@@ -119,11 +119,18 @@ class Object:
         return cls(**reduced_params)
 
     @classmethod
-    def merge(cls, obj1: dict, obj2: dict):
-        """Merge multiple objects and safely initialize a new object."""
+    def merge(cls, obj1: dict, obj2: dict, safe: bool = False):
+        """Merge multiple objects and safely initialize a new object.
+
+        Optionally can safely initialize the object, which removes any invalid
+        arguments.
+        """
         # TODO: support actual zea.core.Objects, now we only support dictionaries
         params = update_dictionary(obj1, obj2)
-        return cls.safe_initialize(**params)
+        if not safe:
+            return cls(**params)
+        else:
+            return cls.safe_initialize(**params)
 
     @classmethod
     def _tree_unflatten(cls, aux, children):

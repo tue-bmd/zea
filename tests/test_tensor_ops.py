@@ -512,6 +512,7 @@ def test_apply_along_axis(array, axis, fn):
 
 
 @pytest.mark.parametrize("mode", ["valid", "same", "full"])
+@backend_equality_check()
 def test_correlate(mode):
     """Test the correlate function with random complex vectors against np.correlate."""
     from zea import tensor_ops
@@ -545,3 +546,51 @@ def test_correlate(mode):
     expected_edge = np.correlate(a_short, v_long, mode=mode)
 
     np.testing.assert_allclose(result_edge, expected_edge, rtol=1e-5, atol=1e-5)
+
+    # Return one of the results for backend_equality_check
+    return result_complex
+
+
+@backend_equality_check(backends=["tensorflow", "torch"])
+def test_vmap():
+    """Test the zea vmap function against jax.vmap."""
+    import jax
+    from keras import ops
+
+    from zea import tensor_ops
+
+    vv = lambda x, y: ops.vdot(x, y)
+    jax_vv = lambda x, y: jax.numpy.vdot(x, y)
+
+    # Create batched data
+    x = np.random.randn(10, 5).astype(np.float32)
+    y = np.random.randn(10, 5).astype(np.float32)
+    x_tensor = ops.convert_to_tensor(x)
+    y_tensor = ops.convert_to_tensor(y)
+
+    # Apply vmap
+    expected = jax.vmap(jax_vv, in_axes=(0, 0))(x, y)
+    result = tensor_ops.vmap(vv, in_axes=(0, 0))(x_tensor, y_tensor)
+    np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
+
+    # Test with different in_axes
+    expected2 = jax.vmap(jax_vv, in_axes=(0, None))(x, y[0])
+    result2 = tensor_ops.vmap(vv, in_axes=(0, None))(x_tensor, y_tensor[0])
+    np.testing.assert_allclose(result2, expected2, rtol=1e-5, atol=1e-5)
+
+    # Create batched data with more dimensions
+    x = np.random.randn(10, 10, 3, 2).astype(np.float32)
+    y = np.random.randn(10, 10, 3, 2).astype(np.float32)
+    x_tensor = ops.convert_to_tensor(x)
+    y_tensor = ops.convert_to_tensor(y)
+
+    # Create different function for more dimensions
+    mean = lambda a, b: ops.mean(a * b, axis=(-1, -2))
+    jax_mean = lambda a, b: jax.numpy.mean(a * b, axis=(-1, -2))
+
+    # Test with different out_axes
+    expected3 = jax.vmap(jax_mean, in_axes=(0, 1), out_axes=1)(x, y)
+    result3 = tensor_ops.vmap(mean, in_axes=(0, 1), out_axes=1)(x_tensor, y_tensor)
+    np.testing.assert_allclose(result3, expected3, rtol=1e-5, atol=1e-5)
+
+    return result

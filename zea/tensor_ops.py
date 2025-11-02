@@ -130,6 +130,102 @@ def extend_n_dims(arr, axis, n_dims):
     return ops.reshape(arr, new_shape)
 
 
+def vmap(fun, in_axes=0, out_axes=0):
+    """Vectorized map.
+
+    For torch and jax backends, this uses the native vmap implementation.
+    For other backends, this a wrapper that uses `ops.vectorized_map` under the hood.
+
+    Args:
+        fun: The function to be mapped.
+        in_axes: The axis or axes to be mapped over in the input.
+            Can be an integer, a tuple of integers, or None.
+            If None, the corresponding argument is not mapped over.
+            Defaults to 0.
+        out_axes: The axis or axes to be mapped over in the output.
+            Can be an integer, a tuple of integers, or None.
+            If None, the corresponding output is not mapped over.
+            Defaults to 0.
+
+    Returns:
+        A function that applies `fun` in a vectorized manner over the specified axes.
+
+    Raises:
+        ValueError: If the backend does not support vmap.
+    """
+    if keras.backend.backend() == "jax":
+        import jax
+
+        return jax.vmap(fun, in_axes=in_axes, out_axes=out_axes)
+    elif keras.backend.backend() == "torch":
+        import torch
+
+        return torch.vmap(fun, in_dims=in_axes, out_dims=out_axes)
+    else:
+        return manual_vmap(fun, in_axes=in_axes, out_axes=out_axes)
+
+
+def manual_vmap(fun, in_axes=0, out_axes=0):
+    """Manual vectorized map for backends that do not support vmap."""
+
+    def find_map_length(args, in_axes):
+        """Find the length of the axis to map over."""
+        # NOTE: only needed for numpy, the other backends can handle a singleton dimension
+        for arg, axis in zip(args, in_axes):
+            if axis is None:
+                continue
+
+            return ops.shape(arg)[axis]
+        return 1
+
+    def _moveaxes(args, in_axes, out_axes):
+        """Move axes of the input arguments."""
+        args = list(args)
+        for i, (arg, in_axis, out_axis) in enumerate(zip(args, in_axes, out_axes)):
+            if in_axis is not None:
+                args[i] = ops.moveaxis(arg, in_axis, out_axis)
+            else:
+                args[i] = ops.repeat(arg[None], find_map_length(args, in_axes), axis=out_axis)
+        return tuple(args)
+
+    def _fun(args):
+        return fun(*args)
+
+    def wrapper(*args):
+        # If in_axes or out_axes is an int, convert to tuple
+        if isinstance(in_axes, int):
+            _in_axes = (in_axes,) * len(args)
+        else:
+            _in_axes = in_axes
+        if isinstance(out_axes, int):
+            _out_axes = (out_axes,) * len(args)
+        else:
+            _out_axes = out_axes
+        zeros = (0,) * len(args)
+
+        # Check that in_axes and out_axes are tuples
+        if not isinstance(_in_axes, tuple):
+            raise ValueError("in_axes must be an int or a tuple of ints.")
+        if not isinstance(_out_axes, tuple):
+            raise ValueError("out_axes must be an int or a tuple of ints.")
+
+        args = _moveaxes(args, _in_axes, zeros)
+        outputs = ops.vectorized_map(_fun, tuple(args))
+
+        tuple_output = isinstance(outputs, (tuple, list))
+        if not tuple_output:
+            outputs = (outputs,)
+
+        outputs = _moveaxes(outputs, zeros, _out_axes)
+
+        if not tuple_output:
+            outputs = outputs[0]
+
+        return outputs
+
+    return wrapper
+
+
 def func_with_one_batch_dim(
     func,
     tensor,
@@ -1425,6 +1521,11 @@ def correlate(x, y, mode="full"):
     y = ops.convert_to_tensor(y)
 
     is_complex = "complex" in ops.dtype(x) or "complex" in ops.dtype(y)
+
+    # Cast to complex64 if real
+    if not is_complex:
+        x = ops.cast(x, "complex64")
+        y = ops.cast(y, "complex64")
 
     # Split into real and imaginary
     xr, xi = ops.real(x), ops.imag(x)

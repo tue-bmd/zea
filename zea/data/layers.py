@@ -25,7 +25,7 @@ class Resizer(TFDataLayer):
     Resize layer for resizing images. Can deal with N-dimensional images.
     Can do resize, center_crop, random_crop and crop_or_pad.
 
-    Can be used in tf.data pipelines.
+    Can be used in `tf.data` pipelines.
     """
 
     def __init__(
@@ -36,7 +36,6 @@ class Resizer(TFDataLayer):
         seed: int | None = None,
         **resize_kwargs,
     ):
-        # noqa: E501
         """
         Initializes the data loader with the specified parameters.
 
@@ -47,7 +46,7 @@ class Resizer(TFDataLayer):
                 ['random_crop'](https://keras.io/api/layers/preprocessing_layers/image_augmentation/random_crop/),
                 ['resize'](https://keras.io/api/layers/preprocessing_layers/image_preprocessing/resizing/),
                 'crop_or_pad': resizes an image to a target width and height by either centrally
-                    cropping the image, padding it evenly with zeros or a combination of both.
+                cropping the image, padding it evenly with zeros or a combination of both.
             resize_axes (tuple | None, optional): The axes along which to resize.
                 Must be of length 2. Defaults to None. In that case, can only process
                 default tensors of shape (batch, height, width, channels), where the

@@ -823,7 +823,8 @@ class DPS(DiffusionGuidance):
         omega,
         **kwargs,
     ):
-        """Compute measurement error for diffusion posterior sampling.
+        """
+        Compute measurement error for diffusion posterior sampling.
 
         Args:
             noisy_images: Noisy images.
@@ -849,20 +850,19 @@ class DPS(DiffusionGuidance):
         return measurement_error, (pred_noises, pred_images)
 
     def __call__(self, noisy_images, **kwargs):
-        """Call the gradient function.
+        """
+        Call the gradient function.
 
-        Returns a function with the following signature:
-            (
-                noisy_images,
-                measurement,
-                operator,
-                noise_rates,
-                signal_rates,
-                omega,
-                **operator_kwargs,
-            ) -> gradients, (error, (pred_noises, pred_images))
+        Args:
+            noisy_images: Noisy images.
+            measurement: Target measurement.
+            operator: Forward operator.
+            noise_rates: Current noise rates.
+            signal_rates: Current signal rates.
+            omega: Weight for the measurement error.
+            **kwargs: Additional arguments for the operator.
 
-        where operator_kwargs are the kwargs for the operator.
-
+        Returns:
+            Tuple of (gradients, (measurement_error, (pred_noises, pred_images)))
         """
         return self.gradient_fn(noisy_images, **kwargs)

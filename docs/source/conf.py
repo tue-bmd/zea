@@ -27,6 +27,7 @@ extensions = [
     "nbsphinx",  # for Jupyter notebook support
     "sphinx_design",  # for fancy code block selection
     "sphinxcontrib.bibtex",  # for bibliography support
+    "sphinxarg.ext",  # for argparse support
 ]
 
 autodoc_mock_imports = ["zea.backend.tf2jax"]
@@ -36,7 +37,9 @@ autodoc_default_options = {
     "members": True,
     "undoc-members": True,
     "show-inheritance": True,
+    "special-members": "__call__",
 }
+autoclass_content = "both"  # include both class docstring and __init__ docstring
 
 templates_path = ["_templates"]
 

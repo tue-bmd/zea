@@ -126,6 +126,12 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     val_tensor = scan.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == 3
 
+    # Select with a slice
+    scan.set_transmits(slice(0, 5, 2))
+    val = getattr(scan, attr)
+    val_tensor = scan.to_tensor(include=[attr])[attr]
+    assert val.shape[0] == val_tensor.shape[0] == 3
+
 
 def test_set_attributes():
     """Test setting attributes of Scan class."""

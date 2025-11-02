@@ -1,5 +1,6 @@
 """Tests for the Operation and Pipeline classes in ops.py"""
 
+import inspect
 import json
 
 import keras
@@ -750,3 +751,12 @@ def test_ops_pass_positional_arg():
     with pytest.raises(TypeError) as excinfo:
         op(1)
     assert "Positional arguments are not allowed." in str(excinfo.value)
+
+
+def test_registry():
+    """Test that all Operations are registered in ops_registry."""
+
+    classes = inspect.getmembers(ops, inspect.isclass)
+    for _, _class in classes:
+        if _class.__module__.startswith("zea.ops."):
+            ops_registry.get_name(_class)  # this raises an error if the class is not registered

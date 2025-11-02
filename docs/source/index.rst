@@ -44,6 +44,8 @@ Welcome to the documentation for the ``zea`` package: *A Toolbox for Cognitive U
    parameters
    pipeline
    models
+   environment
+   cli
 
 .. toctree::
    :caption: Project

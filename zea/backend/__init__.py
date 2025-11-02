@@ -25,6 +25,8 @@ Key Features
 
 """
 
+from contextlib import nullcontext
+
 import keras
 
 from zea import log
@@ -114,3 +116,90 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
         log.warning("Initialize zea.Pipeline with jit_options=None to suppress this warning.")
         log.warning("Falling back to non-compiled mode.")
         return func
+
+
+class on_device:
+    """Context manager to set the device regardless of backend.
+
+    For the `torch` backend, you need to manually move the model and data to the device before
+    using this context manager.
+
+    Args:
+        device (str): Device string, e.g. ``'cuda'``, ``'gpu'``, or ``'cpu'``.
+
+    Example:
+        .. code-block:: python
+
+            with zea.backend.on_device("gpu:3"):
+                pipeline = zea.Pipeline([zea.keras_ops.Abs()])
+                output = pipeline(data=keras.random.normal((10, 10)))  # output is on "cuda:3"
+    """
+
+    def __init__(self, device: str):
+        self.device = self.get_device(device)
+        self._context = self.get_context(self.device)
+
+    def get_context(self, device):
+        if device is None:
+            return nullcontext()
+
+        if keras.backend.backend() == "tensorflow":
+            import tensorflow as tf
+
+            return tf.device(device)
+
+        if keras.backend.backend() == "jax":
+            import jax
+
+            return jax.default_device(device)
+        if keras.backend.backend() == "torch":
+            import torch
+
+            return torch.device(device)
+
+        return nullcontext()
+
+    def get_device(self, device: str):
+        if device is None:
+            return None
+
+        device = device.lower()
+
+        if keras.backend.backend() == "tensorflow":
+            return device.replace("cuda", "gpu")
+
+        if keras.backend.backend() == "jax":
+            from zea.backend.jax import str_to_jax_device
+
+            device = device.replace("cuda", "gpu")
+            return str_to_jax_device(device)
+
+        if keras.backend.backend() == "torch":
+            return device.replace("gpu", "cuda")
+
+    def __enter__(self):
+        self._context.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._context.__exit__(exc_type, exc_val, exc_tb)
+
+
+if keras.backend.backend() in ["tensorflow", "jax", "numpy"]:
+
+    def func_on_device(func, device, *args, **kwargs):
+        """Moves all tensor arguments of a function to a specified device before calling it.
+
+        Args:
+            func (callable): Function to be called.
+            device (str): Device to move tensors to.
+            *args: Positional arguments to be passed to the function.
+            **kwargs: Keyword arguments to be passed to the function.
+        Returns:
+            The output of the function.
+        """
+        with on_device(device):
+            return func(*args, **kwargs)
+elif keras.backend.backend() == "torch":
+    from zea.backend.torch import func_on_device
+else:
+    raise ValueError(f"Unsupported backend: {keras.backend.backend()}")

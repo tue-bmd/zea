@@ -308,3 +308,92 @@ def test_uniform_random_lines():
     # Test with non-divisible actions (should raise AssertionError)
     with pytest.raises(AssertionError):
         selection.UniformRandomLines(3, 10, h, w)
+
+
+def test_task_based_lines():
+    """Test TaskBasedLines action selection."""
+    np.random.seed(2)
+    h, w = 8, 8
+    rand_img_1 = np.random.rand(h, w, 1).astype(np.float32)
+    rand_img_2 = np.random.rand(h, w, 1).astype(np.float32)
+
+    # manually make lines 2 and 3 very correlated
+    rand_img_1[:, 2] = rand_img_1[:, 3]
+    rand_img_2[:, 2] = rand_img_2[:, 3]
+
+    particles = np.stack([rand_img_1, rand_img_2], axis=0)
+    particles = np.expand_dims(particles, axis=0)  # add batch dim
+    particles = np.squeeze(particles, axis=-1)  # remove channel dim --> (batch, n_particles, h, w)
+
+    # Define a simple downstream task function: sum of squared pixel values
+    def downstream_task_fn(x):
+        return ops.sum(x**2)
+
+    n_actions = 1
+    agent = selection.TaskBasedLines(n_actions, w, h, w, downstream_task_fn)
+    selected_lines, mask, pixelwise_contribution = agent.sample(particles)
+
+    # Test output shapes
+    assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w)
+    assert pixelwise_contribution.shape == (1, h, w)
+
+    # Test that correct number of lines are selected
+    first_row = mask[0, 0]
+    assert np.count_nonzero(first_row) == n_actions
+    assert np.count_nonzero(selected_lines[0]) == n_actions
+
+    # Test multiple actions
+    n_actions = 2
+    agent = selection.TaskBasedLines(n_actions, w, h, w, downstream_task_fn)
+    selected_lines, mask, pixelwise_contribution = agent.sample(particles)
+
+    assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w)
+    assert pixelwise_contribution.shape == (1, h, w)
+
+    first_row = mask[0, 0]
+    assert np.count_nonzero(first_row) == n_actions
+    assert np.count_nonzero(selected_lines[0]) == n_actions
+
+    # Test that pixelwise contribution values are non-negative (variance * squared gradient)
+    assert np.all(pixelwise_contribution >= 0)
+
+    # Test with batch size > 1
+    batch_size = 3
+    # Create particles for multiple batches
+    particles_batch = np.tile(particles, (batch_size, 1, 1, 1))  # (batch_size, n_particles, h, w)
+
+    n_actions = 1
+    agent = selection.TaskBasedLines(n_actions, w, h, w, downstream_task_fn)
+    selected_lines_batch, mask_batch, pixelwise_contribution_batch = agent.sample(particles_batch)
+
+    # Test batch output shapes
+    assert mask_batch.shape == (batch_size, h, w)
+    assert selected_lines_batch.shape == (batch_size, w)
+    assert pixelwise_contribution_batch.shape == (batch_size, h, w)
+
+    # Test that correct number of lines are selected for each batch
+    for b in range(batch_size):
+        first_row = mask_batch[b, 0]
+        assert np.count_nonzero(first_row) == n_actions
+        assert np.count_nonzero(selected_lines_batch[b]) == n_actions
+        # All pixelwise contributions should be non-negative
+        assert np.all(pixelwise_contribution_batch[b] >= 0)
+
+    # Test with a different downstream task function: mean pixel value
+    def mean_task_fn(x):
+        return ops.mean(x)
+
+    agent_mean = selection.TaskBasedLines(n_actions, w, h, w, mean_task_fn)
+    selected_lines_mean, mask_mean, pixelwise_contribution_mean = agent_mean.sample(particles)
+
+    # Should have same shapes
+    assert mask_mean.shape == (1, h, w)
+    assert selected_lines_mean.shape == (1, w)
+    assert pixelwise_contribution_mean.shape == (1, h, w)
+    assert np.count_nonzero(selected_lines_mean[0]) == n_actions
+
+    # regression tests
+    assert 2 in np.flatnonzero(selected_lines)
+    assert 6 in np.flatnonzero(selected_lines)

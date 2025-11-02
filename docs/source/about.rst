@@ -77,12 +77,16 @@ The following list contains some of the papers that have been published using ``
   :keyprefix: about-
   :labelprefix: A-
 
-  van2024active
-  luijten2020adaptive
-  van2024off
-  nolan2024active
-  stevens2024dehazing
-  federici2024active
-  stevens2025sequential
-  stevens2025high
-  penninga2025deep
+   van2024active
+   luijten2020adaptive
+   van2024off
+   nolan2024active
+   stevens2024dehazing
+   federici2024active
+   stevens2025sequential
+   stevens2025high
+   stevens2025deep
+   penninga2025deep
+   van2025patient
+   stevens2025semantic
+   stevens2025nuclear

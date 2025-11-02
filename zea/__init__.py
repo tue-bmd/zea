@@ -7,10 +7,10 @@ from . import log
 
 # dynamically add __version__ attribute (see pyproject.toml)
 # __version__ = __import__("importlib.metadata").metadata.version(__package__)
-__version__ = "0.0.4"
+__version__ = "0.0.6"
 
 
-def setup():
+def _bootstrap_backend():
     """Setup function to initialize the zea package."""
 
     def _check_backend_installed():
@@ -40,14 +40,14 @@ def setup():
 
     _check_backend_installed()
 
-    import keras
+    from keras.backend import backend as keras_backend
 
-    log.info(f"Using backend {keras.backend.backend()!r}")
+    log.info(f"Using backend {keras_backend()!r}")
 
 
 # call and clean up namespace
-setup()
-del setup
+_bootstrap_backend()
+del _bootstrap_backend
 
 from . import (
     agent,
@@ -55,6 +55,7 @@ from . import (
     data,
     display,
     io_lib,
+    keras_ops,
     metrics,
     models,
     simulator,
@@ -68,7 +69,7 @@ from .data.file import File, load_file
 from .datapaths import set_data_paths
 from .interface import Interface
 from .internal.device import init_device
-from .internal.setup_zea import set_backend, setup, setup_config
+from .internal.setup_zea import setup, setup_config
 from .ops import Pipeline
 from .probes import Probe
 from .scan import Scan

@@ -49,6 +49,21 @@ def clean_cache_dir():
 
 
 @pytest.fixture
+def dummy_file(tmp_path):
+    """Fixture to create a temporary dataset"""
+    temp_file = tmp_path / "test.hdf5"
+    generate_example_dataset(
+        temp_file,
+        add_optional_dtypes=True,
+        n_frames=DUMMY_DATASET_N_FRAMES,
+        grid_size_z=DUMMY_DATASET_GRID_SIZE_Z,
+        grid_size_x=DUMMY_DATASET_GRID_SIZE_X,
+    )
+
+    yield str(temp_file)
+
+
+@pytest.fixture
 def dummy_dataset_path(tmp_path):
     """Fixture to create a temporary dataset"""
     for i in range(2):
