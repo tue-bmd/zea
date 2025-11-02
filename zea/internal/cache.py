@@ -21,10 +21,8 @@
 
 import ast
 import atexit
-import hashlib
 import inspect
 import os
-import pickle
 import tempfile
 import textwrap
 from pathlib import Path
@@ -33,6 +31,7 @@ import joblib
 import keras
 
 from zea import log
+from zea.internal.core import hash_elements
 
 _DEFAULT_ZEA_CACHE_DIR = Path.home() / ".cache" / "zea"
 
@@ -78,52 +77,6 @@ else:
 
 _CACHE_DIR = ZEA_CACHE_DIR / "cached_funcs"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def serialize_elements(key_elements: list, shorten: bool = False) -> str:
-    """Serialize elements of a list to generate a cache key.
-
-    In general uses the string representation of the elements unless
-    the element has a `serialized` attribute, in which case it uses that.
-    For instance this is useful for custom classes that inherit from `zea.core.Object`.
-
-    Args:
-        key_elements (list): List of elements to serialize. Can be nested lists
-            or tuples. In this case the elements are serialized recursively.
-        shorten (bool): If True, the serialized string is hashed to a shorter
-            representation using MD5. Defaults to False.
-
-    Returns:
-        str: A serialized string representation of the elements, joined by underscores.
-
-    """
-    serialized_elements = []
-    for element in key_elements:
-        if isinstance(element, (list, tuple)):
-            # If element is a list or tuple, serialize its elements recursively
-            serialized_elements.append(serialize_elements(element))
-        elif hasattr(element, "serialized"):
-            # Use the serialized attribute if it exists (e.g. for zea.core.Object)
-            serialized_elements.append(str(element.serialized))
-        elif isinstance(element, str):
-            # If element is a string, use it as is
-            serialized_elements.append(element)
-        elif isinstance(element, keras.random.SeedGenerator):
-            # If element is a SeedGenerator, use the state
-            element = keras.ops.convert_to_numpy(element.state.value)
-            element = pickle.dumps(element)
-            element = hashlib.md5(element).hexdigest()
-            serialized_elements.append(element)
-        else:
-            # Otherwise, serialize the element using pickle and hash it
-            element = pickle.dumps(element)
-            element = hashlib.md5(element).hexdigest()
-            serialized_elements.append(element)
-
-    serialized = "_".join(serialized_elements)
-    if shorten:
-        return hashlib.md5(serialized.encode()).hexdigest()
-    return serialized
 
 
 def get_function_source(func):
@@ -188,7 +141,7 @@ def generate_cache_key(func, args, kwargs, arg_names):
     # Add keras backend
     key_elements.append(keras.backend.backend())
 
-    return f"{func.__qualname__}_" + serialize_elements(key_elements, shorten=True)
+    return f"{func.__qualname__}_" + hash_elements(key_elements)
 
 
 def cache_output(*arg_names, verbose=False):

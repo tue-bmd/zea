@@ -136,7 +136,7 @@ def load_json(preset, config_file=CONFIG_FILE):
     return config
 
 
-def load_serialized_object(config, **kwargs):
+def load_serialized_object(config, cls, **kwargs):
     """Load a serialized Keras object from a config."""
     # `dtype` in config might be a serialized `DTypePolicy` or `DTypePolicyMap`.
     # Ensure that `dtype` is properly configured.
@@ -145,7 +145,7 @@ def load_serialized_object(config, **kwargs):
 
     config["config"] = {**config["config"], **kwargs}
     # return keras.saving.deserialize_keras_object(config)
-    return zea.models.base.deserialize_zea_object(config)
+    return zea.models.base.deserialize_zea_object(config, cls)
 
 
 def check_config_class(config):
@@ -275,7 +275,7 @@ class KerasPresetLoader(PresetLoader):
 
     def load_model(self, cls, load_weights, **kwargs):
         """Load a model from a serialized Keras config."""
-        model = load_serialized_object(self.config, **kwargs)
+        model = load_serialized_object(self.config, cls=cls, **kwargs)
 
         if not load_weights:
             return model
@@ -306,7 +306,7 @@ class KerasPresetLoader(PresetLoader):
     def load_image_converter(self, cls, **kwargs):
         """Load an image converter from the preset."""
         converter_config = load_json(self.preset, IMAGE_CONVERTER_CONFIG_FILE)
-        return load_serialized_object(converter_config, **kwargs)
+        return load_serialized_object(converter_config, cls, **kwargs)
 
     def get_file(self, path):
         """Get a file from the preset."""
@@ -322,7 +322,7 @@ class KerasPresetLoader(PresetLoader):
         if not issubclass(check_config_class(preprocessor_json), cls):
             return super().load_preprocessor(cls, **kwargs)
         # We found a `preprocessing.json` with a complete config for our class.
-        preprocessor = load_serialized_object(preprocessor_json, **kwargs)
+        preprocessor = load_serialized_object(preprocessor_json, cls, **kwargs)
         if hasattr(preprocessor, "load_preset_assets"):
             preprocessor.load_preset_assets(self.preset)
         return preprocessor

@@ -10,15 +10,13 @@ See the Parameters class docstring for details on features and usage.
 
 import functools
 import inspect
-import pickle
 from copy import deepcopy
 
 import numpy as np
 
 from zea import log
-from zea.internal.cache import serialize_elements
 from zea.internal.core import Object as ZeaObject
-from zea.internal.core import _to_tensor
+from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
 
 def cache_with_dependencies(*deps):
@@ -247,7 +245,7 @@ class Parameters(ZeaObject):
     def serialized(self):
         """Compute the checksum of the object only if not already done"""
         if self._serialized is None:
-            self._serialized = pickle.dumps(self._params)
+            self._serialized = serialize_elements([self._params])
         return self._serialized
 
     @classmethod
@@ -283,14 +281,18 @@ class Parameters(ZeaObject):
             raise AttributeError(f"'{name}' is not a valid parameter or computed property.")
 
     def __getattr__(self, item):
+        # Handle case during unpickling when internal attributes may not be set yet
+        if "_params" not in self.__dict__:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+
         # First check regular params
         if item in self._params:
             return self._params[item]
 
         # Check if it's a property
-        if item not in self._properties:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'. ")
-
+        props = self.__dict__.get("_properties")
+        if not props or item not in props:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
         self._assert_dependencies_met(item)
 
         # Return property value
@@ -388,7 +390,7 @@ class Parameters(ZeaObject):
 
     def _current_dependency_hash(self, deps) -> str:
         values = [self._params.get(dep, None) for dep in deps]
-        return serialize_elements(values)
+        return hash_elements(values)
 
     def _assert_dependencies_met(self, name):
         """Assert that all dependencies for a computed property are met."""

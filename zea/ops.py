@@ -56,8 +56,6 @@ Example of a yaml file:
           params:
             operations:
               - name: tof_correction
-                params:
-                  apply_phase_rotation: true
               - name: pfield_weighting
               - name: delay_and_sum
             num_patches: 100
@@ -67,10 +65,12 @@ Example of a yaml file:
 
 """
 
+import ast
 import copy
 import hashlib
 import inspect
 import json
+import textwrap
 from functools import partial
 from typing import Any, Dict, List, Union
 
@@ -99,8 +99,13 @@ from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
 from zea.simulator import simulate_rf
-from zea.tensor_ops import batched_map, patched_map, resample, reshape_axis
-from zea.utils import FunctionTimer, deep_compare, map_negative_indices, translate
+from zea.tensor_ops import patched_map, resample, reshape_axis
+from zea.utils import (
+    FunctionTimer,
+    deep_compare,
+    map_negative_indices,
+    translate,
+)
 
 
 def get_ops(ops_name):
@@ -165,8 +170,6 @@ class Operation(keras.Operation):
         self._output_cache = {}
 
         # Obtain the input signature of the `call` method
-        self._input_signature = None
-        self._valid_keys = None  # Keys valid for the `call` method
         self._trace_signatures()
 
         if jit_kwargs is None:
@@ -199,17 +202,60 @@ class Operation(keras.Operation):
         else:
             self._call = self.call
 
+    @staticmethod
+    def _get_static_return_keys(func) -> set:
+        """
+        Statically extract dictionary keys from return statements in a function.
+        Only works for dict literals (not for dynamically constructed dicts).
+        """
+        source = inspect.getsource(func)
+        source = textwrap.dedent(source)  # Remove leading indentation
+        tree = ast.parse(source)
+
+        class ReturnDictVisitor(ast.NodeVisitor):
+            def __init__(self):
+                self.keys = set()
+
+            def visit_Return(self, node):
+                if isinstance(node.value, ast.Dict):
+                    for key in node.value.keys:
+                        if isinstance(key, ast.Constant):
+                            self.keys.add(key.value)
+                        elif isinstance(key, ast.Name):
+                            self.keys.add(key.id)
+                else:
+                    log.debug(
+                        f"Return value in function {func.__name__} is not a dict literal. "
+                        "Cannot statically extract keys."
+                    )
+                self.generic_visit(node)
+
+        visitor = ReturnDictVisitor()
+        visitor.visit(tree)
+        return set(visitor.keys)
+
     def _trace_signatures(self):
         """
         Analyze and store the input/output signatures of the `call` method.
         """
         self._input_signature = inspect.signature(self.call)
         self._valid_keys = set(self._input_signature.parameters.keys())
+        self._static_return_keys = self._get_static_return_keys(self.call)
 
     @property
-    def valid_keys(self):
+    def static_return_keys(self) -> set:
+        """Get the static return keys of the `call` method."""
+        return self._static_return_keys
+
+    @property
+    def valid_keys(self) -> set:
         """Get the valid keys for the `call` method."""
         return self._valid_keys
+
+    @property
+    def needs_keys(self) -> set:
+        """Get a set of all input keys needed by the operation."""
+        return self.valid_keys
 
     @property
     def jittable(self):
@@ -408,8 +454,6 @@ class Pipeline:
         """
         self._call_pipeline = self.call
         self.name = name
-        self.timer = FunctionTimer()
-        self.timed = timed
 
         self._pipeline_layers = operations
 
@@ -419,6 +463,24 @@ class Pipeline:
         self.with_batch_dim = with_batch_dim
         self._validate_flag = validate
 
+        # Setup timer
+        if jit_options == "pipeline" and timed:
+            raise ValueError(
+                "timed=True cannot be used with jit_options='pipeline' as the entire "
+                "pipeline is compiled into a single function. Try setting jit_options to "
+                "'ops' or None."
+            )
+        if timed:
+            log.warning(
+                "Timer has been initialized for the pipeline. To get an accurate timing estimate, "
+                "the `block_until_ready()` is used, which will slow down the execution, so "
+                "do not use for regular processing!"
+            )
+            self._callable_layers = self._get_timed_operations()
+        else:
+            self._callable_layers = self._pipeline_layers
+        self._timed = timed
+
         if validate:
             self.validate()
         else:
@@ -427,19 +489,30 @@ class Pipeline:
         if jit_kwargs is None:
             jit_kwargs = {}
 
-        if keras.backend.backend() == "jax" and self.static_params:
+        if keras.backend.backend() == "jax" and self.static_params != []:
             jit_kwargs = {"static_argnames": self.static_params}
 
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
     def needs(self, key) -> bool:
-        """Check if the pipeline needs a specific key."""
-        return key in self.valid_keys
+        """Check if the pipeline needs a specific key at the input."""
+        return key in self.needs_keys
+
+    @property
+    def static_return_keys(self) -> set:
+        """Get the static return keys of the pipeline."""
+        static_return_keys = set()
+        for operation in self.operations:
+            static_return_keys.update(operation.static_return_keys)
+        return static_return_keys
 
     @property
     def valid_keys(self) -> set:
-        """Get a set of valid keys for the pipeline."""
+        """Get a set of valid keys for the pipeline.
+
+        This is all keys that can be passed to the pipeline as input.
+        """
         valid_keys = set()
         for operation in self.operations:
             valid_keys.update(operation.valid_keys)
@@ -453,8 +526,26 @@ class Pipeline:
             static_params.extend(operation.static_params)
         return list(set(static_params))
 
+    @property
+    def needs_keys(self) -> set:
+        """Get a set of all input keys needed by the pipeline.
+
+        Will keep track of keys that are already provided by previous operations.
+        """
+        needs = set()
+        has_so_far = set()
+        previous_operation = None
+        for operation in self.operations:
+            if previous_operation is not None:
+                has_so_far.update(previous_operation.static_return_keys)
+            needs.update(operation.needs_keys - has_so_far)
+            previous_operation = operation
+        return needs
+
     @classmethod
-    def from_default(cls, num_patches=100, baseband=False, pfield=False, **kwargs) -> "Pipeline":
+    def from_default(
+        cls, num_patches=100, baseband=False, pfield=False, timed=False, **kwargs
+    ) -> "Pipeline":
         """Create a default pipeline.
 
         Args:
@@ -465,6 +556,7 @@ class Pipeline:
                 so input signal has a single channel dim and is still on carrier frequency.
             pfield (bool): If True, apply Pfield weighting. Defaults to False.
                 This will calculate pressure field and only beamform the data to those locations.
+            timed (bool, optional): Whether to time each operation. Defaults to False.
             **kwargs: Additional keyword arguments to be passed to the Pipeline constructor.
 
         """
@@ -476,7 +568,7 @@ class Pipeline:
 
         # Get beamforming ops
         beamforming = [
-            TOFCorrection(apply_phase_rotation=True),
+            TOFCorrection(),
             DelayAndSum(),
         ]
         if pfield:
@@ -495,7 +587,7 @@ class Pipeline:
             Normalize(),
             LogCompress(),
         ]
-        return cls(operations, **kwargs)
+        return cls(operations, timed=timed, **kwargs)
 
     def copy(self) -> "Pipeline":
         """Create a copy of the pipeline."""
@@ -506,57 +598,60 @@ class Pipeline:
             jit_kwargs=self.jit_kwargs,
             name=self.name,
             validate=self._validate_flag,
+            timed=self._timed,
+        )
+
+    def reinitialize(self):
+        """Reinitialize the pipeline in place."""
+        self.__init__(
+            self._pipeline_layers,
+            with_batch_dim=self.with_batch_dim,
+            jit_options=self.jit_options,
+            jit_kwargs=self.jit_kwargs,
+            name=self.name,
+            validate=self._validate_flag,
+            timed=self._timed,
         )
 
     def prepend(self, operation: Operation):
         """Prepend an operation to the pipeline."""
         self._pipeline_layers.insert(0, operation)
-        self.copy()
+        self.reinitialize()
 
     def append(self, operation: Operation):
         """Append an operation to the pipeline."""
         self._pipeline_layers.append(operation)
-        self.copy()
+        self.reinitialize()
 
     def insert(self, index: int, operation: Operation):
         """Insert an operation at a specific index in the pipeline."""
         if index < 0 or index > len(self._pipeline_layers):
             raise IndexError("Index out of bounds for inserting operation.")
         self._pipeline_layers.insert(index, operation)
-        return self.copy()
+        self.reinitialize()
 
     @property
     def operations(self):
         """Alias for self.layers to match the zea naming convention"""
         return self._pipeline_layers
 
-    def timed_call(self, **inputs):
-        """Process input data through the pipeline."""
+    def reset_timer(self):
+        """Reset the timer for timed operations."""
+        if self._timed:
+            self._callable_layers = self._get_timed_operations()
+        else:
+            log.warning(
+                "Timer has not been initialized. Set timed=True when initializing the pipeline."
+            )
 
-        for op in self._pipeline_layers:
-            timed_op = self.timer(op, name=op.__class__.__name__)
-            try:
-                outputs = timed_op(**inputs)
-            except KeyError as exc:
-                raise KeyError(
-                    f"[zea.Pipeline] Operation '{op.__class__.__name__}' "
-                    f"requires input key '{exc.args[0]}', "
-                    "but it was not provided in the inputs.\n"
-                    "Check whether the objects (such as `zea.Scan`) passed to "
-                    "`pipeline.prepare_parameters()` contain all required keys.\n"
-                    f"Current list of all passed keys: {list(inputs.keys())}\n"
-                    f"Valid keys for this pipeline: {self.valid_keys}"
-                ) from exc
-            except Exception as exc:
-                raise RuntimeError(
-                    f"[zea.Pipeline] Error in operation '{op.__class__.__name__}': {exc}"
-                ) from exc
-            inputs = outputs
-        return outputs
+    def _get_timed_operations(self):
+        """Get a list of timed operations."""
+        self.timer = FunctionTimer()
+        return [self.timer(op, name=op.__class__.__name__) for op in self._pipeline_layers]
 
     def call(self, **inputs):
         """Process input data through the pipeline."""
-        for operation in self._pipeline_layers:
+        for operation in self._callable_layers:
             try:
                 outputs = operation(**inputs)
             except KeyError as exc:
@@ -579,14 +674,9 @@ class Pipeline:
     def __call__(self, return_numpy=False, **inputs):
         """Process input data through the pipeline."""
 
-        if any(key in inputs for key in ["probe", "scan", "config"]):
-            raise ValueError(
-                "Probe, Scan and Config objects should be first processed with "
-                "`Pipeline.prepare_parameters` before calling the pipeline. "
-                "e.g. inputs = Pipeline.prepare_parameters(probe, scan, config)"
-            )
-
-        if any(isinstance(arg, ZEAObject) for arg in inputs.values()):
+        if any(key in inputs for key in ["probe", "scan", "config"]) or any(
+            isinstance(arg, ZEAObject) for arg in inputs.values()
+        ):
             raise ValueError(
                 "Probe, Scan and Config objects should be first processed with "
                 "`Pipeline.prepare_parameters` before calling the pipeline. "
@@ -640,18 +730,13 @@ class Pipeline:
                 if operation.jittable and operation._jit_compile:
                     operation.set_jit(value == "ops")
 
-    @property
-    def _call_fn(self):
-        """Get the call function of the pipeline."""
-        return self.call if not self.timed else self.timed_call
-
     def jit(self):
         """JIT compile the pipeline."""
-        self._call_pipeline = jit(self._call_fn, **self.jit_kwargs)
+        self._call_pipeline = jit(self.call, **self.jit_kwargs)
 
     def unjit(self):
         """Un-JIT compile the pipeline."""
-        self._call_pipeline = self._call_fn
+        self._call_pipeline = self.call
 
     @property
     def jittable(self):
@@ -963,7 +1048,7 @@ class Pipeline:
             assert isinstance(scan, Scan), (
                 f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
             )
-            scan_dict = scan.to_tensor(include=self.valid_keys, keep_as_is=self.static_params)
+            scan_dict = scan.to_tensor(include=self.needs_keys, keep_as_is=self.static_params)
 
         if config is not None:
             assert isinstance(config, Config), (
@@ -1229,10 +1314,22 @@ class PatchedGrid(Pipeline):
             operation.with_batch_dim = False
 
     @property
+    def _extra_keys(self):
+        return {"flatgrid", "grid_size_x", "grid_size_z"}
+
+    @property
     def valid_keys(self) -> set:
-        """Get a set of valid keys for the pipeline. Adds the parameters that PatchedGrid itself
-        operates on (even if not used by operations inside it)."""
-        return super().valid_keys.union({"flatgrid", "grid_size_x", "grid_size_z"})
+        """Get a set of valid keys for the pipeline.
+        Adds the parameters that PatchedGrid itself operates on (even if not used by operations
+        inside it)."""
+        return super().valid_keys.union(self._extra_keys)
+
+    @property
+    def needs_keys(self) -> set:
+        """Get a set of all input keys needed by the pipeline.
+        Adds the parameters that PatchedGrid itself operates on (even if not used by operations
+        inside it)."""
+        return super().needs_keys.union(self._extra_keys)
 
     def call_item(self, inputs):
         """Process data in patches."""
@@ -1242,16 +1339,8 @@ class PatchedGrid(Pipeline):
         grid_size_z = inputs["grid_size_z"]
         flatgrid = inputs.pop("flatgrid")
 
-        # TODO: maybe using n_tx and n_el from kwargs is better but these are tensors now
-        # and this is not supported in broadcast_to
-        n_tx = inputs[self.key].shape[0]
-        n_pix = flatgrid.shape[0]
-        n_el = inputs[self.key].shape[2]
-        inputs["rx_apo"] = ops.broadcast_to(inputs.get("rx_apo", 1.0), (n_tx, n_pix, n_el))
-        inputs["rx_apo"] = ops.swapaxes(inputs["rx_apo"], 0, 1)  # put n_pix first
-
         # Define a list of keys to look up for patching
-        patch_keys = ["flat_pfield", "rx_apo"]
+        patch_keys = ["flat_pfield"]
 
         patch_arrays = {}
         for key in patch_keys:
@@ -1260,7 +1349,6 @@ class PatchedGrid(Pipeline):
 
         def patched_call(flatgrid, **patch_kwargs):
             patch_args = {k: v for k, v in patch_kwargs.items() if v is not None}
-            patch_args["rx_apo"] = ops.swapaxes(patch_args["rx_apo"], 0, 1)
             out = super(PatchedGrid, self).call(flatgrid=flatgrid, **patch_args, **inputs)
             return out[self.output_key]
 
@@ -1309,7 +1397,7 @@ class Identity(Operation):
 
     def call(self, **kwargs) -> Dict:
         """Returns the input as is."""
-        return kwargs
+        return {}
 
 
 @ops_registry("merge")
@@ -1451,18 +1539,16 @@ class TOFCorrection(Operation):
     STATIC_PARAMS = [
         "f_number",
         "apply_lens_correction",
-        "apply_phase_rotation",
         "grid_size_x",
         "grid_size_z",
     ]
 
-    def __init__(self, apply_phase_rotation=True, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.ALIGNED_DATA,
             **kwargs,
         )
-        self.apply_phase_rotation = apply_phase_rotation
 
     def call(
         self,
@@ -1477,6 +1563,8 @@ class TOFCorrection(Operation):
         tx_apodizations,
         initial_times,
         probe_geometry,
+        t_peak,
+        tx_waveform_indices,
         apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
@@ -1497,6 +1585,9 @@ class TOFCorrection(Operation):
             tx_apodizations (ops.Tensor): Transmit apodizations
             initial_times (ops.Tensor): Initial times
             probe_geometry (ops.Tensor): Probe element positions
+            t_peak (float): Time to peak of the transmit pulse
+            tx_waveform_indices (ops.Tensor): Index of the transmit waveform for each
+                transmit. (All zero if there is only one waveform)
             apply_lens_correction (bool): Whether to apply lens correction
             lens_thickness (float): Lens thickness
             lens_sound_speed (float): Sound speed in the lens
@@ -1507,29 +1598,30 @@ class TOFCorrection(Operation):
 
         raw_data = kwargs[self.key]
 
-        kwargs = {
+        tof_kwargs = {
             "flatgrid": flatgrid,
-            "sound_speed": sound_speed,
-            "angles": polar_angles,
-            "focus_distances": focus_distances,
-            "sampling_frequency": sampling_frequency,
-            "fnum": f_number,
-            "apply_phase_rotation": self.apply_phase_rotation,
-            "demodulation_frequency": demodulation_frequency,
             "t0_delays": t0_delays,
             "tx_apodizations": tx_apodizations,
-            "initial_times": initial_times,
+            "sound_speed": sound_speed,
             "probe_geometry": probe_geometry,
+            "initial_times": initial_times,
+            "sampling_frequency": sampling_frequency,
+            "demodulation_frequency": demodulation_frequency,
+            "f_number": f_number,
+            "polar_angles": polar_angles,
+            "focus_distances": focus_distances,
+            "t_peak": t_peak,
+            "tx_waveform_indices": tx_waveform_indices,
             "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
         }
 
         if not self.with_batch_dim:
-            tof_corrected = tof_correction(raw_data, **kwargs)
+            tof_corrected = tof_correction(raw_data, **tof_kwargs)
         else:
             tof_corrected = ops.map(
-                lambda data: tof_correction(data, **kwargs),
+                lambda data: tof_correction(data, **tof_kwargs),
                 raw_data,
             )
 
@@ -1593,38 +1685,29 @@ class DelayAndSum(Operation):
         )
         self.reshape_grid = reshape_grid
 
-    def process_image(self, data, rx_apo):
+    def process_image(self, data):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
             data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_pix, n_el, n_ch)`
-            rx_apo (ops.Tensor): Receive apodization window of shape `(n_tx, n_pix, n_el, n_ch)`.
 
         Returns:
             ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
         """
         # Sum over the channels, i.e. DAS
-        data = ops.sum(rx_apo * data, -2)
+        data = ops.sum(data, -2)
 
         # Sum over transmits, i.e. Compounding
         data = ops.sum(data, 0)
 
         return data
 
-    def call(
-        self,
-        rx_apo=None,
-        grid=None,
-        **kwargs,
-    ):
+    def call(self, grid=None, **kwargs):
         """Performs DAS beamforming on tof-corrected input.
 
         Args:
             tof_corrected_data (ops.Tensor): The TOF corrected input of shape
                 `(n_tx, grid_size_z*grid_size_x, n_el, n_ch)` with optional batch dimension.
-            rx_apo (ops.Tensor): Receive apodization window
-                of shape `(n_tx, grid_size_z*grid_size_x, n_el)`
-                with optional batch dimension. Defaults to 1.0.
 
         Returns:
             dict: Dictionary containing beamformed_data
@@ -1634,17 +1717,11 @@ class DelayAndSum(Operation):
         """
         data = kwargs[self.key]
 
-        if rx_apo is None:
-            rx_apo = ops.ones(1, dtype=ops.dtype(data))
-        rx_apo = ops.broadcast_to(rx_apo[..., None], data.shape)
-
         if not self.with_batch_dim:
-            beamformed_data = self.process_image(data, rx_apo)
+            beamformed_data = self.process_image(data)
         else:
             # Apply process_image to each item in the batch
-            beamformed_data = batched_map(
-                lambda data, rx_apo: self.process_image(data, rx_apo), data, rx_apo=rx_apo
-            )
+            beamformed_data = ops.map(self.process_image, data)
 
         if self.reshape_grid:
             beamformed_data = reshape_axis(
@@ -3095,6 +3172,50 @@ def demodulate(data, center_frequency, sampling_frequency, axis=-3):
     iq_data_signal_complex = analytical_signal * ops.exp(phasor_exponent)
 
     # Split the complex signal into two channels
-    iq_data_two_channel = complex_to_channels(iq_data_signal_complex[..., 0])
+    iq_data_two_channel = complex_to_channels(ops.squeeze(iq_data_signal_complex, axis=-1))
 
     return iq_data_two_channel
+
+
+def compute_time_to_peak_stack(waveforms, center_frequencies, waveform_sampling_frequency=250e6):
+    """Compute the time of the peak of each waveform in a stack of waveforms.
+
+    Args:
+        waveforms (ndarray): The waveforms of shape (n_waveforms, n_samples).
+        center_frequencies (ndarray): The center frequencies of the waveforms in Hz of shape
+            (n_waveforms,) or a scalar if all waveforms have the same center frequency.
+        waveform_sampling_frequency (float): The sampling frequency of the waveforms in Hz.
+
+    Returns:
+        ndarray: The time to peak for each waveform in seconds.
+    """
+    t_peak = []
+    center_frequencies = center_frequencies * ops.ones((waveforms.shape[0],))
+    for waveform, center_frequency in zip(waveforms, center_frequencies):
+        t_peak.append(compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency))
+    return ops.stack(t_peak)
+
+
+def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency=250e6):
+    """Compute the time of the peak of the waveform.
+
+    Args:
+        waveform (ndarray): The waveform of shape (n_samples).
+        center_frequency (float): The center frequency of the waveform in Hz.
+        waveform_sampling_frequency (float): The sampling frequency of the waveform in Hz.
+
+    Returns:
+        float: The time to peak for the waveform in seconds.
+    """
+    n_samples = waveform.shape[0]
+    if n_samples == 0:
+        raise ValueError("Waveform has zero samples.")
+
+    waveforms_iq_complex_channels = demodulate(
+        waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-1
+    )
+    waveforms_iq_complex = channels_to_complex(waveforms_iq_complex_channels)
+    envelope = ops.abs(waveforms_iq_complex)
+    peak_idx = ops.argmax(envelope, axis=-1)
+    t_peak = ops.cast(peak_idx, dtype="float32") / waveform_sampling_frequency
+    return t_peak

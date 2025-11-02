@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from zea.data.file import File, load_file
+from zea.data.file import File, dict_to_sorted_list, load_file
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -116,3 +116,14 @@ def test_load_file_function(dummy_file):
     assert scan.selected_transmits == selected_transmits, (
         "Selected transmits should match expected value"
     )
+
+
+def test_dict_to_sorted_list():
+    """Test dict_to_sorted_list utility function."""
+
+    test_dict = {"b": 2, "a": 1, "c": 3}
+    sorted_list = dict_to_sorted_list(test_dict)
+
+    assert sorted_list == [1, 2, 3], "The sorted list should be [1, 2, 3]"
+
+    assert dict_to_sorted_list({}) == [], "The sorted list of an empty dict should be []"

@@ -1359,17 +1359,17 @@ def fori_loop(lower, upper, body_fun, init_val, disable_jit=False):
 
 
 def L2(x):
-    """L2 norm of a tensor.
+    """L2 norm of a real tensor.
 
-    Implementation of L2 norm: https://mathworld.wolfram.com/L2-Norm.html
+    Implementation of L2 norm for real vectors: https://mathworld.wolfram.com/L2-Norm.html
     """
     return ops.sqrt(ops.sum(x**2))
 
 
 def L1(x):
-    """L1 norm of a tensor.
+    """L1 norm of a real tensor.
 
-    Implementation of L1 norm: https://mathworld.wolfram.com/L1-Norm.html
+    Implementation of L1 norm for real vectors: https://mathworld.wolfram.com/L1-Norm.html
     """
     return ops.sum(ops.abs(x))
 

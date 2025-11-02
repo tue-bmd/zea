@@ -1,6 +1,7 @@
 """Base classes for the toolbox"""
 
 import enum
+import hashlib
 import json
 import pickle
 from copy import deepcopy
@@ -76,7 +77,7 @@ class Object:
             attributes.pop(
                 "_serialized", None
             )  # Remove the cached serialized attribute to avoid recursion
-            self._serialized = pickle.dumps(attributes)
+            self._serialized = serialize_elements([attributes])
         return self._serialized
 
     def __setattr__(self, name: str, value):
@@ -167,9 +168,7 @@ def _skip_to_tensor(value):
     # Skip str (because JIT does not support it)
     # Skip methods and functions
     # Skip byte strings
-    if isinstance(value, str) or callable(value) or isinstance(value, bytes):
-        return True
-    return False
+    return isinstance(value, str) or callable(value) or isinstance(value, bytes)
 
 
 def dict_to_tensor(dictionary, keep_as_is=None):
@@ -184,8 +183,9 @@ def dict_to_tensor(dictionary, keep_as_is=None):
         # Get the value from the dictionary
         value = dictionary[key]
 
-        if isinstance(value, Object):
+        if isinstance(value, Object) and hasattr(value, "to_tensor"):
             snapshot[key] = value.to_tensor(keep_as_is=keep_as_is)
+            continue
 
         # Skip certain types
         if _skip_to_tensor(value):
@@ -288,3 +288,65 @@ class ZEADecoderJSON(json.JSONDecoder):
                 obj[key] = self._MOD_TYPES_MAP[value] if value is not None else None
 
         return obj
+
+
+def serialize_elements(key_elements: list) -> str:
+    """Serialize elements of a list to a string.
+
+    Generally, uses the pickle representation of the elements.
+
+    Args:
+        key_elements (list): List of elements to serialize. Can be nested lists
+            or tuples. In this case the elements are serialized recursively.
+
+    Returns:
+        str: A serialized string representation of the elements, joined by underscores.
+    """
+
+    def _serialize(element) -> str:
+        return pickle.dumps(element).hex()
+
+    def _serialize_element(element) -> str:
+        if isinstance(element, (list, tuple)):
+            # If element is a list or tuple, serialize its elements recursively
+            element = serialize_elements(element)
+        elif isinstance(element, Object) and hasattr(element, "serialized"):
+            # Use the serialized attribute if it exists
+            element = str(element.serialized)
+        elif isinstance(element, keras.random.SeedGenerator):
+            # If element is a SeedGenerator, use the state
+            element = keras.ops.convert_to_numpy(element.state.value)
+            element = _serialize(element)
+        elif isinstance(element, dict):
+            # If element is a dictionary, sort its keys and serialize its values recursively.
+            # This is needed to ensure the internal state and ordering of the dictionary does
+            # not affect the serialization.
+            keys = list(sorted(element.keys()))
+            values = [element[k] for k in keys]
+            keys = serialize_elements(keys)
+            values = serialize_elements(values)
+            element = f"k_{keys}_v_{values}"
+        else:
+            # Otherwise, serialize the element directly
+            element = _serialize(element)
+
+        return element
+
+    serialized_elements = []
+    for element in key_elements:
+        serialized_elements.append(_serialize_element(element))
+
+    return "_".join(serialized_elements)
+
+
+def hash_elements(key_elements: list) -> str:
+    """Generate an MD5 hash of the elements.
+
+    Args:
+        key_elements (list): List of elements to serialize and hash.
+
+    Returns:
+        str: An MD5 hash of the serialized elements.
+    """
+    serialized = serialize_elements(key_elements)
+    return hashlib.md5(serialized.encode()).hexdigest()

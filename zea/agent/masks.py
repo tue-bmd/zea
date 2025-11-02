@@ -91,7 +91,8 @@ def random_uniform_lines(
 
 def _assert_equal_spacing(n_actions, n_possible_actions):
     assert n_possible_actions % n_actions == 0, (
-        "Number of actions must divide evenly into possible actions to use equispaced sampling."
+        "Number of actions must divide evenly into possible actions to use equispaced sampling. "
+        "If you do not care about equal spacing, set `assert_equal_spacing=False`."
     )
 
 

@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter
 from scipy.signal import hilbert
 
 from zea import ops
-from zea.ops import Pipeline, Simulate
+from zea.ops import Pipeline, Simulate, compute_time_to_peak_stack
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -475,3 +475,27 @@ def test_anisotropic_diffusion_op(spiral_image, niter, lmbda):
     assert np.abs(np.mean(filtered_np) - np.mean(speckle)) < 0.1
 
     return filtered_np
+
+
+def test_compute_time_to_peak():
+    """Test compute_time_to_peak function."""
+    t = np.arange(512) / 250e6
+
+    t_peak = 1e-6
+
+    center_frequency0 = 5e6
+    waveform0 = np.exp(-((t - t_peak) ** 2) / (2 * (0.2e-6) ** 2)) * np.cos(
+        2 * np.pi * center_frequency0 * (t - t_peak)
+    )
+
+    center_frequency1 = 10e6
+    waveform1 = np.exp(-((t - t_peak) ** 2) / (2 * (0.2e-6) ** 2)) * np.cos(
+        2 * np.pi * center_frequency1 * (t - t_peak)
+    )
+
+    center_frequencies = np.array([center_frequency0, center_frequency1])
+    waveforms = np.array([waveform0, waveform1])
+
+    t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
+
+    assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"

@@ -28,6 +28,7 @@ extensions = [
     "sphinx_design",  # for fancy code block selection
     "sphinxcontrib.bibtex",  # for bibliography support
     "sphinxarg.ext",  # for argparse support
+    "sphinx.ext.mathjax",  # for rendering math in the documentation
 ]
 
 autodoc_mock_imports = ["zea.backend.tf2jax"]

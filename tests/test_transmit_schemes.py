@@ -212,7 +212,6 @@ def _get_planewave_scan(ultrasound_probe, grid_type):
 
 
 def _get_multistatic_scan(ultrasound_probe, grid_type):
-    constant_scan_kwargs = _get_constant_scan_kwargs()
     n_el = ultrasound_probe.n_el
     n_tx = 8
 
