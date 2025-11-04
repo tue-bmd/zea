@@ -1736,8 +1736,8 @@ class ReshapeToGrid(Operation):
 
     def __init__(self, **kwargs):
         super().__init__(
-            input_data_type=DataTypes.BEAMFORMED_DATA,
-            output_data_type=DataTypes.BEAMFORMED_DATA,
+            input_data_type=None,
+            output_data_type=None,
             **kwargs,
         )
 
@@ -1756,7 +1756,7 @@ class ReshapeToGrid(Operation):
             raise ValueError("`grid` must be provided to ReshapeToGrid to obtain target shape.")
 
         # Use the same axis convention as DelayAndSum: axis = int(self.with_batch_dim)
-        reshaped = reshape_axis(data, grid.shape[:2], axis=int(self.with_batch_dim))
+        reshaped = reshape_axis(data, grid.shape[:2], axis=int(self.with_batch_dim) + 1)
 
         return {self.output_key: reshaped}
 
