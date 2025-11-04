@@ -1724,6 +1724,43 @@ class DelayAndSum(Operation):
         return {self.output_key: beamformed_data}
 
 
+@ops_registry("reshape_to_grid")
+class ReshapeToGrid(Operation):
+    """Reshape a flattened pixel axis back to a 2D grid.
+
+    This operation only reshapes the data from a flattened pixel dimension
+    (n_pix, ...) to a 2D grid (grid_size_z, grid_size_x, ...). It does not
+    perform any summing or beamforming. Behaviour mirrors the reshape logic
+    used in DelayAndSum.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.BEAMFORMED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+
+    def call(self, grid=None, **kwargs):
+        """
+        Args:
+            grid (ops.Tensor or array-like): Array with shape (grid_size_z, grid_size_x, ...)
+                used to obtain the target 2D dimensions via grid.shape[:2].
+
+        Returns:
+            dict: Dictionary containing the reshaped data under self.output_key.
+        """
+        data = kwargs[self.key]
+
+        if grid is None:
+            raise ValueError("`grid` must be provided to ReshapeToGrid to obtain target shape.")
+
+        # Use the same axis convention as DelayAndSum: axis = int(self.with_batch_dim)
+        reshaped = reshape_axis(data, grid.shape[:2], axis=int(self.with_batch_dim))
+
+        return {self.output_key: reshaped}
+
+
 @ops_registry("envelope_detect")
 class EnvelopeDetect(Operation):
     """Envelope detection of RF signals."""
