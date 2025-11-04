@@ -54,7 +54,7 @@ class ABLE(BaseModel):
         kernel_size=1,
         n_latent_layers=2,
         latent_layers=None,
-        axis=3,
+        axis=None,
         name="able",
         **kwargs,
     ):
@@ -186,9 +186,13 @@ class ABLE(BaseModel):
 
             # Infer input shape and dynamically initialize layers on first pass
             if not self._able_layers:
-                # Stack final channel dim into element axis when needed
-                x_reshaped, meta = self.stack_channels(x, axis)
-                stacked_input_dim = ops.shape(x_reshaped)[axis]
+                # Stack final channel dim into element axis when needed.
+                # We assume supported input formats:
+                #   - (batch, H, W, elements)
+                #   - (batch, H, W, elements, n_ch)
+                # After stack_channels the last axis is the channel axis.
+                x_reshaped, meta = self.stack_channels(x, None)
+                stacked_input_dim = ops.shape(x_reshaped)[-1]
 
                 # Dynamically initialize layer dimensions and kernel sizes
                 self.layer_dims = self._init_layers(
@@ -204,7 +208,7 @@ class ABLE(BaseModel):
                     )
 
             # Use the reshaped input for the forward pass
-            x_reshaped, meta = self.stack_channels(x, axis)
+            x_reshaped, meta = self.stack_channels(x, None)
 
             out = x_reshaped
             for conv in self._able_layers:
@@ -224,76 +228,68 @@ class ABLE(BaseModel):
     def stack_channels(self, x, axis):
         """Stack the final channel dimension into the element axis.
 
-        Args:
-            x (Tensor): Input tensor.
-            axis (int): Axis index corresponding to the transducer elements.
-
-        Returns:
-            tuple: Transformed tensor and metadata for reversing the operation.
+        SIMPLIFIED:
+        - Assumes element axis is the second-last axis and optional per-element channel
+          axis is the last axis.
+        - If input rank == 4: (batch, H, W, elements) -> no change.
+        - If input rank == 5: (batch, H, W, elements, n_ch) -> merge elements and n_ch
+          into a single channel axis (last axis) only when n_ch > 1.
+        - Caller should ensure input layout meets the assumption or transpose beforehand.
         """
         rank = len(x.shape)
-        elem_axis = axis if axis >= 0 else rank + axis
         meta = {"stacked": False}
 
-        if rank >= 5:
-            last_idx = rank - 1
-            perm = list(range(rank))
-            if last_idx != elem_axis + 1:
-                perm.pop(last_idx)
-                perm.insert(elem_axis + 1, last_idx)
-                x_perm = ops.permute_dimensions(x, perm)
-                meta["perm"] = perm
-            else:
-                x_perm = x
-                meta["perm"] = None
+        # supported shapes: rank == 4 or rank == 5
+        if rank == 4:
+            # (batch, H, W, elements) -> elements already the channel axis
+            return x, meta
 
-            shape = ops.shape(x_perm)
-            left = shape[:elem_axis]
-            elem = shape[elem_axis]
-            ch = shape[elem_axis + 1]
-            right = shape[elem_axis + 2 :]
-            new_elem = elem * ch
-            new_shape = left + (new_elem,) + right
-            x_reshaped = ops.reshape(x_perm, new_shape)
-            meta.update({"stacked": True, "elem_axis": elem_axis, "elem": elem, "ch": ch})
+        if rank == 5:
+            # (batch, H, W, elements, n_ch)
+            shape = ops.shape(x)
+            elem = shape[-2]
+            ch = shape[-1]
+            # nothing to do if n_ch == 1 (single channel per element)
+            if ch == 1:
+                return x, meta
+
+            # merge elements and per-element channels into single channel axis using reshape
+            # This preserves row-major ordering so unstack_channels can restore shape with a reshape.
+            new_last = elem * ch
+            new_shape = shape[:-2] + (new_last,)
+            x_swapped = ops.transpose(x, axes=list(range(rank - 2)) + [rank - 1, rank - 2])
+            x_reshaped = ops.reshape(x_swapped, new_shape)
+
+            meta.update({"stacked": True, "elem": elem, "ch": ch})
             return x_reshaped, meta
 
+        # unsupported rank: leave unchanged (caller must provide expected formats)
         return x, meta
 
     def unstack_channels(self, x, meta):
-        """Reverse the stacking operation performed by `stack_channels`.
+        """Inverse of stack_channels.
 
-        Args:
-            x (Tensor): Input tensor.
-            meta (dict): Metadata produced during the stacking operation.
-
-        Returns:
-            Tensor: Tensor with the original layout restored.
+        Expects x with shape (..., ch*elem) and meta containing:
+        - "stacked": True
+        - "elem": original element count
+        - "ch": per-element channels (can be any int)
+        Restores (..., elem, ch).
         """
         if not meta.get("stacked", False):
             return x
 
-        elem_axis = meta["elem_axis"]
-        # shape used when stacking
-        shape = ops.shape(x)
-        left = shape[:elem_axis]
-        right = shape[elem_axis + 1 :]
-        # recover original elem and ch
         elem = meta["elem"]
         ch = meta["ch"]
-        out_shape = left + (elem, ch) + right
-        x_unreshaped = ops.reshape(x, out_shape)
 
-        perm = meta.get("perm")
-        if perm is not None:
-            # invert permutation
-            inv = [0] * len(perm)
-            for i, p in enumerate(perm):
-                inv[p] = i
-            x_final = ops.permute_dimensions(x_unreshaped, inv)
-            return x_final
+        # (..., ch*elem) -> (..., ch, elem)
+        shape = ops.shape(x)  # tuple of ints
+        new_shape = shape[:-1] + (ch, elem)  # tuple math, no ops.concatenate
+        x_reshaped = ops.reshape(x, new_shape)
 
-        return x_unreshaped
+        # swap back (..., ch, elem) -> (..., elem, ch)
+        rank = len(x_reshaped.shape)
+        perm = list(range(rank - 2)) + [rank - 1, rank - 2]
+        return ops.transpose(x_reshaped, axes=perm)
 
     def antirectifier(self, x):
         """Apply the anti-rectifier activation function.
@@ -323,15 +319,21 @@ class ABLE(BaseModel):
         Args:
             input_shape (tuple): Shape of the input tensor.
         """
-        # Infer the stacked input dimension by simulating the stacking process
-        elem_axis = self.axis if self.axis >= 0 else len(input_shape) + self.axis
-        trailing_axis = -1  # Always use the final axis as the trailing axis
+        # Check that input_shape is one of the supported formats:
+        #   - (batch, H, W, elements)       -> rank == 4
+        #   - (batch, H, W, elements, n_ch) -> rank == 5
+        if len(input_shape) not in (5, 6):
+            raise ValueError(
+                "Input shape must be 4D or 5D tensor. Supported shapes:\n"
+                "- (batch, H, W, elements)\n"
+                "- (batch, H, W, elements, n_ch)"
+            )
 
-        # Multiply the trailing dimension with the element dimension if it exists
-        if len(input_shape) > elem_axis + 1:
-            stacked_input_dim = input_shape[elem_axis] * input_shape[trailing_axis]
-        else:
-            stacked_input_dim = input_shape[elem_axis]
+        # Compute stacked input channels: last axis after stack_channels is channel axis.
+        if len(input_shape) == 5:
+            stacked_input_dim = input_shape[-1]
+        else:  # len == 6
+            stacked_input_dim = input_shape[-2] * input_shape[-1]
 
         # Dynamically initialize layer dimensions and kernel sizes
         self.layer_dims = self._init_layers(
@@ -348,7 +350,20 @@ class ABLE(BaseModel):
         super().build(input_shape)
 
     def call(self, inputs):
-        """Apply the ABLE network to the input data.
+        """Apply ABLE to the input data."""
+
+        # This assumes the first dimension is batch (with_batch_dim=True)
+        weighed_data = []
+
+        for data in inputs:
+            weighed_data.append(self.apply_model(data))
+
+        weighed_data = ops.stack(weighed_data, axis=0)
+
+        return weighed_data
+
+    def apply_model(self, inputs):
+        """Apply the ABLE network to a single batch element.
 
         Args:
             inputs (Tensor): Input tensor (TOF corrected data)
@@ -368,10 +383,13 @@ class ABLE(BaseModel):
 
         # Multiply input with computed weights (apply adaptive weighting).
         out = ops.multiply(x_reshaped, weights)
+        out = x_reshaped
 
         # Unstack channel dim back to original layout when necessary
         out = self.unstack_channels(out, meta)
 
+        check = ops.all(ops.equal(inputs, out))
+        assert check, "Output not equal to input! Something went wrong in ABLE weighting."
         return out
 
 
@@ -389,11 +407,12 @@ if __name__ == "__main__":
     import keras
     import numpy as np
 
-    batch_size = 5
+    batch_size = 1
+    transmits = 5
     height = 64
     width = 64
     elements = 128
-    x = np.random.randn(batch_size, height, width, elements).astype(np.float32)
+    x = np.random.randn(batch_size, transmits, height, width, elements).astype(np.float32)
 
     y = model(x)
     print("Input shape:", x.shape)
@@ -402,7 +421,7 @@ if __name__ == "__main__":
     # test with extra channel dim
     model = ABLE(latent_dim=32, n_latent_layers=2, kernel_size=(1, 3))
     n_ch = 2
-    x2 = np.random.randn(batch_size, height, width, elements, n_ch).astype(np.float32)
+    x2 = np.random.randn(batch_size, transmits, height, width, elements, n_ch).astype(np.float32)
     y2 = model(x2)
 
     print("Input with channel dim shape:", x2.shape)
@@ -414,7 +433,7 @@ if __name__ == "__main__":
     model = ABLE(latent_dim=32, n_latent_layers=1, kernel_size=(3, 3))
     model.compile(jit_compile=True)
     batch_size = 1
-    x_large = np.random.randn(batch_size, 256, 256, 128, 2).astype(np.float32)
+    x_large = np.random.randn(batch_size, transmits, 256, 256, 128, 2).astype(np.float32)
     # move to device
     x_large = keras.ops.convert_to_tensor(x_large)
 
