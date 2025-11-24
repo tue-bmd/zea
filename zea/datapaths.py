@@ -11,12 +11,24 @@ to set up your local data paths.
 Example usage
 ^^^^^^^^^^^^^
 
-.. code-block:: python
+.. doctest::
 
-    from zea.datapaths import set_data_paths
+    >>> import yaml
+    >>> from zea.datapaths import set_data_paths
 
-    user = set_data_paths("users.yaml")
-    print(user.data_root)
+    >>> user_config = {"data_root": "/path/to/data", "output": "/path/to/output"}
+    >>> with open("users.yaml", "w", encoding="utf-8") as file:
+    ...     yaml.dump(user_config, file)
+
+    >>> user = set_data_paths("users.yaml")
+    >>> print(user.data_root)
+    /path/to/data
+
+.. testcleanup::
+
+    import os
+
+    os.remove("users.yaml")
 
 """
 

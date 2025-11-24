@@ -18,7 +18,7 @@ from zea.ops import Pipeline, Simulate, compute_time_to_peak_stack
 from zea.probes import Probe
 from zea.scan import Scan
 
-from . import backend_equality_check
+from . import backend_equality_check, DEFAULT_TEST_SEED
 
 
 @pytest.mark.parametrize(
@@ -38,13 +38,15 @@ def test_companding(comp_type, size, parameter_value_range):
 
     from zea import ops
 
+    rng = np.random.default_rng(42)
+
     for parameter_value in np.linspace(*parameter_value_range, 10):
         A = parameter_value if comp_type == "a" else 0
         mu = parameter_value if comp_type == "mu" else 0
 
         companding = ops.Companding(comp_type=comp_type, expand=False)
-
-        signal = np.clip((np.random.random(size) - 0.5) * 2, -1, 1)
+        rng = np.random.default_rng(DEFAULT_TEST_SEED)
+        signal = np.clip((rng.standard_normal(size) - 0.5) * 2, -1, 1)
         signal = signal.astype("float32")
         signal = keras.ops.convert_to_tensor(signal)
 
@@ -95,7 +97,8 @@ def test_converting_to_image(size, dynamic_range, input_range):
     else:
         _input_range = input_range
 
-    data = np.random.random(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal(size) * (_input_range[1] - _input_range[0]) + _input_range[0]
     output_range = (0, 1)
     normalize = ops.Normalize(output_range, input_range)
     log_compress = ops.LogCompress()
@@ -137,7 +140,8 @@ def test_normalize(size, output_range, input_range):
     normalize_back = ops.Normalize(_output_range, _input_range)
 
     # create random data between input range
-    data = np.random.random(size) * (input_range[1] - input_range[0]) + input_range[0]
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.random(size) * (input_range[1] - input_range[0]) + input_range[0]
 
     data = keras.ops.convert_to_tensor(data)
 
@@ -163,7 +167,8 @@ def test_normalize(size, output_range, input_range):
 )
 def test_complex_to_channels(size, axis):
     """Test complex to channels and back"""
-    data = np.random.random(size) + 1j * np.random.random(size)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.random(size) + 1j * rng.random(size)
     _data = ops.complex_to_channels(data, axis=axis)
     __data = ops.channels_to_complex(_data)
     np.testing.assert_almost_equal(data, __data)
@@ -179,7 +184,8 @@ def test_complex_to_channels(size, axis):
 )
 def test_channels_to_complex(size, axis):
     """Test channels to complex and back"""
-    data = np.random.random(size)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.random(size)
     _data = ops.channels_to_complex(data)
     __data = ops.complex_to_channels(_data, axis=axis)
     np.testing.assert_almost_equal(data, __data)
@@ -256,6 +262,7 @@ def test_up_and_down_conversion(factor, batch_size):
 
     data = []
     _data = []
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     for _ in range(batch_size):
         # Define scatterers with random variation
         scat_x_base, scat_z_base = np.meshgrid(
@@ -264,11 +271,11 @@ def test_up_and_down_conversion(factor, batch_size):
             indexing="ij",
         )
         # Add random perturbations
-        scat_x = np.ravel(scat_x_base) + np.random.uniform(-1e-3, 1e-3, 25)
-        scat_z = np.ravel(scat_z_base) + np.random.uniform(-1e-3, 1e-3, 25)
+        scat_x = np.ravel(scat_x_base) + rng.uniform(-1e-3, 1e-3, 25)
+        scat_z = np.ravel(scat_z_base) + rng.uniform(-1e-3, 1e-3, 25)
         n_scat = len(scat_x)
         # Select random subset of scatterers
-        idx = np.random.choice(n_scat, n_scat, replace=False)[:n_scat]
+        idx = rng.choice(n_scat, n_scat, replace=False)[:n_scat]
         scat_positions = np.stack(
             [
                 scat_x[idx],
@@ -306,13 +313,16 @@ def test_hilbert_transform():
 
     from zea import ops
 
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
     # create some dummy sinusoidal data of size (2, 500, 128, 1)
     # sinusoids on axis 1
     data = np.sin(np.linspace(0, 2 * math.e * np.pi, 500))
     data = data[np.newaxis, :, np.newaxis, np.newaxis]
     data = np.tile(data, (2, 1, 128, 1))
 
-    data = data + np.random.random(data.shape) * 0.1
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = data + rng.random(data.shape) * 0.1
 
     data = keras.ops.convert_to_tensor(data)
 
@@ -349,7 +359,7 @@ def spiral_image():
     spiral = np.sin(8 * theta + 8 * r)
     spiral = (spiral - spiral.min()) / (spiral.max() - spiral.min())
 
-    rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     noisy = spiral + 0.2 * rng.normal(size=spiral.shape)
     noisy = np.clip(noisy, 0, 1)
     speckle = spiral * (1 + 0.5 * rng.normal(size=spiral.shape))

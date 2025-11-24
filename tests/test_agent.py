@@ -6,6 +6,8 @@ from keras import ops
 
 from zea.agent import masks, selection
 
+from . import DEFAULT_TEST_SEED
+
 
 def test_equispaced_lines():
     """Test equispaced_lines."""
@@ -71,6 +73,7 @@ def test_lines_action_model():
 
 def test_greedy_entropy():
     """Test GreedyEntropy action selection."""
+    # Note: this test is hard-coded to work with rng seed 2, seed should not be a variable.
     np.random.seed(2)
     h, w = 8, 8
     rand_img_1 = np.random.rand(h, w, 1).astype(np.float32)
@@ -128,6 +131,7 @@ def test_greedy_entropy():
 
 def test_covariance_sampling_lines():
     """Test CovarianceSamplingLines action selection."""
+    # Note: this test is hard-coded to work with rng seed 2, seed should not be a variable.
     rng = np.random.default_rng(2)
     h, w = 16, 16
     rand_img_1 = rng.uniform(0, 1, (h, w)).astype(np.float32)
@@ -170,9 +174,9 @@ def test_covariance_sampling_lines():
 
 def test_single_action():
     """Test single action."""
-    np.random.seed(2)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     h, w = 8, 8
-    particles = np.random.rand(1, 2, h, w).astype(np.float32)
+    particles = rng.standard_normal((1, 2, h, w)).astype(np.float32)
 
     agent = selection.GreedyEntropy(1, w, h, w)
     selected_lines, mask = agent.sample(particles)
@@ -191,9 +195,9 @@ def test_single_action():
 
 def test_maximum_actions():
     """Test maximum actions."""
-    np.random.seed(2)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     h, w = 8, 8
-    particles = np.random.rand(1, 2, h, w).astype(np.float32)
+    particles = rng.random((1, 2, h, w)).astype(np.float32)
 
     agent = selection.GreedyEntropy(w, w, h, w)
     selected_lines, mask = agent.sample(particles)
@@ -263,7 +267,6 @@ def test_equispaced_lines_class():
 
 def test_uniform_random_lines():
     """Test UniformRandomLines action selection."""
-    np.random.seed(2)
     h, w = 8, 8
     batch_size = 3
 
@@ -312,6 +315,7 @@ def test_uniform_random_lines():
 
 def test_task_based_lines():
     """Test TaskBasedLines action selection."""
+    # Note: this test is hard-coded to work with rng seed 2, seed should not be a variable.
     np.random.seed(2)
     h, w = 8, 8
     rand_img_1 = np.random.rand(h, w, 1).astype(np.float32)

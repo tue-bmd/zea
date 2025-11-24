@@ -2,7 +2,7 @@
 
 import keras
 import numpy as np
-from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
+from keras.src.layers.preprocessing.data_layer import DataLayer
 
 from zea.ops import Pad as PadOp
 from zea.utils import map_negative_indices
@@ -11,7 +11,7 @@ from zea.utils import map_negative_indices
 class Pad(PadOp):
     """Pad layer for padding tensors to a specified shape which can be used in tf.data pipelines."""
 
-    __call__ = TFDataLayer.__call__
+    __call__ = DataLayer.__call__
 
     def call(self, inputs):
         """
@@ -20,7 +20,7 @@ class Pad(PadOp):
         return super().call(data=inputs)["data"]
 
 
-class Resizer(TFDataLayer):
+class Resizer(DataLayer):
     """
     Resize layer for resizing images. Can deal with N-dimensional images.
     Can do resize, center_crop, random_crop and crop_or_pad.

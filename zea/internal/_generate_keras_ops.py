@@ -3,11 +3,10 @@ and :mod:`keras.ops.image` functions.
 
 They can be used in zea pipelines like any other :class:`zea.Operation`, for example:
 
-.. code-block:: python
+.. doctest::
 
-    from zea.keras_ops import Squeeze
-
-    op = Squeeze(axis=1)
+    >>> from zea.keras_ops import Squeeze
+    >>> op = Squeeze(axis=1)
 """
 
 import inspect
@@ -77,11 +76,11 @@ and :mod:`keras.ops.image` functions.
 
 They can be used in zea pipelines like any other :class:`zea.Operation`, for example:
 
-.. code-block:: python
+.. doctest::
 
-    from zea.keras_ops import Squeeze
+    >>> from zea.keras_ops import Squeeze
 
-    op = Squeeze(axis=1)
+    >>> op = Squeeze(axis=1)
 
 This file is generated automatically. Do not edit manually.
 Generated with Keras {keras.__version__}

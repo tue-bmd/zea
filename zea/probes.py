@@ -16,14 +16,14 @@ Example usage
 
 We can initialize a generic probe with the following code:
 
-.. code-block:: python
+.. doctest::
 
-    import zea
+    >>> from zea import Probe
 
-    probe = zea.Probe.from_name("generic")
-    print(probe.get_parameters())
-
-"""
+    >>> probe = Probe.from_name("generic")
+    >>> print(probe.get_parameters())
+    {'probe_geometry': None, 'center_frequency': None, 'sampling_frequency': None, 'xlims': None, 'zlims': None}
+"""  # noqa: E501
 
 import numpy as np
 

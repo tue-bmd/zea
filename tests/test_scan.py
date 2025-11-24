@@ -144,7 +144,7 @@ def test_set_attributes():
 
     scan.selected_transmits = [0]
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(ValueError):
         scan.grid = np.zeros((10, 10))
 
 
@@ -165,3 +165,75 @@ def test_scan_pickle():
 
     assert scan == scan_unpickled, "Unpickled Scan object does not match the original"
     assert scan is not scan_unpickled, "Unpickled Scan object is the same instance as the original"
+
+
+def test_valid_params_default():
+    """Test that modifying pfield_kwargs in one Scan instance does not affect another.
+
+    The origin of this test is a bug where in VALID_PARAMS, the default value for pfield_kwargs
+    was a mutable dictionary, leading to shared state across instances.
+    """
+    from zea.internal.dummy_scan import get_scan
+
+    scan1 = get_scan()
+    scan1.pfield_kwargs["norm"] = False
+
+    scan2 = get_scan()
+    assert scan2.pfield_kwargs == {}, (
+        "scan2.pfield_kwargs seems to be affected by scan1 modification"
+    )
+    assert scan1 != scan2, "scan1 and scan2 should be different after modification of scan1"
+
+
+def test_inplace_modification():
+    """Test that modifying pfield_kwargs in-place, will update the pfield."""
+    from zea.internal.dummy_scan import get_scan
+
+    def edit1(scan):
+        """edit direct dependency (dict) in-place"""
+        scan.pfield_kwargs["norm"] = False
+        return scan
+
+    def edit2(scan):
+        """edit another indirect dependency (np.ndarray) in-place"""
+        scan.probe_geometry[:, 0] += 0.001
+        return scan
+
+    def edit3(scan):
+        """edit indirect dependency (list) in-place
+        pfield -> grid -> zlims"""
+        # convert to list to allow in-place edit
+        # this will invalidate pfield
+        scan.zlims = list(scan.zlims)
+        # therefore we need to force a computation of pfield to cache it
+        _ = scan.pfield.copy()
+        # and then edit in-place
+        scan.zlims[1] += 0.01
+        return scan
+
+    for edit_fn in (edit1, edit2, edit3):
+        scan = get_scan(pfield_kwargs={"norm": True})
+        original_pfield = scan.pfield.copy()
+        assert "pfield" in scan._cache, "pfield should be cached after first access"
+
+        # Modify something in-place
+        scan = edit_fn(scan)
+
+        # Check that the grid has been updated
+        assert not np.array_equal(original_pfield, scan.pfield), (
+            f"scan.pfield seems to be unaffected by in-place modification in {edit_fn.__name__}"
+        )
+
+
+def test_inplace_modification_tensor_cache():
+    """Test that modifying pfield_kwargs in-place, will update the pfield_tensor."""
+    from zea.internal.dummy_scan import get_scan
+
+    scan = get_scan(pfield_kwargs={"norm": True})
+    tensor_dict = scan.to_tensor(include=["pfield"])
+    scan.pfield_kwargs["norm"] = False  # in-place modification
+    tensor_dict2 = scan.to_tensor(include=["pfield"])
+
+    assert not np.array_equal(tensor_dict["pfield"], tensor_dict2["pfield"]), (
+        "_tensor_cache['pfield'] seems to be unaffected by in-place modification"
+    )

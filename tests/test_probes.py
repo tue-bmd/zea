@@ -7,6 +7,8 @@ from zea import File
 from zea.internal.registry import probe_registry
 from zea.probes import Probe
 
+from . import DEFAULT_TEST_SEED
+
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
 def test_get_probe(probe_name):
@@ -72,7 +74,8 @@ def test_probe_from_file(tmp_path):
     unknown_probe_name = "unknown_probe_xyz"
 
     # Create dummy probe_geometry
-    probe_geometry = np.random.randn(32, 3)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    probe_geometry = rng.standard_normal((32, 3))
 
     # Create HDF5 file with unknown probe name and probe_geometry
     file_path = tmp_path / "unknown_probe.hdf5"

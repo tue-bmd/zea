@@ -10,9 +10,11 @@ from zea.data.data_format import (
     DatasetElement,
     generate_example_dataset,
     generate_zea_dataset,
+    load_additional_elements,
 )
 from zea.data.file import File, validate_file
 from zea.internal.checks import _REQUIRED_SCAN_KEYS
+from . import DEFAULT_TEST_SEED
 
 n_frames = 2
 n_tx = 4
@@ -145,9 +147,9 @@ def test_additional_dataset_element(tmp_hdf5_path):
     dataset."""
 
     elements = []
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
     elements.append(
         DatasetElement(
-            group_name="scan",
             dataset_name="lens_correction",
             data=np.array(0.1),
             description="The additional path length due to the lens in wavelengths.",
@@ -156,9 +158,8 @@ def test_additional_dataset_element(tmp_hdf5_path):
     )
     elements.append(
         DatasetElement(
-            group_name="scan",
             dataset_name="sound_speed_map",
-            data=np.random.rand(10, 10),
+            data=rng.standard_normal((10, 10)),
             description="The local speed of sound in the medium.",
             unit="m/s",
         )
@@ -169,12 +170,16 @@ def test_additional_dataset_element(tmp_hdf5_path):
     for n in range(4):
         elements.append(
             DatasetElement(
-                group_name="scan/waveforms",
-                dataset_name=f"waveform{n}",
-                data=np.sin(2 * np.pi * 1e6 * t),
+                group_name="functions",
+                dataset_name=f"functions{n:02d}",
+                data=np.sin(2 * np.pi * 1e6 * n * t),
                 description="element3 description",
                 unit="m",
             )
         )
 
     generate_zea_dataset(path=tmp_hdf5_path, **DATASET_PARAMETERS, additional_elements=elements)
+
+    elements = load_additional_elements(tmp_hdf5_path)
+
+    assert len(elements) == 6, "Not all additional elements were saved correctly."

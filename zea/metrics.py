@@ -10,8 +10,9 @@ from keras import ops
 from zea import log, tensor_ops
 from zea.backend import func_on_device
 from zea.internal.registry import metrics_registry
+from zea.internal.utils import reduce_to_signature
 from zea.models.lpips import LPIPS
-from zea.utils import reduce_to_signature, translate
+from zea.tensor_ops import translate
 
 
 def get_metric(name, **kwargs):
@@ -313,11 +314,18 @@ class Metrics:
     if specified.
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            metrics = zea.metrics.Metrics(["psnr", "lpips"], image_range=[0, 255])
-            result = metrics(y_true, y_pred)
-            print(result)  # {"psnr": 30.5, "lpips": 0.15}
+            >>> from zea import metrics
+            >>> import numpy as np
+
+            >>> metrics = metrics.Metrics(["psnr", "lpips"], image_range=[0, 255])
+            >>> y_true = np.random.rand(4, 128, 128, 1)
+            >>> y_pred = np.random.rand(4, 128, 128, 1)
+            >>> result = metrics(y_true, y_pred)
+            >>> result = {k: float(v) for k, v in result.items()}
+            >>> print(result)  # doctest: +ELLIPSIS
+            {'psnr': ..., 'lpips': ...}
     """
 
     def __init__(
@@ -364,7 +372,7 @@ class Metrics:
         # Because most metric functions do not support batching, we vmap over the batch axes.
         metric_fn = fun
         for ax in reversed(batch_axes):
-            metric_fn = tensor_ops.vmap(metric_fn, in_axes=ax)
+            metric_fn = tensor_ops.vmap(metric_fn, in_axes=ax, _use_torch_vmap=True)
 
         out = func_on_device(metric_fn, device, y_true, y_pred)
 

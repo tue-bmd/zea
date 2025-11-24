@@ -21,3 +21,13 @@ Data copying
    :func: get_parser
    :prog: python -m zea.data
    :nodefaultconst:
+
+-------------------------------
+Data file manipulation
+-------------------------------
+
+.. argparse::
+   :module: zea.data.file_operations
+   :func: get_parser
+   :prog: python -m zea.data.file_operations
+

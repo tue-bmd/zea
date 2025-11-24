@@ -34,7 +34,7 @@ from zea.data import generate_zea_dataset
 from zea.data.convert.echonet import H5Processor
 from zea.display import cartesian_to_polar_matrix
 from zea.io_lib import load_video
-from zea.utils import translate
+from zea.tensor_ops import translate
 
 
 def get_args():

@@ -18,7 +18,7 @@ from tqdm import tqdm
 from zea.config import Config
 from zea.data import generate_zea_dataset
 from zea.io_lib import load_video
-from zea.utils import translate
+from zea.tensor_ops import translate
 
 
 def get_args():
@@ -305,7 +305,7 @@ class H5Processor:
     def _to_numpy(self):
         return self.path_out is not None
 
-    def translate(self, data):
+    def _translate(self, data):
         """Translate the data from the processing range to final range."""
         return translate(data, self._process_range, self.range_to)
 
@@ -386,12 +386,12 @@ class H5Processor:
 
         zea_dataset = {
             "path": out_h5,
-            "image_sc": self.translate(sequence),
+            "image_sc": self._translate(sequence),
             "probe_name": "generic",
             "description": "EchoNet dataset converted to zea format",
         }
         if accepted:
-            zea_dataset["image"] = self.translate(polar_im_set)
+            zea_dataset["image"] = self._translate(polar_im_set)
         return generate_zea_dataset(**zea_dataset)
 
 

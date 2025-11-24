@@ -45,6 +45,11 @@ NOTEBOOK_PARAMETERS = {
         "n_conditional_steps": 2,
         "n_conditional_samples": 2,
     },
+    "task_based_perception_action_loop.ipynb": {
+        "n_prior_steps": 2,
+        "n_posterior_steps": 2,
+        "n_particles": 2,
+    },
     "zea_sequence_example.ipynb": {
         "n_frames": 15,
         "n_tx": 1,
@@ -59,6 +64,11 @@ NOTEBOOK_PARAMETERS = {
     "doppler_example.ipynb": {
         "n_frames": 3,
         "n_transmits": 2,
+    },
+    "speckle_tracking_example.ipynb": {
+        "num_frames": 5,
+        "num_points": 10,
+        "max_iterations": 2,
     },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {

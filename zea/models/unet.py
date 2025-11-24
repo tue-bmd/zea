@@ -1,4 +1,18 @@
-"""UNet models and architectures"""
+"""UNet models and architectures.
+
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.unet import UNet
+
+    >>> model = UNet.from_preset("unet-echonet-inpainter")
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/models/unet_example`.
+
+"""
 
 import keras
 from keras import layers

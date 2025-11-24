@@ -1,4 +1,26 @@
-"""EchoNetLVH model for segmentation of PLAX view cardiac ultrasound. For more details see https://echonet.github.io/lvh/index.html."""
+"""EchoNetLVH model for segmentation of PLAX view cardiac ultrasound.
+
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.echonetlvh import EchoNetLVH
+
+    >>> model = EchoNetLVH.from_preset("echonetlvh")
+
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper and code, see `here <https://echonet.github.io/lvh/>`_.
+
+    Duffy, Grant, et al.
+    "High-throughput precision phenotyping of left ventricular hypertrophy with cardiovascular deep learning."
+    *JAMA cardiology 7.4 (2022): 386-395*
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/agent/task_based_perception_action_loop`.
+
+"""  # noqa: E501
 
 import numpy as np
 from keras import ops
@@ -8,7 +30,7 @@ from zea.models.base import BaseModel
 from zea.models.deeplabv3 import DeeplabV3Plus
 from zea.models.preset_utils import register_presets
 from zea.models.presets import echonet_lvh_presets
-from zea.utils import translate
+from zea.tensor_ops import translate
 
 
 @model_registry(name="echonetlvh")
@@ -18,14 +40,16 @@ class EchoNetLVH(BaseModel):
 
     This model performs semantic segmentation on echocardiogram images to identify
     key anatomical landmarks for measuring left ventricular wall thickness:
-    - LVPWd_1: Left Ventricular Posterior Wall point 1
-    - LVPWd_2: Left Ventricular Posterior Wall point 2
-    - IVSd_1: Interventricular Septum point 1
-    - IVSd_2: Interventricular Septum point 2
+
+    - **LVPWd_1**: Left Ventricular Posterior Wall point 1
+    - **LVPWd_2**: Left Ventricular Posterior Wall point 2
+    - **IVSd_1**: Interventricular Septum point 1
+    - **IVSd_2**: Interventricular Septum point 2
 
     The model outputs 4-channel logits corresponding to heatmaps for each landmark.
 
-    For more information, see the original project page at https://echonet.github.io/lvh/index.html
+    For more information, see the original project page:
+    https://echonet.github.io/lvh/
     """
 
     def __init__(self, **kwargs):

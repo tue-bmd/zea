@@ -150,11 +150,6 @@ def dereference_index(file, dataset, index, event=None, subindex=None):
         else:
             return file[reference][subindex]
     else:
-        if index > 0:
-            log.warning(
-                f"index {index} is not a reference. You are probably "
-                "incorrectly indexing a dataset."
-            )
         return dataset
 
 
@@ -935,7 +930,7 @@ def get_frame_indices(file, frames):
         frame_indices (np.ndarray): The frame indices.
     """
     # Read the number of frames from the file
-    n_frames = int(file["Resource"]["RcvBuffer"]["numFrames"][0][0])
+    n_frames = int(dereference_index(file, file["Resource"]["RcvBuffer"]["numFrames"], 0)[0][0])
 
     if isinstance(frames, str) and frames == "all":
         # Create an array of all frame-indices

@@ -7,21 +7,21 @@ For a practical example, see :doc:`../notebooks/agent/agent_example`.
 Example usage
 ^^^^^^^^^^^^^
 
-.. code-block:: python
+.. doctest::
 
-    import zea
-    import numpy as np
+    >>> import zea
+    >>> import numpy as np
 
-    agent = zea.agent.selection.GreedyEntropy(
-        n_actions=7,
-        n_possible_actions=112,
-        img_width=112,
-        img_height=112,
-    )
+    >>> agent = zea.agent.selection.GreedyEntropy(
+    ...     n_actions=7,
+    ...     n_possible_actions=112,
+    ...     img_width=112,
+    ...     img_height=112,
+    ... )
 
-    # (batch, samples, height, width)
-    particles = np.random.rand(1, 10, 112, 112)
-    lines, mask = agent.sample(particles)
+    >>> # (batch, samples, height, width)
+    >>> particles = np.random.rand(1, 10, 112, 112)
+    >>> lines, mask = agent.sample(particles)  # doctest: +SKIP
 """
 
 from . import masks, selection

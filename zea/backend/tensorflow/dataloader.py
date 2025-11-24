@@ -12,7 +12,8 @@ from keras.src.trainers.data_adapters import TFDatasetAdapter
 
 from zea.data.dataloader import H5Generator
 from zea.data.layers import Resizer
-from zea.utils import find_methods_with_return_type, translate
+from zea.internal.utils import find_methods_with_return_type
+from zea.tensor_ops import translate
 
 METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(tf.data.Dataset, "DatasetV2")
 
@@ -153,10 +154,6 @@ def make_dataloader(
 
     Mimics the native TF function ``tf.keras.utils.image_dataset_from_directory``
     but for .hdf5 files.
-
-    Saves a dataset_info.yaml file in the directory with information about the dataset.
-    This file is used to load the dataset later on, which speeds up the initial loading
-    of the dataset for very large datasets.
 
     Does the following in order to load a dataset:
 

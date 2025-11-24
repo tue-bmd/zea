@@ -11,39 +11,62 @@ Operations can be run on their own:
 
 Examples
 ^^^^^^^^
-.. code-block:: python
+.. doctest::
 
-    data = np.random.randn(2000, 128, 1)
-    # static arguments are passed in the constructor
-    envelope_detect = EnvelopeDetect(axis=-1)
-    # other parameters can be passed here along with the data
-    envelope_data = envelope_detect(data=data)
+    >>> import numpy as np
+    >>> from zea.ops import EnvelopeDetect
+    >>> data = np.random.randn(2000, 128, 1)
+    >>> # static arguments are passed in the constructor
+    >>> envelope_detect = EnvelopeDetect(axis=-1)
+    >>> # other parameters can be passed here along with the data
+    >>> envelope_data = envelope_detect(data=data)
 
 Using a pipeline
 ----------------
 
 You can initialize with a default pipeline or create your own custom pipeline.
 
-.. code-block:: python
+.. doctest::
 
-    pipeline = Pipeline.from_default()
+    >>> from zea.ops import Pipeline, EnvelopeDetect, Normalize, LogCompress
+    >>> pipeline = Pipeline.from_default()
 
-    operations = [
-        EnvelopeDetect(),
-        Normalize(),
-        LogCompress(),
-    ]
-    pipeline_custom = Pipeline(operations)
+    >>> operations = [
+    ...     EnvelopeDetect(),
+    ...     Normalize(),
+    ...     LogCompress(),
+    ... ]
+    >>> pipeline_custom = Pipeline(operations)
 
 One can also load a pipeline from a config or yaml/json file:
 
-.. code-block:: python
+.. doctest::
 
-    json_string = '{"operations": ["identity"]}'
-    pipeline = Pipeline.from_json(json_string)
+    >>> from zea import Pipeline
 
-    yaml_file = "pipeline.yaml"
-    pipeline = Pipeline.from_yaml(yaml_file)
+    >>> # From JSON string
+    >>> json_string = '{"operations": ["identity"]}'
+    >>> pipeline = Pipeline.from_json(json_string)
+
+    >>> # from yaml file
+    >>> import yaml
+    >>> from zea import Config
+    >>> # Create a sample pipeline YAML file
+    >>> pipeline_dict = {
+    ...     "operations": [
+    ...         {"name": "identity"},
+    ...     ]
+    ... }
+    >>> with open("pipeline.yaml", "w") as f:
+    ...     yaml.dump(pipeline_dict, f)
+    >>> yaml_file = "pipeline.yaml"
+    >>> pipeline = Pipeline.from_yaml(yaml_file)
+
+.. testcleanup::
+
+    import os
+
+    os.remove("pipeline.yaml")
 
 Example of a yaml file:
 
@@ -65,12 +88,10 @@ Example of a yaml file:
 
 """
 
-import ast
 import copy
 import hashlib
 import inspect
 import json
-import textwrap
 from functools import partial
 from typing import Any, Dict, List, Union
 
@@ -79,7 +100,7 @@ import numpy as np
 import scipy
 import yaml
 from keras import ops
-from keras.src.layers.preprocessing.tf_data_layer import TFDataLayer
+from keras.src.layers.preprocessing.data_layer import DataLayer
 
 from zea import log
 from zea.backend import jit
@@ -99,12 +120,11 @@ from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
 from zea.simulator import simulate_rf
-from zea.tensor_ops import patched_map, resample, reshape_axis
+from zea.tensor_ops import resample, reshape_axis, translate, vmap
 from zea.utils import (
     FunctionTimer,
     deep_compare,
     map_negative_indices,
-    translate,
 )
 
 
@@ -130,6 +150,7 @@ class Operation(keras.Operation):
         with_batch_dim: bool = True,
         jit_kwargs: dict | None = None,
         jittable: bool = True,
+        additional_output_keys: List[str] = None,
         **kwargs,
     ):
         """
@@ -148,6 +169,10 @@ class Operation(keras.Operation):
             with_batch_dim: Whether operations should expect a batch dimension in the input
             jit_kwargs: Additional keyword arguments for the JIT compiler
             jittable: Whether the operation can be JIT compiled
+            additional_output_keys: A list of additional output keys produced by the operation.
+                These are used to track if all keys are available for downstream operations.
+                If the operation has a conditional output, it is best to add all possible
+                output keys here.
         """
         super().__init__(**kwargs)
 
@@ -158,6 +183,7 @@ class Operation(keras.Operation):
         self.output_key = output_key  # Key for output data
         if self.output_key is None:
             self.output_key = self.key
+        self.additional_output_keys = additional_output_keys or []
 
         self.inputs = []  # Source(s) of input data (name of a previous operation)
         self.allow_multiple_inputs = False  # Only single input allowed by default
@@ -190,6 +216,11 @@ class Operation(keras.Operation):
             self.set_jit(jit_compile)
 
     @property
+    def output_keys(self) -> List[str]:
+        """Get the output keys of the operation."""
+        return [self.output_key] + self.additional_output_keys
+
+    @property
     def static_params(self):
         """Get the static parameters of the operation."""
         return getattr(self.__class__, "STATIC_PARAMS", [])
@@ -202,50 +233,12 @@ class Operation(keras.Operation):
         else:
             self._call = self.call
 
-    @staticmethod
-    def _get_static_return_keys(func) -> set:
-        """
-        Statically extract dictionary keys from return statements in a function.
-        Only works for dict literals (not for dynamically constructed dicts).
-        """
-        source = inspect.getsource(func)
-        source = textwrap.dedent(source)  # Remove leading indentation
-        tree = ast.parse(source)
-
-        class ReturnDictVisitor(ast.NodeVisitor):
-            def __init__(self):
-                self.keys = set()
-
-            def visit_Return(self, node):
-                if isinstance(node.value, ast.Dict):
-                    for key in node.value.keys:
-                        if isinstance(key, ast.Constant):
-                            self.keys.add(key.value)
-                        elif isinstance(key, ast.Name):
-                            self.keys.add(key.id)
-                else:
-                    log.debug(
-                        f"Return value in function {func.__name__} is not a dict literal. "
-                        "Cannot statically extract keys."
-                    )
-                self.generic_visit(node)
-
-        visitor = ReturnDictVisitor()
-        visitor.visit(tree)
-        return set(visitor.keys)
-
     def _trace_signatures(self):
         """
         Analyze and store the input/output signatures of the `call` method.
         """
         self._input_signature = inspect.signature(self.call)
         self._valid_keys = set(self._input_signature.parameters.keys())
-        self._static_return_keys = self._get_static_return_keys(self.call)
-
-    @property
-    def static_return_keys(self) -> set:
-        """Get the static return keys of the `call` method."""
-        return self._static_return_keys
 
     @property
     def valid_keys(self) -> set:
@@ -500,12 +493,12 @@ class Pipeline:
         return key in self.needs_keys
 
     @property
-    def static_return_keys(self) -> set:
-        """Get the static return keys of the pipeline."""
-        static_return_keys = set()
+    def output_keys(self) -> set:
+        """All output keys the pipeline guarantees to produce."""
+        output_keys = set()
         for operation in self.operations:
-            static_return_keys.update(operation.static_return_keys)
-        return static_return_keys
+            output_keys.update(operation.output_keys)
+        return output_keys
 
     @property
     def valid_keys(self) -> set:
@@ -537,7 +530,7 @@ class Pipeline:
         previous_operation = None
         for operation in self.operations:
             if previous_operation is not None:
-                has_so_far.update(previous_operation.static_return_keys)
+                has_so_far.update(previous_operation.output_keys)
             needs.update(operation.needs_keys - has_so_far)
             previous_operation = operation
         return needs
@@ -920,16 +913,17 @@ class Pipeline:
             Must have a ``pipeline`` key with a subkey ``operations``.
 
         Example:
-            .. code-block:: python
+            .. doctest::
 
-                config = Config(
-                    {
-                        "operations": [
-                            "identity",
-                        ],
-                    }
-                )
-                pipeline = Pipeline.from_config(config)
+                >>> from zea import Config, Pipeline
+                >>> config = Config(
+                ...     {
+                ...         "operations": [
+                ...             "identity",
+                ...         ],
+                ...     }
+                ... )
+                >>> pipeline = Pipeline.from_config(config)
         """
         return pipeline_from_config(Config(config), **kwargs)
 
@@ -945,9 +939,20 @@ class Pipeline:
             Must have the a `pipeline` key with a subkey `operations`.
 
         Example:
-        ```python
-        pipeline = Pipeline.from_yaml("pipeline.yaml")
-        ```
+            .. doctest::
+
+                >>> import yaml
+                >>> from zea import Config
+                >>> # Create a sample pipeline YAML file
+                >>> pipeline_dict = {
+                ...     "operations": [
+                ...         "identity",
+                ...     ],
+                ... }
+                >>> with open("pipeline.yaml", "w") as f:
+                ...     yaml.dump(pipeline_dict, f)
+                >>> from zea.ops import Pipeline
+                >>> pipeline = Pipeline.from_yaml("pipeline.yaml", jit_options=None)
         """
         return pipeline_from_yaml(file_path, **kwargs)
 
@@ -1089,15 +1094,17 @@ def make_operation_chain(
         list: List of operations to be performed.
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            chain = make_operation_chain(
-                [
-                    "envelope_detect",
-                    {"name": "normalize", "params": {"output_range": (0, 1)}},
-                    SomeCustomOperation(),
-                ]
-            )
+            >>> from zea.ops import make_operation_chain, LogCompress
+            >>> SomeCustomOperation = LogCompress  # just for demonstration
+            >>> chain = make_operation_chain(
+            ...     [
+            ...         "envelope_detect",
+            ...         {"name": "normalize", "params": {"output_range": (0, 1)}},
+            ...         SomeCustomOperation(),
+            ...     ]
+            ... )
     """
     chain = []
     for operation in operation_chain:
@@ -1315,7 +1322,7 @@ class PatchedGrid(Pipeline):
 
     @property
     def _extra_keys(self):
-        return {"flatgrid", "grid_size_x", "grid_size_z"}
+        return {"flatgrid", "grid"}
 
     @property
     def valid_keys(self) -> set:
@@ -1331,46 +1338,34 @@ class PatchedGrid(Pipeline):
         inside it)."""
         return super().needs_keys.union(self._extra_keys)
 
-    def call_item(self, inputs):
+    def call_item(self, grid, flatgrid, flat_pfield=None, **inputs):
         """Process data in patches."""
-        # Extract necessary parameters
-        # make sure to add those as valid keys above!
-        grid_size_x = inputs["grid_size_x"]
-        grid_size_z = inputs["grid_size_z"]
-        flatgrid = inputs.pop("flatgrid")
 
-        # Define a list of keys to look up for patching
-        patch_keys = ["flat_pfield"]
-
-        patch_arrays = {}
-        for key in patch_keys:
-            if key in inputs:
-                patch_arrays[key] = inputs.pop(key)
-
-        def patched_call(flatgrid, **patch_kwargs):
-            patch_args = {k: v for k, v in patch_kwargs.items() if v is not None}
-            out = super(PatchedGrid, self).call(flatgrid=flatgrid, **patch_args, **inputs)
+        def patched_call(flatgrid, flat_pfield):
+            out = super(PatchedGrid, self).call(
+                flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
+            )
             return out[self.output_key]
 
-        out = patched_map(
+        out = vmap(
             patched_call,
-            flatgrid,
-            self.num_patches,
-            **patch_arrays,
-            jit=bool(self.jit_options),
-        )
-        return ops.reshape(out, (grid_size_z, grid_size_x, *ops.shape(out)[1:]))
+            chunks=self.num_patches,
+            fn_supports_batch=True,
+            disable_jit=not bool(self.jit_options),
+        )(flatgrid, flat_pfield)
+
+        return ops.reshape(out, (*grid.shape[:-1], *ops.shape(out)[1:]))
 
     def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
         if self._with_batch_dim:
             input_data = inputs.pop(self.key)
             output = ops.map(
-                lambda x: self.call_item({self.key: x, **inputs}),
+                lambda x: self.call_item(**{self.key: x, **inputs}),
                 input_data,
             )
         else:
-            output = self.call_item(inputs)
+            output = self.call_item(**inputs)
 
         return {self.output_key: output}
 
@@ -1487,6 +1482,7 @@ class Simulate(Operation):
     def __init__(self, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
+            additional_output_keys=["n_ch"],
             **kwargs,
         )
 
@@ -1679,7 +1675,7 @@ class DelayAndSum(Operation):
         **kwargs,
     ):
         super().__init__(
-            input_data_type=None,
+            input_data_type=DataTypes.ALIGNED_DATA,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
@@ -1731,6 +1727,46 @@ class DelayAndSum(Operation):
         return {self.output_key: beamformed_data}
 
 
+def envelope_detect(data, axis=-3):
+    """Envelope detection of RF signals.
+
+    If the input data is real, it first applies the Hilbert transform along the specified axis
+    and then computes the magnitude of the resulting complex signal.
+    If the input data is complex, it computes the magnitude directly.
+
+    Args:
+        - data (Tensor): The beamformed data of shape (..., grid_size_z, grid_size_x, n_ch).
+        - axis (int): Axis along which to apply the Hilbert transform. Defaults to -3.
+
+    Returns:
+        - envelope_data (Tensor): The envelope detected data
+            of shape (..., grid_size_z, grid_size_x).
+    """
+    if data.shape[-1] == 2:
+        data = channels_to_complex(data)
+    else:
+        n_ax = ops.shape(data)[axis]
+        n_ax_float = ops.cast(n_ax, "float32")
+
+        # Calculate next power of 2: M = 2^ceil(log2(n_ax))
+        # see https://github.com/tue-bmd/zea/discussions/147
+        log2_n_ax = ops.log2(n_ax_float)
+        M = ops.cast(2 ** ops.ceil(log2_n_ax), "int32")
+
+        data = hilbert(data, N=M, axis=axis)
+        indices = ops.arange(n_ax)
+
+        data = ops.take(data, indices, axis=axis)
+        data = ops.squeeze(data, axis=-1)
+
+    # data = ops.abs(data)
+    real = ops.real(data)
+    imag = ops.imag(data)
+    data = ops.sqrt(real**2 + imag**2)
+    data = ops.cast(data, "float32")
+    return data
+
+
 @ops_registry("envelope_detect")
 class EnvelopeDetect(Operation):
     """Envelope detection of RF signals."""
@@ -1757,23 +1793,7 @@ class EnvelopeDetect(Operation):
         """
         data = kwargs[self.key]
 
-        if data.shape[-1] == 2:
-            data = channels_to_complex(data)
-        else:
-            n_ax = data.shape[self.axis]
-            M = 2 ** int(np.ceil(np.log2(n_ax)))
-            # data = scipy.signal.hilbert(data, N=M, axis=self.axis)
-            data = hilbert(data, N=M, axis=self.axis)
-            indices = ops.arange(n_ax)
-
-            data = ops.take(data, indices, axis=self.axis)
-            data = ops.squeeze(data, axis=-1)
-
-        # data = ops.abs(data)
-        real = ops.real(data)
-        imag = ops.imag(data)
-        data = ops.sqrt(real**2 + imag**2)
-        data = ops.cast(data, "float32")
+        data = envelope_detect(data, axis=self.axis)
 
         return {self.output_key: data}
 
@@ -1811,19 +1831,29 @@ class UpMix(Operation):
         return {self.output_key: data}
 
 
+def log_compress(data, eps=1e-16):
+    """Apply logarithmic compression to data."""
+    eps = ops.convert_to_tensor(eps, dtype=data.dtype)
+    data = ops.where(data == 0, eps, data)  # Avoid log(0)
+    return 20 * keras.ops.log10(data)
+
+
 @ops_registry("log_compress")
 class LogCompress(Operation):
     """Logarithmic compression of data."""
 
-    def __init__(
-        self,
-        **kwargs,
-    ):
+    def __init__(self, clip: bool = True, **kwargs):
+        """Initialize the LogCompress operation.
+
+        Args:
+            clip (bool): Whether to clip the output to a dynamic range. Defaults to True.
+        """
         super().__init__(
             input_data_type=DataTypes.ENVELOPE_DATA,
             output_data_type=DataTypes.IMAGE,
             **kwargs,
         )
+        self.clip = clip
 
     def call(self, dynamic_range=None, **kwargs):
         """Apply logarithmic compression to data.
@@ -1840,12 +1870,35 @@ class LogCompress(Operation):
             dynamic_range = ops.array(DEFAULT_DYNAMIC_RANGE)
         dynamic_range = ops.cast(dynamic_range, data.dtype)
 
-        small_number = ops.convert_to_tensor(1e-16, dtype=data.dtype)
-        data = ops.where(data == 0, small_number, data)
-        compressed_data = 20 * ops.log10(data)
-        compressed_data = ops.clip(compressed_data, dynamic_range[0], dynamic_range[1])
+        compressed_data = log_compress(data)
+        if self.clip:
+            compressed_data = ops.clip(compressed_data, dynamic_range[0], dynamic_range[1])
 
         return {self.output_key: compressed_data}
+
+
+def normalize(data, output_range, input_range=None):
+    """Normalize data to a given range.
+
+    Equivalent to `translate` with clipping.
+
+    Args:
+        data (ops.Tensor): Input data to normalize.
+        output_range (tuple): Range to which data should be mapped, e.g., (0, 1).
+        input_range (tuple, optional): Range of input data.
+            If None, the range will be computed from the data.
+            Defaults to None.
+    """
+    if input_range is None:
+        input_range = (None, None)
+    minval, maxval = input_range
+    if minval is None:
+        minval = ops.min(data)
+    if maxval is None:
+        maxval = ops.max(data)
+    data = ops.clip(data, minval, maxval)
+    normalized_data = translate(data, (minval, maxval), output_range)
+    return normalized_data
 
 
 @ops_registry("normalize")
@@ -1853,7 +1906,7 @@ class Normalize(Operation):
     """Normalize data to a given range."""
 
     def __init__(self, output_range=None, input_range=None, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(additional_output_keys=["minval", "maxval"], **kwargs)
         if output_range is None:
             output_range = (0, 1)
         self.output_range = self.to_float32(output_range)
@@ -1898,11 +1951,9 @@ class Normalize(Operation):
         if maxval is None:
             maxval = ops.max(data)
 
-        # Clip the data to the input range
-        data = ops.clip(data, minval, maxval)
-
-        # Map the data to the output range
-        normalized_data = translate(data, (minval, maxval), self.output_range)
+        normalized_data = normalize(
+            data, output_range=self.output_range, input_range=(minval, maxval)
+        )
 
         return {self.output_key: normalized_data, "minval": minval, "maxval": maxval}
 
@@ -1932,6 +1983,18 @@ class ScanConvert(Operation):
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
             jittable=jittable,
+            additional_output_keys=[
+                "resolution",
+                "x_lim",
+                "y_lim",
+                "z_lim",
+                "rho_range",
+                "theta_range",
+                "phi_range",
+                "d_rho",
+                "d_theta",
+                "d_phi",
+            ],
             **kwargs,
         )
         self.order = order
@@ -2158,6 +2221,7 @@ class Demodulate(Operation):
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
             jittable=True,
+            additional_output_keys=["demodulation_frequency", "center_frequency", "n_ch"],
             **kwargs,
         )
         self.axis = axis
@@ -2222,7 +2286,7 @@ class Lambda(Operation):
 
 
 @ops_registry("pad")
-class Pad(Operation, TFDataLayer):
+class Pad(Operation, DataLayer):
     """Pad layer for padding tensors to a specified shape."""
 
     def __init__(
@@ -2407,6 +2471,7 @@ class Downsample(Operation):
 
     def __init__(self, factor: int = 1, phase: int = 0, axis: int = -3, **kwargs):
         super().__init__(
+            additional_output_keys=["sampling_frequency", "n_ax"],
             **kwargs,
         )
         self.factor = factor

@@ -1,6 +1,25 @@
-"""Echonet-Dynamic segmentation model for cardiac ultrasound segmentation.
-Link below does not work it seems, this is slightly different but does have some info:
-https://github.com/bryanhe/dynamic
+"""
+Echonet-Dynamic segmentation model for cardiac ultrasound segmentation.
+
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.echonet import EchoNetDynamic
+
+    >>> model = EchoNetDynamic.from_preset("echonet-dynamic")  # doctest: +SKIP
+
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper and code, see `here <https://echonet.github.io/dynamic/>`_.
+
+    Ouyang, David, et al. "Video-based AI for beat-to-beat assessment of cardiac function."
+    *Nature 580.7802 (2020): 252-256*
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/models/left_ventricle_segmentation_example`.
+
 """
 
 from pathlib import Path
@@ -32,11 +51,6 @@ tf = _import_tf()
 @model_registry(name="echonet-dynamic")
 class EchoNetDynamic(BaseModel):
     """EchoNet-Dynamic segmentation model for cardiac ultrasound segmentation.
-
-    Original paper and code: https://echonet.github.io/dynamic/
-
-    This class extracts useful parts of the original code and wraps it in a
-    easy to use class.
 
     Preprocessing should normalize the input images with mean and standard deviation.
 

@@ -43,7 +43,7 @@ docs-serve: docs-parameters docs-autosummary
 	echo "Using port $$PORT"; \
 	$(SPHINXAUTOBUILD) --port=$$PORT "$(SOURCEDIR)" "$(BUILDDIR)/html"
 
-docs-test: docs-parameters
+docs-test: docs-parameters docs-autosummary
 	$(SPHINXBUILD) -b doctest "$(SOURCEDIR)" "$(BUILDDIR)/doctest" $(SPHINXOPTS)
 
 docs-clean:

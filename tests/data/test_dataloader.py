@@ -23,14 +23,16 @@ from zea.tools.hf import HFPath
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
 CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
 DUMMY_IMAGE_SHAPE = (28, 28)
+DEFAULT_SEED = 42
 
 
 @pytest.fixture
 def dummy_hdf5(tmp_path):
     """Fixture to create and clean up a dummy hdf5 file."""
     file_path = tmp_path / "dummy_data.hdf5"
+    rng = np.random.default_rng(DEFAULT_SEED)
     with h5py.File(file_path, "w") as f:
-        data = np.random.rand(100, *DUMMY_IMAGE_SHAPE)
+        data = rng.standard_normal((100, *DUMMY_IMAGE_SHAPE))
         f.create_dataset("data", data=data)
     return file_path
 
@@ -38,11 +40,12 @@ def dummy_hdf5(tmp_path):
 @pytest.fixture
 def multi_shape_dataset(tmp_path):
     """Fixture to create and clean up a dummy hdf5 file."""
+    rng = np.random.default_rng(DEFAULT_SEED)
     with h5py.File(tmp_path / "dummy_data_1.hdf5", "w") as f:
-        data = np.random.rand(1, 28, 28)
+        data = rng.standard_normal((1, 28, 28))
         f.create_dataset("data", data=data)
     with h5py.File(tmp_path / "dummy_data_2.hdf5", "w") as f:
-        data = np.random.rand(1, 32, 32)
+        data = rng.standard_normal((1, 32, 32))
         f.create_dataset("data", data=data)
     return tmp_path
 
@@ -56,9 +59,10 @@ def ndim_hdf5_dataset_path(tmp_path):
     n_samples = 10
     image_shape = [i + 20 for i in range(1, n_dims + 1)] + [1]
 
+    rng = np.random.default_rng(DEFAULT_SEED)
     for i in range(n_files):
         with h5py.File(tmp_path / f"dummy_data_{i}.hdf5", "w") as f:
-            data = np.random.rand(n_samples, *image_shape)
+            data = rng.standard_normal((n_samples, *image_shape))
             f.create_dataset("data", data=data)
     return tmp_path
 
@@ -127,7 +131,7 @@ def test_h5_generator(file_path, key, n_frames, insert_frame_axis, request):
 def test_h5_generator_shuffle(dummy_hdf5):
     """Test the H5Generator class"""
 
-    generator = _get_h5_generator(dummy_hdf5, "data", 10, False, seed=42, validate=False)
+    generator = _get_h5_generator(dummy_hdf5, "data", 10, False, seed=DEFAULT_SEED, validate=False)
 
     # Test shuffle
     shuffled_items = deepcopy(generator.shuffled_items)
@@ -156,12 +160,12 @@ def test_dataloader(
 ):
     """Test the dataloader.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
-
+    rng = np.random.default_rng(DEFAULT_SEED)
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
             with File(tmp_path / f"dummy_data_{i}.hdf5", "w") as f:
-                data = np.random.rand(total_samples // num_files, 28, 28)
+                data = rng.random((total_samples // num_files, 28, 28))
                 f.create_dataset(key, data=data)
         directory = tmp_path
         image_range = (0, 1)
@@ -184,9 +188,8 @@ def test_dataloader(
         key=key,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
-        search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=True,
-        seed=42,
+        seed=DEFAULT_SEED,
         image_range=image_range,
     )
     batch_shape = next(iter(dataset)).shape
@@ -250,9 +253,8 @@ def test_h5_dataset_return_filename(
         image_size=image_size,
         n_frames=n_frames,
         insert_frame_axis=insert_frame_axis,
-        search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=True,
-        seed=42,
+        seed=DEFAULT_SEED,
         return_filename=True,
         resize_type="resize",
         batch_size=batch_size,
@@ -310,10 +312,9 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_
         key=key,
         image_size=image_size,
         n_frames=1,
-        search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=True,
         batch_size=batch_size,
-        seed=42,
+        seed=DEFAULT_SEED,
         return_filename=False,
         resize_type=resize_type,
         assert_image_range=False,
@@ -333,8 +334,8 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_
 def test_crop_or_pad():
     """Test the resize_type="crop_or_pad" for to behave as expected"""
     resizer = Resizer(np.array(DUMMY_IMAGE_SHAPE) * 2, resize_type="crop_or_pad")
-
-    inp = np.random.rand(1, *DUMMY_IMAGE_SHAPE, 1)
+    rng = np.random.default_rng(DEFAULT_SEED)
+    inp = rng.standard_normal((1, *DUMMY_IMAGE_SHAPE, 1))
     out = resizer(inp)
 
     assert ops.sum(keras.layers.CenterCrop(*DUMMY_IMAGE_SHAPE)(out) - inp) == 0.0, (
@@ -413,9 +414,8 @@ def test_ndim_hdf5_dataset(
         frame_index_stride=frame_index_stride,
         batch_size=batch_size,
         additional_axes_iter=additional_axes_iter,
-        search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=True,
-        seed=42,
+        seed=DEFAULT_SEED,
         return_filename=False,
         resize_type=resize_type,
         resize_axes=(-3, -1),
@@ -493,7 +493,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
                 circle_axes=(1, 2),
                 return_centers=True,
                 with_batch_dim=True,
-                seed=keras.random.SeedGenerator(42),
+                seed=keras.random.SeedGenerator(DEFAULT_SEED),
             )
         ]
     )
@@ -505,9 +505,8 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
         image_size=(28, 28),
         resize_type="center_crop",
         n_frames=1,
-        search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=False,
-        seed=42,
+        seed=DEFAULT_SEED,
         augmentation=augmentation,
         validate=False,
     )
@@ -540,9 +539,8 @@ def test_resize_with_different_shapes(multi_shape_dataset):
         image_size=(16, 16),
         resize_type="resize",
         n_frames=1,
-        search_file_tree_kwargs={"parallel": False, "verbose": False},
         shuffle=False,
-        seed=42,
+        seed=DEFAULT_SEED,
         validate=False,
         batch_size=2,
     )

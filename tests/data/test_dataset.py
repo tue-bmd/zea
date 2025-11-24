@@ -56,9 +56,7 @@ def test_dataset_indexing(file_idx, idx, expected_shape, dummy_dataset_path):
     """Test ui initialization function"""
     config = {"data": {"dataset_folder": dummy_dataset_path, "dtype": "image"}}
     config = check_config(Config(config))
-    dataset = Dataset.from_config(
-        **config.data, search_file_tree_kwargs={"parallel": False, "verbose": False}
-    )
+    dataset = Dataset.from_config(**config.data)
 
     file = dataset[file_idx]
     data = file.load_data(config.data.dtype, idx)

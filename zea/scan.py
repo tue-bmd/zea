@@ -43,38 +43,38 @@ Comparison to ``zea.Config`` and ``zea.Probe``
 Example Usage
 ^^^^^^^^^^^^^
 
-.. code-block:: python
+.. doctest::
 
-    from zea import Config, Probe, Scan
+    >>> from zea import Config, Probe, Scan
 
-    # Initialize Scan from a Probe's parameters
-    probe = Probe.from_name("verasonics_l11_4v")
-    scan = Scan(**probe.get_parameters(), grid_size_z=256)
+    >>> # Initialize Scan from a Probe's parameters
+    >>> probe = Probe.from_name("verasonics_l11_4v")
+    >>> scan = Scan(**probe.get_parameters(), grid_size_z=256, n_tx=11)
 
-    # Or initialize from a Config object
-    config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
-    scan = Scan(**config.scan, n_tx=11)
+    >>> # Or initialize from a Config object
+    >>> config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
+    >>> scan = Scan(n_tx=11, **config.scan)
 
-    # Or manually specify parameters
-    scan = Scan(
-        grid_size_x=128,
-        grid_size_z=256,
-        xlims=(-0.02, 0.02),
-        zlims=(0.0, 0.06),
-        center_frequency=6.25e6,
-        sound_speed=1540.0,
-        sampling_frequency=25e6,
-        n_el=128,
-        n_tx=11,
-    )
+    >>> # Or manually specify parameters
+    >>> scan = Scan(
+    ...     grid_size_x=128,
+    ...     grid_size_z=256,
+    ...     xlims=(-0.02, 0.02),
+    ...     zlims=(0.0, 0.06),
+    ...     center_frequency=6.25e6,
+    ...     sound_speed=1540.0,
+    ...     sampling_frequency=25e6,
+    ...     n_el=128,
+    ...     n_tx=11,
+    ... )
 
-    # Access a derived property (computed lazily)
-    grid = scan.grid  # shape: (grid_size_z, grid_size_x, 3)
+    >>> # Access a derived property (computed lazily)
+    >>> grid = scan.grid  # shape: (grid_size_z, grid_size_x, 3)
 
-    # Select a subset of transmit events
-    scan.set_transmits(3)  # Use 3 evenly spaced transmits
-    scan.set_transmits([0, 2, 4])  # Use specific transmit indices
-    scan.set_transmits("all")  # Use all transmits
+    >>> # Select a subset of transmit events
+    >>> _ = scan.set_transmits(3)  # Use 3 evenly spaced transmits
+    >>> _ = scan.set_transmits([0, 2, 4])  # Use specific transmit indices
+    >>> _ = scan.set_transmits("all")  # Use all transmits
 
 """
 
@@ -83,7 +83,11 @@ from keras import ops
 
 from zea import log
 from zea.beamform.pfield import compute_pfield
-from zea.beamform.pixelgrid import cartesian_pixel_grid, check_for_aliasing, polar_pixel_grid
+from zea.beamform.pixelgrid import (
+    cartesian_pixel_grid,
+    check_for_aliasing,
+    polar_pixel_grid,
+)
 from zea.display import (
     compute_scan_convert_2d_coordinates,
     compute_scan_convert_3d_coordinates,
@@ -211,8 +215,8 @@ class Scan(Parameters):
         "initial_times": {"type": np.ndarray},
         "time_to_next_transmit": {"type": np.ndarray},
         "tgc_gain_curve": {"type": np.ndarray},
-        "waveforms_one_way": {"type": np.ndarray},
-        "waveforms_two_way": {"type": np.ndarray},
+        "waveforms_one_way": {"type": np.ndarray, "default": None},
+        "waveforms_two_way": {"type": np.ndarray, "default": None},
         "tx_waveform_indices": {"type": np.ndarray},
         "t_peak": {"type": np.ndarray},
         # scan conversion parameters
@@ -256,7 +260,10 @@ class Scan(Parameters):
             )
         elif self.grid_type == "cartesian":
             return cartesian_pixel_grid(
-                self.xlims, self.zlims, grid_size_z=self.grid_size_z, grid_size_x=self.grid_size_x
+                self.xlims,
+                self.zlims,
+                grid_size_z=self.grid_size_z,
+                grid_size_x=self.grid_size_x,
             )
         else:
             raise ValueError(
@@ -317,7 +324,10 @@ class Scan(Parameters):
                 radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
             )
             xlims_plane = (self.probe_geometry[0, 0], self.probe_geometry[-1, 0])
-            xlims = min(xlims_polar[0], xlims_plane[0]), max(xlims_polar[1], xlims_plane[1])
+            xlims = (
+                min(xlims_polar[0], xlims_plane[0]),
+                max(xlims_polar[1], xlims_plane[1]),
+            )
         return xlims
 
     @cache_with_dependencies("sound_speed", "sampling_frequency", "n_ax")
@@ -498,7 +508,7 @@ class Scan(Parameters):
         value = self._params.get("azimuth_angles")
         if value is None:
             log.warning("No azimuth angles provided, using zeros")
-            value = np.zeros(self.n_tx_selected)
+            return np.zeros(self.n_tx_selected)
 
         return value[self.selected_transmits]
 
@@ -519,7 +529,7 @@ class Scan(Parameters):
         value = self._params.get("tx_apodizations")
         if value is None:
             log.warning("No transmit apodizations provided, using ones")
-            value = np.ones((self.n_tx_selected, self.n_el))
+            return np.ones((self.n_tx_selected, self.n_el))
 
         return value[self.selected_transmits]
 
@@ -529,7 +539,7 @@ class Scan(Parameters):
         value = self._params.get("focus_distances")
         if value is None:
             log.warning("No focus distances provided, using zeros")
-            value = np.zeros(self.n_tx_selected)
+            return np.zeros(self.n_tx_selected)
 
         return value[self.selected_transmits]
 
@@ -539,7 +549,7 @@ class Scan(Parameters):
         value = self._params.get("initial_times")
         if value is None:
             log.warning("No initial times provided, using zeros")
-            value = np.zeros(self.n_tx_selected)
+            return np.zeros(self.n_tx_selected)
 
         return value[self.selected_transmits]
 
@@ -590,7 +600,7 @@ class Scan(Parameters):
         "t0_delays",
         "pfield_kwargs",
     )
-    def pfield(self):
+    def pfield(self) -> np.ndarray:
         """Compute or return the pressure field (pfield) for weighting."""
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
@@ -640,7 +650,12 @@ class Scan(Parameters):
         return coords
 
     @cache_with_dependencies(
-        "rho_range", "theta_range", "phi_range", "resolution", "grid_size_z", "grid_size_x"
+        "rho_range",
+        "theta_range",
+        "phi_range",
+        "resolution",
+        "grid_size_z",
+        "grid_size_x",
     )
     def coordinates_3d(self):
         """The coordinates for scan conversion."""
@@ -688,6 +703,7 @@ class Scan(Parameters):
         """The width of each transducer element in meters."""
         value = self._params.get("element_width")
         if value is None:
+            # assume uniform spacing
             return np.linalg.norm(self.probe_geometry[1] - self.probe_geometry[0])
         return value
 

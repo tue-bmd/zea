@@ -15,9 +15,8 @@ from pathlib import Path
 
 from schema import And, Optional, Or, Regex, Schema
 
-import zea.metrics  # noqa: F401
 from zea.internal.checks import _DATA_TYPES
-from zea.internal.registry import metrics_registry
+from zea.metrics import metrics_registry
 
 # predefined checks, later used in schema to check validity of parameter
 any_number = Or(

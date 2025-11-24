@@ -14,27 +14,30 @@ Example usage
 A simple example of simulating RF data with a single scatterer at the center of the probe. For a
 more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_example`.
 
-.. code-block:: python
+.. doctest::
 
-    raw_data = simulate_rf(
-        scatterer_positions=np.array([[0, 0, 20e-3]]),
-        scatterer_magnitudes=np.array([1.0]),
-        probe_geometry=np.stack(
-            [np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1
-        ),
-        apply_lens_correction=True,
-        lens_thickness=1e-3,
-        lens_sound_speed=1000,
-        sound_speed=1540,
-        n_ax=1024,
-        center_frequency=5e6,
-        sampling_frequency=20e6,
-        t0_delays=np.zeros((1, 64)),
-        initial_times=np.zeros(1),
-        element_width=0.2e-3,
-        attenuation_coef=0.5,
-        tx_apodizations=np.ones((1, 64)),
-    )
+    >>> from zea.simulator import simulate_rf
+    >>> import numpy as np
+
+    >>> raw_data = simulate_rf(
+    ...     scatterer_positions=np.array([[0, 0, 20e-3]]),
+    ...     scatterer_magnitudes=np.array([1.0]),
+    ...     probe_geometry=np.stack(
+    ...         [np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1
+    ...     ),
+    ...     apply_lens_correction=True,
+    ...     lens_thickness=1e-3,
+    ...     lens_sound_speed=1000,
+    ...     sound_speed=1540,
+    ...     n_ax=1024,
+    ...     center_frequency=5e6,
+    ...     sampling_frequency=20e6,
+    ...     t0_delays=np.zeros((1, 64)),
+    ...     initial_times=np.zeros(1),
+    ...     element_width=0.2e-3,
+    ...     attenuation_coef=0.5,
+    ...     tx_apodizations=np.ones((1, 64)),
+    ... )
 
 """
 

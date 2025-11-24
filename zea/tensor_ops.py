@@ -130,162 +130,6 @@ def extend_n_dims(arr, axis, n_dims):
     return ops.reshape(arr, new_shape)
 
 
-def vmap(fun, in_axes=0, out_axes=0):
-    """Vectorized map.
-
-    For torch and jax backends, this uses the native vmap implementation.
-    For other backends, this a wrapper that uses `ops.vectorized_map` under the hood.
-
-    Args:
-        fun: The function to be mapped.
-        in_axes: The axis or axes to be mapped over in the input.
-            Can be an integer, a tuple of integers, or None.
-            If None, the corresponding argument is not mapped over.
-            Defaults to 0.
-        out_axes: The axis or axes to be mapped over in the output.
-            Can be an integer, a tuple of integers, or None.
-            If None, the corresponding output is not mapped over.
-            Defaults to 0.
-
-    Returns:
-        A function that applies `fun` in a vectorized manner over the specified axes.
-
-    Raises:
-        ValueError: If the backend does not support vmap.
-    """
-    if keras.backend.backend() == "jax":
-        import jax
-
-        return jax.vmap(fun, in_axes=in_axes, out_axes=out_axes)
-    elif keras.backend.backend() == "torch":
-        import torch
-
-        return torch.vmap(fun, in_dims=in_axes, out_dims=out_axes)
-    else:
-        return manual_vmap(fun, in_axes=in_axes, out_axes=out_axes)
-
-
-def manual_vmap(fun, in_axes=0, out_axes=0):
-    """Manual vectorized map for backends that do not support vmap."""
-
-    def find_map_length(args, in_axes):
-        """Find the length of the axis to map over."""
-        # NOTE: only needed for numpy, the other backends can handle a singleton dimension
-        for arg, axis in zip(args, in_axes):
-            if axis is None:
-                continue
-
-            return ops.shape(arg)[axis]
-        return 1
-
-    def _moveaxes(args, in_axes, out_axes):
-        """Move axes of the input arguments."""
-        args = list(args)
-        for i, (arg, in_axis, out_axis) in enumerate(zip(args, in_axes, out_axes)):
-            if in_axis is not None:
-                args[i] = ops.moveaxis(arg, in_axis, out_axis)
-            else:
-                args[i] = ops.repeat(arg[None], find_map_length(args, in_axes), axis=out_axis)
-        return tuple(args)
-
-    def _fun(args):
-        return fun(*args)
-
-    def wrapper(*args):
-        # If in_axes or out_axes is an int, convert to tuple
-        if isinstance(in_axes, int):
-            _in_axes = (in_axes,) * len(args)
-        else:
-            _in_axes = in_axes
-        if isinstance(out_axes, int):
-            _out_axes = (out_axes,) * len(args)
-        else:
-            _out_axes = out_axes
-        zeros = (0,) * len(args)
-
-        # Check that in_axes and out_axes are tuples
-        if not isinstance(_in_axes, tuple):
-            raise ValueError("in_axes must be an int or a tuple of ints.")
-        if not isinstance(_out_axes, tuple):
-            raise ValueError("out_axes must be an int or a tuple of ints.")
-
-        args = _moveaxes(args, _in_axes, zeros)
-        outputs = ops.vectorized_map(_fun, tuple(args))
-
-        tuple_output = isinstance(outputs, (tuple, list))
-        if not tuple_output:
-            outputs = (outputs,)
-
-        outputs = _moveaxes(outputs, zeros, _out_axes)
-
-        if not tuple_output:
-            outputs = outputs[0]
-
-        return outputs
-
-    return wrapper
-
-
-def func_with_one_batch_dim(
-    func,
-    tensor,
-    n_batch_dims: int,
-    batch_size: int | None = None,
-    func_axis: int | None = None,
-    **kwargs,
-):
-    """Wraps a function to apply it to an input tensor with one or more batch dimensions.
-
-    The function will be executed in parallel on all batch elements.
-
-    Args:
-        func (function): The function to apply to the image.
-            Will take the `func_axis` output from the function.
-        tensor (Tensor): The input tensor.
-        n_batch_dims (int): The number of batch dimensions in the input tensor.
-            Expects the input to start with n_batch_dims batch dimensions. Defaults to 2.
-        batch_size (int, optional): Integer specifying the size of the batch for
-            each step to execute in parallel. Defaults to None, in which case the function
-            will run everything in parallel.
-        func_axis (int, optional): If `func` returns mulitple outputs, this axis will be returned.
-        **kwargs: Additional keyword arguments to pass to the function.
-
-    Returns:
-        The output tensor with the same batch dimensions as the input tensor.
-
-    Raises:
-        ValueError: If the number of batch dimensions is greater than the rank of the input tensor.
-    """
-    # Extract the shape of the batch dimensions from the input tensor
-    batch_dims = ops.shape(tensor)[:n_batch_dims]
-
-    # Extract the shape of the remaining (non-batch) dimensions
-    other_dims = ops.shape(tensor)[n_batch_dims:]
-
-    # Reshape the input tensor to merge all batch dimensions into one
-    reshaped_input = ops.reshape(tensor, [-1, *other_dims])
-
-    # Apply the given function to the reshaped input tensor
-    if batch_size is None:
-        reshaped_output = func(reshaped_input, **kwargs)
-    else:
-        reshaped_output = batched_map(func, reshaped_input, batch_size=batch_size)
-
-    # If the function returns multiple outputs, select the one corresponding to `func_axis`
-    if isinstance(reshaped_output, (tuple, list)):
-        if func_axis is None:
-            raise ValueError(
-                "func_axis must be specified when the function returns multiple outputs."
-            )
-        reshaped_output = reshaped_output[func_axis]
-
-    # Extract the shape of the output tensor after applying the function (excluding the batch dim)
-    output_other_dims = ops.shape(reshaped_output)[1:]
-
-    # Reshape the output tensor to restore the original batch dimensions
-    return ops.reshape(reshaped_output, [*batch_dims, *output_other_dims])
-
-
 def matrix_power(matrix, power):
     """Compute the power of a square matrix.
 
@@ -416,97 +260,347 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     return cov_matrices
 
 
-def patched_map(f, xs, patches: int, jit=True, **batch_kwargs):
-    """Wrapper around `batched_map` for patching.
+def simple_map(function, elements):
+    """Like `ops.map` but no tracing or jit compilation."""
 
-    Allows you to specify the number of patches rather than the batch size.
-    """
-    assert patches > 0, "Number of patches must be greater than 0."
+    if elements is None:
+        return function(None)
 
-    if patches == 1:
-        return f(xs, **batch_kwargs)
+    multiple_inputs = isinstance(elements, (list, tuple))
+
+    outputs = []
+    if not multiple_inputs:
+        batch_size = elements.shape[0]
+        for index in range(batch_size):
+            outputs.append(function(elements[index]))
     else:
-        length = ops.shape(xs)[0]
-        batch_size = np.ceil(length / patches).astype(int)
-        return batched_map(f, xs, batch_size, jit, **batch_kwargs)
+        batch_size = elements[0].shape[0]
+        for index in range(batch_size):
+            outputs.append(function([e[index] if e is not None else None for e in elements]))
+
+    if isinstance(outputs[0], (list, tuple)):
+        return [ops.stack(tensors) for tensors in zip(*outputs)]
+    else:
+        return ops.stack(outputs)
 
 
-def batched_map(f, xs, batch_size=None, jit=True, **batch_kwargs):
-    """Map a function over leading array axes.
+if keras.backend.backend() == "numpy":
+
+    def vectorized_map(function, elements):
+        """Fixes keras.ops.vectorized_map in numpy backend with multiple outputs."""
+        if not isinstance(elements, (list, tuple)):
+            return np.stack([function(x) for x in elements])
+        else:
+            batch_size = elements[0].shape[0]
+            output_store = []
+            for index in range(batch_size):
+                output_store.append(function([x[index] for x in elements]))
+            if isinstance(output_store[0], (list, tuple)):
+                return [np.stack(tensors) for tensors in zip(*output_store)]
+            else:
+                return np.stack(output_store)
+else:
+    vectorized_map = ops.vectorized_map
+
+
+def _find_map_length(args, in_axes) -> int:
+    """Find the length of the axis to map over."""
+    for arg, axis in zip(args, in_axes):
+        if axis is None or arg is None:
+            continue
+
+        return ops.shape(arg)[axis]
+
+    raise ValueError("At least one in_axes must be non-None to determine map length.")
+
+
+def _repeat_int_to_tuple(value, length) -> Tuple[Union[int, None], ...]:
+    """Convert an int or None to a tuple of length `length`."""
+    if isinstance(value, int) or value is None:
+        return (value,) * length
+    elif not isinstance(value, tuple):
+        raise ValueError("Value must be an int, None, or a tuple.")
+    return value
+
+
+def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
+    """Mapping function, vectorized by default.
+
+    For jax, this uses the native vmap implementation.
+    For other backends, this a wrapper that uses `ops.vectorized_map` under the hood.
+
+    Probably you want to use `zea.tensor_ops.vmap` instead, which uses this function
+    with additional batching/chunking support.
 
     Args:
-        f (callable): Function to apply element-wise over the first axis.
-        xs (Tensor): Values over which to map along the leading axis.
-        batch_size (int, optional): Size of the batch for each step. Defaults to None,
-            in which case the function will be equivalent to `ops.map`, and thus map over
-            the leading axis.
-        jit (bool, optional): If True, use a jitted version of the function for
-            faster batched mapping. Else, loop over the data with the original function.
-        batch_kwargs (dict, optional): Additional keyword arguments (tensors) to
-            batch along with xs. Must have the same first dimension size as xs.
+        fun: The function to be mapped.
+        in_axes: The axis or axes to be mapped over in the input.
+            Can be an integer, a tuple of integers, or None.
+            If None, the corresponding argument is not mapped over.
+            Defaults to 0.
+        out_axes: The axis or axes to be mapped over in the output.
+            Can be an integer, a tuple of integers, or None.
+            If None, the corresponding output is not mapped over.
+            Defaults to 0.
+        map_fn: The mapping function to use. If None, defaults to `ops.vectorized_map`.
+        _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
 
     Returns:
-        The mapped tensor(s).
-
-    Idea taken from: https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.map.html
+        A function that applies `fun` (in a vectorized manner) over the specified axes.
     """
-    if batch_kwargs is None:
-        batch_kwargs = {}
 
-    # Ensure all batch kwargs have the same leading dimension as xs.
-    if batch_kwargs:
-        assert all(
-            ops.shape(xs)[0] == ops.shape(v)[0] for v in batch_kwargs.values() if v is not None
-        ), "All batch kwargs must have the same first dimension size as xs."
+    # Use native vmap for JAX backend when map_fn is not provided
+    if keras.backend.backend() == "jax" and map_fn is None:
+        import jax
 
-    total = ops.shape(xs)[0]
-    # TODO: could be rewritten with ops.cond such that it also works for jit=True.
-    if not jit and batch_size is not None and total <= batch_size:
-        return f(xs, **batch_kwargs)
+        return jax.vmap(fun, in_axes=in_axes, out_axes=out_axes)
 
-    ## Non-jitted version: simply iterate over batches.
-    if not jit:
-        bs = batch_size or 1  # Default batch size to 1 if not specified.
-        outputs = []
-        for i in range(0, total, bs):
-            idx = slice(i, i + bs)
-            current_kwargs = {k: v[idx] for k, v in batch_kwargs.items()}
-            outputs.append(f(xs[idx], **current_kwargs))
-        return ops.concatenate(outputs, axis=0)
+    # Use native vmap for PyTorch backend when map_fn is not provided and _use_torch_vmap is True
+    if keras.backend.backend() == "torch" and map_fn is None and _use_torch_vmap:
+        import torch
 
-    ## Jitted version.
+        return torch.vmap(fun, in_dims=in_axes, out_dims=out_axes)
 
-    # Helper to create the batched function for use with ops.map.
-    def create_batched_f(kw_keys):
-        def batched_f(inputs):
-            x, *kw_values = inputs
-            kw = dict(zip(kw_keys, kw_values))
-            return f(x, **kw)
+    # Default to keras vectorized_map if map_fn not provided
+    if map_fn is None:
+        map_fn = vectorized_map
 
-        return batched_f
+    def _moveaxes(args, in_axes, out_axes) -> tuple:
+        """Move axes of the input arguments."""
+        args = list(args)
+        new_args = []
+        map_length = _find_map_length(args, in_axes)
+        for arg, in_axis, out_axis in zip(args, in_axes, out_axes):
+            if arg is None:
+                # filter out None arguments
+                continue
+            if out_axis is None:
+                new_args.append(ops.take(arg, 0, axis=in_axis))
+            elif in_axis is not None:
+                new_args.append(ops.moveaxis(arg, in_axis, out_axis))
+            else:
+                new_args.append(
+                    ops.repeat(ops.expand_dims(arg, out_axis), map_length, axis=out_axis)
+                )
+        return tuple(new_args)
 
-    if batch_size is None:
-        batched_f = create_batched_f(list(batch_kwargs.keys()))
-        return ops.map(batched_f, (xs, *batch_kwargs.values()))
+    def _partial_at(func, idx, value) -> callable:
+        """Return a new function with value inserted at index idx in args."""
 
-    # Pad and reshape primary tensor.
-    xs_padded = pad_array_to_divisible(xs, batch_size, axis=0)
-    new_shape = (-1, batch_size) + ops.shape(xs_padded)[1:]
-    xs_reshaped = ops.reshape(xs_padded, new_shape)
+        def wrapper(*args, **kwargs):
+            args = list(args)
+            args[idx:idx] = [value]
+            return func(*args, **kwargs)
 
-    # Pad and reshape batch_kwargs similarly.
-    reshaped_kwargs = {}
-    for k, v in batch_kwargs.items():
-        if v is None:
-            reshaped_kwargs[k] = None
+        return wrapper
+
+    def mapped_wrapper(*args):
+        _in_axes = _repeat_int_to_tuple(in_axes, len(args))
+
+        # Move mapped axes to front
+        zeros = (0,) * len(args)
+        none_indexes = [i for i, arg in enumerate(args) if arg is None]
+        args = _moveaxes(args, _in_axes, zeros)
+
+        # Build function with None arguments prefilled
+        _prefilled_none_fn = fun
+        for none_idx in none_indexes:
+            _prefilled_none_fn = _partial_at(_prefilled_none_fn, none_idx, None)
+
+        def _fun(args):
+            return _prefilled_none_fn(*args)
+
+        outputs = map_fn(_fun, tuple(args))
+
+        # Wrap outputs to tuple for easier processing
+        tuple_output = isinstance(outputs, (tuple, list))
+        if not tuple_output:
+            outputs = (outputs,)
+
+        _out_axes = _repeat_int_to_tuple(out_axes, len(outputs))
+
+        # Move mapped axes back to original position
+        outputs = _moveaxes(outputs, zeros, _out_axes)
+
+        if not tuple_output:
+            outputs = outputs[0]
+
+        return outputs
+
+    return mapped_wrapper
+
+
+def vmap(
+    fun,
+    in_axes=0,
+    out_axes=0,
+    batch_size=None,
+    chunks=None,
+    fn_supports_batch=False,
+    disable_jit=False,
+    _use_torch_vmap=False,
+):
+    """`vmap` with batching or chunking support to avoid memory issues.
+
+    Basically a wrapper around `vmap` that splits the input into batches or chunks
+    to avoid memory issues with large inputs. Choose the `batch_size` or `chunks` wisely, because
+    it pads the input to make it divisible, and then crop the output back to the original size.
+
+    Args:
+        fun: Function to be mapped.
+        in_axes: Axis or axes to be mapped over in the input.
+        out_axes: Axis or axes to be mapped over in the output.
+        batch_size: Size of the batch for each step. If `None`, the function will be equivalent
+            to `vmap`. If `1`, will be equivalent to `map`. Mutually exclusive with `chunks`.
+        chunks: Number of chunks to split the input into. If `None` or `1`, the function will be
+            equivalent to `vmap`. Mutually exclusive with `batch_size`.
+        fn_supports_batch: If True, assumes that `fun` can already handle batched inputs.
+            In this case, this function will only handle padding and reshaping for batching.
+        disable_jit: If True, disables JIT compilation for backends that support it.
+            This can be useful for debugging. Will fall back to simple mapping.
+        _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
+            Advantage: you can apply `vmap` multiple times without issues.
+            Disadvantage: does not support None arguments.
+    Returns:
+        A function that applies `fun` in a batched manner over the specified axes.
+    """
+
+    # Mutually exclusive arguments
+    assert not (batch_size is not None and chunks is not None), (
+        "batch_size and chunks are mutually exclusive. Please specify only one of them."
+    )
+
+    if batch_size is not None:
+        assert batch_size > 0, "batch_size must be greater than 0."
+    if chunks is not None:
+        assert chunks > 0, "chunks must be greater than 0."
+
+    no_chunks_or_batch = batch_size is None and (chunks is None or chunks == 1)
+
+    if fn_supports_batch and no_chunks_or_batch:
+        return fun
+
+    if not fn_supports_batch:
+        # vmap to support batches
+        fun = _map(
+            fun,
+            in_axes=in_axes,
+            out_axes=out_axes,
+            map_fn=None if not disable_jit else simple_map,
+            _use_torch_vmap=_use_torch_vmap,
+        )
+
+    if no_chunks_or_batch:
+        return fun
+
+    # map (sequentially) to support batches/chunks that fit in memory
+    map_fn = ops.map if not disable_jit else simple_map
+
+    def batched_fun(*args):
+        _in_axes = _repeat_int_to_tuple(in_axes, len(args))
+        total_length = _find_map_length(args, _in_axes)
+
+        if chunks is not None:
+            _batch_size = np.ceil(total_length / chunks).astype(int)
         else:
-            v_padded = pad_array_to_divisible(v, batch_size, axis=0)
-            reshaped_kwargs[k] = ops.reshape(v_padded, (-1, batch_size) + ops.shape(v_padded)[1:])
+            _batch_size = batch_size
 
-    batched_f = create_batched_f(list(reshaped_kwargs.keys()))
-    out = ops.map(batched_f, (xs_reshaped, *reshaped_kwargs.values()))
-    out_reshaped = ops.reshape(out, (-1,) + ops.shape(out)[2:])
-    return out_reshaped[:total]  # Remove any padding added.
+        new_args = []
+        for arg, in_axis in zip(args, _in_axes):
+            if in_axis is None or arg is None:
+                new_args.append(arg)
+                continue
+            padded_arg = pad_array_to_divisible(arg, _batch_size, axis=in_axis)
+            reshaped_arg = reshape_axis(padded_arg, (-1, _batch_size), axis=in_axis)
+            new_args.append(reshaped_arg)
+
+        outputs = _map(fun, in_axes=_in_axes, out_axes=out_axes, map_fn=map_fn)(*new_args)
+
+        # Wrap outputs to tuple for easier processing
+        tuple_output = isinstance(outputs, (tuple, list))
+        if not tuple_output:
+            outputs = (outputs,)
+
+        new_outputs = []
+        _out_axes = _repeat_int_to_tuple(out_axes, len(outputs))
+        for output, out_axis in zip(outputs, _out_axes):
+            if out_axis is None:
+                new_outputs.append(output)
+                continue
+            reshaped_output = flatten(output, start_dim=out_axis, end_dim=out_axis + 1)
+            cropped_output = ops.take(reshaped_output, ops.arange(total_length), axis=out_axis)
+            new_outputs.append(cropped_output)
+
+        if tuple_output:
+            return tuple(new_outputs)
+        else:
+            return new_outputs[0]
+
+    return batched_fun
+
+
+def func_with_one_batch_dim(
+    func,
+    tensor,
+    n_batch_dims: int,
+    batch_size: int | None = None,
+    func_axis: int | None = None,
+    **kwargs,
+):
+    """Wraps a function to apply it to an input tensor with one or more batch dimensions.
+
+    The function will be executed in parallel on all batch elements.
+
+    Args:
+        func (function): The function to apply to the image.
+            Will take the `func_axis` output from the function.
+        tensor (Tensor): The input tensor.
+        n_batch_dims (int): The number of batch dimensions in the input tensor.
+            Expects the input to start with n_batch_dims batch dimensions. Defaults to 2.
+        batch_size (int, optional): Integer specifying the size of the batch for
+            each step to execute in parallel. Defaults to None, in which case the function
+            will run everything in parallel.
+        func_axis (int, optional): If `func` returns mulitple outputs, this axis will be returned.
+        **kwargs: Additional keyword arguments to pass to the function.
+
+    Returns:
+        The output tensor with the same batch dimensions as the input tensor.
+
+    Raises:
+        ValueError: If the number of batch dimensions is greater than the rank of the input tensor.
+    """
+    # Extract the shape of the batch dimensions from the input tensor
+    batch_dims = ops.shape(tensor)[:n_batch_dims]
+
+    # Extract the shape of the remaining (non-batch) dimensions
+    other_dims = ops.shape(tensor)[n_batch_dims:]
+
+    # Reshape the input tensor to merge all batch dimensions into one
+    reshaped_input = ops.reshape(tensor, [-1, *other_dims])
+
+    # Apply the given function to the reshaped input tensor
+    if batch_size is None:
+        reshaped_output = func(reshaped_input, **kwargs)
+    else:
+        reshaped_output = vmap(
+            lambda *args: func(*args, **kwargs),
+            batch_size=batch_size,
+            fn_supports_batch=True,
+        )(reshaped_input)
+
+    # If the function returns multiple outputs, select the one corresponding to `func_axis`
+    if isinstance(reshaped_output, (tuple, list)):
+        if func_axis is None:
+            raise ValueError(
+                "func_axis must be specified when the function returns multiple outputs."
+            )
+        reshaped_output = reshaped_output[func_axis]
+
+    # Extract the shape of the output tensor after applying the function (excluding the batch dim)
+    output_other_dims = ops.shape(reshaped_output)[1:]
+
+    # Reshape the output tensor to restore the original batch dimensions
+    return ops.reshape(reshaped_output, [*batch_dims, *output_other_dims])
 
 
 if keras.backend.backend() == "jax":
@@ -555,7 +649,7 @@ def pad_array_to_divisible(arr, N, axis=0, mode="constant", pad_value=None):
     return padded_array
 
 
-def interpolate_data(subsampled_data, mask, order=1, axis=-1):
+def interpolate_data(subsampled_data, mask, order=1, axis=-1, fill_mode="nearest", fill_value=0):
     """Interpolate subsampled data along a specified axis using `map_coordinates`.
 
     Args:
@@ -565,6 +659,12 @@ def interpolate_data(subsampled_data, mask, order=1, axis=-1):
             `True` where data is known.
         order (int, optional): The order of the spline interpolation. Default is `1`.
         axis (int, optional): The axis along which the data is subsampled. Default is `-1`.
+        fill_mode (str, optional): Points outside the boundaries of the input are filled
+            according to the given mode. Default is 'nearest'. For more info see
+            `keras.ops.image.map_coordinates`.
+        fill_value (float, optional): Value to use for points outside the boundaries
+            of the input if `fill_mode` is 'constant'. Default is `0`. For more info see
+            `keras.ops.image.map_coordinates`.
 
     Returns:
         ndarray: The data interpolated back to the original grid.
@@ -629,6 +729,8 @@ def interpolate_data(subsampled_data, mask, order=1, axis=-1):
         subsampled_data,
         interp_coords,
         order=order,
+        fill_mode=fill_mode,
+        fill_value=fill_value,
     )
 
     interpolated_data = ops.reshape(interpolated_data, -1)
@@ -740,14 +842,16 @@ def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number:
         Tensor: Reshaped tensor with data stacked along stack_axis.
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            import keras
+            >>> import keras
+            >>> from zea.tensor_ops import stack_volume_data_along_axis
 
-            data = keras.random.uniform((10, 20, 30))
-            # stacking along 1st axis with 2 frames per block
-            stacked_data = stack_volume_data_along_axis(data, 0, 1, 2)
-            stacked_data.shape
+            >>> data = keras.random.uniform((10, 20, 30))
+            >>> # stacking along 1st axis with 2 frames per block
+            >>> stacked_data = stack_volume_data_along_axis(data, 0, 1, 2)
+            >>> stacked_data.shape
+            (5, 40, 30)
     """
     blocks = int(ops.ceil(data.shape[batch_axis] / number))
     data = pad_array_to_divisible(data, axis=batch_axis, N=blocks, mode="reflect")
@@ -782,13 +886,15 @@ def split_volume_data_from_axis(data, batch_axis: int, stack_axis: int, number: 
         Tensor: Reshaped tensor with data split back to original format.
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            import keras
+            >>> import keras
+            >>> from zea.tensor_ops import split_volume_data_from_axis
 
-            data = keras.random.uniform((20, 10, 30))
-            split_data = split_volume_data_from_axis(data, 0, 1, 2, 2)
-            split_data.shape
+            >>> data = keras.random.uniform((20, 10, 30))
+            >>> split_data = split_volume_data_from_axis(data, 0, 1, 2, 2)
+            >>> split_data.shape
+            (39, 5, 30)
     """
     if data.shape[stack_axis] == 1:
         # in this case it was a broadcasted axis which does not need to be split
@@ -904,14 +1010,17 @@ def check_patches_fit(
         in the original image and the new image shape if the patches do not fit.
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            image_shape = (10, 10)
-            patch_shape = (4, 4)
-            overlap = (2, 2)
-            patches_fit, new_shape = check_patches_fit(image_shape, patch_shape, overlap)
-            patches_fit
-            new_shape
+            >>> from zea.tensor_ops import check_patches_fit
+            >>> image_shape = (10, 10)
+            >>> patch_shape = (4, 4)
+            >>> overlap = (2, 2)
+            >>> patches_fit, new_shape = check_patches_fit(image_shape, patch_shape, overlap)
+            >>> patches_fit
+            True
+            >>> new_shape
+            (10, 10)
     """
     if overlap:
         stride = (np.array(patch_shape) - np.array(overlap)).astype(int)
@@ -968,13 +1077,15 @@ def images_to_patches(
             [batch, #patch_y, #patch_x, patch_size_y, patch_size_x, #channels].
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            import keras
+            >>> import keras
+            >>> from zea.tensor_ops import images_to_patches
 
-            images = keras.random.uniform((2, 8, 8, 3))
-            patches = images_to_patches(images, patch_shape=(4, 4), overlap=(2, 2))
-            patches.shape
+            >>> images = keras.random.uniform((2, 8, 8, 3))
+            >>> patches = images_to_patches(images, patch_shape=(4, 4), overlap=(2, 2))
+            >>> patches.shape
+            (2, 3, 3, 4, 4, 3)
     """
     assert len(images.shape) == 4, (
         f"input array should have 4 dimensions, but has {len(images.shape)} dimensions"
@@ -1052,13 +1163,15 @@ def patches_to_images(
         images (Tensor): Reconstructed batch of images from batch of patches.
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            import keras
+            >>> import keras
+            >>> from zea.tensor_ops import patches_to_images
 
-            patches = keras.random.uniform((2, 3, 3, 4, 4, 3))
-            images = patches_to_images(patches, image_shape=(8, 8, 3), overlap=(2, 2))
-            images.shape
+            >>> patches = keras.random.uniform((2, 3, 3, 4, 4, 3))
+            >>> images = patches_to_images(patches, image_shape=(8, 8, 3), overlap=(2, 2))
+            >>> images.shape
+            (2, 8, 8, 3)
     """
     # Input validation
     assert len(image_shape) == 3, "image_shape must have 3 dimensions: (height, width, channels)."
@@ -1138,14 +1251,16 @@ def reshape_axis(data, newshape: tuple, axis: int):
         axis (int): axis to reshape.
 
     Example:
-        .. code-block:: python
+        .. doctest::
 
-            import keras
+            >>> import keras
+            >>> from zea.tensor_ops import reshape_axis
 
-            data = keras.random.uniform((3, 4, 5))
-            newshape = (2, 2)
-            reshaped_data = reshape_axis(data, newshape, axis=1)
-            reshaped_data.shape
+            >>> data = keras.random.uniform((3, 4, 5))
+            >>> newshape = (2, 2)
+            >>> reshaped_data = reshape_axis(data, newshape, axis=1)
+            >>> reshaped_data.shape
+            (3, 2, 2, 5)
     """
     axis = map_negative_indices([axis], data.ndim)[0]
     shape = list(ops.shape(data))  # list
@@ -1403,34 +1518,6 @@ def sinc(x, eps=keras.config.epsilon()):
     return ops.sin(x + eps) / (x + eps)
 
 
-if keras.backend.backend() == "tensorflow":
-
-    def safe_vectorize(
-        pyfunc,
-        excluded=None,
-        signature=None,
-    ):
-        """Just a wrapper around ops.vectorize.
-
-        Because tensorflow does not support multiple arguments to ops.vectorize(func)(...)
-        We will just map the function manually.
-        """
-
-        def _map(*args):
-            outputs = []
-            for i in range(ops.shape(args[0])[0]):
-                outputs.append(pyfunc(*[arg[i] for arg in args]))
-            return ops.stack(outputs)
-
-        return _map
-
-else:
-
-    def safe_vectorize(pyfunc, excluded=None, signature=None):
-        """Just a wrapper around ops.vectorize."""
-        return ops.vectorize(pyfunc, excluded=excluded, signature=signature)
-
-
 def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     """Apply a function to 1D array slices along an axis.
 
@@ -1476,7 +1563,7 @@ def apply_along_axis(func1d, axis, arr, *args, **kwargs):
                 perm = list(range(len(x.shape)))
                 perm[0], perm[dim_offset] = perm[dim_offset], perm[0]
                 x_moved = ops.transpose(x, perm)
-                result = ops.vectorized_map(f, x_moved)
+                result = vectorized_map(f, x_moved)
                 # Move the result dimension back if needed
                 if len(result.shape) > 0:
                     result_perm = list(range(len(result.shape)))
@@ -1497,7 +1584,7 @@ def apply_along_axis(func1d, axis, arr, *args, **kwargs):
         prev_func = func
 
         def make_func(f):
-            return lambda x: ops.vectorized_map(f, x)
+            return lambda x: vectorized_map(f, x)
 
         func = make_func(prev_func)
 
@@ -1576,3 +1663,80 @@ def correlate(x, y, mode="full"):
         return complex_tensor
     else:
         return ops.real(complex_tensor)
+
+
+def find_contour(binary_mask):
+    """Extract contour/boundary points from a binary mask using edge detection.
+
+    This function finds the boundary pixels of objects in a binary mask by detecting
+    pixels that have at least one neighbor with a different value (using 4-connectivity).
+
+    Args:
+        binary_mask: Binary mask tensor of shape (H, W) with values 0 or 1.
+
+    Returns:
+        Boundary points as tensor of shape (N, 2) in (row, col) format.
+        Returns empty tensor of shape (0, 2) if no boundaries are found.
+
+    Example:
+        .. doctest::
+
+            >>> from zea.tensor_ops import find_contour
+            >>> import keras
+            >>> mask = keras.ops.zeros((10, 10))
+            >>> mask = keras.ops.scatter_update(
+            ...     mask, [[3, 3], [3, 4], [4, 3], [4, 4]], [1, 1, 1, 1]
+            ... )
+            >>> contour = find_contour(mask)
+            >>> contour.shape
+            (4, 2)
+    """
+    # Pad the mask to handle edges
+    padded = ops.pad(binary_mask, [[1, 1], [1, 1]], mode="constant", constant_values=0.0)
+
+    # Check 4-connectivity (up, down, left, right)
+    is_edge = (
+        (binary_mask != padded[:-2, 1:-1])  # top neighbor different
+        | (binary_mask != padded[2:, 1:-1])  # bottom neighbor different
+        | (binary_mask != padded[1:-1, :-2])  # left neighbor different
+        | (binary_mask != padded[1:-1, 2:])  # right neighbor different
+    )
+
+    # Only keep edges that are part of the foreground (binary_mask == 1)
+    is_boundary = is_edge & ops.cast(binary_mask, "bool")
+
+    boundary_indices = ops.where(is_boundary)
+
+    if ops.shape(boundary_indices[0])[0] > 0:
+        boundary_points = ops.stack(boundary_indices, axis=1)
+        boundary_points = ops.cast(boundary_points, "float32")
+    else:
+        boundary_points = ops.zeros((0, 2), dtype="float32")
+
+    return boundary_points
+
+
+def translate(array, range_from=None, range_to=(0, 255)):
+    """Map values in array from one range to other.
+
+    Args:
+        array (ndarray): input array.
+        range_from (Tuple, optional): lower and upper bound of original array.
+            Defaults to min and max of array.
+        range_to (Tuple, optional): lower and upper bound to which array should be mapped.
+            Defaults to (0, 255).
+
+    Returns:
+        (ndarray): translated array
+    """
+    if range_from is None:
+        left_min, left_max = ops.min(array), ops.max(array)
+    else:
+        left_min, left_max = range_from
+    right_min, right_max = range_to
+
+    # Convert the left range into a 0-1 range (float)
+    value_scaled = (array - left_min) / (left_max - left_min)
+
+    # Convert the 0-1 range into a value in the right range.
+    return right_min + (value_scaled * (right_max - right_min))

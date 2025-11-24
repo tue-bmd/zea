@@ -1,23 +1,40 @@
 """
-The model is the nnU-Net model trained on the augmented CAMUS dataset from the following publication:
-Van De Vyver, Gilles, et al.
-"Generative augmentations for improved cardiac ultrasound segmentation using diffusion models."
-arXiv preprint arXiv:2502.20100 (2025).
+nnU-Net segmentation model trained on the augmented CAMUS dataset.
 
-GitHub original repo: https://github.com/GillesVanDeVyver/EchoGAINS
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.lv_segmentation import AugmentedCamusSeg
+
+    >>> model = AugmentedCamusSeg.from_preset("augmented_camus_seg")
+
+The model segments both the left ventricle and myocardium.
 
 At the time of writing (17 September 2025) and to the best of our knowledge,
 it is the state-of-the-art model for left ventricle segmentation on the CAMUS dataset.
 
-The model is originally a PyTorch model converted to ONNX. The model segments the left ventricle and myocardium.
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper and code, see `here <https://github.com/GillesVanDeVyver/EchoGAINS>`_.
 
-Note:
------
-To use this model, you must install the `onnxruntime` Python package:
+    Van De Vyver, Gilles, et al.
+    "Generative augmentations for improved cardiac ultrasound segmentation using diffusion models."
+    *https://arxiv.org/abs/2502.20100*
 
-    pip install onnxruntime
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/models/left_ventricle_segmentation_example`.
 
-This is required for ONNX model inference.
+.. note::
+    The model is originally a PyTorch model converted to ONNX. To use this model, you must have `onnxruntime` installed. This is required for ONNX model inference.
+
+    You can install it using pip:
+
+    .. code-block:: bash
+
+        pip install onnxruntime
+
 """  # noqa: E501
 
 from keras import ops
@@ -26,6 +43,8 @@ from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
 from zea.models.presets import augmented_camus_seg_presets
+
+INFERENCE_SIZE = 256
 
 
 @model_registry(name="augmented_camus_seg")

@@ -3,15 +3,15 @@
 Example usage
 ^^^^^^^^^^^^^^
 
-.. code-block:: python
+.. doctest::
 
-    import zea
-    from zea.internal.setup_zea import setup_config
+    >>> import zea
+    >>> from zea.internal.setup_zea import setup_config
 
-    config = setup_config("hf://zeahub/configs/config_camus.yaml")
+    >>> config = setup_config("hf://zeahub/configs/config_camus.yaml")
 
-    interface = zea.Interface(config)
-    interface.run(plot=True)
+    >>> interface = zea.Interface(config)
+    >>> interface.run(plot=True)  # doctest: +SKIP
 
 """
 
@@ -31,15 +31,15 @@ from zea.data.file import File
 from zea.datapaths import format_data_path
 from zea.display import to_8bit
 from zea.internal.core import DataTypes
+from zea.internal.utils import keep_trying
 from zea.internal.viewer import (
     ImageViewerMatplotlib,
     ImageViewerOpenCV,
     filename_from_window_dialog,
     running_in_notebook,
 )
-from zea.io_lib import matplotlib_figure_to_numpy
+from zea.io_lib import matplotlib_figure_to_numpy, save_video
 from zea.ops import Pipeline
-from zea.utils import keep_trying, save_to_gif, save_to_mp4
 
 
 class Interface:
@@ -266,10 +266,11 @@ class Interface:
         save = self.config.plot.save
 
         if self.frame_no == "all":
-            if not asyncio.get_event_loop().is_running():
-                asyncio.run(self.run_movie(save))
-            else:
-                asyncio.create_task(self.run_movie(save))
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.run_movie(save))  # already running loop
+            except RuntimeError:
+                asyncio.run(self.run_movie(save))  # no loop yet
 
         else:
             if plot:
@@ -520,10 +521,7 @@ class Interface:
 
         fps = self.config.plot.fps
 
-        if self.config.plot.video_extension == "gif":
-            save_to_gif(images, path, fps=fps)
-        elif self.config.plot.video_extension == "mp4":
-            save_to_mp4(images, path, fps=fps)
+        save_video(images, path, fps=fps)
 
         if self.verbose:
             log.info(f"Video saved to {log.yellow(path)}")

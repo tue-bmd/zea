@@ -143,45 +143,51 @@ How to Generate a zea Dataset
 
 Here is a minimal example of how to generate and save a zea dataset:
 
-.. code-block:: python
+.. doctest::
 
-  import numpy as np
-  from zea.data.data_format import DatasetElement, generate_zea_dataset
+  >>> import numpy as np
+  >>> from zea.data.data_format import DatasetElement, generate_zea_dataset
 
-  # Example data (replace with your actual data)
-  raw_data = np.random.randn(2, 11, 2048, 128, 1)
-  image = np.random.randn(2, 512, 512)
-  probe_geometry = np.zeros((128, 3))
-  t0_delays = np.zeros((11, 128))
-  initial_times = np.zeros((11,))
-  sampling_frequency = 40e6
-  center_frequency = 7e6
+  >>> # Example data (replace with your actual data)
+  >>> raw_data = np.random.randn(2, 11, 2048, 128, 1)
+  >>> image = np.random.randn(2, 512, 512)
+  >>> probe_geometry = np.zeros((128, 3))
+  >>> t0_delays = np.zeros((11, 128))
+  >>> initial_times = np.zeros((11,))
+  >>> sampling_frequency = 40e6
+  >>> center_frequency = 7e6
 
-  # Optionally define a custom dataset element
-  custom_dataset_element = DatasetElement(
-      group_name="scan",
-      dataset_name="custom_element",
-      data=np.random.rand(10, 10),
-      description="custom description",
-      unit="m",
-  )
+  >>> # Optionally define a custom dataset element
+  >>> custom_dataset_element = DatasetElement(
+  ...    group_name="scan",
+  ...    dataset_name="custom_element",
+  ...    data=np.random.rand(10, 10),
+  ...    description="custom description",
+  ...    unit="m",
+  ... )
 
-  # Save the dataset to disk
-  generate_zea_dataset(
-      "output_file.hdf5",
-      raw_data=raw_data,
-      image=image,
-      probe_geometry=probe_geometry,
-      t0_delays=t0_delays,
-      initial_times=initial_times,
-      sampling_frequency=sampling_frequency,
-      center_frequency=center_frequency,
-      sound_speed=1540,
-      probe_name="generic",
-      description="Example dataset",
-      additional_elements=[custom_dataset_element],
-  )
+  >>> # Save the dataset to disk
+  >>> generate_zea_dataset(
+  ...    "output_file.hdf5",
+  ...    raw_data=raw_data,
+  ...    image=image,
+  ...    probe_geometry=probe_geometry,
+  ...    t0_delays=t0_delays,
+  ...    initial_times=initial_times,
+  ...    sampling_frequency=sampling_frequency,
+  ...    center_frequency=center_frequency,
+  ...    sound_speed=1540,
+  ...    probe_name="generic",
+  ...    description="Example dataset",
+  ...    additional_elements=[custom_dataset_element],
+  ...    overwrite=True,
+  ... )
 
+.. testcleanup::
+
+    import os
+
+    os.remove("output_file.hdf5")
 
 For more advanced usage, see :py:func:`zea.data.data_format.generate_zea_dataset`.
 

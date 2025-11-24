@@ -15,6 +15,8 @@ from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
 
+from . import DEFAULT_TEST_SEED
+
 """Some operations for testing"""
 
 
@@ -753,7 +755,10 @@ def test_pipeline_parameter_tracing(ultrasound_scan: Scan):
     ultrasound_scan._params.pop("n_ch", None)  # remove a parameter that is not needed
     ultrasound_scan._params.pop("demodulation_frequency", None)
     params = pipeline.prepare_parameters(scan=ultrasound_scan)
-    data = np.random.randn(1, ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal(
+        (1, ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    )
     output = pipeline(data=data, **params)
     assert "demodulation_frequency" in output
 

@@ -20,7 +20,8 @@ from tqdm import tqdm
 # from zea.display import transform_sc_image_to_polar
 from zea import log
 from zea.data.data_format import generate_zea_dataset
-from zea.utils import find_first_nonzero_index, translate
+from zea.internal.utils import find_first_nonzero_index
+from zea.tensor_ops import translate
 
 
 def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):

@@ -236,26 +236,32 @@ How to Load and Save a Config
 
 Here is a minimal example of how to load and save a config file using zea:
 
-.. code-block:: python
+.. doctest::
 
-    from zea import Config
-    from zea.config import check_config
+    >>> from zea import Config
+    >>> from zea.config import check_config
 
-    # Load a config from file
-    config = Config.from_yaml("configs/config_picmus_rf.yaml")
-    # or some predefined from Hugging Face Hub
-    config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
+    >>> # Load a config from file
+    >>> config = Config.from_yaml("../configs/config_picmus_rf.yaml")
+    >>> # or some predefined from Hugging Face Hub
+    >>> config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
 
-    # We can check if the config has valid parameters (zea compliance)
-    config = check_config(config)
+    >>> # We can check if the config has valid parameters (zea compliance)
+    >>> config = check_config(config)
 
-    # Access or change parameters
-    print(config.scan.sampling_frequency)
-    config.scan.sampling_frequency = 8e6
+    >>> # Access or change parameters
+    >>> config.scan.sampling_frequency = 8e6
+    >>> print(config.scan.sampling_frequency)
+    8000000.0
 
-    # Save the config back to file
-    config.save_to_yaml("configs/config_picmus_rf_modified.yaml")
+    >>> # Save the config back to file
+    >>> config.save_to_yaml("my_new_config.yaml")
 
+.. testcleanup::
+
+    import os
+
+    os.remove("my_new_config.yaml")
 
 -------------------------------
 Parameter List

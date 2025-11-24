@@ -40,5 +40,6 @@ zea
    simulator
    tensor_ops
    tools
+   tracking
    utils
    visualize

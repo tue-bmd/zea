@@ -1,6 +1,6 @@
 [project]
 name = "zea"
-version = "0.0.6"
+version = "0.0.7"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "keras >=3.11",
+    "keras >=3.12",
     "h5py >=3.11",
     "numpy >= 1.24",
     "matplotlib >=3.8",
@@ -65,6 +65,7 @@ dev = [
     "sphinx-copybutton",
     "sphinx_design",
     "sphinx-argparse",
+    "sphinx-reredirects",
     "sphinxcontrib-bibtex",
     "mock",
     "myst-parser",
@@ -95,6 +96,7 @@ docs = [
     "sphinx-copybutton",
     "sphinx_design",
     "sphinx-argparse",
+    "sphinx-reredirects",
     "sphinxcontrib-bibtex",
     "mock",
     "myst-parser",

@@ -27,6 +27,7 @@ extensions = [
     "nbsphinx",  # for Jupyter notebook support
     "sphinx_design",  # for fancy code block selection
     "sphinxcontrib.bibtex",  # for bibliography support
+    "sphinx_reredirects",  # for redirecting empty toc entries
     "sphinxarg.ext",  # for argparse support
     "sphinx.ext.mathjax",  # for rendering math in the documentation
 ]
@@ -70,3 +71,9 @@ modindex_common_prefix = ["zea."]
 
 # for bibtex
 bibtex_bibfiles = ["../../paper/paper.bib"]
+
+# for redirecting empty toc items to their parent
+redirects = {
+    f"notebooks/{page}.html": f"../examples.html#{page}"
+    for page in ["data", "pipeline", "models", "metrics", "agent"]
+}

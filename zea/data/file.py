@@ -16,9 +16,10 @@ from zea.internal.checks import (
     _REQUIRED_SCAN_KEYS,
     get_check,
 )
+from zea.internal.core import DataTypes
+from zea.internal.utils import reduce_to_signature
 from zea.probes import Probe
 from zea.scan import Scan
-from zea.utils import reduce_to_signature
 
 
 def assert_key(file: h5py.File, key: str):
@@ -232,14 +233,28 @@ class File(h5py.File):
           indexing with lists of indices for both axes is not supported. In that case,
           try to define one of the axes with a slice.
 
-        .. code-block:: python
+        .. doctest::
 
-            # Load frame 5
-            File.load_data("raw_data", indices=5)
-            # Load frames 0, 2 and 4
-            File.load_data("raw_data", indices=[0, 2, 4])
-            # Load frames 0-9 and transmits 0, 2 and 4
-            File.load_data("raw_data", indices=(slice(10), [0, 2, 4]))
+            >>> from zea import File
+
+            >>> path_to_file = (
+            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+            ... )
+
+            >>> with File(path_to_file, mode="r") as file:
+            ...     # data has shape (n_frames, n_tx, n_el, n_ax, n_ch)
+            ...     data = file.load_data("raw_data")
+            ...     data.shape
+            ...     # load first frame only
+            ...     data = file.load_data("raw_data", indices=0)
+            ...     data.shape
+            ...     # load frame 0 and transmits 0, 2 and 4
+            ...     data = file.load_data("raw_data", indices=(0, [0, 2, 4]))
+            ...     data.shape
+            (1, 75, 832, 128, 2)
+            (75, 832, 128, 2)
+            (3, 832, 128, 2)
 
         Args:
             data_type (str): The type of data to load. Options are 'raw_data', 'aligned_data',
@@ -411,6 +426,21 @@ class File(h5py.File):
                 ans[key] = self.recursively_load_dict_contents_from_group(path + "/" + key + "/")
         return ans
 
+    def has_key(self, key: str) -> bool:
+        """Check if the file has a specific key.
+
+        Args:
+            key (str): The key to check.
+
+        Returns:
+            bool: True if the key exists, False otherwise.
+        """
+        try:
+            key = self.format_key(key)
+        except AssertionError:
+            return False
+        return True
+
     @classmethod
     def get_shape(cls, path: str, key: str) -> tuple:
         """Get the shape of a key in a file.
@@ -476,6 +506,78 @@ class File(h5py.File):
         _print_hdf5_attrs(self)
 
 
+def load_file_all_data_types(
+    path,
+    indices: str | int | List[int] = "all",
+    scan_kwargs: dict = None,
+):
+    """Loads a zea data files (h5py file).
+
+    Returns all data types together with a scan object containing the parameters
+    of the acquisition and a probe object containing the parameters of the probe.
+
+    Additionally, it can load a specific subset of frames / transmits.
+
+    The indices parameter can be used to load a subset of the data. This can be
+
+    - 'all' to load all data
+
+    - an int to load a single frame
+
+    - a list of ints to load specific frames
+
+    - a tuple of lists, ranges or slices to index frames and transmits. Note that
+        indexing with lists of indices for both axes is not supported. In that case,
+        try to define one of the axes with a slice.
+
+    # TODO: add support for event
+
+    Args:
+        path (str, pathlike): The path to the hdf5 file.
+        indices (str, int, list, optional): The indices to load. Defaults to "all" in
+            which case all frames are loaded. If an int is provided, it will be used
+            as a single index. If a list is provided, it will be used as a list of
+            indices.
+        scan_kwargs (Config, dict, optional): Additional keyword arguments
+            to pass to the Scan object. These will override the parameters from the file
+            if they are present in the file. Defaults to None.
+
+    Returns:
+        (dict): A dictionary with all data types as keys and the corresponding data as values.
+        (Scan): A scan object containing the parameters of the acquisition.
+        (Probe): A probe object containing the parameters of the probe.
+    """
+    # Define the additional keyword parameters from the scan object
+    if scan_kwargs is None:
+        scan_kwargs = {}
+
+    data_dict = {}
+
+    with File(path, mode="r") as file:
+        # Load the probe object from the file
+        probe = file.probe()
+
+        for data_type in DataTypes:
+            if not file.has_key(data_type.value):
+                data_dict[data_type.value] = None
+                continue
+
+            # Load the desired frames from the file
+            data_dict[data_type.value] = file.load_data(data_type.value, indices=indices)
+
+        # extract transmits from indices
+        # we only have to do this when the data has a n_tx dimension
+        # in that case we also have update scan parameters to match
+        # the number of selected transmits
+        indices = File._prepare_indices(indices)
+        if isinstance(indices, tuple) and len(indices) > 1:
+            scan_kwargs["selected_transmits"] = indices[1]
+
+        scan = file.scan(**scan_kwargs)
+
+        return data_dict, scan, probe
+
+
 def load_file(
     path,
     data_type="raw_data",
@@ -490,6 +592,18 @@ def load_file(
     Additionally, it can load a specific subset of frames / transmits.
 
     # TODO: add support for event
+
+    The indices parameter can be used to load a subset of the data. This can be
+
+    - 'all' to load all data
+
+    - an int to load a single frame
+
+    - a list of ints to load specific frames
+
+    - a tuple of lists, ranges or slices to index frames and transmits. Note that
+        indexing with lists of indices for both axes is not supported. In that case,
+        try to define one of the axes with a slice.
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
@@ -845,15 +959,13 @@ def dict_to_sorted_list(dictionary: dict):
         This function operates on the top level of the dictionary only.
         If the dictionary contains nested dictionaries, those will not be sorted.
 
-    .. code-block:: python
+    Example:
+        .. doctest::
 
-        # Example usage
-        input_dict = {"number_000": 5, "number_001": 1, "number_002": 23}
-        output_list = dict_to_sorted_list(input_dict)
-        # output_list will be:
-        # [
-        #     5, 1, 23
-        # ]
+            >>> from zea.data.file import dict_to_sorted_list
+            >>> input_dict = {"number_000": 5, "number_001": 1, "number_002": 23}
+            >>> dict_to_sorted_list(input_dict)
+            [5, 1, 23]
 
     Args:
         dictionary (dict): The dictionary to convert. The keys must be sortable.

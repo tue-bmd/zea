@@ -3,14 +3,14 @@ and :mod:`keras.ops.image` functions.
 
 They can be used in zea pipelines like any other :class:`zea.Operation`, for example:
 
-.. code-block:: python
+.. doctest::
 
-    from zea.keras_ops import Squeeze
+    >>> from zea.keras_ops import Squeeze
 
-    op = Squeeze(axis=1)
+    >>> op = Squeeze(axis=1)
 
 This file is generated automatically. Do not edit manually.
-Generated with Keras 3.11.3
+Generated with Keras 3.12.0
 """
 
 import keras
@@ -387,6 +387,16 @@ class Cholesky(Lambda):
             super().__init__(func=keras.ops.cholesky, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Cholesky", "keras.ops.cholesky") from e
+
+@ops_registry("keras.ops.cholesky_inverse")
+class CholeskyInverse(Lambda):
+    """Operation wrapping keras.ops.cholesky_inverse."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.cholesky_inverse, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("CholeskyInverse", "keras.ops.cholesky_inverse") from e
 
 @ops_registry("keras.ops.clip")
 class Clip(Lambda):
@@ -917,6 +927,36 @@ class Isnan(Lambda):
             super().__init__(func=keras.ops.isnan, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Isnan", "keras.ops.isnan") from e
+
+@ops_registry("keras.ops.isneginf")
+class Isneginf(Lambda):
+    """Operation wrapping keras.ops.isneginf."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.isneginf, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Isneginf", "keras.ops.isneginf") from e
+
+@ops_registry("keras.ops.isposinf")
+class Isposinf(Lambda):
+    """Operation wrapping keras.ops.isposinf."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.isposinf, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Isposinf", "keras.ops.isposinf") from e
+
+@ops_registry("keras.ops.isreal")
+class Isreal(Lambda):
+    """Operation wrapping keras.ops.isreal."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.isreal, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Isreal", "keras.ops.isreal") from e
 
 @ops_registry("keras.ops.istft")
 class Istft(Lambda):
@@ -1828,6 +1868,16 @@ class Trunc(Lambda):
         except AttributeError as e:
             raise MissingKerasOps("Trunc", "keras.ops.trunc") from e
 
+@ops_registry("keras.ops.unfold")
+class Unfold(Lambda):
+    """Operation wrapping keras.ops.unfold."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.unfold, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("Unfold", "keras.ops.unfold") from e
+
 @ops_registry("keras.ops.unstack")
 class Unstack(Lambda):
     """Operation wrapping keras.ops.unstack."""
@@ -1847,6 +1897,16 @@ class Var(Lambda):
             super().__init__(func=keras.ops.var, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("Var", "keras.ops.var") from e
+
+@ops_registry("keras.ops.view")
+class View(Lambda):
+    """Operation wrapping keras.ops.view."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.view, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("View", "keras.ops.view") from e
 
 @ops_registry("keras.ops.view_as_complex")
 class ViewAsComplex(Lambda):
@@ -1987,3 +2047,13 @@ class RgbToHsv(Lambda):
             super().__init__(func=keras.ops.image.rgb_to_hsv, **kwargs)
         except AttributeError as e:
             raise MissingKerasOps("RgbToHsv", "keras.ops.image.rgb_to_hsv") from e
+
+@ops_registry("keras.ops.image.scale_and_translate")
+class ScaleAndTranslate(Lambda):
+    """Operation wrapping keras.ops.image.scale_and_translate."""
+
+    def __init__(self, **kwargs):
+        try:
+            super().__init__(func=keras.ops.image.scale_and_translate, **kwargs)
+        except AttributeError as e:
+            raise MissingKerasOps("ScaleAndTranslate", "keras.ops.image.scale_and_translate") from e

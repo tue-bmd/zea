@@ -5,7 +5,7 @@ import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import calculate_lens_corrected_delays
-from zea.tensor_ops import safe_vectorize
+from zea.tensor_ops import vmap
 
 
 def fnum_window_fn_rect(normalized_angle):
@@ -190,10 +190,7 @@ def tof_correction(
     txdel = ops.moveaxis(txdel, 1, 0)
     txdel = txdel[..., None]
 
-    return safe_vectorize(
-        _apply_delays,
-        signature="(n_samples,n_el,n_ch),(n_pix,1)->(n_pix,n_el,n_ch)",
-    )(data, txdel)
+    return vmap(_apply_delays)(data, txdel)
 
 
 def calculate_delays(
@@ -266,10 +263,7 @@ def calculate_delays(
             sound_speed,
         )
 
-    tx_distances = safe_vectorize(
-        _tx_distances,
-        signature="(),(n_el),(n_el),()->(n_pix)",
-    )(polar_angles, t0_delays, tx_apodizations, focus_distances)
+    tx_distances = vmap(_tx_distances)(polar_angles, t0_delays, tx_apodizations, focus_distances)
     tx_distances = ops.transpose(tx_distances, (1, 0))
     # tx_distances shape is now (n_pix, n_tx)
 
@@ -277,7 +271,7 @@ def calculate_delays(
     def _rx_distances(probe_geometry):
         return distance_Rx(grid, probe_geometry)
 
-    rx_distances = safe_vectorize(_rx_distances, signature="(3)->(n_pix)")(probe_geometry)
+    rx_distances = vmap(_rx_distances)(probe_geometry)
     rx_distances = ops.transpose(rx_distances, (1, 0))
     # rx_distances shape is now (n_pix, n_el)
 

@@ -4,22 +4,19 @@ Use to quickly read and write files or interact with file system.
 """
 
 import functools
-import multiprocessing
 import os
 import time
 from io import BytesIO
 from pathlib import Path
+from typing import Generator
 
 import imageio
 import numpy as np
-import tqdm
-import yaml
 from PIL import Image, ImageSequence
 
 from zea import log
-from zea.data.file import File
 
-_SUPPORTED_VID_TYPES = [".avi", ".mp4", ".gif"]
+_SUPPORTED_VID_TYPES = [".mp4", ".gif"]
 _SUPPORTED_IMG_TYPES = [".jpg", ".png", ".JPEG", ".PNG", ".jpeg"]
 _SUPPORTED_ZEA_TYPES = [".hdf5", ".h5"]
 
@@ -27,7 +24,7 @@ _SUPPORTED_ZEA_TYPES = [".hdf5", ".h5"]
 def load_video(filename, mode="L"):
     """Load a video file and return a numpy array of frames.
 
-    Supported file types: avi, mp4, gif.
+    Supported file types: mp4, gif.
 
     Args:
         filename (str): The path to the video file.
@@ -57,12 +54,24 @@ def load_video(filename, mode="L"):
         with Image.open(filename) as im:
             for frame in ImageSequence.Iterator(im):
                 frames.append(_convert_image_mode(frame, mode=mode))
-    else:  # .mp4, .avi
-        reader = imageio.get_reader(filename)
-        for frame in reader:
-            img = Image.fromarray(frame)
-            frames.append(_convert_image_mode(img, mode=mode))
-        reader.close()
+    elif ext == ".mp4":
+        # Use imageio with FFMPEG format for MP4 files
+        try:
+            reader = imageio.get_reader(filename, format="FFMPEG")
+        except (ImportError, ValueError) as exc:
+            raise ImportError(
+                "FFMPEG plugin is required to load MP4 files. "
+                "Please install it with 'pip install imageio-ffmpeg'."
+            ) from exc
+
+        try:
+            for frame in reader:
+                img = Image.fromarray(frame)
+                frames.append(_convert_image_mode(img, mode=mode))
+        finally:
+            reader.close()
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
 
     return np.stack(frames, axis=0)
 
@@ -98,171 +107,256 @@ def load_image(filename, mode="L"):
         return _convert_image_mode(img, mode=mode)
 
 
-def _convert_image_mode(img, mode="L"):
-    """Convert a PIL Image to the specified mode and return as numpy array."""
-    if mode not in {"L", "RGB"}:
-        raise ValueError(f"Unsupported mode: {mode}, must be one of: L, RGB")
-    if mode == "L":
-        img = img.convert("L")
-        arr = np.array(img)
-    elif mode == "RGB":
-        img = img.convert("RGB")
-        arr = np.array(img)
-    return arr
+def save_video(images, filename, fps=20, **kwargs):
+    """Saves a sequence of images to a video file.
 
-
-def search_file_tree(
-    directory,
-    filetypes=None,
-    write=True,
-    dataset_info_filename="dataset_info.yaml",
-    hdf5_key_for_length=None,
-    redo=False,
-    parallel=False,
-    verbose=True,
-):
-    """Lists all files in directory and sub-directories.
-
-    If dataset_info.yaml is detected in the directory, that file is read and used
-    to deduce the file paths. If not, the file paths are searched for in the
-    directory and written to a dataset_info.yaml file.
+    Supported file types: mp4, gif.
 
     Args:
-        directory (str): Path to base directory to start file search.
-        filetypes (str or list, optional): Filetypes to look for in directory.
-            Defaults to image types (.png etc.). Make sure to include the dot.
-        write (bool, optional): Whether to write to dataset_info.yaml file.
-            Defaults to True. If False, the file paths are not written to file
-            and simply returned.
-        dataset_info_filename (str, optional): Name of dataset info file.
-            Defaults to "dataset_info.yaml", but can be changed to any name.
-        hdf5_key_for_length (str, optional): Key to use for getting length of hdf5 files.
-            Defaults to None. If set, the number of frames in each hdf5 file is
-            calculated and stored in the dataset_info.yaml file. This is extra
-            functionality of ``search_file_tree`` and only works with hdf5 files.
-        redo (bool, optional): Whether to redo the search and overwrite the dataset_info.yaml file.
-        parallel (bool, optional): Whether to use multiprocessing for hdf5 shape reading.
-        verbose (bool, optional): Whether to print progress and info.
+        images (list or np.ndarray): List or array of images. Must have shape
+            (n_frames, height, width, channels) or (n_frames, height, width).
+            If channel axis is not present, or is 1, grayscale image is assumed,
+            which is then converted to RGB. Images should be uint8.
+        filename (str or Path): Filename to which data should be written.
+        fps (int): Frames per second of rendered format.
+        **kwargs: Additional keyword arguments passed to the specific save function.
+            For GIF files, this includes `shared_color_palette` (bool).
 
-    Returns:
-        dict: Dictionary containing file paths and total number of files.
-            Has the following structure:
-
-            .. code-block:: python
-
-                {
-                    "file_paths": list of file paths,
-                    "total_num_files": total number of files,
-                    "file_lengths": list of number of frames in each hdf5 file,
-                    "file_shapes": list of shapes of each image file,
-                    "total_num_frames": total number of frames in all hdf5 files
-                }
+    Raises:
+        ValueError: If the file extension is not supported.
 
     """
-    directory = Path(directory)
-    if not directory.is_dir():
-        raise ValueError(
-            log.error(f"Directory {directory} does not exist. Please provide a valid directory.")
+    filename = Path(filename)
+    ext = filename.suffix.lower()
+
+    if ext == ".mp4":
+        return save_to_mp4(images, filename, fps=fps, **kwargs)
+    elif ext == ".gif":
+        return save_to_gif(images, filename, fps=fps, **kwargs)
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
+
+
+def save_to_gif(images, filename, fps=20, shared_color_palette=False):
+    """Saves a sequence of images to a GIF file.
+
+    .. note::
+        It's recommended to use :func:`save_video` for a more general interface
+        that supports multiple formats.
+
+    Args:
+        images (list or np.ndarray): List or array of images. Must have shape
+            (n_frames, height, width, channels) or (n_frames, height, width).
+            If channel axis is not present, or is 1, grayscale image is assumed,
+            which is then converted to RGB. Images should be uint8.
+        filename (str or Path): Filename to which data should be written.
+        fps (int): Frames per second of rendered format.
+        shared_color_palette (bool, optional): If True, creates a global
+            color palette across all frames, ensuring consistent colors
+            throughout the GIF. Defaults to False, which is default behavior
+            of PIL.Image.save. Note: True increases speed and shrinks file
+            size for longer sequences.
+
+    """
+    images = preprocess_for_saving(images)
+
+    if fps > 50:
+        log.warning(f"Cannot set fps ({fps}) > 50. Setting it automatically to 50.")
+        fps = 50
+
+    duration = int(round(1000 / fps))  # milliseconds per frame
+
+    pillow_imgs = [Image.fromarray(img) for img in images]
+
+    if shared_color_palette:
+        # Apply the same palette to all frames without dithering for consistent color mapping
+        global_palette = compute_global_palette_by_histogram(
+            pillow_imgs, bits_per_channel=5, palette_size=256
         )
-    assert Path(dataset_info_filename).suffix == ".yaml", (
-        "Currently only YAML files are supported for dataset info file when "
-        f"using `search_file_tree`, got {dataset_info_filename}"
+
+        # Apply the same palette to all frames without dithering
+        pillow_imgs = [
+            img.convert("RGB").quantize(
+                palette=global_palette,
+                dither=Image.NONE,
+            )
+            for img in pillow_imgs
+        ]
+
+    pillow_img, *pillow_imgs = pillow_imgs
+
+    pillow_img.save(
+        fp=filename,
+        format="GIF",
+        append_images=pillow_imgs,
+        save_all=True,
+        loop=0,
+        duration=duration,
+        interlace=False,
+        optimize=False,
     )
+    log.success(f"Successfully saved GIF to -> {log.yellow(filename)}")
 
-    if (directory / dataset_info_filename).is_file() and not redo:
-        with open(directory / dataset_info_filename, "r", encoding="utf-8") as file:
-            dataset_info = yaml.load(file, Loader=yaml.FullLoader)
 
-        # Check if the file_shapes key is present in the dataset_info, otherwise redo the search
-        if "file_shapes" in dataset_info:
-            if verbose:
-                log.info(
-                    "Using pregenerated dataset info file: "
-                    f"{log.yellow(directory / dataset_info_filename)} ..."
-                )
-                log.info(f"...for reading file paths in {log.yellow(directory)}")
-            return dataset_info
+def save_to_mp4(images, filename, fps=20, shared_color_palette=False):
+    """Saves a sequence of images to an MP4 file.
 
-    if redo and verbose:
-        log.info(f"Overwriting dataset info file: {log.yellow(directory / dataset_info_filename)}")
+    .. note::
+        It's recommended to use :func:`save_video` for a more general interface
+        that supports multiple formats.
 
-    # set default file type
-    if filetypes is None:
-        filetypes = _SUPPORTED_IMG_TYPES + _SUPPORTED_VID_TYPES + _SUPPORTED_ZEA_TYPES
+    Args:
+        images (list or np.ndarray): List or array of images. Must have shape
+            (n_frames, height, width, channels) or (n_frames, height, width).
+            If channel axis is not present, or is 1, grayscale image is assumed,
+            which is then converted to RGB. Images should be uint8.
+        filename (str or Path): Filename to which data should be written.
+        fps (int): Frames per second of rendered format.
+        shared_color_palette (bool, optional): If True, creates a global
+            color palette across all frames, ensuring consistent colors
+            throughout the MP4. Note: True can cause slow saving for longer
+            sequences.
 
-    file_paths = []
+    Raises:
+        ImportError: If imageio-ffmpeg is not installed.
 
-    if isinstance(filetypes, str):
-        filetypes = [filetypes]
+    Returns:
+        str: Success message.
 
-    if hdf5_key_for_length is not None:
-        assert isinstance(hdf5_key_for_length, str), "hdf5_key_for_length must be a string"
-        assert set(filetypes).issubset({".hdf5", ".h5"}), (
-            "hdf5_key_for_length only works with when filetypes is set to "
-            f"`.hdf5` or `.h5`, got {filetypes}"
+    """
+    images = preprocess_for_saving(images)
+
+    filename = str(filename)
+
+    parent_dir = Path(filename).parent
+    parent_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use imageio with FFMPEG format for MP4 files
+    try:
+        writer = imageio.get_writer(
+            filename, fps=fps, format="FFMPEG", codec="libx264", pixelformat="yuv420p"
         )
+    except (ImportError, ValueError) as exc:
+        raise ImportError(
+            "FFMPEG plugin is required to save MP4 files. "
+            "Please install it with 'pip install imageio-ffmpeg'."
+        ) from exc
 
+    try:
+        if shared_color_palette:
+            pillow_imgs = [Image.fromarray(img) for img in images]
+            global_palette = compute_global_palette_by_histogram(
+                pillow_imgs, bits_per_channel=5, palette_size=256
+            )
+            for img in pillow_imgs:
+                paletted_img = img.convert("RGB").quantize(
+                    palette=global_palette,
+                    dither=Image.NONE,
+                )
+                writer.append_data(np.array(paletted_img.convert("RGB")))
+        else:
+            # Write from numpy arrays directly
+            for image in images:
+                writer.append_data(image)
+    finally:
+        writer.close()
+
+    return log.success(f"Successfully saved MP4 to -> {filename}")
+
+
+def search_file_tree(directory, filetypes=None, verbose=True, relative=False) -> Generator:
+    """Traverse a directory tree and yield file paths matching specified file types.
+
+    Args:
+        directory (str or Path): The root directory to start the search.
+        filetypes (list of str, optional): List of file extensions to match.
+            If None, file types supported by `zea` are matched. Defaults to None.
+        verbose (bool, optional): If True, logs the search process. Defaults to True.
+        relative (bool, optional): If True, yields file paths relative to the
+            root directory. Defaults to False.
+
+    Yields:
+        Path: Paths of files matching the specified file types.
+    """
     # Traverse file tree to index all files from filetypes
     if verbose:
         log.info(f"Searching {log.yellow(directory)} for {filetypes} files...")
+
     for dirpath, _, filenames in os.walk(directory):
         for file in filenames:
             # Append to file_paths if it is a filetype file
             if Path(file).suffix in filetypes:
                 file_path = Path(dirpath) / file
-                file_path = file_path.relative_to(directory)
-                file_paths.append(str(file_path))
+                if relative:
+                    file_path = file_path.relative_to(directory)
+                yield file_path
 
-    if hdf5_key_for_length is not None:
-        # using multiprocessing to speed up reading hdf5 files
-        # and getting the number of frames in each file
-        if verbose:
-            log.info("Getting number of frames in each hdf5 file...")
 
-        get_shape_partial = functools.partial(File.get_shape, key=hdf5_key_for_length)
-        # make sure to call search_file_tree from within a function
-        # or use if __name__ == "__main__":
-        # to avoid freezing the main process
-        absolute_file_paths = [directory / file for file in file_paths]
-        if parallel:
-            with multiprocessing.Pool() as pool:
-                file_shapes = list(
-                    tqdm.tqdm(
-                        pool.imap(
-                            get_shape_partial,
-                            absolute_file_paths,
-                        ),
-                        total=len(file_paths),
-                        desc="Getting number of frames in each hdf5 file",
-                        disable=not verbose,
-                    )
-                )
-        else:
-            file_shapes = []
-            for file_path in tqdm.tqdm(
-                absolute_file_paths,
-                desc="Getting number of frames in each hdf5 file",
-                disable=not verbose,
-            ):
-                file_shapes.append(File.get_shape(file_path, hdf5_key_for_length))
+def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette_size=256):
+    """Computes a global color palette for a sequence of images using histogram analysis.
 
-    assert len(file_paths) > 0, f"No image files were found in: {directory}"
-    if verbose:
-        log.info(f"Found {len(file_paths)} image files in {log.yellow(directory)}")
-        log.info(f"Writing dataset info to {log.yellow(directory / dataset_info_filename)}")
+    Args:
+        pillow_imgs (list): List of pillow images. All images should be in RGB mode.
+        bits_per_channel (int, optional): Number of bits to use per color channel for histogram
+            binning. Can take values between 1 and 7. Defaults to 5.
+        palette_size (int, optional): Number of colors in the resulting palette. Defaults to 256.
 
-    dataset_info = {"file_paths": file_paths, "total_num_files": len(file_paths)}
-    if len(file_shapes) > 0:
-        dataset_info["file_shapes"] = file_shapes
-        file_lengths = [shape[0] for shape in file_shapes]
-        dataset_info["file_lengths"] = file_lengths
-        dataset_info["total_num_frames"] = sum(file_lengths)
+    Returns:
+        PIL.Image: A PIL 'P' mode image containing the computed color palette.
 
-    if write:
-        with open(directory / dataset_info_filename, "w", encoding="utf-8") as file:
-            yaml.dump(dataset_info, file)
+    Raises:
+        ValueError: If bits_per_channel or palette_size is outside of range.
+    """
 
-    return dataset_info
+    if not 1 <= bits_per_channel <= 7:
+        raise ValueError(f"bits_per_channel must be between 1 and 7, got {bits_per_channel}")
+    if not 1 <= palette_size <= 256:
+        raise ValueError(f"palette_size must be between 1 and 256, got {palette_size}")
+
+    # compute number of bins per channel by bitshift
+    bins_per = 1 << bits_per_channel
+    # compute total number of histogram bins for RGB
+    total_bins = bins_per**3
+    # counts per bin in the final histogram
+    counts = np.zeros(total_bins, dtype=np.int64)
+
+    shift = 8 - bits_per_channel
+    # Iterate images, accumulate bin counts
+    for img in pillow_imgs:
+        arr = np.array(img.convert("RGB"), dtype=np.uint8).reshape(-1, 3)
+        # reduce bits, compute bin index
+        r = (arr[:, 0] >> shift).astype(np.int32)
+        g = (arr[:, 1] >> shift).astype(np.int32)
+        b = (arr[:, 2] >> shift).astype(np.int32)
+        idx = (r * bins_per + g) * bins_per + b
+        # accumulate counts
+        bincount = np.bincount(idx, minlength=total_bins)
+        counts += bincount
+
+    # pick top bins
+    top_idx = np.argpartition(-counts, palette_size - 1)[:palette_size]
+
+    # sort top bins by frequency
+    top_idx = top_idx[np.argsort(-counts[top_idx])]
+
+    # convert bin index back to representative RGB (center of bin)
+    bins = np.array(
+        [((i // (bins_per * bins_per)), (i // bins_per) % bins_per, i % bins_per) for i in top_idx]
+    )
+
+    # expand bin centers back to 8-bit values
+    center = (
+        (bins * (1 << (8 - bits_per_channel)) + (1 << (7 - bits_per_channel))).clip(0, 255)
+    ).astype(np.uint8)
+    palette_colors = center.reshape(-1, 3)  # shape (k,3)
+
+    # build a PIL 'P' palette image from these colors
+    pal = np.zeros(768, dtype=np.uint8)  # 256*3 entries
+    pal[: palette_colors.size] = palette_colors.flatten()
+    palette_img = Image.new("P", (1, 1))
+    palette_img.putpalette(pal.tolist())
+
+    return palette_img
 
 
 def matplotlib_figure_to_numpy(fig, **kwargs):
@@ -341,3 +435,85 @@ def retry_on_io_error(max_retries=3, initial_delay=0.5, retry_action=None):
         return wrapper
 
     return decorator
+
+
+def _convert_image_mode(img, mode="L"):
+    """Convert a PIL Image to the specified mode and return as numpy array."""
+    if mode not in {"L", "RGB"}:
+        raise ValueError(f"Unsupported mode: {mode}, must be one of: L, RGB")
+    if mode == "L":
+        img = img.convert("L")
+        arr = np.array(img)
+    elif mode == "RGB":
+        img = img.convert("RGB")
+        arr = np.array(img)
+    return arr
+
+
+def grayscale_to_rgb(image):
+    """Converts a grayscale image to an RGB image.
+
+    Args:
+        image (ndarray): Grayscale image. Must have shape (height, width).
+
+    Returns:
+        ndarray: RGB image.
+    """
+    assert image.ndim == 2, "Input image must be grayscale."
+    # Stack the grayscale image into 3 channels (RGB)
+    return np.stack([image] * 3, axis=-1)
+
+
+def _assert_uint8_images(images: np.ndarray):
+    """
+    Asserts that the input images have the correct properties.
+
+    Args:
+        images (np.ndarray): The input images.
+
+    Raises:
+        AssertionError: If the dtype of images is not uint8.
+        AssertionError: If the shape of images is not (n_frames, height, width, channels)
+            or (n_frames, height, width) for grayscale images.
+        AssertionError: If images have anything other than 1 (grayscale),
+            3 (rgb) or 4 (rgba) channels.
+    """
+    assert images.dtype == np.uint8, f"dtype of images should be uint8, got {images.dtype}"
+
+    assert images.ndim in (3, 4), (
+        "images must have shape (n_frames, height, width, channels),"
+        f" or (n_frames, height, width) for grayscale images. Got {images.shape}"
+    )
+
+    if images.ndim == 4:
+        assert images.shape[-1] in (1, 3, 4), (
+            "Grayscale images must have 1 channel, "
+            "RGB images must have 3 channels, and RGBA images must have 4 channels. "
+            f"Got shape: {images.shape}, channels: {images.shape[-1]}"
+        )
+
+
+def preprocess_for_saving(images):
+    """Preprocesses images for saving to GIF or MP4.
+
+    Args:
+        images (ndarray, list[ndarray]): Images. Must have shape (n_frames, height, width, channels)
+            or (n_frames, height, width).
+    """
+    images = np.array(images)
+    _assert_uint8_images(images)
+
+    # Remove channel axis if it is 1 (grayscale image)
+    if images.ndim == 4 and images.shape[-1] == 1:
+        images = np.squeeze(images, axis=-1)
+
+    # convert grayscale images to RGB
+    if images.ndim == 3:
+        images = [grayscale_to_rgb(image) for image in images]
+        images = np.array(images)
+
+    # drop alpha channel if present (RGBA -> RGB)
+    if images.ndim == 4 and images.shape[-1] == 4:
+        images = images[..., :3]
+
+    return images

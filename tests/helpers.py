@@ -14,6 +14,7 @@ import jax
 import numpy as np
 import pytest
 
+
 debugging = sys.gettrace() or debugpy.is_client_connected() is not None
 
 

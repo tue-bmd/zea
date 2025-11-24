@@ -1,7 +1,24 @@
 """LPIPS model for perceptual similarity.
 
-See original code: https://github.com/richzhang/PerceptualSimilarity
-As well as the paper: https://arxiv.org/abs/1801.03924
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.lpips import LPIPS
+
+    >>> model = LPIPS.from_preset("lpips")
+
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper and code, see `here <https://github.com/richzhang/PerceptualSimilarity>`_.
+
+    Zhang, Richard, et al.
+    "The Unreasonable Effectiveness of Deep Features as a Perceptual Metric."
+    *https://arxiv.org/abs/1801.03924*
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/metrics/lpips_example`.
 
 """
 

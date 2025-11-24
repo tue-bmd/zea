@@ -17,7 +17,7 @@ import keras
 import numpy as np
 import pytest
 
-from zea.internal.parameters import Parameters, cache_with_dependencies
+from zea.internal.parameters import MissingDependencyError, Parameters, cache_with_dependencies
 
 
 class DummyCircularParameters(Parameters):
@@ -104,7 +104,7 @@ class DummyParameters(Parameters):
             return self._params["optional_param"]
         # Otherwise, compute from dependencies
         if None in (self.param3, self.param1, self.param4):
-            raise AttributeError("Missing dependencies for optional_param")
+            raise MissingDependencyError("Missing dependencies for optional_param")
         return [0, self.param3 * self.param1 / self.param4 / 2]
 
     @cache_with_dependencies("optional_param", "param6")
@@ -112,7 +112,7 @@ class DummyParameters(Parameters):
         # If optional_param is set, use it, else use computed value
         base = self.optional_param
         if self.param6 is None:
-            raise AttributeError("Missing dependency: param6")
+            raise MissingDependencyError("Missing dependency: param6")
         # Just for test: sum the second value of optional_param and param6
         return base[1] + self.param6
 
@@ -179,8 +179,8 @@ def test_chain_dependency_and_cache(dummy_params):
 
 
 def test_setting_computed_property_raises(dummy_params):
-    """Test that setting a computed property raises informative AttributeError."""
-    with pytest.raises(AttributeError) as excinfo:
+    """Test that setting a computed property raises informative MissingDependencyError."""
+    with pytest.raises(ValueError) as excinfo:
         dummy_params.computed1 = 123
     msg = str(excinfo.value)
     assert "Cannot set computed property 'computed1'" in msg
@@ -190,7 +190,7 @@ def test_setting_computed_property_raises(dummy_params):
 def test_missing_dependency_error_message():
     """Test that missing dependencies raise informative errors."""
     s = DummyParameters()
-    with pytest.raises(AttributeError) as excinfo:
+    with pytest.raises(MissingDependencyError) as excinfo:
         _ = s.computed2
     msg = str(excinfo.value)
     assert "param1" in msg and "param2" in msg

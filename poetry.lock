@@ -2027,14 +2027,14 @@ files = [
 
 [[package]]
 name = "keras"
-version = "3.11.3"
+version = "3.12.0"
 description = "Multi-backend Keras"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "keras-3.11.3-py3-none-any.whl", hash = "sha256:f484f050e05ee400455b05ec8c36ed35edc34de94256b6073f56cfe68f65491f"},
-    {file = "keras-3.11.3.tar.gz", hash = "sha256:efda616835c31b7d916d72303ef9adec1257320bc9fd4b2b0138840fc65fb5b7"},
+    {file = "keras-3.12.0-py3-none-any.whl", hash = "sha256:02b69e007d5df8042286c3bcc2a888539e3e487590ffb08f6be1b4354df50aa8"},
+    {file = "keras-3.12.0.tar.gz", hash = "sha256:536e3f8385a05ae04e82e08715a1a59988578087e187b04cb0a6fad11743f07f"},
 ]
 
 [package.dependencies]
@@ -5260,6 +5260,38 @@ theme-rtd = ["sphinx-rtd-theme (>=2.0,<3.0)"]
 theme-sbt = ["sphinx-book-theme (>=1.1,<2.0)"]
 
 [[package]]
+name = "sphinx-reredirects"
+version = "0.1.6"
+description = "Handles redirects for moved pages in Sphinx documentation projects"
+optional = true
+python-versions = ">=3.5"
+groups = ["main"]
+markers = "python_version == \"3.10\" and (extra == \"dev\" or extra == \"docs\")"
+files = [
+    {file = "sphinx_reredirects-0.1.6-py3-none-any.whl", hash = "sha256:efd50c766fbc5bf40cd5148e10c00f2c00d143027de5c5e48beece93cc40eeea"},
+    {file = "sphinx_reredirects-0.1.6.tar.gz", hash = "sha256:c491cba545f67be9697508727818d8626626366245ae64456fe29f37e9bbea64"},
+]
+
+[package.dependencies]
+sphinx = ">=7.1"
+
+[[package]]
+name = "sphinx-reredirects"
+version = "1.0.0"
+description = "The extension for Sphinx documentation projects that handle redirects for moved pages. It generates HTML pages with meta refresh redirects to the new page location to prevent 404 errors if you rename or move your documents."
+optional = true
+python-versions = ">=3.11"
+groups = ["main"]
+markers = "python_version >= \"3.11\" and (extra == \"dev\" or extra == \"docs\")"
+files = [
+    {file = "sphinx_reredirects-1.0.0-py3-none-any.whl", hash = "sha256:1d0102710a8f633c6c885f940f440f7195ada675c1739976f0135790747dea06"},
+    {file = "sphinx_reredirects-1.0.0.tar.gz", hash = "sha256:7c9bada9f1330489fcf4c7297a2d6da2a49ca4877d3f42d1388ae1de1019bf5c"},
+]
+
+[package.dependencies]
+sphinx = ">=7.4,<9.0"
+
+[[package]]
 name = "sphinxcontrib-applehelp"
 version = "2.0.0"
 description = "sphinxcontrib-applehelp is a Sphinx extension which outputs Apple help books"
@@ -6428,10 +6460,10 @@ propcache = ">=0.2.1"
 
 [extras]
 backends = ["jax", "tensorflow", "torch"]
-dev = ["IPython", "PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "mock", "myst-parser", "nbsphinx", "onnxruntime", "opencv-python-headless", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "sphinx", "sphinx-argparse", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx_design", "sphinxcontrib-bibtex"]
+dev = ["IPython", "PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "mock", "myst-parser", "nbsphinx", "onnxruntime", "opencv-python-headless", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "sphinx", "sphinx-argparse", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-bibtex"]
 display = ["opencv-python"]
 display-headless = ["opencv-python-headless"]
-docs = ["IPython", "PyStemmer", "furo", "mock", "myst-parser", "nbsphinx", "sphinx", "sphinx-argparse", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx_design", "sphinxcontrib-bibtex"]
+docs = ["IPython", "PyStemmer", "furo", "mock", "myst-parser", "nbsphinx", "sphinx", "sphinx-argparse", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-bibtex"]
 jax = ["jax"]
 models = ["onnxruntime"]
 tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff"]
@@ -6439,4 +6471,4 @@ tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "p
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.13"
-content-hash = "c910a00015b91ce282b5911a95e4d8ae513af891067b824cef1996457c11eda0"
+content-hash = "66d7f79259ed5664b2d0c4e90e0e4961ad806b5a49782574b43eec9ff3802d7f"

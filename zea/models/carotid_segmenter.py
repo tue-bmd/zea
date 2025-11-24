@@ -1,9 +1,24 @@
 """Carotid segmentation model.
 
-Original implementation of paper:
-    - "Unsupervised domain adaptation method for segmenting cross-sectional CCA images"
-    - https://doi.org/10.1016/j.cmpb.2022.107037
-    - Author: Luuk van Knippenberg
+To try this model, simply load one of the available presets:
+
+.. doctest::
+
+    >>> from zea.models.carotid_segmenter import CarotidSegmenter
+
+    >>> model = CarotidSegmenter.from_preset("carotid-segmenter")
+
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper see:
+
+    van Knippenberg, Luuk, et al.
+    "Unsupervised domain adaptation method for segmenting cross-sectional CCA images."
+    *https://doi.org/10.1016/j.cmpb.2022.107037*
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/models/carotid_segmentation_example`.
 """
 
 import keras

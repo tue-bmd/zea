@@ -1,21 +1,41 @@
 """
-The model is the movilenetV2 based image quality model from:
-Van De Vyver, et al. "Regional Image Quality Scoring for 2-D Echocardiography Using Deep Learning."
-Ultrasound in Medicine & Biology 51.4 (2025): 638-649.
+MobileNetv2 based image quality model for myocardial regions in apical views.
 
-GitHub original repo: https://github.com/GillesVanDeVyver/arqee
+To try this model, simply load one of the available presets:
 
-The model is originally a PyTorch model converted to ONNX. The model predicts the regional image quality of
+.. doctest::
+
+    >>> from zea.models.regional_quality import MobileNetv2RegionalQuality
+
+    >>> model = MobileNetv2RegionalQuality.from_preset("mobilenetv2_regional_quality")
+
+The model predicts the regional image quality of
 the myocardial regions in apical views. It can also be used to get the overall image quality by averaging the
 regional scores.
 
-Note:
------
-To use this model, you must install the `onnxruntime` Python package:
+At the time of writing (17 September 2025) and to the best of our knowledge,
+it is the state-of-the-art model for left ventricle segmentation on the CAMUS dataset.
 
-    pip install onnxruntime
+.. important::
+    This is a ``zea`` implementation of the model.
+    For the original paper and code, see `here <https://github.com/GillesVanDeVyver/arqee>`_.
 
-This is required for ONNX model inference.
+    Van De Vyver, et al. "Regional Image Quality Scoring for 2-D Echocardiography Using Deep Learning."
+    *Ultrasound in Medicine & Biology 51.4 (2025): 638-649*
+
+.. seealso::
+    A tutorial notebook where this model is used:
+    :doc:`../notebooks/metrics/myocardial_quality_example`.
+
+.. note::
+    The model is originally a PyTorch model converted to ONNX. To use this model, you must have `onnxruntime` installed. This is required for ONNX model inference.
+
+    You can install it using pip:
+
+    .. code-block:: bash
+
+        pip install onnxruntime
+
 """  # noqa: E501
 
 import numpy as np

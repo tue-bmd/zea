@@ -22,14 +22,13 @@ initialization steps for you:
 By calling :func:`setup`, you can prepare your zea environment in a single step,
 ensuring that configuration, data paths, and device setup are all handled for you.
 
-.. code-block:: python
+.. doctest::
 
+    >>> # Basic usage: loads config, sets paths, initializes device
+    >>> config = setup_zea.setup(config_path="my_config.yaml")
 
-    # Basic usage: loads config, sets paths, initializes device
-    config = setup_zea.setup(config_path="my_config.yaml")
-
-    # With user creation prompt
-    config = setup_zea.setup(config_path="my_config.yaml", create_user=True)
+    >>> # With user creation prompt
+    >>> config = setup_zea.setup(config_path="my_config.yaml", create_user=True)
 
 Function Details
 ----------------

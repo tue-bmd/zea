@@ -9,7 +9,8 @@ from copy import deepcopy
 import keras
 import numpy as np
 
-from zea.utils import reduce_to_signature, update_dictionary
+from zea.internal.utils import reduce_to_signature
+from zea.utils import update_dictionary
 
 CONVERT_TO_KERAS_TYPES = (np.ndarray, int, float, list, tuple, bool)
 BASE_FLOAT_PRECISION = "float32"

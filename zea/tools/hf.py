@@ -41,7 +41,7 @@ def load_model_from_hf(repo_id, revision="main", verbose=True):
     if verbose:
         log.info(
             log.yellow(
-                f"Succesfully loaded model {commit_message} from "
+                f"Successfully loaded model {commit_message} from "
                 f"'https://huggingface.co/{repo_id}'. Last updated on {commit_time}."
             )
         )
