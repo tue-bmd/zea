@@ -21,14 +21,16 @@ from zea.data.convert.utils import unzip
 
 
 def segment(tensor, number_erasing=0, min_clip=0):
-    """Segments the background of the echonet images by setting it to 0 and creating a hard edge.
-
-    Args:
-        tensor (ndarray): Input image (sc) with 3 dimensions. (N, 112, 112)
-        number_erasing (float, optional): number to fill the background with.
+    """
+    Segment the background of EchoNet frames by masking regions outside the ultrasound cone and enforcing edge clipping.
+    
+    Parameters:
+        tensor (ndarray): Input array of shape (N, 112, 112); frames are modified in-place to mask background regions.
+        number_erasing (float, optional): Value used to fill masked background regions. Defaults to 0.
+        min_clip (float, optional): If > 0, values on the computed cone edge will be clipped to be at least this value. Defaults to 0.
+    
     Returns:
-        tensor (ndarray): Segmented matrix of same dimensions as input
-
+        ndarray: The same `tensor` array with background regions set to `number_erasing` and edge pixels clipped when `min_clip > 0`.
     """
     # Start with the upper part
 
@@ -238,7 +240,16 @@ def cartesian_to_polar_matrix(
 
 
 def find_split_for_file(file_dict, target_file):
-    """Function that finds the split for a given file in a dictionary."""
+    """
+    Locate which split contains a given filename.
+    
+    Parameters:
+        file_dict (dict): Mapping from split name (e.g., "train", "val", "test", "rejected") to an iterable of filenames.
+        target_file (str): Filename to search for within the split lists.
+    
+    Returns:
+        str: The split name that contains `target_file`, or `"rejected"` if the file is not found.
+    """
     for split, files in file_dict.items():
         if target_file in files:
             return split
@@ -247,6 +258,12 @@ def find_split_for_file(file_dict, target_file):
 
 
 def count_init(shared_counter):
+    """
+    Initialize the module-level shared counter used by worker processes.
+    
+    Parameters:
+        shared_counter (multiprocessing.Value): A process-shared integer Value that will be assigned to the module-global COUNTER for coordinated counting across processes.
+    """
     global COUNTER
     COUNTER = shared_counter
 
@@ -290,7 +307,18 @@ class H5Processor:
         return translate(data, self._process_range, self.range_to)
 
     def get_split(self, hdf5_file: str, sequence):
-        """Determine the split for a given file."""
+        """
+        Determine the dataset split label for a given file and its image sequence.
+        
+        This method checks acceptance based on the first frame of `sequence`. If explicit splits were provided to the processor, it returns the split found for `hdf5_file` (and asserts that the acceptance result matches the split). If no explicit splits are provided, rejected sequences are labeled `"rejected"`. Accepted sequences increment a shared counter and are assigned `"val"`, `"test"`, or `"train"` according to the processor's `num_val` and `num_test` quotas.
+        
+        Parameters:
+            hdf5_file (str): Filename or identifier used to look up an existing split when splits are provided.
+            sequence (array-like): Time-ordered sequence of images; the first frame is used for acceptance checking.
+        
+        Returns:
+            str: One of `"train"`, `"val"`, `"test"`, or `"rejected"` indicating the assigned split.
+        """
         # Always check acceptance
         accepted = accept_shape(sequence[0])
 
@@ -320,6 +348,14 @@ class H5Processor:
             return "train"
 
     def validate_split_copy(self, split_file):
+        """
+        Validate that a generated split YAML matches the original splits provided to the processor.
+        
+        Reads the YAML at `split_file` and compares its `train`, `val`, `test`, and `rejected` lists (or other split keys present in `self.splits`) against `self.splits`; logs confirmation when a split matches and logs which entries are missing or extra when they differ. If the processor was not initialized with `splits`, validation is skipped and a message is logged.
+        
+        Parameters:
+            split_file (str or os.PathLike): Path to the YAML file containing the generated dataset splits.
+        """
         if self.splits is not None:
             # Read the split_file and ensure contents of the train, val and split match
             with open(split_file, "r") as f:
@@ -342,7 +378,15 @@ class H5Processor:
 
     def __call__(self, avi_file):
         """
-        Processes a single h5 file using the class variables and the filename given.
+        Convert a single AVI file into a ZE A/HDF5 dataset entry and optionally save a consolidated NumPy archive.
+        
+        Loads the AVI, validates and rescales pixel ranges, applies segmentation, assigns a data split (train/val/test/rejected), converts accepted frames to polar coordinates, and writes a .npz file when numpy output is enabled. Constructs and returns the ZE A dataset descriptor used by generate_zea_dataset; the descriptor always includes `path`, `image_sc`, `probe_name`, and `description`, and includes `image` when the file is accepted.
+        
+        Parameters:
+            avi_file (pathlib.Path): Path to the source .avi file to process.
+        
+        Returns:
+            dict: The value returned by generate_zea_dataset containing the dataset entry for the processed file.
         """
         hdf5_file = avi_file.stem + ".hdf5"
         sequence = load_avi(avi_file)
@@ -399,6 +443,24 @@ class H5Processor:
 
 def convert_echonet(args):
     # Check if unzip is needed
+    """
+    Convert an EchoNet dataset into HDF5/ZE A files and optional NumPy (.npz) outputs, organizing results into train/val/test/rejected splits.
+    
+    Parameters:
+        args: An object (typically argparse.Namespace) with attributes:
+            src (str|Path): Path to the source archive or directory containing .avi files; will be unzipped if needed.
+            dst (str|Path): Destination directory for generated HDF5/ZE A files; per-split subdirectories (train, val, test, rejected) and a split.yaml are created/updated.
+            dst_npz (str|Path|None): If provided, .npz files containing processed arrays are written to this path.
+            split_path (str|Path|None): If provided, must contain a split.yaml to reproduce an existing split; function asserts the file exists.
+            no_hyperthreading (bool): When false, processing uses a ProcessPoolExecutor with a shared counter; when true, processing runs sequentially.
+    
+    Side effects:
+        - May unzip the source into a working directory.
+        - Writes HDF5/ZE A files (and optional .npz files) into dst and/or dst_npz.
+        - Writes a split.yaml into dst summarizing produced files per split.
+        - Logs progress and validation results.
+        - Asserts that split.yaml exists at split_path when split reproduction is requested.
+    """
     src = unzip(args.src, "echonet")
 
     if args.split_path is not None:

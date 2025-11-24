@@ -24,22 +24,15 @@ from zea.data.convert.utils import unzip
 
 def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
     """
-    Transform a scan converted input image (cone) into square
-        using radial stretching and downsampling. Note that it assumes the background to be zero!
-        Please verify if your results make sense, especially if the image contains black parts
-        at the edges. This function is not perfect by any means, but it works for most cases.
-
-    Args:
-        image (numpy.ndarray): Input image as a 2D numpy array (height, width).
-        output_size (tuple, optional): Output size of the image as a tuple.
-            Defaults to image_sc.shape.
-        fit_outline (bool, optional): Whether to fit a polynomial the outline of the image.
-            Defaults to True. If this is set to False, and the ultrasound image contains
-            some black parts at the edges, weird artifacts can occur, because the jagged outline
-            is stretched to the desired width.
-
+    Convert a scan-converted 2D ultrasound (cone) image into a square (polar-like) representation.
+    
+    Parameters:
+        image_sc (numpy.ndarray): Input 2D image array (height, width) with background assumed to be zero.
+        output_size (tuple, optional): Desired output size as (height, width). Defaults to the input shape.
+        fit_outline (bool, optional): If True, fit smooth polynomial outlines to image borders before remapping to reduce edge artifacts; if False, use the raw detected outline.
+    
     Returns:
-        numpy.ndarray: Squared image as a 2D numpy array (height, width).
+        numpy.ndarray: Squared 2D image resized to `output_size`.
     """
     assert len(image_sc.shape) == 2, "function only allows for 2D data"
 
@@ -116,14 +109,20 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
 
 
 def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """Loads an image using SimpleITK and returns the image and its metadata.
-
-    Args:
-        filepath: Path to the image.
-
+    """
+    Load an image file using SimpleITK and return its pixel array along with extracted metadata.
+    
+    Parameters:
+        filepath (str | Path): Path to the image file to load.
+    
     Returns:
-        - ([N], H, W), Image array.
-        - Collection of metadata.
+        im_array (np.ndarray): NumPy array produced by SimpleITK's GetArrayFromImage. For 3D images the shape is (Z, H, W); for 2D images the shape is (H, W). Pixel dtype is preserved.
+        metadata (dict): Dictionary with keys:
+            - "origin": image origin tuple,
+            - "ElementSpacing": spacing tuple,
+            - "direction": direction cosines tuple,
+            - "NDims": number of image dimensions,
+            - "metadata": mapping of SimpleITK metadata keys to their values.
     """
     # Load image and save info
     import SimpleITK as sitk
@@ -149,14 +148,16 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
 
 
 def process_camus(source_path, output_path, output_path_npz=None, overwrite=False):
-    """Converts the camus database to the zea format.
-
-    Args:
-        source_path (str, pathlike): The path to the original camus file.
-        output_path (str, pathlike): The path to the output file.
-        output_path_npz (str, pathlike, optional): The path to the numpy output if desired.
-        overwrite (bool, optional): Set to True to overwrite existing file.
-            Defaults to False.
+    """
+    Convert a CAMUS image or sequence to ZE A format and write output files.
+    
+    This loads the CAMUS source, converts each frame to a polar (squared) representation, rescales both original and polar images to the range [-60, 0] dB, and writes a ZE A HDF5 dataset. Optionally saves a compressed NumPy (.npz) with the polar and scan-converted images.
+    
+    Parameters:
+        source_path (str | os.PathLike): Path to the CAMUS image file or sequence.
+        output_path (str | os.PathLike): Destination path for the ZE A HDF5 output.
+        output_path_npz (str | os.PathLike, optional): If provided, path to write a compressed .npz containing `image` (polar) and `image_sc` (scan-converted).
+        overwrite (bool, optional): If True, overwrite an existing output_path. If False and output_path exists, the function returns without writing. Defaults to False.
     """
 
     # Check if output file already exists and remove
@@ -201,7 +202,15 @@ splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 
 
 def get_split(patient_id: int) -> str:
-    """Determine the dataset split for a given patient ID."""
+    """
+    Determine which dataset split a patient ID belongs to.
+    
+    Returns:
+        The split name: "train", "val", or "test".
+    
+    Raises:
+        ValueError: If the patient_id does not fall into any defined split range.
+    """
     if splits["train"][0] <= patient_id < splits["train"][1]:
         return "train"
     elif splits["val"][0] <= patient_id < splits["val"][1]:
@@ -213,8 +222,16 @@ def get_split(patient_id: int) -> str:
 
 
 def _process_task(task):
-    """Unpack task tuple and call process_camus from the main module.
-    task: (source_file_str, output_file_str, output_file_npz_str_or_None)
+    """
+    Unpack a task tuple and invoke process_camus in a worker process.
+    
+    Creates parent directories for the target outputs, calls process_camus with the unpacked paths, and logs then re-raises any exception raised by processing.
+    
+    Parameters:
+        task (tuple): (source_file_str, output_file_str, output_file_npz_str_or_None)
+            - source_file_str: filesystem path to the source CAMUS file as a string.
+            - output_file_str: filesystem path for the ZEA output file as a string.
+            - output_file_npz_str_or_None: filesystem path for optional NPZ output as a string, or None.
     """
     source_file_str, output_file_str, output_file_npz_str = task
     source_file = Path(source_file_str)
@@ -237,6 +254,18 @@ def _process_task(task):
 
 
 def convert_camus(args):
+    """
+    Orchestrates conversion of the CAMUS dataset into ZE A HDF5 files (and optional compressed NPZ files) across dataset splits.
+    
+    Processes files found under the CAMUS source folder (after unzipping if needed), assigns each patient to a train/val/test split, creates matching output paths, and executes per-file conversion tasks either serially or in parallel. Ensures output directories do not pre-exist, optionally produces .npz copies when dst_npz is provided, and logs progress and failures.
+    
+    Parameters:
+        args: An object with the following attributes:
+            src (str | Path): Path to the CAMUS archive or extracted folder.
+            dst (str | Path): Root destination folder for ZE A HDF5 outputs; split subfolders will be created.
+            dst_npz (str | Path | None): Optional root destination for compressed NPZ outputs; if provided, NPZ files are produced.
+            no_hyperthreading (bool, optional): If True, run tasks serially instead of using a process pool.
+    """
     to_numpy = args.dst_npz is not None
 
     camus_source_folder = Path(args.src)

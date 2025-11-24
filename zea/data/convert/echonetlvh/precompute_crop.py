@@ -14,7 +14,17 @@ from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
 def load_splits(source_dir):
-    """Load splits from MeasurementsList.csv and return avi filenames"""
+    """
+    Collects AVI filenames for each dataset split from MeasurementsList.csv.
+    
+    Reads the MeasurementsList.csv file in source_dir, groups rows by the `HashedFileName` column, uses the `split` column to assign each unique file to a split, and returns a mapping of split names to lists of corresponding AVI filenames (each with a ".avi" suffix).
+    
+    Parameters:
+        source_dir (str or pathlib.Path): Directory containing MeasurementsList.csv.
+    
+    Returns:
+        dict: Mapping with keys "train", "val", "test", and "rejected", each value is a list of AVI filename strings (e.g., "abcd1234.avi").
+    """
     csv_path = Path(source_dir) / "MeasurementsList.csv"
     splits = {"train": [], "val": [], "test": [], "rejected": []}
     # Read CSV using built-in csv module
@@ -86,11 +96,20 @@ def load_first_frame(avi_file):
 
 def precompute_cone_parameters(args):
     """
-    Precompute and save cone parameters for all AVI files.
-
-    This function loads the first frame from each AVI file, applies fit_scan_cone
-    to determine cropping parameters, and saves these parameters to a CSV file
-    for later use during the actual data conversion.
+    Precompute and save cone cropping parameters for AVI files found in the source directory.
+    
+    Loads the first frame of each AVI listed in the dataset splits, fits a scan-cone model to determine cropping/apex parameters, and writes a CSV and JSON mapping of the resulting parameters. Processing can be limited by batch, max_files, or forced to recompute existing output.
+    
+    Parameters:
+        args: An object with the following attributes:
+            src (str or Path): Path to the dataset source directory containing Batch* folders and MeasurementsList.csv.
+            dst (str or Path): Path to the output directory where cone_parameters.csv and cone_parameters.json will be written.
+            batch (str, optional): If provided, restrict search for AVI files to the named batch directory.
+            max_files (int, optional): If provided, process at most this many files.
+            force (bool, optional): If True, recompute and overwrite existing cone_parameters.csv even if it exists.
+    
+    Returns:
+        Path: Path to the written cone_parameters.csv file.
     """
     source_path = Path(args.src)
     output_path = Path(args.dst)

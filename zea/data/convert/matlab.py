@@ -919,14 +919,15 @@ def read_verasonics_file(file, event=None, additional_functions=None, frames="al
 
 
 def get_frame_indices(file, frames):
-    """Creates a numpy array of frame indices from the file and the frames argument.
-
-    Args:
-        file (h5py.File): The file to read the frame indices from.
-        frames (str): The frames argument. This can be "all" or a list of frame indices.
-
+    """
+    Resolve a frames specification into a sorted array of valid frame indices for the given Verasonics file.
+    
+    Parameters:
+        file (h5py.File): Open Verasonics .mat file used to read the total number of frames (expects Resource/RcvBuffer/numFrames).
+        frames (str | sequence): Either "all" to select every frame or a sequence (list/array) of requested frame indices.
+    
     Returns:
-        frame_indices (np.ndarray): The frame indices.
+        np.ndarray: Sorted integer array of valid frame indices. Any indices greater than or equal to the file's frame count are removed (an error is logged when out-of-bounds indices are encountered).
     """
     # Read the number of frames from the file
     n_frames = int(dereference_index(file, file["Resource"]["RcvBuffer"]["numFrames"], 0)[0][0])
@@ -953,18 +954,15 @@ def get_frame_indices(file, frames):
 def zea_from_matlab_raw(
     input_path, output_path, output_path_npz=None, additional_functions=None, frames="all"
 ):
-    """Converts a Verasonics matlab raw file to the zea format. The MATLAB file
-    should be created using the `save_raw` function and be stored in "v7.3" format.
-
-    Args:
-        input_path (str): The path to the input file (.mat file).
-        output_path (str): The path to the output file (.hdf5 file).
-        additional_functions (list, optional): A list of functions that read additional
-            data from the file. Each function should take the file as input and return a
-            `DatasetElement`. Defaults to None.
-        frames (str or list of int, optional): The frames to add to the file. This can be
-            a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
-            'all'.
+    """
+    Convert a Verasonics MATLAB raw file into a Zea-format dataset (HDF5), optionally also saving the extracted data as a NumPy NPZ.
+    
+    Parameters:
+        input_path (str or Path): Path to the input .mat file (v7.3 format produced by `save_raw`).
+        output_path (str or Path): Path to the output Zea HDF5 file (.hdf5 or .h5).
+        output_path_npz (str or Path, optional): If provided, also save the extracted dataset as a NumPy `.npz` file at this path.
+        additional_functions (list of callables, optional): Additional readers to run against the opened HDF5 file. Each callable should accept the open file (h5py.File) and return a dataset element (e.g., a mapping or object that will be included in the output data dictionary).
+        frames (str or list of int, optional): Which frames to include; can be 'all', an explicit list of frame indices, or a range expression (e.g., "4-8"). Defaults to 'all'.
     """
     to_numpy = output_path_npz is not None
 
@@ -1035,18 +1033,15 @@ def zea_from_matlab_raw(
 
 
 def get_answer(prompt, additional_options=None):
-    """Get a yes or no answer from the user. There is also the option to provide
-    additional options. In case yes or no is selected, the function returns a boolean.
-    In case an additional option is selected, the function returns the selected option
-    as a string.
-
-    Args:
-        prompt (str): The prompt to show the user.
-        additional_options (list, optional): Additional options to show the user.
-            Defaults to None.
-
+    """
+    Prompt the user until they enter a yes/no response or one of the provided additional options.
+    
+    Parameters:
+        prompt (str): Text to display to the user when requesting input.
+        additional_options (list[str], optional): Additional valid string responses; if the user enters one, that string is returned.
+    
     Returns:
-        str: The user's answer.
+        True if the user answered yes, False if the user answered no, or the selected additional option as a string.
     """
     while True:
         answer = input(prompt)
@@ -1062,6 +1057,23 @@ def get_answer(prompt, additional_options=None):
 def convert_matlab(args):
     # Variable to indicate what to do with existing files.
     # Is set by the user in case these are found.
+    """
+    Convert Verasonics MATLAB raw files to Zea-format files, either a single file or a directory tree.
+    
+    This function reads command-line style arguments from `args`, prompts interactively when needed (directory selection or overwrite decisions), parses frame selection, and writes Zea HDF5 output files. If `args.dst_npz` is provided, a corresponding NumPy NPZ bundle is also written alongside HDF5 outputs. When `args.src` points to a directory the function walks the tree and converts all `.mat` files, preserving relative paths under the output directory.
+    
+    Parameters:
+        args: An object with the following attributes used by this routine:
+            - src: Path to a source file or directory (or None to prompt a directory dialog).
+            - dst: Destination path (directory for batch conversion or .hdf5/.h5 for a single file).
+            - dst_npz: Optional destination path for NumPy NPZ outputs (None to disable NPZ output).
+            - frames: A list specifying frames to convert (or ["all"] for all frames). Ranges like "0-3" are supported.
+    
+    Side effects:
+        - May prompt the user via a GUI directory chooser (tkinter) if `args.src` is None.
+        - May prompt for overwrite/skip decisions when outputs already exist and may exit the process on abort.
+        - Creates output directories and writes HDF5 files and optional NPZ files.
+    """
     existing_file_policy = None
     to_numpy = args.dst_npz is not None
 

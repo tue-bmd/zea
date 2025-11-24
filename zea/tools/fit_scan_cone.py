@@ -72,32 +72,39 @@ def filter_edge_points_by_boundary(edge_points, is_left=True, min_cone_half_angl
 
 
 def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
-    """Detect the ultrasound cone parameters from a grayscale image.
-
-    This function performs the following steps:
-    1. Thresholds the image to create a binary mask
-    2. Detects left and right edge points of the cone
-    3. Filters edge points to ensure physical constraints
-    4. Fits lines to the cone boundaries
-    5. Calculates cone parameters including apex position, opening angle, and crop boundaries
-
-    Args:
-        image: 2D numpy array (grayscale image)
-        min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees
-        threshold: Threshold for binary image (pixels above this are considered data)
-
+    """
+    Detects the geometric parameters of the ultrasound scan cone in a grayscale image.
+    
+    Given a 2D grayscale image, locates the cone's left and right boundaries, fits lines
+    to those boundaries, and computes cone geometry and crop bounds suitable for
+    centering and extracting the scan sector.
+    
+    Parameters:
+        image (np.ndarray): 2D grayscale image.
+        min_cone_half_angle_deg (int): Minimum expected cone half-angle in degrees used
+            to filter boundary points.
+        threshold (int): Intensity threshold; pixels with values greater than this are
+            considered foreground/data.
+    
     Returns:
-        Dictionary containing cone parameters including:
-        - apex_x, apex_y: Coordinates of the cone apex
-        - crop_left, crop_right, crop_top, crop_bottom: Crop boundaries
-        - cone_height: Height of the cone
-        - opening_angle: Opening angle of the cone
-        - symmetry_ratio: Measure of cone symmetry
-        - data_coverage: Fraction of crop region containing data
-        - And other geometric parameters
-
+        dict: A dictionary of computed cone and crop parameters. Keys include:
+            - apex_x, apex_y: Apex coordinates (float).
+            - crop_left, crop_right, crop_top, crop_bottom: Crop boundaries (int, may be negative).
+            - original_width, original_height: Source image dimensions (int).
+            - cone_height: Distance from apex to bottom data row (float).
+            - opening_angle: Cone opening angle in radians (float).
+            - new_width, new_height: Computed crop dimensions (int).
+            - symmetry_ratio: Symmetry measure based on fitted slopes (float).
+            - first_data_row: First row containing data (int).
+            - data_coverage: Fraction of crop region containing foreground pixels (float).
+            - apex_above_image: True if computed apex lies above the image (bool).
+            - left_slope, right_slope, left_intercept, right_intercept: Line parameters for boundaries (float).
+            - circle_center_x, circle_center_y, circle_radius: Circle used for bottom sector approximation (float).
+            - sector_left_x, sector_left_y, sector_right_x, sector_right_y, sector_bottom: Sector intersection points and bottom (float/int).
+    
     Raises:
-        ValueError: If input image is not 2D or cone detection fails
+        ImportError: If OpenCV (cv2) is not available.
+        ValueError: If `image` is not a 2D array.
     """
     try:
         import cv2
@@ -205,7 +212,19 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
     # Calculate where the circle intersects with the cone lines
     def line_circle_intersection(a, b, cx, cy, r):
-        """Find intersection of line x = a + b*y with circle centered at (cx, cy) with radius r"""
+        """
+        Compute the intersection point between the line x = a + b*y and the circle centered at (cx, cy) with radius r, selecting the intersection with the larger y when two intersections exist.
+        
+        Parameters:
+            a (float): Line intercept in x = a + b*y.
+            b (float): Line slope with respect to y in x = a + b*y.
+            cx (float): x-coordinate of the circle center.
+            cy (float): y-coordinate of the circle center.
+            r (float): Radius of the circle.
+        
+        Returns:
+            tuple[float, float] | None: `(y, x)` coordinates of the intersection point that has the larger y value, or `None` if the line does not intersect the circle.
+        """
         # Substitute line equation into circle equation
         # (a + b*y - cx)^2 + (y - cy)^2 = r^2
         # Expand and collect terms to get quadratic in y
@@ -316,19 +335,17 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
 
 def crop_and_center_cone(image, cone_params):
     """
-    Crop the image to the sector bounding box and pad as needed to center the apex.
-
-    This function:
-    1. Crops the image to the detected cone boundaries
-    2. Adds padding if the apex is above the image
-    3. Centers the apex horizontally in the final image
-
-    Args:
-        image: 2D numpy array (grayscale image)
-        cone_params: Dictionary of cone parameters from detect_cone_parameters()
-
+    Crop an ultrasound image to the detected cone sector and horizontally center its apex at the top.
+    
+    Crops the input 2D image to the bounding box defined by cone_params, pads the top if the apex lies above the image, and adds horizontal padding so the cone apex is positioned at the horizontal center of the returned image.
+    
+    Parameters:
+        image (np.ndarray): 2D grayscale image containing the scan cone.
+        cone_params (dict): Parameters returned by detect_cone_parameters(); must include
+            "crop_left", "crop_right", "crop_top", "crop_bottom", and "apex_x".
+    
     Returns:
-        numpy array of the cropped and centered image with the cone apex at the top center
+        np.ndarray: Cropped (and possibly padded) 2D image with the cone apex at the top center.
     """
     # Get crop boundaries
     crop_left = cone_params["crop_left"]
@@ -380,20 +397,20 @@ def fit_and_crop_around_scan_cone(
     image, min_cone_half_angle_deg=20, threshold=15, return_params=False
 ):
     """
-    Detect scan cone in ultrasound image and return cropped/padded image with centered apex.
-
-    Args:
-        image: numpy array (2D grayscale image)
-        min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees (default: 20)
-        threshold: Threshold for binary image - pixels above this are considered data (default: 15)
-        return_params: If True, also return cone parameters (default: False)
-
+    Detect the ultrasound scan cone and return the image cropped to the cone with the apex centered horizontally.
+    
+    Parameters:
+        image (ndarray): 2D grayscale image.
+        min_cone_half_angle_deg (float): Minimum expected cone half-angle in degrees; used to constrain boundary detection.
+        threshold (int): Pixel intensity threshold; pixels with value > threshold are considered data.
+        return_params (bool): If True, also return the computed cone parameters.
+    
     Returns:
-        - If return_params is False: numpy array (cropped and padded image with apex at center)
-        - If return_params is True: Tuple of (cropped_array, cone_parameters_dict)
-
+        ndarray: Cropped and padded image with the cone apex horizontally centered when `return_params` is False.
+        tuple(ndarray, dict): `(cropped_image, cone_parameters)` when `return_params` is True.
+    
     Raises:
-        ValueError: If cone detection fails or image is not 2D
+        ValueError: If `image` is not 2D or if cone detection fails.
     """
     # Ensure image is 2D
     if len(image.shape) != 2:
@@ -420,14 +437,20 @@ def fit_and_crop_around_scan_cone(
 
 def visualize_scan_cone(image, cone_params, output_dir="output"):
     """
-    Create visualization plots for the scan cone detection.
-
-    Args:
-        image: Original grayscale image
-        cone_params: Dictionary of cone parameters from detect_cone_parameters()
-        output_dir: Directory to save output plots (default: "output")
-
-    The visualization is saved as 'scan_cone_visualization.png' in the output directory.
+    Generate and save a visualization showing the detected scan cone, its fitted boundaries, optional circular sector, apex marker, and crop rectangle overlaid on the input image.
+    
+    Parameters:
+        image (ndarray): Grayscale or RGB image as a NumPy array to annotate.
+        cone_params (dict): Dictionary returned by detect_cone_parameters() containing at minimum:
+            - 'apex_x', 'apex_y': apex coordinates.
+            - 'left_intercept', 'left_slope', 'right_intercept', 'right_slope': fitted line parameters.
+            - 'crop_left', 'crop_right', 'crop_top', 'crop_bottom', 'new_width', 'new_height': crop geometry.
+            - 'opening_angle': cone opening angle (radians).
+            - 'symmetry_ratio': ratio describing left/right symmetry.
+            Optionally may include 'circle_center_x', 'circle_center_y', and 'circle_radius' to draw the sector arc.
+        output_dir (str): Directory where 'scan_cone_visualization.png' will be written (created if needed).
+    
+    The visualization is saved as 'scan_cone_visualization.png' in the specified output directory.
     """
     # Create output directory
     output_path = Path(output_dir)
@@ -587,7 +610,12 @@ def visualize_scan_cone(image, cone_params, output_dir="output"):
 
 
 def main(avi_path):
-    """Demonstrate scan cone fitting on a sample AVI file."""
+    """
+    Demonstrates scan-cone fitting on a video by processing the first frame and saving a visualization.
+    
+    Parameters:
+        avi_path (str or pathlib.Path): Path to an AVI video file whose first frame will be used for cone detection and visualization. The function reads the first frame, converts it to grayscale, runs cone fitting, saves a visualization to output/scan_cone_visualization.png, and prints success or error messages.
+    """
     try:
         import cv2
     except ImportError as exc:

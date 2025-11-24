@@ -8,6 +8,17 @@ from zea import log
 
 
 def load_avi(file_path, mode="L"):
+    """
+    Load all frames from an AVI file and return them as a single stacked NumPy array.
+    
+    Parameters:
+        file_path (str | os.PathLike): Path to the AVI file to read.
+        mode (str): PIL image mode to convert each frame to (default "L" for 8-bit grayscale).
+    
+    Returns:
+        numpy.ndarray: Stacked array of frames with shape (n_frames, height, width) for single-channel modes
+        or (n_frames, height, width, channels) for multi-channel modes. Array values are image pixel values (typically uint8).
+    """
     frames = []
     with imageio.get_reader(file_path) as reader:
         for frame in reader:
@@ -21,8 +32,22 @@ def load_avi(file_path, mode="L"):
 
 def unzip(src: str | Path, dataset: str) -> Path:
     """
-    Checks if data folder exist in src.
-    Otherwise, unzip dataset.zip in src.
+    Ensure the specified dataset is available under `src` by verifying the expected folder structure or extracting the corresponding zip archive.
+    
+    Parameters:
+    	src (str | Path): Directory that should contain the dataset folder or the dataset zip file.
+    	dataset (str): Dataset identifier; must be one of: "picmus", "camus", "echonet", "echonetlvh".
+    
+    Returns:
+    	Path: The directory to use for the dataset:
+    		- picmus: src/archive_to_download
+    		- camus: src/CAMUS_public
+    		- echonet: src/EchoNet-Dynamic/Videos
+    		- echonetlvh: src
+    
+    Raises:
+    	SystemExit: If the dataset is unrecognized or the required zip/folder is missing.
+    	AssertionError: For "echonetlvh" if any of Batch2, Batch3, Batch4, or MeasurementsList.csv are missing.
     """
     src = Path(src)
     if dataset == "picmus":

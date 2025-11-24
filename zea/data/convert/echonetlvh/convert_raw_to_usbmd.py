@@ -29,7 +29,14 @@ from zea.data.convert.utils import unzip
 
 
 def overwrite_splits(source_dir):
-    """Overwrite MeasurementsList.csv splits based on manual_rejections.txt"""
+    """
+    Apply manual rejection labels to MeasurementsList.csv using manual_rejections.txt.
+    
+    Reads manual_rejections.txt located next to this module to obtain a list of HashedFileName values to mark as rejected. Opens MeasurementsList.csv in source_dir, sets the `split` field to "rejected" for any row whose HashedFileName appears in the rejection list, and atomically replaces the original CSV with the updated version. If manual_rejections.txt or MeasurementsList.csv is missing, the function logs a warning and returns without modifying files. The function asserts that exactly 278 rows were marked as rejected and logs the number of rejections written.
+    
+    Parameters:
+        source_dir (str | Path): Directory containing MeasurementsList.csv to be updated.
+    """
     current_dir = os.path.dirname(os.path.abspath(__file__))
     rejection_path = os.path.join(current_dir, "manual_rejections.txt")
     try:
@@ -67,7 +74,14 @@ def overwrite_splits(source_dir):
 
 
 def load_splits(source_dir):
-    """Load splits from MeasurementsList.csv and return avi filenames"""
+    """
+    Load dataset split mapping from MeasurementsList.csv in source_dir.
+    
+    Reads MeasurementsList.csv and returns a dictionary with keys "train", "val", "test", and "rejected", each mapping to a list of corresponding AVI filenames (each filename suffixed with ".avi").
+    
+    Returns:
+        dict: Mapping from split name ("train", "val", "test", "rejected") to a list of `.avi` filenames.
+    """
     csv_path = Path(source_dir) / "MeasurementsList.csv"
     splits = {"train": [], "val": [], "test": [], "rejected": []}
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
@@ -137,14 +151,14 @@ def load_cone_parameters(csv_path):
 
 def crop_frame_with_params(frame, cone_params):
     """
-    Crop a single frame using predetermined cone parameters.
-
-    Args:
-        frame: Input frame as numpy array
-        cone_params: Dictionary containing cropping parameters
-
+    Crop a single image frame according to precomputed cone parameters and apply zero padding to preserve apex centering.
+    
+    Parameters:
+        frame (numpy.ndarray): 2D image array to crop.
+        cone_params (dict): Mapping with keys `crop_left`, `crop_right`, `crop_top`, `crop_bottom`, and `apex_x` used to compute cropping and padding.
+    
     Returns:
-        Cropped and padded frame
+        numpy.ndarray: The cropped (and if needed, zero-padded) frame with apex horizontally centered within the output.
     """
     crop_left = int(cone_params["crop_left"])
     crop_right = int(cone_params["crop_right"])
@@ -184,14 +198,14 @@ def crop_frame_with_params(frame, cone_params):
 
 def crop_sequence_with_params(sequence, cone_params):
     """
-    Apply cropping to a sequence of frames using predetermined parameters.
-
-    Args:
-        sequence: Input sequence as numpy array of shape (frames, height, width)
-        cone_params: Dictionary containing cropping parameters
-
+    Crop each frame in a sequence using provided cone parameters and return the stacked result.
+    
+    Parameters:
+        sequence (numpy.ndarray): Array of frames with shape (frames, height, width).
+        cone_params (dict): Cropping and padding parameters (as produced by load_cone_parameters) used to crop each frame.
+    
     Returns:
-        Cropped and padded sequence
+        numpy.ndarray: Cropped (and if needed, padded) sequence stacked along the first axis with shape (frames, final_height, final_width).
     """
     cropped_frames = [crop_frame_with_params(frame, cone_params) for frame in sequence]
     return np.stack(cropped_frames, axis=0)
@@ -201,20 +215,29 @@ class LVHProcessor(H5Processor):
     """Modified H5Processor for EchoNet-LVH dataset."""
 
     def __init__(self, *args, cone_params=None, **kwargs):
+        """
+        Initialize the LVHProcessor and store optional precomputed cone parameters.
+        
+        Parameters:
+            cone_params (dict or None): Mapping from AVI filename to its cone parameter dictionary.
+                If None, an empty mapping is used and no precomputed parameters will be applied.
+        """
         super().__init__(*args, **kwargs)
         # Store the pre-computed cone parameters
         self.cone_parameters = cone_params or {}
 
     def get_split(self, avi_file: str, sequence):
         """
-        Get the split (train/val/test) for a given AVI file.
-
-        Args:
-            avi_file: Path to the AVI file
-            sequence: Video sequence (unused)
-
+        Determine which dataset split the given AVI file belongs to.
+        
+        Parameters:
+            avi_file (str): Path or filename of the AVI file to check.
+        
         Returns:
-            String indicating the split ('train', 'val', or 'test')
+            str: The split name — 'train', 'val', or 'test'.
+        
+        Raises:
+            UserWarning: If the file is not found in any split.
         """
         # Extract base filename without extension
         filename = Path(avi_file).stem + ".avi"
@@ -225,6 +248,17 @@ class LVHProcessor(H5Processor):
         raise UserWarning("Unknown split for file: " + filename)
 
     def __call__(self, avi_file):
+        """
+        Process a single AVI file into a zea-format dataset.
+        
+        Loads the AVI, applies amplitude translation and optional precomputed cone cropping, converts each frame to polar coordinates, optionally saves a .npz with both polar and original sequences, and builds the zea dataset payload with scaled uint8 images.
+        
+        Parameters:
+            avi_file (str or Path): Path to the AVI file to process.
+        
+        Returns:
+            The created zea dataset representation for the processed AVI file (contains HDF5 output path, `image` and `image_sc` arrays, and related metadata).
+        """
         avi_filename = Path(avi_file).stem + ".avi"
         sequence = np.array(load_avi(avi_file))
 
@@ -268,14 +302,17 @@ class LVHProcessor(H5Processor):
 
 
 def transform_measurement_coordinates_with_cone_params(row, cone_params):
-    """Transform measurement coordinates using cone parameters from fit_scan_cone.
-
-    Args:
-        row: A dict containing measurement data with X1,X2,Y1,Y2 coordinates
-        cone_params: Dictionary containing cone parameters from fit_scan_cone
-
+    """
+    Transform measurement coordinates (X1, X2, Y1, Y2) using precomputed scan-cone parameters.
+    
+    Parameters:
+        row (dict): Measurement row containing 'HashedFileName' and coordinate fields 'X1', 'X2', 'Y1', 'Y2'.
+        cone_params (dict): Cone parameters produced by fit_scan_cone; required keys include
+            'crop_left', 'crop_top', 'apex_x', 'crop_right', 'new_width', and 'new_height'.
+    
     Returns:
-        A new row with transformed coordinates, or None if cone_params is None
+        dict or None: The input row with transformed coordinate values converted to strings, or
+        `None` if `cone_params` is `None`.
     """
     if cone_params is None:
         log.warning(f"No cone parameters for file {row['HashedFileName']}")
@@ -330,12 +367,15 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
 
 
 def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
-    """Convert measurements CSV file with updated coordinates using cone parameters.
-
-    Args:
-        source_csv: Path to source CSV file
-        output_csv: Path to output CSV file
-        cone_params_csv: Path to CSV file with cone parameters
+    """
+    Transform measurement coordinates in a CSV using precomputed cone parameters and write the transformed rows to a new CSV.
+    
+    If a cone parameters CSV is provided and exists, its parameters are applied per-file when transforming measurement coordinates. Rows that cannot be transformed are skipped; if no rows are transformed the output CSV will contain only the original header. A summary of processed, converted, and skipped rows is logged.
+    
+    Parameters:
+        source_csv (str or Path): Path to the input measurements CSV.
+        output_csv (str or Path): Path where the converted CSV will be written.
+        cone_params_csv (str or Path, optional): Path to a CSV containing cone parameters; if omitted or not found, measurements will not be transformed.
     """
     try:
         # Read the CSV file
@@ -402,6 +442,31 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
 
 def convert_echonetlvh(args):
     # Check if unzip is needed
+    """
+    Coordinate conversion of the EchoNet-LVH dataset into zea-compatible outputs (HDF5/NPZ) and optional measurement CSV transformation.
+    
+    This function:
+    - Ensures the source archive is available and applies manual rejections when enabled.
+    - Ensures precomputed cone parameters exist (generating them if missing).
+    - Converts image sequences to zea-format HDF5 files (and optional NPZ dumps) using precomputed cone parameters and dataset splits when `convert_images` is enabled.
+    - Converts and writes a transformed MeasurementsList.csv using cone parameters when `convert_measurements` is enabled.
+    
+    Parameters:
+        args: An object (typically parsed CLI/namespace) with required attributes:
+            src (str or Path): Source path or archive root for EchoNet-LVH input.
+            dst (str or Path): Destination directory for HDF5 outputs and converted CSV.
+            dst_npz (str or Path): Destination directory for optional NPZ outputs.
+            no_rejection (bool): If True, skip applying manual rejection updates to splits.
+            convert_images (bool): If True, perform image sequence conversion.
+            convert_measurements (bool): If True, perform measurement CSV conversion.
+            batch (str or None): Optional batch subdirectory to restrict AVI discovery.
+            max_files (int or None): Optional max number of files to process.
+            no_hyperthreading (bool): If True, process files sequentially instead of using a process pool.
+    
+    Side effects:
+        Creates/overwrites files under `dst` (HDF5, MeasurementsList.csv) and optionally `dst_npz` (NPZ).
+        May call external helpers that read/write additional intermediate files (e.g., cone parameters).
+    """
     src = unzip(args.src, "echonetlvh")
 
     # Overwrite the splits if manual rejections are provided
