@@ -2,7 +2,7 @@
 
 import enum
 from pathlib import Path
-from typing import List
+from typing import List, Tuple, Union
 
 import h5py
 import numpy as np
@@ -112,63 +112,9 @@ class File(h5py.File):
         else:
             raise NotImplementedError
 
-    @staticmethod
-    def _prepare_indices(indices):
-        """Prepare the indices for loading data from hdf5 files.
-        Options:
-            - str("all")
-            - int -> single frame
-            - list of ints -> indexes first axis (frames)
-            - list of list, ranges or slices -> indexes multiple axes
-
-        Returns:
-            indices (tuple): A tuple of indices / slices to use for indexing.
-        """
-        _value_error_msg = (
-            f"Invalid value for indices: {indices}. "
-            "Indices can be a 'all', int or a List[int, tuple, list, slice, range]."
-        )
-
-        # Check all options that only index the first axis
-        if isinstance(indices, str):
-            if indices == "all":
-                return slice(None)
-            else:
-                raise ValueError(_value_error_msg)
-
-        if isinstance(indices, range):
-            return list(indices)
-
-        if isinstance(indices, (int, slice, np.integer)):
-            return indices
-
-        # At this point, indices should be a list or tuple
-        assert isinstance(indices, (list, tuple, np.ndarray)), _value_error_msg
-
-        assert all(
-            isinstance(idx, (list, tuple, int, slice, range, np.ndarray, np.integer))
-            for idx in indices
-        ), _value_error_msg
-
-        # Convert ranges to lists
-        processed_indices = [list(idx) if isinstance(idx, range) else idx for idx in indices]
-
-        # Check if items are list-like and cast to tuple (needed for hdf5)
-        if any(isinstance(idx, (list, tuple, slice)) for idx in processed_indices):
-            processed_indices = tuple(processed_indices)
-
-        return processed_indices
-
     def load_scan(self, event=None):
         """Alias for get_scan_parameters."""
         return self.get_scan_parameters(event)
-
-    @staticmethod
-    def check_data(data, key):
-        """Check the data for a given key. For example, will check if the shape matches
-        the data type (such as raw_data, ...)"""
-        if key in _DATA_TYPES:
-            get_check(key)(data, with_batch_dim=None)
 
     def format_key(self, key):
         """Format the key to match the data type."""
@@ -207,7 +153,7 @@ class File(h5py.File):
     def load_transmits(self, key, selected_transmits):
         """Load raw_data or aligned_data for a given list of transmits.
         Args:
-            data_type (str): The type of data to load. Options are 'raw_data' and 'aligned_data'.
+            key (str): The type of data to load. Options are 'raw_data' and 'aligned_data'.
             selected_transmits (list, np.ndarray): The transmits to load.
         """
         key = self.format_key(key)
@@ -215,23 +161,18 @@ class File(h5py.File):
         assert data_type in ["raw_data", "aligned_data"], (
             f"Cannot load transmits for {data_type}. Only raw_data and aligned_data are supported."
         )
-        indices = [slice(None), np.array(selected_transmits)]
+        # First axis: all frames, second axis: selected transmits
+        indices = (slice(None), np.array(selected_transmits))
         return self.load_data(key, indices)
 
-    def load_data(self, data_type, indices: str | int | List[int] = "all"):
+    def load_data(
+        self,
+        data_type,
+        indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
+    ):
         """Load data from the file.
 
-        The indices parameter can be used to load a subset of the data. This can be
-
-        - 'all' to load all data
-
-        - an int to load a single frame
-
-        - a list of ints to load specific frames
-
-        - a tuple of lists, ranges or slices to index frames and transmits. Note that
-          indexing with lists of indices for both axes is not supported. In that case,
-          try to define one of the axes with a slice.
+        .. include:: ../common/file_indexing.rst
 
         .. doctest::
 
@@ -259,13 +200,12 @@ class File(h5py.File):
         Args:
             data_type (str): The type of data to load. Options are 'raw_data', 'aligned_data',
                 'beamformed_data', 'envelope_data', 'image' and 'image_sc'.
-            indices (str, int, list, optional): The indices to load. Defaults to "all" in
-                which case all frames are loaded. If an int is provided, it will be used
-                as a single index. If a list is provided, it will be used as a list of
-                indices.
+            indices (optional): The indices to load. Defaults to `None` in
+                which case all data is loaded.
         """
         key = self.format_key(data_type)
-        indices = self._prepare_indices(indices)
+        if indices is None or (isinstance(indices, str) and indices == "all"):
+            indices = slice(None)
 
         if self._simple_index(key):
             data = self[key]
@@ -275,7 +215,6 @@ class File(h5py.File):
                 raise ValueError(
                     f"Invalid indices {indices} for key {key}. {key} has shape {data.shape}."
                 ) from exc
-            self.check_data(data, key)
         elif self.events_have_same_shape(key):
             raise NotImplementedError
         else:
@@ -508,7 +447,7 @@ class File(h5py.File):
 
 def load_file_all_data_types(
     path,
-    indices: str | int | List[int] = "all",
+    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
 ):
     """Loads a zea data files (h5py file).
@@ -518,26 +457,12 @@ def load_file_all_data_types(
 
     Additionally, it can load a specific subset of frames / transmits.
 
-    The indices parameter can be used to load a subset of the data. This can be
-
-    - 'all' to load all data
-
-    - an int to load a single frame
-
-    - a list of ints to load specific frames
-
-    - a tuple of lists, ranges or slices to index frames and transmits. Note that
-        indexing with lists of indices for both axes is not supported. In that case,
-        try to define one of the axes with a slice.
-
-    # TODO: add support for event
+    .. include:: ../common/file_indexing.rst
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
-        indices (str, int, list, optional): The indices to load. Defaults to "all" in
-            which case all frames are loaded. If an int is provided, it will be used
-            as a single index. If a list is provided, it will be used as a list of
-            indices.
+        indices (optional): The indices to load. Defaults to None in
+            which case all frames are loaded.
         scan_kwargs (Config, dict, optional): Additional keyword arguments
             to pass to the Scan object. These will override the parameters from the file
             if they are present in the file. Defaults to None.
@@ -569,7 +494,6 @@ def load_file_all_data_types(
         # we only have to do this when the data has a n_tx dimension
         # in that case we also have update scan parameters to match
         # the number of selected transmits
-        indices = File._prepare_indices(indices)
         if isinstance(indices, tuple) and len(indices) > 1:
             scan_kwargs["selected_transmits"] = indices[1]
 
@@ -581,7 +505,7 @@ def load_file_all_data_types(
 def load_file(
     path,
     data_type="raw_data",
-    indices: str | int | List[int] = "all",
+    indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
     scan_kwargs: dict = None,
 ):
     """Loads a zea data files (h5py file).
@@ -591,29 +515,15 @@ def load_file(
 
     Additionally, it can load a specific subset of frames / transmits.
 
-    # TODO: add support for event
-
-    The indices parameter can be used to load a subset of the data. This can be
-
-    - 'all' to load all data
-
-    - an int to load a single frame
-
-    - a list of ints to load specific frames
-
-    - a tuple of lists, ranges or slices to index frames and transmits. Note that
-        indexing with lists of indices for both axes is not supported. In that case,
-        try to define one of the axes with a slice.
+    .. include:: ../common/file_indexing.rst
 
     Args:
         path (str, pathlike): The path to the hdf5 file.
         data_type (str, optional): The type of data to load. Defaults to
             'raw_data'. Other options are 'aligned_data', 'beamformed_data',
             'envelope_data', 'image' and 'image_sc'.
-        indices (str, int, list, optional): The indices to load. Defaults to "all" in
-            which case all frames are loaded. If an int is provided, it will be used
-            as a single index. If a list is provided, it will be used as a list of
-            indices.
+        indices (optional): The indices to load. Defaults to None in
+            which case all frames are loaded.
         scan_kwargs (Config, dict, optional): Additional keyword arguments
             to pass to the Scan object. These will override the parameters from the file
             if they are present in the file. Defaults to None.
@@ -639,7 +549,6 @@ def load_file(
         # in that case we also have update scan parameters to match
         # the number of selected transmits
         if data_type in ["raw_data", "aligned_data"]:
-            indices = File._prepare_indices(indices)
             if isinstance(indices, tuple) and len(indices) > 1:
                 scan_kwargs["selected_transmits"] = indices[1]
 

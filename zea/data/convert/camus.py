@@ -1,14 +1,14 @@
 """Functionality to convert the camus dataset to the zea format.
 Requires SimpleITK to be installed: pip install SimpleITK.
+
+Data source: https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8
 """
 
 from __future__ import annotations
 
-import argparse
-import importlib.util
 import logging
 import os
-import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -17,8 +17,8 @@ import scipy
 from skimage.transform import resize
 from tqdm import tqdm
 
-# from zea.display import transform_sc_image_to_polar
 from zea import log
+from zea.data.convert.utils import unzip
 from zea.data.data_format import generate_zea_dataset
 from zea.internal.utils import find_first_nonzero_index
 from zea.tensor_ops import translate
@@ -128,6 +128,8 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
         - Collection of metadata.
     """
     # Load image and save info
+    import SimpleITK as sitk
+
     image = sitk.ReadImage(str(filepath))
 
     all_metadata = {}
@@ -148,7 +150,7 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
     return im_array, metadata
 
 
-def convert_camus(source_path, output_path, overwrite=False):
+def process_camus(source_path, output_path, overwrite=False):
     """Converts the camus database to the zea format.
 
     Args:
@@ -188,24 +190,6 @@ def convert_camus(source_path, output_path, overwrite=False):
     )
 
 
-def get_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--source",
-        type=str,
-        # path to CAMUS_public/database_nifti
-        required=True,
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        required=True,
-    )
-    args = parser.parse_args()
-    return args
-
-
 splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 
 
@@ -221,16 +205,31 @@ def get_split(patient_id: int) -> str:
         raise ValueError(f"Did not find split for patient: {patient_id}")
 
 
-if __name__ == "__main__":
-    if importlib.util.find_spec("SimpleITK") is None:
-        log.error("SimpleITK not installed. Please install SimpleITK: `pip install SimpleITK`")
-        sys.exit()
-    import SimpleITK as sitk
+def _process_task(task):
+    """Unpack task tuple and call process_camus from the main module."""
+    source_file_str, output_file_str = task
+    source_file = Path(source_file_str)
+    output_file = Path(output_file_str)
 
-    args = get_args()
+    # Ensure destination directories exist (safe to call from multiple processes)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    camus_source_folder = Path(args.source)
-    camus_output_folder = Path(args.output)
+    # Call the real processing function (must be importable in the worker)
+    # If process_camus lives in another module, import it there instead.
+    try:
+        process_camus(source_file, output_file, overwrite=False)
+    except Exception:
+        # Log and re-raise so the main process can handle it
+        log.error("Error processing %s", source_file)
+        raise
+
+
+def convert_camus(args):
+    camus_source_folder = Path(args.src)
+    camus_output_folder = Path(args.dst)
+
+    # Look for either CAMUS_public.zip or folders database_nifti, database_split
+    camus_source_folder = unzip(camus_source_folder, "camus")
 
     # check if output folders already exist
     for split in splits:
@@ -239,9 +238,9 @@ if __name__ == "__main__":
         )
 
     # clone folder structure of source to output using pathlib
-    # and run convert_camus() for every hdf5 found in there
     files = list(camus_source_folder.glob("**/*_half_sequence.nii.gz"))
-    for source_file in tqdm(files):
+    tasks = []
+    for source_file in files:
         # check if source file in camus database (ignore other files)
         if "database_nifti" not in source_file.parts:
             continue
@@ -251,10 +250,28 @@ if __name__ == "__main__":
         split = get_split(patient_id)
 
         output_file = camus_output_folder / split / source_file.relative_to(camus_source_folder)
-
         # Replace .nii.gz with .hdf5
         output_file = output_file.with_suffix("").with_suffix(".hdf5")
-
         # make sure folder exists
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        convert_camus(source_file, output_file, overwrite=False)
+
+        tasks.append((str(source_file), str(output_file)))
+    if not tasks:
+        log.info("No files found to process.")
+        return
+
+    if getattr(args, "no_hyperthreading", False):
+        log.info("no_hyperthreading is True — running tasks serially (no ProcessPoolExecutor)")
+        for t in tqdm(tasks, desc="Processing files (serial)"):
+            try:
+                _process_task(t)
+            except Exception as e:
+                log.error("Task processing failed: %s", e)
+        log.info("Processing finished for %d files (serial)", len(tasks))
+        return
+
+    # Submit tasks to the process pool and track progress
+    with ProcessPoolExecutor() as exe:
+        for _ in tqdm(exe.map(_process_task, tasks), total=len(tasks), desc="Processing files"):
+            pass
+    log.info("Processing finished for %d files", len(tasks))

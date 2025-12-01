@@ -107,7 +107,7 @@ def test_load_file_function(dummy_file):
     """Test the load_file function."""
 
     selected_transmits = [0, 2, 4]
-    data, scan, probe = load_file(dummy_file, indices=[slice(2), selected_transmits])
+    data, scan, probe = load_file(dummy_file, indices=(slice(2), selected_transmits))
 
     assert data.shape[0] == 2, "Data should have 2 frames"
     assert data.shape[1] == 3, "Data should have 3 selected transmits"

@@ -7,73 +7,71 @@ without padding, such that it can be converted to polar domain.
 This cropping requires first computing scan cone parameters
 using `data/convert/echonetlvh/precompute_crop.py`, which
 are then passed to this script.
+
+Data source: https://stanfordaimi.azurewebsites.net/datasets/5b7fcc28-579c-4285-8b72-e4238eac7bd1
 """
 
-import os
-
-os.environ["KERAS_BACKEND"] = "jax"
-
-
-if __name__ == "__main__":
-    from zea import init_device
-
-    init_device("auto:1")
-
-import argparse
 import csv
-import sys
+import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import jax.numpy as jnp
-import numpy as np
 from jax import jit, vmap
+import numpy as np
 from tqdm import tqdm
 
+from zea import log
 from zea.data import generate_zea_dataset
 from zea.data.convert.echonet import H5Processor
+from zea.data.convert.echonetlvh.precompute_crop import precompute_cone_parameters
+from zea.data.convert.utils import load_avi, unzip
 from zea.display import cartesian_to_polar_matrix
-from zea.io_lib import load_video
 from zea.tensor_ops import translate
 
 
-def get_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Convert EchoNet-LVH to zea format")
-    parser.add_argument(
-        "--source",
-        type=str,
-        required=True,
-    )
-    parser.add_argument("--output", type=str, required=True)
-    parser.add_argument("--output_numpy", type=str, default=None)
-    parser.add_argument("--file_list", type=str, help="Optional path to list of files")
-    parser.add_argument("--use_hyperthreading", action="store_true", help="Enable hyperthreading")
-    parser.add_argument(
-        "--batch",
-        type=str,
-        help="Specify which BatchX directory to process, e.g. --batch=Batch2",
-    )
-    parser.add_argument(
-        "--max_files",
-        type=int,
-        default=None,
-        help="Maximum number of files to process (for testing)",
-    )
-    # if neither is specified, both will be converted
-    parser.add_argument(
-        "--convert_measurements",
-        action="store_true",
-        help="Only convert measurements CSV file",
-    )
-    parser.add_argument("--convert_images", action="store_true", help="Only convert image files")
-    return parser.parse_args()
+def overwrite_splits(source_dir):
+    """Overwrite MeasurementsList.csv splits based on manual_rejections.txt"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    rejection_path = os.path.join(current_dir, "manual_rejections.txt")
+    try:
+        with open(rejection_path) as f:
+            rejected_hashes = [line.strip() for line in f]
+    except FileNotFoundError:
+        log.warning(f"{rejection_path} not found, skipping rejections.")
+        return
+
+    csv_path = Path(source_dir) / "MeasurementsList.csv"
+    temp_path = Path(source_dir) / "MeasurementsList_temp.csv"
+    try:
+        rejection_counter = 0
+        with (
+            csv_path.open("r", newline="", encoding="utf-8") as infile,
+            temp_path.open("w", encoding="utf-8", newline="") as outfile,
+        ):
+            reader = csv.DictReader(infile)
+            writer = csv.DictWriter(outfile, fieldnames=reader.fieldnames)
+            writer.writeheader()
+            for row in reader:
+                if row["HashedFileName"] in rejected_hashes:
+                    row["split"] = "rejected"
+                    rejection_counter += 1
+                writer.writerow(row)
+            assert rejection_counter == 278, (
+                f"Expected 278 rejections, but applied only {rejection_counter}."
+            )
+    except FileNotFoundError:
+        log.warning(f"{csv_path} not found, skipping rejections.")
+        return
+    temp_path.replace(csv_path)
+    log.info(f"Overwritten {rejection_counter}/278 rejections to {csv_path}")
+    return
 
 
 def load_splits(source_dir):
     """Load splits from MeasurementsList.csv and return avi filenames"""
     csv_path = Path(source_dir) / "MeasurementsList.csv"
-    splits = {"train": [], "val": [], "test": []}
+    splits = {"train": [], "val": [], "test": [], "rejected": []}
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         file_split_map = {}
@@ -206,10 +204,9 @@ class LVHProcessor(H5Processor):
 
     def __init__(self, *args, cone_params=None, **kwargs):
         super().__init__(*args, **kwargs)
-        # self.cart2pol_jit = jit(cartesian_to_polar_matrix_jax)
+        # Store the pre-computed cone parameters
         self.cart2pol_jit = jit(cartesian_to_polar_matrix)
         self.cart2pol_batched = vmap(self.cart2pol_jit)
-        # Store the pre-computed cone parameters
         self.cone_parameters = cone_params or {}
 
     def get_split(self, avi_file: str, sequence):
@@ -232,22 +229,17 @@ class LVHProcessor(H5Processor):
         raise UserWarning("Unknown split for file: " + filename)
 
     def __call__(self, avi_file):
-        print(avi_file)
         avi_filename = Path(avi_file).stem + ".avi"
-        sequence = jnp.array(load_video(avi_file))
+        sequence = np.array(load_avi(avi_file))
 
         sequence = translate(sequence, self.range_from, self._process_range)
-
         # Get pre-computed cone parameters for this file
         cone_params = self.cone_parameters.get(avi_filename)
-
         if cone_params is not None:
             # Apply pre-computed cropping parameters
             sequence = crop_sequence_with_params(sequence, cone_params)
         else:
-            print(f"Warning: No cone parameters for {avi_filename}, using original sequence")
-
-        # Convert to JAX array for polar conversion
+            log.warning(f"No cone parameters for {avi_filename}, using original sequence")
         sequence = jnp.array(sequence)
 
         split = self.get_split(avi_file, sequence)
@@ -282,7 +274,7 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
         A new row with transformed coordinates, or None if cone_params is None
     """
     if cone_params is None:
-        print(f"Warning: No cone parameters for file {row['HashedFileName']}")
+        log.warning(f"No cone parameters for file {row['HashedFileName']}")
         return None
 
     new_row = dict(row)
@@ -324,7 +316,7 @@ def transform_measurement_coordinates_with_cone_params(row, cone_params):
     )
 
     if is_out_of_bounds:
-        print(f"Warning: Transformed coordinates out of bounds for file {row['HashedFileName']}")
+        log.warning(f"Transformed coordinates out of bounds for file {row['HashedFileName']}")
 
     # Convert back to string if original was string
     for k in ["X1", "X2", "Y1", "Y2"]:
@@ -353,7 +345,7 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
         if cone_params_csv and Path(cone_params_csv).exists():
             cone_parameters = load_cone_parameters(cone_params_csv)
         else:
-            print("Warning: No cone parameters file found. Measurements will not be transformed.")
+            log.warning("No cone parameters file found. Measurements will not be transformed.")
 
         # Apply coordinate transformation and track skipped rows
         transformed_rows = []
@@ -371,7 +363,7 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
                 else:
                     skipped_files.add(row["HashedFileName"])
             except Exception as e:
-                print(f"Error processing row for file {row['HashedFileName']}: {str(e)}")
+                log.error(f"Error processing row for file {row['HashedFileName']}: {str(e)}")
                 skipped_files.add(row["HashedFileName"])
 
         # Save to new CSV file
@@ -389,30 +381,42 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
                 writer.writeheader()
 
         # Print summary
-        print("\nConversion Summary:")
-        print(f"Total rows processed: {len(rows)}")
-        print(f"Rows successfully converted: {len(transformed_rows)}")
-        print(f"Rows skipped: {len(rows) - len(transformed_rows)}")
+        log.info("Conversion Summary:")
+        log.info(f"Total rows processed: {len(rows)}")
+        log.info(f"Rows successfully converted: {len(transformed_rows)}")
+        log.info(f"Rows skipped: {len(rows) - len(transformed_rows)}")
         if skipped_files:
-            print("\nSkipped files:")
+            log.info("Skipped files:")
             for filename in sorted(skipped_files):
-                print(f"  - {filename}")
-        print(f"\nConverted measurements saved to {output_csv}")
+                log.info(f"  - {filename}")
+        log.info(f"Converted measurements saved to {output_csv}")
 
     except Exception as e:
-        print(f"Error processing CSV file: {str(e)}")
+        log.error(f"Error processing CSV file: {str(e)}")
         raise
 
 
-if __name__ == "__main__":
-    args = get_args()
+def _process_file_worker(avi_file, dst, splits, cone_parameters, range_from, process_range):
+    # create a fresh processor inside the worker process
+    proc = LVHProcessor(path_out_h5=dst, splits=splits, cone_params=cone_parameters)
+    # if LVHProcessor needs range_from/_process_range set, set them here
+    proc.range_from = range_from
+    proc._process_range = process_range
+    return proc(avi_file)
+
+
+def convert_echonetlvh(args):
+    # Check if unzip is needed
+    src = unzip(args.src, "echonetlvh")
+
+    # Overwrite the splits if manual rejections are provided
+    if not args.no_rejection:
+        overwrite_splits(args.src)
 
     # Check that cone parameters exist
-    cone_params_csv = Path(args.output) / "cone_parameters.csv"
+    cone_params_csv = Path(args.dst) / "cone_parameters.csv"
     if not cone_params_csv.exists():
-        print(f"Error: Cone parameters not found at {cone_params_csv}")
-        print("Please run precompute_crop.py first to generate the parameters.")
-        sys.exit(1)
+        precompute_cone_parameters(args)
 
     # If no specific conversion is requested, convert both
     if not (args.convert_measurements or args.convert_images):
@@ -421,30 +425,30 @@ if __name__ == "__main__":
 
     # Convert images if requested
     if args.convert_images:
-        source_path = Path(args.source)
+        source_path = Path(src)
         splits = load_splits(source_path)
 
         # Load precomputed cone parameters
         cone_parameters = load_cone_parameters(cone_params_csv)
-        print(f"Loaded cone parameters for {len(cone_parameters)} files")
+        log.info(f"Loaded cone parameters for {len(cone_parameters)} files")
 
         files_to_process = []
         for split_files in splits.values():
             for avi_filename in split_files:
                 # Strip .avi if present
                 base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-                avi_file = find_avi_file(args.source, base_filename, batch=args.batch)
+                avi_file = find_avi_file(src, base_filename, batch=args.batch)
                 if avi_file:
                     files_to_process.append(avi_file)
                 else:
-                    print(
+                    log.warning(
                         f"Warning: Could not find AVI file for {base_filename} in batch "
                         f"{args.batch if args.batch else 'any'}"
                     )
 
         # List files that have already been processed
         files_done = []
-        for _, _, filenames in os.walk(args.output):
+        for _, _, filenames in os.walk(args.dst):
             for filename in filenames:
                 if filename.endswith(".hdf5"):
                     files_done.append(filename.replace(".hdf5", ""))
@@ -455,45 +459,53 @@ if __name__ == "__main__":
         # Limit files if max_files is specified
         if args.max_files is not None:
             files_to_process = files_to_process[: args.max_files]
-            print(f"Limited to processing {args.max_files} files due to max_files parameter")
+            log.info(f"Limited to processing {args.max_files} files due to max_files parameter")
 
-        print(f"Files left to process: {len(files_to_process)}")
+        log.info(f"Files left to process: {len(files_to_process)}")
 
         # Initialize processor with splits and cone parameters
-        processor = LVHProcessor(
-            path_out_h5=args.output,
-            path_out=args.output_numpy,
-            splits=splits,
-            cone_params=cone_parameters,
-        )
+        processor = LVHProcessor(path_out_h5=args.dst, splits=splits, cone_params=cone_parameters)
 
-        print("Starting the conversion process.")
+        log.info("Starting the conversion process.")
 
-        if args.use_hyperthreading:
-            with ProcessPoolExecutor() as executor:
-                futures = {executor.submit(processor, file): file for file in files_to_process}
+        if not args.no_hyperthreading:
+            # DO NOT create a processor here for submission
+            with ProcessPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+                futures = {
+                    executor.submit(
+                        _process_file_worker,
+                        str(file),  # avi_file
+                        args.dst,  # dst (Path or str)
+                        splits,  # splits (picklable dict of lists)
+                        cone_parameters,  # cone params dict (picklable)
+                        processor.range_from,  # only if needed; better pass primitives
+                        processor._process_range,
+                    ): file
+                    for file in files_to_process
+                }
                 for future in tqdm(as_completed(futures), total=len(files_to_process)):
                     try:
                         future.result()
                     except Exception as e:
-                        print(f"Error processing file: {str(e)}")
+                        log.error(f"Error processing file: {str(e)}")
         else:
+            log.info("Converting without hyperthreading")
             for file in tqdm(files_to_process):
                 try:
                     processor(file)
                 except Exception as e:
-                    print(f"Error processing {file}: {str(e)}")
+                    log.error(f"Error processing {file}: {str(e)}")
 
-        print("All image conversion tasks are completed.")
+        log.info("All image conversion tasks are completed.")
 
     # Convert measurements if requested
     if args.convert_measurements:
-        source_path = Path(args.source)
+        source_path = Path(src)
         measurements_csv = source_path / "MeasurementsList.csv"
         if measurements_csv.exists():
-            output_csv = Path(args.output) / "MeasurementsList.csv"
+            output_csv = Path(args.dst) / "MeasurementsList.csv"
             convert_measurements_csv(measurements_csv, output_csv, cone_params_csv)
         else:
-            print("Warning: MeasurementsList.csv not found in source directory")
+            log.warning("MeasurementsList.csv not found in source directory")
 
-    print("All tasks are completed.")
+    log.info("All tasks are completed.")

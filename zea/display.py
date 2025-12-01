@@ -8,7 +8,6 @@ import scipy
 from keras import ops
 from PIL import Image
 
-from zea import log
 from zea.tensor_ops import translate
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
@@ -441,11 +440,7 @@ def cartesian_to_polar_matrix(
     Returns:
         polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`.
     """
-    if ops.dtype(cartesian_matrix) != "float32":
-        log.info(
-            f"Cartesian matrix with dtype {ops.dtype(cartesian_matrix)} has been cast to float32."
-        )
-        cartesian_matrix = ops.cast(cartesian_matrix, "float32")
+    assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
 
     # Assume that polar grid is same shape as cartesian grid unless specified
     cartesian_rows, cartesian_cols = ops.shape(cartesian_matrix)
@@ -503,6 +498,7 @@ def inverse_scan_convert_2d(
     output_size=None,
     interpolation_order=1,
     find_scan_cone=True,
+    image_range: tuple | None = None,
 ):
     """
     Convert a Cartesian-format ultrasound image to a polar representation.
@@ -512,7 +508,7 @@ def inverse_scan_convert_2d(
     Optionally, it can detect and crop around the scan cone before conversion.
 
     Args:
-        cartesian_image (tensor): 2D image array in Cartesian coordinates.
+        cartesian_image (tensor): 2D image array in Cartesian coordinates of type float.
         fill_value (float): Value used to fill regions outside the original image
             during interpolation.
         angle (float): Angular field of view (in radians) used for the polar transformation.
@@ -525,12 +521,15 @@ def inverse_scan_convert_2d(
             in the Cartesian image before polar conversion, ensuring that the scan cone is
             centered without padding. Can be set to False if the image is already cropped
             and centered.
+        image_range (tuple, optional): Tuple (vmin, vmax) for display scaling
+            when detecting the scan cone.
 
     Returns:
         polar_image (Array): 2D image in polar coordinates (sector-shaped scan).
     """
     if find_scan_cone:
-        cartesian_image = fit_and_crop_around_scan_cone(cartesian_image)
+        assert image_range is not None, "image_range must be provided when find_scan_cone is True"
+        cartesian_image = fit_and_crop_around_scan_cone(cartesian_image, image_range)
     polar_image = cartesian_to_polar_matrix(
         cartesian_image,
         fill_value=fill_value,

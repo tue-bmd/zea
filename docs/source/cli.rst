@@ -13,6 +13,16 @@ File reading and visualization
    :prog: zea
 
 -------------------------------
+Convert datasets
+-------------------------------
+
+.. argparse::
+   :module: zea.data.convert.__main__
+   :func: get_parser
+   :prog: python -m zea.data.convert
+   :nodefaultconst:
+
+-------------------------------
 Data copying
 -------------------------------
 

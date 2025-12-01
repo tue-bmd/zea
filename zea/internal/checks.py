@@ -64,8 +64,7 @@ def _check_raw_data(data=None, shape=None, with_batch_dim=None):
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 5 dimensions. Defaults to
-            False.
+            Setting this to True requires the data to have 5 dimensions. Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape
@@ -105,8 +104,7 @@ def _check_aligned_data(data=None, shape=None, with_batch_dim=None):
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 5 dimensions. Defaults to
-            False.
+            Setting this to True requires the data to have 5 dimensions. Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape
@@ -147,8 +145,7 @@ def _check_beamformed_data(data=None, shape=None, with_batch_dim=None):
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 4 dimensions. Defaults to
-            False.
+            Setting this to True requires the data to have 4 dimensions. Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape
@@ -190,8 +187,7 @@ def _check_envelope_data(data=None, shape=None, with_batch_dim=None):
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 4 dimensions. Defaults to
-            False.
+            Setting this to True requires the data to have 3 dimensions. Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape
@@ -227,8 +223,7 @@ def _check_image(data=None, shape=None, with_batch_dim=None):
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 4 dimensions. Defaults to
-            False.
+            Setting this to True requires the data to have 3 dimensions. Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape.
@@ -264,8 +259,7 @@ def _check_image_sc(data=None, shape=None, with_batch_dim=None):
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 4 dimensions. Defaults to
-            False.
+            Setting this to True requires the data to have 3 dimensions. Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape.

@@ -278,8 +278,7 @@ def test_h5_dataset_return_filename(
     assert isinstance(filename, str), "The filename should be a string"
     fullpath = file_dict["fullpath"]
     assert isinstance(fullpath, str), "The fullpath should be a string"
-    indices = file_dict["indices"]
-    File._prepare_indices(indices)  # will raise an error if indices are not valid
+    assert "indices" in file_dict, "The file_dict should contain indices"
 
 
 @pytest.mark.parametrize(

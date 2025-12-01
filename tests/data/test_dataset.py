@@ -23,7 +23,7 @@ _ALL_DATA_TYPES = _IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES
         (
             -1,
             (1, 2, 3),
-            (3, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_GRID_SIZE_X),
+            (),
         ),
         (
             0,
@@ -42,13 +42,18 @@ _ALL_DATA_TYPES = _IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES
         ),
         (
             -1,
-            [0, range(5)],
+            (0, list(range(5))),
             (5, DUMMY_DATASET_GRID_SIZE_X),
         ),
         (
             0,
             (np.array([1, 2]), slice(10)),
             (2, 10, DUMMY_DATASET_GRID_SIZE_X),
+        ),
+        (
+            0,
+            (slice(None), np.arange(10)),
+            (DUMMY_DATASET_N_FRAMES, 10, DUMMY_DATASET_GRID_SIZE_X),
         ),
     ],
 )

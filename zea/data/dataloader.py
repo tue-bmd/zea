@@ -5,7 +5,7 @@ H5 dataloader for loading images from zea datasets.
 import re
 from itertools import product
 from pathlib import Path
-from typing import List
+from typing import List, Tuple, Union
 
 import numpy as np
 
@@ -65,12 +65,12 @@ def generate_h5_indices(
                 (
                     "/folder/path_to_file.hdf5",
                     "data/image",
-                    [range(0, 1), slice(None, 256, None), slice(None, 256, None)],
+                    (range(0, 1), slice(None, 256, None), slice(None, 256, None)),
                 ),
                 (
                     "/folder/path_to_file.hdf5",
                     "data/image",
-                    [range(1, 2), slice(None, 256, None), slice(None, 256, None)],
+                    (range(1, 2), slice(None, 256, None), slice(None, 256, None)),
                 ),
                 ...,
             ]
@@ -117,7 +117,7 @@ def generate_h5_indices(
             # Optionally limit frames to load from each file
             n_frames_in_file = min(n_frames_in_file, limit_n_frames)
             indices = [
-                range(i, i + block_size, frame_index_stride)
+                list(range(i, i + block_size, frame_index_stride))
                 for i in range(0, n_frames_in_file - block_size + 1, block_step_size)
             ]
             yield [indices]
@@ -132,7 +132,7 @@ def generate_h5_indices(
             continue
 
         if additional_axes_iter:
-            axis_indices += [range(shape[axis]) for axis in additional_axes_iter]
+            axis_indices += [list(range(shape[axis])) for axis in additional_axes_iter]
 
         axis_indices = product(*axis_indices)
 
@@ -140,7 +140,7 @@ def generate_h5_indices(
             full_indices = [slice(size) for size in shape]
             for i, axis in enumerate([initial_frame_axis] + list(additional_axes_iter)):
                 full_indices[axis] = axis_index[i]
-            indices.append((file, key, full_indices))
+            indices.append((file, key, tuple(full_indices)))
 
     if skipped_files > 0:
         log.warning(
@@ -321,7 +321,12 @@ class H5Generator(Dataset):
         initial_delay=INITIAL_RETRY_DELAY,
         retry_action=_h5_reopen_on_io_error,
     )
-    def load(self, file: File, key: str, indices: tuple | str):
+    def load(
+        self,
+        file: File,
+        key: str,
+        indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
+    ):
         """Extract data from hdf5 file.
         Args:
             file_name (str): name of the file to extract image from.

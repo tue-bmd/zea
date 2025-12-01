@@ -5,7 +5,7 @@ import pytest
 
 from zea import display
 
-from . import backend_equality_check, DEFAULT_TEST_SEED
+from . import DEFAULT_TEST_SEED, backend_equality_check
 
 
 @pytest.mark.parametrize(
@@ -107,6 +107,7 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
 
     from zea import display
 
+    # data range is [0, 1] and type is float32
     if pattern_creator == "create_radial_pattern":
         polar_data = create_radial_pattern(size)
     elif pattern_creator == "create_concentric_rings":
@@ -117,12 +118,15 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error):
     rho_range = (0, 100)
     theta_range = np.deg2rad((-45, 45))
 
+    # Scan convert
     cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
-    cartesian_data = ops.convert_to_numpy(cartesian_data)
+
+    # Inverse scan convert
     cartesian_data_inv = display.inverse_scan_convert_2d(
         cartesian_data, output_size=polar_data.shape, find_scan_cone=False
     )
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
+
     mean_squared_error = ((polar_data - cartesian_data_inv) ** 2).mean()
 
     assert mean_squared_error < allowed_error, f"MSE is too high: {mean_squared_error:.4f}"
@@ -169,7 +173,7 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     top_padding = ops.zeros((20, ops.shape(cartesian_data_padded)[1]))
     cartesian_data_padded = ops.concatenate([top_padding, cartesian_data_padded], axis=0)
     cartesian_data_inv = display.inverse_scan_convert_2d(
-        cartesian_data_padded, output_size=polar_data.shape, find_scan_cone=True
+        cartesian_data_padded, output_size=polar_data.shape, find_scan_cone=True, image_range=(0, 1)
     )
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
     mean_squared_error = ((polar_data - cartesian_data_inv) ** 2).mean()

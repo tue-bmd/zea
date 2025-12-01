@@ -1,49 +1,24 @@
 """
 Script to convert the EchoNet database to .npy and zea formats.
 Will segment the images and convert them to polar coordinates.
+
+Data source: https://stanfordaimi.azurewebsites.net/datasets/834e1cd1-92f7-4268-9daa-d359198b310a
 """
 
 import os
-
-os.environ["KERAS_BACKEND"] = "numpy"
-
-import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Value
 from pathlib import Path
 
 import numpy as np
+import yaml
 from scipy.interpolate import griddata
 from tqdm import tqdm
 
-from zea.config import Config
+from zea import log
 from zea.data import generate_zea_dataset
-from zea.io_lib import load_video
+from zea.data.convert.utils import load_avi, unzip
 from zea.tensor_ops import translate
-
-
-def get_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Convert EchoNet to zea format")
-    parser.add_argument(
-        "--source",
-        type=str,
-        # path to EchoNet-Dynamic/Videos
-        required=True,
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        required=True,
-    )
-    parser.add_argument(
-        "--splits",
-        type=str,
-        default=None,
-    )
-    parser.add_argument("--output_numpy", type=str, default=None)
-    parser.add_argument("--no_hyperthreading", action="store_true")
-    args = parser.parse_args()
-    return args
 
 
 def segment(tensor, number_erasing=0, min_clip=0):
@@ -268,7 +243,13 @@ def find_split_for_file(file_dict, target_file):
     for split, files in file_dict.items():
         if target_file in files:
             return split
+    log.warning(f"File {target_file} not found in any split, defaulting to rejected.")
     return "rejected"
+
+
+def count_init(shared_counter):
+    global COUNTER
+    COUNTER = shared_counter
 
 
 class H5Processor:
@@ -279,7 +260,6 @@ class H5Processor:
     def __init__(
         self,
         path_out_h5,
-        path_out=None,
         num_val=500,
         num_test=500,
         range_from=(0, 255),
@@ -287,7 +267,6 @@ class H5Processor:
         splits=None,
     ):
         self.path_out_h5 = Path(path_out_h5)
-        self.path_out = Path(path_out) if path_out else None
         self.num_val = num_val
         self.num_test = num_test
         self.range_from = range_from
@@ -297,13 +276,7 @@ class H5Processor:
 
         # Ensure train, val, test, rejected paths exist
         for folder in ["train", "val", "test", "rejected"]:
-            if self._to_numpy:
-                (self.path_out / folder).mkdir(parents=True, exist_ok=True)
             (self.path_out_h5 / folder).mkdir(parents=True, exist_ok=True)
-
-    @property
-    def _to_numpy(self):
-        return self.path_out is not None
 
     def _translate(self, data):
         """Translate the data from the processing range to final range."""
@@ -324,25 +297,48 @@ class H5Processor:
         if not accepted:
             return "rejected"
 
-        # This inefficient counter works with hyperthreading
-        # TODO: but it is not reproducible!
-        val_counter = len(list((self.path_out_h5 / "val").iterdir()))
-        test_counter = len(list((self.path_out_h5 / "test").iterdir()))
+        # Increment the hyperthreading counter
+        # Note that some threads will start on subsequent splits
+        # while others are still processing
+        with COUNTER.get_lock():
+            COUNTER.value += 1
+            n = COUNTER.value
 
         # Determine the split
-        if val_counter < self.num_val:
+        if n <= self.num_val:
             return "val"
-        elif test_counter < self.num_test:
+        elif n <= self.num_val + self.num_test:
             return "test"
         else:
             return "train"
+
+    def validate_split_copy(self, split_file):
+        if self.splits is not None:
+            # Read the split_file and ensure contents of the train, val and split match
+            with open(split_file, "r") as f:
+                new_splits = yaml.safe_load(f)
+            for split in self.splits.keys():
+                if set(new_splits[split]) == set(self.splits[split]):
+                    log.info(f"Split {split} copied correctly.")
+                else:
+                    # Log which entry is missing or extra in the split_file
+                    missing = set(self.splits[split]) - set(new_splits[split])
+                    extra = set(new_splits[split]) - set(self.splits[split])
+                    if missing:
+                        log.warning(f"New dataset split {split} is missing entries: {missing}")
+                    if extra:
+                        log.warning(f"New dataset split {split} has extra entries: {extra}")
+        else:
+            log.info(
+                "Processor not initialized with a split, not validating if the split was copied."
+            )
 
     def __call__(self, avi_file):
         """
         Processes a single h5 file using the class variables and the filename given.
         """
         hdf5_file = avi_file.stem + ".hdf5"
-        sequence = load_video(avi_file)
+        sequence = load_avi(avi_file)
 
         assert sequence.min() >= self.range_from[0], f"{sequence.min()} < {self.range_from[0]}"
         assert sequence.max() <= self.range_from[1], f"{sequence.max()} > {self.range_from[1]}"
@@ -356,25 +352,14 @@ class H5Processor:
         accepted = split != "rejected"
 
         out_h5 = self.path_out_h5 / split / hdf5_file
-        if self._to_numpy:
-            out_dir = self.path_out / split / avi_file.stem
-            out_dir.mkdir(parents=True, exist_ok=True)
 
         polar_im_set = []
-        for i, im in enumerate(sequence):
-            if self._to_numpy:
-                np.save(out_dir / f"sc{str(i).zfill(3)}.npy", im)
-
+        for _, im in enumerate(sequence):
             if not accepted:
                 continue
 
             polar_im = cartesian_to_polar_matrix(im, interpolation="cubic")
             polar_im = np.clip(polar_im, *self._process_range)
-            if self._to_numpy:
-                np.save(
-                    out_dir / f"polar{str(i).zfill(3)}.npy",
-                    polar_im,
-                )
             polar_im_set.append(polar_im)
 
         if accepted:
@@ -395,44 +380,66 @@ class H5Processor:
         return generate_zea_dataset(**zea_dataset)
 
 
-if __name__ == "__main__":
-    args = get_args()
+def convert_echonet(args):
+    # Check if unzip is needed
+    src = unzip(args.src, "echonet")
 
-    if args.splits is not None:
+    if args.split_path is not None:
         # Reproduce a previous split...
-        split_yaml_dir = Path(args.splits)
-        splits = {"train": None, "val": None, "test": None}
-        for split in splits:
-            yaml_file = split_yaml_dir / (split + ".yaml")
-            assert yaml_file.exists(), f"File {yaml_file} does not exist."
-            splits[split] = Config.from_yaml(yaml_file)["file_paths"]
+        yaml_file = Path(args.split_path) / "split.yaml"
+        assert yaml_file.exists(), f"File {yaml_file} does not exist."
+        splits = {"train": None, "val": None, "test": None, "rejected": None}
+        with open(yaml_file, "r") as f:
+            splits = yaml.safe_load(f)
+        log.info(f"Processor initialized with train-val-test split from {yaml_file}.")
     else:
         splits = None
 
     # List the files that have an entry in path_out_h5 already
     files_done = []
-    for _, _, filenames in os.walk(args.output):
+    for _, _, filenames in os.walk(args.dst):
         for filename in filenames:
             files_done.append(filename.replace(".hdf5", ""))
 
     # List all files of echonet and exclude those already processed
-    path_in = Path(args.source)
+    path_in = Path(src)
     h5_files = path_in.glob("*.avi")
     h5_files = [file for file in h5_files if file.stem not in files_done]
-    print(f"Files left to process: {len(h5_files)}")
+    log.info(f"Files left to process: {len(h5_files)}")
 
     # Run the processor
-    processor = H5Processor(path_out_h5=args.output, path_out=args.output_numpy, splits=splits)
+    processor = H5Processor(path_out_h5=args.dst, splits=splits)
 
-    print("Starting the conversion process.")
+    log.info("Starting the conversion process.")
 
     if not args.no_hyperthreading:
-        with ProcessPoolExecutor() as executor:
-            futures = {executor.submit(processor, file): file for file in h5_files}
-            for future in tqdm(as_completed(futures), total=len(h5_files)):
-                future.result()
+        shared_counter = Value("i", 0)
+        with ProcessPoolExecutor(initializer=count_init, initargs=(shared_counter,)) as executor:
+            futures = [executor.submit(processor, file) for file in h5_files]
+            for future in tqdm(as_completed(futures), total=len(futures)):
+                try:
+                    future.result()
+                except Exception:
+                    log.warning("Task raised an exception")
     else:
+        # Initialize global variable for counting
+        count_init(Value("i", 0))
         for file in tqdm(h5_files):
             processor(file)
 
-    print("All tasks are completed.")
+    log.info("All tasks are completed.")
+
+    # Write to yaml split files
+    full_list = {}
+    for split in ["train", "val", "test", "rejected"]:
+        split_dir = Path(args.dst) / split
+
+        # Get only files (skip directories)
+        file_list = [f.name for f in split_dir.iterdir() if f.is_file()]
+        full_list[split] = file_list
+
+    with open(Path(args.dst) / "split.yaml", "w") as f:
+        yaml.dump(full_list, f)
+
+    # Validate that the split was copied correctly
+    processor.validate_split_copy(Path(args.dst) / "split.yaml")

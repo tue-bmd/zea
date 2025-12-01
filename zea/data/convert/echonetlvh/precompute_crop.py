@@ -3,58 +3,20 @@ Script to precompute cone parameters for the EchoNet-LVH dataset.
 This script should be run separately before the main conversion process.
 """
 
-import argparse
 import csv
 import json
-import os
 from pathlib import Path
 
 from tqdm import tqdm
 
-# Set Keras backend to numpy for best CPU performance
-os.environ["KERAS_BACKEND"] = "numpy"
-
+from zea import log
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
-
-
-def get_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Precompute cone parameters for EchoNet-LVH dataset"
-    )
-    parser.add_argument(
-        "--source",
-        type=str,
-        required=True,
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        required=True,
-    )
-    parser.add_argument(
-        "--batch",
-        type=str,
-        help="Specify which BatchX directory to process, e.g. --batch=Batch2",
-    )
-    parser.add_argument(
-        "--max_files",
-        type=int,
-        default=None,
-        help="Maximum number of files to process (for testing)",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force recomputation even if parameters already exist",
-    )
-    return parser.parse_args()
 
 
 def load_splits(source_dir):
     """Load splits from MeasurementsList.csv and return avi filenames"""
     csv_path = Path(source_dir) / "MeasurementsList.csv"
-    splits = {"train": [], "val": [], "test": []}
+    splits = {"train": [], "val": [], "test": [], "rejected": []}
     # Read CSV using built-in csv module
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
@@ -98,7 +60,7 @@ def load_first_frame(avi_file):
         avi_file: Path to the video file
 
     Returns:
-        First frame as numpy array
+        First frame as numpy array of shape (H, W) and dtype np.uint8 (grayscale)
     """
     try:
         import cv2
@@ -130,8 +92,8 @@ def precompute_cone_parameters(args):
     to determine cropping parameters, and saves these parameters to a CSV file
     for later use during the actual data conversion.
     """
-    source_path = Path(args.source)
-    output_path = Path(args.output)
+    source_path = Path(args.src)
+    output_path = Path(args.dst)
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Output file for cone parameters
@@ -140,7 +102,7 @@ def precompute_cone_parameters(args):
 
     # Check if parameters already exist
     if cone_params_csv.exists() and not args.force:
-        print(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
+        log.warning(f"Parameters already exist at {cone_params_csv}. Use --force to recompute.")
         return cone_params_csv
 
     # Get list of files to process
@@ -151,21 +113,21 @@ def precompute_cone_parameters(args):
         for avi_filename in split_files:
             # Strip .avi if present
             base_filename = avi_filename[:-4] if avi_filename.endswith(".avi") else avi_filename
-            avi_file = find_avi_file(args.source, base_filename, batch=args.batch)
+            avi_file = find_avi_file(args.src, base_filename, batch=args.batch)
             if avi_file:
                 files_to_process.append((avi_file, avi_filename))
             else:
-                print(
-                    f"Warning: Could not find AVI file for {base_filename} in batch "
+                log.warning(
+                    f"Could not find AVI file for {base_filename} in batch "
                     f"{args.batch if args.batch else 'any'}"
                 )
 
     # Limit files if max_files is specified
     if args.max_files is not None:
         files_to_process = files_to_process[: args.max_files]
-        print(f"Limited to processing {args.max_files} files due to max_files parameter")
+        log.info(f"Limited to processing {args.max_files} files due to max_files parameter")
 
-    print(f"Computing cone parameters for {len(files_to_process)} files")
+    log.info(f"Computing cone parameters for {len(files_to_process)} files")
 
     # Dictionary to store parameters for each file
     all_cone_params = {}
@@ -217,7 +179,7 @@ def precompute_cone_parameters(args):
                 all_cone_params[avi_filename] = essential_params
 
             except Exception as e:
-                print(f"Error processing {avi_file}: {str(e)}")
+                log.error(f"Error processing {avi_file}: {str(e)}")
 
                 # Write failure record
                 failure_record = {
@@ -236,16 +198,5 @@ def precompute_cone_parameters(args):
     with open(cone_params_json, "w", encoding="utf-8") as jsonfile:
         json.dump(all_cone_params, jsonfile)
 
-    print(f"Cone parameters saved to {cone_params_csv} and {cone_params_json}")
+    log.info(f"Cone parameters saved to {cone_params_csv} and {cone_params_json}")
     return cone_params_csv
-
-
-if __name__ == "__main__":
-    args = get_args()
-    print("Using Keras backend: numpy (forced for best performance)")
-
-    # Precompute cone parameters
-    cone_params_csv = precompute_cone_parameters(args)
-
-    print(f"Precomputation completed. Parameters saved to {cone_params_csv}")
-    print("You can now run the main conversion script.")
