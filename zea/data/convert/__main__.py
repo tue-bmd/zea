@@ -2,10 +2,28 @@ import argparse
 
 
 def get_parser():
-    parser = argparse.ArgumentParser(description="Convert raw data to a USBMD dataset.")
+    """
+    Build and parse command-line arguments for converting raw datasets to a zea dataset.
+
+    Returns:
+        argparse.Namespace: Parsed arguments with the following attributes:
+            dataset (str): One of "echonet", "echonetlvh", "camus", "picmus", "verasonics".
+            src (str): Source folder path.
+            dst (str): Destination folder path.
+            split_path (str|None): Optional path to a split.yaml to copy dataset splits.
+            no_hyperthreading (bool): Disable hyperthreading for multiprocessing.
+            frames (list[str]): MATLAB frames spec (e.g., ["all"], integers, or ranges like "4-8").
+            no_rejection (bool): EchonetLVH flag to skip manual_rejections.txt filtering.
+            batch (str|None): EchonetLVH Batch directory to process (e.g., "Batch2").
+            convert_measurements (bool): EchonetLVH flag to convert only measurements CSV.
+            convert_images (bool): EchonetLVH flag to convert only image files.
+            max_files (int|None): EchonetLVH maximum number of files to process.
+            force (bool): EchonetLVH flag to force recomputation even if parameters exist.
+    """
+    parser = argparse.ArgumentParser(description="Convert raw data to a zea dataset.")
     parser.add_argument(
         "dataset",
-        choices=["echonet", "echonetlvh", "camus", "picmus", "matlab"],
+        choices=["echonet", "echonetlvh", "camus", "picmus", "verasonics"],
         help="Raw dataset to convert",
     )
     parser.add_argument("src", type=str, help="Source folder path")
@@ -22,13 +40,13 @@ def get_parser():
     )
     # Dataset specific arguments:
 
-    # MATLAB
+    # verasonics
     parser.add_argument(
         "--frames",
         default=["all"],
         type=str,
         nargs="+",
-        help="MATLAB: The frames to add to the file. This can be a list of integers, a range "
+        help="verasonics: The frames to add to the file. This can be a list of integers, a range "
         "of integers (e.g. 4-8), or 'all'.",
     )
     # ECHONET_LVH
@@ -67,6 +85,14 @@ def get_parser():
 
 
 def main():
+    """
+    Parse command-line arguments and dispatch to the selected dataset conversion routine.
+
+    This function obtains CLI arguments via get_args() and calls the corresponding converter
+    (convert_echonet, convert_echonetlvh, convert_camus, convert_picmus, or convert_verasonics)
+    based on args.dataset.
+    Raises a ValueError if args.dataset is not one of the supported choices.
+    """
     parser = get_parser()
     args = parser.parse_args()
     if args.dataset == "echonet":
@@ -74,7 +100,7 @@ def main():
 
         convert_echonet(args)
     elif args.dataset == "echonetlvh":
-        from zea.data.convert.echonetlvh.convert_raw_to_usbmd import convert_echonetlvh
+        from zea.data.convert.echonetlvh import convert_echonetlvh
 
         convert_echonetlvh(args)
     elif args.dataset == "camus":
@@ -85,10 +111,10 @@ def main():
         from zea.data.convert.picmus import convert_picmus
 
         convert_picmus(args)
-    elif args.dataset == "matlab":
-        from zea.data.convert.matlab import convert_matlab
+    elif args.dataset == "verasonics":
+        from zea.data.convert.verasonics import convert_verasonics
 
-        convert_matlab(args)
+        convert_verasonics(args)
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 

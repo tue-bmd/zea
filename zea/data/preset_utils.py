@@ -1,6 +1,6 @@
 """Preset utils for zea datasets hosted on Hugging Face.
 
-See https://huggingface.co/zea/
+See https://huggingface.co/zeahub/
 """
 
 from pathlib import Path

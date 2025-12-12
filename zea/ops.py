@@ -88,10 +88,10 @@ Example of a yaml file:
 
 """
 
-import copy
 import hashlib
 import inspect
 import json
+import uuid
 from functools import partial
 from typing import Any, Dict, List, Union
 
@@ -120,7 +120,15 @@ from zea.internal.registry import ops_registry
 from zea.probes import Probe
 from zea.scan import Scan
 from zea.simulator import simulate_rf
-from zea.tensor_ops import resample, reshape_axis, translate, vmap
+from zea.tensor_ops import (
+    apply_along_axis,
+    correlate,
+    extend_n_dims,
+    resample,
+    reshape_axis,
+    translate,
+    vmap,
+)
 from zea.utils import (
     FunctionTimer,
     deep_compare,
@@ -238,7 +246,7 @@ class Operation(keras.Operation):
         Analyze and store the input/output signatures of the `call` method.
         """
         self._input_signature = inspect.signature(self.call)
-        self._valid_keys = set(self._input_signature.parameters.keys())
+        self._valid_keys = set(self._input_signature.parameters.keys()) | {self.key}
 
     @property
     def valid_keys(self) -> set:
@@ -405,6 +413,36 @@ class Operation(keras.Operation):
         return True
 
 
+class ImageOperation(Operation):
+    """
+    Base class for image processing operations.
+
+    This class extends the Operation class to provide a common interface
+    for operations that process image data, with shape (batch, height, width, channels)
+    or (height, width, channels) if batch dimension is not present.
+
+    Subclasses should implement the `call` method to define the image processing logic, and call
+    ``super().call(**kwargs)`` to validate the input data shape.
+    """
+
+    def call(self, **kwargs):
+        """
+        Validate input data shape for image operations.
+
+        Args:
+            **kwargs: Keyword arguments containing input data.
+
+        Raises:
+            AssertionError: If input data does not have the expected number of dimensions.
+        """
+        data = kwargs[self.key]
+
+        if self.with_batch_dim:
+            assert ops.ndim(data) == 4, "Input data must have 4 dimensions (b, h, w, c)."
+        else:
+            assert ops.ndim(data) == 3, "Input data must have 3 dimensions (h, w, c)."
+
+
 @ops_registry("pipeline")
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of operations."""
@@ -488,9 +526,19 @@ class Pipeline:
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
 
+        self._logged_difference_keys = False
+
+        # Do not log again for nested pipelines
+        for nested_pipeline in self._nested_pipelines:
+            nested_pipeline._logged_difference_keys = True
+
     def needs(self, key) -> bool:
         """Check if the pipeline needs a specific key at the input."""
         return key in self.needs_keys
+
+    @property
+    def _nested_pipelines(self):
+        return [operation for operation in self.operations if isinstance(operation, Pipeline)]
 
     @property
     def output_keys(self) -> set:
@@ -576,6 +624,7 @@ class Pipeline:
 
         # Add display ops
         operations += [
+            ReshapeGrid(),
             EnvelopeDetect(),
             Normalize(),
             LogCompress(),
@@ -681,6 +730,16 @@ class Pipeline:
                 "Pipeline does not support string inputs. "
                 "Please ensure all inputs are convertible to tensors."
             )
+
+        if not self._logged_difference_keys:
+            difference_keys = set(inputs.keys()) - self.valid_keys
+            if difference_keys:
+                log.debug(
+                    f"[zea.Pipeline] The following input keys are not used by the pipeline: "
+                    f"{difference_keys}. Make sure this is intended. "
+                    "This warning will only be shown once."
+                )
+                self._logged_difference_keys = True
 
         ## PROCESSING
         outputs = self._call_pipeline(**inputs)
@@ -804,59 +863,9 @@ class Pipeline:
             return params
 
     def __str__(self):
-        """String representation of the pipeline.
-
-        Will print on two parallel pipeline lines if it detects a splitting operations
-        (such as multi_bandpass_filter)
-        Will merge the pipeline lines if it detects a stacking operation (such as stack)
-        """
-        split_operations = []
-        merge_operations = ["Stack"]
-
+        """String representation of the pipeline."""
         operations = [operation.__class__.__name__ for operation in self.operations]
         string = " -> ".join(operations)
-
-        if any(operation in split_operations for operation in operations):
-            # a second line is needed with same length as the first line
-            split_line = " " * len(string)
-            # find the splitting operation and index and print \-> instead of -> after
-            split_detected = False
-            merge_detected = False
-            split_operation = None
-            for operation in operations:
-                if operation in split_operations:
-                    index = string.index(operation)
-                    index = index + len(operation)
-                    split_line = split_line[:index] + "\\->" + split_line[index + len("\\->") :]
-                    split_detected = True
-                    merge_detected = False
-                    split_operation = operation
-                    continue
-
-                if operation in merge_operations:
-                    index = string.index(operation)
-                    index = index - 4
-                    split_line = split_line[:index] + "/" + split_line[index + 1 :]
-                    split_detected = False
-                    merge_detected = True
-                    continue
-
-                if split_detected:
-                    # print all operations in the second line
-                    index = string.index(operation)
-                    split_line = (
-                        split_line[:index]
-                        + operation
-                        + " -> "
-                        + split_line[index + len(operation) + len(" -> ") :]
-                    )
-            assert merge_detected is True, log.error(
-                "Pipeline was never merged back together (with Stack operation), even "
-                f"though it was split with {split_operation}. "
-                "Please properly define your operation chain."
-            )
-            return f"\n{string}\n{split_line}\n"
-
         return string
 
     def __repr__(self):
@@ -1185,7 +1194,7 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     operations = make_operation_chain(config.operations)
 
     # merge pipeline config without operations with kwargs
-    pipeline_config = copy.deepcopy(config)
+    pipeline_config = config.copy()
     pipeline_config.pop("operations")
 
     kwargs = {**pipeline_config, **kwargs}
@@ -1256,33 +1265,134 @@ def pipeline_to_yaml(pipeline: Pipeline, file_path: str) -> None:
         yaml.dump(pipeline_dict, f, Dumper=yaml.Dumper, indent=4)
 
 
-@ops_registry("patched_grid")
-class PatchedGrid(Pipeline):
+@ops_registry("map")
+class Map(Pipeline):
     """
-    With this class you can form a pipeline that will be applied to patches of the grid.
-    This is useful to avoid OOM errors when processing large grids.
+    A pipeline that maps its operations over specified input arguments.
 
-    Some things to NOTE about this class:
+    This can be used to reduce memory usage by processing data in chunks.
 
-    - The ops have to use flatgrid and flat_pfield as inputs, these will be patched.
-
-    - Changing anything other than `self.output_data_type` in the dict will not be propagated!
-
+    Notes
+    -----
+    - When `chunks` and `batch_size` are both None (default), this behaves like a normal Pipeline.
+    - Changing anything other than ``self.output_key`` in the dict will not be propagated.
     - Will be jitted as a single operation, not the individual operations.
-
     - This class handles the batching.
 
+    For more information on how to use ``in_axes``, ``out_axes``, `see the documentation for
+    jax.vmap <https://docs.jax.dev/en/latest/_autosummary/jax.vmap.html>`_.
+
+    Example
+    -------
+        .. doctest::
+
+            >>> from zea.ops import Map, Pipeline, Demodulate, TOFCorrection
+
+            >>> # apply operations in batches of 8
+            >>> # in this case, over the first axis of "data"
+            >>> # or more specifically, process 8 transmits at a time
+
+            >>> pipeline_mapped = Map(
+            ...     [
+            ...         Demodulate(),
+            ...         TOFCorrection(),
+            ...     ],
+            ...     argnames="data",
+            ...     batch_size=8,
+            ... )
+
+            >>> # you can also map a subset of the operations
+            >>> # for example, demodulate in 4 chunks
+            >>> # or more specifically, split the transmit axis into 4 parts
+
+            >>> pipeline_mapped = Pipeline(
+            ...     [
+            ...         Map([Demodulate()], argnames="data", chunks=4),
+            ...         TOFCorrection(),
+            ...     ],
+            ... )
     """
 
-    def __init__(self, *args, num_patches=10, **kwargs):
-        super().__init__(*args, name="patched_grid", **kwargs)
-        self.num_patches = num_patches
+    def __init__(
+        self,
+        operations: List[Operation],
+        argnames: List[str] | str,
+        in_axes: List[Union[int, None]] | int = 0,
+        out_axes: List[Union[int, None]] | int = 0,
+        chunks: int | None = None,
+        batch_size: int | None = None,
+        **kwargs,
+    ):
+        """
+        Args:
+            operations (list): List of operations to be performed.
+            argnames (str or list): List of argument names (or keys) to map over.
+                Can also be a single string if only one argument is mapped over.
+            in_axes (int or list): Axes to map over for each argument.
+                If a single int is provided, it is used for all arguments.
+            out_axes (int or list): Axes to map over for each output.
+                If a single int is provided, it is used for all outputs.
+            chunks (int, optional): Number of chunks to split the input data into.
+                If None, no chunking is performed. Mutually exclusive with ``batch_size``.
+            batch_size (int, optional): Size of batches to process at once.
+                If None, no batching is performed. Mutually exclusive with ``chunks``.
+        """
+        super().__init__(operations, **kwargs)
 
-        for operation in self.operations:
-            if isinstance(operation, DelayAndSum):
-                operation.reshape_grid = False
+        if batch_size is not None and chunks is not None:
+            raise ValueError(
+                "batch_size and chunks are mutually exclusive. Please specify only one."
+            )
 
-        self._jittable_call = self.jittable_call
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer.")
+
+        if chunks is not None and chunks <= 0:
+            raise ValueError("chunks must be a positive integer.")
+
+        if isinstance(argnames, str):
+            argnames = [argnames]
+
+        self.argnames = argnames
+        self.in_axes = in_axes
+        self.out_axes = out_axes
+        self.chunks = chunks
+        self.batch_size = batch_size
+
+        if chunks is None and batch_size is None:
+            log.warning(
+                "[zea.ops.Map] Both `chunks` and `batch_size` are None. "
+                "This will behave like a normal Pipeline. "
+                "Consider setting one of them to process data in chunks or batches."
+            )
+
+        def call_item(**inputs):
+            """Process data in patches."""
+            mapped_args = []
+            for argname in argnames:
+                mapped_args.append(inputs.pop(argname, None))
+
+            def patched_call(*args):
+                mapped_kwargs = [(k, v) for k, v in zip(argnames, args)]
+                out = super(Map, self).call(**dict(mapped_kwargs), **inputs)
+
+                # TODO: maybe it is possible to output everything?
+                # e.g. prepend a empty dimension to all inputs and just map over everything?
+                return out[self.output_key]
+
+            out = vmap(
+                patched_call,
+                in_axes=in_axes,
+                out_axes=out_axes,
+                chunks=chunks,
+                batch_size=batch_size,
+                fn_supports_batch=True,
+                disable_jit=not bool(self.jit_options),
+            )(*mapped_args)
+
+            return out
+
+        self.call_item = call_item
 
     @property
     def jit_options(self):
@@ -1321,40 +1431,18 @@ class PatchedGrid(Pipeline):
             operation.with_batch_dim = False
 
     @property
-    def _extra_keys(self):
-        return {"flatgrid", "grid"}
-
-    @property
     def valid_keys(self) -> set:
         """Get a set of valid keys for the pipeline.
         Adds the parameters that PatchedGrid itself operates on (even if not used by operations
         inside it)."""
-        return super().valid_keys.union(self._extra_keys)
+        return super().valid_keys.union(self.argnames)
 
     @property
     def needs_keys(self) -> set:
         """Get a set of all input keys needed by the pipeline.
         Adds the parameters that PatchedGrid itself operates on (even if not used by operations
         inside it)."""
-        return super().needs_keys.union(self._extra_keys)
-
-    def call_item(self, grid, flatgrid, flat_pfield=None, **inputs):
-        """Process data in patches."""
-
-        def patched_call(flatgrid, flat_pfield):
-            out = super(PatchedGrid, self).call(
-                flatgrid=flatgrid, flat_pfield=flat_pfield, **inputs
-            )
-            return out[self.output_key]
-
-        out = vmap(
-            patched_call,
-            chunks=self.num_patches,
-            fn_supports_batch=True,
-            disable_jit=not bool(self.jit_options),
-        )(flatgrid, flat_pfield)
-
-        return ops.reshape(out, (*grid.shape[:-1], *ops.shape(out)[1:]))
+        return super().needs_keys.union(self.argnames)
 
     def jittable_call(self, **inputs):
         """Process input data through the pipeline."""
@@ -1378,9 +1466,59 @@ class PatchedGrid(Pipeline):
     def get_dict(self):
         """Get the configuration of the pipeline."""
         config = super().get_dict()
-        config.update({"name": "patched_grid"})
+        config["params"].update(
+            {
+                "argnames": self.argnames,
+                "in_axes": self.in_axes,
+                "out_axes": self.out_axes,
+                "chunks": self.chunks,
+                "batch_size": self.batch_size,
+            }
+        )
+        return config
+
+
+@ops_registry("patched_grid")
+class PatchedGrid(Map):
+    """
+    A pipeline that maps its operations over `flatgrid` and `flat_pfield` keys.
+
+    This can be used to reduce memory usage by processing data in chunks.
+
+    For more information and flexibility, see :class:`zea.ops.Map`.
+    """
+
+    def __init__(self, *args, num_patches=10, **kwargs):
+        super().__init__(*args, argnames=["flatgrid", "flat_pfield"], chunks=num_patches, **kwargs)
+        self.num_patches = num_patches
+
+    def get_dict(self):
+        """Get the configuration of the pipeline."""
+        config = super().get_dict()
+        config["params"].pop("argnames")
+        config["params"].pop("chunks")
         config["params"].update({"num_patches": self.num_patches})
         return config
+
+
+@ops_registry("reshape_grid")
+class ReshapeGrid(Operation):
+    """Reshape flat grid data to grid shape."""
+
+    def __init__(self, axis=0, **kwargs):
+        super().__init__(**kwargs)
+        self.axis = axis
+
+    def call(self, grid, **kwargs):
+        """
+        Args:
+            - data (Tensor): The flat grid data of shape (..., n_pix, ...).
+        Returns:
+            - reshaped_data (Tensor): The reshaped data of shape (..., grid.shape, ...).
+        """
+        data = kwargs[self.key]
+        reshaped_data = reshape_axis(data, grid.shape[:-1], self.axis + int(self.with_batch_dim))
+        return {self.output_key: reshaped_data}
 
 
 ## Base Operations
@@ -1413,21 +1551,6 @@ class Merge(Operation):
                 raise TypeError("All inputs must be dictionaries.")
             merged.update(arg)
         return merged
-
-
-@ops_registry("split")
-class Split(Operation):
-    """Operation that splits an input dictionary  n copies."""
-
-    def __init__(self, n: int, **kwargs):
-        super().__init__(**kwargs)
-        self.n = n
-
-    def call(self, **kwargs) -> List[Dict]:
-        """
-        Splits the input dictionary into n copies.
-        """
-        return [kwargs.copy() for _ in range(self.n)]
 
 
 @ops_registry("stack")
@@ -1644,7 +1767,7 @@ class PfieldWeighting(Operation):
         Returns:
             dict: Dictionary containing weighted data
         """
-        data = kwargs[self.key]
+        data = kwargs[self.key]  # must start with ((batch_size,) n_tx, n_pix, ...)
 
         if flat_pfield is None:
             return {self.output_key: data}
@@ -1652,14 +1775,16 @@ class PfieldWeighting(Operation):
         # Swap (n_pix, n_tx) to (n_tx, n_pix)
         flat_pfield = ops.swapaxes(flat_pfield, 0, 1)
 
-        # Perform element-wise multiplication with the pressure weight mask
-        # Also add the required dimensions for broadcasting
+        # Add batch dimension if needed
         if self.with_batch_dim:
             pfield_expanded = ops.expand_dims(flat_pfield, axis=0)
         else:
             pfield_expanded = flat_pfield
 
-        pfield_expanded = pfield_expanded[..., None, None]
+        append_n_dims = ops.ndim(data) - ops.ndim(pfield_expanded)
+        pfield_expanded = extend_n_dims(pfield_expanded, axis=-1, n_dims=append_n_dims)
+
+        # Perform element-wise multiplication with the pressure weight mask
         weighted_data = data * pfield_expanded
 
         return {self.output_key: weighted_data}
@@ -1669,17 +1794,12 @@ class PfieldWeighting(Operation):
 class DelayAndSum(Operation):
     """Sums time-delayed signals along channels and transmits."""
 
-    def __init__(
-        self,
-        reshape_grid=True,
-        **kwargs,
-    ):
+    def __init__(self, **kwargs):
         super().__init__(
             input_data_type=DataTypes.ALIGNED_DATA,
             output_data_type=DataTypes.BEAMFORMED_DATA,
             **kwargs,
         )
-        self.reshape_grid = reshape_grid
 
     def process_image(self, data):
         """Performs DAS beamforming on tof-corrected input.
@@ -1707,8 +1827,7 @@ class DelayAndSum(Operation):
 
         Returns:
             dict: Dictionary containing beamformed_data
-                of shape `(grid_size_z*grid_size_x, n_ch)` when reshape_grid is False
-                or `(grid_size_z, grid_size_x, n_ch)` when reshape_grid is True,
+                of shape `(grid_size_z*grid_size_x, n_ch)`
                 with optional batch dimension.
         """
         data = kwargs[self.key]
@@ -1718,11 +1837,6 @@ class DelayAndSum(Operation):
         else:
             # Apply process_image to each item in the batch
             beamformed_data = ops.map(self.process_image, data)
-
-        if self.reshape_grid:
-            beamformed_data = reshape_axis(
-                beamformed_data, grid.shape[:2], axis=int(self.with_batch_dim)
-            )
 
         return {self.output_key: beamformed_data}
 
@@ -1765,6 +1879,85 @@ def envelope_detect(data, axis=-3):
     data = ops.sqrt(real**2 + imag**2)
     data = ops.cast(data, "float32")
     return data
+
+
+@ops_registry("multiply_and_sum")
+class MultiplyAndSum(Operation):
+    """Performs the operations for the Delay-Multiply-and-Sum beamformer except the delay.
+    The delay should be performed by the TOF correction operation.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            **kwargs,
+        )
+
+    def process_image(self, data):
+        """Performs DMAS beamforming on tof-corrected input.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape `(n_tx, n_pix, n_el, n_ch)`
+
+        Returns:
+            ops.Tensor: The beamformed data of shape `(n_pix, n_ch)`
+        """
+
+        if not data.shape[-1] == 2:
+            raise ValueError(
+                "MultiplyAndSum operation requires IQ data with 2 channels. "
+                f"Got data with shape {data.shape}."
+            )
+
+        # Compute the correlation matrix
+        data = channels_to_complex(data)
+
+        data = self._multiply(data)
+        data = self._select_lower_triangle(data)
+        data = ops.sum(data, axis=(0, 2, 3))
+
+        data = complex_to_channels(data)
+
+        return data
+
+    def _select_lower_triangle(self, data):
+        """Select only the lower triangle of the correlation matrix."""
+        n_el = data.shape[3]
+        mask = ops.ones((n_el, n_el), dtype=data.dtype) - ops.eye(n_el, dtype=data.dtype)
+        data = data * mask[None, None, :, :] / 2
+        return data
+
+    def _multiply(self, data):
+        """Apply the DMAS multiplication step."""
+        channel_products = data[:, :, :, None] * data[:, :, None, :]
+
+        data = ops.sign(channel_products) * ops.cast(
+            ops.sqrt(ops.abs(channel_products)), data.dtype
+        )
+        return data
+
+    def call(self, grid=None, **kwargs):
+        """Performs DMAS beamforming on tof-corrected input.
+
+        Args:
+            tof_corrected_data (ops.Tensor): The TOF corrected input of shape
+                `(n_tx, grid_size_z*grid_size_x, n_el, n_ch)` with optional batch dimension.
+
+        Returns:
+            dict: Dictionary containing beamformed_data
+                of shape `(grid_size_z*grid_size_x, n_ch)`
+                with optional batch dimension.
+        """
+        data = kwargs[self.key]
+
+        if not self.with_batch_dim:
+            beamformed_data = self.process_image(data)
+        else:
+            # Apply process_image to each item in the batch
+            beamformed_data = ops.map(self.process_image, data)
+
+        return {self.output_key: beamformed_data}
 
 
 @ops_registry("envelope_detect")
@@ -2053,7 +2246,7 @@ class ScanConvert(Operation):
 
 
 @ops_registry("gaussian_blur")
-class GaussianBlur(Operation):
+class GaussianBlur(ImageOperation):
     """
     GaussianBlur is an operation that applies a Gaussian blur to an input image.
     Uses scipy.ndimage.gaussian_filter to create a kernel.
@@ -2103,6 +2296,13 @@ class GaussianBlur(Operation):
         return ops.convert_to_tensor(kernel)
 
     def call(self, **kwargs):
+        """Apply a Gaussian filter to the input data.
+
+        Args:
+            data (ops.Tensor): Input image data of shape (height, width, channels) with
+                optional batch dimension if ``self.with_batch_dim``.
+        """
+        super().call(**kwargs)
         data = kwargs[self.key]
 
         # Add batch dimension if not present
@@ -2137,7 +2337,7 @@ class GaussianBlur(Operation):
 
 
 @ops_registry("lee_filter")
-class LeeFilter(Operation):
+class LeeFilter(ImageOperation):
     """
     The Lee filter is a speckle reduction filter commonly used in synthetic aperture radar (SAR)
     and ultrasound image processing. It smooths the image while preserving edges and details.
@@ -2167,7 +2367,7 @@ class LeeFilter(Operation):
             pad_mode=self.pad_mode,
             with_batch_dim=self.with_batch_dim,
             jittable=self._jittable,
-            key=self.key,
+            key="data",
         )
 
     @property
@@ -2183,24 +2383,29 @@ class LeeFilter(Operation):
             self.gaussian_blur.with_batch_dim = value
 
     def call(self, **kwargs):
-        data = kwargs[self.key]
+        """Apply the Lee filter to the input data.
+
+        Args:
+            data (ops.Tensor): Input image data of shape (height, width, channels) with
+                optional batch dimension if ``self.with_batch_dim``.
+        """
+        super().call(**kwargs)
+        data = kwargs.pop(self.key)
 
         # Apply Gaussian blur to get local mean
-        img_mean = self.gaussian_blur.call(**kwargs)[self.gaussian_blur.output_key]
+        img_mean = self.gaussian_blur.call(data=data, **kwargs)[self.gaussian_blur.output_key]
 
         # Apply Gaussian blur to squared data to get local squared mean
-        data_squared = data**2
-        kwargs[self.gaussian_blur.key] = data_squared
-        img_sqr_mean = self.gaussian_blur.call(**kwargs)[self.gaussian_blur.output_key]
+        img_sqr_mean = self.gaussian_blur.call(
+            data=data**2,
+            **kwargs,
+        )[self.gaussian_blur.output_key]
 
         # Calculate local variance
         img_variance = img_sqr_mean - img_mean**2
 
         # Calculate global variance (per channel)
-        if self.with_batch_dim:
-            overall_variance = ops.var(data, axis=(-3, -2), keepdims=True)
-        else:
-            overall_variance = ops.var(data, axis=(-2, -1), keepdims=True)
+        overall_variance = ops.var(data, axis=(-3, -2), keepdims=True)
 
         # Calculate adaptive weights
         img_weights = img_variance / (img_variance + overall_variance)
@@ -2221,7 +2426,11 @@ class Demodulate(Operation):
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
             jittable=True,
-            additional_output_keys=["demodulation_frequency", "center_frequency", "n_ch"],
+            additional_output_keys=[
+                "demodulation_frequency",
+                "center_frequency",
+                "n_ch",
+            ],
             **kwargs,
         )
         self.axis = axis
@@ -2245,6 +2454,121 @@ class Demodulate(Operation):
             "center_frequency": 0.0,
             "n_ch": 2,
         }
+
+
+@ops_registry("fir_filter")
+class FirFilter(Operation):
+    """Apply a FIR filter to the input signal using convolution.
+
+    Looks for the filter taps in the input dictionary using the specified ``filter_key``.
+    """
+
+    def __init__(
+        self,
+        axis: int,
+        complex_channels: bool = False,
+        filter_key: str = "fir_filter_taps",
+        **kwargs,
+    ):
+        """
+        Args:
+            axis (int): Axis along which to apply the filter. Cannot be the batch dimension.
+                When using ``complex_channels=True``, the complex channels are removed to convert
+                to complex numbers before filtering, so adjust the ``axis`` accordingly!
+            complex_channels (bool): Whether the last dimension of the input signal represents
+                complex channels (real and imaginary parts). When True, it will convert the signal
+                to ``complex`` dtype before filtering and convert it back to two channels
+                after filtering.
+            filter_key (str): Key in the input dictionary where the FIR filter taps are stored.
+                Default is "fir_filter_taps".
+        """
+        super().__init__(**kwargs)
+        self._check_axis(axis)
+
+        self.axis = axis
+        self.complex_channels = complex_channels
+        self.filter_key = filter_key
+
+    def _check_axis(self, axis, ndim=None):
+        """Check if the axis is valid."""
+        if ndim is not None:
+            if axis < -ndim or axis >= ndim:
+                raise ValueError(f"Axis {axis} is out of bounds for array of dimension {ndim}.")
+
+        if self.with_batch_dim and (axis == 0 or (ndim is not None and axis == -ndim)):
+            raise ValueError("Cannot apply FIR filter along batch dimension.")
+
+    @property
+    def valid_keys(self):
+        """Get the valid keys for the `call` method."""
+        return self._valid_keys.union({self.filter_key})
+
+    def call(self, **kwargs):
+        signal = kwargs[self.key]
+        fir_filter_taps = kwargs[self.filter_key]
+
+        if self.complex_channels:
+            signal = channels_to_complex(signal)
+
+        self._check_axis(self.axis, ndim=ops.ndim(signal))
+
+        def _convolve(signal):
+            """Apply the filter to the signal using correlation."""
+            return correlate(signal, fir_filter_taps[::-1], mode="same")
+
+        filtered_signal = apply_along_axis(_convolve, self.axis, signal)
+
+        if self.complex_channels:
+            filtered_signal = complex_to_channels(filtered_signal)
+
+        return {self.output_key: filtered_signal}
+
+
+@ops_registry("low_pass_filter")
+class LowPassFilter(FirFilter):
+    """Apply a low-pass FIR filter to the input signal using convolution.
+
+    It is recommended to use :class:`FirFilter` with pre-computed filter taps for jittable
+    operations. The :class:`LowPassFilter` operation itself is not jittable and is provided
+    for convenience only.
+
+    Uses :func:`get_low_pass_iq_filter` to compute the filter taps.
+    """
+
+    def __init__(self, axis: int, complex_channels: bool = False, num_taps: int = 128, **kwargs):
+        """Initialize the LowPassFilter operation.
+
+        Args:
+            axis (int): Axis along which to apply the filter. Cannot be the batch dimension.
+                When using ``complex_channels=True``, the complex channels are removed to convert
+                to complex numbers before filtering, so adjust the ``axis`` accordingly.
+            complex_channels (bool): Whether the last dimension of the input signal represents
+                complex channels (real and imaginary parts). When True, it will convert the signal
+                to ``complex`` dtype before filtering and convert it back to two channels
+                after filtering.
+            num_taps (int): Number of taps in the FIR filter. Default is 128.
+        """
+        self._random_suffix = str(uuid.uuid4())
+        kwargs.pop("filter_key", None)
+        kwargs.pop("jittable", None)
+        super().__init__(
+            axis=axis,
+            complex_channels=complex_channels,
+            filter_key=f"low_pass_{self._random_suffix}",
+            jittable=False,
+            **kwargs,
+        )
+        self.num_taps = num_taps
+
+    def call(self, bandwidth, sampling_frequency, center_frequency, **kwargs):
+        lpf = get_low_pass_iq_filter(
+            self.num_taps,
+            ops.convert_to_numpy(sampling_frequency).item(),
+            ops.convert_to_numpy(center_frequency).item(),
+            ops.convert_to_numpy(bandwidth).item(),
+        )
+        kwargs[self.filter_key] = lpf
+        return super().call(**kwargs)
 
 
 @ops_registry("lambda")
@@ -2281,7 +2605,10 @@ class Lambda(Operation):
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        data = self.func(data)
+        if self.with_batch_dim:
+            data = ops.map(self.func, data)
+        else:
+            data = self.func(data)
         return {self.output_key: data}
 
 
@@ -3036,7 +3363,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2):
     return bpf
 
 
-def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
+def get_low_pass_iq_filter(num_taps, sampling_frequency, center_frequency, bandwidth):
     """Design complex low-pass filter.
 
     The filter is a low-pass FIR filter modulated to the center frequency.
@@ -3044,16 +3371,16 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
     Args:
         num_taps (int): number of taps in filter.
         sampling_frequency (float): sample frequency.
-        f (float): center frequency.
-        bw (float): bandwidth in Hz.
+        center_frequency (float): center frequency.
+        bandwidth (float): bandwidth in Hz.
 
     Raises:
-        ValueError: if cutoff frequency (bw / 2) is not within (0, sampling_frequency / 2)
+        ValueError: if cutoff frequency (bandwidth / 2) is not within (0, sampling_frequency / 2)
 
     Returns:
         ndarray: Complex-valued low-pass filter
     """
-    cutoff = bw / 2
+    cutoff = bandwidth / 2
     if not (0 < cutoff < sampling_frequency / 2):
         raise ValueError(
             f"Cutoff frequency must be within (0, sampling_frequency / 2), "
@@ -3063,7 +3390,7 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, f, bw):
     lpf = scipy.signal.firwin(num_taps, cutoff, pass_zero=True, fs=sampling_frequency)
     # Modulate to center frequency to make it complex
     time_points = np.arange(num_taps) / sampling_frequency
-    lpf_complex = lpf * np.exp(1j * 2 * np.pi * f * time_points)
+    lpf_complex = lpf * np.exp(1j * 2 * np.pi * center_frequency * time_points)
     return lpf_complex
 
 

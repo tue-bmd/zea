@@ -33,6 +33,14 @@ def unzip(src: str | Path, dataset: str) -> Path:
     """
     Checks if data folder exist in src.
     Otherwise, unzip dataset.zip in src.
+
+    Args:
+        src (str | Path): The source directory containing the zip file or unzipped folder.
+        dataset (str): The name of the dataset to unzip.
+            Options are "picmus", "camus", "echonet", "echonetlvh".
+
+    Returns:
+        Path: The path to the unzipped dataset directory.
     """
     src = Path(src)
     if dataset == "picmus":

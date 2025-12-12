@@ -7,7 +7,7 @@ from . import log
 
 # dynamically add __version__ attribute (see pyproject.toml)
 # __version__ = __import__("importlib.metadata").metadata.version(__package__)
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 
 
 def _bootstrap_backend():

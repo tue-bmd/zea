@@ -14,7 +14,14 @@ from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
 def load_splits(source_dir):
-    """Load splits from MeasurementsList.csv and return avi filenames"""
+    """
+    Load splits from MeasurementsList.csv and return avi filenames
+
+    Args:
+        source_dir: Source directory containing MeasurementsList.csv
+    Returns:
+        Dictionary with keys 'train', 'val', 'test', 'rejected' and values as lists of avi filenames
+    """
     csv_path = Path(source_dir) / "MeasurementsList.csv"
     splits = {"train": [], "val": [], "test": [], "rejected": []}
     # Read CSV using built-in csv module
@@ -33,7 +40,17 @@ def load_splits(source_dir):
 
 
 def find_avi_file(source_dir, hashed_filename, batch=None):
-    """Find AVI file in the specified batch directory or any batch if not specified."""
+    """
+    Find AVI file in the specified batch directory or any batch if not specified.
+
+    Args:
+        source_dir: Source directory containing BatchX subdirectories
+        hashed_filename: Hashed filename (with or without .avi extension)
+        batch: Specific batch directory to search in (e.g., "Batch2"), or None to search all batches
+
+    Returns:
+        Path to the AVI file if found, else None
+    """
     # If filename already has .avi extension, strip it
     if hashed_filename.endswith(".avi"):
         hashed_filename = hashed_filename[:-4]
@@ -91,7 +108,18 @@ def precompute_cone_parameters(args):
     This function loads the first frame from each AVI file, applies fit_scan_cone
     to determine cropping parameters, and saves these parameters to a CSV file
     for later use during the actual data conversion.
+
+    Args:
+        args: Argument parser namespace with the following attributes:
+            src: Source directory containing EchoNet-LVH data
+            dst: Destination directory to save cone parameters
+            batch: Specific batch to process (e.g., "Batch2") or None for all
+            max_files: Maximum number of files to process (or None for all)
+            force: Whether to recompute parameters if they already exist
+    Returns:
+        Path to the CSV file containing cone parameters
     """
+
     source_path = Path(args.src)
     output_path = Path(args.dst)
     output_path.mkdir(parents=True, exist_ok=True)

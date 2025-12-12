@@ -200,20 +200,21 @@ The ``zea`` toolbox supports several public and research ultrasound datasets. Fo
 **Supported Datasets:**
 
 - **EchoNet-Dynamic**: Large-scale cardiac ultrasound dataset.
+- **EchoNet-LVH**: Large-scale cardiac dataset for left ventricular hypertrophy detection.
 - **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
 - **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
 - **Custom Datasets**: You can add your own datasets by following the ``zea`` format.
 
 **Conversion Scripts:**
 
-- Scripts are provided in the `zea/data/convert/ <https://github.com/your-org/zea/tree/main/zea/data/convert/>`__ directory to automate downloading and conversion.
+- Scripts are provided in the `zea/data/convert/ <https://github.com/tue-bmd/zea/tree/main/zea/data/convert/>`__ directory to automate downloading and conversion.
 - Example usage:
 
   .. code-block:: shell
 
-      python zea/data/convert/echonet.py --output-dir <your_data_dir>
-      python zea/data/convert/camus.py --output-dir <your_data_dir>
-      python zea/data/convert/picmus.py --output-dir <your_data_dir>
+      python -m zea.data.convert --dataset "echonet" --src <source_folder> --dst <destination_folder>
+      python -m zea.data.convert --dataset "camus" --src <source_folder> --dst <destination_folder>
+      python -m zea.data.convert --dataset "picmus" --src <source_folder> --dst <destination_folder>
 
 - These scripts will fetch the raw data, process it, and store it in the standardized ``zea`` format.
 
@@ -227,14 +228,13 @@ One can also acquire data using various ultrasound platforms and convert it to t
 
 - Record data using your preferred Verasonics script.
 - Save entire workspace to a `.mat` file.
-- Use ``zea/data/convert/matlab.py`` to convert the MATLAB workspace files to ``zea`` format.
+- Use the ``--dataset "verasonics"`` flag to convert the MATLAB workspace files to ``zea`` format. More info can be found in the :mod:`zea.data.convert.verasonics` module documentation.
 - Example:
 
   .. code-block:: shell
 
-      python zea/data/convert/matlab.py --input <verasonics_mat_file> --output <zea_hdf5_file>
+    python -m zea.data.convert --dataset "verasonics" --src <source_folder> --dst <destination_folder>
 
 **us4us**
 
-- See ``zea/data/convert/us4us.py`` for details.
--
+- To be added in a future release.

@@ -4,11 +4,14 @@ Script to convert the EchoNet-LVH database to zea format.
 Each video is cropped so that the scan cone is centered
 without padding, such that it can be converted to polar domain.
 
-This cropping requires first computing scan cone parameters
-using `data/convert/echonetlvh/precompute_crop.py`, which
-are then passed to this script.
+.. note::
+    This cropping requires first computing scan cone parameters
+    using :mod:`zea.data.convert.echonetlvh.precompute_crop`, which
+    are then passed to this script.
 
-Data source: https://stanfordaimi.azurewebsites.net/datasets/5b7fcc28-579c-4285-8b72-e4238eac7bd1
+For more information about the dataset, resort to the following links:
+
+- The original dataset can be found at `this link <https://stanfordaimi.azurewebsites.net/datasets/5b7fcc28-579c-4285-8b72-e4238eac7bd1>`_.
 """
 
 import csv
@@ -17,8 +20,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import jax.numpy as jnp
-from jax import jit, vmap
 import numpy as np
+from jax import jit, vmap
 from tqdm import tqdm
 
 from zea import log
@@ -31,7 +34,14 @@ from zea.tensor_ops import translate
 
 
 def overwrite_splits(source_dir):
-    """Overwrite MeasurementsList.csv splits based on manual_rejections.txt"""
+    """
+    Overwrite MeasurementsList.csv splits based on manual_rejections.txt
+
+    Args:
+        source_dir: Source directory containing MeasurementsList.csv and manual_rejections.txt
+    Returns:
+        None
+    """
     current_dir = os.path.dirname(os.path.abspath(__file__))
     rejection_path = os.path.join(current_dir, "manual_rejections.txt")
     try:
@@ -69,7 +79,14 @@ def overwrite_splits(source_dir):
 
 
 def load_splits(source_dir):
-    """Load splits from MeasurementsList.csv and return avi filenames"""
+    """
+    Load splits from MeasurementsList.csv and return avi filenames
+
+    Args:
+        source_dir: Source directory containing MeasurementsList.csv
+    Returns:
+        Dictionary with keys 'train', 'val', 'test', 'rejected' and values as lists of avi filenames
+    """
     csv_path = Path(source_dir) / "MeasurementsList.csv"
     splits = {"train": [], "val": [], "test": [], "rejected": []}
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
@@ -85,7 +102,17 @@ def load_splits(source_dir):
 
 
 def find_avi_file(source_dir, hashed_filename, batch=None):
-    """Find AVI file in the specified batch directory or any batch if not specified."""
+    """
+    Find AVI file in the specified batch directory or any batch if not specified.
+
+    Args:
+        source_dir: Source directory containing BatchX subdirectories
+        hashed_filename: Hashed filename (with or without .avi extension)
+        batch: Specific batch directory to search in (e.g., "Batch2"), or None to search all batches
+
+    Returns:
+        Path to the AVI file if found, else None
+    """
     # If filename already has .avi extension, strip it
     if hashed_filename.endswith(".avi"):
         hashed_filename = hashed_filename[:-4]
@@ -229,6 +256,15 @@ class LVHProcessor(H5Processor):
         raise UserWarning("Unknown split for file: " + filename)
 
     def __call__(self, avi_file):
+        """Takes a single avi_file and generates a zea dataset
+
+        Args:
+            avi_file: String or path to avi_file to be processed
+
+        Returns:
+            zea dataset
+        """
+
         avi_filename = Path(avi_file).stem + ".avi"
         sequence = np.array(load_avi(avi_file))
 
@@ -397,6 +433,20 @@ def convert_measurements_csv(source_csv, output_csv, cone_params_csv=None):
 
 
 def _process_file_worker(avi_file, dst, splits, cone_parameters, range_from, process_range):
+    """
+    Function for a hyperthreading worker to process a single file.
+
+    Args:
+        avi_file: Path to the AVI file to process
+        dst: Destination directory for output
+        splits: Dictionary of splits
+        cone_parameters: Dictionary of cone parameters
+        range_from: Range from value for processing
+        process_range: Process range value for processing
+    Returns:
+        Result of processing the file
+    """
+
     # create a fresh processor inside the worker process
     proc = LVHProcessor(path_out_h5=dst, splits=splits, cone_params=cone_parameters)
     # if LVHProcessor needs range_from/_process_range set, set them here
@@ -406,6 +456,15 @@ def _process_file_worker(avi_file, dst, splits, cone_parameters, range_from, pro
 
 
 def convert_echonetlvh(args):
+    """
+    Conversion script for the EchoNet-LVH dataset.
+    Unzips, overwrites splits if needed, precomputes cone parameters,
+    and converts images and/or measurements to zea format and saves dataset.
+    Is called with argparse arguments through zea/zea/data/convert/__main__.py
+
+    Args:
+        args (argparse.Namespace): Command-line arguments
+    """
     # Check if unzip is needed
     src = unzip(args.src, "echonetlvh")
 

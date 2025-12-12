@@ -1,6 +1,6 @@
-"""Functionality to convert Verasonics matlab raw files to the zea format.
+"""Functionality to convert Verasonics MATLAB workspace to the zea format.
 
-Example (MATLAB):
+Example of saving the entire workspace to a .mat file (MATLAB):
 
     .. code-block:: matlab
 
@@ -8,19 +8,19 @@ Example (MATLAB):
         >> VSX;
         >> save_raw('C:/path/to/raw_data.mat');
 
-Then in python:
+Then convert the saved `raw_data.mat` file to zea format using the following code (Python):
 
     .. code-block:: python
 
-        from zea.data_format.zea_from_matlab_raw import zea_from_matlab_raw
+        from zea.data.convert.verasonics import zea_from_verasonics_workspace
 
-        zea_from_matlab_raw("C:/path/to/raw_data.mat", "C:/path/to/output.hdf5")
+        zea_from_verasonics_workspace("C:/path/to/raw_data.mat", "C:/path/to/output.hdf5")
 
 Or alternatively, use the script below to convert all .mat files in a directory:
 
     .. code-block:: bash
 
-        python zea/data/convert/matlab.py "C:/path/to/directory"
+        python zea/data/convert/verasonics.py "C:/path/to/directory"
 
 or without the directory argument, the script will prompt you to select a directory
 using a file dialog.
@@ -72,7 +72,7 @@ Adding additional elements
 
 You can add additional elements to the dataset by defining a function that reads the
 data from the file and returns a ``DatasetElement``. Then pass the function to the
-``zea_from_matlab_raw`` function as a list.
+``zea_from_verasonics_workspace`` function as a list.
 
 .. code-block:: python
 
@@ -91,7 +91,7 @@ data from the file and returns a ``DatasetElement``. Then pass the function to t
         )
 
 
-    zea_from_matlab_raw(
+    zea_from_verasonics_workspace(
         "C:/path/to/raw_data.mat",
         "C:/path/to/output.hdf5",
         [read_high_voltage_func],
@@ -950,8 +950,8 @@ def get_frame_indices(file, frames):
     return frame_indices
 
 
-def zea_from_matlab_raw(input_path, output_path, additional_functions=None, frames="all"):
-    """Converts a Verasonics matlab raw file to the zea format. The MATLAB file
+def zea_from_verasonics_workspace(input_path, output_path, additional_functions=None, frames="all"):
+    """Converts a Verasonics MATLAB workspace file (.mat) to the zea format. The .mat file
     should be created using the `save_raw` function and be stored in "v7.3" format.
 
     Args:
@@ -1045,13 +1045,25 @@ def get_answer(prompt, additional_options=None):
         log.warning("Invalid input.")
 
 
-def convert_matlab(args):
+def convert_verasonics(args):
+    """
+    Converts a Verasonics MATLAB workspace file (.mat) or a directory containing multiple
+    such files to the zea format.
+
+    Args:
+        args (argparse.Namespace): An object with attributes:
+
+            - src (str): Source folder path.
+            - dst (str): Destination folder path.
+            - frames (list[str]): MATLAB frames spec (e.g., ["all"], integers, or ranges like "4-8")
+    """
+
     # Variable to indicate what to do with existing files.
     # Is set by the user in case these are found.
     existing_file_policy = None
 
     if args.src is None:
-        log.info("Select a directory containing Verasonics matlab raw files.")
+        log.info("Select a directory containing Verasonics MATLAB workspace files.")
         # Create a Tkinter root window
         try:
             import tkinter as tk
@@ -1140,7 +1152,7 @@ def convert_matlab(args):
             else:
                 log.info("Aborting...")
                 sys.exit()
-        zea_from_matlab_raw(selected_path, output_path, frames=frames)
+        zea_from_verasonics_workspace(selected_path, output_path, frames=frames)
     else:
         # Continue with the rest of your code...
         for root, dirs, files in os.walk(selected_path):
@@ -1187,7 +1199,7 @@ def convert_matlab(args):
                         file_output_path.unlink(missing_ok=False)
 
                 try:
-                    zea_from_matlab_raw(full_path, file_output_path, frames=frames)
+                    zea_from_verasonics_workspace(full_path, file_output_path, frames=frames)
                 except Exception:
                     # Print error message without raising it
                     log.error(f"Failed to convert {mat_file}")

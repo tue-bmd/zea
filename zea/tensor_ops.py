@@ -1,6 +1,6 @@
 """Basic tensor operations implemented with the multi-backend ``keras.ops``."""
 
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 import keras
 import numpy as np
@@ -9,7 +9,7 @@ from scipy.ndimage import _ni_support
 from scipy.ndimage._filters import _gaussian_kernel1d
 
 from zea import log
-from zea.utils import map_negative_indices
+from zea.utils import canonicalize_axis
 
 
 def split_seed(seed, n):
@@ -431,14 +431,14 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
 
 
 def vmap(
-    fun,
-    in_axes=0,
-    out_axes=0,
-    batch_size=None,
-    chunks=None,
-    fn_supports_batch=False,
-    disable_jit=False,
-    _use_torch_vmap=False,
+    fun: callable,
+    in_axes: List[Union[int, None]] | int = 0,
+    out_axes: List[Union[int, None]] | int = 0,
+    chunks: int | None = None,
+    batch_size: int | None = None,
+    fn_supports_batch: bool = False,
+    disable_jit: bool = False,
+    _use_torch_vmap: bool = False,
 ):
     """`vmap` with batching or chunking support to avoid memory issues.
 
@@ -1262,7 +1262,7 @@ def reshape_axis(data, newshape: tuple, axis: int):
             >>> reshaped_data.shape
             (3, 2, 2, 5)
     """
-    axis = map_negative_indices([axis], data.ndim)[0]
+    axis = canonicalize_axis(axis, data.ndim)
     shape = list(ops.shape(data))  # list
     shape = shape[:axis] + list(newshape) + shape[axis + 1 :]
     return ops.reshape(data, shape)
@@ -1521,7 +1521,8 @@ def sinc(x, eps=keras.config.epsilon()):
 def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     """Apply a function to 1D array slices along an axis.
 
-    Keras implementation of numpy.apply_along_axis using keras.ops.vectorized_map.
+    Keras implementation of ``numpy.apply_along_axis``. Copies the ``jax`` implementation, which
+    uses ``vmap`` to vectorize the function application along the specified axis.
 
     Args:
         func1d: A callable function with signature ``func1d(arr, /, *args, **kwargs)``
@@ -1538,56 +1539,13 @@ def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     # Convert to keras tensor
     arr = ops.convert_to_tensor(arr)
 
-    # Get array dimensions
-    num_dims = len(arr.shape)
-
-    # Canonicalize axis (handle negative indices)
-    if axis < 0:
-        axis = num_dims + axis
-
-    if axis < 0 or axis >= num_dims:
-        raise ValueError(f"axis {axis} is out of bounds for array of dimension {num_dims}")
-
-    # Create a wrapper function that applies func1d with the additional arguments
-    def func(slice_arr):
-        return func1d(slice_arr, *args, **kwargs)
-
-    # Recursively build up vectorized maps following the JAX pattern
-    # For dimensions after the target axis (right side)
+    num_dims = ops.ndim(arr)
+    axis = canonicalize_axis(axis, num_dims)
+    func = lambda arr: func1d(arr, *args, **kwargs)
     for i in range(1, num_dims - axis):
-        prev_func = func
-
-        def make_func(f, dim_offset):
-            def vectorized_func(x):
-                # Move the dimension we want to map over to the front
-                perm = list(range(len(x.shape)))
-                perm[0], perm[dim_offset] = perm[dim_offset], perm[0]
-                x_moved = ops.transpose(x, perm)
-                result = vectorized_map(f, x_moved)
-                # Move the result dimension back if needed
-                if len(result.shape) > 0:
-                    result_perm = list(range(len(result.shape)))
-                    if len(result_perm) > dim_offset:
-                        result_perm[0], result_perm[dim_offset] = (
-                            result_perm[dim_offset],
-                            result_perm[0],
-                        )
-                        result = ops.transpose(result, result_perm)
-                return result
-
-            return vectorized_func
-
-        func = make_func(prev_func, i)
-
-    # For dimensions before the target axis (left side)
+        func = vmap(func, in_axes=i, out_axes=-1, _use_torch_vmap=True)
     for i in range(axis):
-        prev_func = func
-
-        def make_func(f):
-            return lambda x: vectorized_map(f, x)
-
-        func = make_func(prev_func)
-
+        func = vmap(func, in_axes=0, out_axes=0, _use_torch_vmap=True)
     return func(arr)
 
 
@@ -1604,6 +1562,8 @@ def correlate(x, y, mode="full"):
         y: np.ndarray (complex or real)
         mode: "full", "valid", or "same"
     """
+    if keras.backend.backend() == "jax":
+        return ops.correlate(x, y, mode=mode)
     x = ops.convert_to_tensor(x)
     y = ops.convert_to_tensor(y)
 

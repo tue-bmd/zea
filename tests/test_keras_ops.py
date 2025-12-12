@@ -17,8 +17,19 @@ def test_swapaxes():
     with pytest.raises(ValueError):
         zea.keras_ops.Swapaxes(axis2=1)
 
-    output = zea.keras_ops.Swapaxes(axis1=0, axis2=1)(data=np.ones((10, 20)))["data"]
+    output = zea.keras_ops.Swapaxes(
+        axis1=0,
+        axis2=1,
+        with_batch_dim=False,
+    )(data=np.ones((10, 20)))["data"]
     assert output.shape == (20, 10)
+
+    output = zea.keras_ops.Swapaxes(
+        axis1=0,
+        axis2=2,
+        with_batch_dim=True,
+    )(data=np.ones((5, 10, 15, 3)))["data"]
+    assert output.shape == (5, 3, 15, 10)
 
 
 def test_registry():

@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as follows:"
 title: "zea: A Toolbox for Cognitive Ultrasound Imaging"
-version: 0.0.7
-# doi: 10.0000/placeholder-doi  # Replace with actual DOI later
-date-released: 2025-10-27
+version: 0.0.8
+doi: 10.48550/arXiv.2512.01433
+date-released: 2025-12-04
 repository-code: https://github.com/tue-bmd/zea
 license: Apache-2.0
 keywords:

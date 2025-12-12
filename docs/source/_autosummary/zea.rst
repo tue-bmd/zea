@@ -1,3 +1,7 @@
+.. This is the only manually maintained file in the
+   _autosummary directory. It is used to generate the main API reference
+   page for the zea package.
+
 zea
 ====
 

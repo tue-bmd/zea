@@ -153,7 +153,6 @@ class Scan(Parameters):
         apply_lens_correction (bool, optional): Whether to apply lens correction to
             delays. Defaults to False.
         lens_thickness (float, optional): Thickness of the lens in meters.
-            Defaults to None.
         f_number (float, optional): F-number of the transducer. Defaults to 1.0.
         theta_range (tuple, optional): Range of theta angles for 3D imaging.
         phi_range (tuple, optional): Range of phi angles for 3D imaging.
@@ -617,7 +616,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("pfield")
     def flat_pfield(self):
-        """Flattened pfield for weighting."""
+        """Flattened pfield for weighting of shape (n_pix, n_tx)."""
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
     @cache_with_dependencies("zlims")
@@ -673,6 +672,17 @@ class Scan(Parameters):
         """Get the coordinates for scan conversion, will be 3D if phi_range is set,
         otherwise 2D."""
         return self.coordinates_3d if getattr(self, "phi_range", None) else self.coordinates_2d
+
+    @property
+    def pulse_repetition_frequency(self):
+        """The pulse repetition frequency (PRF) [Hz]. Assumes a constant PRF."""
+        if self.time_to_next_transmit is None:
+            log.warning("Time to next transmit is not set, cannot compute PRF")
+            return None
+
+        pulse_repetition_interval = np.mean(self.time_to_next_transmit)
+
+        return 1 / pulse_repetition_interval
 
     @cache_with_dependencies("time_to_next_transmit")
     def frames_per_second(self):

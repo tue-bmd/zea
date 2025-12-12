@@ -7,6 +7,8 @@
 [![License](https://img.shields.io/github/license/tue-bmd/zea)](https://github.com/tue-bmd/zea/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg)](https://codecov.io/gh/tue-bmd/zea)
 [![status](https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d/status.svg)](https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d)
+[![arXiv](https://img.shields.io/badge/arXiv-B31B1B?style=flat&logo=arXiv&logoColor=white)](https://arxiv.org/abs/2512.01433)
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/zeahub)
 [![GitHub stars](https://img.shields.io/github/stars/tue-bmd/zea?style=social)](https://github.com/tue-bmd/zea/stargazers)
 
 Welcome to the `zea` package: *A Toolbox for Cognitive Ultrasound Imaging.*

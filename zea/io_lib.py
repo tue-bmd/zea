@@ -120,7 +120,7 @@ def save_video(images, filename, fps=20, **kwargs):
         filename (str or Path): Filename to which data should be written.
         fps (int): Frames per second of rendered format.
         **kwargs: Additional keyword arguments passed to the specific save function.
-            For GIF files, this includes `shared_color_palette` (bool).
+            For GIF and mp4 files, this includes `shared_color_palette` (bool).
 
     Raises:
         ValueError: If the file extension is not supported.
@@ -137,7 +137,7 @@ def save_video(images, filename, fps=20, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def save_to_gif(images, filename, fps=20, shared_color_palette=False):
+def save_to_gif(images, filename, fps=20, shared_color_palette=True):
     """Saves a sequence of images to a GIF file.
 
     .. note::
@@ -153,7 +153,7 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=False):
         fps (int): Frames per second of rendered format.
         shared_color_palette (bool, optional): If True, creates a global
             color palette across all frames, ensuring consistent colors
-            throughout the GIF. Defaults to False, which is default behavior
+            throughout the GIF. Defaults to True, which is default behavior
             of PIL.Image.save. Note: True increases speed and shrinks file
             size for longer sequences.
 

@@ -38,15 +38,6 @@ Examples usage
     ...     files.append(file)  # process each file as needed
     >>> dataset.close()
 
-Subpackage layout
------------------
-
-- ``file.py``: Implements :class:`zea.File` and related file utilities.
-- ``datasets.py``: Implements :class:`zea.Dataset` and folder management.
-- ``dataloader.py``: Data loading utilities for batching and shuffling.
-- ``data_format.py``: Data validation and example dataset generation.
-- ``convert/``: Data conversion tools (e.g., from external formats).
-
 """  # noqa: E501
 
 from .convert.camus import sitk_load

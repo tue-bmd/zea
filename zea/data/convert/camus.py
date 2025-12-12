@@ -1,7 +1,12 @@
 """Functionality to convert the camus dataset to the zea format.
-Requires SimpleITK to be installed: pip install SimpleITK.
 
-Data source: https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8
+.. note::
+    Requires SimpleITK to be installed: `pip install SimpleITK`.
+
+For more information about the dataset, resort to the following links:
+
+- The original dataset can be found at `this link <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8>`_.
+
 """
 
 from __future__ import annotations
@@ -124,7 +129,7 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
         filepath: Path to the image.
 
     Returns:
-        - ([N], H, W), Image array.
+        - Image array of shape (num_frames, height, width).
         - Collection of metadata.
     """
     # Load image and save info
@@ -194,7 +199,18 @@ splits = {"train": [1, 401], "val": [401, 451], "test": [451, 501]}
 
 
 def get_split(patient_id: int) -> str:
-    """Determine the dataset split for a given patient ID."""
+    """
+    Determine which dataset split a patient ID belongs to.
+
+    Args:
+        patient_id: Integer ID of the patient.
+
+    Returns:
+        The split name: "train", "val", or "test".
+
+    Raises:
+        ValueError: If the patient_id does not fall into any defined split range.
+    """
     if splits["train"][0] <= patient_id < splits["train"][1]:
         return "train"
     elif splits["val"][0] <= patient_id < splits["val"][1]:
@@ -206,7 +222,17 @@ def get_split(patient_id: int) -> str:
 
 
 def _process_task(task):
-    """Unpack task tuple and call process_camus from the main module."""
+    """
+    Unpack a task tuple and invoke process_camus in a worker process.
+
+    Creates parent directories for the target outputs, calls process_camus
+    with the unpacked paths, and logs then re-raises any exception raised by processing.
+
+    Args:
+        task (tuple): (source_file_str, output_file_str)
+            - source_file_str: filesystem path to the source CAMUS file as a string.
+            - output_file_str: filesystem path for the ZEA output file as a string.
+    """
     source_file_str, output_file_str = task
     source_file = Path(source_file_str)
     output_file = Path(output_file_str)
@@ -225,6 +251,23 @@ def _process_task(task):
 
 
 def convert_camus(args):
+    """
+    Converts the CAMUS dataset into ZEA HDF5 files across dataset splits.
+
+    Processes files found under the CAMUS source folder (after unzipping if needed),
+    assigns each patient to a train/val/test split, creates matching output paths,
+    and executes per-file conversion tasks either serially or in parallel.
+    Ensures output directories do not pre-exist, and logs progress and failures.
+
+    Args:
+        args (argparse.Namespace): An object with attributes:
+
+            - src (str | Path): Path to the CAMUS archive or extracted folder.
+            - dst (str | Path): Root destination folder for ZEA HDF5 outputs;
+              split subfolders will be created.
+            - no_hyperthreading (bool, optional): If True, run tasks serially instead
+              of using a process pool.
+    """
     camus_source_folder = Path(args.src)
     camus_output_folder = Path(args.dst)
 

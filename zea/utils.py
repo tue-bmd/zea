@@ -12,14 +12,23 @@ import yaml
 from zea import log
 
 
-def map_negative_indices(indices: list, length: int):
+def canonicalize_axis(axis, num_dims) -> int:
+    """Canonicalize an axis in [-num_dims, num_dims) to [0, num_dims)."""
+    if not -num_dims <= axis < num_dims:
+        raise ValueError(f"axis {axis} is out of bounds for array of dimension {num_dims}")
+    if axis < 0:
+        axis = axis + num_dims
+    return axis
+
+
+def map_negative_indices(indices: list, num_dims: int):
     """Maps negative indices for array indexing to positive indices.
     Example:
         >>> from zea.utils import map_negative_indices
         >>> map_negative_indices([-1, -2], 5)
         [4, 3]
     """
-    return [i if i >= 0 else length + i for i in indices]
+    return [canonicalize_axis(idx, num_dims) for idx in indices]
 
 
 def print_clear_line():

@@ -403,8 +403,10 @@ def test_linear_sum_assignment_greedy():
         [default_rng(DEFAULT_TEST_SEED + 1).normal(size=(2, 3)), 0, "sum"],
         [default_rng(DEFAULT_TEST_SEED + 2).normal(size=(2, 3, 4)), 1, "argmax"],
         [default_rng(DEFAULT_TEST_SEED + 3).normal(size=(2, 3, 4, 5)), 2, "var"],
+        [default_rng(DEFAULT_TEST_SEED + 4).normal(size=(9, 268, 8, 1)), 1, "correlate"],
     ],
 )
+@backend_equality_check()
 def test_apply_along_axis(array, axis, fn):
     """Test the apply_along_axis function."""
     from keras import ops
@@ -420,6 +422,9 @@ def test_apply_along_axis(array, axis, fn):
     elif fn == "argmax":
         fn = ops.argmax
         np_fn = np.argmax
+    elif fn == "correlate":
+        fn = lambda x: tensor_ops.correlate(x, ops.ones(10), mode="valid")
+        np_fn = lambda x: np.correlate(x, np.ones(10), mode="valid")
     else:
         raise ValueError(f"Function {fn} not recognized.")
 

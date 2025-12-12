@@ -125,6 +125,7 @@ def default_pipeline_config():
             {"name": "tof_correction"},
             {"name": "pfield_weighting"},
             {"name": "delay_and_sum"},
+            {"name": "reshape_grid"},
             {"name": "envelope_detect"},
             {"name": "normalize"},
             {"name": "log_compress"},
@@ -148,6 +149,7 @@ def patched_pipeline_config():
                     {"name": "delay_and_sum"},
                 ],
             },
+            {"name": "reshape_grid"},
             {"name": "envelope_detect"},
             {"name": "normalize"},
             {"name": "log_compress"},
@@ -450,19 +452,20 @@ def validate_default_pipeline(pipeline, patched=False):
         assert isinstance(pipeline.operations[2], ops.TOFCorrection)
         assert isinstance(pipeline.operations[3], ops.PfieldWeighting)
         assert isinstance(pipeline.operations[4], ops.DelayAndSum)
-        assert isinstance(pipeline.operations[5], ops.EnvelopeDetect)
-        assert isinstance(pipeline.operations[6], ops.Normalize)
-        assert isinstance(pipeline.operations[7], ops.LogCompress)
+        assert isinstance(pipeline.operations[5], ops.ReshapeGrid)
+        assert isinstance(pipeline.operations[6], ops.EnvelopeDetect)
+        assert isinstance(pipeline.operations[7], ops.Normalize)
+        assert isinstance(pipeline.operations[8], ops.LogCompress)
     else:
         patched_grid = pipeline.operations[2]
         assert hasattr(patched_grid, "operations")
         assert isinstance(patched_grid.operations[0], ops.TOFCorrection)
         assert isinstance(patched_grid.operations[1], ops.PfieldWeighting)
         assert isinstance(patched_grid.operations[2], ops.DelayAndSum)
-
-        assert isinstance(pipeline.operations[3], ops.EnvelopeDetect)
-        assert isinstance(pipeline.operations[4], ops.Normalize)
-        assert isinstance(pipeline.operations[5], ops.LogCompress)
+        assert isinstance(pipeline.operations[3], ops.ReshapeGrid)
+        assert isinstance(pipeline.operations[4], ops.EnvelopeDetect)
+        assert isinstance(pipeline.operations[5], ops.Normalize)
+        assert isinstance(pipeline.operations[6], ops.LogCompress)
 
 
 @pytest.mark.parametrize(
