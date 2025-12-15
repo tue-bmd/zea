@@ -66,7 +66,7 @@ The ultrasound research community has advanced significantly due to publically a
 - **Agents**: A set of tools to interact with the pipeline and models. These agents can be used to alter the pipeline parameters, or select a subset of acquired data. The agent module closes the action-perception loop, tying together acquisition and reconstruction of ultrasound data.
 
 # Example usage
-Below, we will show a brief overview of how to use the main components of `zea`, including the data handling, pipeline, models, and agents. For more detailed examples and use cases, please refer to the example notebooks available on the documentation: [https://zea.readthedocs.io/](https://zea.readthedocs.io/). Note that these snippets have been tested with `zea` version 0.8.0.
+Below, we will show a brief overview of how to use the main components of `zea`, including the data handling, pipeline, models, and agents. For more detailed examples and use cases, please refer to the example notebooks available on the documentation: [https://zea.readthedocs.io/](https://zea.readthedocs.io/). Note that the following snippets have been tested with `zea` version 0.0.8.
 
 ## Data
 `zea` stores data as well as acquisition parameters together in HDF5 files, which can be easily loaded and saved through the `zea.data` API.
