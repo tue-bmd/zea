@@ -66,7 +66,7 @@ The ultrasound research community has advanced significantly due to publically a
 - **Agents**: A set of tools to interact with the pipeline and models. These agents can be used to alter the pipeline parameters, or select a subset of acquired data. The agent module closes the action-perception loop, tying together acquisition and reconstruction of ultrasound data.
 
 # Example usage
-Below, we will show a brief overview of how to use the main components of `zea`, including the data handling, pipeline, models, and agents. For more detailed examples and use cases, please refer to the example notebooks available on the documentation: [https://zea.readthedocs.io/](https://zea.readthedocs.io/).
+Below, we will show a brief overview of how to use the main components of `zea`, including the data handling, pipeline, models, and agents. For more detailed examples and use cases, please refer to the example notebooks available on the documentation: [https://zea.readthedocs.io/](https://zea.readthedocs.io/). Note that these snippets have been tested with `zea` version 0.8.0.
 
 ## Data
 `zea` stores data as well as acquisition parameters together in HDF5 files, which can be easily loaded and saved through the `zea.data` API.
@@ -127,6 +127,7 @@ pipeline = zea.Pipeline(
             ],
             num_patches=100,
         ),
+        ReshapeGrid(),              # Reshape grid back to image size
         EnvelopeDetect(),           # Envelope detection
         Normalize(),                # Normalization
         LogCompress(),              # to dB scale (B-mode)
@@ -151,6 +152,7 @@ inputs = {pipeline.key: data}
 
 # parameters can be dynamically passed here as keyword arguments, e.g., sound_speed
 sound_speed = 1540  # m/s
+parameters.pop("sound_speed")
 outputs = pipeline(**inputs, **parameters, sound_speed=sound_speed)
 
 image = outputs[pipeline.output_key]
