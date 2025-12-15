@@ -22,7 +22,7 @@ We can initialize a generic probe with the following code:
 
     >>> probe = Probe.from_name("generic")
     >>> print(probe.get_parameters())
-    {'probe_geometry': None, 'center_frequency': None, 'sampling_frequency': None, 'xlims': None, 'zlims': None}
+    {'probe_geometry': None, 'center_frequency': None, 'sampling_frequency': None, 'xlims': None, 'zlims': None, 'n_el': None}
 """  # noqa: E501
 
 import numpy as np
@@ -114,6 +114,7 @@ class Probe(Object):
             "sampling_frequency": self.sampling_frequency,
             "xlims": self.xlims,
             "zlims": self.zlims,
+            "n_el": self.n_el,
         }
 
     @classmethod
@@ -231,12 +232,3 @@ class Esaote_sll1543(Probe):
             bandwidth_MHz=bandwidth_MHz,
             probe_type="linear",
         )
-
-    def get_parameters(self):
-        return {
-            "probe_geometry": self.probe_geometry,
-            "center_frequency": self.center_frequency,
-            "sampling_frequency": self.sampling_frequency,
-            "xlims": self.xlims,
-            "zlims": self.zlims,
-        }
