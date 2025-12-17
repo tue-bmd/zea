@@ -5027,6 +5027,33 @@ test = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "ini2toml[lite] (>=
 type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.develop (>=7.21) ; sys_platform != \"cygwin\"", "mypy (==1.14.*)", "pytest-mypy"]
 
 [[package]]
+name = "simpleitk"
+version = "2.5.3"
+description = "SimpleITK is a simplified interface to the Insight Toolkit (ITK) for image registration and segmentation"
+optional = true
+python-versions = "*"
+groups = ["main"]
+markers = "extra == \"dev\" or extra == \"tests\""
+files = [
+    {file = "simpleitk-2.5.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:63f8ff790cf59232860a9cfa4b730032c3d9b8ecde76b6ad5fc199be6a76cde4"},
+    {file = "simpleitk-2.5.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:b4dacf663d5956bd0c883fba6f0bc09f54b6c5298293627a5eb8aec8d0711cad"},
+    {file = "simpleitk-2.5.3-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:6fa8bf9d6c6ff933148c87f82a067557a7b5e9b77398ddd73e56e3f5287158b6"},
+    {file = "simpleitk-2.5.3-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:a4ec4b699d992b67bfaa2baabb740e064ed85b7bc5ba79c98115a2b78f79dc13"},
+    {file = "simpleitk-2.5.3-cp310-cp310-win_amd64.whl", hash = "sha256:6be4cdbab18076411500879c35dad995371df6ad56738c170f81561c22f33f59"},
+    {file = "simpleitk-2.5.3-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:eda739126d3cdda29266b722c3bb182a534ee4b4b60a6e565c20e1ebbd7ca2da"},
+    {file = "simpleitk-2.5.3-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:5438fb87b7e3380b1ba02b2447bf9f474560b51a649b2ad6973195c6515a43a5"},
+    {file = "simpleitk-2.5.3-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:724a8fba4a493a9da06cbba545521174092927acf99fbc0594f4f257d66061ff"},
+    {file = "simpleitk-2.5.3-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b615a96826815471965899d50d089fb67381a4d59b65750eafe58a6a980ecce2"},
+    {file = "simpleitk-2.5.3-cp311-abi3-win_amd64.whl", hash = "sha256:31b187922c53c858f8604b4f90ebd7aae809e680de751674f5f95ccefcf674d5"},
+    {file = "simpleitk-2.5.3-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:ac73cbdc50975f7b415d84637c9937f5e3bec74a5c6914273262793bc24270bc"},
+    {file = "simpleitk-2.5.3-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:d572043169ce97ac313a24b806d656adf113c018a7f587218ce79713ed6ffa3d"},
+    {file = "simpleitk-2.5.3-cp39-cp39-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:8e7b42188b9f9bfe33007f0ae52182c99472e4b5d384b29cbbfe49546b224697"},
+    {file = "simpleitk-2.5.3-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b3f7a925b9972d9d4e58b29ec29e8535f14b63b3f04714c898570094102d008f"},
+    {file = "simpleitk-2.5.3-cp39-cp39-win_amd64.whl", hash = "sha256:af90f897e96e1e623985ef1f48c497727fa919dc48fb2491b05ad5fe36da60a3"},
+    {file = "simpleitk-2.5.3.tar.gz", hash = "sha256:859c15d9865120a5668952ec4da63393203b978008697907fc3bb3c8329aaa32"},
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 description = "Python 2 and 3 compatibility utilities"
@@ -6460,15 +6487,15 @@ propcache = ">=0.2.1"
 
 [extras]
 backends = ["jax", "tensorflow", "torch"]
-dev = ["IPython", "PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "mock", "myst-parser", "nbsphinx", "onnxruntime", "opencv-python-headless", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "sphinx", "sphinx-argparse", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-bibtex"]
+dev = ["IPython", "PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "mock", "myst-parser", "nbsphinx", "onnxruntime", "opencv-python-headless", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "simpleitk", "sphinx", "sphinx-argparse", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-bibtex"]
 display = ["opencv-python"]
 display-headless = ["opencv-python-headless"]
 docs = ["IPython", "PyStemmer", "furo", "mock", "myst-parser", "nbsphinx", "sphinx", "sphinx-argparse", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-bibtex"]
 jax = ["jax"]
 models = ["onnxruntime"]
-tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff"]
+tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "simpleitk"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.13"
-content-hash = "66d7f79259ed5664b2d0c4e90e0e4961ad806b5a49782574b43eec9ff3802d7f"
+content-hash = "6d30129162ebe1249cd3e38cf1a3aa7e2136e9cf1b91e2bf09d2f85ff984f962"

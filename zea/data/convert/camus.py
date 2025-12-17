@@ -133,7 +133,13 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
         - Collection of metadata.
     """
     # Load image and save info
-    import SimpleITK as sitk
+    try:
+        import SimpleITK as sitk
+    except ImportError as exc:
+        raise ImportError(
+            "SimpleITK is not installed. "
+            "Please install it with `pip install SimpleITK` to convert CAMUS dataset."
+        ) from exc
 
     image = sitk.ReadImage(str(filepath))
 

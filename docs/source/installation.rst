@@ -77,14 +77,14 @@ Note that these build arguments can be set to either `cpu` or `gpu` depending on
 Run
 ~~~
 
-Run a container with one of the built images. Ensure you mount your repository at ``/zea`` so that changes are reflected inside the container, and use your user and group IDs to avoid permission issues.
+Run a container with one of the built images. Ensure you mount your repository at ``/zea`` so that changes are reflected inside the container.
+We recommend using `rootless docker <https://docs.docker.com/engine/security/rootless/>`_ to avoid permission issues.
 
 .. code-block:: shell
 
    docker run --name {CONTAINER-NAME} --gpus 'all' \
      -v ~/zea:/zea \
-     -d -it --user "$(id -u):$(id -g)" \
-     {IMAGE-NAME}:{IMAGE-TAG}
+     -d -it {IMAGE-NAME}:{IMAGE-TAG}
 
 .. dropdown:: Docker run command flags explained
 
@@ -98,7 +98,6 @@ Run a container with one of the built images. Ensure you mount your repository a
       - ``--tty``: allocate a pseudo-TTY.
    - ``-m`` or ``--memory``: set a memory limit (use g for gigabytes).
    - ``--cpus``: specify the number of CPU cores to use.
-   - ``--user``: run as a specific user.
    - ``-w`` or ``--workdir``: set the working directory inside the container.
    - ``--rm``: automatically remove the container when it *exits*.
    - ``--env-file``: load environment variables from a .env file.
@@ -106,7 +105,7 @@ Run a container with one of the built images. Ensure you mount your repository a
 
 .. important::
 
-   Mount your ``zea`` repository to ``/zea`` inside the container so that changes are reflected in the `zea` installation inside the container. Additionally, use your user ID and group ID with ``--user "$(id -u):$(id -g)"`` to avoid permission issues when writing to mounted volumes.
+   Mount your ``zea`` repository to ``/zea`` inside the container so that changes are reflected in the `zea` installation inside the container.
 
 .. tip::
 

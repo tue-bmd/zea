@@ -105,31 +105,15 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
             ${{ needs.image.outputs.docker_image }} \
-            sh -c "pip install -e . && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
+            sh -c "pip install -e .[tests] && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ env.MAIN_REPO }}
-
-      - name: Run heavy Pytest (allowed to fail)
-        continue-on-error: true
-        run: |
-          docker run --rm \
-          -v "${{ github.workspace }}:/zea" \
-          -w /zea \
-          -u $(id -u):$(id -g) \
-          -e HOME=/tmp \
-          -e USER=$(id -un) \
-          -e LOGNAME=$(id -un) \
-          ${{ needs.image.outputs.docker_image }} \
-          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+          flags: unit
 
   heavy-tests:
     needs: [image]
@@ -139,30 +123,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Git
-        run: git config --global safe.directory $GITHUB_WORKSPACE
-
       - name: Run heavy Pytest
         run: |
           docker run --rm \
           -v "${{ github.workspace }}:/zea" \
           -w /zea \
-          -u $(id -u):$(id -g) \
-          -e HOME=/tmp \
-          -e USER=$(id -un) \
-          -e LOGNAME=$(id -un) \
           ${{ needs.image.outputs.docker_image }} \
-          sh -c "pip install -e . && pytest -p no:cacheprovider -m 'heavy' ./tests"
+          sh -c "pip install -e . && pytest --cov --cov-branch --cov-report=xml -p no:cacheprovider -m 'heavy' ./tests"
+
+      - name: Upload heavy test results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: ${{ env.MAIN_REPO }}
+          flags: heavy
 
       - name: Run notebook tests with Pytest
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
             ${{ needs.image.outputs.docker_image }} \
             sh -c "pip install -e .[dev] && pytest -s -m 'notebook'"
 
@@ -181,10 +161,6 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
             -w /zea/docs \
-            -u $(id -u):$(id -g) \
-            -e HOME=/tmp \
-            -e USER=$(id -un) \
-            -e LOGNAME=$(id -un) \
             ${{ needs.image.outputs.docker_image }} \
             sh -c "\
               sudo apt-get update && \
