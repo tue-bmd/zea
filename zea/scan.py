@@ -327,17 +327,20 @@ class Scan(Parameters):
         on the polar limits and probe geometry.
         """
         xlims = self._params.get("xlims")
-        if xlims is None:
-            radius = max(self.zlims)
-            xlims_polar = (
-                radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
-                radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
-            )
-            xlims_plane = (min(self.probe_geometry[:, 0]), max(self.probe_geometry[:, 0]))
-            xlims = (
-                min(xlims_polar[0], xlims_plane[0]),
-                max(xlims_polar[1], xlims_plane[1]),
-            )
+        if xlims is not None:
+            return xlims
+
+        # If xlims not set, compute based on polar limits and probe geometry
+        radius = max(self.zlims)
+        xlims_polar = (
+            radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
+            radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
+        )
+        xlims_plane = (min(self.probe_geometry[:, 0]), max(self.probe_geometry[:, 0]))
+        xlims = (
+            min(xlims_polar[0], xlims_plane[0]),
+            max(xlims_polar[1], xlims_plane[1]),
+        )
         return xlims
 
     @cache_with_dependencies("zlims", "grid_type", "azimuth_limits", "probe_geometry")
@@ -532,7 +535,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("polar_angles")
     def polar_limits(self):
-        """The limits of the polar angles."""
+        """The limits of the polar angles. A margin of 0.15 is added to increase field of view."""
         value = self._params.get("polar_limits")
         if value is None and self.polar_angles is not None:
             value = self.polar_angles.min(), self.polar_angles.max()
@@ -554,7 +557,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("azimuth_angles")
     def azimuth_limits(self):
-        """The limits of the azimuth angles."""
+        """The limits of the azimuth angles. A margin of 0.15 is added to increase field of view."""
         value = self._params.get("azimuth_limits")
         if value is None and self.azimuth_angles is not None:
             value = self.azimuth_angles.min(), self.azimuth_angles.max()
