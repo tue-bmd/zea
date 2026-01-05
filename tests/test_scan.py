@@ -237,3 +237,76 @@ def test_inplace_modification_tensor_cache():
     assert not np.array_equal(tensor_dict["pfield"], tensor_dict2["pfield"]), (
         "_tensor_cache['pfield'] seems to be unaffected by in-place modification"
     )
+
+
+def test_grid_with_explicit_limits():
+    """Test grid computation when xlims/zlims are already set."""
+    scan = Scan(**scan_args)
+    grid = scan.grid
+    assert grid.shape == (scan.grid_size_z, scan.grid_size_x, 3)
+    # Check grid bounds match xlims and zlims
+    assert np.isclose(grid[0, 0, 0], scan.xlims[0])
+    assert np.isclose(grid[0, -1, 0], scan.xlims[1])
+    assert np.isclose(grid[0, 0, 2], scan.zlims[0])
+    assert np.isclose(grid[-1, 0, 2], scan.zlims[1])
+
+
+def test_grid_with_computed_limits():
+    """
+    Test grid computation when xlims/zlims are derived from probe_geometry and focus_distances.
+    """
+    # Start with scan_args but remove xlims/zlims so they get computed
+    args = {
+        k: v for k, v in scan_args.items() if k not in ("xlims", "ylims", "zlims", "azimuth_angles")
+    }
+    args["probe_geometry"] = np.column_stack(
+        [
+            np.linspace(-0.01, 0.01, 10),  # x positions
+            np.zeros(10),  # y positions
+            np.zeros(10),  # z positions
+        ]
+    )
+    args["focus_distances"] = np.ones(10) * 0.05
+
+    scan = Scan(**args)
+    grid = scan.grid
+    assert grid.shape == (scan.grid_size_z, scan.grid_size_x, 3)
+    # xlims should be derived from probe_geometry x range
+    assert np.isclose(grid[0, 0, 0], scan.xlims[0])
+    assert np.isclose(grid[0, -1, 0], scan.xlims[1])
+    # zlims should be derived from focus_distances (via n_ax, sampling_frequency, sound_speed)
+    assert np.isclose(grid[0, 0, 2], scan.zlims[0])
+    assert np.isclose(grid[-1, 0, 2], scan.zlims[1])
+
+
+def test_grid_3d_and_errors():
+    """Test 3D grid creation and error cases."""
+    # Test: grid_size_y set (3D Cartesian grid)
+    args_3d = {k: v for k, v in scan_args.items() if k not in ("grid_size_x", "grid_size_z")}
+    args_3d.update(
+        {
+            "ylims": (-0.005, 0.005),
+            "grid_size_x": 16,
+            "grid_size_y": 8,
+            "grid_size_z": 32,
+        }
+    )
+
+    scan_3d = Scan(**args_3d)
+    grid_3d = scan_3d.grid
+    assert grid_3d.shape == (32, 16, 8, 3)
+    assert np.isclose(grid_3d[0, 0, 0, 1], scan_3d.ylims[0])
+    assert np.isclose(grid_3d[0, 0, -1, 1], scan_3d.ylims[1])
+
+    # Test: 3D polar grid raises NotImplementedError
+    args_3d_polar = args_3d.copy()
+    args_3d_polar["grid_type"] = "polar"
+    args_3d_polar["polar_angles"] = np.linspace(-0.5, 0.5, 10)
+    scan_3d_polar = Scan(**args_3d_polar)
+    with pytest.raises(NotImplementedError, match="3D polar grids are not yet supported"):
+        _ = scan_3d_polar.grid
+
+    # Test: ValueError when grid cannot be computed (missing required attributes)
+    scan_invalid = Scan(n_tx=10, n_el=10)
+    with pytest.raises((ValueError, AttributeError)):
+        _ = scan_invalid.grid

@@ -1,4 +1,4 @@
-"""Tests for the cartesian_pixel_grid function."""
+"""Tests for the pixelgrid.py"""
 
 import numpy as np
 import pytest
