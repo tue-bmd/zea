@@ -1,6 +1,6 @@
 [project]
 name = "zea"
-version = "0.0.8"
+version = "0.0.9"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },

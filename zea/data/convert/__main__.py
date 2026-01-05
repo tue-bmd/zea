@@ -1,86 +1,139 @@
 import argparse
 
 
-def get_parser():
-    """
-    Build and parse command-line arguments for converting raw datasets to a zea dataset.
-
-    Returns:
-        argparse.Namespace: Parsed arguments with the following attributes:
-            dataset (str): One of "echonet", "echonetlvh", "camus", "picmus", "verasonics".
-            src (str): Source folder path.
-            dst (str): Destination folder path.
-            split_path (str|None): Optional path to a split.yaml to copy dataset splits.
-            no_hyperthreading (bool): Disable hyperthreading for multiprocessing.
-            frames (list[str]): MATLAB frames spec (e.g., ["all"], integers, or ranges like "4-8").
-            no_rejection (bool): EchonetLVH flag to skip manual_rejections.txt filtering.
-            batch (str|None): EchonetLVH Batch directory to process (e.g., "Batch2").
-            convert_measurements (bool): EchonetLVH flag to convert only measurements CSV.
-            convert_images (bool): EchonetLVH flag to convert only image files.
-            max_files (int|None): EchonetLVH maximum number of files to process.
-            force (bool): EchonetLVH flag to force recomputation even if parameters exist.
-    """
-    parser = argparse.ArgumentParser(description="Convert raw data to a zea dataset.")
-    parser.add_argument(
-        "dataset",
-        choices=["echonet", "echonetlvh", "camus", "picmus", "verasonics"],
-        help="Raw dataset to convert",
-    )
-    parser.add_argument("src", type=str, help="Source folder path")
-    parser.add_argument("dst", type=str, help="Destination folder path")
-    parser.add_argument(
+def _add_parser_args_echonet(subparsers):
+    """Add Echonet specific arguments to the parser."""
+    echonet_parser = subparsers.add_parser("echonet", help="Convert Echonet dataset")
+    echonet_parser.add_argument("src", type=str, help="Source folder path")
+    echonet_parser.add_argument("dst", type=str, help="Destination folder path")
+    echonet_parser.add_argument(
         "--split_path",
         type=str,
         help="Path to the split.yaml file containing the dataset split if a split should be copied",
     )
-    parser.add_argument(
+    echonet_parser.add_argument(
         "--no_hyperthreading",
         action="store_true",
         help="Disable hyperthreading for multiprocessing",
     )
-    # Dataset specific arguments:
 
-    # verasonics
-    parser.add_argument(
+
+def _add_parser_args_camus(subparsers):
+    """Add CAMUS specific arguments to the parser."""
+    camus_parser = subparsers.add_parser("camus", help="Convert CAMUS dataset")
+    camus_parser.add_argument("src", type=str, help="Source folder path")
+    camus_parser.add_argument("dst", type=str, help="Destination folder path")
+    camus_parser.add_argument(
+        "--no_hyperthreading",
+        action="store_true",
+        help="Disable hyperthreading for multiprocessing",
+    )
+
+
+def _add_parser_args_echonetlvh(subparsers):
+    """Add EchonetLVH specific arguments to the parser."""
+    echonetlvh_parser = subparsers.add_parser("echonetlvh", help="Convert EchonetLVH dataset")
+    echonetlvh_parser.add_argument("src", type=str, help="Source folder path")
+    echonetlvh_parser.add_argument("dst", type=str, help="Destination folder path")
+    echonetlvh_parser.add_argument(
+        "--no_rejection",
+        action="store_true",
+        help="Do not reject sequences in manual_rejections.txt",
+    )
+    echonetlvh_parser.add_argument(
+        "--rejection_path",
+        type=str,
+        default=None,
+        help="Path to custom rejection txt file (defaults to manual_rejections.txt)",
+    )
+    echonetlvh_parser.add_argument(
+        "--batch",
+        type=str,
+        default=None,
+        help="Specify which BatchX directory to process, e.g. --batch=Batch2",
+    )
+    echonetlvh_parser.add_argument(
+        "--convert_measurements",
+        action="store_true",
+        help="Only convert measurements CSV file",
+    )
+    echonetlvh_parser.add_argument(
+        "--convert_images",
+        action="store_true",
+        help="Only convert image files",
+    )
+    echonetlvh_parser.add_argument(
+        "--max_files",
+        type=int,
+        default=None,
+        help="Maximum number of files to process (for testing)",
+    )
+    echonetlvh_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force recomputation even if parameters already exist",
+    )
+    echonetlvh_parser.add_argument(
+        "--no_hyperthreading",
+        action="store_true",
+        help="Disable hyperthreading for multiprocessing",
+    )
+
+
+def _add_parser_args_picmus(subparsers):
+    """Add PICMUS specific arguments to the parser."""
+    picmus_parser = subparsers.add_parser("picmus", help="Convert PICMUS dataset")
+    picmus_parser.add_argument("src", type=str, help="Source folder path")
+    picmus_parser.add_argument("dst", type=str, help="Destination folder path")
+
+
+def _add_parser_args_verasonics(subparsers):
+    verasonics_parser = subparsers.add_parser(
+        "verasonics", help="Convert Verasonics data to zea dataset"
+    )
+    verasonics_parser.add_argument("src", type=str, help="Source folder path")
+    verasonics_parser.add_argument("dst", type=str, help="Destination folder path")
+    verasonics_parser.add_argument(
         "--frames",
         default=["all"],
         type=str,
         nargs="+",
-        help="verasonics: The frames to add to the file. This can be a list of integers, a range "
+        help="The frames to add to the file. This can be a list of integers, a range "
         "of integers (e.g. 4-8), or 'all'.",
     )
-    # ECHONET_LVH
-    parser.add_argument(
-        "--no_rejection",
+    verasonics_parser.add_argument(
+        "--allow_accumulate",
         action="store_true",
-        help="EchonetLVH: Do not reject sequences in manual_rejections.txt",
+        help=(
+            "Sometimes, some transmits are already accumulated on the Verasonics system "
+            "(e.g. harmonic imaging through pulse inversion). In this case, the mode in the "
+            "Receive structure is set to 1 (accumulate). If this flag is set, such files "
+            "will be processed. Otherwise, an error is raised when such a mode is detected."
+        ),
+    )
+    verasonics_parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="Device to use for conversion (e.g., 'cpu' or 'gpu:0').",
+    )
+    verasonics_parser.add_argument(
+        "--no_compression",
+        action="store_true",
+        help="Disable compression when saving the zea dataset. By default, compression is "
+        "enabled, which reduces disk space at the cost of increased conversion time.",
     )
 
-    parser.add_argument(
-        "--batch",
-        type=str,
-        default=None,
-        help="EchonetLVH: Specify which BatchX directory to process, e.g. --batch=Batch2",
-    )
-    parser.add_argument(
-        "--convert_measurements",
-        action="store_true",
-        help="EchonetLVH: Only convert measurements CSV file",
-    )
-    parser.add_argument(
-        "--convert_images", action="store_true", help="EchonetLVH: Only convert image files"
-    )
-    parser.add_argument(
-        "--max_files",
-        type=int,
-        default=None,
-        help="EchonetLVH: Maximum number of files to process (for testing)",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="EchonetLVH: Force recomputation even if parameters already exist",
-    )
+
+def get_parser():
+    """Build and parse command-line arguments for converting raw datasets to a zea dataset."""
+    parser = argparse.ArgumentParser(description="Convert raw data to a zea dataset.")
+    subparsers = parser.add_subparsers(dest="dataset", required=True)
+    _add_parser_args_echonet(subparsers)
+    _add_parser_args_echonetlvh(subparsers)
+    _add_parser_args_camus(subparsers)
+    _add_parser_args_picmus(subparsers)
+    _add_parser_args_verasonics(subparsers)
     return parser
 
 

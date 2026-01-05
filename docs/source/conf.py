@@ -33,7 +33,22 @@ extensions = [
 ]
 
 autodoc_mock_imports = ["zea.backend.tf2jax"]
-exclude_patterns = ["_autosummary/zea.backend.tf2jax.rst"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "_autosummary/zea.backend.tf2jax.rst",
+    # Exclude internal implementation modules from documentation
+    "_autosummary/zea.func.tensor.rst",
+    "_autosummary/zea.func.ultrasound.rst",
+    "_autosummary/zea.ops.base.rst",
+    "_autosummary/zea.ops.tensor.rst",
+    "_autosummary/zea.ops.ultrasound.rst",
+    "_autosummary/zea.ops.pipeline.rst",
+    "_autosummary/zea.tracking.base.rst",
+    "_autosummary/zea.tracking.segmentation.rst",
+    "_autosummary/zea.tracking.lucas_kanade.rst",
+]
 
 autodoc_default_options = {
     "members": True,
@@ -77,3 +92,7 @@ redirects = {
     f"notebooks/{page}.html": f"../examples.html#{page}"
     for page in ["data", "pipeline", "models", "metrics", "agent"]
 }
+
+# this will make sure that when an __all__ is defined in a module, the members
+# listed in __all__ are the only ones included in the autosummary documentation
+autosummary_ignore_module_all = False

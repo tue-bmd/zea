@@ -12,8 +12,8 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 
+from zea.func.tensor import translate
 from zea.io_lib import save_video
-from zea.tensor_ops import translate
 
 
 def get_args():

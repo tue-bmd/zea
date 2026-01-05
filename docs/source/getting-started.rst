@@ -54,7 +54,7 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
       file = dataset[0]
       image = file.load_data("image_sc", indices=0)
 
-   image = zea.tensor_ops.translate(image, config.data.dynamic_range, (-1, 1))
+   image = zea.func.translate(image, config.data.dynamic_range, (-1, 1))
    masks = model(image[None, ..., None])
 
 

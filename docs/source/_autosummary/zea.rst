@@ -32,9 +32,9 @@ zea
    datapaths
    display
    doppler
+   func
    interface
    io_lib
-   keras_ops
    log
    metrics
    models
@@ -42,7 +42,6 @@ zea
    probes
    scan
    simulator
-   tensor_ops
    tools
    tracking
    utils

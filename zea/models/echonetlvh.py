@@ -25,12 +25,12 @@ To try this model, simply load one of the available presets:
 import numpy as np
 from keras import ops
 
+from zea.func.tensor import translate
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.deeplabv3 import DeeplabV3Plus
 from zea.models.preset_utils import register_presets
 from zea.models.presets import echonet_lvh_presets
-from zea.tensor_ops import translate
 
 
 @model_registry(name="echonetlvh")

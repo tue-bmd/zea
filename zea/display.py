@@ -8,7 +8,7 @@ import scipy
 from keras import ops
 from PIL import Image
 
-from zea.tensor_ops import translate
+from zea.func.tensor import translate
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
@@ -451,7 +451,7 @@ def cartesian_to_polar_matrix(
 
     # assume tip is at center top unless specified
     if tip is None:
-        center_x = cartesian_cols // 2
+        center_x = cartesian_cols / 2  # center_x can be between two pixels
         tip_y = 0
         tip = (center_x, tip_y)
 

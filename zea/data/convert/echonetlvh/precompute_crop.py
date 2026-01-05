@@ -170,6 +170,7 @@ def precompute_cone_parameters(args):
         "apex_x",
         "new_width",
         "new_height",
+        "opening_angle",
         "status",
     ]
 
@@ -197,6 +198,7 @@ def precompute_cone_parameters(args):
                     "apex_x": full_cone_params["apex_x"],
                     "new_width": full_cone_params["new_width"],
                     "new_height": full_cone_params["new_height"],
+                    "opening_angle": full_cone_params["opening_angle"],
                     "status": "success",
                 }
 

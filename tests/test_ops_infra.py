@@ -10,8 +10,9 @@ import pytest
 from zea import ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
-from zea.internal.core import DataTypes
+from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
+from zea.ops.pipeline import pipeline_from_config, pipeline_from_json, pipeline_from_yaml
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -141,15 +142,13 @@ def patched_pipeline_config():
             {"name": "simulate_rf"},
             {"name": "demodulate"},
             {
-                "name": "patched_grid",
-                "params": {"num_patches": 15},
-                "operations": [
-                    {"name": "tof_correction"},
-                    {"name": "pfield_weighting"},
-                    {"name": "delay_and_sum"},
-                ],
+                "name": "beamform",
+                "params": {
+                    "beamformer": "delay_and_sum",
+                    "num_patches": 15,
+                    "enable_pfield": True,
+                },
             },
-            {"name": "reshape_grid"},
             {"name": "envelope_detect"},
             {"name": "normalize"},
             {"name": "log_compress"},
@@ -182,6 +181,7 @@ def branched_pipeline_config():
                     ],
                 },
             },
+            {"name": "reshape_grid"},
             {"name": "envelope_detect"},
             {"name": "normalize"},
             {"name": "log_compress"},
@@ -191,11 +191,12 @@ def branched_pipeline_config():
 
 def validate_branched_pipeline(pipeline):
     """Validates the branched pipeline."""
-    assert len(pipeline.operations) == 4
+    assert len(pipeline.operations) == 5
     assert hasattr(pipeline.operations[0], "branches")
-    assert isinstance(pipeline.operations[1], ops.EnvelopeDetect)
-    assert isinstance(pipeline.operations[2], ops.Normalize)
-    assert isinstance(pipeline.operations[3], ops.LogCompress)
+    assert isinstance(pipeline.operations[1], ops.ReshapeGrid)
+    assert isinstance(pipeline.operations[2], ops.EnvelopeDetect)
+    assert isinstance(pipeline.operations[3], ops.Normalize)
+    assert isinstance(pipeline.operations[4], ops.LogCompress)
 
     branch_1 = pipeline.operations[0].branches["branch_1"]
     branch_2 = pipeline.operations[0].branches["branch_2"]
@@ -213,7 +214,7 @@ def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=1, jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(ops.Normalize(input_range=DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -222,7 +223,7 @@ def patched_pipeline():
     """Returns a pipeline for ultrasound simulation where the beamforming happens patch-wise."""
     pipeline = ops.Pipeline.from_default(jit_options=None)
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(ops.Normalize(input_range=DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
@@ -457,15 +458,14 @@ def validate_default_pipeline(pipeline, patched=False):
         assert isinstance(pipeline.operations[7], ops.Normalize)
         assert isinstance(pipeline.operations[8], ops.LogCompress)
     else:
-        patched_grid = pipeline.operations[2]
-        assert hasattr(patched_grid, "operations")
-        assert isinstance(patched_grid.operations[0], ops.TOFCorrection)
-        assert isinstance(patched_grid.operations[1], ops.PfieldWeighting)
-        assert isinstance(patched_grid.operations[2], ops.DelayAndSum)
-        assert isinstance(pipeline.operations[3], ops.ReshapeGrid)
-        assert isinstance(pipeline.operations[4], ops.EnvelopeDetect)
-        assert isinstance(pipeline.operations[5], ops.Normalize)
-        assert isinstance(pipeline.operations[6], ops.LogCompress)
+        beamform = pipeline.operations[2]
+        assert hasattr(beamform, "operations")
+        assert isinstance(beamform.operations[0].operations[0], ops.TOFCorrection)
+        assert isinstance(beamform.operations[0].operations[1], ops.PfieldWeighting)
+        assert isinstance(beamform.operations[0].operations[2], ops.DelayAndSum)
+        assert isinstance(pipeline.operations[3], ops.EnvelopeDetect)
+        assert isinstance(pipeline.operations[4], ops.Normalize)
+        assert isinstance(pipeline.operations[5], ops.LogCompress)
 
 
 @pytest.mark.parametrize(
@@ -476,7 +476,7 @@ def test_default_pipeline_from_json(config_fixture, request):
     """Tests building a default pipeline from a JSON string."""
     config = request.getfixturevalue(config_fixture)
     json_string = json.dumps(config)
-    pipeline = ops.pipeline_from_json(json_string, jit_options=None)
+    pipeline = pipeline_from_json(json_string, jit_options=None)
 
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(pipeline)
@@ -489,7 +489,7 @@ def test_pipeline_from_config(config_fixture, request):
     """Tests building a dummy pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     validate_basic_pipeline(pipeline, with_params=config_fixture == "pipeline_config_with_params")
 
@@ -502,7 +502,7 @@ def test_default_pipeline_from_config(config_fixture, request):
     """Tests building a default pipeline from a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(pipeline)
@@ -518,13 +518,13 @@ def test_pipeline_to_config(config_fixture, request):
     """Tests converting a pipeline to a Config object."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     # Convert the pipeline back to a Config object
     new_config = pipeline.to_config()
 
     # Create a new pipeline from the new Config object
-    new_pipeline = ops.pipeline_from_config(new_config, jit_options=None)
+    new_pipeline = pipeline_from_config(new_config, jit_options=None)
 
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(new_pipeline)
@@ -540,13 +540,13 @@ def test_pipeline_to_json(config_fixture, request):
     """Tests converting a pipeline to a JSON string."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     # Convert the pipeline to a JSON string
     json_string = pipeline.to_json()
 
     # Create a new pipeline from the JSON string
-    new_pipeline = ops.pipeline_from_json(json_string, jit_options=None)
+    new_pipeline = pipeline_from_json(json_string, jit_options=None)
 
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(new_pipeline)
@@ -562,14 +562,14 @@ def test_pipeline_to_yaml(config_fixture, request, tmp_path):
     """Tests converting a pipeline to a YAML file (in tmp directory), and then loading it back."""
     config_dict = request.getfixturevalue(config_fixture)
     config = Config(**config_dict)
-    pipeline = ops.pipeline_from_config(config, jit_options=None)
+    pipeline = pipeline_from_config(config, jit_options=None)
 
     # Write pipeline to a YAML file in the temporary directory
     path = tmp_path / "tmp_pipeline.yaml"
     pipeline.to_yaml(path)
 
     # Load the pipeline from the YAML file
-    new_pipeline = ops.pipeline_from_yaml(path, jit_options=None)
+    new_pipeline = pipeline_from_yaml(path, jit_options=None)
 
     if config_fixture == "branched_pipeline_config":
         validate_branched_pipeline(new_pipeline)
@@ -784,4 +784,11 @@ def test_registry():
     classes = inspect.getmembers(ops, inspect.isclass)
     for _, _class in classes:
         if _class.__module__.startswith("zea.ops."):
+            # Skip abstract base classes and base Operation classes
+            if inspect.isabstract(_class) or _class.__name__ in [
+                "Operation",
+                "ImageOperation",
+                "MissingKerasOps",
+            ]:
+                continue
             ops_registry.get_name(_class)  # this raises an error if the class is not registered

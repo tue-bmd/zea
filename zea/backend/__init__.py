@@ -131,7 +131,7 @@ class on_device:
         .. code-block:: python
 
             with zea.backend.on_device("gpu:3"):
-                pipeline = zea.Pipeline([zea.keras_ops.Abs()])
+                pipeline = zea.Pipeline([zea.ops.Abs()])
                 output = pipeline(data=keras.random.normal((10, 10)))  # output is on "cuda:3"
     """
 

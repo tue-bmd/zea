@@ -16,9 +16,9 @@ from typing import Callable
 import keras
 from keras import ops
 
-from zea import tensor_ops
 from zea.agent import masks
 from zea.backend.autograd import AutoGrad
+from zea.func import tensor
 from zea.internal.registry import action_selection_registry
 
 
@@ -462,7 +462,7 @@ class CovarianceSamplingLines(LinesActionModel):
         particles = ops.reshape(particles, shape)
 
         # [batch_size, rows * stack_n_cols, n_possible_actions, n_possible_actions]
-        cov_matrix = tensor_ops.batch_cov(particles)
+        cov_matrix = tensor.batch_cov(particles)
 
         # Sum over the row dimension [batch_size, n_possible_actions, n_possible_actions]
         cov_matrix = ops.sum(cov_matrix, axis=1)
@@ -477,7 +477,7 @@ class CovarianceSamplingLines(LinesActionModel):
         # Subsample the covariance matrix with random lines
         def subsample_with_mask(mask):
             """Subsample the covariance matrix with a single mask."""
-            subsampled_cov_matrix = tensor_ops.boolean_mask(
+            subsampled_cov_matrix = tensor.boolean_mask(
                 cov_matrix, mask, size=batch_size * self.n_actions**2
             )
             return ops.reshape(subsampled_cov_matrix, [batch_size, self.n_actions, self.n_actions])

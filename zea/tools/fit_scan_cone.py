@@ -11,13 +11,14 @@ This module provides functionality to:
 """
 
 import argparse
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from zea import log
-from zea.tensor_ops import translate
+from zea.func.tensor import translate
 
 
 def filter_edge_points_by_boundary(edge_points, is_left=True, min_cone_half_angle_deg=20):
@@ -238,10 +239,11 @@ def detect_cone_parameters(image, min_cone_half_angle_deg=20, threshold=15):
     padding_x = 0
     padding_y = 0
 
-    crop_left = int(left_x_bottom) - padding_x
-    crop_right = int(right_x_bottom) + padding_x
-    crop_top = int(apex_y) - padding_y
-    crop_bottom = int(sector_bottom)
+    # convservative cropping boundaries to avoid empty space
+    crop_left = math.ceil(left_x_bottom) - padding_x
+    crop_right = math.floor(right_x_bottom) + padding_x
+    crop_top = math.ceil(apex_y) - padding_y
+    crop_bottom = math.floor(sector_bottom)
 
     # Calculate final dimensions
     new_width = crop_right - crop_left
@@ -366,14 +368,14 @@ def crop_and_center_cone(image, cone_params):
 
 
 def fit_and_crop_around_scan_cone(
-    image, image_range, min_cone_half_angle_deg=20, threshold=15, return_params=False
+    image, image_range=(0, 255), min_cone_half_angle_deg=20, threshold=15, return_params=False
 ):
     """
     Detect scan cone in ultrasound image and return cropped/padded image with centered apex.
 
     Args:
         image: numpy array (2D grayscale image)
-        image_range: tuple (vmin, vmax) for display scaling
+        image_range: tuple (vmin, vmax) for display scaling (default: (0, 255))
         min_cone_half_angle_deg: Minimum expected half-angle of the cone in degrees (default: 20)
         threshold: Threshold for binary image - pixels above this are considered data.
             This is always on a scale of 0-255 (default: 15).

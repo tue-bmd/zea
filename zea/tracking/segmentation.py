@@ -8,7 +8,7 @@
 
 from keras import ops
 
-from zea.tensor_ops import find_contour
+from zea.func.tensor import find_contour
 
 from .base import BaseTracker
 

@@ -48,6 +48,7 @@ from skimage.measure import approximate_polygon, find_contours
 from sklearn.metrics import pairwise_distances
 
 from zea import log
+from zea.func.tensor import translate
 from zea.internal.viewer import (
     filename_from_window_dialog,
     get_matplotlib_figure_props,
@@ -55,7 +56,6 @@ from zea.internal.viewer import (
 )
 from zea.io_lib import _SUPPORTED_VID_TYPES, load_image, load_video
 from zea.metrics import get_metric
-from zea.tensor_ops import translate
 from zea.visualize import plot_rectangle_from_mask, plot_shape_from_mask
 
 

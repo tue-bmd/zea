@@ -10,7 +10,7 @@ from typing import Tuple
 
 from keras import ops
 
-from zea.tensor_ops import gaussian_filter, translate
+from zea.func.tensor import gaussian_filter, translate
 
 from .base import BaseTracker
 

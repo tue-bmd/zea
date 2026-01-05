@@ -24,7 +24,7 @@ from tqdm import tqdm
 from zea import log
 from zea.data import generate_zea_dataset
 from zea.data.convert.utils import load_avi, unzip
-from zea.tensor_ops import translate
+from zea.func.tensor import translate
 
 
 def segment(tensor, number_erasing=0, min_clip=0):

@@ -7,12 +7,13 @@ import keras
 import numpy as np
 from keras import ops
 
-from zea import log, tensor_ops
+from zea import log
 from zea.backend import func_on_device
+from zea.func import tensor
+from zea.func.tensor import translate
 from zea.internal.registry import metrics_registry
 from zea.internal.utils import reduce_to_signature
 from zea.models.lpips import LPIPS
-from zea.tensor_ops import translate
 
 
 def get_metric(name, **kwargs):
@@ -197,7 +198,7 @@ def ssim(
 
         # Construct a 1D convolution.
         def filter_fn_1(z):
-            return tensor_ops.correlate(z, ops.flip(filt), mode="valid")
+            return tensor.correlate(z, ops.flip(filt), mode="valid")
 
         # Apply the vectorized filter along the y axis.
         def filter_fn_y(z):
@@ -300,7 +301,7 @@ def get_lpips(image_range, batch_size=None, clip=False):
 
         imgs = ops.stack([img1, img2], axis=-1)
         n_batch_dims = ops.ndim(img1) - 3
-        return tensor_ops.func_with_one_batch_dim(
+        return tensor.func_with_one_batch_dim(
             unstack_lpips, imgs, n_batch_dims, batch_size=batch_size
         )
 
@@ -372,7 +373,7 @@ class Metrics:
         # Because most metric functions do not support batching, we vmap over the batch axes.
         metric_fn = fun
         for ax in reversed(batch_axes):
-            metric_fn = tensor_ops.vmap(metric_fn, in_axes=ax, _use_torch_vmap=True)
+            metric_fn = tensor.vmap(metric_fn, in_axes=ax, _use_torch_vmap=True)
 
         out = func_on_device(metric_fn, device, y_true, y_pred)
 

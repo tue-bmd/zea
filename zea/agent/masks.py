@@ -9,8 +9,8 @@ from typing import List
 import keras
 from keras import ops
 
-from zea import tensor_ops
 from zea.agent.gumbel import hard_straight_through
+from zea.func.tensor import nonzero
 
 _DEFAULT_DTYPE = "bool"
 
@@ -56,7 +56,7 @@ def k_hot_to_indices(selected_lines, n_actions: int, fill_value=-1):
 
     # Find nonzero indices for each frame
     def get_nonzero(row):
-        return tensor_ops.nonzero(row > 0, size=n_actions, fill_value=fill_value)[0]
+        return nonzero(row > 0, size=n_actions, fill_value=fill_value)[0]
 
     indices = ops.vectorized_map(get_nonzero, selected_lines)
     return indices

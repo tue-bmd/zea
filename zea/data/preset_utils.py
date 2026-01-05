@@ -86,7 +86,7 @@ def _download_files_in_path(
     return downloaded_files
 
 
-def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR):
+def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR) -> Path:
     """Resolve a Hugging Face path to a local cache directory path.
 
     Downloads files from a HuggingFace dataset repository and returns

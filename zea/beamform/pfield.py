@@ -24,8 +24,8 @@ import numpy as np
 from keras import ops
 
 from zea import log
+from zea.func.tensor import sinc
 from zea.internal.cache import cache_output
-from zea.tensor_ops import sinc
 
 
 def _abs_sinc(x):

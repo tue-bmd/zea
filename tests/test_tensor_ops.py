@@ -9,7 +9,7 @@ from keras import ops
 from numpy.random import default_rng
 from scipy.ndimage import gaussian_filter
 
-from zea import tensor_ops
+import zea
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
 
@@ -26,9 +26,9 @@ from . import DEFAULT_TEST_SEED, backend_equality_check
 @backend_equality_check()
 def test_flatten(array, start_dim, end_dim):
     """Test the `flatten` function to `torch.flatten`."""
-    from zea import tensor_ops
+    import zea
 
-    out = tensor_ops.flatten(array, start_dim, end_dim)
+    out = zea.func.flatten(array, start_dim, end_dim)
     torch_out = torch.flatten(
         torch.from_numpy(array),
         start_dim=start_dim,
@@ -76,11 +76,11 @@ def test_batch_cov(data, rowvar, bias, ddof):
     """
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     data = ops.convert_to_tensor(data)
 
-    out = tensor_ops.batch_cov(data, rowvar=rowvar, bias=bias, ddof=ddof)
+    out = zea.func.batch_cov(data, rowvar=rowvar, bias=bias, ddof=ddof)
 
     # Assert that is is equal to the numpy implementation
     np.testing.assert_allclose(
@@ -96,13 +96,13 @@ def test_batch_cov(data, rowvar, bias, ddof):
 def test_add_salt_and_pepper_noise():
     """Tests if add_salt_and_pepper_noise runs."""
     image = ops.zeros((28, 28), "float32")
-    tensor_ops.add_salt_and_pepper_noise(image, 0.1, 0.1)
+    zea.func.add_salt_and_pepper_noise(image, 0.1, 0.1)
 
 
 def test_extend_n_dims():
     """Tests if extend_n_dims runs."""
     tensor = ops.zeros((28, 28), "float32")
-    out = tensor_ops.extend_n_dims(tensor, axis=1, n_dims=2)
+    out = zea.func.extend_n_dims(tensor, axis=1, n_dims=2)
     assert ops.ndim(out) == 4
     assert ops.shape(out) == (28, 1, 1, 28)
 
@@ -117,9 +117,8 @@ def test_extend_n_dims():
 @backend_equality_check()
 def test_matrix_power(array, n):
     """Test matrix_power to np.linalg.matrix_power."""
-    from zea import tensor_ops
 
-    out = tensor_ops.matrix_power(array, n)
+    out = zea.func.matrix_power(array, n)
 
     # Test if the output is equal to the np.linalg.matrix_power implementation
     np.testing.assert_almost_equal(
@@ -147,9 +146,9 @@ def test_boolean_mask(array, mask):
     """Tests if boolean_mask runs."""
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
-    out = tensor_ops.boolean_mask(array, mask)
+    out = zea.func.boolean_mask(array, mask)
 
     out = ops.convert_to_numpy(out)
     assert ops.prod(ops.shape(out)) == ops.sum(mask), "Output shape is incorrect."
@@ -173,13 +172,13 @@ def test_func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis):
 
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     if func == "rgb_to_grayscale":
         func = ops.image.rgb_to_grayscale
 
-    out = tensor_ops.func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis=func_axis)
-    out2 = tensor_ops.func_with_one_batch_dim(
+    out = zea.func.func_with_one_batch_dim(func, tensor, n_batch_dims, func_axis=func_axis)
+    out2 = zea.func.func_with_one_batch_dim(
         func, tensor, n_batch_dims, batch_size=2, func_axis=func_axis
     )
     assert ops.shape(out) == (*tensor.shape[:-1], 1), "Output shape is incorrect."
@@ -205,13 +204,13 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
 
     TODO: does not work for torch...
     """
-    from zea import tensor_ops
+    import zea
 
     # Create random test data (gradient)
     data = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
 
     # First stack the data
-    stacked = tensor_ops.stack_volume_data_along_axis(data, batch_axis, stack_axis, n_frames)
+    stacked = zea.func.stack_volume_data_along_axis(data, batch_axis, stack_axis, n_frames)
 
     # Calculate padding that was added (if any)
     original_size = data.shape[batch_axis]
@@ -220,7 +219,7 @@ def test_stack_and_split_volume_data(shape, batch_axis, stack_axis, n_frames):
     padding = padded_size - original_size
 
     # Then split it back
-    restored = tensor_ops.split_volume_data_from_axis(
+    restored = zea.func.split_volume_data_from_axis(
         stacked, batch_axis, stack_axis, n_frames, padding
     )
 
@@ -246,11 +245,11 @@ def test_pad_array_to_divisible(array, divisor, axis):
     """Test the pad_array_to_divisible function."""
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     array = ops.convert_to_tensor(array)
 
-    padded = tensor_ops.pad_array_to_divisible(array, divisor, axis=axis)
+    padded = zea.func.pad_array_to_divisible(array, divisor, axis=axis)
 
     # Check that output shape is divisible by divisor only on specified axis
     assert padded.shape[axis] % divisor == 0, (
@@ -287,9 +286,9 @@ def test_pad_array_to_divisible(array, divisor, axis):
 @backend_equality_check()
 def test_images_to_patches(image, patch_size, overlap):
     """Test the images_to_patches function."""
-    from zea import tensor_ops
+    import zea
 
-    patches = tensor_ops.images_to_patches(image, patch_size, overlap)
+    patches = zea.func.images_to_patches(image, patch_size, overlap)
     assert patches.shape[0] == image.shape[0]
     assert patches.shape[3] == patch_size[0]
     assert patches.shape[4] == patch_size[1]
@@ -323,9 +322,9 @@ def test_images_to_patches(image, patch_size, overlap):
 @backend_equality_check()
 def test_patches_to_images(patches, image_shape, overlap, window_type):
     """Test the patches_to_images function."""
-    from zea import tensor_ops
+    import zea
 
-    image = tensor_ops.patches_to_images(patches, image_shape, overlap, window_type)
+    image = zea.func.patches_to_images(patches, image_shape, overlap, window_type)
     assert image.shape[1:] == image_shape
     return image
 
@@ -341,10 +340,10 @@ def test_patches_to_images(patches, image_shape, overlap, window_type):
 @backend_equality_check()
 def test_images_to_patches_and_back(image, patch_size, overlap, window_type):
     """Test images_to_patches and patches_to_images together."""
-    from zea import tensor_ops
+    import zea
 
-    patches = tensor_ops.images_to_patches(image, patch_size, overlap)
-    reconstructed_image = tensor_ops.patches_to_images(
+    patches = zea.func.images_to_patches(image, patch_size, overlap)
+    reconstructed_image = zea.func.patches_to_images(
         patches,
         image.shape[1:],
         overlap,
@@ -371,14 +370,14 @@ def test_gaussian_filter(array, sigma, order, truncate):
     """
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     array = array.astype(np.float32)
 
     blurred_scipy = gaussian_filter(array, sigma=sigma, order=order, truncate=truncate)
 
     tensor = ops.convert_to_tensor(array)
-    blurred_zea = tensor_ops.gaussian_filter(tensor, sigma=sigma, order=order, truncate=truncate)
+    blurred_zea = zea.func.gaussian_filter(tensor, sigma=sigma, order=order, truncate=truncate)
     blurred_zea = ops.convert_to_numpy(blurred_zea)
 
     np.testing.assert_allclose(blurred_scipy, blurred_zea, rtol=1e-5, atol=1e-5)
@@ -387,11 +386,11 @@ def test_gaussian_filter(array, sigma, order, truncate):
 
 def test_linear_sum_assignment_greedy():
     """Test the custom greedy linear_sum_assignment function."""
-    from zea import tensor_ops
+    import zea
 
     # Simple cost matrix: diagonal is optimal
     cost = np.array([[1, 2, 3], [2, 1, 3], [3, 2, 1]], dtype=np.float32)
-    row_ind, col_ind = tensor_ops.linear_sum_assignment(cost)
+    row_ind, col_ind = zea.func.linear_sum_assignment(cost)
     # Should assign 0->0, 1->1, 2->2
     assert np.all(row_ind == np.array([0, 1, 2]))
     assert np.all(col_ind == np.array([0, 1, 2]))
@@ -411,7 +410,7 @@ def test_apply_along_axis(array, axis, fn):
     """Test the apply_along_axis function."""
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     if fn == "sum":
         fn = ops.sum
@@ -423,14 +422,14 @@ def test_apply_along_axis(array, axis, fn):
         fn = ops.argmax
         np_fn = np.argmax
     elif fn == "correlate":
-        fn = lambda x: tensor_ops.correlate(x, ops.ones(10), mode="valid")
+        fn = lambda x: zea.func.correlate(x, ops.ones(10), mode="valid")
         np_fn = lambda x: np.correlate(x, np.ones(10), mode="valid")
     else:
         raise ValueError(f"Function {fn} not recognized.")
 
     # Simple test: sum along axis
     array = array.astype(np.float32)
-    result = tensor_ops.apply_along_axis(fn, axis, array)
+    result = zea.func.apply_along_axis(fn, axis, array)
     expected = np.apply_along_axis(np_fn, axis, array)
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
 
@@ -439,7 +438,7 @@ def test_apply_along_axis(array, axis, fn):
 @backend_equality_check()
 def test_correlate(mode):
     """Test the correlate function with random complex vectors against np.correlate."""
-    from zea import tensor_ops
+    import zea
 
     # Set random seed for reproducibility
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
@@ -448,7 +447,7 @@ def test_correlate(mode):
     a_real = rng.standard_normal(10).astype(np.float32)
     v_real = rng.standard_normal(7).astype(np.float32)
 
-    result_real = tensor_ops.correlate(a_real, v_real, mode=mode)
+    result_real = zea.func.correlate(a_real, v_real, mode=mode)
     expected_real = np.correlate(a_real, v_real, mode=mode)
 
     np.testing.assert_allclose(result_real, expected_real, rtol=1e-5, atol=1e-5)
@@ -457,7 +456,7 @@ def test_correlate(mode):
     a_complex = (rng.standard_normal(8) + 1j * rng.standard_normal(8)).astype(np.complex64)
     v_complex = (rng.standard_normal(5) + 1j * rng.standard_normal(5)).astype(np.complex64)
 
-    result_complex = tensor_ops.correlate(a_complex, v_complex, mode=mode)
+    result_complex = zea.func.correlate(a_complex, v_complex, mode=mode)
     expected_complex = np.correlate(a_complex, v_complex, mode=mode)
 
     np.testing.assert_allclose(result_complex, expected_complex, rtol=1e-5, atol=1e-5)
@@ -466,7 +465,7 @@ def test_correlate(mode):
     a_short = rng.standard_normal(3).astype(np.float32)
     v_long = rng.standard_normal(12).astype(np.float32)
 
-    result_edge = tensor_ops.correlate(a_short, v_long, mode=mode)
+    result_edge = zea.func.correlate(a_short, v_long, mode=mode)
     expected_edge = np.correlate(a_short, v_long, mode=mode)
 
     np.testing.assert_allclose(result_edge, expected_edge, rtol=1e-5, atol=1e-5)
@@ -504,7 +503,7 @@ def test_vmap(func, in_axes, out_axes, batch_size, chunks, fn_supports_batch):
     import jax
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     shape = (10, 10, 3, 2)
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
@@ -578,7 +577,7 @@ def test_vmap(func, in_axes, out_axes, batch_size, chunks, fn_supports_batch):
 
     # Apply vmap
     expected = jax.vmap(jax_func, in_axes, out_axes)(x, y)
-    result = tensor_ops.vmap(
+    result = zea.func.vmap(
         func,
         in_axes,
         out_axes,
@@ -586,7 +585,7 @@ def test_vmap(func, in_axes, out_axes, batch_size, chunks, fn_supports_batch):
         chunks=chunks,
         fn_supports_batch=fn_supports_batch,
     )(x_tensor, y_tensor)
-    no_jit_result = tensor_ops.vmap(
+    no_jit_result = zea.func.vmap(
         func,
         in_axes,
         out_axes,
@@ -609,7 +608,7 @@ def test_vmap_none_arg():
     """Test the `zea` `vmap` function with `None` argument."""
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     shape = (10, 10, 3, 2)
 
@@ -623,7 +622,7 @@ def test_vmap_none_arg():
     x_tensor = ops.convert_to_tensor(x)
 
     # Apply map
-    result = tensor_ops.vmap(func)(x_tensor, None)
+    result = zea.func.vmap(func)(x_tensor, None)
     expected = x + 1
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
 
@@ -635,7 +634,7 @@ def test_simple_map_one_input():
     """Test the `zea` `simple_map` function against `keras.ops.map`."""
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     # One input
     def func_one_input(x):
@@ -645,7 +644,7 @@ def test_simple_map_one_input():
     x = rng.standard_normal((10, 5)).astype(np.float32)
     x_tensor = ops.convert_to_tensor(x)
     expected_one_input = ops.map(func_one_input, x_tensor)
-    result_one_input = tensor_ops.simple_map(func_one_input, x_tensor)
+    result_one_input = zea.func.simple_map(func_one_input, x_tensor)
     np.testing.assert_allclose(result_one_input, expected_one_input, rtol=1e-5, atol=1e-5)
 
     return result_one_input
@@ -656,7 +655,7 @@ def test_simple_map_multiple_inputs():
     """Test the `zea` `simple_map` function against `keras.ops.map`."""
     from keras import ops
 
-    from zea import tensor_ops
+    import zea
 
     # Multiple inputs
     def func_multiple_inputs(inputs):
@@ -669,7 +668,7 @@ def test_simple_map_multiple_inputs():
     x_tensor = ops.convert_to_tensor(x)
     y_tensor = ops.convert_to_tensor(y)
     expected_multiple_inputs = ops.map(func_multiple_inputs, [x_tensor, y_tensor])
-    result_multiple_inputs = tensor_ops.simple_map(func_multiple_inputs, [x_tensor, y_tensor])
+    result_multiple_inputs = zea.func.simple_map(func_multiple_inputs, [x_tensor, y_tensor])
     np.testing.assert_allclose(
         result_multiple_inputs, expected_multiple_inputs, rtol=1e-5, atol=1e-5
     )
@@ -688,7 +687,7 @@ def test_simple_map_multiple_inputs():
 @backend_equality_check()
 def test_find_contour(mask_shape, blob_center, blob_radius):
     """Test the find_contour function."""
-    from zea import tensor_ops
+    import zea
 
     # Create a binary mask with a circular blob
     mask = ops.zeros(mask_shape, dtype="float32")
@@ -696,7 +695,7 @@ def test_find_contour(mask_shape, blob_center, blob_radius):
     circle_mask = (y - blob_center[0]) ** 2 + (x - blob_center[1]) ** 2 <= blob_radius**2
     mask = ops.convert_to_tensor(circle_mask)
 
-    contour = tensor_ops.find_contour(mask)
+    contour = zea.func.find_contour(mask)
 
     # Check output shape and type
     assert ops.ndim(contour) == 2
@@ -716,10 +715,10 @@ def test_find_contour(mask_shape, blob_center, blob_radius):
 
 def test_find_contours_empty_mask():
     """Test find_contours with empty mask."""
-    from zea import tensor_ops
+    import zea
 
     mask = ops.zeros((50, 50), dtype="float32")
-    contour = tensor_ops.find_contour(mask)
+    contour = zea.func.find_contour(mask)
 
     # Should return empty contours
     assert ops.shape(contour) == (0, 2)
@@ -729,12 +728,15 @@ def test_find_contours_empty_mask():
     "range_from, range_to",
     [((0, 100), (2, 5)), ((-60, 0), (0, 255))],
 )
+@backend_equality_check()
 def test_translate(range_from, range_to):
     """Tests the translate function by providing a test array with its range_from and
     a range to."""
+    import zea
+
     rng = default_rng(DEFAULT_TEST_SEED)
     arr = rng.integers(low=range_from[0] + 1, high=range_from[1] - 2, size=10)
     right_min, right_max = range_to
-    result = tensor_ops.translate(arr, range_from, range_to)
+    result = zea.func.translate(arr, range_from, range_to)
     assert right_min <= np.min(result), "Minimum value is too small"
     assert np.max(result) <= right_max, "Maximum value is too large"

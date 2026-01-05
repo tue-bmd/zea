@@ -12,8 +12,8 @@ from keras.src.trainers.data_adapters import TFDatasetAdapter
 
 from zea.data.dataloader import H5Generator
 from zea.data.layers import Resizer
+from zea.func.tensor import translate
 from zea.internal.utils import find_methods_with_return_type
-from zea.tensor_ops import translate
 
 METHODS_THAT_RETURN_DATASET = find_methods_with_return_type(tf.data.Dataset, "DatasetV2")
 

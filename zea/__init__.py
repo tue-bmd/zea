@@ -7,7 +7,7 @@ from . import log
 
 # dynamically add __version__ attribute (see pyproject.toml)
 # __version__ = __import__("importlib.metadata").metadata.version(__package__)
-__version__ = "0.0.8"
+__version__ = "0.0.9"
 
 
 def _bootstrap_backend():
@@ -89,12 +89,12 @@ from . import (
     beamform,
     data,
     display,
+    func,
     io_lib,
-    keras_ops,
     metrics,
     models,
+    ops,
     simulator,
-    tensor_ops,
     utils,
     visualize,
 )

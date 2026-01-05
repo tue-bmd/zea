@@ -3,7 +3,7 @@
 import numpy as np
 from keras import ops
 
-from zea import tensor_ops
+from zea.func import tensor
 
 
 def color_doppler(
@@ -61,11 +61,11 @@ def color_doppler(
     if hamming_size[0] != 1 and hamming_size[1] != 1:
         h_row = np.hamming(hamming_size[0])
         h_col = np.hamming(hamming_size[1])
-        autocorr = tensor_ops.apply_along_axis(
-            lambda x: tensor_ops.correlate(x, h_row, mode="same"), 0, autocorr
+        autocorr = tensor.apply_along_axis(
+            lambda x: tensor.correlate(x, h_row, mode="same"), 0, autocorr
         )
-        autocorr = tensor_ops.apply_along_axis(
-            lambda x: tensor_ops.correlate(x, h_col, mode="same"), 1, autocorr
+        autocorr = tensor.apply_along_axis(
+            lambda x: tensor.correlate(x, h_col, mode="same"), 1, autocorr
         )
 
     # Doppler velocity

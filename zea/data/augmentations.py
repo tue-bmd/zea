@@ -4,7 +4,7 @@ import keras
 import numpy as np
 from keras import layers, ops
 
-from zea.tensor_ops import is_jax_prng_key, split_seed
+from zea.func.tensor import is_jax_prng_key, split_seed
 
 
 class RandomCircleInclusion(layers.Layer):

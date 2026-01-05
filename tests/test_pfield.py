@@ -3,6 +3,7 @@
 import numpy as np
 
 from zea.beamform.delays import compute_t0_delays_planewave
+from zea.ops import Pipeline
 from zea.probes import Verasonics_l11_4v
 from zea.scan import Scan
 
@@ -59,4 +60,25 @@ def test_pfield():
     assert pfield.shape == (n_tx, scan.grid_size_z, scan.grid_size_x), (
         f"Expected pfield shape {(n_tx, scan.grid_size_z, scan.grid_size_x)}, "
         f"but got {pfield.shape}"
+    )
+
+
+def test_pfield_not_triggered():
+    """Test that pfield is not computed when not needed for a Pipeline."""
+    probe = Verasonics_l11_4v()
+    scan = Scan(
+        probe_geometry=probe.probe_geometry,
+        n_tx=1,
+        n_el=probe.n_el,
+        xlims=(-20e-3, 20e-3),
+        zlims=(0, 40e-3),
+        n_ax=1024,
+        sampling_frequency=probe.sampling_frequency,
+        center_frequency=probe.center_frequency,
+    )
+
+    pipeline = Pipeline.from_default(enable_pfield=False)
+    parameters = pipeline.prepare_parameters(probe, scan)
+    assert "flat_pfield" not in parameters and "pfield" not in parameters, (
+        "pfield was computed in default pipeline but should not have been."
     )

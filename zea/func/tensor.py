@@ -329,7 +329,7 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
     For jax, this uses the native vmap implementation.
     For other backends, this a wrapper that uses `ops.vectorized_map` under the hood.
 
-    Probably you want to use `zea.tensor_ops.vmap` instead, which uses this function
+    Probably you want to use `zea.func.vmap` instead, which uses this function
     with additional batching/chunking support.
 
     Args:
@@ -845,7 +845,7 @@ def stack_volume_data_along_axis(data, batch_axis: int, stack_axis: int, number:
         .. doctest::
 
             >>> import keras
-            >>> from zea.tensor_ops import stack_volume_data_along_axis
+            >>> from zea.func import stack_volume_data_along_axis
 
             >>> data = keras.random.uniform((10, 20, 30))
             >>> # stacking along 1st axis with 2 frames per block
@@ -889,7 +889,7 @@ def split_volume_data_from_axis(data, batch_axis: int, stack_axis: int, number: 
         .. doctest::
 
             >>> import keras
-            >>> from zea.tensor_ops import split_volume_data_from_axis
+            >>> from zea.func import split_volume_data_from_axis
 
             >>> data = keras.random.uniform((20, 10, 30))
             >>> split_data = split_volume_data_from_axis(data, 0, 1, 2, 2)
@@ -1012,7 +1012,7 @@ def check_patches_fit(
     Example:
         .. doctest::
 
-            >>> from zea.tensor_ops import check_patches_fit
+            >>> from zea.func import check_patches_fit
             >>> image_shape = (10, 10)
             >>> patch_shape = (4, 4)
             >>> overlap = (2, 2)
@@ -1080,7 +1080,7 @@ def images_to_patches(
         .. doctest::
 
             >>> import keras
-            >>> from zea.tensor_ops import images_to_patches
+            >>> from zea.func import images_to_patches
 
             >>> images = keras.random.uniform((2, 8, 8, 3))
             >>> patches = images_to_patches(images, patch_shape=(4, 4), overlap=(2, 2))
@@ -1166,7 +1166,7 @@ def patches_to_images(
         .. doctest::
 
             >>> import keras
-            >>> from zea.tensor_ops import patches_to_images
+            >>> from zea.func import patches_to_images
 
             >>> patches = keras.random.uniform((2, 3, 3, 4, 4, 3))
             >>> images = patches_to_images(patches, image_shape=(8, 8, 3), overlap=(2, 2))
@@ -1254,7 +1254,7 @@ def reshape_axis(data, newshape: tuple, axis: int):
         .. doctest::
 
             >>> import keras
-            >>> from zea.tensor_ops import reshape_axis
+            >>> from zea.func import reshape_axis
 
             >>> data = keras.random.uniform((3, 4, 5))
             >>> newshape = (2, 2)
@@ -1641,7 +1641,7 @@ def find_contour(binary_mask):
     Example:
         .. doctest::
 
-            >>> from zea.tensor_ops import find_contour
+            >>> from zea.func import find_contour
             >>> import keras
             >>> mask = keras.ops.zeros((10, 10))
             >>> mask = keras.ops.scatter_update(
@@ -1700,3 +1700,27 @@ def translate(array, range_from=None, range_to=(0, 255)):
 
     # Convert the 0-1 range into a value in the right range.
     return right_min + (value_scaled * (right_max - right_min))
+
+
+def normalize(data, output_range, input_range=None):
+    """Normalize data to a given range.
+
+    Equivalent to `translate` with clipping.
+
+    Args:
+        data (ops.Tensor): Input data to normalize.
+        output_range (tuple): Range to which data should be mapped, e.g., (0, 1).
+        input_range (tuple, optional): Range of input data.
+            If None, the range will be computed from the data.
+            Defaults to None.
+    """
+    if input_range is None:
+        input_range = (None, None)
+    minval, maxval = input_range
+    if minval is None:
+        minval = ops.min(data)
+    if maxval is None:
+        maxval = ops.max(data)
+    data = ops.clip(data, minval, maxval)
+    normalized_data = translate(data, (minval, maxval), output_range)
+    return normalized_data

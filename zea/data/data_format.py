@@ -213,6 +213,7 @@ def _write_datasets(
     waveforms_two_way=None,
     additional_elements=None,
     cast_to_float=True,
+    enable_compression=True,
     **kwargs,
 ):
     if kwargs:
@@ -234,13 +235,17 @@ def _write_datasets(
         if data is None:
             return
 
+        data = np.asarray(data)
+
         # Create the group if it does not exist
         if group_name not in dataset:
             group = dataset.create_group(group_name)
         else:
             group = dataset[group_name]
 
-        new_dataset = group.create_dataset(name, data=data)
+        dataset_is_scalar = np.isscalar(data) or data.ndim == 0
+        compression = "gzip" if enable_compression and not dataset_is_scalar else None
+        new_dataset = group.create_dataset(name, data=data, compression=compression)
         new_dataset.attrs["description"] = description
         new_dataset.attrs["unit"] = unit
 
@@ -256,8 +261,6 @@ def _write_datasets(
         n_tx = _first_not_none_shape([raw_data, aligned_data], axis=1)
     if n_ax is None:
         n_ax = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-3)
-    if n_ax is None:
-        n_ax = _first_not_none_shape([envelope_data, image, image_sc], axis=-2)
     if n_el is None:
         n_el = _first_not_none_shape([raw_data], axis=-2)
     if n_ch is None:
@@ -583,6 +586,7 @@ def generate_zea_dataset(
     event_structure=False,
     cast_to_float=True,
     overwrite=False,
+    enable_compression=True,
 ):
     """Generates a dataset in the zea format.
 
@@ -643,6 +647,9 @@ def generate_zea_dataset(
         cast_to_float (bool): Whether to store data as float32. You may want to set this
             to False if storing images.
         overwrite (bool): Whether to overwrite the file if it already exists. Defaults to False.
+        enable_compression (bool): Whether to enable gzip compression for datasets.
+            Defaults to True. Compression reduces disk space at the cost of increased
+            write time.
 
     """
     # check if all args are lists
@@ -682,10 +689,11 @@ def generate_zea_dataset(
     # make sure input arguments of func is same length as data_and_parameters
     # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
     assert (
-        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 4
+        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 5
     ), (
         "All arguments should be put in data_and_parameters except "
-        "`path`, `event_structure`, `cast_to_float`, and `overwrite` arguments."
+        "`path`, `event_structure`, `cast_to_float`, `overwrite`, and `enable_compression` "
+        "arguments."
     )
 
     if event_structure:
@@ -751,6 +759,7 @@ def generate_zea_dataset(
                     data_group_name=f"event_{i}/data",
                     scan_group_name=f"event_{i}/scan",
                     cast_to_float=cast_to_float,
+                    enable_compression=enable_compression,
                     **_data_and_parameters,
                 )
 
@@ -760,6 +769,7 @@ def generate_zea_dataset(
                 data_group_name="data",
                 scan_group_name="scan",
                 cast_to_float=cast_to_float,
+                enable_compression=enable_compression,
                 **data_and_parameters,
             )
 

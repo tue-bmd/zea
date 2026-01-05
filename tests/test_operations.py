@@ -11,10 +11,15 @@ import keras
 import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
-from scipy.signal import hilbert
+from scipy.signal import hilbert as hilbert_scipy
 
 from zea import ops
-from zea.ops import Pipeline, Simulate, compute_time_to_peak_stack
+from zea.func.ultrasound import (
+    channels_to_complex,
+    complex_to_channels,
+    compute_time_to_peak_stack,
+)
+from zea.ops import Pipeline, Simulate
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -169,8 +174,8 @@ def test_complex_to_channels(size, axis):
     """Test complex to channels and back"""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.random(size) + 1j * rng.random(size)
-    _data = ops.complex_to_channels(data, axis=axis)
-    __data = ops.channels_to_complex(_data)
+    _data = complex_to_channels(data, axis=axis)
+    __data = channels_to_complex(_data)
     np.testing.assert_almost_equal(data, __data)
 
 
@@ -186,8 +191,8 @@ def test_channels_to_complex(size, axis):
     """Test channels to complex and back"""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.random(size)
-    _data = ops.channels_to_complex(data)
-    __data = ops.complex_to_channels(_data, axis=axis)
+    _data = channels_to_complex(data)
+    __data = complex_to_channels(_data, axis=axis)
     np.testing.assert_almost_equal(data, __data)
 
 
@@ -311,7 +316,7 @@ def test_hilbert_transform():
 
     import keras
 
-    from zea import ops
+    from zea import func
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
 
@@ -326,7 +331,7 @@ def test_hilbert_transform():
 
     data = keras.ops.convert_to_tensor(data)
 
-    data_iq = ops.hilbert(data, axis=-3)
+    data_iq = func.hilbert(data, axis=-3)
     assert keras.ops.dtype(data_iq) in [
         "complex64",
         "complex128",
@@ -334,7 +339,7 @@ def test_hilbert_transform():
 
     data_iq = keras.ops.convert_to_numpy(data_iq)
 
-    reference_data_iq = hilbert(data, axis=-3)
+    reference_data_iq = hilbert_scipy(data, axis=-3)
     np.testing.assert_almost_equal(reference_data_iq, data_iq, decimal=4)
 
     return data_iq
@@ -519,14 +524,54 @@ def test_compute_time_to_peak():
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
 
-def test_multiply_and_sum_dmas():
-    operation = ops.MultiplyAndSum(with_batch_dim=True)
+@pytest.mark.parametrize(
+    "beamformer,expected_shape",
+    [
+        ("das", (1, 7, 2)),
+        ("dmas", (1, 7, 2)),
+    ],
+)
+def test_beamformers(beamformer, expected_shape):
+    """Test all beamformer operations (DAS and DMAS stages)."""
+    if beamformer == "das":
+        operation = ops.DelayAndSum(with_batch_dim=True)
+    elif beamformer == "dmas":
+        operation = ops.DelayMultiplyAndSum(with_batch_dim=True)
+    else:
+        raise ValueError(f"Unknown beamformer: {beamformer}")
 
     data = keras.ops.zeros((1, 3, 7, 4, 2))
 
     output = operation(data=data)["data"]
-    assert output.shape == (1, 7, 2), f"Output shape should be (1, 7, 2), got {output.shape}"
+    assert output.shape == expected_shape, (
+        f"Output shape should be {expected_shape} for {beamformer}, got {output.shape}"
+    )
 
-    with pytest.raises(ValueError):
-        data = keras.ops.zeros((1, 3, 7, 4, 1))
-        operation(data=data)
+    # DMAS should raise ValueError with single channel
+    if beamformer == "dmas":
+        with pytest.raises(ValueError):
+            data = keras.ops.zeros((1, 3, 7, 4, 1))
+            operation(data=data)
+
+
+@pytest.mark.parametrize(
+    "axis, size, start, end, window_type",
+    [
+        (0, 64, 64, 32, "hanning"),
+        (1, 32, 32, 16, "linear"),
+    ],
+)
+def test_apply_window(axis, size, start, end, window_type):
+    """Test ApplyWindow operation."""
+    operation = ops.ultrasound.ApplyWindow(
+        axis=axis, size=size, start=start, end=end, window_type=window_type
+    )
+
+    data = keras.ops.ones((256, 128, 64))
+    data_out = operation(data=data)["data"]
+    if axis == 0:
+        assert data_out[:start, :, :].numpy().sum() == 0.0, "Start region not zeroed correctly."
+        assert data_out[-end:, :, :].numpy().sum() == 0.0, "End region not zeroed correctly."
+    elif axis == 1:
+        assert data_out[:, :start, :].numpy().sum() == 0.0, "Start region not zeroed correctly."
+        assert data_out[:, -end:, :].numpy().sum() == 0.0, "End region not zeroed correctly."

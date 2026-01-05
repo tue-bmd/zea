@@ -44,12 +44,11 @@ pipeline:
   # The operations to perform on the data. This is a list of dictionaries, where
   # each dictionary contains the parameters for a single operation.
   operations:
-    - name: "patched_grid"
+    - name: "beamform"
       params:
-        operations:
-          - name: tof_correction
-          - name: delay_and_sum
-        num_patches: 100
+        beamformer: delay_and_sum
+        enable_pfield: false
+        num_patches: 200
     - name: envelope_detect
     - name: normalize
     - name: log_compress

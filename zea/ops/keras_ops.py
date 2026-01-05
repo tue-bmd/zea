@@ -5,7 +5,7 @@ They can be used in zea pipelines like any other :class:`zea.Operation`, for exa
 
 .. doctest::
 
-    >>> from zea.keras_ops import Squeeze
+    >>> from zea.ops.keras_ops import Squeeze
 
     >>> op = Squeeze(axis=1)
 
@@ -16,7 +16,7 @@ Generated with Keras 3.12.0
 import keras
 
 from zea.internal.registry import ops_registry
-from zea.ops import Lambda
+from zea.ops.base import Lambda
 
 class MissingKerasOps(ValueError):
     def __init__(self, class_name: str, func: str):

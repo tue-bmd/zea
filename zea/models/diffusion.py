@@ -23,6 +23,7 @@ from keras import ops
 
 from zea.backend import _import_tf, jit
 from zea.backend.autograd import AutoGrad
+from zea.func.tensor import L2, fori_loop, split_seed
 from zea.internal.core import Object
 from zea.internal.operators import Operator
 from zea.internal.registry import diffusion_guidance_registry, model_registry, operator_registry
@@ -33,7 +34,6 @@ from zea.models.preset_utils import register_presets
 from zea.models.presets import diffusion_model_presets
 from zea.models.unet import get_time_conditional_unetwork
 from zea.models.utils import LossTrackerWrapper
-from zea.tensor_ops import L2, fori_loop, split_seed
 
 tf = _import_tf()
 

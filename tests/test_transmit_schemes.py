@@ -6,6 +6,7 @@ import pytest
 
 from zea import ops
 from zea.beamform.phantoms import fish
+from zea.internal.core import DEFAULT_DYNAMIC_RANGE
 from zea.internal.dummy_scan import _get_probe, _get_scan
 
 
@@ -83,7 +84,7 @@ def default_pipeline():
     """Returns a default pipeline for ultrasound simulation."""
     pipeline = ops.Pipeline.from_default(num_patches=10, jit_options="ops")
     pipeline.prepend(ops.Simulate())
-    pipeline.append(ops.Normalize(input_range=ops.DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
+    pipeline.append(ops.Normalize(input_range=DEFAULT_DYNAMIC_RANGE, output_range=(0, 255)))
     return pipeline
 
 
