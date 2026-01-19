@@ -41,3 +41,102 @@ def fish():
 
     scat_z += z_offset
     return np.stack([scat_x, scat_y, scat_z], axis=1)
+
+
+def rose(k=3, num_scatterers=80):
+    """Returns a scatterer phantom of the rose curve for ultrasound simulation tests.
+
+    Args:
+        k (int): The frequency parameter of the rose curve.
+        num_scatterers (int): The number of scatterers to generate along the curve.
+
+    Returns:
+        ndarray: The scatterer positions of shape (n_scat, 3).
+    """
+    # https://en.wikipedia.org/wiki/Rose_(mathematics)
+    size = 11e-3
+    z_offset = 2.0 * size
+
+    def rose_curve(theta, k):
+        r = size * np.cos(k * theta)
+        x = r * np.cos(theta)
+        y = r * np.sin(theta)
+        return x, y
+
+    scat_x, scat_z = rose_curve(theta=np.linspace(0, 2 * np.pi, num_scatterers), k=k)
+    scat_z += z_offset
+    scat_y = np.zeros_like(scat_x)
+    return np.stack([scat_x, scat_y, scat_z], axis=1)
+
+
+def fibonacci(alpha=0.5, num_scatterers=100):
+    """Generates scatterer positions based on the Fibonacci sphere algorithm.
+
+    Args:
+        num_scatterers (int): Number of scatterer points to generate.
+        alpha (float): Scaling factor for the z-coordinate.
+
+    Returns:
+        ndarray: The scatterer positions of shape (num_scatterers, 3).
+    """
+    size = 11e-3
+    z_offset = 2.0 * size
+
+    phi = (1 + 5**0.5) / 2
+    golden_angle = 2 * np.pi * (1 - 1 / phi)
+
+    n = np.arange(num_scatterers)
+    r = size * np.sqrt((n + alpha) / num_scatterers)
+    theta = n * golden_angle
+
+    scat_x = r * np.cos(theta)
+    scat_z = r * np.sin(theta) + z_offset
+    scat_y = np.zeros_like(scat_x)
+
+    return np.stack([scat_x, scat_y, scat_z], axis=1)
+
+
+def lissajous(a=3, b=2, delta=np.pi / 2, num_scatterers=200):
+    """Generates scatterer positions based on a Lissajous curve.
+
+    Args:
+        a (int): Frequency parameter for the x-coordinate.
+        b (int): Frequency parameter for the z-coordinate.
+        num_scatterers (int): Number of scatterer points to generate.
+
+    Returns:
+        ndarray: The scatterer positions of shape (num_scatterers, 3).
+    """
+    size = 11e-3
+    z_offset = 2.0 * size
+
+    t = np.linspace(0, 2 * np.pi, num_scatterers, endpoint=False)
+
+    scat_x = size * np.sin(a * t + delta)
+    scat_z = size * np.sin(b * t) + z_offset
+    scat_y = np.zeros_like(scat_x)
+
+    return np.stack([scat_x, scat_y, scat_z], axis=1)
+
+
+def golden_ratio(num_scatterers=100):
+    """Generates scatterer positions based on the golden ratio spiral.
+
+    Args:
+        num_scatterers (int): Number of scatterer points to generate.
+
+    Returns:
+        ndarray: The scatterer positions of shape (num_scatterers, 3).
+    """
+    size = 11e-3
+    z_offset = 2.0 * size
+
+    phi = (1 + 5**0.5) / 2  # Golden ratio
+    theta = np.linspace(0, 4 * np.pi, num_scatterers)
+    r = size * (theta / (4 * np.pi))
+
+    scat_x = r * np.cos(theta * phi)
+    scat_z = r * np.sin(theta * phi) + z_offset
+    scat_y = np.zeros_like(scat_x)
+
+    return np.stack([scat_x, scat_y, scat_z], axis=1)

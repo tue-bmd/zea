@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Pre-commit hook to clean and validate Jupyter notebooks.
 
@@ -10,17 +9,22 @@ This script enforces consistency and quality standards for example notebooks. It
 
 2. **Badges**
    Requires a markdown cell containing both:
-   - An **Open in Colab** badge, linking to this notebook’s path on Colab.
-   - A **View on GitHub** badge, linking to this notebook’s path in the repo.
+   - An **Open in Colab** badge, linking to this notebook's path on Colab.
+   - A **View on GitHub** badge, linking to this notebook's path in the repo.
    Also checks badge URLs for validity and common typos.
 
-3. **Noisy outputs**
+3. **GPU/TPU warning**
+   Requires a markdown cell immediately after the badges containing a GPU/TPU optimization
+   warning for users running on Colab. Some notebooks (e.g., data-only notebooks) can be
+   excluded from this check via GPU_WARNING_EXCLUSIONS.
+
+4. **Noisy outputs**
    Removes known transient/warning outputs from stderr streams, e.g.:
    - "computation placer already registered"
    - "Unable to register cuDNN factory"
    - "Unable to register cuBLAS factory"
 
-4. **First cell requirement**
+5. **First cell requirement**
    The very first code cell must contain a `pip install zea` command
    (e.g. `%%capture\n%pip install zea`).
 
@@ -43,10 +47,24 @@ BADGE_GITHUB = re.compile(
     r"\[!\[View on GitHub\]\(https://img\.shields\.io/badge/GitHub-View%20Source-blue\?logo=github\)\]\(([^)]+)\)"
 )
 
+# Notebooks that don't require GPU/TPU warning (paths relative to notebooks/)
+GPU_WARNING_EXCLUSIONS = [
+    "data/zea_local_data.ipynb",
+]
+
+GPU_WARNING_TEXT = """‼️ **Important:** This notebook is optimized for **GPU/TPU**. Code execution on a **CPU** may be very slow.
+
+If you are running in Colab, please enable a hardware accelerator via:
+
+**Runtime → Change runtime type → Hardware accelerator → GPU/TPU** 🚀."""  # noqa E501
+
+DOCS_URL = "https://github.com/tue-bmd/zea/blob/main/docs/source/notebook_clean_and_check.py"
+
 
 def error(msg, nb_path=None):
     prefix = f"[NOTEBOOK ERROR] {nb_path}: " if nb_path else "[NOTEBOOK ERROR] "
     print(f"{prefix}{msg}", file=sys.stderr)
+    print(f"\nSee formatting requirements: {DOCS_URL}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -98,7 +116,9 @@ def check_badges(nb, nb_path):
         nb_rel = str(nb_path).replace(os.sep, "/")
 
     found_badge = False
-    for cell in nb.get("cells", []):
+    badge_cell_idx = -1
+    cells = nb.get("cells", [])
+    for idx, cell in enumerate(cells):
         if cell.get("cell_type") != "markdown":
             continue
         src = "".join(cell.get("source", []))
@@ -107,11 +127,58 @@ def check_badges(nb, nb_path):
         if m_colab and m_github:
             if nb_rel in m_colab.group(1) and nb_rel in m_github.group(1):
                 found_badge = True
+                badge_cell_idx = idx
                 break
     if not found_badge:
         error(
             "Missing markdown cell with Colab + GitHub badges "
             f"linking to this notebook ({nb_rel}).",
+            nb_path,
+        )
+    return badge_cell_idx
+
+
+def check_gpu_warning(nb, nb_path, badge_cell_idx):
+    """Ensure GPU/TPU warning appears after badges cell (unless notebook is excluded)."""
+    # Check if this notebook is excluded from GPU warning requirement
+    try:
+        repo_root = Path(__file__).resolve().parents[2]
+        nb_abs = Path(nb_path).resolve()
+
+        # Check if notebook is in the exclusion list (match against notebooks/ subdirectory)
+        notebooks_dir = repo_root / "docs" / "source" / "notebooks"
+        if nb_abs.is_relative_to(notebooks_dir):
+            nb_rel_to_notebooks = str(nb_abs.relative_to(notebooks_dir)).replace(os.sep, "/")
+            if nb_rel_to_notebooks in GPU_WARNING_EXCLUSIONS:
+                return  # Skip GPU warning check for excluded notebooks
+    except Exception:
+        pass  # If we can't determine path, continue with check
+
+    cells = nb.get("cells", [])
+
+    # Check that the cell after badges exists and is markdown
+    if badge_cell_idx + 1 >= len(cells) or cells[badge_cell_idx + 1].get("cell_type") != "markdown":
+        cell_type = (
+            cells[badge_cell_idx + 1].get("cell_type")
+            if badge_cell_idx + 1 < len(cells)
+            else "missing"
+        )
+        error(
+            f"Cell after badges must be markdown with GPU/TPU warning, found {cell_type}.",
+            nb_path,
+        )
+
+    next_cell = cells[badge_cell_idx + 1]
+    next_cell_src = "".join(next_cell.get("source", []))
+    expected_text = GPU_WARNING_TEXT
+    actual_text = next_cell_src
+
+    if expected_text != actual_text:
+        error(
+            (
+                f"GPU/TPU warning text mismatch.\n\nExpected:\n{expected_text}\n\n"
+                f"Found:\n{actual_text}"
+            ),
             nb_path,
         )
 
@@ -161,7 +228,8 @@ def process_notebook(nb_path):
     check_cell_size(nb, nb_path)
     check_first_cell(nb, nb_path)
     check_execution_counts(nb, nb_path)
-    check_badges(nb, nb_path)
+    badge_cell_idx = check_badges(nb, nb_path)
+    check_gpu_warning(nb, nb_path, badge_cell_idx)
 
     if clean_outputs(nb, nb_path):
         with nb_path.open("w", encoding="utf-8") as f:

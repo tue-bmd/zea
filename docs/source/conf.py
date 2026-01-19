@@ -48,6 +48,8 @@ exclude_patterns = [
     "_autosummary/zea.tracking.base.rst",
     "_autosummary/zea.tracking.segmentation.rst",
     "_autosummary/zea.tracking.lucas_kanade.rst",
+    "_autosummary/zea.models.hvae.model.rst",
+    "_autosummary/zea.models.hvae.utils.rst",
 ]
 
 autodoc_default_options = {

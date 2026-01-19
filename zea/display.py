@@ -417,7 +417,7 @@ def cartesian_to_polar_matrix(
     polar_shape=None,
     tip=None,
     r_max=None,
-    angle=np.deg2rad(45),
+    angle=None,
     interpolation_order=1,
 ):
     """
@@ -432,8 +432,8 @@ def cartesian_to_polar_matrix(
             transformation (typically the probe tip). Defaults to the center-top of the image.
         r_max (float, optional): Maximum radius to consider in the polar transform.
             Defaults to the height of the input image.
-        angle (float): Total angular field of view (in radians) centered at 0.
-            The polar grid spans from -angle to +angle.
+        angle (float, optional): Total angular field of view (in radians) centered at 0.
+            The polar grid spans from -angle to +angle. Defaults to π/4 radians (45 degrees).
         interpolation_order (int): Order of interpolation to use (0 = nearest-neighbor,
             1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
 
@@ -441,6 +441,10 @@ def cartesian_to_polar_matrix(
         polar_matrix (Array): The image re-sampled in polar coordinates with shape `polar_shape`.
     """
     assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
+
+    # Default angle to π/4 radians (45 degrees)
+    if angle is None:
+        angle = np.deg2rad(45)
 
     # Assume that polar grid is same shape as cartesian grid unless specified
     cartesian_rows, cartesian_cols = ops.shape(cartesian_matrix)
@@ -494,7 +498,7 @@ def cartesian_to_polar_matrix(
 def inverse_scan_convert_2d(
     cartesian_image,
     fill_value=0.0,
-    angle=np.deg2rad(45),
+    angle=None,
     output_size=None,
     interpolation_order=1,
     find_scan_cone=True,
@@ -511,8 +515,9 @@ def inverse_scan_convert_2d(
         cartesian_image (tensor): 2D image array in Cartesian coordinates of type float.
         fill_value (float): Value used to fill regions outside the original image
             during interpolation.
-        angle (float): Angular field of view (in radians) used for the polar transformation.
-            The polar output will span from -angle to +angle.
+        angle (float, optional): Angular field of view (in radians) used for the polar
+            transformation. The polar output will span from -angle to +angle.
+            Defaults to π/4 radians (45 degrees).
         output_size (tuple, optional): Shape (rows, cols) of the resulting polar image.
             If None, the shape of the input image is used.
         interpolation_order (int): Order of interpolation used in resampling
@@ -527,9 +532,11 @@ def inverse_scan_convert_2d(
     Returns:
         polar_image (Array): 2D image in polar coordinates (sector-shaped scan).
     """
+
     if find_scan_cone:
         assert image_range is not None, "image_range must be provided when find_scan_cone is True"
         cartesian_image = fit_and_crop_around_scan_cone(cartesian_image, image_range)
+
     polar_image = cartesian_to_polar_matrix(
         cartesian_image,
         fill_value=fill_value,

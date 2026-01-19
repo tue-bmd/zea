@@ -96,6 +96,7 @@ class GreedyEntropy(LinesActionModel):
         std_dev: float = 1,
         num_lines_to_update: int = 5,
         entropy_sigma: float = 1.0,
+        average_entropy_across_batch: bool = False,
     ):
         """Initialize the GreedyEntropy action selection model.
 
@@ -110,6 +111,10 @@ class GreedyEntropy(LinesActionModel):
                 to update. Must be odd.
             entropy_sigma (float, optional): The standard deviation of the Gaussian
                 Mixture components used to approximate the posterior.
+            average_entropy_across_batch (bool, optional): Whether to average entropy
+                across the batch when selecting lines. This can be useful when
+                selecting planes in 3D imaging, where the batch dimension represents
+                a third spatial dimension. Defaults to False.
         """
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
 
@@ -117,6 +122,7 @@ class GreedyEntropy(LinesActionModel):
         # of the selected line is set to 0 once it's been selected.
         assert num_lines_to_update % 2 == 1, "num_samples must be odd."
         self.num_lines_to_update = num_lines_to_update
+        self.average_entropy_across_batch = average_entropy_across_batch
 
         # see here what I mean by upside_down_gaussian:
         # https://colab.research.google.com/drive/1CQp_Z6nADzOFsybdiH5Cag0vtVZjjioU?usp=sharing
@@ -153,7 +159,7 @@ class GreedyEntropy(LinesActionModel):
         assert particles.shape[1] > 1, "The entropy cannot be approximated using a single particle."
 
         if n_possible_actions is None:
-            n_possible_actions = particles.shape[-1]
+            n_possible_actions = ops.shape(particles)[-1]
 
         # TODO: I think we only need to compute the lower triangular
         # of this matrix, since it's symmetric
@@ -164,7 +170,8 @@ class GreedyEntropy(LinesActionModel):
         # Vertically stack all columns corresponding with the same line
         # This way we can just sum across the height axis and get the entropy
         # for each pixel in a given line
-        batch_size, n_particles, _, height, _ = gaussian_error_per_pixel_i_j.shape
+        batch_size, n_particles, _, height, _ = ops.shape(gaussian_error_per_pixel_i_j)
+
         gaussian_error_per_pixel_stacked = ops.transpose(
             ops.reshape(
                 ops.transpose(gaussian_error_per_pixel_i_j, (0, 1, 2, 4, 3)),
@@ -274,6 +281,8 @@ class GreedyEntropy(LinesActionModel):
 
         pixelwise_entropy = self.compute_pixelwise_entropy(particles)
         linewise_entropy = ops.sum(pixelwise_entropy, axis=1)
+        if self.average_entropy_across_batch:
+            linewise_entropy = ops.expand_dims(ops.mean(linewise_entropy, axis=0), axis=0)
 
         # Greedily select best line, reweight entropies, and repeat
         all_selected_lines = []

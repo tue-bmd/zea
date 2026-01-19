@@ -249,3 +249,19 @@ def test_config_recursive():
     expected_config = Config({"a": 4, "b": {"c": 5, "d": 3}})
 
     config_check_equal_recursive(config, expected_config)
+
+
+def test_config_pickle():
+    """Tests if the config can be pickled and unpickled without changing its contents."""
+    import pickle
+
+    config = Config(dictionary=doubly_nested_dict)
+
+    # Pickle the config
+    pickled = pickle.dumps(config)
+
+    # Unpickle the config
+    unpickled = pickle.loads(pickled)
+
+    # Check if the config is the same
+    config_check_equal_recursive(config, unpickled)

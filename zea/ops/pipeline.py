@@ -650,6 +650,11 @@ class Pipeline:
         # Initialize dictionaries for probe, scan, and config
         probe_dict, scan_dict, config_dict = {}, {}, {}
 
+        config_keys, kwargs_keys = set(), set()
+        if config is not None:
+            config_keys = set(config.keys())
+        kwargs_keys = set(kwargs.keys())
+
         # Process args to extract Probe, Scan, and Config objects
         if probe is not None:
             assert isinstance(probe, Probe), (
@@ -661,7 +666,8 @@ class Pipeline:
             assert isinstance(scan, Scan), (
                 f"Expected an instance of `zea.scan.Scan`, got {type(scan)}"
             )
-            scan_dict = scan.to_tensor(include=self.needs_keys, keep_as_is=self.static_params)
+            needs_keys = self.needs_keys - config_keys - kwargs_keys
+            scan_dict = scan.to_tensor(include=needs_keys, keep_as_is=self.static_params)
 
         if config is not None:
             assert isinstance(config, Config), (

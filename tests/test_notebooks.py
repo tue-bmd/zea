@@ -50,6 +50,9 @@ NOTEBOOK_PARAMETERS = {
         "n_posterior_steps": 2,
         "n_particles": 2,
     },
+    "3d_beamforming_example.ipynb": {
+        "downscale_rate": 8,
+    },
     "zea_sequence_example.ipynb": {
         "n_frames": 15,
         "n_tx": 1,
@@ -69,6 +72,11 @@ NOTEBOOK_PARAMETERS = {
         "num_frames": 5,
         "num_points": 10,
         "max_iterations": 2,
+    },
+    "hvae_model_example.ipynb": {
+        "inference_fractions": [0.03],
+        "n_samples": 2,
+        "batch_size": 1,
     },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {

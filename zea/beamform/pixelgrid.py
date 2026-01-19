@@ -30,43 +30,88 @@ def check_for_aliasing(scan):
         )
 
 
-def cartesian_pixel_grid(xlims, zlims, grid_size_x=None, grid_size_z=None, dx=None, dz=None):
-    """Generate a Cartesian pixel grid based on input parameters.
+def cartesian_pixel_grid(
+    xlims,
+    zlims,
+    ylims=(0.0, 0.0),
+    grid_size_x=None,
+    grid_size_y=None,
+    grid_size_z=None,
+    dx=None,
+    dy=None,
+    dz=None,
+):
+    """Generate a Cartesian pixel grid.
+
+    Behaviour:
+      - If ylims has zero extent (abs(ymax - ymin) < eps) the function returns a 2D grid
+        with shape (nz, nx, 3) that contains (x, y=0, z) per-pixel (y omitted as a dimension).
+      - If ylims has non-zero extent the function returns a 3D grid with shape
+        (nz, nx, ny, 3) containing (x, y, z) per-voxel.
 
     Args:
-        xlims (tuple): Azimuthal limits of pixel grid ([xmin, xmax])
-        zlims (tuple): Depth limits of pixel grid ([zmin, zmax])
-        grid_size_x (int): Number of azimuthal pixels, overrides dx and dz parameters
-        grid_size_z (int): Number of depth pixels, overrides dx and dz parameters
-        dx (float): Pixel spacing in azimuth
-        dz (float): Pixel spacing in depth
-
-    Raises:
-        ValueError: Either grid_size_x and grid_size_z or dx and dz must be defined.
+        xlims (tuple): [xmin, xmax]
+        ylims (tuple): [ymin, ymax] — if ymax == ymin (within tol) treated as "no y extent"
+        zlims (tuple): [zmin, zmax]
+        grid_size_x, grid_size_y, grid_size_z (int): number of samples along each axis.
+            For 2D (no y extent) only grid_size_x and grid_size_z are required if using sizes.
+        dx, dy, dz (float): spacings along axes.
+            For 2D, only dx and dz are required if using spacings.
 
     Returns:
-        grid (np.ndarray): Pixel grid of size (grid_size_z, grid_size_x, 3) in
-            Cartesian coordinates (x, y, z)
+        np.ndarray:
+            - 2D: shape (nz, nx, 3) with per-pixel [x, y, z] (y will be zeros)
+            - 3D: shape (nz, nx, ny, 3) with per-voxel [x, y, z]
     """
-    assert (bool(grid_size_x) and bool(grid_size_z)) ^ (bool(dx) and bool(dz)), (
-        "Either grid_size_x and grid_size_z or dx and dz must be defined."
-    )
+    is_3d = abs(ylims[1] - ylims[0]) > eps
 
-    # Determine the grid spacing
-    if grid_size_x is not None and grid_size_z is not None:
-        x = np.linspace(xlims[0], xlims[1] + eps, grid_size_x)
-        z = np.linspace(zlims[0], zlims[1] + eps, grid_size_z)
-    elif dx is not None and dz is not None:
-        sign = np.sign(xlims[1] - xlims[0])
-        x = np.arange(xlims[0], xlims[1] + eps, sign * dx)
-        z = np.arange(zlims[0], zlims[1] + eps, sign * dz)
+    # Validate: must provide either all sizes OR all spacings (exclusive)
+    if is_3d:
+        sizes_provided = (
+            (grid_size_x is not None) and (grid_size_y is not None) and (grid_size_z is not None)
+        )
+        spacings_provided = (dx is not None) and (dy is not None) and (dz is not None)
     else:
-        raise ValueError("Either grid_size_x and grid_size_z or dx and dz must be defined.")
+        sizes_provided = (grid_size_x is not None) and (grid_size_z is not None)
+        spacings_provided = (dx is not None) and (dz is not None)
+        grid_size_y = 1  # Make grid 'flat' in the y direction for 2D case
 
-    # Create the pixel grid
-    z_grid, x_grid = np.meshgrid(z, x, indexing="ij")
-    y_grid = 0 * x_grid  # Assume y = 0
+    if sizes_provided == spacings_provided:
+        if is_3d:
+            raise ValueError(
+                "For 3D (non-zero y extent) either provide grid_size_x/grid_size_y/grid_size_z "
+                "OR provide dx/dy/dz (but not both)."
+            )
+        else:
+            raise ValueError(
+                "For 2D (no y extent) either provide grid_size_x & grid_size_z "
+                "OR provide dx & dz (but not both)."
+            )
+
+    # Build coordinate vectors
+    if sizes_provided:
+        x = np.linspace(xlims[0], xlims[1] + eps, grid_size_x)
+        y = np.linspace(ylims[0], ylims[1] + eps, grid_size_y)
+        z = np.linspace(zlims[0], zlims[1] + eps, grid_size_z)
+    else:
+        sign_x = np.sign(xlims[1] - xlims[0]) if xlims[1] != xlims[0] else 1.0
+        sign_z = np.sign(zlims[1] - zlims[0]) if zlims[1] != zlims[0] else 1.0
+        x = np.arange(xlims[0], xlims[1] + sign_x * eps, sign_x * dx)
+        z = np.arange(zlims[0], zlims[1] + sign_z * eps, sign_z * dz)
+        if is_3d:
+            sign_y = np.sign(ylims[1] - ylims[0]) if ylims[1] != ylims[0] else 1.0
+            y = np.arange(ylims[0], ylims[1] + sign_y * eps, sign_y * dy)
+        else:
+            y = np.array([0.0])
+
+    # Build grid: always (nz, nx, ny, 3)
+    z_grid, x_grid, y_grid = np.meshgrid(z, x, y, indexing="ij")
     grid = np.stack((x_grid, y_grid, z_grid), axis=-1)
+
+    # Squeeze y dimension for 2D case: (nz, nx, 1, 3) -> (nz, nx, 3)
+    if not is_3d:
+        grid = grid.squeeze(axis=2)
+
     return grid
 
 

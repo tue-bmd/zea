@@ -280,12 +280,12 @@ class Config(dict):
 
     def _mark_accessed(self, name):
         """Mark an attribute as accessed."""
-        if name in self:
+        if name in self and hasattr(self, "__accessed__"):
             self.__accessed__[name] = True
 
     def _mark_unaccessed(self, name):
         """Mark an attribute as unaccessed."""
-        if name in self.__accessed__:
+        if hasattr(self, "__accessed__") and name in self.__accessed__:
             del self.__accessed__[name]
 
     def _mark_accessed_recursive(self):
