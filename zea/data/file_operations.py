@@ -253,6 +253,49 @@ def compound_transmits(input_path: Path, output_path: Path, overwrite=False):
     )
 
 
+def iq_to_rf(input_path: Path, output_path: Path, overwrite=False):
+    """
+    Converts IQ data in a raw data file to RF data.
+
+    Args:
+        input_path (Path): Path to the input raw data file.
+        output_path (Path): Path to the output file where the RF data will be saved.
+        overwrite (bool, optional): Whether to overwrite the output file if it exists. Defaults to
+            False.
+    """
+
+    data_dict, scan, probe = load_file_all_data_types(input_path)
+    additional_elements = load_additional_elements(input_path)
+    description = load_description(input_path)
+
+    if data_dict["raw_data"] is None:
+        logger.error("No raw_data found in the input file.")
+        return
+
+    iq_data = data_dict["raw_data"]
+    from zea.func.ultrasound import channels_to_complex, upmix
+
+    iq_data = channels_to_complex(iq_data)
+
+    rf_data = upmix(
+        iq_data, sampling_frequency=scan.sampling_frequency, center_frequency=scan.center_frequency
+    )[..., None]
+
+    data_dict["raw_data"] = rf_data
+
+    if overwrite:
+        _delete_file_if_exists(output_path)
+
+    save_file(
+        path=output_path,
+        scan=scan,
+        probe=probe,
+        additional_elements=additional_elements,
+        description=description,
+        **data_dict,
+    )
+
+
 def _all_tx_are_identical(scan: Scan):
     """Checks if all transmits in a Scan object are identical."""
     attributes_to_check = [
@@ -397,8 +440,18 @@ def get_parser():
     _add_parser_compound_transmits(subparsers)
     _add_parser_resave(subparsers)
     _add_parser_extract(subparsers)
+    _add_parser_iq_to_rf(subparsers)
 
     return parser
+
+
+def _add_parser_iq_to_rf(subparsers):
+    iq2rf_parser = subparsers.add_parser("iq_to_rf", help="Convert IQ raw data to RF raw data.")
+    iq2rf_parser.add_argument("input_path", type=Path, help="Input HDF5 file.")
+    iq2rf_parser.add_argument("output_path", type=Path, help="Output HDF5 file.")
+    iq2rf_parser.add_argument(
+        "--overwrite", action="store_true", default=False, help="Overwrite existing output file."
+    )
 
 
 def _add_parser_sum(subparsers):
@@ -490,6 +543,8 @@ if __name__ == "__main__":
             transmit_indices=_interpret_indices(args.transmits),
             overwrite=args.overwrite,
         )
+    elif args.operation == "iq_to_rf":
+        iq_to_rf(input_path=args.input_path, output_path=args.output_path, overwrite=args.overwrite)
     else:
         sum_data(
             input_paths=args.input_paths, output_path=args.output_path, overwrite=args.overwrite
