@@ -47,6 +47,7 @@ def plot_image_grid(
     remove_axis: Optional[bool] = True,
     background_color: Optional[str] = None,
     text_color: Optional[str] = None,
+    axes_pad: float = 0.1,
     **kwargs,
 ) -> Tuple[plt.Figure, List]:
     """Plot a batch of images in a grid.
@@ -73,6 +74,7 @@ def plot_image_grid(
             allowing later label drawing to remain visible.
         background_color (str, optional): Background color. Defaults to None. (Matplotlib default)
         text_color (str, optional): Text color. Defaults to None. (Matplotlib default)
+        axes_pad (float, optional): Padding between axes. Defaults to 0.1.
         **kwargs: arguments for plt.Figure.
 
     Returns:
@@ -117,7 +119,7 @@ def plot_image_grid(
 
     if fig is None:
         fig = plt.figure(figsize=figsize, **kwargs)
-        axes = ImageGrid(fig, 111, nrows_ncols=(nrows, ncols), axes_pad=0.1)
+        axes = ImageGrid(fig, 111, nrows_ncols=(nrows, ncols), axes_pad=axes_pad)
         if background_color is not None:
             fig.patch.set_facecolor(background_color)
         fig.set_layout_engine("tight", pad=0.1)
