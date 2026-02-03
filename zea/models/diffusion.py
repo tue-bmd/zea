@@ -458,12 +458,12 @@ class DiffusionModel(DeepGenerativeModel):
 
     def reverse_diffusion_step(
         self,
-        shape,
         pred_images,
         pred_noises,
         signal_rates,
         next_signal_rates,
         next_noise_rates,
+        shape=None,
         seed=None,
         stochastic_sampling=False,
     ):
