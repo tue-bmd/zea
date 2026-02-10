@@ -283,7 +283,7 @@ class DiffusionModel(DeepGenerativeModel):
         seed1, seed2 = split_seed(seed, 2)
 
         # Use provided noise or generate random noise
-        if initial_noise is None or ops.all(initial_noise == 0):
+        if initial_noise is None:  # or ops.all(initial_noise == 0):
             initial_noise = keras.random.normal(
                 shape=(batch_size * n_samples, *self.input_shape),
                 seed=seed1,
