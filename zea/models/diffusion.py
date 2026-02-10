@@ -230,6 +230,7 @@ class DiffusionModel(DeepGenerativeModel):
         n_steps=20,
         initial_step=0,
         initial_samples=None,
+        initial_noise=None,
         seed=None,
         **kwargs,
     ):
@@ -252,6 +253,10 @@ class DiffusionModel(DeepGenerativeModel):
                 If provided, these samples will be used as the starting point
                 for the diffusion process. Only used if `initial_step` is
                 greater than 0. Must be of shape `(batch_size, n_samples, *input_shape)`.
+            initial_noise: Optional fixed noise tensor of shape
+                `(batch_size, *input_shape)`. If provided, this noise is used
+                instead of randomly generated noise, enabling temporal
+                consistency across frames.
             seed: Random seed generator.
             **kwargs: Additional arguments.
 
@@ -277,10 +282,12 @@ class DiffusionModel(DeepGenerativeModel):
 
         seed1, seed2 = split_seed(seed, 2)
 
-        initial_noise = keras.random.normal(
-            shape=(batch_size * n_samples, *self.input_shape),
-            seed=seed1,
-        )
+        # Use provided noise or generate random noise
+        if initial_noise is None or ops.all(initial_noise == 0):
+            initial_noise = keras.random.normal(
+                shape=(batch_size * n_samples, *self.input_shape),
+                seed=seed1,
+            )
 
         out = self.reverse_conditional_diffusion(
             measurements=measurements,
