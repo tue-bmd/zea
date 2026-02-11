@@ -64,7 +64,7 @@ This project is licensed under the `Apache License 2.0 <https://www.apache.org/l
 Citation
 --------
 
-Please see the :ref:`citation` guide for citation information of ``zea``.
+Please see the :ref:`citation` guide for citation information of `zea`.
 
 Papers
 ------

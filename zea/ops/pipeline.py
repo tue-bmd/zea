@@ -34,6 +34,8 @@ from zea.ops.ultrasound import (
     PfieldWeighting,
     ReshapeGrid,
     TOFCorrection,
+    TOFCorrectionGrid,
+    CommonMidpointPhaseError,
 )
 from zea.probes import Probe
 from zea.scan import Scan
