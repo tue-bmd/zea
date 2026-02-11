@@ -20,7 +20,7 @@ def color_doppler(
         data (ndarray): I/Q complex data of shape (n_frames, grid_size_z, grid_size_x).
             n_frames corresponds to the ensemble length used to compute
             the Doppler signal.
-        center_frequency (float): Center frequency of the ultrasound probe in Hz.
+        center_frequency (float): Transmit center frequency in Hz.
         pulse_repetition_frequency (float): Pulse repetition frequency in Hz.
         sound_speed (float): Speed of sound in the medium in m/s.
         hamming_size (int or tuple, optional): Size of the Hamming window to apply

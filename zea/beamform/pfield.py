@@ -55,11 +55,11 @@ def compute_pfield(
 
     Args:
         sound_speed (float): Speed of sound in the medium.
-        center_frequency (float): Center frequency of the probe in Hz.
+        center_frequency (float): Center frequency of the transmit pulse in Hz.
         bandwidth_percent (float): Bandwidth of the probe, pulse-echo 6dB fractional bandwidth (%)
         n_el (int): Number of elements in the probe.
         probe_geometry (array): Geometry of the probe elements.
-        tx_apodizations (array): Transmit apodization values.
+        tx_apodizations (array): Transmit apodizations of shape (n_tx, n_el).
         grid (array): Grid points where the pressure field is computed
             of shape (grid_size_z, grid_size_x, 3).
         t0_delays (array): Transmit delays for each transmit event.
@@ -263,7 +263,6 @@ def compute_pfield(
         # Render pressure field for all relevant frequencies and sum them up
         rp = _pfield_freq_loop(
             freq,
-            sound_speed,
             delays_tx,
             tx_apodization,
             exp_arr,
@@ -333,7 +332,6 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
 def _pfield_freq_step(
     k,
     freq,
-    sound_speed,
     delays_tx,
     tx_apodization,
     rp_mono,
@@ -347,7 +345,6 @@ def _pfield_freq_step(
     Args:
         k (int): Frequency index.
         freq (list): List of frequencies.
-        sound_speed (float): Speed of sound.
         delays_tx (list): List of transmit delays.
         tx_apodization (list): List of transmit apodization values (complex64).
         rp_mono: (Tensor): Per-element, per-field-point complex pressure response
@@ -359,8 +356,8 @@ def _pfield_freq_step(
     Returns:
         rp_k (Tensor): Pressure field for this frequency.
     """
-    kw = 2 * np.pi * freq[k] / sound_speed
-    del_apod = ops.exp(1j * ops.cast(kw * sound_speed * delays_tx, "complex64")) * tx_apodization
+    angular_frequency = 2 * np.pi * freq[k]
+    del_apod = ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
     rp_k = ops.matmul(rp_mono, del_apod) * pulse_spect[k] * probe_spect[k]
     rp_k = ops.where(z < 0, 0, rp_k)
     return ops.abs(rp_k) ** 2
@@ -368,7 +365,6 @@ def _pfield_freq_step(
 
 def _pfield_freq_loop(
     freq,
-    sound_speed,
     delays_tx,
     tx_apodization,
     exp_arr,
@@ -381,7 +377,6 @@ def _pfield_freq_loop(
 
     Args:
         freq (list): List of frequencies.
-        sound_speed (float): Speed of sound.
         delays_tx (list): List of transmit delays.
         tx_apodization (list): List of transmit apodization values.
         exp_arr (list): List of complex exponentials.
@@ -404,7 +399,6 @@ def _pfield_freq_loop(
         rp_k = _pfield_freq_step(
             k,
             freq,
-            sound_speed,
             delays_tx,
             tx_apodization,
             ops.mean(rp_mono, axis=1),  # avg over sub-elements

@@ -3,7 +3,7 @@
 Contributing
 =============
 
-``zea`` is an open-source project and we welcome contributions from the ultrasound community. Whether you want to report a bug, suggest a new feature, or contribute code, your input is valuable. This document outlines how you can contribute to the project.
+``zea`` is an open-source project and we welcome contributions from the ultrasound community. Whether you want to report a bug, suggest a new feature, or contribute code, your input is valuable. This document outlines how you can contribute to the project. In case you have a general question or want to discuss an idea before working on it, please feel free to open an `issue on GitHub <https://github.com/tue-bmd/zea/issues>`_ or join the discussion in the `GitHub Discussions <https://github.com/tue-bmd/zea/discussions>`_.
 
 How to contribute
 -----------------
@@ -12,7 +12,7 @@ First, take some time to read through this whole guide. Then follow the followin
 1. Make an issue
 ~~~~~~~~~~~~~~~~
 
-Take a look at the current `issues <https://github.com/tue-bmd/zea/issues>`_ on GitHub to see if there are any open issues that you can help with. If your issue is not listed, please create a new issue describing the motivation behind the problem or feature you want to work on. That way we can discuss it and make sure that your contribution is aligned with the project's goals.
+Take a look at the current `issues on GitHub <https://github.com/tue-bmd/zea/issues>`_ to see if there are any open issues that you can help with. If your issue is not listed, please create a new issue describing the motivation behind the problem or feature you want to work on. That way we can discuss it and make sure that your contribution is aligned with the project's goals.
 
 .. dropdown:: Example Issue Template
 

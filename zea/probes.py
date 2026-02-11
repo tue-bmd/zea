@@ -58,6 +58,8 @@ def create_probe_geometry(n_el, pitch):
 class Probe(Object):
     """Probe base class. All probes should inherit from this class."""
 
+    # TODO: our data format doesn't store the actual probe center frequency anymore...
+    # We should decide how to handle this in the future.
     def __init__(
         self,
         probe_geometry=None,

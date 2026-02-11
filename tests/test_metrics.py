@@ -31,7 +31,8 @@ def test_smsle():
 @pytest.mark.parametrize("metric_name", metrics_registry.registered_names())
 @backend_equality_check(decimal=3)
 def test_metrics(metric_name):
-    """Test all losses and metrics"""
+    """Test all losses and metrics.
+    Most metrics do not have a batch axis, so we test with single images."""
     if metric_name == "lpips":
         metric = metrics.get_metric(metric_name, image_range=[0, 255])
     else:
@@ -39,8 +40,8 @@ def test_metrics(metric_name):
     paired = metrics_registry.get_parameter(metric_name, "paired")
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    y_true = rng.standard_normal((2, 16, 16, 3)).astype(np.float32) * 255.0
-    y_pred = rng.standard_normal((2, 16, 16, 3)).astype(np.float32) * 255.0
+    y_true = rng.uniform(0, 255, (16, 16, 3)).astype(np.float32)
+    y_pred = rng.uniform(0, 255, (16, 16, 3)).astype(np.float32)
     y_true = ops.convert_to_tensor(y_true)
     y_pred = ops.convert_to_tensor(y_pred)
 
@@ -48,6 +49,8 @@ def test_metrics(metric_name):
         metric_value = metric(y_true, y_pred)
     else:
         metric_value = metric(y_pred)
+
+    assert metric_value.shape == (), f"Metric {metric_name} did not return a scalar value"
 
     # Regression test against TensorFlow implementations for SSIM and PSNR
     if metric_name == "ssim":
@@ -74,10 +77,13 @@ def test_metrics(metric_name):
 
 @backend_equality_check(decimal=2)
 def test_metrics_class():
-    """Test Metrics class"""
+    """Test Metrics class, which computes multiple metrics at once on batched data."""
+    batch_size = 2
+    img_size = (16, 16, 3)
+
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    y_true = rng.random((2, 16, 16, 3)).astype(np.float32) * 255.0
-    y_pred = rng.random((2, 16, 16, 3)).astype(np.float32) * 255.0
+    y_true = rng.uniform(0, 255, (batch_size, *img_size)).astype(np.float32)
+    y_pred = rng.uniform(0, 255, (batch_size, *img_size)).astype(np.float32)
     y_true = ops.convert_to_tensor(y_true)
     y_pred = ops.convert_to_tensor(y_pred)
 
@@ -90,7 +96,7 @@ def test_metrics_class():
 
     results_no_avg = metrics_instance(y_true, y_pred, average_batches=False)
     assert all(name in results_no_avg for name in METRIC_NAMES)
-    assert all(value.shape[0] == 2 for value in results_no_avg.values())
+    assert all(value.shape == (batch_size,) for value in results_no_avg.values())
 
     # Compare backends for a single metric
     return results_no_avg["mse"]

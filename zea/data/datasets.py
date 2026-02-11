@@ -682,10 +682,3 @@ def count_samples_per_directory(file_names, directories):
     )
 
     return counts
-
-
-if __name__ == "__main__":
-    src_folder = Folder(
-        "/mnt/z/Ultrasound-BMd/data/USBMD_datasets/CAMUS/val/patient0450", "image", validate=False
-    )
-    src_folder.copy("./CAMIUS", key="all")

@@ -5,6 +5,8 @@ import shutil
 import subprocess as sp
 from typing import Union
 
+import keras
+
 from zea import log
 
 
@@ -269,7 +271,10 @@ def get_device(device="auto:1", verbose=True, hide_others=True):
     """
 
     def _cpu_case():
-        os.environ["JAX_PLATFORMS"] = "cpu"  # only affects jax
+        if keras.backend.backend() == "jax":
+            import jax
+
+            jax.config.update("jax_platforms", "cpu")
         if hide_others:
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
         # returns None to indicate CPU

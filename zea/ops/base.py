@@ -16,6 +16,7 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.utils import (
     deep_compare,
+    map_negative_indices,
 )
 
 
@@ -296,6 +297,34 @@ class Operation(keras.Operation):
         return True
 
 
+class Filter(Operation):
+    def _resolve_filter_axes(self, data, axes=None):
+        """
+        Resolve the axes to filter over based on the axes parameter and with_batch_dim flag.
+
+        Args:
+            data: Input tensor
+            axes: Tuple of axes to filter over, or None to filter all (non-batch) axes
+
+        Returns:
+            Tuple of resolved axes indices
+
+        Raises:
+            ValueError: If batch dimension is included in axes when with_batch_dim is True
+        """
+
+        if axes is None:
+            if self.with_batch_dim:
+                return tuple(range(1, data.ndim))
+            else:
+                return tuple(range(data.ndim))
+        else:
+            axes = map_negative_indices(axes, data.ndim)
+            if self.with_batch_dim and 0 in axes:
+                raise ValueError("Batch dimension cannot be one of the axes to filter over.")
+            return axes
+
+
 @ops_registry("identity")
 class Identity(Operation):
     """Identity operation."""
@@ -303,36 +332,6 @@ class Identity(Operation):
     def call(self, **kwargs) -> Dict:
         """Returns the input as is."""
         return {}
-
-
-class ImageOperation(Operation):
-    """
-    Base class for image processing operations.
-
-    This class extends the Operation class to provide a common interface
-    for operations that process image data, with shape (batch, height, width, channels)
-    or (height, width, channels) if batch dimension is not present.
-
-    Subclasses should implement the `call` method to define the image processing logic, and call
-    ``super().call(**kwargs)`` to validate the input data shape.
-    """
-
-    def call(self, **kwargs):
-        """
-        Validate input data shape for image operations.
-
-        Args:
-            **kwargs: Keyword arguments containing input data.
-
-        Raises:
-            AssertionError: If input data does not have the expected number of dimensions.
-        """
-        data = kwargs[self.key]
-
-        if self.with_batch_dim:
-            assert ops.ndim(data) == 4, "Input data must have 4 dimensions (b, h, w, c)."
-        else:
-            assert ops.ndim(data) == 3, "Input data must have 3 dimensions (h, w, c)."
 
 
 @ops_registry("lambda")

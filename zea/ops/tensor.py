@@ -1,23 +1,18 @@
-from typing import List, Union
+from typing import List, Tuple, Union
 
 import numpy as np
-import scipy
 from keras import ops
 from keras.src.layers.preprocessing.data_layer import DataLayer
 
 from zea.func import normalize
+from zea.func.tensor import gaussian_filter
 from zea.internal.registry import ops_registry
-from zea.ops.base import (
-    ImageOperation,
-    Operation,
-)
-from zea.utils import (
-    map_negative_indices,
-)
+from zea.ops.base import Filter, Operation
+from zea.utils import map_negative_indices
 
 
 @ops_registry("gaussian_blur")
-class GaussianBlur(ImageOperation):
+class GaussianBlur(Filter):
     """
     GaussianBlur is an operation that applies a Gaussian blur to an input image.
     Uses scipy.ndimage.gaussian_filter to create a kernel.
@@ -26,45 +21,44 @@ class GaussianBlur(ImageOperation):
     def __init__(
         self,
         sigma: float,
-        kernel_size: int | None = None,
-        pad_mode="symmetric",
-        truncate=4.0,
+        order: int | Tuple[int] = 0,
+        mode: str = "symmetric",
+        cval: float | None = None,
+        truncate: float = 4.0,
+        axes: Tuple[int] = (-3, -2),
         **kwargs,
     ):
         """
         Args:
-            sigma (float): Standard deviation for Gaussian kernel.
-            kernel_size (int, optional): The size of the kernel. If None, the kernel
-                size is calculated based on the sigma and truncate. Default is None.
-            pad_mode (str): Padding mode for the input image. Default is 'symmetric'.
-            truncate (float): Truncate the filter at this many standard deviations.
+            sigma (float or tuple): Standard deviation for Gaussian kernel. The standard deviations
+                of the Gaussian filter are given for each axis as a sequence, or as a single number,
+                in which case it is equal for all axes.
+            order (int or Tuple[int]): The order of the filter along each axis is given as a
+                sequence of integers, or as a single number. An order of 0 corresponds to
+                convolution with a Gaussian kernel. A positive order corresponds to convolution
+                with that derivative of a Gaussian. Default is 0.
+            mode (str, optional): Padding mode for the input image. Default is 'symmetric'.
+                See [keras docs](https://www.tensorflow.org/api_docs/python/tf/keras/ops/pad) for
+                all options and [tensorflow docs](https://www.tensorflow.org/api_docs/python/tf/pad)
+                for some examples. Note that the naming differs from scipy.ndimage.gaussian_filter!
+            cval (float, optional): Value to fill past edges of input if mode is 'constant'.
+                Default is None.
+            truncate (float, optional): Truncate the filter at this many standard deviations.
+                Default is 4.0.
+            axes (Tuple[int], optional): If None, input is filtered along all axes. Otherwise, input
+                is filtered along the specified axes. When axes is specified, any tuples used for
+                sigma, order, mode and/or radius must match the length of axes. The ith entry in
+                any of these tuples corresponds to the ith entry in axes. Default is (-3, -2),
+                which corresponds to the height and width dimensions of a
+                (..., height, width, channels) tensor.
         """
         super().__init__(**kwargs)
-        if kernel_size is None:
-            radius = round(truncate * sigma)
-            self.kernel_size = 2 * radius + 1
-        else:
-            self.kernel_size = kernel_size
         self.sigma = sigma
-        self.pad_mode = pad_mode
-        self.radius = self.kernel_size // 2
-        self.kernel = self.get_kernel()
-
-    def get_kernel(self):
-        """
-        Create a gaussian kernel for blurring.
-
-        Returns:
-            kernel (Tensor): A gaussian kernel for blurring.
-                Shape is (kernel_size, kernel_size, 1, 1).
-        """
-        n = np.zeros((self.kernel_size, self.kernel_size))
-        n[self.radius, self.radius] = 1
-        kernel = scipy.ndimage.gaussian_filter(n, sigma=self.sigma, mode="constant").astype(
-            np.float32
-        )
-        kernel = kernel[:, :, None, None]
-        return ops.convert_to_tensor(kernel)
+        self.order = order
+        self.mode = mode
+        self.cval = cval
+        self.truncate = truncate
+        self.axes = axes
 
     def call(self, **kwargs):
         """Apply a Gaussian filter to the input data.
@@ -73,36 +67,12 @@ class GaussianBlur(ImageOperation):
             data (ops.Tensor): Input image data of shape (height, width, channels) with
                 optional batch dimension if ``self.with_batch_dim``.
         """
-        super().call(**kwargs)
         data = kwargs[self.key]
+        axes = self._resolve_filter_axes(data, self.axes)
 
-        # Add batch dimension if not present
-        if not self.with_batch_dim:
-            data = data[None]
-
-        # Add channel dimension to kernel
-        kernel = ops.tile(self.kernel, (1, 1, data.shape[-1], data.shape[-1]))
-
-        # Pad the input image according to the padding mode
-        padded = ops.pad(
-            data,
-            [[0, 0], [self.radius, self.radius], [self.radius, self.radius], [0, 0]],
-            mode=self.pad_mode,
+        out = gaussian_filter(
+            data, self.sigma, self.order, self.mode, self.cval, self.truncate, axes
         )
-
-        # Apply the gaussian kernel to the padded image
-        out = ops.conv(padded, kernel, padding="valid", data_format="channels_last")
-
-        # Remove padding
-        out = ops.slice(
-            out,
-            [0, 0, 0, 0],
-            [out.shape[0], data.shape[1], data.shape[2], data.shape[3]],
-        )
-
-        # Remove batch dimension if it was not present before
-        if not self.with_batch_dim:
-            out = ops.squeeze(out, axis=0)
 
         return {self.output_key: out}
 
@@ -133,6 +103,13 @@ class Normalize(Operation):
         return (
             [np.float32(x) if x is not None else None for x in data] if data is not None else None
         )
+
+    @property
+    def valid_keys(self):
+        if self.input_range is None:
+            return super().valid_keys.union({"maxval", "minval"})
+        else:
+            return super().valid_keys
 
     def call(self, **kwargs):
         """Normalize data to a given range.
@@ -307,12 +284,12 @@ class Threshold(Operation):
                 )
         else:  # soft
             if below_threshold:
-                self._threshold_func = (
-                    lambda data, threshold, fill: ops.maximum(data - threshold, 0) + fill
+                self._threshold_func = lambda data, threshold, fill: (
+                    ops.maximum(data - threshold, 0) + fill
                 )
             else:
-                self._threshold_func = (
-                    lambda data, threshold, fill: ops.minimum(data - threshold, 0) + fill
+                self._threshold_func = lambda data, threshold, fill: (
+                    ops.minimum(data - threshold, 0) + fill
                 )
 
     def _resolve_fill_value(self, data, threshold):

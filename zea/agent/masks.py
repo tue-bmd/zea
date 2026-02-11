@@ -4,6 +4,8 @@ Mask generation utilities.
 These masks are used as a measurement operator for focused scan-line subsampling.
 """
 
+from __future__ import annotations
+
 from typing import List
 
 import keras
@@ -117,11 +119,21 @@ def initial_equispaced_lines(
         Tensor: k-hot-encoded line vector of shape (n_possible_actions).
             Needs to be converted to image size.
     """
+    assert n_actions > 0, "Number of actions must be > 0."
+    assert n_possible_actions > 0, "Number of possible actions must be > 0."
+    assert n_actions <= n_possible_actions, (
+        "Number of actions must be less than or equal to number of possible actions."
+    )
+
     if assert_equal_spacing:
         _assert_equal_spacing(n_actions, n_possible_actions)
-        selected_indices = ops.arange(0, n_possible_actions, n_possible_actions // n_actions)
-    else:
-        selected_indices = ops.linspace(0, n_possible_actions - 1, n_actions, dtype="int32")
+
+    # Distribute indices as evenly as possible
+    # This approach ensures spacing differs by at most 1 when not divisible
+    step = n_possible_actions / n_actions
+    selected_indices = ops.cast(
+        ops.round(ops.arange(0, n_actions, dtype="float32") * step), "int32"
+    )
 
     return indices_to_k_hot(selected_indices, n_possible_actions, dtype=dtype)
 

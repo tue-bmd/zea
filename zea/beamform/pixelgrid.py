@@ -123,7 +123,7 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
     The position along the ray is defined by its limits (rlims) and spacing (dr).
 
     Args:
-        rlims (tuple): Radial limits of pixel grid ([rmin, rmax])
+        rlims (tuple): Radial limits of pixel grid ([rmin, rmax]) with respect to each ray origin
         dr (float): Pixel spacing in radius
         oris (np.ndarray): Origin of each ray in Cartesian coordinates (x, y, z)
             with shape (nrays, 3)
@@ -147,16 +147,24 @@ def radial_pixel_grid(rlims, dr, oris, dirs):
     return grid
 
 
-def polar_pixel_grid(polar_limits, zlims, num_radial_pixels: int, num_polar_pixels: int):
+def polar_pixel_grid(
+    polar_limits,
+    zlims,
+    num_radial_pixels: int,
+    num_polar_pixels: int,
+    distance_to_apex: float = 0.0,
+):
     """Generate a polar grid.
 
     Uses radial_pixel_grid but based on parameters that are present in the scan class.
+    Currently only 2D grids (no elevation steering) are supported.
 
     Args:
         polar_limits (tuple): Polar limits of pixel grid ([polar_min, polar_max])
         zlims (tuple): Depth limits of pixel grid ([zmin, zmax])
         num_radial_pixels (int, optional): Number of depth pixels.
         num_polar_pixels (int, optional): Number of polar pixels.
+        distance_to_apex (float, optional): Distance from transducer to apex of pixel grid.
 
     Returns:
         grid (np.ndarray): Pixel grid of size (num_radial_pixels, num_polar_pixels, 3)
@@ -165,12 +173,17 @@ def polar_pixel_grid(polar_limits, zlims, num_radial_pixels: int, num_polar_pixe
     assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
     assert len(zlims) == 2, "zlims must be a tuple of length 2."
 
-    dr = (zlims[1] - zlims[0]) / num_radial_pixels
+    rlims = (zlims[0], zlims[1] + distance_to_apex)
+    dr = (rlims[1] - rlims[0]) / num_radial_pixels
 
-    oris = np.array([0, 0, 0])
+    oris = np.array([0, 0, -distance_to_apex])
     oris = np.tile(oris, (num_polar_pixels, 1))
     dirs_az = np.linspace(*polar_limits, num_polar_pixels)
 
     dirs_el = np.zeros(num_polar_pixels)
     dirs = np.vstack((dirs_az, dirs_el)).T
-    return radial_pixel_grid(zlims, dr, oris, dirs).transpose(1, 0, 2)
+
+    grid = radial_pixel_grid(rlims, dr, oris, dirs).transpose(1, 0, 2)
+
+    # In case of rounding errors, trim the grid to the correct number of radial pixels
+    return grid[:num_radial_pixels, :, :]

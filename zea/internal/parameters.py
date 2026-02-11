@@ -165,6 +165,10 @@ class Parameters(ZeaObject):
         for name in self.__class__.__dict__:
             self._check_for_circular_dependencies(name)
 
+        # Check if all dependencies are valid parameters or computed properties
+        # Will automatically catch typo's etc.
+        self._check_validity_of_dependencies()
+
         # Internal state
         self._params = {}
         self._properties = self.get_properties()
@@ -371,6 +375,17 @@ class Parameters(ZeaObject):
             for dep in cls._get_dependencies(name):
                 cls._check_for_circular_dependencies(dep, seen)
 
+    @classmethod
+    def _check_validity_of_dependencies(cls):
+        for dep in cls.get_properties_with_dependencies():
+            for d in cls._get_dependencies(dep):
+                if not (d in cls.VALID_PARAMS or cls._is_property_with_dependencies(d)):
+                    raise ValueError(
+                        f"Dependency '{d}' of computed property '{dep}' is not a valid "
+                        f"parameter or computed property. This has to be fixed in the "
+                        f"{cls.__name__} class definition."
+                    )
+
     def _find_all_dependents(self, target, seen=None):
         """
         Find all computed properties that depend (directly or indirectly) on the target parameter
@@ -442,6 +457,11 @@ class Parameters(ZeaObject):
     def get_properties(cls):
         """Get all properties of the class, including those with dependencies."""
         return [name for name, value in inspect.getmembers(cls) if isinstance(value, property)]
+
+    @classmethod
+    def get_properties_with_dependencies(cls):
+        """Get all properties of the class that have dependencies."""
+        return [name for name in cls.get_properties() if cls._is_property_with_dependencies(name)]
 
     def to_tensor(self, include=None, exclude=None, keep_as_is: list = None):
         """

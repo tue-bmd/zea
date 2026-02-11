@@ -5,7 +5,7 @@ def fish():
     """Returns a scatterer phantom for ultrasound simulation tests.
 
     Returns:
-        ndarray: The scatterer positions of shape (n_scat, 3).
+        ndarray: The scatterer positions of shape (104, 3).
     """
     # The size is the height of the fish
     size = 11e-3
@@ -40,18 +40,19 @@ def fish():
     )
 
     scat_z += z_offset
-    return np.stack([scat_x, scat_y, scat_z], axis=1)
+    scat = np.stack([scat_x, scat_y, scat_z], axis=1)
+    return scat
 
 
 def rose(k=3, num_scatterers=80):
-    """Returns a scatterer phantom of the rose curve for ultrasound simulation tests.
+    """Generates scatterer positions based on the Rose curve.
 
     Args:
         k (int): The frequency parameter of the rose curve.
         num_scatterers (int): The number of scatterers to generate along the curve.
 
     Returns:
-        ndarray: The scatterer positions of shape (n_scat, 3).
+        ndarray: The scatterer positions of shape (num_scatterers, 3).
     """
     # https://en.wikipedia.org/wiki/Rose_(mathematics)
     size = 11e-3
@@ -66,7 +67,8 @@ def rose(k=3, num_scatterers=80):
     scat_x, scat_z = rose_curve(theta=np.linspace(0, 2 * np.pi, num_scatterers), k=k)
     scat_z += z_offset
     scat_y = np.zeros_like(scat_x)
-    return np.stack([scat_x, scat_y, scat_z], axis=1)
+    scat = np.stack([scat_x, scat_y, scat_z], axis=1)
+    return scat
 
 
 def fibonacci(alpha=0.5, num_scatterers=100):
@@ -93,7 +95,8 @@ def fibonacci(alpha=0.5, num_scatterers=100):
     scat_z = r * np.sin(theta) + z_offset
     scat_y = np.zeros_like(scat_x)
 
-    return np.stack([scat_x, scat_y, scat_z], axis=1)
+    scat = np.stack([scat_x, scat_y, scat_z], axis=1)
+    return scat
 
 
 def lissajous(a=3, b=2, delta=np.pi / 2, num_scatterers=200):
@@ -115,8 +118,8 @@ def lissajous(a=3, b=2, delta=np.pi / 2, num_scatterers=200):
     scat_x = size * np.sin(a * t + delta)
     scat_z = size * np.sin(b * t) + z_offset
     scat_y = np.zeros_like(scat_x)
-
-    return np.stack([scat_x, scat_y, scat_z], axis=1)
+    scat = np.stack([scat_x, scat_y, scat_z], axis=1)
+    return scat
 
 
 def golden_ratio(num_scatterers=100):
@@ -138,5 +141,5 @@ def golden_ratio(num_scatterers=100):
     scat_x = r * np.cos(theta * phi)
     scat_z = r * np.sin(theta * phi) + z_offset
     scat_y = np.zeros_like(scat_x)
-
-    return np.stack([scat_x, scat_y, scat_z], axis=1)
+    scat = np.stack([scat_x, scat_y, scat_z], axis=1)
+    return scat

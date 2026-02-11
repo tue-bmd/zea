@@ -305,7 +305,7 @@ def make_dataloader(
             return dataset.map(func, num_parallel_calls=tf.data.AUTOTUNE)
 
     # add channel dim
-    if len(image_extractor.shape) != 3:
+    if len(image_extractor.shape) < 3:
         dataset = dataset_map(dataset, lambda x: tf.expand_dims(x, axis=-1))
 
     # Clip to image range

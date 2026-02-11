@@ -41,15 +41,19 @@ def test_unequal_spacing():
     lines = masks.initial_equispaced_lines(
         n_actions=3, n_possible_actions=10, assert_equal_spacing=False
     )
+    expected_lines = np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0])  # notice the spacing is 2, 3, 2
     assert ops.shape(lines) == (10,)
     assert ops.sum(lines) == 3
+    assert ops.all(lines == expected_lines)
 
     # Should not raise error when n_possible_actions is divisible by n_actions
     lines = masks.initial_equispaced_lines(
         n_actions=2, n_possible_actions=10, assert_equal_spacing=False
     )
+    expected_lines = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0])
     assert ops.shape(lines) == (10,)
     assert ops.sum(lines) == 2
+    assert ops.all(lines == expected_lines)
 
 
 def test_mask_action_model():

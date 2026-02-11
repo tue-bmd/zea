@@ -17,6 +17,7 @@ import yaml
 
 from zea.data.convert.images import convert_image_dataset
 from zea.data.convert.utils import load_avi, unzip
+from zea.data.convert.verasonics import VerasonicsFile
 from zea.data.file import File
 from zea.data.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
@@ -42,9 +43,8 @@ def test_conversion_script(tmp_path_factory, dataset):
         [sys.executable, "-m", "zea.data.convert", dataset, str(src), str(dst), *extra_args],
         env=create_env_for_dataset(dataset),
         check=True,
-        capture_output=True,
     )
-    verify_converted_test_dataset(dataset, dst)
+    verify_converted_test_dataset(dataset, src, dst)
 
     if dataset == "echonet":
         # For echonet we want to run it again, using the split.yaml file created in dst
@@ -111,7 +111,7 @@ def create_test_data_for_dataset(dataset, src):
     return extra_args
 
 
-def verify_converted_test_dataset(dataset, dst):
+def verify_converted_test_dataset(dataset, src, dst):
     """
     Selects the function that reads the converted test dataset based on the provided dataset
 
@@ -132,7 +132,7 @@ def verify_converted_test_dataset(dataset, dst):
     elif dataset == "picmus":
         verify_converted_picmus_test_data(dst)
     elif dataset == "verasonics":
-        verify_converted_verasonics_test_data(dst)
+        verify_converted_verasonics_test_data(src, dst)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -207,6 +207,7 @@ def create_echonetlvh_test_data(src):
         ("0X2222222222222222", "train", (64, 48)),  # (will be rejected)
         ("0X3333333333333333", "val", (64, 48)),  # Even width
         ("0X4444444444444444", "test", (64, 48)),
+        ("0X5555555555555555", "train", (64, 48)),  # Will cause crop to overshoot
     ]
 
     # Create a test rejections file with one entry
@@ -337,6 +338,11 @@ def create_echonetlvh_test_data(src):
                 constant_values=0,
             )
 
+            # Special case: Add a bright pixel below the scan cone to cause overshoot
+            if filename == "0X5555555555555555":
+                # Place a white pixel at the bottom center to confuse cone detection
+                padded_img[-2, 5] = 1.0
+
             # Scale to uint8
             padded_img = (padded_img * 255).astype(np.uint8)
             frames.append(padded_img)
@@ -464,6 +470,15 @@ def create_verasonics_test_data(src):
     mat_file = _hf_resolve_path("hf://zeahub/pytest/verasonics_conversion_test_zea.mat")
     shutil.copy(mat_file, src / mat_file.name)
 
+    # Create a convert.yaml file to specify parameters
+    convert_yaml = {
+        "files": [
+            {"name": mat_file.name, "first_frame": 1},
+        ],
+    }
+    with open(src / "convert.yaml", "w", encoding="utf-8") as f:
+        yaml.dump(convert_yaml, f)
+
 
 def verify_converted_echonet_test_data(dst):
     """
@@ -564,6 +579,7 @@ def verify_converted_echonetlvh_test_data(dst):
             # "0X2222222222222222.avi", # This one was rejected
             "0X3333333333333333.avi",
             "0X4444444444444444.avi",
+            # "0X5555555555555555.avi", # This one results in error
         ]
 
         successful_files = [
@@ -591,6 +607,10 @@ def verify_converted_echonetlvh_test_data(dst):
                 )
                 assert crop_bottom > crop_top, (
                     f"Invalid vertical crop bounds for {row['avi_filename']}"
+                )
+            if row.get("avi_filename") == "0X5555555555555555.avi":
+                assert row.get("status").startswith("error"), (
+                    "Expected error status for 0X5555555555555555.avi due to crop overshoot"
                 )
 
 
@@ -641,10 +661,19 @@ def verify_converted_picmus_test_data(dst):
             f.validate()
 
 
-def verify_converted_verasonics_test_data(dst):
+def verify_converted_verasonics_test_data(src, dst):
     h5_files = list(dst.rglob("*.hdf5"))
     assert len(h5_files) == 1, "Expected 1 converted hdf5 file."
     h5_file = h5_files[0]
+
+    # Check that the convert_config in the VerasonicsFile matches what we set up
+    filepath = Path(src).glob("*.mat").__next__()
+    with VerasonicsFile(filepath, "r") as vf:
+        convert_config = vf.load_convert_config()
+        assert convert_config["name"] == filepath.name
+        assert convert_config["first_frame"] == 1
+
+    # Check that the file contains data
     with File(h5_file, "r") as f:
         assert "data" in f, f"Missing 'data' in {h5_file}"
         assert "scan" in f, f"Missing 'scan' in {h5_file}"

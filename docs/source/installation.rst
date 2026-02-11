@@ -1,7 +1,7 @@
 Installation
 =============
 
-Here we will outline how to install the `zea` package and its dependencies.
+Here we will outline how to install the ``zea`` package and its dependencies.
 Besides installation through `PyPI <https://pypi.org/project/zea>`_, we also provide Docker images for easy development (see the `Docker`_ section below). For instructions on contributing and development installation, see :doc:`contributing`.
 
 .. tab-set::
@@ -105,7 +105,7 @@ We recommend using `rootless docker <https://docs.docker.com/engine/security/roo
 
 .. important::
 
-   Mount your ``zea`` repository to ``/zea`` inside the container so that changes are reflected in the `zea` installation inside the container.
+   Mount your ``zea`` repository to ``/zea`` inside the container so that changes are reflected in the ``zea`` installation inside the container.
 
 .. tip::
 

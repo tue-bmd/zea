@@ -343,7 +343,7 @@ class EquispacedLines(LinesActionModel):
         n_possible_actions: int,
         img_width: int,
         img_height: int,
-        assert_equal_spacing=True,
+        assert_equal_spacing: bool = True,
     ):
         super().__init__(n_actions, n_possible_actions, img_width, img_height)
 

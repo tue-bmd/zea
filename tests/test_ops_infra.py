@@ -7,7 +7,7 @@ import keras
 import numpy as np
 import pytest
 
-from zea import ops
+from zea import func, ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
@@ -656,7 +656,8 @@ def ultrasound_scan(ultrasound_probe):
 
 
 def get_scatterers():
-    """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
+    """Returns scatterer positions and magnitudes for ultrasound simulation tests.
+    Has a batch dimension of 1."""
     scat_x, scat_z = np.meshgrid(
         np.linspace(-10e-3, 10e-3, 5),
         np.linspace(10e-3, 30e-3, 5),
@@ -673,10 +674,11 @@ def get_scatterers():
         ],
         axis=1,
     )
+    scat_positions = np.expand_dims(scat_positions, axis=0)  # add batch dimension
 
     return {
         "positions": scat_positions.astype(np.float32),
-        "magnitudes": np.ones(n_scat, dtype=np.float32),
+        "magnitudes": np.ones((1, n_scat), dtype=np.float32),
         "n_scat": n_scat,
     }
 
@@ -687,24 +689,29 @@ def ultrasound_scatterers():
     return get_scatterers()
 
 
-def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers):
+@pytest.mark.parametrize(
+    "with_batch_dim",
+    [False, True],
+)
+def test_simulator(ultrasound_probe, ultrasound_scan, ultrasound_scatterers, with_batch_dim):
     """Tests the simulator operation."""
-    pipeline = ops.Pipeline([ops.Simulate()])
+    pipeline = ops.Pipeline([ops.Simulate()], with_batch_dim=with_batch_dim)
     parameters = pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+
+    if not with_batch_dim:
+        # remove batch_dim of scatterers for pipeline without batch dimension
+        ultrasound_scatterers["positions"] = ultrasound_scatterers["positions"][0]
+        ultrasound_scatterers["magnitudes"] = ultrasound_scatterers["magnitudes"][0]
 
     output = pipeline(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
         scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
     )
-
-    assert output["data"].shape == (
-        1,
-        ultrasound_scan.n_tx,
-        ultrasound_scan.n_ax,
-        ultrasound_scan.n_el,
-        1,
-    )
+    # assert output shape with batch dimension if with_batch_dim else without
+    expected_shape = (ultrasound_scan.n_tx, ultrasound_scan.n_ax, ultrasound_scan.n_el, 1)
+    expected_shape = (1,) + expected_shape if with_batch_dim else expected_shape
+    assert output["data"].shape == expected_shape
 
 
 @pytest.mark.heavy
@@ -719,7 +726,6 @@ def test_default_ultrasound_pipeline(
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
     parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
-
     output_default = default_pipeline(
         **parameters,
         scatterer_positions=ultrasound_scatterers["positions"],
@@ -787,8 +793,126 @@ def test_registry():
             # Skip abstract base classes and base Operation classes
             if inspect.isabstract(_class) or _class.__name__ in [
                 "Operation",
-                "ImageOperation",
                 "MissingKerasOps",
             ]:
                 continue
             ops_registry.get_name(_class)  # this raises an error if the class is not registered
+
+
+def _get_defined_names_from_submodules(parent_module, submodule_names, exclude_private=True):
+    """Get all function and class names defined in specific submodules.
+
+    This inspects the actual submodule files, not what's imported into the parent,
+    so it will catch items that should be exported but aren't imported yet.
+
+    Args:
+        parent_module: The parent module object
+        submodule_names: List of submodule names to inspect (e.g., ['tensor', 'ultrasound'])
+        exclude_private: Whether to exclude names starting with underscore
+
+    Returns:
+        set: Set of names defined in the submodules
+    """
+    import importlib
+
+    defined_names = set()
+    parent_name = parent_module.__name__
+
+    for submodule_name in submodule_names:
+        # Import the submodule directly
+        full_module_name = f"{parent_name}.{submodule_name}"
+        submodule = importlib.import_module(full_module_name)
+
+        # Get all members defined in this specific submodule
+        for name, obj in inspect.getmembers(submodule):
+            # Skip private names if requested
+            if exclude_private and name.startswith("_"):
+                continue
+
+            # Check if it's a function or class
+            if inspect.isfunction(obj) or inspect.isclass(obj):
+                # Only include if it's defined in this specific submodule
+                if hasattr(obj, "__module__") and obj.__module__ == full_module_name:
+                    defined_names.add(name)
+
+    return defined_names
+
+
+def _check_exports(module, module_name, defined_names, exported_names, file_path):
+    """Check that all defined names are both importable and exported in __all__.
+
+    Args:
+        module: The module object to check imports from
+        module_name: Name of the module for error messages
+        defined_names: Set of names that should be exported
+        exported_names: Set of names in __all__
+        file_path: Path to the __init__.py file for error messages
+    """
+    # Check if items are in __all__
+    missing_in_all = defined_names - exported_names
+
+    # Check if items are actually importable from the module
+    missing_imports = []
+    for name in defined_names:
+        if not hasattr(module, name):
+            missing_imports.append(name)
+
+    # Report errors
+    errors = []
+    if missing_in_all:
+        errors.append(f"Not in __all__: {sorted(missing_in_all)}")
+    if missing_imports:
+        errors.append(f"Not imported: {sorted(missing_imports)}")
+
+    if errors:
+        error_msg = (
+            f"The following items are not properly exported from {module_name}:\n"
+            + "\n".join(f"  - {err}" for err in errors)
+            + f"\nPlease add them to both the imports and __all__ list in {file_path}"
+        )
+        pytest.fail(error_msg)
+
+
+def test_all_operations_exported():
+    """Test that all registered Operation classes are exported in zea.ops.__all__."""
+    # Get all registered operation classes from the registry
+    registered_ops = set()
+    for name in ops_registry.registry:
+        op_class = ops_registry[name]
+        # Only check Operation subclasses that are defined in zea.ops
+        # Skip keras_ops (they're exported via the keras_ops module)
+        if (
+            inspect.isclass(op_class)
+            and issubclass(op_class, ops.Operation)
+            and op_class.__module__.startswith("zea.ops.")
+            and op_class.__module__ != "zea.ops.keras_ops"
+            and op_class.__name__ not in ["Operation", "ImageOperation", "MissingKerasOps"]
+        ):
+            registered_ops.add(op_class.__name__)
+
+    # Check that all registered operations are both imported and in __all__
+    _check_exports(
+        module=ops,
+        module_name="zea.ops",
+        defined_names=registered_ops,
+        exported_names=set(ops.__all__),
+        file_path="zea/ops/__init__.py",
+    )
+
+
+def test_all_functions_exported():
+    """Test that all functions defined in zea.func submodules are exported in zea.func.__all__."""
+    # Get all functions defined in the actual submodule files (tensor.py, ultrasound.py)
+    # This will catch functions that should be exported but aren't imported yet
+    defined_funcs = _get_defined_names_from_submodules(
+        parent_module=func, submodule_names=["tensor", "ultrasound"], exclude_private=True
+    )
+
+    # Check that all defined functions are both imported and in __all__
+    _check_exports(
+        module=func,
+        module_name="zea.func",
+        defined_names=defined_funcs,
+        exported_names=set(func.__all__),
+        file_path="zea/func/__init__.py",
+    )

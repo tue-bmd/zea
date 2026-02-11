@@ -15,6 +15,8 @@ To try this model, simply load one of the available presets:
 
 """
 
+from __future__ import annotations
+
 import abc
 from typing import Literal
 
@@ -912,6 +914,9 @@ class DPS(DiffusionGuidance):
             training=False,
         )
 
+        # Note that while the DPS paper specifies a squared L2 here, we follow their
+        # implementation, which uses a standard L2:
+        # https://github.com/DPS2022/diffusion-posterior-sampling/blob/effbde7325b22ce8dc3e2c06c160c021e743a12d/guided_diffusion/condition_methods.py#L31  # noqa: E501
         measurement_error = omega * L2(measurements - self.operator.forward(pred_images, **kwargs))
 
         return measurement_error, (pred_noises, pred_images)

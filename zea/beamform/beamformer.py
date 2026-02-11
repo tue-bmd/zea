@@ -4,7 +4,7 @@ import keras
 import numpy as np
 from keras import ops
 
-from zea.beamform.lens_correction import calculate_lens_corrected_delays
+from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 
 
@@ -62,6 +62,7 @@ def tof_correction(
     focus_distances,
     t_peak,
     tx_waveform_indices,
+    transmit_origins,
     apply_lens_correction=False,
     lens_thickness=1e-3,
     lens_sound_speed=1000,
@@ -87,6 +88,7 @@ def tof_correction(
             Shape `(n_waveforms,)`.
         tx_waveform_indices (ops.Tensor): The indices of the waveform used for each
             transmit of shape `(n_tx,)`.
+        transmit_origins (ops.Tensor): Transmit origins of shape (n_tx, 3).
         apply_lens_correction (bool, optional): Whether to apply lens correction to
             time-of-flights. This makes it slower, but more accurate in the near-field.
             Defaults to False.
@@ -120,8 +122,7 @@ def tof_correction(
     # rxdel has shape (n_el, n_pix)
     # --------------------------------------------------------------------
 
-    delay_fn = calculate_lens_corrected_delays if apply_lens_correction else calculate_delays
-    txdel, rxdel = delay_fn(
+    txdel, rxdel = calculate_delays(
         flatgrid,
         t0_delays,
         tx_apodizations,
@@ -133,10 +134,12 @@ def tof_correction(
         n_el,
         focus_distances,
         polar_angles,
-        t_peak=t_peak,
-        tx_waveform_indices=tx_waveform_indices,
-        lens_thickness=lens_thickness,
-        lens_sound_speed=lens_sound_speed,
+        t_peak,
+        tx_waveform_indices,
+        transmit_origins,
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
     )
 
     n_pix = ops.shape(flatgrid)[0]
@@ -207,7 +210,11 @@ def calculate_delays(
     polar_angles,
     t_peak,
     tx_waveform_indices,
-    **kwargs,
+    transmit_origins,
+    apply_lens_correction=False,
+    lens_thickness=None,
+    lens_sound_speed=None,
+    n_iter=2,
 ):
     """Calculates the delays in samples to every pixel in the grid.
 
@@ -242,6 +249,16 @@ def calculate_delays(
             `(n_waveforms,)`.
         tx_waveform_indices (Tensor): The indices of the waveform used for each
             transmit of shape `(n_tx,)`.
+        transmit_origins (Tensor): Transmit origins of shape (n_tx, 3).
+        apply_lens_correction (bool, optional): Whether to apply lens correction to
+            time-of-flights. This makes it slower, but more accurate in the near-field.
+            Defaults to False.
+        lens_thickness (float, optional): Thickness of the lens in meters. Used for
+            lens correction.
+        lens_sound_speed (float, optional): Speed of sound in the lens in m/s. Used
+            for lens correction.
+        n_iter (int, optional): Number of iterations for the Newton-Raphson method
+            used in lens correction. Defaults to 2.
 
 
     Returns:
@@ -252,38 +269,56 @@ def calculate_delays(
             `(n_pix, n_el)`.
     """
 
-    def _tx_distances(polar_angles, t0_delays, tx_apodizations, focus_distances):
-        return distance_Tx_generic(
-            grid,
-            t0_delays,
-            tx_apodizations,
+    # Validate input shapes
+    for arr in [t0_delays, grid, tx_apodizations, probe_geometry]:
+        assert arr.ndim == 2
+    assert probe_geometry.shape[0] == n_el
+    assert t0_delays.shape[0] == n_tx
+
+    if not apply_lens_correction:
+        # Compute receive distances in meters of shape (n_pix, n_el)
+        rx_distances = distance_Rx(grid, probe_geometry)
+
+        # Convert distances to delays in seconds
+        rx_delays = rx_distances / sound_speed
+    else:
+        # Compute lens-corrected travel times from each element to each pixel
+        assert lens_thickness is not None, "lens_thickness must be provided for lens correction."
+        assert lens_sound_speed is not None, (
+            "lens_sound_speed must be provided for lens correction."
+        )
+        rx_delays = compute_lens_corrected_travel_times(
             probe_geometry,
-            focus_distances,
-            polar_angles,
+            grid,
+            lens_thickness,
+            lens_sound_speed,
             sound_speed,
+            n_iter=n_iter,
         )
 
-    tx_distances = vmap(_tx_distances)(polar_angles, t0_delays, tx_apodizations, focus_distances)
-    tx_distances = ops.transpose(tx_distances, (1, 0))
-    # tx_distances shape is now (n_pix, n_tx)
+    # Compute transmit delays
+    tx_delays = vmap(transmit_delays, in_axes=(None, 0, 0, None, 0, 0, 0, None, 0), out_axes=1)(
+        grid,
+        t0_delays,
+        tx_apodizations,
+        rx_delays,
+        focus_distances,
+        polar_angles,
+        initial_times,
+        None,
+        transmit_origins,
+    )
 
-    # Compute receive distances
-    def _rx_distances(probe_geometry):
-        return distance_Rx(grid, probe_geometry)
+    # Add the offset to the transmit peak time
+    tx_delays += ops.take(t_peak, tx_waveform_indices)[None]
 
-    rx_distances = vmap(_rx_distances)(probe_geometry)
-    rx_distances = ops.transpose(rx_distances, (1, 0))
-    # rx_distances shape is now (n_pix, n_el)
+    # TODO: nan to num needed?
+    # tx_delays = ops.nan_to_num(tx_delays, nan=0.0, posinf=0.0, neginf=0.0)
+    # rx_delays = ops.nan_to_num(rx_delays, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # Compute the delays [in samples] from the distances
-    # The units here are ([m]/[m/s]-[s])*[1/s] resulting in a unitless quantity
-    # TODO: Add pulse width to transmit delays
-    tx_delays = (
-        tx_distances / sound_speed
-        - initial_times[None]
-        + ops.take(t_peak, tx_waveform_indices)[None]
-    ) * sampling_frequency
-    rx_delays = (rx_distances / sound_speed) * sampling_frequency
+    # Convert from seconds to samples
+    tx_delays *= sampling_frequency
+    rx_delays *= sampling_frequency
 
     return tx_delays, rx_delays
 
@@ -414,7 +449,7 @@ def complex_rotate(iq, theta):
 def distance_Rx(grid, probe_geometry):
     """Computes distance to user-defined pixels from elements.
 
-    Expects all inputs to be numpy arrays specified in SI units.
+    Expects all inputs to be arrays specified in SI units.
 
     Args:
         grid (ops.Tensor): Pixel positions in x,y,z of shape `(n_pix, 3)`.
@@ -425,83 +460,117 @@ def distance_Rx(grid, probe_geometry):
             `(n_pix, n_el)`.
     """
     # Get norm of distance vector between elements and pixels via broadcasting
-    dist = ops.linalg.norm(grid - probe_geometry[None, ...], axis=-1)
+    dist = ops.linalg.norm(grid[:, None, :] - probe_geometry[None, :, :], axis=-1)
     return dist
 
 
-def distance_Tx_generic(
+def transmit_delays(
     grid,
     t0_delays,
     tx_apodization,
-    probe_geometry,
+    rx_delays,
     focus_distance,
     polar_angle,
-    sound_speed=1540,
+    initial_time,
+    azimuth_angle=None,
+    transmit_origin=None,
 ):
-    """Generic transmit distance calculation.
+    """
+    Computes the transmit delay from transmission to each pixel in the grid.
 
-    Computes distance to user-defined pixels for generic transmits based on
-    the t0_delays.
+    Uses the first-arrival time for pixels before the focus (or virtual source)
+    and the last-arrival time for pixels beyond the focus.
+
+    The receive delays can be precomputed since they do not depend on the
+    transmit parameters.
 
     Args:
-        grid (ops.Tensor): Flattened tensor of pixel positions in x,y,z of shape
-            `(n_pix, 3)`
-        t0_delays (ops.Tensor): The transmit delays in seconds of shape `(n_el,)`,
-            shifted such that the smallest delay is 0. Defaults to None.
-        tx_apodization (ops.Tensor): The transmit apodizations of shape
-            `(n_el,)`.
-        probe_geometry (ops.Tensor): The positions of the transducer elements of shape
-            `(n_el, 3)`.
+        grid (ops.Tensor): Flattened tensor of pixel positions in x,y,z of shape `(n_pix, 3)`
+        t0_delays (Tensor): The transmit delays in seconds of shape (n_el,).
+        tx_apodization (Tensor): The transmit apodization of shape (n_el,).
+        rx_delays (Tensor): The travel times in seconds from elements to pixels
+            of shape (n_pix, n_el).
         focus_distance (float): The focus distance in meters.
         polar_angle (float): The polar angle in radians.
-        sound_speed (float): The speed of sound in m/s. Defaults to 1540.
+        initial_time (float): The initial time for this transmit in seconds.
+        azimuth_angle (float, optional): The azimuth angle in radians. Defaults to 0.0.
+        transmit_origin (ops.Tensor, optional): The origin of the transmit beam of shape (3,).
+            If None, defaults to (0, 0, 0). Defaults to None.
 
     Returns:
-        Tensor: Distance from each pixel to each element in meters
-        of shape `(n_pix,)`
+        Tensor: The transmit delays of shape `(n_pix,)`.
     """
-    # Get the individual x, y, and z components of the pixel coordinates
-    x = grid[:, 0]
-    y = grid[:, 1]
-    z = grid[:, 2]
-
-    # Reshape x, y, and z to shape (n_pix, 1)
-    x = x[..., None]
-    y = y[..., None]
-    z = z[..., None]
-
-    # Get the individual x, y, and z coordinates of the elements and add a
-    # dummy dimension at the beginning to shape (1, n_el).
-    ele_x = probe_geometry[None, :, 0]
-    ele_y = probe_geometry[None, :, 1]
-    ele_z = probe_geometry[None, :, 2]
-
-    # Compute the differences dx, dy, and dz of shape (n_pix, n_el)
-    dx = x - ele_x
-    dy = y - ele_y
-    dz = z - ele_z
-
-    # Define an infinite offset for elements that do not fire to not consider them in
-    # the transmit distance calculation.
+    # Add a large offset for elements that are not used in the transmit to
+    # disqualify them from being the closest element
     offset = ops.where(tx_apodization == 0, np.inf, 0.0)
 
-    # Compute the distance between the elements and the pixels of shape
-    # (n_pix, n_el)
-    dist = t0_delays[None] * sound_speed + ops.sqrt(dx**2 + dy**2 + dz**2)
+    # Compute total travel time from t=0 to each pixel via each element
+    # rx_delays has shape (n_pix, n_el)
+    # t0_delays has shape (n_el,)
+    total_times = rx_delays + t0_delays[None, :]
 
-    # Compute the z-coordinate of the focal point
-    focal_z = ops.cos(polar_angle) * focus_distance
+    if azimuth_angle is None:
+        azimuth_angle = ops.zeros_like(polar_angle)
 
-    # Compute the effective distance of the pixels to the wavefront by computing the
-    # largest distance over all the elements when the pixel is behind the virtual
-    # source and the smallest distance otherwise.
-    dist = ops.where(
-        ops.cast(ops.sign(focus_distance), "float32") * (grid[:, 2] - focal_z) <= 0.0,
-        ops.min(dist + offset[None], 1),
-        ops.max(dist - offset[None], 1),
+    # Set origin to (0, 0, 0) if not provided
+    if transmit_origin is None:
+        transmit_origin = ops.zeros(3, dtype=grid.dtype)
+
+    # Compute the 3D position of the focal point
+    # The beam direction vector
+    beam_direction = ops.stack(
+        [
+            ops.sin(polar_angle) * ops.cos(azimuth_angle),
+            ops.sin(polar_angle) * ops.sin(azimuth_angle),
+            ops.cos(polar_angle),
+        ]
     )
 
-    return dist
+    # Handle plane wave case where focus_distance is set to zero
+    # We use np.inf to consider the first wavefront arrival for all pixels
+    focus_distance = ops.where(focus_distance == 0.0, np.inf, focus_distance)
+
+    # Compute focal point position: origin + focus_distance * beam_direction
+    # For negative focus_distance (diverging/virtual source), this is behind the origin
+    focal_point = transmit_origin + focus_distance * beam_direction  # shape (3,)
+
+    # Deal with plane wave case where focus_distance is infinite and beam_direction is zero
+    # (np.inf * 0.0 -> nan) so we convert nan to zero
+    focal_point = ops.where(ops.isnan(focal_point), 0.0, focal_point)
+
+    # Compute the position of each pixel relative to the focal point
+    pixel_relative_to_focus = grid - focal_point[None, :]  # shape (n_pix, 3)
+
+    # Project onto the beam direction to determine if pixel is before or after focus
+    # Positive projection means pixel is in the direction of beam propagation (beyond focus)
+    # Negative projection means pixel is behind the focus (before focus)
+    projection_along_beam = ops.sum(
+        pixel_relative_to_focus * beam_direction[None, :], axis=-1
+    )  # shape (n_pix,)
+
+    # For focused waves (positive focus_distance):
+    #   - Use min time for pixels before focus (projection < 0)
+    #   - Use max time for pixels beyond focus (projection > 0)
+    # For diverging waves (negative focus_distance, virtual source):
+    #   - The sign of focus_distance flips the logic
+    #   - Use min time for pixels between transducer and virtual source
+    #   - Use max time for pixels beyond transducer
+    is_before_focus = ops.cast(ops.sign(focus_distance), "float32") * projection_along_beam < 0.0
+
+    # Compute the effective time of the pixels to the wavefront by computing the
+    # smallest time over all elements (first wavefront arrival) for pixels before
+    # the focus, and the largest time (last wavefront contribution) for pixels
+    # beyond the focus.
+    tx_delay = ops.where(
+        is_before_focus,
+        ops.min(total_times + offset[None, :], axis=-1),
+        ops.max(total_times - offset[None, :], axis=-1),
+    )
+
+    # Subtract the initial time offset for this transmit
+    tx_delay = tx_delay - initial_time
+
+    return tx_delay
 
 
 def fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn):

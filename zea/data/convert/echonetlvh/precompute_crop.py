@@ -188,6 +188,16 @@ def precompute_cone_parameters(args):
                 # Detect cone parameters
                 _, full_cone_params = fit_and_crop_around_scan_cone(first_frame, return_params=True)
 
+                if (
+                    full_cone_params["crop_left"] < 0
+                    or full_cone_params["crop_right"] > first_frame.shape[1]
+                ):
+                    raise ValueError(
+                        "Computed crop exceeds frame dimensions, meaning that either cone detection"
+                        "failed, due to e.g. DICOM artifacts present in the frame, or the full scan"
+                        "cone is not visible in the frame."
+                    )
+
                 # Extract only the essential parameters
                 essential_params = {
                     "avi_filename": avi_filename,

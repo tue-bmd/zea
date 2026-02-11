@@ -14,7 +14,6 @@ import jax
 import numpy as np
 import pytest
 
-
 debugging = sys.gettrace() or debugpy.is_client_connected() is not None
 
 
@@ -173,6 +172,7 @@ class BackendEqualityCheck:
         gt_backend: str = "numpy",
         verbose: bool = False,
         timeout: int = 30,
+        allow_none: bool = False,
     ):
         """Test the processing functions of different libraries (on CPU).
 
@@ -228,7 +228,11 @@ class BackendEqualityCheck:
                 # if both outputs are None, skip the check
                 # i.e. we are just checking if it runs, not if produces the same output
                 if output[gt_backend] is None and output[backend] is None:
-                    continue
+                    if allow_none:
+                        continue
+                    raise ValueError(
+                        "Both outputs are None. Set allow_none=True to allow None outputs."
+                    )
 
                 try:
                     np.testing.assert_almost_equal(

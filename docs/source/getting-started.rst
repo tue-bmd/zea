@@ -203,7 +203,7 @@ After installing a backend, set the ``KERAS_BACKEND`` environment variable to on
 Citation
 --------
 
-If you use `zea` in your research, please cite using :cite:p:`started-stevens2025zea` and :cite:p:`started-van2024active`. Our preprint paper can be found on `arXiv <https://arxiv.org/abs/2512.01433>`_. Also, in case you use them, don't forget to ensure proper attribution to authors of specific models and datasets that are supported by `zea`.
+If you use ``zea`` in your research, please cite using :cite:p:`started-stevens2025zea` and :cite:p:`started-van2024active`. Our preprint paper can be found on `arXiv <https://arxiv.org/abs/2512.01433>`_. Also, in case you use them, don't forget to ensure proper attribution to authors of specific models and datasets that are supported by ``zea``.
 
 .. bibliography:: ../../paper/paper.bib
    :style: unsrt

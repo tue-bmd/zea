@@ -47,10 +47,12 @@ The ``zea`` toolbox uses a custom data format based on the HDF5 standard to stor
          ├── probe_geometry
          ├── sampling_frequency
          ├── center_frequency
+         ├── demodulation_frequency
          ├── initial_times
          ├── t0_delays
          ├── tx_apodizations
          ├── focus_distances
+         ├── transmit_origins
          ├── polar_angles
          ├── azimuth_angles
          ├── bandwidth_percent
@@ -100,7 +102,9 @@ The ``zea`` toolbox uses a custom data format based on the HDF5 standard to stor
    * - ``scan/sampling_frequency``
      - Sampling frequency of the data acquisition (in Hz).
    * - ``scan/center_frequency``
-     - Center frequency of the transducer (in Hz).
+     - Center frequency of the transmit waveform in Hz.
+   * - ``scan/demodulation_frequency``
+     - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
    * - ``scan/initial_times``
      - Time (in seconds) when the A/D converter starts sampling for each transmit, shape [n_tx].
    * - ``scan/t0_delays``
@@ -108,7 +112,9 @@ The ``zea`` toolbox uses a custom data format based on the HDF5 standard to stor
    * - ``scan/tx_apodizations``
      - Transmit apodization values, shape [n_tx, n_el].
    * - ``scan/focus_distances``
-     - Transmit focus distances in meters, shape [n_tx].
+     - Distance from the origin point on the transducer to where the beam comes to focus for each transmit, in meters, shape [n_tx].
+   * - ``scan/transmit_origins``
+     - 3D coordinates (in meters) of the origin point for each transmit, shape [n_tx, 3].
    * - ``scan/polar_angles``
      - Polar angles of transmit beams in radians, shape [n_tx].
    * - ``scan/azimuth_angles``

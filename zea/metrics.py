@@ -8,7 +8,7 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.backend import func_on_device
+from zea.backend import func_on_device, jit
 from zea.func import tensor
 from zea.func.tensor import translate
 from zea.internal.registry import metrics_registry
@@ -28,17 +28,19 @@ def get_metric(name, **kwargs):
 
 def _reduce_mean(array, keep_batch_dim=True):
     """Reduce array by taking the mean.
-    Preserves batch dimension if keep_batch_dim=True.
+
+    Args:
+        array (tensor): Input tensor of shape (..., height, width, channels)
+        keep_batch_dim (bool): Whether to keep the batch dimensions when reducing.
+            Default is True.
     """
     if keep_batch_dim:
-        ndim = ops.ndim(array)
-        axis = tuple(range(max(0, ndim - 3), ndim))
+        return ops.mean(array, axis=(-3, -2, -1))
     else:
-        axis = None
-    return ops.mean(array, axis=axis)
+        return ops.mean(array)
 
 
-@metrics_registry(name="cnr", paired=True)
+@metrics_registry(name="cnr", paired=True, jittable=True)
 def cnr(x, y):
     """Calculate contrast to noise ratio"""
     mu_x = ops.mean(x)
@@ -50,13 +52,13 @@ def cnr(x, y):
     return 20 * ops.log10(ops.abs(mu_x - mu_y) / ops.sqrt((var_x + var_y) / 2))
 
 
-@metrics_registry(name="contrast", paired=True)
+@metrics_registry(name="contrast", paired=True, jittable=True)
 def contrast(x, y):
     """Contrast ratio"""
     return 20 * ops.log10(ops.mean(x) / ops.mean(y))
 
 
-@metrics_registry(name="gcnr", paired=True)
+@metrics_registry(name="gcnr", paired=True, jittable=False)
 def gcnr(x, y, bins=256):
     """Generalized contrast-to-noise-ratio"""
     x = ops.convert_to_numpy(x)
@@ -71,42 +73,44 @@ def gcnr(x, y, bins=256):
     return 1 - np.sum(np.minimum(f, g))
 
 
-@metrics_registry(name="fwhm", paired=False)
+@metrics_registry(name="fwhm", paired=False, jittable=False)
 def fwhm(img):
     """Resolution full width half maxima"""
     mask = ops.nonzero(img >= 0.5 * ops.amax(img))[0]
     return mask[-1] - mask[0]
 
 
-@metrics_registry(name="snr", paired=False)
+@metrics_registry(name="snr", paired=False, jittable=True)
 def snr(img):
     """Signal to noise ratio"""
     return ops.mean(img) / ops.std(img)
 
 
-@metrics_registry(name="wopt_mae", paired=True)
+@metrics_registry(name="wopt_mae", paired=True, jittable=True)
 def wopt_mae(ref, img):
     """Find the optimal weight that minimizes the mean absolute error"""
     wopt = ops.median(ref / img)
     return wopt
 
 
-@metrics_registry(name="wopt_mse", paired=True)
+@metrics_registry(name="wopt_mse", paired=True, jittable=True)
 def wopt_mse(ref, img):
     """Find the optimal weight that minimizes the mean squared error"""
     wopt = ops.sum(ref * img) / ops.sum(img * img)
     return wopt
 
 
-@metrics_registry(name="psnr", paired=True)
+@metrics_registry(name="psnr", paired=True, jittable=True)
 def psnr(y_true, y_pred, *, max_val=255):
     """Peak Signal to Noise Ratio (PSNR) for two input tensors.
 
     PSNR = 20 * log10(max_val) - 10 * log10(mean(square(y_true - y_pred)))
 
     Args:
-        y_true (tensor): [None, height, width, channels]
-        y_pred (tensor): [None, height, width, channels]
+        y_true (tensor): input tensor of shape (height, width, channels)
+            with optional batch dimension.
+        y_pred (tensor): input tensor of shape (height, width, channels)
+            with optional batch dimension.
         max_val: The dynamic range of the images
 
     Returns:
@@ -117,33 +121,39 @@ def psnr(y_true, y_pred, *, max_val=255):
     return psnr
 
 
-@metrics_registry(name="mse", paired=True)
+@metrics_registry(name="mse", paired=True, jittable=True)
 def mse(y_true, y_pred):
     """Gives the MSE for two input tensors.
+
     Args:
-        y_true (tensor)
-        y_pred (tensor)
+        y_true (tensor): input tensor of shape (height, width, channels)
+            with optional batch dimension.
+        y_pred (tensor): input tensor of shape (height, width, channels)
+            with optional batch dimension.
+
     Returns:
         (float): mean squared error between y_true and y_pred. L2 loss.
-
     """
     return _reduce_mean(ops.square(y_true - y_pred))
 
 
-@metrics_registry(name="mae", paired=True)
+@metrics_registry(name="mae", paired=True, jittable=True)
 def mae(y_true, y_pred):
     """Gives the MAE for two input tensors.
+
     Args:
-        y_true (tensor)
-        y_pred (tensor)
+        y_true (tensor): input tensor of shape (height, width, channels)
+            with optional batch dimension.
+        y_pred (tensor): input tensor of shape (height, width, channels)
+            with optional batch dimension.
+
     Returns:
         (float): mean absolute error between y_true and y_pred. L1 loss.
-
     """
     return _reduce_mean(ops.abs(y_true - y_pred))
 
 
-@metrics_registry(name="ssim", paired=True)
+@metrics_registry(name="ssim", paired=True, jittable=True)
 def ssim(
     a,
     b,
@@ -252,7 +262,7 @@ def ssim(
     return ssim_map if return_map else ssim_value
 
 
-@metrics_registry(name="ncc", paired=True)
+@metrics_registry(name="ncc", paired=True, jittable=True)
 def ncc(x, y):
     """Normalized cross correlation"""
     num = ops.sum(x * y)
@@ -260,37 +270,33 @@ def ncc(x, y):
     return num / ops.maximum(denom, keras.config.epsilon())
 
 
-@metrics_registry(name="lpips", paired=True)
-def get_lpips(image_range, batch_size=None, clip=False):
+@metrics_registry(name="lpips", paired=True, jittable=True)
+def get_lpips(image_range, clip=False):
     """
     Get the Learned Perceptual Image Patch Similarity (LPIPS) metric.
 
     Args:
         image_range (list): The range of the images. Will be translated to [-1, 1] for LPIPS.
-        batch_size (int): The batch size for the LPIPS model.
         clip (bool): Whether to clip the images to `image_range`.
 
     Returns:
-        The LPIPS metric function which can be used with [..., h, w, c] tensors in
-        the range `image_range`.
+        The LPIPS metric function.
     """
     # Get the LPIPS model
     _lpips = LPIPS.from_preset("lpips")
     _lpips.trainable = False
     _lpips.disable_checks = True
 
-    def unstack_lpips(imgs):
-        """Unstack the images and calculate the LPIPS metric."""
-        img1, img2 = ops.unstack(imgs, num=2, axis=-1)
-        return _lpips([img1, img2])
-
-    def lpips(img1, img2, **kwargs):
+    def lpips(img1, img2):
         """
         The LPIPS metric function.
+
         Args:
-            img1 (tensor) with shape (..., h, w, c)
-            img2 (tensor) with shape (..., h, w, c)
-        Returns (float): The LPIPS metric between img1 and img2 with shape [...]
+            img1 (tensor) with shape (height, width, channels) with optional batch dimension
+            img2 (tensor) with shape (height, width, channels) with optional batch dimension
+
+        Returns (float): The LPIPS metric between img1 and img2 with shape (batch_size,)
+            or scalar if no batch dimension.
         """
         # clip and translate images to [-1, 1]
         if clip:
@@ -299,11 +305,7 @@ def get_lpips(image_range, batch_size=None, clip=False):
         img1 = translate(img1, image_range, [-1, 1])
         img2 = translate(img2, image_range, [-1, 1])
 
-        imgs = ops.stack([img1, img2], axis=-1)
-        n_batch_dims = ops.ndim(img1) - 3
-        return tensor.func_with_one_batch_dim(
-            unstack_lpips, imgs, n_batch_dims, batch_size=batch_size
-        )
+        return _lpips([img1, img2])
 
     return lpips
 
@@ -335,6 +337,7 @@ class Metrics:
         image_range: tuple,
         quantize: bool = False,
         clip: bool = False,
+        jit_compile: bool = True,
         **kwargs,
     ):
         """Initialize the Metrics class.
@@ -357,9 +360,13 @@ class Metrics:
         self.image_range = image_range
 
         # Initialize all metrics
-        self.metrics = {
-            m: get_metric(m, **reduce_to_signature(metrics_registry[m], kwargs)) for m in metrics
-        }
+        self.metrics = {}
+        for m in metrics:
+            jittable = metrics_registry.get_parameter(m, "jittable")
+            metric_fn = get_metric(m, **reduce_to_signature(metrics_registry[m], kwargs))
+            if jit_compile and jittable:
+                metric_fn = jit(metric_fn)
+            self.metrics[m] = metric_fn
 
         # Other settings
         self.quantize = quantize
@@ -372,6 +379,7 @@ class Metrics:
         num_batch_axes = max(0, ops.ndim(y_true) - 3)
 
         # Because most metric functions do not support batching, we vmap over the batch axes.
+        # This does assume that the metric function can handle single images of shape (h, w, c).
         metric_fn = fun
         for _ in range(num_batch_axes):
             # recursively vmap the leading axis
@@ -388,7 +396,7 @@ class Metrics:
             out = ops.convert_to_numpy(out)
         return out
 
-    def _prepocess(self, tensor):
+    def _preprocess(self, tensor):
         tensor = translate(tensor, self.image_range, [0, 255])
         if self.clip:
             tensor = ops.clip(tensor, 0, 255)
@@ -407,13 +415,13 @@ class Metrics:
         device=None,
     ):
         """Calculate all metrics and return as a dictionary.
-        Assumes input shape [..., h, w, c], i.e. images of shape [h, w, c] with
+        Assumes input shape (..., h, w, c), i.e. images of shape (h, w, c) with
         any number of leading batch dimensions. The metrics will be calculated
         on these 2d images and mapped across all leading batch dimensions.
 
         Args:
-            y_true (tensor): Ground truth images with shape [..., h, w, c]
-            y_pred (tensor): Predicted images with shape [..., h, w, c]
+            y_true (tensor): Ground truth images with shape (..., h, w, c)
+            y_pred (tensor): Predicted images with shape (..., h, w, c)
             average_batches (bool): Whether to average the metrics over the batch dimensions.
             mapped_batch_size (optional int): The batch size to use for computing
                 metric values in parallel.
@@ -427,8 +435,8 @@ class Metrics:
         for name, metric in self.metrics.items():
             results[name] = self._call_metric_fn(
                 metric,
-                self._prepocess(y_true),
-                self._prepocess(y_pred),
+                self._preprocess(y_true),
+                self._preprocess(y_pred),
                 average_batches,
                 return_numpy,
                 device,

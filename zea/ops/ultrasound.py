@@ -1,4 +1,5 @@
 import uuid
+from typing import Tuple
 
 import keras
 import numpy as np
@@ -11,6 +12,7 @@ from zea.func.tensor import (
     apply_along_axis,
     correlate,
     extend_n_dims,
+    gaussian_filter,
     reshape_axis,
 )
 from zea.func.ultrasound import (
@@ -18,6 +20,7 @@ from zea.func.ultrasound import (
     complex_to_channels,
     demodulate,
     envelope_detect,
+    get_band_pass_filter,
     get_low_pass_iq_filter,
     log_compress,
     upmix,
@@ -27,13 +30,7 @@ from zea.internal.core import (
     DataTypes,
 )
 from zea.internal.registry import ops_registry
-from zea.ops.base import (
-    ImageOperation,
-    Operation,
-)
-from zea.ops.tensor import (
-    GaussianBlur,
-)
+from zea.ops.base import Filter, Operation
 from zea.simulator import simulate_rf
 from zea.utils import canonicalize_axis
 
@@ -71,24 +68,42 @@ class Simulate(Operation):
         tx_apodizations,
         **kwargs,
     ):
+        simulate_kwargs = {
+            "probe_geometry": probe_geometry,
+            "apply_lens_correction": apply_lens_correction,
+            "lens_thickness": lens_thickness,
+            "lens_sound_speed": lens_sound_speed,
+            "sound_speed": sound_speed,
+            "n_ax": n_ax,
+            "center_frequency": center_frequency,
+            "sampling_frequency": sampling_frequency,
+            "t0_delays": t0_delays,
+            "initial_times": initial_times,
+            "element_width": element_width,
+            "attenuation_coef": attenuation_coef,
+            "tx_apodizations": tx_apodizations,
+        }
+        if not self.with_batch_dim:
+            simulated_rf = simulate_rf(
+                scatterer_positions=scatterer_positions,
+                scatterer_magnitudes=scatterer_magnitudes,
+                **simulate_kwargs,
+            )
+        else:
+            simulated_rf = ops.map(
+                lambda inputs: simulate_rf(
+                    scatterer_positions=inputs["positions"],
+                    scatterer_magnitudes=inputs["magnitudes"],
+                    **simulate_kwargs,
+                ),
+                {
+                    "positions": scatterer_positions,
+                    "magnitudes": scatterer_magnitudes,
+                },
+            )
+
         return {
-            self.output_key: simulate_rf(
-                ops.convert_to_tensor(scatterer_positions),
-                ops.convert_to_tensor(scatterer_magnitudes),
-                probe_geometry=probe_geometry,
-                apply_lens_correction=apply_lens_correction,
-                lens_thickness=lens_thickness,
-                lens_sound_speed=lens_sound_speed,
-                sound_speed=sound_speed,
-                n_ax=n_ax,
-                center_frequency=center_frequency,
-                sampling_frequency=sampling_frequency,
-                t0_delays=t0_delays,
-                initial_times=initial_times,
-                element_width=element_width,
-                attenuation_coef=attenuation_coef,
-                tx_apodizations=tx_apodizations,
-            ),
+            self.output_key: simulated_rf,
             "n_ch": 1,  # Simulate always returns RF data (so single channel)
         }
 
@@ -122,6 +137,7 @@ class TOFCorrection(Operation):
         probe_geometry,
         t_peak,
         tx_waveform_indices,
+        transmit_origins,
         apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
@@ -145,6 +161,7 @@ class TOFCorrection(Operation):
             t_peak (float): Time to peak of the transmit pulse
             tx_waveform_indices (ops.Tensor): Index of the transmit waveform for each
                 transmit. (All zero if there is only one waveform)
+            transmit_origins (ops.Tensor): Transmit origins of shape (n_tx, 3)
             apply_lens_correction (bool): Whether to apply lens correction
             lens_thickness (float): Lens thickness
             lens_sound_speed (float): Sound speed in the lens
@@ -169,6 +186,7 @@ class TOFCorrection(Operation):
             "focus_distances": focus_distances,
             "t_peak": t_peak,
             "tx_waveform_indices": tx_waveform_indices,
+            "transmit_origins": transmit_origins,
             "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
@@ -332,31 +350,24 @@ class Demodulate(Operation):
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
             jittable=True,
-            additional_output_keys=[
-                "demodulation_frequency",
-                "center_frequency",
-                "n_ch",
-            ],
+            additional_output_keys=["center_frequency", "n_ch"],
             **kwargs,
         )
         self.axis = axis
 
-    def call(self, center_frequency=None, sampling_frequency=None, **kwargs):
+    def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
-
-        demodulation_frequency = center_frequency
 
         # Split the complex signal into two channels
         iq_data_two_channel = demodulate(
             data=data,
-            center_frequency=center_frequency,
+            demodulation_frequency=demodulation_frequency,
             sampling_frequency=sampling_frequency,
             axis=self.axis,
         )
 
         return {
             self.output_key: iq_data_two_channel,
-            "demodulation_frequency": demodulation_frequency,
             "center_frequency": 0.0,
             "n_ch": 2,
         }
@@ -378,9 +389,8 @@ class FirFilter(Operation):
     ):
         """
         Args:
-            axis (int): Axis along which to apply the filter. Cannot be the batch dimension.
-                When using ``complex_channels=True``, the complex channels are removed to convert
-                to complex numbers before filtering, so adjust the ``axis`` accordingly!
+            axis (int): Axis along which to apply the filter. Cannot be the batch dimension and
+                not the complex channel axis when ``complex_channels=True``.
             complex_channels (bool): Whether the last dimension of the input signal represents
                 complex channels (real and imaginary parts). When True, it will convert the signal
                 to ``complex`` dtype before filtering and convert it back to two channels
@@ -396,11 +406,7 @@ class FirFilter(Operation):
         self.filter_key = filter_key
 
     def _check_axis(self, axis, ndim=None):
-        """Check if the axis is valid."""
-        if ndim is not None:
-            if axis < -ndim or axis >= ndim:
-                raise ValueError(f"Axis {axis} is out of bounds for array of dimension {ndim}.")
-
+        """Check if axis is not the batch dimension."""
         if self.with_batch_dim and (axis == 0 or (ndim is not None and axis == -ndim)):
             raise ValueError("Cannot apply FIR filter along batch dimension.")
 
@@ -413,16 +419,22 @@ class FirFilter(Operation):
         signal = kwargs[self.key]
         fir_filter_taps = kwargs[self.filter_key]
 
-        if self.complex_channels:
-            signal = channels_to_complex(signal)
+        ndim = ops.ndim(signal)
+        self._check_axis(self.axis, ndim)
+        axis = canonicalize_axis(self.axis, ndim)
 
-        self._check_axis(self.axis, ndim=ops.ndim(signal))
+        if self.complex_channels:
+            assert axis < ndim - 1, (
+                "When using complex_channels=True, the complex channels are removed to convert"
+                " to complex numbers before filtering, so axis cannot be the last axis."
+            )
+            signal = channels_to_complex(signal)
 
         def _convolve(signal):
             """Apply the filter to the signal using correlation."""
             return correlate(signal, fir_filter_taps[::-1], mode="same")
 
-        filtered_signal = apply_along_axis(_convolve, self.axis, signal)
+        filtered_signal = apply_along_axis(_convolve, axis, signal)
 
         if self.complex_channels:
             filtered_signal = complex_to_channels(filtered_signal)
@@ -431,35 +443,33 @@ class FirFilter(Operation):
 
 
 @ops_registry("low_pass_filter")
-class LowPassFilter(FirFilter):
-    """Apply a low-pass FIR filter to the input signal using convolution.
+class LowPassFilterIQ(FirFilter):
+    """Apply a low-pass FIR filter to the demodulated IQ (n_ch=2) input signal using convolution.
 
     It is recommended to use :class:`FirFilter` with pre-computed filter taps for jittable
-    operations. The :class:`LowPassFilter` operation itself is not jittable and is provided
+    operations. The :class:`LowPassFilterIQ` operation itself is not jittable and is provided
     for convenience only.
 
     Uses :func:`get_low_pass_iq_filter` to compute the filter taps.
     """
 
-    def __init__(self, axis: int, complex_channels: bool = False, num_taps: int = 128, **kwargs):
-        """Initialize the LowPassFilter operation.
+    def __init__(self, axis: int = -3, num_taps: int = 127, **kwargs):
+        """Initialize the LowPassFilterIQ operation.
 
         Args:
-            axis (int): Axis along which to apply the filter. Cannot be the batch dimension.
-                When using ``complex_channels=True``, the complex channels are removed to convert
-                to complex numbers before filtering, so adjust the ``axis`` accordingly.
-            complex_channels (bool): Whether the last dimension of the input signal represents
-                complex channels (real and imaginary parts). When True, it will convert the signal
-                to ``complex`` dtype before filtering and convert it back to two channels
-                after filtering.
-            num_taps (int): Number of taps in the FIR filter. Default is 128.
+            axis (int): Axis along which to apply the filter. Cannot be the batch dimension and
+                cannot be the complex channel axis (the last axis). Default is -3, which is the
+                ``n_ax`` axis for standard ultrasound data layout.
+            num_taps (int): Number of taps in the FIR filter. Default is 127.
+                Odd will result in a type I filter, even in a type II filter.
         """
         self._random_suffix = str(uuid.uuid4())
         kwargs.pop("filter_key", None)
         kwargs.pop("jittable", None)
+        kwargs.pop("complex_channels", None)
         super().__init__(
             axis=axis,
-            complex_channels=complex_channels,
+            complex_channels=True,
             filter_key=f"low_pass_{self._random_suffix}",
             jittable=False,
             **kwargs,
@@ -474,6 +484,63 @@ class LowPassFilter(FirFilter):
             ops.convert_to_numpy(bandwidth).item(),
         )
         kwargs[self.filter_key] = lpf
+        return super().call(**kwargs)
+
+
+@ops_registry("band_pass_filter")
+class BandPassFilter(FirFilter):
+    """Apply a band-pass FIR filter to the real input signal using convolution.
+
+    The bandwidth parameter in the call method defines the passband centered around
+    ``demodulation_frequency``, with edges at ``demodulation_frequency - bandwidth/2``
+    and ``demodulation_frequency + bandwidth/2``. So, make sure this is used before demodulation
+    to baseband.
+
+    This operation is provided for convenience and will recompute the filter weights every
+    time it is called. Alternatively, you can use :class:`FirFilter` with pre-computed
+    filter taps.
+    """
+
+    def __init__(self, axis: int = -3, num_taps: int = 127, **kwargs):
+        """Initialize the BandPassFilter operation.
+
+        Args:
+            axis (int): Axis along which to apply the filter. Cannot be the batch dimension.
+                Default is -3, which is the ``n_ax`` axis for standard ultrasound data layout.
+            num_taps (int): Number of taps in the FIR filter. Default is 127.
+                Odd will result in a type I filter, even in a type II filter.
+        """
+        self._random_suffix = str(uuid.uuid4())
+        kwargs.pop("filter_key", None)
+        kwargs.pop("complex_channels", None)
+        super().__init__(
+            axis=axis,
+            complex_channels=False,
+            filter_key=f"band_pass_{self._random_suffix}",
+            **kwargs,
+        )
+        self.num_taps = num_taps
+
+    def call(self, sampling_frequency, demodulation_frequency, bandwidth, **kwargs):
+        """Apply band-pass filter with specified bandwidth.
+
+        Args:
+            sampling_frequency (float): Sampling frequency in Hz.
+            demodulation_frequency (float): Center frequency in Hz.
+            bandwidth (float): Bandwidth in Hz. The filter will pass frequencies from
+                ``demodulation_frequency - bandwidth/2`` to
+                ``demodulation_frequency + bandwidth/2``.
+
+        Returns:
+            dict: Dictionary containing filtered signal.
+        """
+        f1 = demodulation_frequency - bandwidth / 2
+        f2 = demodulation_frequency + bandwidth / 2
+
+        bpf = get_band_pass_filter(
+            self.num_taps, sampling_frequency, f1, f2, validate=not self._jit_compile
+        )
+        kwargs[self.filter_key] = bpf
         return super().call(**kwargs)
 
 
@@ -498,7 +565,7 @@ class ComplexToChannels(Operation):
 
 
 @ops_registry("lee_filter")
-class LeeFilter(ImageOperation):
+class LeeFilter(Filter):
     """
     The Lee filter is a speckle reduction filter commonly used in synthetic aperture radar (SAR)
     and ultrasound image processing. It smooths the image while preserving edges and details.
@@ -508,40 +575,41 @@ class LeeFilter(ImageOperation):
     IEEE Transactions on Pattern Analysis and Machine Intelligence, (2), 165-168.
     """
 
-    def __init__(self, sigma=3, kernel_size=None, pad_mode="symmetric", **kwargs):
+    def __init__(
+        self,
+        sigma: float,
+        mode: str = "symmetric",
+        cval: float | None = None,
+        truncate: float = 4.0,
+        axes: Tuple[int] = (-3, -2),
+        **kwargs,
+    ):
         """
         Args:
-            sigma (float): Standard deviation for Gaussian kernel. Default is 3.
-            kernel_size (int, optional): Size of the Gaussian kernel. If None,
-                it will be calculated based on sigma.
-            pad_mode (str): Padding mode to be used for Gaussian blur. Default is "symmetric".
+            sigma (float or tuple): Standard deviation for Gaussian kernel. The standard deviations
+                of the Gaussian filter are given for each axis as a sequence, or as a single number,
+                in which case it is equal for all axes.
+            mode (str, optional): Padding mode for the input image. Default is 'symmetric'.
+                See [keras docs](https://www.tensorflow.org/api_docs/python/tf/keras/ops/pad) for
+                all options and [tensorflow docs](https://www.tensorflow.org/api_docs/python/tf/pad)
+                for some examples. Note that the naming differs from scipy.ndimage.gaussian_filter!
+            cval (float, optional): Value to fill past edges of input if mode is 'constant'.
+                Default is None.
+            truncate (float, optional): Truncate the filter at this many standard deviations.
+                Default is 4.0.
+            axes (Tuple[int], optional): If None, input is filtered along all axes. Otherwise, input
+                is filtered along the specified axes. When axes is specified, any tuples used for
+                sigma, order, mode and/or radius must match the length of axes. The ith entry in
+                any of these tuples corresponds to the ith entry in axes. Default is (-3, -2),
+                which corresponds to the height and width dimensions of a
+                (..., height, width, channels) tensor.
         """
         super().__init__(**kwargs)
         self.sigma = sigma
-        self.kernel_size = kernel_size
-        self.pad_mode = pad_mode
-
-        # Create a GaussianBlur instance for computing local statistics
-        self.gaussian_blur = GaussianBlur(
-            sigma=self.sigma,
-            kernel_size=self.kernel_size,
-            pad_mode=self.pad_mode,
-            with_batch_dim=self.with_batch_dim,
-            jittable=self._jittable,
-            key="data",
-        )
-
-    @property
-    def with_batch_dim(self):
-        """Get the with_batch_dim property of the LeeFilter operation."""
-        return self._with_batch_dim
-
-    @with_batch_dim.setter
-    def with_batch_dim(self, value):
-        """Set the with_batch_dim property of the LeeFilter operation."""
-        self._with_batch_dim = value
-        if hasattr(self, "gaussian_blur"):
-            self.gaussian_blur.with_batch_dim = value
+        self.mode = mode
+        self.cval = cval
+        self.truncate = truncate
+        self.axes = axes
 
     def call(self, **kwargs):
         """Apply the Lee filter to the input data.
@@ -550,23 +618,24 @@ class LeeFilter(ImageOperation):
             data (ops.Tensor): Input image data of shape (height, width, channels) with
                 optional batch dimension if ``self.with_batch_dim``.
         """
-        super().call(**kwargs)
         data = kwargs.pop(self.key)
+        axes = self._resolve_filter_axes(data, self.axes)
 
         # Apply Gaussian blur to get local mean
-        img_mean = self.gaussian_blur.call(data=data, **kwargs)[self.gaussian_blur.output_key]
+        img_mean = gaussian_filter(
+            data, self.sigma, mode=self.mode, cval=self.cval, truncate=self.truncate, axes=axes
+        )
 
         # Apply Gaussian blur to squared data to get local squared mean
-        img_sqr_mean = self.gaussian_blur.call(
-            data=data**2,
-            **kwargs,
-        )[self.gaussian_blur.output_key]
+        img_sqr_mean = gaussian_filter(
+            data**2, self.sigma, mode=self.mode, cval=self.cval, truncate=self.truncate, axes=axes
+        )
 
         # Calculate local variance
         img_variance = img_sqr_mean - img_mean**2
 
         # Calculate global variance (per channel)
-        overall_variance = ops.var(data, axis=(-3, -2), keepdims=True)
+        overall_variance = ops.var(data, axis=axes, keepdims=True)
 
         # Calculate adaptive weights
         eps = keras.config.epsilon()
@@ -813,12 +882,7 @@ class UpMix(Operation):
         )
         self.upsampling_rate = upsampling_rate
 
-    def call(
-        self,
-        sampling_frequency=None,
-        center_frequency=None,
-        **kwargs,
-    ):
+    def call(self, sampling_frequency=None, demodulation_frequency=None, **kwargs):
         data = kwargs[self.key]
 
         if data.shape[-1] == 1:
@@ -827,7 +891,7 @@ class UpMix(Operation):
         elif data.shape[-1] == 2:
             data = channels_to_complex(data)
 
-        data = upmix(data, sampling_frequency, center_frequency, self.upsampling_rate)
+        data = upmix(data, sampling_frequency, demodulation_frequency, self.upsampling_rate)
         data = ops.expand_dims(data, axis=-1)
         return {self.output_key: data}
 

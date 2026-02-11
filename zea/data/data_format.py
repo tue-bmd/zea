@@ -198,10 +198,12 @@ def _write_datasets(
     probe_geometry=None,
     sampling_frequency=None,
     center_frequency=None,
+    demodulation_frequency=None,
     initial_times=None,
     t0_delays=None,
     tx_apodizations=None,
     focus_distances=None,
+    transmit_origins=None,
     polar_angles=None,
     azimuth_angles=None,
     bandwidth_percent=None,
@@ -266,7 +268,9 @@ def _write_datasets(
     if n_ch is None:
         n_ch = _first_not_none_shape([raw_data, aligned_data, beamformed_data], axis=-1)
     if n_tx is None:
-        n_tx = _first_not_none_shape([t0_delays, focus_distances, polar_angles], axis=0)
+        n_tx = _first_not_none_shape(
+            [t0_delays, focus_distances, polar_angles, transmit_origins], axis=0
+        )
     if n_el is None:
         n_el = _first_not_none_shape([t0_delays], axis=1)
     if n_el is None:
@@ -394,7 +398,17 @@ def _write_datasets(
         group_name=scan_group_name,
         name="center_frequency",
         data=center_frequency,
-        description="The center frequency in Hz.",
+        description="The center frequency of the transmit pulse in Hz.",
+        unit="Hz",
+    )
+
+    _add_dataset(
+        group_name=scan_group_name,
+        name="demodulation_frequency",
+        data=demodulation_frequency,
+        description="The frequency at which the data should be "
+        "demodulated in Hz. (Usually the same as center_frequency, "
+        "but different when doing harmonic imaging.)",
         unit="Hz",
     )
 
@@ -437,7 +451,20 @@ def _write_datasets(
         data=focus_distances,
         description=(
             "The transmit focus distances in meters of "
-            "shape (n_tx,). For planewaves this is set to Inf."
+            "shape (n_tx,). This is the distance from the origin point on the transducer to where "
+            "the beam comes to focus. For planewaves this is set to Inf."
+        ),
+        unit="m",
+    )
+
+    _add_dataset(
+        group_name=scan_group_name,
+        name="transmit_origins",
+        data=transmit_origins,
+        description=(
+            "The transmit origins in meters of the transmit beams "
+            "of shape (n_tx, 3). This is the (x, y, z) position "
+            "from which the beam is transmitted."
         ),
         unit="m",
     )
@@ -566,12 +593,14 @@ def generate_zea_dataset(
     probe_geometry=None,
     sampling_frequency=None,
     center_frequency=None,
+    demodulation_frequency=None,
     initial_times=None,
     t0_delays=None,
     sound_speed=None,
     probe_name=None,
     description="No description was supplied",
     focus_distances=None,
+    transmit_origins=None,
     polar_angles=None,
     azimuth_angles=None,
     tx_apodizations=None,
@@ -606,7 +635,8 @@ def generate_zea_dataset(
             of shape (n_frames, output_size_z, output_size_x).
         probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).
         sampling_frequency (float): The sampling frequency in Hz.
-        center_frequency (float): The center frequency in Hz.
+        center_frequency (float): The center frequency of the transmit pulse in Hz.
+        demodulation_frequency (float): The demodulation frequency in Hz.
         initial_times (list): The times when the A/D converter starts sampling
             in seconds of shape (n_tx,). This is the time between the first element
             firing and the first recorded sample.
@@ -614,7 +644,8 @@ def generate_zea_dataset(
         sound_speed (float): The speed of sound in m/s.
         probe_name (str): The name of the probe.
         description (str): The description of the dataset.
-        focus_distances (np.ndarray): The focus distances of shape (n_tx, n_el).
+        focus_distances (np.ndarray): The focus distances of shape (n_tx,).
+        transmit_origins (np.ndarray): The transmit origins of shape (n_tx, 3).
         polar_angles (np.ndarray): The polar angles (radians) of shape (n_el,).
         azimuth_angles (np.ndarray): The azimuth angles (radians) of shape (n_tx,).
         tx_apodizations (np.ndarray): The transmit delays for each element defining
@@ -667,12 +698,14 @@ def generate_zea_dataset(
         "probe_geometry": probe_geometry,
         "sampling_frequency": sampling_frequency,
         "center_frequency": center_frequency,
+        "demodulation_frequency": demodulation_frequency,
         "initial_times": initial_times,
         "t0_delays": t0_delays,
         "sound_speed": sound_speed,
         "probe_name": probe_name,
         "description": description,
         "focus_distances": focus_distances,
+        "transmit_origins": transmit_origins,
         "polar_angles": polar_angles,
         "azimuth_angles": azimuth_angles,
         "tx_apodizations": tx_apodizations,

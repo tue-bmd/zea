@@ -277,35 +277,42 @@ class LVHProcessor(H5Processor):
         """
 
         avi_filename = Path(avi_file).stem + ".avi"
-        sequence = np.array(load_avi(avi_file))
-
-        sequence = translate(sequence, self.range_from, self._process_range)
+        sequence_np = load_avi(avi_file)
+        sequence_processed = jnp.array(sequence_np)
+        sequence_processed = translate(sequence_processed, self.range_from, self._process_range)
         # Get pre-computed cone parameters for this file
         cone_params = self.cone_parameters.get(avi_filename)
         if cone_params is not None:
             # Apply pre-computed cropping parameters
-            sequence = crop_sequence_with_params(sequence, cone_params)
+            sequence_processed = crop_sequence_with_params(sequence_processed, cone_params)
         else:
-            log.warning(f"No cone parameters for {avi_filename}, using original sequence")
-        sequence = jnp.array(sequence)
+            raise UserWarning(f"No cone parameters for {avi_filename}")
 
-        split = self.get_split(avi_file, sequence)
+        split = self.get_split(avi_file, sequence_processed)
         out_h5 = self.path_out_h5 / split / (Path(avi_file).stem + ".hdf5")
 
         angle = cone_params["opening_angle"] / 2  # angular field spans (-angle, +angle)
-        polar_im_set = self.cart2pol_batched(sequence, angle)
+        polar_im_set = self.cart2pol_batched(sequence_processed, angle)
+        sequence_processed = translate(sequence_processed, self._process_range, self.range_from)
+        sequence_processed_uint8 = jnp.asarray(jnp.floor(sequence_processed + 0.5), dtype=jnp.uint8)
+        del sequence_processed
+
+        polar_im_set = translate(polar_im_set, self._process_range, (0, 255))
+        polar_im_set_uint8 = jnp.asarray(jnp.floor(polar_im_set + 0.5), dtype=jnp.uint8)
+        del polar_im_set
+
+        if jnp.all(sequence_processed_uint8 == 0):
+            raise ValueError(f"Processed sequence is all zeros for file {avi_file}")
+
+        if jnp.all(polar_im_set_uint8 == 0):
+            raise ValueError(f"Polar sequence is all zeros for file {avi_file}")
 
         zea_dataset = {
             "path": out_h5,
-            # store as uint8 for memory efficiency
-            "image_sc": translate(np.array(sequence), self._process_range, (0, 255)).astype(
-                np.uint8
-            ),
+            "image_sc": sequence_processed_uint8,
             "probe_name": "generic",
             "description": "EchoNet-LVH dataset converted to zea format",
-            "image": translate(np.array(polar_im_set), self._process_range, (0, 255)).astype(
-                np.uint8
-            ),
+            "image": polar_im_set_uint8,
             "cast_to_float": False,
         }
         return generate_zea_dataset(**zea_dataset)
@@ -539,33 +546,11 @@ def convert_echonetlvh(args):
 
         log.info("Starting the conversion process.")
 
-        if not args.no_hyperthreading:
-            # DO NOT create a processor here for submission
-            with ProcessPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
-                futures = {
-                    executor.submit(
-                        _process_file_worker,
-                        str(file),  # avi_file
-                        args.dst,  # dst (Path or str)
-                        splits,  # splits (picklable dict of lists)
-                        cone_parameters,  # cone params dict (picklable)
-                        processor.range_from,  # only if needed; better pass primitives
-                        processor._process_range,
-                    ): file
-                    for file in files_to_process
-                }
-                for future in tqdm(as_completed(futures), total=len(files_to_process)):
-                    try:
-                        future.result()
-                    except Exception as e:
-                        log.error(f"Error processing file: {str(e)}")
-        else:
-            log.info("Converting without hyperthreading")
-            for file in tqdm(files_to_process):
-                try:
-                    processor(file)
-                except Exception as e:
-                    log.error(f"Error processing {file}: {str(e)}")
+        for file in tqdm(files_to_process):
+            try:
+                processor(file)
+            except Exception as e:
+                log.error(f"Error processing {file}: {str(e)}")
 
         log.info("All image conversion tasks are completed.")
 

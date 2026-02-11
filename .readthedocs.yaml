@@ -25,4 +25,4 @@ python:
       path: .
       extra_requirements:
         - docs
-        - backends
+        - jax

@@ -140,7 +140,7 @@ Parameters Reference
    * - ``scan.apply_lens_correction``
      - Set to true to apply lens correction in the time-of-flight calculation
    * - ``scan.center_frequency``
-     - The center frequency of the transducer in Hz
+     - The center frequency of the transmit pulse in Hz
    * - ``scan.demodulation_frequency``
      - The demodulation frequency of the data in Hz. This is the assumed center frequency of the transmit waveform used to demodulate the rf data to iq data.
    * - ``scan.f_number``

@@ -105,10 +105,13 @@ def _get_planewave_scan(ultrasound_probe, grid_type, **kwargs):
     angles = np.linspace(10, -10, n_tx) * np.pi / 180
 
     sound_speed = constant_scan_kwargs["sound_speed"]
-    focus_distances = np.ones(n_tx) * np.inf
     t0_delays = compute_t0_delays_planewave(
         probe_geometry=probe_geometry, polar_angles=angles, sound_speed=sound_speed
     )
+
+    # Focus distances can be overriden via kwargs
+    if "focus_distances" not in kwargs:
+        kwargs["focus_distances"] = np.ones(n_tx) * np.inf
 
     return Scan(
         n_tx=n_tx,
@@ -119,7 +122,6 @@ def _get_planewave_scan(ultrasound_probe, grid_type, **kwargs):
         t0_delays=t0_delays,
         tx_apodizations=tx_apodizations,
         element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
-        focus_distances=focus_distances,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
@@ -178,8 +180,9 @@ def _get_diverging_scan(ultrasound_probe, grid_type, **kwargs):
 
     sound_speed = constant_scan_kwargs["sound_speed"]
     focus_distances = np.ones(n_tx) * -15e-3
+    transmit_origins = np.zeros((n_tx, 3))
     t0_delays = compute_t0_delays_focused(
-        origins=np.zeros((n_tx, 3)),
+        transmit_origins=transmit_origins,
         focus_distances=focus_distances,
         probe_geometry=ultrasound_probe.probe_geometry,
         polar_angles=angles,
@@ -199,6 +202,7 @@ def _get_diverging_scan(ultrasound_probe, grid_type, **kwargs):
         tx_apodizations=tx_apodizations,
         element_width=element_width,
         focus_distances=focus_distances,
+        transmit_origins=transmit_origins,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
@@ -221,8 +225,9 @@ def _get_focused_scan(ultrasound_probe, grid_type, **kwargs):
 
     sound_speed = constant_scan_kwargs["sound_speed"]
     focus_distances = np.ones(n_tx) * 15e-3
+    transmit_origins = np.zeros((n_tx, 3))
     t0_delays = compute_t0_delays_focused(
-        origins=np.zeros((n_tx, 3)),
+        transmit_origins=transmit_origins,
         focus_distances=focus_distances,
         probe_geometry=ultrasound_probe.probe_geometry,
         polar_angles=angles,
@@ -242,6 +247,7 @@ def _get_focused_scan(ultrasound_probe, grid_type, **kwargs):
         tx_apodizations=tx_apodizations,
         element_width=element_width,
         focus_distances=focus_distances,
+        transmit_origins=transmit_origins,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),
@@ -264,13 +270,13 @@ def _get_linescan_scan(ultrasound_probe, grid_type, **kwargs):
     aperture_size_elements = 24
 
     # Define subapertures
-    origins = []
+    transmit_origins = []
     for n, idx in enumerate(center_elements):
         el0 = np.clip(idx - aperture_size_elements // 2, 0, n_el)
         el1 = np.clip(idx + aperture_size_elements // 2, 0, n_el)
         tx_apodizations[n, el0:el1] = np.hanning(el1 - el0)[None]
-        origins.append(ultrasound_probe.probe_geometry[idx])
-    origins = np.stack(origins, axis=0)
+        transmit_origins.append(ultrasound_probe.probe_geometry[idx])
+    transmit_origins = np.stack(transmit_origins, axis=0)
 
     # All angles should be zero because each line fires straight ahead
     angles = np.zeros(n_tx)
@@ -279,7 +285,7 @@ def _get_linescan_scan(ultrasound_probe, grid_type, **kwargs):
 
     focus_distances = np.ones(n_tx) * 15e-3
     t0_delays = compute_t0_delays_focused(
-        origins=origins,
+        transmit_origins=transmit_origins,
         focus_distances=focus_distances,
         probe_geometry=ultrasound_probe.probe_geometry,
         polar_angles=angles,
@@ -299,6 +305,7 @@ def _get_linescan_scan(ultrasound_probe, grid_type, **kwargs):
         tx_apodizations=tx_apodizations,
         element_width=element_width,
         focus_distances=focus_distances,
+        transmit_origins=transmit_origins,
         polar_angles=angles,
         initial_times=np.ones(n_tx) * 1e-6,
         n_ax=_get_n_ax(ultrasound_probe),

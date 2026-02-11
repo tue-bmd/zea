@@ -18,6 +18,7 @@ from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak_stack,
+    make_tgc_curve,
 )
 from zea.ops import Pipeline, Simulate
 from zea.probes import Probe
@@ -289,11 +290,12 @@ def test_up_and_down_conversion(factor, batch_size):
             ],
             axis=1,
         )
+        scat_positions = np.expand_dims(scat_positions, axis=0)  # add batch dimension
 
         output = simulator_pipeline(
             **parameters,
             scatterer_positions=scat_positions.astype(np.float32),
-            scatterer_magnitudes=np.ones(n_scat, dtype=np.float32),
+            scatterer_magnitudes=np.ones((1, n_scat), dtype=np.float32),
         )
 
         data.append(keras.ops.convert_to_numpy(output["data"]))
@@ -310,9 +312,27 @@ def test_up_and_down_conversion(factor, batch_size):
     )
 
 
+@pytest.mark.parametrize(
+    "shape, axis, N",
+    [
+        # 1D tests
+        ((500,), -1, None),
+        ((500,), -1, 500),
+        ((500,), -1, 1024),
+        # 2D tests
+        ((128, 500), -1, None),
+        ((128, 500), -1, 512),
+        # 3D tests
+        ((2, 500, 128), 1, None),
+        ((2, 500, 128), 1, 600),
+        # 4D tests (original test case)
+        ((2, 500, 128, 1), -3, None),
+        ((2, 500, 128, 1), -3, 512),
+    ],
+)
 @backend_equality_check(decimal=4)
-def test_hilbert_transform():
-    """Test hilbert transform"""
+def test_hilbert_transform(shape, axis, N):
+    """Test hilbert transform with various shapes and N values"""
 
     import keras
 
@@ -320,18 +340,26 @@ def test_hilbert_transform():
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
 
-    # create some dummy sinusoidal data of size (2, 500, 128, 1)
-    # sinusoids on axis 1
-    data = np.sin(np.linspace(0, 2 * math.e * np.pi, 500))
-    data = data[np.newaxis, :, np.newaxis, np.newaxis]
-    data = np.tile(data, (2, 1, 128, 1))
+    # Create sinusoidal data along the specified axis
+    n_samples = shape[axis]
+    base_signal = np.sin(np.linspace(0, 2 * math.e * np.pi, n_samples))
 
-    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # Reshape to match target shape
+    reshape_spec = [1] * len(shape)
+    reshape_spec[axis] = n_samples
+    data = base_signal.reshape(reshape_spec)
+
+    # Tile to full shape
+    tile_spec = list(shape)
+    tile_spec[axis] = 1
+    data = np.tile(data, tile_spec)
+
+    # Add small noise
     data = data + rng.random(data.shape) * 0.1
 
     data = keras.ops.convert_to_tensor(data)
 
-    data_iq = func.hilbert(data, axis=-3)
+    data_iq = func.hilbert(data, N=N, axis=axis)
     assert keras.ops.dtype(data_iq) in [
         "complex64",
         "complex128",
@@ -339,10 +367,25 @@ def test_hilbert_transform():
 
     data_iq = keras.ops.convert_to_numpy(data_iq)
 
-    reference_data_iq = hilbert_scipy(data, axis=-3)
+    reference_data_iq = hilbert_scipy(data, N=N, axis=axis)
     np.testing.assert_almost_equal(reference_data_iq, data_iq, decimal=4)
 
     return data_iq
+
+
+def test_hilbert_transform_invalid_N():
+    """Test that hilbert raises ValueError when N < n_ax"""
+    import keras
+
+    from zea import func
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.random((100,))
+    data = keras.ops.convert_to_tensor(data)
+
+    # N=50 is less than n_ax=100, should raise ValueError
+    with pytest.raises(ValueError, match="N must be greater or equal to n_ax"):
+        func.hilbert(data, N=50, axis=-1)
 
 
 @pytest.fixture(scope="module")
@@ -351,7 +394,7 @@ def spiral_image():
     Fixture for generating a synthetic spiral image and noisy variants.
     Returns:
         dict: {
-            "spiral": clean spiral image,
+            "spiral": clean spiral image of size (64, 64),
             "noisy": additive Gaussian noise,
             "speckle": multiplicative speckle noise
         }
@@ -378,11 +421,13 @@ def spiral_image():
 
 
 @pytest.mark.parametrize("sigma", [0.5, 1.0, 2.0])
-@backend_equality_check(decimal=4)
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
 def test_gaussian_blur(sigma, spiral_image):
     """
     Test `ops.GaussianBlur against scipy.ndimage.gaussian_filter.`
     `GaussianBlur` with default args should be equivalent to scipy.
+
+    NOTE: We don't test torch backend here because of differences in padding behavior.
     """
     import keras
 
@@ -399,15 +444,19 @@ def test_gaussian_blur(sigma, spiral_image):
 
     blurred_zea = keras.ops.convert_to_numpy(blurred_zea)
 
-    np.testing.assert_allclose(blurred_scipy, blurred_zea, atol=1e-1, rtol=1e-1)
+    np.testing.assert_allclose(blurred_scipy, blurred_zea, rtol=1e-5, atol=1e-5)
+
+    return blurred_zea
 
 
 @pytest.mark.parametrize("sigma", [1.0, 2.0])
-@backend_equality_check(decimal=4)
+@backend_equality_check(decimal=5, backends=["tensorflow", "jax"])
 def test_lee_filter(sigma, spiral_image):
     """
     Test `ops.LeeFilter`, checks if variance is reduced and if with and without
     batch dimension give the same result.
+
+    # NOTE: We don't test torch backend here because of differences in padding behavior.
     """
     import keras
 
@@ -415,22 +464,27 @@ def test_lee_filter(sigma, spiral_image):
 
     # Use spiral image for testing
     image = spiral_image["spiral"]
+    image = image[..., None]  # add channel dimension
 
     lee = ops.LeeFilter(sigma=sigma, with_batch_dim=False)
     lee_batched = ops.LeeFilter(sigma=sigma, with_batch_dim=True)
 
-    image_tensor = keras.ops.convert_to_tensor(image[..., None])
+    image_tensor = keras.ops.convert_to_tensor(image)
     filtered = lee(data=image_tensor)["data"][..., 0]
     filtered_batched = lee_batched(data=image_tensor[None, ...])["data"][0, ..., 0]
 
-    assert np.allclose(
-        keras.ops.convert_to_numpy(filtered),
-        keras.ops.convert_to_numpy(filtered_batched),
-    ), "LeeFilter with and without batch dim should give the same result."
+    filtered = keras.ops.convert_to_numpy(filtered)
+    filtered_batched = keras.ops.convert_to_numpy(filtered_batched)
 
-    assert keras.ops.var(filtered) < keras.ops.var(image_tensor), (
+    assert np.allclose(filtered, filtered_batched), (
+        "LeeFilter with and without batch dim should give the same result."
+    )
+
+    assert np.var(filtered) < np.var(image), (
         "LeeFilter should reduce variance of the processed image"
     )
+
+    return filtered
 
 
 @pytest.mark.parametrize(
@@ -575,3 +629,38 @@ def test_apply_window(axis, size, start, end, window_type):
     elif axis == 1:
         assert data_out[:, :start, :].numpy().sum() == 0.0, "Start region not zeroed correctly."
         assert data_out[:, -end:, :].numpy().sum() == 0.0, "End region not zeroed correctly."
+
+
+def test_make_tgc_curve():
+    """Test that TGC curve is monotonically increasing with depth."""
+    n_ax = 1000
+    attenuation_coef = 0.5  # dB/cm/MHz (typical for soft tissue)
+    sampling_frequency = 40e6  # 40 MHz
+    center_frequency = 5e6  # 5 MHz
+    sound_speed = 1540  # m/s
+
+    tgc_curve = make_tgc_curve(
+        n_ax=n_ax,
+        attenuation_coef=attenuation_coef,
+        sampling_frequency=sampling_frequency,
+        center_frequency=center_frequency,
+        sound_speed=sound_speed,
+    )
+
+    # Check output shape
+    assert tgc_curve.shape == (n_ax,), f"Expected shape ({n_ax},), got {tgc_curve.shape}"
+
+    # Check output dtype
+    assert tgc_curve.dtype == np.float32, f"Expected dtype float32, got {tgc_curve.dtype}"
+
+    # Check that the curve is monotonically increasing (TGC should increase with depth)
+    differences = np.diff(tgc_curve)
+    assert np.all(differences >= 0), "TGC curve should be monotonically increasing with depth"
+
+    # Check that the first value is 1 (no gain at zero depth)
+    assert np.isclose(tgc_curve[0], 1.0, rtol=1e-5), (
+        f"TGC curve should start at 1.0 (no gain at zero depth), got {tgc_curve[0]}"
+    )
+
+    # Check that values are positive
+    assert np.all(tgc_curve > 0), "TGC curve values should be positive"

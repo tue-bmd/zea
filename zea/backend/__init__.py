@@ -59,8 +59,21 @@ def _import_torch():
         return None
 
 
+def _get_backend():
+    try:
+        backend_result = keras.backend.backend()
+        if isinstance(backend_result, str):
+            return backend_result
+        else:
+            # to handle mocked backends during testing
+            return None
+    except Exception:
+        return None
+
+
 tf_mod = _import_tf()
 jax_mod = _import_jax()
+backend = _get_backend()
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
@@ -184,7 +197,7 @@ class on_device:
         self._context.__exit__(exc_type, exc_val, exc_tb)
 
 
-if keras.backend.backend() in ["tensorflow", "jax", "numpy"]:
+if backend in [None, "tensorflow", "jax", "numpy"]:
 
     def func_on_device(func, device, *args, **kwargs):
         """Moves all tensor arguments of a function to a specified device before calling it.
@@ -199,7 +212,8 @@ if keras.backend.backend() in ["tensorflow", "jax", "numpy"]:
         """
         with on_device(device):
             return func(*args, **kwargs)
-elif keras.backend.backend() == "torch":
+
+elif backend == "torch":
     from zea.backend.torch import func_on_device
 else:
-    raise ValueError(f"Unsupported backend: {keras.backend.backend()}")
+    raise ValueError(f"Unsupported backend: {backend}")

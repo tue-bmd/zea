@@ -1,16 +1,17 @@
 """Configuration file for the Sphinx documentation builder."""
 
 import os
+
+os.environ["KERAS_BACKEND"] = "numpy"
+
 import sys
+from importlib.metadata import version as get_version
 
 sys.path.insert(0, os.path.abspath("../.."))
 
-import zea
-
 # -- Project information -----------------------------------------------------
 project = "zea"
-# get automatically the version from the package
-release = zea.__version__
+release = str(get_version("zea"))
 
 # -- General configuration ---------------------------------------------------
 extensions = [
@@ -28,11 +29,16 @@ extensions = [
     "sphinx_design",  # for fancy code block selection
     "sphinxcontrib.bibtex",  # for bibliography support
     "sphinx_reredirects",  # for redirecting empty toc entries
-    "sphinxarg.ext",  # for argparse support
+    "sphinxcontrib.autoprogram",  # for argparse support
     "sphinx.ext.mathjax",  # for rendering math in the documentation
 ]
 
-autodoc_mock_imports = ["zea.backend.tf2jax"]
+autodoc_mock_imports = [
+    "tensorflow",
+    "torch",
+    "zea.backend.tf2jax",
+]
+
 exclude_patterns = [
     "_build",
     "Thumbs.db",

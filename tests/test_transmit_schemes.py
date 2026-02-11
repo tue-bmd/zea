@@ -12,8 +12,9 @@ from zea.internal.dummy_scan import _get_probe, _get_scan
 
 def _get_flatgrid(extent, shape):
     """Helper function to get a flat grid corresponding to an image."""
-    x = np.linspace(extent[0], extent[1], shape[0])
-    y = np.linspace(extent[2], extent[3], shape[1])
+    xmin, xmax, zmax, zmin = extent
+    x = np.linspace(xmin, xmax, shape[0])
+    y = np.linspace(zmin, zmax, shape[1])
     X, Y = np.meshgrid(x, y, indexing="ij")
     return np.vstack((X.flatten(), Y.flatten())).T
 
@@ -24,8 +25,8 @@ def _get_pixel_size(extent, shape):
     Returns:
         np.ndarray: The pixel size (width, height).
     """
-
-    width, height = extent[1] - extent[0], extent[3] - extent[2]
+    xmin, xmax, zmax, zmin = extent
+    width, height = xmax - xmin, zmax - zmin
     if shape[0] == 1:
         pixel_width = width
     else:
@@ -105,12 +106,12 @@ def _test_location(image, extent, true_position):
 @pytest.fixture
 def ultrasound_scatterers():
     """Returns scatterer positions and magnitudes for ultrasound simulation tests."""
-    scat_positions = fish()
-    n_scat = scat_positions.shape[0]
+    scat_positions = np.expand_dims(fish(), axis=0)
+    n_scat = scat_positions.shape[1]
 
     return {
         "positions": scat_positions.astype(np.float32),
-        "magnitudes": np.ones(n_scat, dtype=np.float32),
+        "magnitudes": np.ones((1, n_scat), dtype=np.float32),
         "n_scat": n_scat,
     }
 
@@ -131,17 +132,17 @@ def ultrasound_scatterers():
 )
 @pytest.mark.heavy
 def test_transmit_schemes(
-    default_pipeline,
+    default_pipeline: ops.Pipeline,
     probe_kind,
     scan_kind,
     ultrasound_scatterers,
 ):
     """Tests the default ultrasound pipeline."""
 
-    ultrasound_probe = _get_probe(probe_kind)
-    ultrasound_scan = _get_scan(ultrasound_probe, scan_kind)
+    probe = _get_probe(probe_kind)
+    scan = _get_scan(probe, scan_kind)
 
-    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    parameters = default_pipeline.prepare_parameters(probe, scan)
 
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
@@ -155,12 +156,6 @@ def test_transmit_schemes(
 
     # Convert to numpy
     image = keras.ops.convert_to_numpy(image)
-    extent = [
-        ultrasound_scan.xlims[0],
-        ultrasound_scan.xlims[1],
-        ultrasound_scan.zlims[0],
-        ultrasound_scan.zlims[1],
-    ]
 
     # Target the scatterer that forms the eye
     target_scatterer_index = -4
@@ -168,8 +163,8 @@ def test_transmit_schemes(
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=extent,
-        true_position=ultrasound_scatterers["positions"][target_scatterer_index],
+        extent=scan.extent,
+        true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
     # Check that the pipeline produced the expected outputs
     assert output_default["data"].shape[0] == 1  # Batch dimension
@@ -177,19 +172,42 @@ def test_transmit_schemes(
     assert np.nanmin(output_default["data"]) >= 0.0
     assert np.nanmax(output_default["data"]) <= 255.0
 
+    # Additional test for planewave: verify focus_distance=0 gives same result
+    if scan_kind == "planewave":
+        scan_zero_focus = _get_scan(probe, scan_kind, focus_distances=np.zeros(scan.n_tx))
+        parameters_zero = default_pipeline.prepare_parameters(probe, scan_zero_focus)
+
+        output_zero_focus = default_pipeline(
+            **parameters_zero,
+            scatterer_positions=ultrasound_scatterers["positions"],
+            scatterer_magnitudes=ultrasound_scatterers["magnitudes"],
+        )
+
+        image_zero = keras.ops.convert_to_numpy(output_zero_focus["data"][0])
+
+        # The images should be identical (or very close due to numerical precision)
+        np.testing.assert_allclose(
+            image,
+            image_zero,
+            rtol=1e-5,
+            atol=1e-3,
+            err_msg="Planewave with focus_distance=inf and "
+            + "focus_distance=0 should give same result",
+        )
+
 
 @pytest.mark.heavy
 def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     """Tests the polar grid generation."""
-    ultrasound_probe = _get_probe("linear")
-    ultrasound_scan = _get_scan(ultrasound_probe, "focused", grid_type="polar")
+    probe = _get_probe("linear")
+    scan = _get_scan(probe, "focused", grid_type="polar")
 
     # Check if the grid type is set correctly
-    assert ultrasound_scan.grid_type == "polar"
+    assert scan.grid_type == "polar"
 
     default_pipeline.append(ops.ScanConvert(order=3))
 
-    parameters = default_pipeline.prepare_parameters(ultrasound_probe, ultrasound_scan)
+    parameters = default_pipeline.prepare_parameters(probe, scan)
 
     # all dynamic parameters are set in the call method of the operations
     # or equivalently in the pipeline call (which is passed to the operations)
@@ -204,24 +222,14 @@ def test_polar_grid(default_pipeline: ops.Pipeline, ultrasound_scatterers):
     # Convert to numpy
     image = keras.ops.convert_to_numpy(image)
 
-    assert ultrasound_scan.zlims[0] == 0.0
-
-    # xlims for polar grid can be computed as follows, think about the unit circle :)
-    radius = ultrasound_scan.zlims[1]
-    xlims = (
-        radius * np.cos(-np.pi / 2 + ultrasound_scan.theta_range[0]),
-        radius * np.cos(-np.pi / 2 + ultrasound_scan.theta_range[1]),
-    )
-    extent = [*xlims, *ultrasound_scan.zlims]
-
     # Target the scatterer that forms the eye
     target_scatterer_index = -4
 
     # Check if the scatterer is in the right location in the image
     _test_location(
         image.T,
-        extent=extent,
-        true_position=ultrasound_scatterers["positions"][target_scatterer_index],
+        extent=scan.extent,
+        true_position=ultrasound_scatterers["positions"][0, target_scatterer_index],
     )
 
 

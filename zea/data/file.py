@@ -300,7 +300,9 @@ class File(h5py.File):
                 log.warning(
                     f"We have detected that focus distances in '{self.path}' are "
                     "(probably) stored wavelengths. Please update your file! "
-                    "Converting to meters automatically for now."
+                    "Converting to meters automatically for now, but this assumes that "
+                    "`center_frequency` is the probe center frequency which is not always "
+                    "the case!"
                 )
                 assert "sound_speed" in scan_parameters, (
                     "Cannot convert focus distances from wavelengths to meters "
@@ -778,6 +780,9 @@ def _assert_scan_keys_present(file: File):
         elif key == "focus_distances":
             correct_shape = (file["scan"]["n_tx"][()],)
 
+        elif key == "transmit_origins":
+            correct_shape = (file["scan"]["n_tx"][()], 3)
+
         elif key == "polar_angles":
             correct_shape = (file["scan"]["n_tx"][()],)
 
@@ -802,6 +807,7 @@ def _assert_scan_keys_present(file: File):
         elif key in (
             "sampling_frequency",
             "center_frequency",
+            "demodulation_frequency",
             "n_frames",
             "n_tx",
             "n_el",
@@ -817,7 +823,7 @@ def _assert_scan_keys_present(file: File):
 
         else:
             correct_shape = None
-            log.warning(f"No validation has been defined for {log.orange(key)}.")
+            log.debug(f"No validation has been defined for {log.orange(key)}.")
 
         if correct_shape is not None:
             assert shape_file == correct_shape, (

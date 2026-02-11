@@ -36,6 +36,22 @@ class DummyCircularParameters(Parameters):
         return self.computed1
 
 
+class DummyInvalidParameters(Parameters):
+    """A simple test class with an invalid parameter type."""
+
+    VALID_PARAMS = {
+        "param1": {"type": int},
+    }
+
+    @cache_with_dependencies("param1")
+    def computed1(self):
+        return self.param1 * 2
+
+    @cache_with_dependencies("non_existing_dependency")  # Invalid dependency
+    def computed2(self):
+        return self.computed1
+
+
 class DummyParameters(Parameters):
     """A simple test class with parameters and computed properties.
 
@@ -127,6 +143,12 @@ def test_catch_circular_dependency():
     """Test that circular dependencies raise an error."""
     with pytest.raises(RuntimeError, match="Circular dependency detected"):
         DummyCircularParameters(param1=5)
+
+
+def test_catch_invalid_dependency():
+    """Test that invalid dependencies raise an error."""
+    with pytest.raises(ValueError):
+        DummyInvalidParameters(param1=5)
 
 
 def test_type_validation_on_init():

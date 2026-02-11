@@ -67,6 +67,7 @@ Example Usage
     ...     sampling_frequency=25e6,
     ...     n_el=128,
     ...     n_tx=11,
+    ...     probe_geometry=probe.probe_geometry,
     ... )
 
     >>> # Access a derived property (computed lazily)
@@ -93,7 +94,6 @@ from zea.display import (
     compute_scan_convert_2d_coordinates,
     compute_scan_convert_3d_coordinates,
 )
-from zea.internal.core import DEFAULT_DYNAMIC_RANGE
 from zea.internal.parameters import Parameters, cache_with_dependencies
 
 
@@ -109,7 +109,8 @@ class Scan(Parameters):
         sound_speed (float, optional): Speed of sound in the medium in m/s.
             Defaults to 1540.0.
         sampling_frequency (float): Sampling frequency in Hz.
-        center_frequency (float): Center frequency of the transducer in Hz.
+        center_frequency (float): Transmit center frequency in Hz.
+        demodulation_frequency (float, optional): Demodulation frequency in Hz.
         n_el (int): Number of elements in the transducer array.
         n_tx (int): Number of transmit events in the dataset.
         n_ax (int): Number of axial samples in the received signal.
@@ -128,11 +129,12 @@ class Scan(Parameters):
         t0_delays (np.ndarray): Transmit delays in seconds of
             shape (n_tx, n_el), shifted such that the smallest delay is 0.
         tx_apodizations (np.ndarray): Transmit apodizations of shape (n_tx, n_el).
-        focus_distances (np.ndarray): Focus distances in meters for each event of shape (n_tx,).
+        focus_distances (np.ndarray): Distance from the origin point on the transducer to where the
+            beam comes to focus for each transmit in meters of shape (n_tx,).
+        transmit_origins (np.ndarray): Transmit origins of shape (n_tx, 3).
         initial_times (np.ndarray): Initial times in seconds for each event of shape (n_tx,).
         bandwidth_percent (float, optional): Bandwidth as percentage of center
             frequency. Defaults to 200.0.
-        demodulation_frequency (float, optional): Demodulation frequency in Hz.
         time_to_next_transmit (np.ndarray): The time between subsequent
             transmit events of shape (n_frames, n_tx).
         tgc_gain_curve (np.ndarray): Time gain compensation (TGC) curve of shape (n_ax,).
@@ -172,7 +174,9 @@ class Scan(Parameters):
             Can be "cartesian" or "polar". Defaults to "cartesian".
         dynamic_range (tuple, optional): Dynamic range for image display.
             Defined in dB as (min_dB, max_dB). Defaults to (-60, 0).
-
+        distance_to_apex (float, optional): Distance from the transducer to the apex of the
+            pixel grid. This property is used for polar grids. Will be computed automatically
+            if not provided.
     """
 
     VALID_PARAMS = {
@@ -190,8 +194,11 @@ class Scan(Parameters):
         "lens_thickness": {"type": float},
         "grid_type": {"type": str, "default": "cartesian"},
         "polar_limits": {"type": (tuple, list)},
-        "dynamic_range": {"type": (tuple, list), "default": DEFAULT_DYNAMIC_RANGE},
-        "selected_transmits": {"type": (type(None), str, int, list, slice, np.ndarray)},
+        "dynamic_range": {"type": (tuple, list)},
+        "selected_transmits": {
+            "type": (type(None), str, int, list, slice, np.ndarray),
+            "default": None,
+        },
         # acquisition parameters
         "sound_speed": {"type": float, "default": 1540.0},
         "sampling_frequency": {"type": float},
@@ -213,6 +220,7 @@ class Scan(Parameters):
         "t0_delays": {"type": np.ndarray},
         "tx_apodizations": {"type": np.ndarray},
         "focus_distances": {"type": np.ndarray},
+        "transmit_origins": {"type": np.ndarray},
         "initial_times": {"type": np.ndarray},
         "time_to_next_transmit": {"type": np.ndarray},
         "tgc_gain_curve": {"type": np.ndarray},
@@ -222,29 +230,51 @@ class Scan(Parameters):
         "t_peak": {"type": np.ndarray},
         # scan conversion parameters
         "theta_range": {"type": (tuple, list)},
-        "phi_range": {"type": (tuple, list)},
+        "phi_range": {"type": (tuple, list), "default": None},
         "rho_range": {"type": (tuple, list)},
         "fill_value": {"type": float},
         "resolution": {"type": float, "default": None},
+        "distance_to_apex": {"type": float},
     }
 
-    def __init__(self, **kwargs):
-        # Ensure that selected_transmits is present and set to None by default
-        selected_transmits_input = kwargs.get("selected_transmits", None)
-        kwargs["selected_transmits"] = None
+    @cache_with_dependencies("probe_geometry")
+    def aperture_size(self):
+        """Calculate the aperture size (x,y,z) based on the probe geometry."""
+        if "probe_geometry" in self._params:
+            x_coords = self.probe_geometry[:, 0]
+            y_coords = self.probe_geometry[:, 1]
+            z_coords = self.probe_geometry[:, 2]
+            aperture_width = x_coords.max() - x_coords.min()
+            aperture_height = y_coords.max() - y_coords.min()
+            aperture_depth = z_coords.max() - z_coords.min()
+            return np.array([aperture_width, aperture_height, aperture_depth])
+        return None
 
-        # Initialize parent class
-        super().__init__(**kwargs)
-
-        # Initialize selection to None
-        self._selected_transmits = None
-
-        # Apply selection from input if provided
-        if selected_transmits_input is not None:
-            self.set_transmits(selected_transmits_input)
+    @cache_with_dependencies("polar_limits", "aperture_size")
+    def distance_to_apex(self):
+        """Calculate the distance from the transducer to the apex of the pixel grid."""
+        if "distance_to_apex" in self._params:
+            return self._params["distance_to_apex"]
+        if self.aperture_size is not None:
+            max_angle = np.max(np.abs(self.polar_limits))
+            t = np.tan(max_angle)
+            if np.isclose(t, 0.0):
+                return 0.0
+            distance_to_apex = (self.aperture_size[0] / 2) / t
+            return distance_to_apex
+        return 0.0
 
     @cache_with_dependencies(
-        "xlims", "ylims", "zlims", "grid_size_x", "grid_size_y", "grid_size_z", "grid_type", "is_3d"
+        "xlims",
+        "ylims",
+        "zlims",
+        "grid_size_x",
+        "grid_size_z",
+        "grid_size_y",
+        "grid_type",
+        "is_3d",
+        "polar_limits",
+        "distance_to_apex",
     )
     def grid(self):
         """The beamforming grid of shape (grid_size_z, grid_size_x, 3)."""
@@ -252,7 +282,11 @@ class Scan(Parameters):
             if self.is_3d:
                 raise NotImplementedError("3D polar grids are not yet supported.")
             return polar_pixel_grid(
-                self.polar_limits, self.zlims, self.grid_size_z, self.grid_size_x
+                self.polar_limits,
+                self.zlims,
+                self.grid_size_z,
+                self.grid_size_x,
+                self.distance_to_apex,
             )
         elif self.grid_type == "cartesian":
             return cartesian_pixel_grid(
@@ -319,7 +353,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("sound_speed", "center_frequency")
     def wavelength(self):
-        """Calculate the wavelength based on sound speed and center frequency."""
+        """Calculate the wavelength based on sound speed and transmit center frequency."""
         return self.sound_speed / self.center_frequency
 
     @cache_with_dependencies("zlims", "polar_limits", "probe_geometry")
@@ -375,12 +409,19 @@ class Scan(Parameters):
             return [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
         return zlims
 
-    @cache_with_dependencies("xlims", "zlims")
+    @cache_with_dependencies("grid", "grid_type", "distance_to_apex")
     def extent(self):
         """The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
         Can be directly used with `plt.imshow(x, extent=scan.extent)` for visualization.
         """
-        return np.array([self.xlims[0], self.xlims[1], self.zlims[1], self.zlims[0]])
+        xlims = (self.grid[:, :, 0].min(), self.grid[:, :, 0].max())
+        zlims = (self.grid[:, :, 2].min(), self.grid[:, :, 2].max())
+
+        # For polar grids, adjust zlims to account for distance to apex
+        if self.grid_type == "polar":
+            zlims = (zlims[0] + self.distance_to_apex, zlims[1])
+
+        return np.array([xlims[0], xlims[1], zlims[1], zlims[0]])
 
     @cache_with_dependencies("grid")
     def flatgrid(self):
@@ -392,29 +433,9 @@ class Scan(Parameters):
         return self.grid_size_y > 1 and self.grid_size_x > 1 and self.grid_size_z > 1
 
     @property
-    def selected_transmits(self):
-        """Get the currently selected transmit indices.
-
-        Returns:
-            list: The list of selected transmit indices. If none were explicitly
-            selected and n_tx is available, all transmits are used.
-        """
-        # Return all transmits if none explicitly selected
-        if self._selected_transmits is None:
-            if "n_tx" in self._params:
-                return list(range(self._params["n_tx"]))
-            return []
-        return self._selected_transmits
-
-    @property
     def n_tx_total(self):
         """The total number of transmits in the full dataset."""
         return self._params["n_tx"]
-
-    @property
-    def n_tx_selected(self):
-        """The number of currently selected transmits."""
-        return len(self.selected_transmits)
 
     @cache_with_dependencies("selected_transmits")
     def n_tx(self):
@@ -431,6 +452,9 @@ class Scan(Parameters):
                 - None: Use all transmits
                 - "all": Use all transmits
                 - "center": Use only the center transmit
+                - "focused": Use only focused transmits
+                - "diverging": Use only diverging transmits
+                - "plane": Use only plane wave transmits
                 - int: Select this many evenly spaced transmits
                 - list/array: Use these specific transmit indices
                 - slice: Use transmits specified by the slice (e.g., slice(0, 10, 2))
@@ -457,13 +481,46 @@ class Scan(Parameters):
 
         # Handle None and "all" - use all transmits
         if selection is None or selection == "all":
-            self._selected_transmits = None
+            self._params["selected_transmits"] = list(range(n_tx_total))
             self._invalidate("selected_transmits")
             return self
 
         # Handle "center" - use center transmit
         if selection == "center":
-            self._selected_transmits = [n_tx_total // 2]
+            self._params["selected_transmits"] = [n_tx_total // 2]
+            self._invalidate("selected_transmits")
+            return self
+
+        if selection == "focused":
+            value = self._params.get("focus_distances")
+            if value is None:
+                raise ValueError("No focus distances provided, cannot select focused transmits")
+            idx = np.where(value > 0)[0].tolist()
+            if len(idx) == 0:
+                raise ValueError("No focused transmits found.")
+            self._params["selected_transmits"] = idx
+            self._invalidate("selected_transmits")
+            return self
+
+        if selection == "diverging":
+            value = self._params.get("focus_distances")
+            if value is None:
+                raise ValueError("No focus distances provided, cannot select diverging transmits")
+            idx = np.where(value < 0)[0].tolist()
+            if len(idx) == 0:
+                raise ValueError("No diverging transmits found.")
+            self._params["selected_transmits"] = idx
+            self._invalidate("selected_transmits")
+            return self
+
+        if selection == "plane":
+            value = self._params.get("focus_distances")
+            if value is None:
+                raise ValueError("No focus distances provided, cannot select plane wave transmits")
+            idx = np.concatenate([np.where(value == 0)[0], np.where(np.isinf(value))[0]]).tolist()
+            if len(idx) == 0:
+                raise ValueError("No plane wave transmits found.")
+            self._params["selected_transmits"] = idx
             self._invalidate("selected_transmits")
             return self
 
@@ -479,11 +536,11 @@ class Scan(Parameters):
                 )
 
             if selection == 1:
-                self._selected_transmits = [n_tx_total // 2]
+                self._params["selected_transmits"] = [n_tx_total // 2]
             else:
                 # Compute evenly spaced indices
                 tx_indices = np.linspace(0, n_tx_total - 1, selection)
-                self._selected_transmits = list(np.rint(tx_indices).astype(int))
+                self._params["selected_transmits"] = list(np.rint(tx_indices).astype(int))
 
             self._invalidate("selected_transmits")
             return self
@@ -501,7 +558,7 @@ class Scan(Parameters):
             if any(i < 0 or i >= n_tx_total for i in selection):
                 raise ValueError(f"Transmit indices must be between 0 and {n_tx_total - 1}")
 
-            self._selected_transmits = [
+            self._params["selected_transmits"] = [
                 int(i) for i in selection
             ]  # Convert numpy integers to Python ints
             self._invalidate("selected_transmits")
@@ -512,14 +569,13 @@ class Scan(Parameters):
 
         raise ValueError(f"Unsupported selection type: {type(selection)}")
 
-    @cache_with_dependencies("n_ch", "center_frequency")
+    @cache_with_dependencies("center_frequency")
     def demodulation_frequency(self):
-        """The demodulation frequency."""
+        """The demodulation frequency in Hz."""
         if self._params.get("demodulation_frequency") is not None:
             return self._params["demodulation_frequency"]
 
-        # Default behavior based on n_ch
-        return self.center_frequency if self.n_ch == 2 else 0.0
+        return self.center_frequency
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
@@ -533,7 +589,7 @@ class Scan(Parameters):
 
     @cache_with_dependencies("polar_angles")
     def polar_limits(self):
-        """The limits of the polar angles."""
+        """The limits of the polar angles, used for polar grids."""
         value = self._params.get("polar_limits")
         if value is None and self.polar_angles is not None:
             value = self.polar_angles.min(), self.polar_angles.max()
@@ -542,14 +598,14 @@ class Scan(Parameters):
             value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
         return value
 
-    @cache_with_dependencies("selected_transmits")
+    @cache_with_dependencies("selected_transmits", "n_tx")
     def azimuth_angles(self):
         """Azimuth angles for each transmit event in radians
         of shape (n_tx,). These angles are often used in 3D imaging."""
         value = self._params.get("azimuth_angles")
         if value is None:
             log.warning("No azimuth angles provided, using zeros")
-            return np.zeros(self.n_tx_selected)
+            return np.zeros(self.n_tx)
 
         return value[self.selected_transmits]
 
@@ -564,48 +620,58 @@ class Scan(Parameters):
             value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
         return value
 
-    @cache_with_dependencies("selected_transmits", "n_el")
+    @cache_with_dependencies("selected_transmits", "n_el", "n_tx")
     def t0_delays(self):
         """Transmit delays in seconds of
         shape (n_tx, n_el), shifted such that the smallest delay is 0."""
         value = self._params.get("t0_delays")
         if value is None:
             log.warning("No transmit delays provided, using zeros")
-            return np.zeros((self.n_tx_selected, self.n_el))
+            return np.zeros((self.n_tx, self.n_el))
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("selected_transmits")
+    @cache_with_dependencies("selected_transmits", "n_el", "n_tx")
     def tx_apodizations(self):
         """Transmit apodizations of shape (n_tx, n_el)."""
         value = self._params.get("tx_apodizations")
         if value is None:
             log.warning("No transmit apodizations provided, using ones")
-            return np.ones((self.n_tx_selected, self.n_el))
+            return np.ones((self.n_tx, self.n_el))
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("selected_transmits")
+    @cache_with_dependencies("selected_transmits", "n_tx")
     def focus_distances(self):
         """Focus distances in meters for each event of shape (n_tx,)."""
         value = self._params.get("focus_distances")
         if value is None:
             log.warning("No focus distances provided, using zeros")
-            return np.zeros(self.n_tx_selected)
+            return np.zeros(self.n_tx)
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("selected_transmits")
+    @cache_with_dependencies("selected_transmits", "n_tx")
+    def transmit_origins(self):
+        """Transmit origins of shape (n_tx, 3)."""
+        value = self._params.get("transmit_origins")
+        if value is None:
+            log.warning("No transmit origins provided, using zeros")
+            return np.zeros((self.n_tx, 3))
+
+        return value[self.selected_transmits]
+
+    @cache_with_dependencies("selected_transmits", "n_tx")
     def initial_times(self):
         """Initial times in seconds for each event of shape (n_tx,)."""
         value = self._params.get("initial_times")
         if value is None:
             log.warning("No initial times provided, using zeros")
-            return np.zeros(self.n_tx_selected)
+            return np.zeros(self.n_tx)
 
         return value[self.selected_transmits]
 
-    @property
+    @cache_with_dependencies("waveforms_one_way", "waveforms_two_way")
     def n_waveforms(self):
         """The number of unique transmit waveforms."""
 
@@ -617,7 +683,7 @@ class Scan(Parameters):
 
         return 1
 
-    @property
+    @cache_with_dependencies("center_frequency", "n_waveforms")
     def t_peak(self):
         """The time of the peak of the pulse in seconds of shape (n_waveforms,)."""
         t_peak = self._params.get("t_peak")
@@ -644,12 +710,12 @@ class Scan(Parameters):
             return np.ones(self.n_ax)
         return value[: self.n_ax]
 
-    @cache_with_dependencies("selected_transmits")
+    @cache_with_dependencies("selected_transmits", "n_tx")
     def tx_waveform_indices(self):
         """Indices of the waveform used for each transmit event of shape (n_tx,)."""
         value = self._params.get("tx_waveform_indices")
         if value is None:
-            return np.zeros(self.n_tx_selected, dtype=int)
+            return np.zeros(self.n_tx, dtype=int)
 
         return value[self.selected_transmits]
 
@@ -685,13 +751,13 @@ class Scan(Parameters):
         """Flattened pfield for weighting of shape (n_pix, n_tx)."""
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
-    @cache_with_dependencies("zlims")
+    @cache_with_dependencies("zlims", "distance_to_apex")
     def rho_range(self):
         """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
         Used for scan conversion."""
         value = self._params.get("rho_range")
         if value is None:
-            return self.zlims
+            return (self.zlims[0], self.zlims[1] + self.distance_to_apex)
         return value
 
     @cache_with_dependencies("polar_limits")
@@ -703,7 +769,9 @@ class Scan(Parameters):
             return self.polar_limits
         return value
 
-    @cache_with_dependencies("rho_range", "theta_range", "resolution", "grid_size_z", "grid_size_x")
+    @cache_with_dependencies(
+        "rho_range", "theta_range", "resolution", "grid_size_z", "grid_size_x", "distance_to_apex"
+    )
     def coordinates_2d(self):
         """The coordinates for scan conversion."""
         coords, _ = compute_scan_convert_2d_coordinates(
@@ -711,6 +779,7 @@ class Scan(Parameters):
             self.rho_range,
             self.theta_range,
             self.resolution,
+            distance_to_apex=self.distance_to_apex,
         )
         return coords
 
@@ -724,6 +793,7 @@ class Scan(Parameters):
     )
     def coordinates_3d(self):
         """The coordinates for scan conversion."""
+        # TODO: no grid_size_y... this is broken
         coords, _ = compute_scan_convert_3d_coordinates(
             (self.grid_size_z, self.grid_size_x),
             self.rho_range,
@@ -733,13 +803,13 @@ class Scan(Parameters):
         )
         return coords
 
-    @property
+    @cache_with_dependencies("phi_range", "coordinates_2d", "coordinates_3d")
     def coordinates(self):
         """Get the coordinates for scan conversion, will be 3D if phi_range is set,
         otherwise 2D."""
         return self.coordinates_3d if getattr(self, "phi_range", None) else self.coordinates_2d
 
-    @property
+    @cache_with_dependencies("time_to_next_transmit")
     def pulse_repetition_frequency(self):
         """The pulse repetition frequency (PRF) [Hz]. Assumes a constant PRF."""
         if self.time_to_next_transmit is None:
@@ -760,17 +830,18 @@ class Scan(Parameters):
         Uses the time it took to do all transmits (per frame). So if you only use some portion
         of the transmits, the fps will still be calculated based on all.
         """
-        if self.time_to_next_transmit is None:
+        time_to_next_transmit = self._params.get("time_to_next_transmit")
+        if time_to_next_transmit is None:
             log.warning("Time to next transmit is not set, cannot compute fps")
             return None
 
         # Check if fps is constant
-        uniq = np.unique(self.time_to_next_transmit, axis=0)  # frame axis
+        uniq = np.unique(time_to_next_transmit, axis=0)  # frame axis
         if uniq.shape[0] != 1:
             log.warning("Time to next transmit is not constant")
 
         # Compute fps
-        time = np.mean(np.sum(self.time_to_next_transmit, axis=1))
+        time = np.mean(np.sum(time_to_next_transmit, axis=1))
         fps = 1 / time
         return fps
 
@@ -787,5 +858,5 @@ class Scan(Parameters):
         if key == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)
-            return super().__setattr__(key, self.selected_transmits)
-        return super().__setattr__(key, value)
+        else:
+            return super().__setattr__(key, value)

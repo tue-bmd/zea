@@ -433,6 +433,8 @@ def test_apply_along_axis(array, axis, fn):
     expected = np.apply_along_axis(np_fn, axis, array)
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
 
+    return result
+
 
 @pytest.mark.parametrize("mode", ["valid", "same", "full"])
 @backend_equality_check()
@@ -740,3 +742,55 @@ def test_translate(range_from, range_to):
     result = zea.func.translate(arr, range_from, range_to)
     assert right_min <= np.min(result), "Minimum value is too small"
     assert np.max(result) <= right_max, "Maximum value is too large"
+
+    return result
+
+
+@pytest.mark.parametrize(
+    "num_taps, f1, f2, sampling_frequency",
+    [
+        (127, 2e6, 4e6, 20e6),  # Standard case
+        (41, 1e6, 5e6, 25e6),  # Different parameters
+        (21, 0.5e6, 4.5e6, 10e6),  # Close to but below Nyquist
+        (128, 2e6, 4e6, 20e6),  # Even num_taps (not at Nyquist)
+        (11, 1e6, 1.5e6, 10e6),  # Small num_taps
+        (127, 0.1e6, 0.5e6, 20e6),  # Very low frequencies
+        (2, 2e6, 4e6, 20e6),  # Minimal num_taps
+    ],
+)
+def test_get_band_pass_filter(num_taps, f1, f2, sampling_frequency):
+    """Tests if get_band_pass_filter is equivalent to scipy.signal.firwin."""
+    import scipy.signal
+
+    import zea
+
+    b1 = zea.func.get_band_pass_filter(num_taps, sampling_frequency, f1, f2)
+    b2 = scipy.signal.firwin(num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency)
+
+    np.testing.assert_allclose(b1, b2, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "num_taps, f1, f2, sampling_frequency",
+    [
+        (127, 0, 4e6, 20e6),  # f1 == 0
+        (127, 2e6, 10e6, 20e6),  # f2 == Nyquist (fs/2)
+        (21, 0.5e6, 5e6, 10e6),  # f2 == Nyquist (fs/2)
+        (127, 5e6, 2e6, 20e6),  # f1 > f2 (reversed)
+        (127, 2e6, 2e6, 20e6),  # f1 == f2 (zero bandwidth)
+        (127, -1e6, 4e6, 20e6),  # Negative f1
+        (127, 2e6, 25e6, 20e6),  # f2 > Nyquist
+    ],
+)
+def test_get_band_pass_filter_invalid_inputs(num_taps, f1, f2, sampling_frequency):
+    """Tests that get_band_pass_filter raises appropriate errors for invalid inputs."""
+    import scipy.signal
+
+    import zea
+
+    # Verify scipy also raises an error for these cases
+    with pytest.raises(ValueError):
+        scipy.signal.firwin(num_taps, [f1, f2], pass_zero=False, fs=sampling_frequency)
+
+    with pytest.raises(ValueError):
+        zea.func.get_band_pass_filter(num_taps, sampling_frequency, f1, f2)

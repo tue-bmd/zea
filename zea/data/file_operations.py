@@ -79,6 +79,7 @@ def save_file(
         t0_delays=scan.t0_delays,
         sound_speed=scan.sound_speed,
         focus_distances=scan.focus_distances,
+        transmit_origins=scan.transmit_origins,
         polar_angles=scan.polar_angles,
         azimuth_angles=scan.azimuth_angles,
         tx_apodizations=scan.tx_apodizations,
@@ -261,6 +262,7 @@ def _all_tx_are_identical(scan: Scan):
         scan.t0_delays,
         scan.tx_apodizations,
         scan.focus_distances,
+        scan.transmit_origins,
         scan.initial_times,
     ]
 

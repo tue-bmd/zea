@@ -663,28 +663,34 @@ def update_imshow_with_mask(
     images: np.ndarray,
     masks: np.ndarray,
     selector: str,
+    **kwargs,
 ) -> tuple:
     """Updates the imshow object with the image from the given frame and
-    overlays a mask on top of it.
+    overlays the corresponding mask on top of it.
+
+    This function is designed for animation where each frame has one associated mask.
+    It removes any existing masks from the axes before plotting the new one.
 
     Args:
         frame_no (int): The index of the frame to display.
         axs (matplotlib.axes.Axes): The axes object to display the image on.
         imshow_obj (matplotlib.image.AxesImage): The imshow object to update.
-        images (numpy.ndarray): An array of images to display.
-        masks (numpy.ndarray): An array of masks to overlay on top of the images.
-        selector (str): The type of selector to use for the mask.
+        images (numpy.ndarray): An array of images with shape (num_frames, height, width).
+        masks (numpy.ndarray): An array of masks with shape (num_frames, height, width),
+            where each mask corresponds to one frame in the images array.
+        selector (str): The type of selector to use for plotting the mask.
             Can be either "rectangle" or "shape".
 
     Returns:
-        tuple: A tuple containing the updated imshow object and the mask object.
+        tuple: A tuple containing the updated imshow object and the mask object
+            (the matplotlib patch that was plotted).
     """
     imshow_obj.set_array(images[frame_no])
     remove_masks_from_axs(axs)
     if selector == "rectangle":
-        mask_obj = plot_rectangle_from_mask(axs, masks[frame_no])
+        mask_obj = plot_rectangle_from_mask(axs, masks[frame_no], **kwargs)
     else:
-        mask_obj = plot_shape_from_mask(axs, masks[frame_no], alpha=0.5)
+        mask_obj = plot_shape_from_mask(axs, masks[frame_no], alpha=0.5, **kwargs)
     return imshow_obj, mask_obj
 
 

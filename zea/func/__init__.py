@@ -21,6 +21,7 @@ from .tensor import (
     fori_loop,
     func_with_one_batch_dim,
     gaussian_filter,
+    gaussian_filter1d,
     images_to_patches,
     interpolate_data,
     is_jax_prng_key,
@@ -28,6 +29,7 @@ from .tensor import (
     linear_sum_assignment,
     map_indices_for_interpolation,
     matrix_power,
+    nonzero,
     normalize,
     pad_array_to_divisible,
     patches_to_images,
@@ -53,6 +55,7 @@ from .ultrasound import (
     get_low_pass_iq_filter,
     hilbert,
     log_compress,
+    make_tgc_curve,
     upmix,
 )
 
@@ -74,6 +77,7 @@ __all__ = [
     "fori_loop",
     "func_with_one_batch_dim",
     "gaussian_filter",
+    "gaussian_filter1d",
     "images_to_patches",
     "interpolate_data",
     "is_jax_prng_key",
@@ -81,6 +85,7 @@ __all__ = [
     "linear_sum_assignment",
     "map_indices_for_interpolation",
     "matrix_power",
+    "nonzero",
     "normalize",
     "pad_array_to_divisible",
     "patches_to_images",
@@ -106,4 +111,5 @@ __all__ = [
     "hilbert",
     "upmix",
     "log_compress",
+    "make_tgc_curve",
 ]
