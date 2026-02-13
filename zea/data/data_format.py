@@ -2,6 +2,8 @@
 Functions to write and validate datasets in the zea format.
 """
 
+from __future__ import annotations
+
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +16,299 @@ from zea import log
 from zea.data.file import File, validate_file
 from zea.internal.checks import _DATA_TYPES
 from zea.internal.utils import first_not_none_item
+from zea.probes import Probe
+from zea.scan import Scan
+
+
+def generate_zea_dataset_from_scan_probe(
+    path: str | Path,
+    scan: Scan,
+    probe: Probe | None = None,
+    raw_data=None,
+    aligned_data=None,
+    envelope_data=None,
+    beamformed_data=None,
+    image=None,
+    image_sc=None,
+    description="No description was supplied",
+):
+    generate_zea_dataset(
+        path=path,
+        raw_data=raw_data,
+        aligned_data=aligned_data,
+        envelope_data=envelope_data,
+        beamformed_data=beamformed_data,
+        image=image,
+        image_sc=image_sc,
+        probe_geometry=scan.probe_geometry if probe is None else probe.probe_geometry,
+        sampling_frequency=scan.sampling_frequency,
+        center_frequency=scan.center_frequency,
+        demodulation_frequency=scan.demodulation_frequency,
+        initial_times=scan.initial_times,
+        t0_delays=scan.t0_delays,
+        sound_speed=scan.sound_speed,
+        probe_name="generic",
+        description=description,
+        focus_distances=scan.focus_distances,
+        transmit_origins=scan.transmit_origins,
+        polar_angles=scan.polar_angles,
+        azimuth_angles=scan.azimuth_angles,
+        tx_apodizations=scan.tx_apodizations,
+        bandwidth_percent=scan.bandwidth_percent,
+        time_to_next_transmit=scan.time_to_next_transmit,
+        tgc_gain_curve=scan.tgc_gain_curve,
+        element_width=scan.element_width,
+        tx_waveform_indices=scan.tx_waveform_indices,
+        waveforms_one_way=scan.waveforms_one_way,
+        waveforms_two_way=scan.waveforms_two_way,
+        additional_elements=None,
+        event_structure=False,
+        cast_to_float=True,
+        overwrite=False,
+    )
+
+
+def filter_dict_for_function_arguments(func, dictionary):
+    """Filters a dictionary to only include keys that are arguments of a given function.
+
+    Args:
+        func (function): The function to filter the dictionary for.
+        dictionary (dict): The dictionary to filter.
+
+    Returns:
+        dict: A filtered dictionary containing only keys that are arguments of the function.
+    """
+    func_args = set(inspect.signature(func).parameters.keys())
+    filtered_dict = {k: v for k, v in dictionary.items() if k in func_args}
+    return filtered_dict
+
+
+def generate_zea_dataset(
+    path: str | Path,
+    raw_data=None,
+    aligned_data=None,
+    envelope_data=None,
+    beamformed_data=None,
+    image=None,
+    image_sc=None,
+    probe_geometry=None,
+    sampling_frequency=None,
+    center_frequency=None,
+    demodulation_frequency=None,
+    initial_times=None,
+    t0_delays=None,
+    sound_speed=None,
+    probe_name=None,
+    description="No description was supplied",
+    focus_distances=None,
+    transmit_origins=None,
+    polar_angles=None,
+    azimuth_angles=None,
+    tx_apodizations=None,
+    bandwidth_percent=None,
+    time_to_next_transmit=None,
+    tgc_gain_curve=None,
+    element_width=None,
+    tx_waveform_indices=None,
+    waveforms_one_way=None,
+    waveforms_two_way=None,
+    additional_elements=None,
+    event_structure=False,
+    cast_to_float=True,
+    overwrite=False,
+    enable_compression=True,
+):
+    """Generates a dataset in the zea format.
+
+    Args:
+        path (str): The path to write the dataset to.
+        raw_data (np.ndarray): The raw data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
+            shape (n_frames, n_tx, n_ax, n_el, n_ch).
+        envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
+            shape (n_frames, grid_size_z, grid_size_x).
+        beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
+            shape (n_frames, grid_size_z, grid_size_x, n_ch).
+        image (np.ndarray): The ultrasound images to be saved
+            of shape (n_frames, grid_size_z, grid_size_x).
+        image_sc (np.ndarray): The scan converted ultrasound images to be saved
+            of shape (n_frames, output_size_z, output_size_x).
+        probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).
+        sampling_frequency (float): The sampling frequency in Hz.
+        center_frequency (float): The center frequency of the transmit pulse in Hz.
+        demodulation_frequency (float): The demodulation frequency in Hz.
+        initial_times (list): The times when the A/D converter starts sampling
+            in seconds of shape (n_tx,). This is the time between the first element
+            firing and the first recorded sample.
+        t0_delays (np.ndarray): The t0_delays of shape (n_tx, n_el).
+        sound_speed (float): The speed of sound in m/s.
+        probe_name (str): The name of the probe.
+        description (str): The description of the dataset.
+        focus_distances (np.ndarray): The focus distances of shape (n_tx,).
+        transmit_origins (np.ndarray): The transmit origins of shape (n_tx, 3).
+        polar_angles (np.ndarray): The polar angles (radians) of shape (n_el,).
+        azimuth_angles (np.ndarray): The azimuth angles (radians) of shape (n_tx,).
+        tx_apodizations (np.ndarray): The transmit delays for each element defining
+            the wavefront in seconds of shape (n_tx, n_elem).
+            This is the time between the first element firing and the last element firing.
+        bandwidth_percent (float): The bandwidth of the transducer as a
+            percentage of the center frequency.
+        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s
+            of shape (n_frames, n_tx).
+        tgc_gain_curve (np.ndarray): The TGC gain that was applied to every sample in the
+            raw_data of shape (n_ax).
+        element_width (float): The width of the elements in the probe in meters of
+            shape (n_tx,).
+        tx_waveform_indices (np.ndarray): Transmit indices for waveforms, indexing
+            waveforms_one_way and waveforms_two_way. This indicates which transmit
+            waveform was used for each transmit event.
+        waveforms_one_way (list): List of one-way waveforms as simulated by the Verasonics
+            system, sampled at 250MHz. This is the waveform after being filtered by the
+            transducer bandwidth once. Every element in the list is a 1D numpy array.
+        waveforms_two_way (list): List of two-way waveforms as simulated by the Verasonics
+            system, sampled at 250MHz. This is the waveform after being filtered by the
+            transducer bandwidth twice. Every element in the list is a 1D numpy array.
+        additional_elements (List[DatasetElement]): A list of additional dataset
+            elements to be added to the dataset. Each element should be a DatasetElement
+            object. The additional elements are added under the scan group.
+        event_structure (bool): Whether to write the dataset with an event structure.
+            In that case all data should be lists with the same length (number of events).
+            The data will be stored under event_i/data and event_i/scan for each event i.
+            Instead of just a single data and scan group.
+        cast_to_float (bool): Whether to store data as float32. You may want to set this
+            to False if storing images.
+        overwrite (bool): Whether to overwrite the file if it already exists. Defaults to False.
+        enable_compression (bool): Whether to enable gzip compression for datasets.
+            Defaults to True. Compression reduces disk space at the cost of increased
+            write time.
+
+    """
+    # check if all args are lists
+    if isinstance(probe_name, list):
+        # all names in probe_name list should be the same
+        assert len(set(probe_name)) == 1, "Probe names for all events should be the same"
+
+    data_and_parameters = {
+        "raw_data": raw_data,
+        "aligned_data": aligned_data,
+        "envelope_data": envelope_data,
+        "beamformed_data": beamformed_data,
+        "image": image,
+        "image_sc": image_sc,
+        "probe_geometry": probe_geometry,
+        "sampling_frequency": sampling_frequency,
+        "center_frequency": center_frequency,
+        "demodulation_frequency": demodulation_frequency,
+        "initial_times": initial_times,
+        "t0_delays": t0_delays,
+        "sound_speed": sound_speed,
+        "probe_name": probe_name,
+        "description": description,
+        "focus_distances": focus_distances,
+        "transmit_origins": transmit_origins,
+        "polar_angles": polar_angles,
+        "azimuth_angles": azimuth_angles,
+        "tx_apodizations": tx_apodizations,
+        "bandwidth_percent": bandwidth_percent,
+        "time_to_next_transmit": time_to_next_transmit,
+        "tgc_gain_curve": tgc_gain_curve,
+        "element_width": element_width,
+        "tx_waveform_indices": tx_waveform_indices,
+        "waveforms_one_way": waveforms_one_way,
+        "waveforms_two_way": waveforms_two_way,
+        "additional_elements": additional_elements,
+    }
+
+    # make sure input arguments of func is same length as data_and_parameters
+    # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
+    assert (
+        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 5
+    ), (
+        "All arguments should be put in data_and_parameters except "
+        "`path`, `event_structure`, `cast_to_float`, `overwrite`, and `enable_compression` "
+        "arguments."
+    )
+
+    if event_structure:
+        for argument, argument_value in data_and_parameters.items():
+            _num_events = None
+            if argument_value is not None:
+                assert isinstance(argument_value, list), (
+                    f"{argument} should be a list when event_structure is set to True."
+                )
+                num_events = len(argument_value)
+                if _num_events is not None:
+                    assert num_events == _num_events, (
+                        "All arguments should have the same number of events."
+                    )
+                _num_events = num_events
+
+        assert len(set(probe_name)) == 1, "Probe names for all events should be the same"
+        log.info(
+            f"Event structure is set to True. Writing dataset with event "
+            f"structure (found {len(probe_name)} events)."
+        )
+        num_events = len(probe_name)
+        probe_name = probe_name[0]
+        description = description[0]
+
+    assert isinstance(probe_name, str), "The probe name must be a string."
+    assert isinstance(description, str), "The description must be a string."
+    assert isinstance(event_structure, bool), "The event_structure must be a boolean."
+
+    validate_input_data(
+        raw_data=raw_data,
+        aligned_data=aligned_data,
+        envelope_data=envelope_data,
+        beamformed_data=beamformed_data,
+        image=image,
+        image_sc=image_sc,
+    )
+
+    # Convert path to Path object
+    path = Path(path)
+
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"The file {path} already exists.")
+
+    # Create the directory if it does not exist
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with File(path, "w") as dataset:
+        dataset.attrs["probe"] = probe_name
+        dataset.attrs["description"] = description
+        dataset.attrs["event_structure"] = event_structure
+        # remove probe and description from data_and_parameters
+        data_and_parameters.pop("probe_name")
+        data_and_parameters.pop("description")
+
+        if event_structure:
+            for i in range(num_events):
+                _data_and_parameters = {
+                    k: v[i] for k, v in data_and_parameters.items() if v is not None
+                }
+                _write_datasets(
+                    dataset,
+                    data_group_name=f"event_{i}/data",
+                    scan_group_name=f"event_{i}/scan",
+                    cast_to_float=cast_to_float,
+                    enable_compression=enable_compression,
+                    **_data_and_parameters,
+                )
+
+        else:
+            _write_datasets(
+                dataset,
+                data_group_name="data",
+                scan_group_name="scan",
+                cast_to_float=cast_to_float,
+                enable_compression=enable_compression,
+                **data_and_parameters,
+            )
+
+    validate_file(path)
+    log.info(f"zea dataset written to {log.yellow(path)}")
 
 
 @dataclass
@@ -580,234 +875,6 @@ def _write_datasets(
                 description=element.description,
                 unit=element.unit,
             )
-
-
-def generate_zea_dataset(
-    path,
-    raw_data=None,
-    aligned_data=None,
-    envelope_data=None,
-    beamformed_data=None,
-    image=None,
-    image_sc=None,
-    probe_geometry=None,
-    sampling_frequency=None,
-    center_frequency=None,
-    demodulation_frequency=None,
-    initial_times=None,
-    t0_delays=None,
-    sound_speed=None,
-    probe_name=None,
-    description="No description was supplied",
-    focus_distances=None,
-    transmit_origins=None,
-    polar_angles=None,
-    azimuth_angles=None,
-    tx_apodizations=None,
-    bandwidth_percent=None,
-    time_to_next_transmit=None,
-    tgc_gain_curve=None,
-    element_width=None,
-    tx_waveform_indices=None,
-    waveforms_one_way=None,
-    waveforms_two_way=None,
-    additional_elements=None,
-    event_structure=False,
-    cast_to_float=True,
-    overwrite=False,
-    enable_compression=True,
-):
-    """Generates a dataset in the zea format.
-
-    Args:
-        path (str): The path to write the dataset to.
-        raw_data (np.ndarray): The raw data of the ultrasound measurement of
-            shape (n_frames, n_tx, n_ax, n_el, n_ch).
-        aligned_data (np.ndarray): The aligned data of the ultrasound measurement of
-            shape (n_frames, n_tx, n_ax, n_el, n_ch).
-        envelope_data (np.ndarray): The envelope data of the ultrasound measurement of
-            shape (n_frames, grid_size_z, grid_size_x).
-        beamformed_data (np.ndarray): The beamformed data of the ultrasound measurement of
-            shape (n_frames, grid_size_z, grid_size_x, n_ch).
-        image (np.ndarray): The ultrasound images to be saved
-            of shape (n_frames, grid_size_z, grid_size_x).
-        image_sc (np.ndarray): The scan converted ultrasound images to be saved
-            of shape (n_frames, output_size_z, output_size_x).
-        probe_geometry (np.ndarray): The probe geometry of shape (n_el, 3).
-        sampling_frequency (float): The sampling frequency in Hz.
-        center_frequency (float): The center frequency of the transmit pulse in Hz.
-        demodulation_frequency (float): The demodulation frequency in Hz.
-        initial_times (list): The times when the A/D converter starts sampling
-            in seconds of shape (n_tx,). This is the time between the first element
-            firing and the first recorded sample.
-        t0_delays (np.ndarray): The t0_delays of shape (n_tx, n_el).
-        sound_speed (float): The speed of sound in m/s.
-        probe_name (str): The name of the probe.
-        description (str): The description of the dataset.
-        focus_distances (np.ndarray): The focus distances of shape (n_tx,).
-        transmit_origins (np.ndarray): The transmit origins of shape (n_tx, 3).
-        polar_angles (np.ndarray): The polar angles (radians) of shape (n_el,).
-        azimuth_angles (np.ndarray): The azimuth angles (radians) of shape (n_tx,).
-        tx_apodizations (np.ndarray): The transmit delays for each element defining
-            the wavefront in seconds of shape (n_tx, n_elem).
-            This is the time between the first element firing and the last element firing.
-        bandwidth_percent (float): The bandwidth of the transducer as a
-            percentage of the center frequency.
-        time_to_next_transmit (np.ndarray): The time between subsequent transmit events in s
-            of shape (n_frames, n_tx).
-        tgc_gain_curve (np.ndarray): The TGC gain that was applied to every sample in the
-            raw_data of shape (n_ax).
-        element_width (float): The width of the elements in the probe in meters of
-            shape (n_tx,).
-        tx_waveform_indices (np.ndarray): Transmit indices for waveforms, indexing
-            waveforms_one_way and waveforms_two_way. This indicates which transmit
-            waveform was used for each transmit event.
-        waveforms_one_way (list): List of one-way waveforms as simulated by the Verasonics
-            system, sampled at 250MHz. This is the waveform after being filtered by the
-            transducer bandwidth once. Every element in the list is a 1D numpy array.
-        waveforms_two_way (list): List of two-way waveforms as simulated by the Verasonics
-            system, sampled at 250MHz. This is the waveform after being filtered by the
-            transducer bandwidth twice. Every element in the list is a 1D numpy array.
-        additional_elements (List[DatasetElement]): A list of additional dataset
-            elements to be added to the dataset. Each element should be a DatasetElement
-            object. The additional elements are added under the scan group.
-        event_structure (bool): Whether to write the dataset with an event structure.
-            In that case all data should be lists with the same length (number of events).
-            The data will be stored under event_i/data and event_i/scan for each event i.
-            Instead of just a single data and scan group.
-        cast_to_float (bool): Whether to store data as float32. You may want to set this
-            to False if storing images.
-        overwrite (bool): Whether to overwrite the file if it already exists. Defaults to False.
-        enable_compression (bool): Whether to enable gzip compression for datasets.
-            Defaults to True. Compression reduces disk space at the cost of increased
-            write time.
-
-    """
-    # check if all args are lists
-    if isinstance(probe_name, list):
-        # all names in probe_name list should be the same
-        assert len(set(probe_name)) == 1, "Probe names for all events should be the same"
-
-    data_and_parameters = {
-        "raw_data": raw_data,
-        "aligned_data": aligned_data,
-        "envelope_data": envelope_data,
-        "beamformed_data": beamformed_data,
-        "image": image,
-        "image_sc": image_sc,
-        "probe_geometry": probe_geometry,
-        "sampling_frequency": sampling_frequency,
-        "center_frequency": center_frequency,
-        "demodulation_frequency": demodulation_frequency,
-        "initial_times": initial_times,
-        "t0_delays": t0_delays,
-        "sound_speed": sound_speed,
-        "probe_name": probe_name,
-        "description": description,
-        "focus_distances": focus_distances,
-        "transmit_origins": transmit_origins,
-        "polar_angles": polar_angles,
-        "azimuth_angles": azimuth_angles,
-        "tx_apodizations": tx_apodizations,
-        "bandwidth_percent": bandwidth_percent,
-        "time_to_next_transmit": time_to_next_transmit,
-        "tgc_gain_curve": tgc_gain_curve,
-        "element_width": element_width,
-        "tx_waveform_indices": tx_waveform_indices,
-        "waveforms_one_way": waveforms_one_way,
-        "waveforms_two_way": waveforms_two_way,
-        "additional_elements": additional_elements,
-    }
-
-    # make sure input arguments of func is same length as data_and_parameters
-    # except `path` and `event_structure` arguments and ofcourse `data_and_parameters` itself
-    assert (
-        len(data_and_parameters) == len(inspect.signature(generate_zea_dataset).parameters) - 5
-    ), (
-        "All arguments should be put in data_and_parameters except "
-        "`path`, `event_structure`, `cast_to_float`, `overwrite`, and `enable_compression` "
-        "arguments."
-    )
-
-    if event_structure:
-        for argument, argument_value in data_and_parameters.items():
-            _num_events = None
-            if argument_value is not None:
-                assert isinstance(argument_value, list), (
-                    f"{argument} should be a list when event_structure is set to True."
-                )
-                num_events = len(argument_value)
-                if _num_events is not None:
-                    assert num_events == _num_events, (
-                        "All arguments should have the same number of events."
-                    )
-                _num_events = num_events
-
-        assert len(set(probe_name)) == 1, "Probe names for all events should be the same"
-        log.info(
-            f"Event structure is set to True. Writing dataset with event "
-            f"structure (found {len(probe_name)} events)."
-        )
-        num_events = len(probe_name)
-        probe_name = probe_name[0]
-        description = description[0]
-
-    assert isinstance(probe_name, str), "The probe name must be a string."
-    assert isinstance(description, str), "The description must be a string."
-    assert isinstance(event_structure, bool), "The event_structure must be a boolean."
-
-    validate_input_data(
-        raw_data=raw_data,
-        aligned_data=aligned_data,
-        envelope_data=envelope_data,
-        beamformed_data=beamformed_data,
-        image=image,
-        image_sc=image_sc,
-    )
-
-    # Convert path to Path object
-    path = Path(path)
-
-    if path.exists() and not overwrite:
-        raise FileExistsError(f"The file {path} already exists.")
-
-    # Create the directory if it does not exist
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with File(path, "w") as dataset:
-        dataset.attrs["probe"] = probe_name
-        dataset.attrs["description"] = description
-        dataset.attrs["event_structure"] = event_structure
-        # remove probe and description from data_and_parameters
-        data_and_parameters.pop("probe_name")
-        data_and_parameters.pop("description")
-
-        if event_structure:
-            for i in range(num_events):
-                _data_and_parameters = {
-                    k: v[i] for k, v in data_and_parameters.items() if v is not None
-                }
-                _write_datasets(
-                    dataset,
-                    data_group_name=f"event_{i}/data",
-                    scan_group_name=f"event_{i}/scan",
-                    cast_to_float=cast_to_float,
-                    enable_compression=enable_compression,
-                    **_data_and_parameters,
-                )
-
-        else:
-            _write_datasets(
-                dataset,
-                data_group_name="data",
-                scan_group_name="scan",
-                cast_to_float=cast_to_float,
-                enable_compression=enable_compression,
-                **data_and_parameters,
-            )
-
-    validate_file(path)
-    log.info(f"zea dataset written to {log.yellow(path)}")
 
 
 def load_description(path):
