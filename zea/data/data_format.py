@@ -31,6 +31,7 @@ def generate_zea_dataset_from_scan_probe(
     image=None,
     image_sc=None,
     description="No description was supplied",
+    overwrite=False,
 ):
     generate_zea_dataset(
         path=path,
@@ -64,7 +65,7 @@ def generate_zea_dataset_from_scan_probe(
         additional_elements=None,
         event_structure=False,
         cast_to_float=True,
-        overwrite=False,
+        overwrite=overwrite,
     )
 
 
