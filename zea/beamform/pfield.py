@@ -305,7 +305,6 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
 
 
 def _pfield_freq_step(
-    k,
     freq,
     delays_tx,
     tx_apodization,
@@ -318,26 +317,23 @@ def _pfield_freq_step(
     Calculates the pressure field for a single frequency step.
 
     Args:
-        k (int): Frequency index.
-        freq (list): List of frequencies.
+        freq: (float): Frequency of the current step.
         delays_tx (list): List of transmit delays.
         tx_apodization (list): List of transmit apodization values (complex64).
         monochromatic_pressure: (Tensor): Per-element, per-field-point complex pressure response
             (including directivity and propagation effects) at the current frequency sample.
-        pulse_spect (list): List of pulse spectra.
-        probe_spect (list): List of probe spectra (complex64).
+        pulse_spect
+        probe_spect
         z (list): List of z-coordinates.
 
     Returns:
         pressure_squared_k (Tensor): Pressure field for this frequency.
     """
-    angular_frequency = 2 * np.pi * freq[k]
+    angular_frequency = 2 * np.pi * freq
     delay_apodization = (
         ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
     )
-    pressure_k = (
-        ops.matmul(monochromatic_pressure, delay_apodization) * pulse_spect[k] * probe_spect[k]
-    )
+    pressure_k = ops.matmul(monochromatic_pressure, delay_apodization) * pulse_spect * probe_spect
     pressure_k = ops.where(z < 0, 0, pressure_k)
     return ops.abs(pressure_k) ** 2
 
@@ -370,20 +366,27 @@ def _pfield_freq_loop(
 
     tx_apodization = ops.cast(tx_apodization, "complex64")
     probe_spect = ops.cast(probe_spect, "complex64")
-    monochromatic_pressure = exp_arr
-    total_pressure_squared = 0
-    for k in range(len(freq)):
-        if k > 0:
-            monochromatic_pressure *= exp_freq_step
+    monochromatic_pressure = exp_arr / exp_freq_step
+
+    def scan_fn(carry, k):
+        monochromatic_pressure, total_pressure_squared = carry
+        monochromatic_pressure *= exp_freq_step
         pressure_squared_k = _pfield_freq_step(
-            k,
-            freq,
+            freq[k],
             delays_tx,
             tx_apodization,
             ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
-            pulse_spect,
-            probe_spect,
+            pulse_spect[k],
+            probe_spect[k],
             z,
         )
         total_pressure_squared += pressure_squared_k
+        return (monochromatic_pressure, total_pressure_squared), None
+
+    (_, total_pressure_squared), _ = ops.scan(
+        scan_fn,
+        (monochromatic_pressure, ops.zeros_like(z, dtype="float32")),
+        ops.arange(len(freq)),
+    )
+
     return total_pressure_squared
