@@ -23,8 +23,7 @@ import keras
 import numpy as np
 from keras import ops
 
-from zea import log
-from zea.func.tensor import sinc
+from zea.func.tensor import sinc, vmap
 from zea.internal.cache import cache_output
 
 
@@ -49,7 +48,6 @@ def compute_pfield(
     alpha=1,
     percentile=10,
     norm=True,
-    verbose=True,
 ):
     """Compute the pressure field for ultrasound imaging.
 
@@ -117,8 +115,6 @@ def compute_pfield(
 
     kerf = 0.1 * pitch  # for now this is hardcoded
     element_width = pitch - kerf
-
-    n_tx = len(tx_apodizations)
 
     # %------------------------------------%
     # % POINT LOCATIONS, DISTANCES & GRIDS %
@@ -188,75 +184,62 @@ def compute_pfield(
         # Apply the negative sign and exponential
         return ops.exp(-exponent)
 
-    p_list = []
+    # The frequency response is a pulse-echo (transmit + receive) response.
+    # The spectrum of the pulse (pulse_spectrum) will be then multiplied
+    # by the frequency-domain tapering window of the transducer (probe_spectrum)
+    # The frequency step df is chosen to avoid interferences due to
+    # inadequate discretization.
+    # df = frequency step (must be sufficiently small):
+    # One has exp[-i(k r + w delay)] = exp[-2i pi(f r/c + f delay)] in the Eq.
+    # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
+    # Therefore: df < 1/(r/c + delay).
 
-    if verbose:
-        log.info("Computing pressure field for all transmits")
-        progbar = keras.utils.Progbar(n_tx, unit_name="transmits")
-    for j in range(0, n_tx):
-        # delays and apodization of transmit event
-        delays_tx = t0_delays[j]
-        tx_apodization = tx_apodizations[j]
+    freq_step = 1 / (ops.max(distance / sound_speed) + ops.max(t0_delays))
+    freq_step = frequency_step * freq_step
 
-        # The frequency response is a pulse-echo (transmit + receive) response.
-        # The spectrum of the pulse (pulse_spectrum) will be then multiplied
-        # by the frequency-domain tapering window of the transducer (probe_spectrum)
-        # The frequency step df is chosen to avoid interferences due to
-        # inadequate discretization.
-        # df = frequency step (must be sufficiently small):
-        # One has exp[-i(k r + w delay)] = exp[-2i pi(f r/c + f delay)] in the Eq.
-        # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
-        # Therefore: df < 1/(r/c + delay).
+    # FREQUENCY SAMPLES
+    num_freq = 2 * ops.cast(ops.ceil(center_frequency / freq_step), "int32") + 1
+    freq = ops.arange(0, num_freq) * freq_step
 
-        freq_step = 1 / (ops.max(distance / sound_speed) + ops.max(delays_tx))
-        freq_step = frequency_step * freq_step
+    # keep the significant components only by using db_thresh
+    spectrum = ops.abs(
+        pulse_spectrum(2 * np.pi * freq) * ops.cast(probe_spectrum(2 * np.pi * freq), "complex64")
+    )
+    gain_db = 20 * ops.log10(keras.config.epsilon() + spectrum / (ops.max(spectrum)))
+    idx = gain_db > db_thresh
 
-        # FREQUENCY SAMPLES
-        num_freq = 2 * ops.cast(ops.ceil(center_frequency / freq_step), "int32") + 1
-        freq = ops.linspace(0, 2 * center_frequency, num_freq)
-        freq_step = freq[1]
+    freq = freq[idx]
 
-        # keep the significant components only by using db_thresh
-        spectrum = ops.abs(
-            pulse_spectrum(2 * np.pi * freq)
-            * ops.cast(probe_spectrum(2 * np.pi * freq), "complex64")
-        )
-        gain_db = 20 * ops.log10(epsilon + spectrum / (ops.max(spectrum)))
-        idx = gain_db > db_thresh
+    pulse_spect = pulse_spectrum(2 * np.pi * freq)
+    probe_spect = probe_spectrum(2 * np.pi * freq)
 
-        freq = freq[idx]
+    # Exponential arrays of size [numel(x) n_el num_sub_elements]
+    wavenumber = 2 * np.pi * freq[0] / sound_speed
+    attenuation_wavenumber = attenuation_coef * freq[0]
 
-        pulse_spect = pulse_spectrum(2 * np.pi * freq)
-        probe_spect = probe_spectrum(2 * np.pi * freq)
+    distance_complex = ops.cast(distance, dtype="complex64")
+    attenuation_wavenumber = ops.cast(attenuation_wavenumber, dtype="complex64")
+    mod_out = ops.cast(ops.mod(wavenumber * distance, 2 * np.pi), dtype="complex64")
+    exp_arr = ops.exp(-attenuation_wavenumber * distance_complex + 1j * mod_out)
 
-        # Exponential arrays of size [numel(x) n_el num_sub_elements]
-        wavenumber = 2 * np.pi * freq[0] / sound_speed
-        attenuation_wavenumber = attenuation_coef * freq[0]
+    # Exponential array for the increment wavenumber dk
+    wavenumber_step = 2 * np.pi * freq_step / sound_speed
+    attenuation_wavenumber_step = attenuation_coef * freq_step
+    wavenumber_step = ops.cast(wavenumber_step, dtype="complex64")
+    attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
 
-        distance_complex = ops.cast(distance, dtype="complex64")
-        attenuation_wavenumber = ops.cast(attenuation_wavenumber, dtype="complex64")
-        mod_out = ops.cast(ops.mod(wavenumber * distance, 2 * np.pi), dtype="complex64")
-        exp_arr = ops.exp(-attenuation_wavenumber * distance_complex + 1j * mod_out)
+    exp_freq_step = ops.exp(
+        (-attenuation_wavenumber_step + 1j * wavenumber_step) * distance_complex
+    )
 
-        # Exponential array for the increment wavenumber dk
-        wavenumber_step = 2 * np.pi * freq_step / sound_speed
-        attenuation_wavenumber_step = attenuation_coef * freq_step
-        wavenumber_step = ops.cast(wavenumber_step, dtype="complex64")
-        attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
+    exp_arr = exp_arr / ops.sqrt(distance_complex)
+    exp_arr = exp_arr * ops.cast(ops.min(ops.sqrt(distance)), "complex64")  # normalize the field
 
-        exp_freq_step = ops.exp(
-            (-attenuation_wavenumber_step + 1j * wavenumber_step) * distance_complex
-        )
+    center_wavenumber = 2 * np.pi * center_frequency / sound_speed
+    directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
+    exp_arr = exp_arr * ops.cast(directivity, "complex64")
 
-        exp_arr = exp_arr / ops.sqrt(distance_complex)
-        exp_arr = exp_arr * ops.cast(
-            ops.min(ops.sqrt(distance)), "complex64"
-        )  # normalize the field
-
-        center_wavenumber = 2 * np.pi * center_frequency / sound_speed
-        directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
-        exp_arr = exp_arr * ops.cast(directivity, "complex64")
-
+    def _compute_pfield_single_tx(delays_tx, tx_apodization):
         # Render pressure field for all relevant frequencies and sum them up
         pressure_squared = _pfield_freq_loop(
             freq,
@@ -276,13 +259,9 @@ def compute_pfield(
         pressure = ops.squeeze(
             ops.image.resize(pressure[..., None], size_orig, interpolation="nearest"), axis=-1
         )
+        return pressure
 
-        p_list.append(pressure)
-
-        if verbose:
-            progbar.add(1)
-
-    p_arr = ops.convert_to_tensor(p_list)
+    p_arr = vmap(_compute_pfield_single_tx)(t0_delays, tx_apodizations)
 
     if norm:
         normalized_pfield = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
