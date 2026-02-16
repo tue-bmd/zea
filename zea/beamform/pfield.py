@@ -83,7 +83,6 @@ def compute_pfield(
             of shape (n_tx, grid_size_z, grid_size_x).
     """
     # medium params
-
     # NOTE: currently we ignore attenuation in the compounding
     attenuation_coef = 0  # dB/cm/MHz, attenuation coefficient of the medium
     attenuation_coef = attenuation_coef / 8.686  # convert to Np/cm/MHz
@@ -119,7 +118,7 @@ def compute_pfield(
     kerf = 0.1 * pitch  # for now this is hardcoded
     element_width = pitch - kerf
 
-    num_transmits = len(tx_apodizations)
+    n_tx = len(tx_apodizations)
 
     # %------------------------------------%
     # % POINT LOCATIONS, DISTANCES & GRIDS %
@@ -193,8 +192,8 @@ def compute_pfield(
 
     if verbose:
         log.info("Computing pressure field for all transmits")
-        progbar = keras.utils.Progbar(num_transmits, unit_name="transmits")
-    for j in range(0, num_transmits):
+        progbar = keras.utils.Progbar(n_tx, unit_name="transmits")
+    for j in range(0, n_tx):
         # delays and apodization of transmit event
         delays_tx = t0_delays[j]
         tx_apodization = tx_apodizations[j]
