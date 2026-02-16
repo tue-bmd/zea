@@ -64,6 +64,8 @@ class DiffusionModel(DeepGenerativeModel):
         ema_val=0.999,
         min_t=0.0,
         max_t=1.0,
+        noise_correlation_across_channels=None,
+        noise_correlation_alpha=1.0,
         **kwargs,
     ):
         """Initialize a diffusion model.
@@ -85,6 +87,11 @@ class DiffusionModel(DeepGenerativeModel):
             ema_val: Exponential moving average value for the network weights.
             min_t: Minimum diffusion time for sampling during training.
             max_t: Maximum diffusion time for sampling during training.
+            noise_correlation_across_channels (str): Determines whether noise is correlated
+                across channels. One of [None | "mixed" | "progressive"]. If None, then
+                noise is uncorrelated across channels. Default is None.
+                For context, see: https://arxiv.org/abs/2305.10474
+            noise_correlation_alpha (float): higher = more correlation.
             **kwargs: Additional arguments.
         """
         super().__init__(name=name, **kwargs)
@@ -96,6 +103,8 @@ class DiffusionModel(DeepGenerativeModel):
         self.network_name = network_name
         self.network_kwargs = network_kwargs or {}
         self.ema_val = ema_val
+        self.noise_correlation_across_channels = noise_correlation_across_channels
+        self.noise_correlation_alpha = noise_correlation_alpha
 
         # reverse diffusion (i.e. sampling) goes from t = max_t to t = min_t
         self.min_t = min_t
@@ -108,19 +117,6 @@ class DiffusionModel(DeepGenerativeModel):
             input_shape=self.input_shape,
             **self.network_kwargs,
         )
-        # if network_name == "unet_time_conditional":
-        #     self.network = get_time_conditional_unetwork(
-        #         image_shape=self.input_shape,
-        #         **self.network_kwargs,
-        #     )
-        # elif network_name == "dense_time_conditional":
-        #     assert len(input_shape) == 1, "Dense network only supports 1D input"
-        #     self.network = get_time_conditional_dense_network(
-        #         input_dim=self.input_shape[0],
-        #         **self.network_kwargs,
-        #     )
-        # else:
-        #     raise ValueError("Invalid network name provided.")
 
         # Also initialize the exponential moving average network
         self.ema_network = keras.models.clone_model(self.network)
@@ -225,13 +221,13 @@ class DiffusionModel(DeepGenerativeModel):
         seed, seed1 = split_seed(seed, 2)
 
         # Generate random noise
-        noise = keras.random.normal(
+        initial_noise = self.generate_noise(
             shape=(n_samples, *self.input_shape),
             seed=seed1,
         )
         # Reverse diffusion process
         return self.reverse_diffusion(
-            initial_noise=noise, diffusion_steps=n_steps, seed=seed, **kwargs
+            initial_noise=initial_noise, diffusion_steps=n_steps, seed=seed, **kwargs
         )
 
     def posterior_sample(
@@ -288,9 +284,8 @@ class DiffusionModel(DeepGenerativeModel):
 
         seed1, seed2 = split_seed(seed, 2)
 
-        initial_noise = keras.random.normal(
-            shape=(batch_size * n_samples, *self.input_shape),
-            seed=seed1,
+        initial_noise = self.generate_noise(
+            shape=(batch_size * n_samples, *self.input_shape), seed=seed1
         )
 
         out = self.reverse_conditional_diffusion(
@@ -323,6 +318,48 @@ class DiffusionModel(DeepGenerativeModel):
         """Metrics for training."""
         return [*self.noise_loss_tracker, *self.image_loss_tracker]
 
+    def generate_noise(self, shape, seed=None):
+        """
+        Generate random / correlated random noise.
+        For info on noise correlation methods, see: https://arxiv.org/pdf/2305.10474
+        """
+        if self.noise_correlation_across_channels is None:
+            return keras.random.normal(shape=shape, seed=seed)
+        elif self.noise_correlation_across_channels == "mixed":
+            batch_size, height, width, _ = shape
+            shared_var = (self.noise_correlation_alpha**2) / (1 + self.noise_correlation_alpha**2)
+            shared_noise = keras.random.normal(
+                shape=(batch_size, height, width, 1), seed=seed, stddev=ops.sqrt(shared_var)
+            )
+            independent_var = 1 / (1 + self.noise_correlation_alpha**2)
+            independent_noise = keras.random.normal(
+                shape=shape, seed=seed, stddev=ops.sqrt(independent_var)
+            )
+            return shared_noise + independent_noise  # broadcast shared_noise across channels
+        elif self.noise_correlation_across_channels == "progressive":
+            batch_size, height, width, n_channels = shape
+            noise_0 = keras.random.normal(shape=(batch_size, height, width, 1), seed=seed)
+            progressive_var = 1 / (1 + self.noise_correlation_alpha**2)
+            mixing_coef = self.noise_correlation_alpha / ops.sqrt(
+                1 + self.noise_correlation_alpha**2
+            )
+            noises = [noise_0]
+            for i in range(1, n_channels):
+                noise_i = keras.random.normal(
+                    shape=(batch_size, height, width, 1),
+                    seed=seed,
+                    stddev=ops.sqrt(progressive_var),
+                )
+                noises_i = mixing_coef * noises[i - 1] + noise_i
+                noises.append(noises_i)
+            return ops.concatenate(noises, axis=-1)
+        else:
+            raise ValueError(
+                "Invalid noise_correlation_across_channels value: "
+                f"{self.noise_correlation_across_channels}. "
+                "Must be one of [None, 'mixed', 'progressive']."
+            )
+
     def train_step(self, data):
         """Custom train step so we can call model.fit() on the diffusion model.
         Note:
@@ -338,7 +375,7 @@ class DiffusionModel(DeepGenerativeModel):
         n_dims = len(input_shape)
 
         # Generate random noise
-        noises = keras.random.normal(shape=ops.shape(data))
+        noises = self.generate_noise(shape=ops.shape(data))
 
         # Sample uniform random diffusion times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
@@ -501,7 +538,7 @@ class DiffusionModel(DeepGenerativeModel):
         alpha = next_signal_rates**2
 
         sigma_t = ops.sqrt((1 - alpha) / (1 - alpha_prev)) * ops.sqrt(1 - alpha_prev / alpha)
-        epsilon = keras.random.normal(shape=shape, seed=seed)
+        epsilon = self.generate_noise(shape=shape, seed=seed)
 
         next_noise_rates = ops.sqrt(1 - alpha - sigma_t**2)
         next_noisy_images = (
