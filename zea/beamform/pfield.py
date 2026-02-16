@@ -92,6 +92,13 @@ def compute_pfield(
     alpha_db = ops.cast(alpha_db, "float32")
     db_thresh = ops.cast(db_thresh, "float32")
 
+    # to tensor
+    probe_geometry = ops.convert_to_tensor(probe_geometry, dtype="float32")
+    grid_x = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
+    grid_z = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
+    t0_delays = ops.convert_to_tensor(t0_delays, dtype="float32")
+    tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="float32")
+
     # probe params
     center_frequency = center_frequency / downmix  # downmixing the frequency
 
@@ -99,8 +106,6 @@ def compute_pfield(
     num_waveforms = 1  # number of waveforms in the pulse
 
     # array params
-    probe_geometry = ops.convert_to_tensor(probe_geometry, dtype="float32")
-
     pitch = ops.abs(probe_geometry[1, 0] - probe_geometry[0, 0])  # element pitch
 
     kerf = 0.1 * pitch  # for now this is hardcoded
@@ -116,70 +121,60 @@ def compute_pfield(
     lambda_min = sound_speed / (center_frequency * (1 + bandwidth_percent / 200))
     num_sub_elements = ops.ceil(element_width / lambda_min)
 
-    x_orig = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
-    z_orig = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
-
-    size_orig = ops.shape(x_orig)
+    size_orig = ops.shape(grid_x)
 
     # Nearest-neighbor downsampling the grid
-    x = x_orig[::downsample, ::downsample]
-    z = z_orig[::downsample, ::downsample]
-    size_downsampled = ops.shape(x)
+    grid_x = grid_x[::downsample, ::downsample]
+    grid_z = grid_z[::downsample, ::downsample]
+    size_downsampled = ops.shape(grid_x)
 
     # Coordinates of the points where pressure is needed
-    x = ops.reshape(x, (-1,))
-    z = ops.reshape(z, (-1,))
+    grid_x = ops.reshape(grid_x, (-1,))
+    grid_z = ops.reshape(grid_z, (-1,))
 
     # Centers of the transducer elements (x- and z-coordinates)
-    xe = (ops.arange(0.0, n_el) - (n_el - 1) / 2) * pitch
-    ze = ops.zeros(n_el)
-    the = ops.zeros(n_el)
+    element_x = (ops.arange(0.0, n_el) - (n_el - 1) / 2) * pitch
+    element_z = ops.zeros(n_el)
+    element_theta = ops.zeros(n_el)
 
     # Centroids of the sub-elements
     seg_length = element_width / num_sub_elements
-    tmp = (
+    sub_element_x = (
         -element_width / 2
         + seg_length / 2
         + ops.arange(0, num_sub_elements, dtype=seg_length.dtype) * seg_length
     )
-    xi = tmp
-    zi = ops.zeros((int(num_sub_elements),))
+    sub_element_z = ops.zeros((int(num_sub_elements),))
 
     # Distances between the points and the transducer elements
-    x_expanded = x[:, None, None]
-    xi_expanded = xi[None, :, None]
-    xe_expanded = xe[None, None, :]
+    delta_x = grid_x[:, None, None] - sub_element_x[None, :, None] - element_x[None, None, :]
+    delta_z = grid_z[:, None, None] - sub_element_z[None, :, None] - element_z[None, None, :]
 
-    dxi = x_expanded - xi_expanded - xe_expanded
-
-    z_expanded = z[:, None, None]
-    zi_expanded = zi[None, :, None]
-    ze_expanded = ze[None, None, :]
-
-    d2 = dxi**2 + (z_expanded - zi_expanded - ze_expanded) ** 2
-    r = ops.sqrt(d2)
-    r_flat = ops.reshape(r, (-1,))
+    distance = ops.sqrt(delta_x**2 + delta_z**2)
+    distance_flat = ops.reshape(distance, (-1,))
 
     # Angle between the normal to the transducer and the line joining
     # the point and the transducer
-    eps = keras.config.epsilon()
-    theta = ops.arcsin((dxi + eps) / (ops.sqrt(d2) + eps)) - the
+    epsilon = keras.config.epsilon()
+    theta = ops.arcsin((delta_x + epsilon) / (distance + epsilon)) - element_theta
     sin_theta = ops.sin(theta)
 
     pulse_width = num_waveforms / center_frequency  # temporal pulse width
-    wc = 2 * np.pi * center_frequency
+    center_angular_freq = 2 * np.pi * center_frequency
 
     def pulse_spectrum(w):
-        imag = _abs_sinc(pulse_width * (w - wc) / 2) - _abs_sinc(pulse_width * (w + wc) / 2)
+        imag = _abs_sinc(pulse_width * (w - center_angular_freq) / 2) - _abs_sinc(
+            pulse_width * (w + center_angular_freq) / 2
+        )
         return 1j * ops.cast(imag, "complex64")
 
     # FREQUENCY RESPONSE of the ensemble PZT + probe
-    w_bandwidth = bandwidth_percent * wc / 100  # angular frequency bandwidth
-    p_shape = ops.log(126) / ops.log(eps + 2 * wc / w_bandwidth)
+    w_bandwidth = bandwidth_percent * center_angular_freq / 100  # angular frequency bandwidth
+    p_shape = ops.log(126) / ops.log(epsilon + 2 * center_angular_freq / w_bandwidth)
 
     def probe_spectrum(w):
         # Calculate the normalized frequency difference
-        freq_diff = ops.abs(w - wc)
+        freq_diff = ops.abs(w - center_angular_freq)
         # Calculate the denominator for normalization
         denom = (w_bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
         # Raise the normalized difference to the power of p_shape
@@ -194,14 +189,11 @@ def compute_pfield(
         progbar = keras.utils.Progbar(num_transmits, unit_name="transmits")
     for j in range(0, num_transmits):
         # delays and apodization of transmit event
-        delays_tx = ops.convert_to_tensor(t0_delays[j], dtype="float32")
-        idx_nan = ops.isnan(delays_tx)
-        delays_tx = ops.where(idx_nan, 0, delays_tx)
+        delays_tx = t0_delays[j]
+        delays_tx = ops.where(ops.isnan(delays_tx), 0, delays_tx)
 
-        tx_apodization = ops.convert_to_tensor(tx_apodizations[j])
-        idx_nan = ops.isnan(tx_apodization)
-        tx_apodization = ops.where(idx_nan, 0, tx_apodization)
-        tx_apodization = ops.squeeze(tx_apodization)
+        tx_apodization = tx_apodizations[j]
+        tx_apodization = ops.where(ops.isnan(tx_apodization), 0, tx_apodization)
 
         # The frequency response is a pulse-echo (transmit + receive) response.
         # The spectrum of the pulse (pulse_spectrum) will be then multiplied
@@ -213,22 +205,20 @@ def compute_pfield(
         # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
         # Therefore: df < 1/(r/c + delay).
 
-        delays_tx_flat = ops.reshape(delays_tx, (-1,))
-
-        df = 1 / (ops.max(r_flat / sound_speed) + ops.max(delays_tx_flat))
-        df = frequency_step * df
+        freq_step = 1 / (ops.max(distance_flat / sound_speed) + ops.max(delays_tx))
+        freq_step = frequency_step * freq_step
 
         # FREQUENCY SAMPLES
-        num_freq = 2 * ops.cast(ops.ceil(center_frequency / df), "int32") + 1
+        num_freq = 2 * ops.cast(ops.ceil(center_frequency / freq_step), "int32") + 1
         freq = ops.linspace(0, 2 * center_frequency, num_freq)
-        df = freq[1]
+        freq_step = freq[1]
 
         # keep the significant components only by using db_thresh
         spectrum = ops.abs(
             pulse_spectrum(2 * np.pi * freq)
             * ops.cast(probe_spectrum(2 * np.pi * freq), "complex64")
         )
-        gain_db = 20 * ops.log10(eps + spectrum / (ops.max(spectrum)))
+        gain_db = 20 * ops.log10(epsilon + spectrum / (ops.max(spectrum)))
         idx = gain_db > db_thresh
 
         freq = freq[idx]
@@ -237,48 +227,54 @@ def compute_pfield(
         probe_spect = probe_spectrum(2 * np.pi * freq)
 
         # Exponential arrays of size [numel(x) n_el num_sub_elements]
-        kw = 2 * np.pi * freq[0] / sound_speed
-        kwa = alpha_db / 8.69 * freq[0] / 1e6 * 1e2
+        wavenumber = 2 * np.pi * freq[0] / sound_speed
+        attenuation_wavenumber = alpha_db / 8.69 * freq[0] / 1e6 * 1e2
 
-        r_complex = ops.cast(r, dtype="complex64")
-        kwa = ops.cast(kwa, dtype="complex64")
-        mod_out = ops.cast(ops.mod(kw * r, 2 * np.pi), dtype="complex64")
-        exp_arr = ops.exp(-kwa * r_complex + 1j * mod_out)
+        distance_complex = ops.cast(distance, dtype="complex64")
+        attenuation_wavenumber = ops.cast(attenuation_wavenumber, dtype="complex64")
+        mod_out = ops.cast(ops.mod(wavenumber * distance, 2 * np.pi), dtype="complex64")
+        exp_arr = ops.exp(-attenuation_wavenumber * distance_complex + 1j * mod_out)
 
         # Exponential array for the increment wavenumber dk
-        dkw = 2 * np.pi * df / sound_speed
-        dkwa = alpha_db / 8.69 * df / 1e6 * 1e2
-        dkw = ops.cast(dkw, dtype="complex64")
-        dkwa = ops.cast(dkwa, dtype="complex64")
+        wavenumber_step = 2 * np.pi * freq_step / sound_speed
+        attenuation_wavenumber_step = alpha_db / 8.69 * freq_step / 1e6 * 1e2
+        wavenumber_step = ops.cast(wavenumber_step, dtype="complex64")
+        attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
 
-        exp_df = ops.exp((-dkwa + 1j * dkw) * r_complex)
+        exp_freq_step = ops.exp(
+            (-attenuation_wavenumber_step + 1j * wavenumber_step) * distance_complex
+        )
 
-        exp_arr = exp_arr / ops.sqrt(r_complex)
-        exp_arr = exp_arr * ops.cast(ops.min(ops.sqrt(r)), "complex64")  # normalize the field
+        exp_arr = exp_arr / ops.sqrt(distance_complex)
+        exp_arr = exp_arr * ops.cast(
+            ops.min(ops.sqrt(distance)), "complex64"
+        )  # normalize the field
 
         center_wavenumber = 2 * np.pi * center_frequency / sound_speed
         directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
         exp_arr = exp_arr * ops.cast(directivity, "complex64")
 
         # Render pressure field for all relevant frequencies and sum them up
-        rp = _pfield_freq_loop(
+        pressure_squared = _pfield_freq_loop(
             freq,
             delays_tx,
             tx_apodization,
             exp_arr,
-            exp_df,
+            exp_freq_step,
             pulse_spect,
             probe_spect,
-            z,
+            grid_z,
         )
 
         # RMS acoustic pressure
-        p = ops.reshape(ops.sqrt(rp), size_downsampled)
+        pressure = ops.reshape(ops.sqrt(pressure_squared), size_downsampled)
 
-        # resize p to exactly the original grid size
-        p = ops.squeeze(ops.image.resize(p[..., None], size_orig, interpolation="nearest"), axis=-1)
+        # resize pressure to exactly the original grid size
+        pressure = ops.squeeze(
+            ops.image.resize(pressure[..., None], size_orig, interpolation="nearest"), axis=-1
+        )
 
-        p_list.append(p)
+        p_list.append(pressure)
 
         if verbose:
             progbar.add(1)
@@ -289,11 +285,11 @@ def compute_pfield(
     )  # TODO: this is necessary for Jax / TF somehow. not sure why (not for torch)
 
     if norm:
-        p_norm = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
+        normalized_pfield = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
     else:
-        p_norm = p_arr
+        normalized_pfield = p_arr
 
-    return p_norm
+    return normalized_pfield
 
 
 def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
@@ -324,9 +320,9 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
     pfield = ops.power(pfield, alpha)
 
     # Normalize over transmit events (axis=0)
-    p_norm = pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
+    normalized_pfield = pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
-    return p_norm
+    return normalized_pfield
 
 
 def _pfield_freq_step(
@@ -334,7 +330,7 @@ def _pfield_freq_step(
     freq,
     delays_tx,
     tx_apodization,
-    rp_mono,
+    monochromatic_pressure,
     pulse_spect,
     probe_spect,
     z,
@@ -347,20 +343,24 @@ def _pfield_freq_step(
         freq (list): List of frequencies.
         delays_tx (list): List of transmit delays.
         tx_apodization (list): List of transmit apodization values (complex64).
-        rp_mono: (Tensor): Per-element, per-field-point complex pressure response
+        monochromatic_pressure: (Tensor): Per-element, per-field-point complex pressure response
             (including directivity and propagation effects) at the current frequency sample.
         pulse_spect (list): List of pulse spectra.
         probe_spect (list): List of probe spectra (complex64).
         z (list): List of z-coordinates.
 
     Returns:
-        rp_k (Tensor): Pressure field for this frequency.
+        pressure_squared_k (Tensor): Pressure field for this frequency.
     """
     angular_frequency = 2 * np.pi * freq[k]
-    del_apod = ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
-    rp_k = ops.matmul(rp_mono, del_apod) * pulse_spect[k] * probe_spect[k]
-    rp_k = ops.where(z < 0, 0, rp_k)
-    return ops.abs(rp_k) ** 2
+    delay_apodization = (
+        ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
+    )
+    pressure_k = (
+        ops.matmul(monochromatic_pressure, delay_apodization) * pulse_spect[k] * probe_spect[k]
+    )
+    pressure_k = ops.where(z < 0, 0, pressure_k)
+    return ops.abs(pressure_k) ** 2
 
 
 def _pfield_freq_loop(
@@ -368,7 +368,7 @@ def _pfield_freq_loop(
     delays_tx,
     tx_apodization,
     exp_arr,
-    exp_df,
+    exp_freq_step,
     pulse_spect,
     probe_spect,
     z,
@@ -380,7 +380,7 @@ def _pfield_freq_loop(
         delays_tx (list): List of transmit delays.
         tx_apodization (list): List of transmit apodization values.
         exp_arr (list): List of complex exponentials.
-        exp_df (list): List of complex exponential frequency shifts.
+        exp_freq_step (list): List of complex exponential frequency shifts.
         pulse_spect (list): List of pulse spectra.
         probe_spect (list): List of probe spectra.
         z (list): List of z-coordinates.
@@ -391,20 +391,20 @@ def _pfield_freq_loop(
 
     tx_apodization = ops.cast(tx_apodization, "complex64")
     probe_spect = ops.cast(probe_spect, "complex64")
-    rp_mono = exp_arr
-    rp = 0
+    monochromatic_pressure = exp_arr
+    total_pressure_squared = 0
     for k in range(len(freq)):
         if k > 0:
-            rp_mono *= exp_df
-        rp_k = _pfield_freq_step(
+            monochromatic_pressure *= exp_freq_step
+        pressure_squared_k = _pfield_freq_step(
             k,
             freq,
             delays_tx,
             tx_apodization,
-            ops.mean(rp_mono, axis=1),  # avg over sub-elements
+            ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
             pulse_spect,
             probe_spect,
             z,
         )
-        rp += rp_k
-    return rp
+        total_pressure_squared += pressure_squared_k
+    return total_pressure_squared

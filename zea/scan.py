@@ -731,7 +731,8 @@ class Scan(Parameters):
         "pfield_kwargs",
     )
     def pfield(self) -> np.ndarray:
-        """Compute or return the pressure field (pfield) for weighting."""
+        """Compute or return the pressure field (pfield) for weighting
+        of shape (n_tx, grid_size_z, grid_size_x)."""
         assert not self.is_3d, "Pfield computation only supported for 2D scans"
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
