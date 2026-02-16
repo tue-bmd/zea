@@ -74,7 +74,6 @@ def compute_pfield(
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
             Only works when norm is True. Higher is more aggressive. Default is 10.
         norm (bool, optional): per pixel normalization (True) or unnormalized (False)
-        verbose (bool, optional): Whether to print progress.
 
     Returns:
         ops.array: The (normalized) pressure field (across tx events)
@@ -318,13 +317,16 @@ def _pfield_freq_step(
 
     Args:
         freq: (float): Frequency of the current step.
-        delays_tx (list): List of transmit delays.
-        tx_apodization (list): List of transmit apodization values (complex64).
+        delays_tx (Tensor): List of transmit delays of shape (n_el,).
+        tx_apodization (Tensor): List of transmit apodization values (complex64) of shape (n_el,).
         monochromatic_pressure: (Tensor): Per-element, per-field-point complex pressure response
-            (including directivity and propagation effects) at the current frequency sample.
-        pulse_spect
-        probe_spect
-        z (list): List of z-coordinates.
+            (including directivity and propagation effects) at the current frequency sample
+            of shape (num_points, n_el).
+        pulse_spect (complex64): Complex frequency response of the pulse
+            at the current frequency sample.
+        probe_spect (complex64): Complex frequency response of the pulse and probe
+            at the current frequency sample.
+        z (Tensor): Array of z-coordinates of shape (num_points,).
 
     Returns:
         pressure_squared_k (Tensor): Pressure field for this frequency.
@@ -351,14 +353,14 @@ def _pfield_freq_loop(
     """Calculates the pressure field using frequency loop method.
 
     Args:
-        freq (list): List of frequencies.
-        delays_tx (list): List of transmit delays.
-        tx_apodization (list): List of transmit apodization values.
+        freq (Tensor): List of frequencies.
+        delays_tx (list): List of transmit delays of shape (n_el,).
+        tx_apodization (list): List of transmit apodization values of shape (n_el,).
         exp_arr (list): List of complex exponentials.
         exp_freq_step (list): List of complex exponential frequency shifts.
-        pulse_spect (list): List of pulse spectra.
-        probe_spect (list): List of probe spectra.
-        z (list): List of z-coordinates.
+        pulse_spect (Tensor): List of pulse spectra at the frequency samples.
+        probe_spect (Tensor): List of probe spectra at the frequency samples.
+        z (Tensor): Array of z-coordinates of shape (num_points,).
 
     Returns:
         (Tensor): Pressure field.
