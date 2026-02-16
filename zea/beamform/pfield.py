@@ -83,13 +83,17 @@ def compute_pfield(
             of shape (n_tx, grid_size_z, grid_size_x).
     """
     # medium params
-    alpha_db = 0  # currently we ignore attenuation in the compounding
+
+    # NOTE: currently we ignore attenuation in the compounding
+    attenuation_coef = 0  # dB/cm/MHz, attenuation coefficient of the medium
+    attenuation_coef = attenuation_coef / 8.686  # convert to Np/cm/MHz
+    attenuation_coef = attenuation_coef / 1e6 / 1e2  # convert to Np/m/Hz
 
     # cast to float32
     sound_speed = ops.cast(sound_speed, "float32")
     center_frequency = ops.cast(center_frequency, "float32")
     bandwidth_percent = ops.cast(bandwidth_percent, "float32")
-    alpha_db = ops.cast(alpha_db, "float32")
+    attenuation_coef = ops.cast(attenuation_coef, "float32")
     db_thresh = ops.cast(db_thresh, "float32")
 
     # to tensor
@@ -98,6 +102,10 @@ def compute_pfield(
     grid_z = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
     t0_delays = ops.convert_to_tensor(t0_delays, dtype="float32")
     tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="float32")
+
+    # formatting
+    t0_delays = ops.where(ops.isnan(t0_delays), 0, t0_delays)
+    tx_apodizations = ops.where(ops.isnan(tx_apodizations), 0, tx_apodizations)
 
     # probe params
     center_frequency = center_frequency / downmix  # downmixing the frequency
@@ -190,10 +198,7 @@ def compute_pfield(
     for j in range(0, num_transmits):
         # delays and apodization of transmit event
         delays_tx = t0_delays[j]
-        delays_tx = ops.where(ops.isnan(delays_tx), 0, delays_tx)
-
         tx_apodization = tx_apodizations[j]
-        tx_apodization = ops.where(ops.isnan(tx_apodization), 0, tx_apodization)
 
         # The frequency response is a pulse-echo (transmit + receive) response.
         # The spectrum of the pulse (pulse_spectrum) will be then multiplied
@@ -228,7 +233,7 @@ def compute_pfield(
 
         # Exponential arrays of size [numel(x) n_el num_sub_elements]
         wavenumber = 2 * np.pi * freq[0] / sound_speed
-        attenuation_wavenumber = alpha_db / 8.69 * freq[0] / 1e6 * 1e2
+        attenuation_wavenumber = attenuation_coef * freq[0]
 
         distance_complex = ops.cast(distance, dtype="complex64")
         attenuation_wavenumber = ops.cast(attenuation_wavenumber, dtype="complex64")
@@ -237,7 +242,7 @@ def compute_pfield(
 
         # Exponential array for the increment wavenumber dk
         wavenumber_step = 2 * np.pi * freq_step / sound_speed
-        attenuation_wavenumber_step = alpha_db / 8.69 * freq_step / 1e6 * 1e2
+        attenuation_wavenumber_step = attenuation_coef * freq_step
         wavenumber_step = ops.cast(wavenumber_step, dtype="complex64")
         attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
 
