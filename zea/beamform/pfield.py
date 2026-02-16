@@ -159,12 +159,11 @@ def compute_pfield(
     delta_z = grid_z[:, None, None] - sub_element_z[None, :, None] - element_z[None, None, :]
 
     distance = ops.sqrt(delta_x**2 + delta_z**2)
-    distance_flat = ops.reshape(distance, (-1,))
 
     # Angle between the normal to the transducer and the line joining
     # the point and the transducer
     epsilon = keras.config.epsilon()
-    theta = ops.arcsin((delta_x + epsilon) / (distance + epsilon)) - element_theta
+    theta = ops.arcsin(ops.clip(delta_x / distance, -1.0, 1.0)) - element_theta
     sin_theta = ops.sin(theta)
 
     pulse_width = num_waveforms / center_frequency  # temporal pulse width
@@ -210,7 +209,7 @@ def compute_pfield(
         # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
         # Therefore: df < 1/(r/c + delay).
 
-        freq_step = 1 / (ops.max(distance_flat / sound_speed) + ops.max(delays_tx))
+        freq_step = 1 / (ops.max(distance / sound_speed) + ops.max(delays_tx))
         freq_step = frequency_step * freq_step
 
         # FREQUENCY SAMPLES
@@ -285,9 +284,6 @@ def compute_pfield(
             progbar.add(1)
 
     p_arr = ops.convert_to_tensor(p_list)
-    p_arr = ops.where(
-        ops.isnan(p_arr), 0, p_arr
-    )  # TODO: this is necessary for Jax / TF somehow. not sure why (not for torch)
 
     if norm:
         normalized_pfield = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
