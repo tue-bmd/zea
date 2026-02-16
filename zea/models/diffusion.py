@@ -353,6 +353,13 @@ class DiffusionModel(DeepGenerativeModel):
                 noises_i = mixing_coef * noises[i - 1] + noise_i
                 noises.append(noises_i)
             return ops.concatenate(noises, axis=-1)
+        elif self.noise_correlation_across_channels == "identical":
+            batch_size, height, width, n_channels = shape
+            return ops.repeat(
+                keras.random.normal(shape=(batch_size, height, width, 1), seed=seed),
+                n_channels,
+                axis=-1,
+            )
         else:
             raise ValueError(
                 "Invalid noise_correlation_across_channels value: "
