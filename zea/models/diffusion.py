@@ -40,7 +40,8 @@ tf = _import_tf()
 VALID_NETWORK_MODELS = [
     "unet_time_conditional",
     "dense_time_conditional",
-    "unet_temporal_time_conditional",
+    "unet_light_temporal_time_conditional",
+    "unet_fully_temporal_time_conditional",
 ]
 
 
