@@ -56,7 +56,7 @@ def generate_zea_dataset_from_scan_probe(
         azimuth_angles=scan.azimuth_angles,
         tx_apodizations=scan.tx_apodizations,
         bandwidth_percent=scan.bandwidth_percent,
-        time_to_next_transmit=scan.time_to_next_transmit,
+        # time_to_next_transmit=scan.time_to_next_transmit,
         tgc_gain_curve=scan.tgc_gain_curve,
         element_width=scan.element_width,
         tx_waveform_indices=scan.tx_waveform_indices,
