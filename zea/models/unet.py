@@ -223,8 +223,10 @@ def get_time_conditional_unetwork(
 
 
 # ===========================================================================
-# Temporal layers and blocks
+# Temporal layers
 # ===========================================================================
+
+VALID_TEMPORAL_SCOPES = ("none", "bottleneck", "all")
 
 
 @keras.saving.register_keras_serializable()
@@ -275,7 +277,6 @@ class TemporalConv(layers.Layer):
             padding="same",
             groups=groups,
         )
-        self._temporal_conv.build((None, None, None, self.n_frames, c))
         super().build(input_shape)
 
     def call(self, x):
@@ -330,10 +331,6 @@ class TemporalAttention(layers.Layer):
             num_heads=self.num_heads,
             key_dim=key_dim,
         )
-        self._attn.build(
-            query_shape=(None, self.n_frames, c),
-            value_shape=(None, self.n_frames, c),
-        )
         super().build(input_shape)
 
     def call(self, x):
@@ -357,276 +354,61 @@ class TemporalAttention(layers.Layer):
         return config
 
 
-@keras.saving.register_keras_serializable()
-class TemporalResidualBlock(layers.Layer):
-    """A residual block that applies spatial convolutions followed by a
-    lightweight temporal convolution.
-
-    Wraps a standard ``ResidualBlock`` and appends a ``TemporalConv``.
-
-    Args:
-        width: Number of spatial filters.
-        n_frames: Number of temporal frames.
-        temporal_kernel_size: Temporal conv kernel size.
-        depthwise: Use depthwise temporal conv.
-    """
-
-    def __init__(
-        self,
-        width,
-        n_frames,
-        temporal_kernel_size=3,
-        depthwise=False,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.width = width
-        self.n_frames = n_frames
-        self.temporal_kernel_size = temporal_kernel_size
-        self.depthwise = depthwise
-
-        self.spatial_block = ResidualBlock(width)
-        self.temporal_conv = TemporalConv(
-            n_frames=n_frames,
-            temporal_kernel_size=temporal_kernel_size,
-            depthwise=depthwise,
-        )
-
-    def call(self, x):
-        x = self.spatial_block(x)
-        x = x + self.temporal_conv(x)  # residual around temporal conv
-        return x
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "width": self.width,
-                "n_frames": self.n_frames,
-                "temporal_kernel_size": self.temporal_kernel_size,
-                "depthwise": self.depthwise,
-            }
-        )
-        return config
-
-
 # ===========================================================================
-# Temporal UNet model and network builder
+# Temporal UNet — unified model and network builder
 # ===========================================================================
 
 
-@model_registry(name="unet_light_temporal_time_conditional")
-class UNetLightTemporalTimeConditional(BaseModel):
-    """Light temporal UNet with (2+1)D factorized convolutions at the bottleneck
-    and time-conditional sinusoidal embeddings for video diffusion.
-
-    Keeps the encoder and decoder **identical** to :class:`UNetTimeConditional`
-    (standard spatial ``ResidualBlock`` / ``DownBlock`` / ``UpBlock``).  Only
-    the bottleneck is augmented with lightweight temporal convolutions and
-    optional temporal self-attention.  This follows the "95% identical"
-    design principle: temporal inductive bias is injected only where spatial
-    resolution is smallest and the cost is negligible.
-
-    Frames are packed as channels: input shape ``(H, W, T*C)`` where ``T`` is
-    the number of frames and ``C`` is the per-frame channel count (typically 1
-    for grayscale ultrasound).
-
-    Args:
-        image_shape: ``(H, W, T*C)`` — height, width, frames×channels.
-        n_frames: Number of temporal frames ``T``.
-        widths: Filter counts per resolution level.
-        block_depth: Number of residual blocks per down/up stage.
-        image_range: Value range of input images.
-        temporal_kernel_size: Kernel size for temporal convolutions (bottleneck only).
-        temporal_depthwise: Use depthwise temporal convs (cheaper).
-        temporal_attention_bottleneck: Add temporal self-attention at bottleneck.
-        temporal_attention_heads: Number of attention heads.
-        embedding_min_frequency: Min frequency for sinusoidal time embedding.
-        embedding_max_frequency: Max frequency for sinusoidal time embedding.
-        embedding_dims: Dimensionality of time embedding.
-    """
-
-    def __init__(
-        self,
-        image_shape,
-        n_frames,
-        widths,
-        block_depth,
-        image_range,
-        temporal_kernel_size=3,
-        temporal_depthwise=False,
-        temporal_attention_bottleneck=True,
-        temporal_attention_heads=4,
-        embedding_min_frequency=1.0,
-        embedding_max_frequency=1000.0,
-        embedding_dims=32,
-        name="unet_light_temporal_time_conditional",
-        **kwargs,
-    ):
-        super().__init__(name=name, **kwargs)
-        self.image_shape = image_shape
-        self.n_frames = n_frames
-        self.image_range = image_range
-        self.widths = widths
-        self.block_depth = block_depth
-        self.temporal_kernel_size = temporal_kernel_size
-        self.temporal_depthwise = temporal_depthwise
-        self.temporal_attention_bottleneck = temporal_attention_bottleneck
-        self.temporal_attention_heads = temporal_attention_heads
-        self.embedding_min_frequency = embedding_min_frequency
-        self.embedding_max_frequency = embedding_max_frequency
-        self.embedding_dims = embedding_dims
-
-        self.network = get_light_temporal_time_conditional_unetwork(
-            image_shape=self.image_shape,
-            n_frames=self.n_frames,
-            widths=self.widths,
-            block_depth=self.block_depth,
-            temporal_kernel_size=self.temporal_kernel_size,
-            temporal_depthwise=self.temporal_depthwise,
-            temporal_attention_bottleneck=self.temporal_attention_bottleneck,
-            temporal_attention_heads=self.temporal_attention_heads,
-            embedding_min_frequency=self.embedding_min_frequency,
-            embedding_max_frequency=self.embedding_max_frequency,
-            embedding_dims=self.embedding_dims,
-        )
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "image_shape": self.image_shape,
-                "n_frames": self.n_frames,
-                "image_range": self.image_range,
-                "widths": self.widths,
-                "block_depth": self.block_depth,
-                "temporal_kernel_size": self.temporal_kernel_size,
-                "temporal_depthwise": self.temporal_depthwise,
-                "temporal_attention_bottleneck": self.temporal_attention_bottleneck,
-                "temporal_attention_heads": self.temporal_attention_heads,
-                "embedding_min_frequency": self.embedding_min_frequency,
-                "embedding_max_frequency": self.embedding_max_frequency,
-                "embedding_dims": self.embedding_dims,
-            }
-        )
-        return config
-
-    def call(self, *args, **kwargs):
-        return self.network(*args, **kwargs)
+def _temporal_residual_block(x, width, n_frames, temporal_kernel_size, temporal_depthwise):
+    """Apply a spatial ResidualBlock followed by a residual TemporalConv (inline)."""
+    x = ResidualBlock(width)(x)
+    x = x + TemporalConv(
+        n_frames=n_frames,
+        temporal_kernel_size=temporal_kernel_size,
+        depthwise=temporal_depthwise,
+    )(x)
+    return x
 
 
-def get_light_temporal_time_conditional_unetwork(
-    image_shape,
-    n_frames,
-    widths=None,
-    block_depth=None,
-    temporal_kernel_size=3,
-    temporal_depthwise=False,
-    temporal_attention_bottleneck=True,
-    temporal_attention_heads=4,
-    embedding_min_frequency=1.0,
-    embedding_max_frequency=1000.0,
-    embedding_dims=32,
+def _temporal_down(
+    x, skips, width, block_depth, n_frames, temporal_kernel_size, temporal_depthwise
 ):
-    """Build a temporal UNet with time-conditional sinusoidal embeddings.
-
-    The encoder and decoder use standard spatial ``DownBlock`` / ``UpBlock``
-    (identical to :func:`get_time_conditional_unetwork`).  **Only the
-    bottleneck** is augmented with ``(1,1,k)`` temporal Conv3D and optional
-    temporal self-attention.  This keeps the architecture 95% identical to
-    the non-temporal version while injecting temporal inductive bias where
-    it is cheapest (lowest spatial resolution).
-
-    Args:
-        image_shape: ``(H, W, T*C)`` — spatial dims + packed frame channels.
-        n_frames: Number of temporal frames ``T``.
-        widths: Filter counts per resolution level.
-        block_depth: Residual blocks per down/up stage.
-        temporal_kernel_size: Temporal conv kernel size (bottleneck only).
-        temporal_depthwise: Use depthwise temporal convs.
-        temporal_attention_bottleneck: Add temporal attention at bottleneck.
-        temporal_attention_heads: Number of attention heads.
-        embedding_min_frequency: Min freq for sinusoidal embedding.
-        embedding_max_frequency: Max freq for sinusoidal embedding.
-        embedding_dims: Embedding dimensionality (must be even).
-
-    Returns:
-        ``keras.Model`` with inputs ``[noisy_images, noise_variances]``.
-    """
-    assert len(image_shape) == 3, "image_shape must be (height, width, channels)"
-    assert embedding_dims % 2 == 0, "embedding_dims must be even! (sin + cos)"
-
-    if widths is None:
-        log.warning("No widths provided, using default widths [32, 64, 96, 128]")
-        widths = [32, 64, 96, 128]
-    if block_depth is None:
-        block_depth = 2
-
-    image_height, image_width, n_channels = image_shape
-    assert n_channels % n_frames == 0, (
-        f"Total channels ({n_channels}) must be divisible by n_frames ({n_frames}). "
-        f"Expected image_shape = (H, W, T*C) where T={n_frames}."
-    )
-
-    noisy_images = keras.Input(shape=(image_height, image_width, n_channels))
-    noise_variances = keras.Input(shape=(1, 1, 1))
-
-    # ---- Time embedding (identical to non-temporal version) ----
-    @keras.saving.register_keras_serializable()
-    def _sinusoidal_embedding(x):
-        return sinusoidal_embedding(
-            x, embedding_min_frequency, embedding_max_frequency, embedding_dims
-        )
-
-    e = layers.Lambda(_sinusoidal_embedding, output_shape=(1, 1, embedding_dims))(noise_variances)
-    e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(e)
-
-    # ---- Encoder (standard spatial blocks — identical to non-temporal) ----
-    x = layers.Conv2D(widths[0], kernel_size=1)(noisy_images)
-    x = layers.Concatenate()([x, e])
-
-    skips = []
-    for width in widths[:-1]:
-        x = DownBlock(width, block_depth)([x, skips])
-
-    # ---- Bottleneck (temporal modelling injected here only) ----
+    """Temporal encoder stage: temporal residual blocks + average pooling."""
     for _ in range(block_depth):
-        x = ResidualBlock(widths[-1])(x)
-        # Cheap (1,1,k) temporal conv after each spatial residual block
-        x = x + TemporalConv(
-            n_frames=n_frames,
-            temporal_kernel_size=temporal_kernel_size,
-            depthwise=temporal_depthwise,
-        )(x)
-
-    if temporal_attention_bottleneck:
-        x = x + TemporalAttention(
-            n_frames=n_frames,
-            num_heads=temporal_attention_heads,
-        )(x)
-
-    # ---- Decoder (standard spatial blocks — identical to non-temporal) ----
-    for width in reversed(widths[:-1]):
-        x = UpBlock(width, block_depth)([x, skips])
-
-    x = layers.Conv2D(n_channels, kernel_size=1, kernel_initializer="zeros")(x)
-
-    return keras.Model([noisy_images, noise_variances], x, name="temporal_residual_unet")
+        x = _temporal_residual_block(x, width, n_frames, temporal_kernel_size, temporal_depthwise)
+        skips.append(x)
+    x = layers.AveragePooling2D(pool_size=2)(x)
+    return x
 
 
-@model_registry(name="unet_fully_temporal_time_conditional")
-class UNetFullyTemporalTimeConditional(BaseModel):
-    """Fully temporal UNet with (2+1)D factorized convolutions and time-conditional
+def _temporal_up(x, skips, width, block_depth, n_frames, temporal_kernel_size, temporal_depthwise):
+    """Temporal decoder stage: upsample + concat skips + temporal residual blocks."""
+    x = layers.UpSampling2D(size=2, interpolation="bilinear")(x)
+    for _ in range(block_depth):
+        x = layers.Concatenate()([x, skips.pop()])
+        x = _temporal_residual_block(x, width, n_frames, temporal_kernel_size, temporal_depthwise)
+    return x
+
+
+@model_registry(name="unet_temporal_time_conditional")
+class UNetTemporalTimeConditional(BaseModel):
+    """Temporal UNet with (2+1)D factorized convolutions and time-conditional
     sinusoidal embeddings for video diffusion.
 
     Frames are packed as channels: input shape ``(H, W, T*C)`` where ``T`` is
-    the number of frames and ``C`` is the per-frame channel count (typically 1
-    for grayscale ultrasound).
+    the number of frames and ``C`` is the per-frame channel count.
 
-    The architecture mirrors :class:`UNetTimeConditional` but replaces every
-    ``ResidualBlock`` with a ``TemporalResidualBlock`` that appends a cheap
-    ``(1,1,k)`` temporal convolution.  Optionally adds temporal self-attention
-    at the bottleneck for global motion coherence.
+    The ``temporal_scope`` parameter controls where temporal convolutions are
+    injected:
+
+    - ``"bottleneck"``: Only the bottleneck uses temporal convolutions and
+      optional temporal self-attention.  Encoder and decoder use standard
+      spatial ``DownBlock`` / ``UpBlock``.  Cheapest option.
+    - ``"all"``: Every residual block throughout the encoder, bottleneck, and
+      decoder is augmented with a temporal convolution.  Maximum temporal
+      modelling capacity.
+    - ``"none"``: No temporal convolutions at all (equivalent to a standard
+      time-conditional UNet operating on packed channels).
 
     Args:
         image_shape: ``(H, W, T*C)`` — height, width, frames×channels.
@@ -634,6 +416,8 @@ class UNetFullyTemporalTimeConditional(BaseModel):
         widths: Filter counts per resolution level.
         block_depth: Number of residual blocks per down/up stage.
         image_range: Value range of input images.
+        temporal_scope: Where to inject temporal convolutions.
+            One of ``"bottleneck"``, ``"all"``, or ``"none"``.
         temporal_kernel_size: Kernel size for temporal convolutions.
         temporal_depthwise: Use depthwise temporal convs (cheaper).
         temporal_attention_bottleneck: Add temporal self-attention at bottleneck.
@@ -650,6 +434,7 @@ class UNetFullyTemporalTimeConditional(BaseModel):
         widths,
         block_depth,
         image_range,
+        temporal_scope="bottleneck",
         temporal_kernel_size=3,
         temporal_depthwise=False,
         temporal_attention_bottleneck=True,
@@ -661,11 +446,16 @@ class UNetFullyTemporalTimeConditional(BaseModel):
         **kwargs,
     ):
         super().__init__(name=name, **kwargs)
+        assert temporal_scope in VALID_TEMPORAL_SCOPES, (
+            f"temporal_scope must be one of {VALID_TEMPORAL_SCOPES}, got '{temporal_scope}'"
+        )
+
         self.image_shape = image_shape
         self.n_frames = n_frames
         self.image_range = image_range
         self.widths = widths
         self.block_depth = block_depth
+        self.temporal_scope = temporal_scope
         self.temporal_kernel_size = temporal_kernel_size
         self.temporal_depthwise = temporal_depthwise
         self.temporal_attention_bottleneck = temporal_attention_bottleneck
@@ -674,11 +464,12 @@ class UNetFullyTemporalTimeConditional(BaseModel):
         self.embedding_max_frequency = embedding_max_frequency
         self.embedding_dims = embedding_dims
 
-        self.network = get_fully_temporal_time_conditional_unetwork(
+        self.network = get_temporal_time_conditional_unetwork(
             image_shape=self.image_shape,
             n_frames=self.n_frames,
             widths=self.widths,
             block_depth=self.block_depth,
+            temporal_scope=self.temporal_scope,
             temporal_kernel_size=self.temporal_kernel_size,
             temporal_depthwise=self.temporal_depthwise,
             temporal_attention_bottleneck=self.temporal_attention_bottleneck,
@@ -697,6 +488,7 @@ class UNetFullyTemporalTimeConditional(BaseModel):
                 "image_range": self.image_range,
                 "widths": self.widths,
                 "block_depth": self.block_depth,
+                "temporal_scope": self.temporal_scope,
                 "temporal_kernel_size": self.temporal_kernel_size,
                 "temporal_depthwise": self.temporal_depthwise,
                 "temporal_attention_bottleneck": self.temporal_attention_bottleneck,
@@ -708,15 +500,19 @@ class UNetFullyTemporalTimeConditional(BaseModel):
         )
         return config
 
+    def summary(self):
+        return self.network.summary()
+
     def call(self, *args, **kwargs):
         return self.network(*args, **kwargs)
 
 
-def get_fully_temporal_time_conditional_unetwork(
+def get_temporal_time_conditional_unetwork(
     image_shape,
     n_frames,
     widths=None,
     block_depth=None,
+    temporal_scope="bottleneck",
     temporal_kernel_size=3,
     temporal_depthwise=False,
     temporal_attention_bottleneck=True,
@@ -725,18 +521,30 @@ def get_fully_temporal_time_conditional_unetwork(
     embedding_max_frequency=1000.0,
     embedding_dims=32,
 ):
-    """Build a (2+1)D temporal UNet with time-conditional sinusoidal embeddings.
+    """Build a temporal UNet with time-conditional sinusoidal embeddings.
 
-    The input is ``(B, H, W, T*C)`` with ``T`` grayscale frames packed as
-    channels.  Every residual block performs spatial Conv2D followed by a
-    lightweight ``(1,1,k)`` temporal Conv3D.  Optionally temporal
-    self-attention is added at the bottleneck.
+    The ``temporal_scope`` parameter determines where ``(1,1,k)`` temporal
+    Conv3D layers are injected:
+
+    - ``"bottleneck"``: encoder/decoder are standard spatial blocks; only the
+      bottleneck has temporal convolutions (+ optional temporal attention).
+    - ``"all"``: every residual block is followed by a temporal convolution;
+      encoder/decoder use temporal down/up blocks.
+    - ``"none"``: purely spatial — equivalent to :func:`get_time_conditional_unetwork`
+      but with the ``Add``-based embedding combination (safe for packed-channel
+      inputs whose widths must be divisible by ``n_frames``).
+
+    When ``temporal_scope`` is ``"all"``, every width in ``widths`` must be
+    divisible by ``n_frames`` (required by :class:`TemporalConv`).  When
+    ``temporal_scope`` is ``"bottleneck"``, only ``widths[-1]`` must satisfy
+    this constraint.
 
     Args:
         image_shape: ``(H, W, T*C)`` — spatial dims + packed frame channels.
         n_frames: Number of temporal frames ``T``.
         widths: Filter counts per resolution level.
         block_depth: Residual blocks per down/up stage.
+        temporal_scope: One of ``"bottleneck"``, ``"all"``, ``"none"``.
         temporal_kernel_size: Temporal conv kernel size.
         temporal_depthwise: Use depthwise temporal convs.
         temporal_attention_bottleneck: Add temporal attention at bottleneck.
@@ -750,6 +558,9 @@ def get_fully_temporal_time_conditional_unetwork(
     """
     assert len(image_shape) == 3, "image_shape must be (height, width, channels)"
     assert embedding_dims % 2 == 0, "embedding_dims must be even! (sin + cos)"
+    assert temporal_scope in VALID_TEMPORAL_SCOPES, (
+        f"temporal_scope must be one of {VALID_TEMPORAL_SCOPES}, got '{temporal_scope}'"
+    )
 
     if widths is None:
         log.warning("No widths provided, using default widths [32, 64, 96, 128]")
@@ -763,10 +574,26 @@ def get_fully_temporal_time_conditional_unetwork(
         f"Expected image_shape = (H, W, T*C) where T={n_frames}."
     )
 
+    # Validate temporal divisibility constraints
+    if temporal_scope == "all":
+        for w in widths:
+            assert w % n_frames == 0, (
+                f"temporal_scope='all' requires every width to be divisible by "
+                f"n_frames ({n_frames}), but got width={w}."
+            )
+    elif temporal_scope == "bottleneck":
+        assert widths[-1] % n_frames == 0, (
+            f"temporal_scope='bottleneck' requires widths[-1] to be divisible by "
+            f"n_frames ({n_frames}), but got widths[-1]={widths[-1]}."
+        )
+
+    use_temporal_enc_dec = temporal_scope == "all"
+    use_temporal_bottleneck = temporal_scope in ("bottleneck", "all")
+
     noisy_images = keras.Input(shape=(image_height, image_width, n_channels))
     noise_variances = keras.Input(shape=(1, 1, 1))
 
-    # ---- Time embedding (identical to non-temporal version) ----
+    # ---- Time embedding ----
     @keras.saving.register_keras_serializable()
     def _sinusoidal_embedding(x):
         return sinusoidal_embedding(
@@ -776,48 +603,44 @@ def get_fully_temporal_time_conditional_unetwork(
     e = layers.Lambda(_sinusoidal_embedding, output_shape=(1, 1, embedding_dims))(noise_variances)
     e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(e)
 
-    # ---- Encoder ----
     x = layers.Conv2D(widths[0], kernel_size=1)(noisy_images)
     x = layers.Concatenate()([x, e])
+    # e_proj = layers.Conv2D(widths[0], kernel_size=1, padding="same")(e)
+    # x = layers.Add()([x, e_proj])
 
+    # ---- Encoder ----
     skips = []
+    temporal_kwargs = dict(
+        n_frames=n_frames,
+        temporal_kernel_size=temporal_kernel_size,
+        temporal_depthwise=temporal_depthwise,
+    )
+
     for width in widths[:-1]:
-        for _ in range(block_depth):
-            x = TemporalResidualBlock(
-                width,
-                n_frames=n_frames,
-                temporal_kernel_size=temporal_kernel_size,
-                depthwise=temporal_depthwise,
-            )(x)
-            skips.append(x)
-        x = layers.AveragePooling2D(pool_size=2)(x)
+        if use_temporal_enc_dec:
+            x = _temporal_down(x, skips, width, block_depth, **temporal_kwargs)
+        else:
+            x, skips = DownBlock(width, block_depth)([x, skips])
 
     # ---- Bottleneck ----
     for _ in range(block_depth):
-        x = TemporalResidualBlock(
-            widths[-1],
-            n_frames=n_frames,
-            temporal_kernel_size=temporal_kernel_size,
-            depthwise=temporal_depthwise,
-        )(x)
+        if use_temporal_bottleneck:
+            x = _temporal_residual_block(x, widths[-1], **temporal_kwargs)
+        else:
+            x = ResidualBlock(widths[-1])(x)
 
-    if temporal_attention_bottleneck:
+    if use_temporal_bottleneck and temporal_attention_bottleneck:
         x = x + TemporalAttention(
             n_frames=n_frames,
             num_heads=temporal_attention_heads,
         )(x)
 
-    # ---- Decoder (inline upsample + concat skips + temporal residual blocks) ----
+    # ---- Decoder ----
     for width in reversed(widths[:-1]):
-        x = layers.UpSampling2D(size=2, interpolation="bilinear")(x)
-        for _ in range(block_depth):
-            x = layers.Concatenate()([x, skips.pop()])
-            x = TemporalResidualBlock(
-                width,
-                n_frames=n_frames,
-                temporal_kernel_size=temporal_kernel_size,
-                depthwise=temporal_depthwise,
-            )(x)
+        if use_temporal_enc_dec:
+            x = _temporal_up(x, skips, width, block_depth, **temporal_kwargs)
+        else:
+            x, skips = UpBlock(width, block_depth)([x, skips])
 
     x = layers.Conv2D(n_channels, kernel_size=1, kernel_initializer="zeros")(x)
 
@@ -826,5 +649,4 @@ def get_fully_temporal_time_conditional_unetwork(
 
 register_presets(unet_presets, UNet)
 register_presets(unet_presets, UNetTimeConditional)
-register_presets(unet_presets, UNetLightTemporalTimeConditional)
-register_presets(unet_presets, UNetFullyTemporalTimeConditional)
+register_presets(unet_presets, UNetTemporalTimeConditional)

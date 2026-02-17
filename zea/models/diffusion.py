@@ -40,8 +40,7 @@ tf = _import_tf()
 VALID_NETWORK_MODELS = [
     "unet_time_conditional",
     "dense_time_conditional",
-    "unet_light_temporal_time_conditional",
-    "unet_fully_temporal_time_conditional",
+    "unet_temporal_time_conditional",
 ]
 
 
@@ -151,6 +150,9 @@ class DiffusionModel(DeepGenerativeModel):
             }
         )
         return config
+
+    def summary(self):
+        return self.network.summary()
 
     def _init_operator_and_guidance(self, operator, guidance):
         if operator is not None:
