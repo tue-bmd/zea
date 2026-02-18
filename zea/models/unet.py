@@ -322,7 +322,11 @@ class TemporalAttention(layers.Layer):
         # Reshape (B, H, W, T) -> (B, H*W, T)
         # Each spatial position is treated as an independent sequence of T timesteps
         x = keras.ops.reshape(x, (b, h * w, t))
+        # Transpose so that the time axis is the sequence dimension for attention
+        x = keras.ops.transpose(x, axes=(0, 2, 1))
         x = self._attn(x, x)
+        # Un-transpose back to (B, H*W, T)
+        x = keras.ops.transpose(x, axes=(0, 2, 1))
         # Reshape back (B, H*W, T) -> (B, H, W, T)
         return keras.ops.reshape(x, (b, h, w, t))
 
