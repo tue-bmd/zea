@@ -233,70 +233,53 @@ VALID_TEMPORAL_SCOPES = ("none", "bottleneck", "all")
 class TemporalConv(layers.Layer):
     """Lightweight temporal convolution operating on frames packed as channels.
 
-    Expects input of shape ``(B, H, W, T*C)`` where ``T`` frames of ``C``
-    channels are interleaved along the last axis.  Internally reshapes to
-    5-D ``(B, H, W, T, C)``, applies a ``(1, 1, k)`` Conv3D, and reshapes
-    back.
+    For grayscale video data, the input shape is ``(B, H, W, T)`` where ``T``
+    is the number of frames. Internally reshapes to 5-D ``(B, H, W, T, 1)``,
+    applies a ``(1, 1, k)`` Conv3D, and reshapes back. Output shape matches
+    input (shape-preserving).
 
     Args:
-        n_frames: Number of temporal frames ``T``.
-        filters: Number of output filters (per frame).  If ``None``, keeps
-            the same number as input channels per frame.
+        n_frames: Number of temporal frames ``T`` (equals the channel dimension).
         temporal_kernel_size: Kernel size along the temporal axis.
-        depthwise: If ``True``, use grouped (depthwise) convolution along
-            the temporal axis for minimal parameter cost.
+        depthwise: If ``True``, use depthwise convolution (minimal params).
     """
 
     def __init__(
         self,
-        n_frames,
-        filters=None,
         temporal_kernel_size=3,
-        depthwise=False,
+        depthwise=True,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.n_frames = n_frames
-        self.filters = filters
         self.temporal_kernel_size = temporal_kernel_size
         self.depthwise = depthwise
         self._temporal_conv = None
 
     def build(self, input_shape):
-        total_channels = input_shape[-1]
-        assert total_channels % self.n_frames == 0, (
-            f"Last dim ({total_channels}) must be divisible by n_frames ({self.n_frames})"
-        )
-        c = total_channels // self.n_frames
-        out_filters = self.filters if self.filters is not None else c
-
-        groups = out_filters if self.depthwise else 1
+        # Since C=1, filters=1 and groups=1 (depthwise with 1 channel is just regular conv)
         self._temporal_conv = layers.Conv3D(
-            filters=out_filters,
+            filters=1,
             kernel_size=(1, 1, self.temporal_kernel_size),
             padding="same",
-            groups=groups,
         )
         super().build(input_shape)
 
     def call(self, x):
         shape = keras.ops.shape(x)
-        b, h, w = shape[0], shape[1], shape[2]
-        c = shape[3] // self.n_frames
+        b, h, w, t = shape[0], shape[1], shape[2], shape[3]
 
-        x = keras.ops.reshape(x, (b, h, w, self.n_frames, c))
+        # Reshape (B, H, W, T) -> (B, H, W, T, 1)
+        x = keras.ops.reshape(x, (b, h, w, t, 1))
         x = self._temporal_conv(x)
-        out_c = keras.ops.shape(x)[-1]
-        return keras.ops.reshape(x, (b, h, w, self.n_frames * out_c))
+        # Reshape back (B, H, W, T, 1) -> (B, H, W, T)
+        return keras.ops.reshape(x, (b, h, w, t))
 
     def get_config(self):
         config = super().get_config()
         config.update(
             {
-                "n_frames": self.n_frames,
-                "filters": self.filters,
                 "temporal_kernel_size": self.temporal_kernel_size,
-                "depthwise": self.depthwise,
+                "depthwise": self.depthwise,  # kept for compatibility but unused
             }
         )
         return config
@@ -306,27 +289,27 @@ class TemporalConv(layers.Layer):
 class TemporalAttention(layers.Layer):
     """Lightweight self-attention over the temporal axis.
 
-    Expects ``(B, H, W, T*C)``; reshapes to ``(B*H*W, T, C)``, applies
-    multi-head attention, and reshapes back.  Designed to be used only at
+    For grayscale video data, expects ``(B, H, W, T)`` where ``T`` is the
+    number of frames. Reshapes to ``(B, H*W, T)`` (treating each spatial
+    position as an independent sequence), applies multi-head attention over
+    the temporal dimension, and reshapes back. Designed to be used only at
     the bottleneck where spatial resolution is small.
 
     Args:
-        n_frames: Number of temporal frames.
         num_heads: Number of attention heads.
-        key_dim: Dimension of each attention head.
+        key_dim: Dimension of each attention head (defaults to T // num_heads).
     """
 
-    def __init__(self, n_frames, num_heads=4, key_dim=None, **kwargs):
+    def __init__(self, num_heads=4, key_dim=None, **kwargs):
         super().__init__(**kwargs)
-        self.n_frames = n_frames
         self.num_heads = num_heads
         self.key_dim = key_dim
         self._attn = None
 
     def build(self, input_shape):
-        total_channels = input_shape[-1]
-        c = total_channels // self.n_frames
-        key_dim = self.key_dim or max(c // self.num_heads, 1)
+        # For grayscale: channels dimension IS the temporal dimension
+        t = input_shape[-1]
+        key_dim = self.key_dim or max(t // self.num_heads, 1)
         self._attn = layers.MultiHeadAttention(
             num_heads=self.num_heads,
             key_dim=key_dim,
@@ -335,18 +318,19 @@ class TemporalAttention(layers.Layer):
 
     def call(self, x):
         shape = keras.ops.shape(x)
-        b, h, w = shape[0], shape[1], shape[2]
-        c = shape[3] // self.n_frames
+        b, h, w, t = shape[0], shape[1], shape[2], shape[3]
 
-        x = keras.ops.reshape(x, (b * h * w, self.n_frames, c))
+        # Reshape (B, H, W, T) -> (B, H*W, T)
+        # Each spatial position is treated as an independent sequence of T timesteps
+        x = keras.ops.reshape(x, (b, h * w, t))
         x = self._attn(x, x)
-        return keras.ops.reshape(x, (b, h, w, self.n_frames * c))
+        # Reshape back (B, H*W, T) -> (B, H, W, T)
+        return keras.ops.reshape(x, (b, h, w, t))
 
     def get_config(self):
         config = super().get_config()
         config.update(
             {
-                "n_frames": self.n_frames,
                 "num_heads": self.num_heads,
                 "key_dim": self.key_dim,
             }
@@ -430,7 +414,6 @@ class UNetTemporalTimeConditional(BaseModel):
     def __init__(
         self,
         image_shape,
-        n_frames,
         widths,
         block_depth,
         image_range,
@@ -442,6 +425,7 @@ class UNetTemporalTimeConditional(BaseModel):
         embedding_min_frequency=1.0,
         embedding_max_frequency=1000.0,
         embedding_dims=32,
+        embedding_conditioning="add",  # | "concat"
         name="unet_temporal_time_conditional",
         **kwargs,
     ):
@@ -451,7 +435,6 @@ class UNetTemporalTimeConditional(BaseModel):
         )
 
         self.image_shape = image_shape
-        self.n_frames = n_frames
         self.image_range = image_range
         self.widths = widths
         self.block_depth = block_depth
@@ -463,10 +446,10 @@ class UNetTemporalTimeConditional(BaseModel):
         self.embedding_min_frequency = embedding_min_frequency
         self.embedding_max_frequency = embedding_max_frequency
         self.embedding_dims = embedding_dims
+        self.embedding_conditioning = embedding_conditioning
 
         self.network = get_temporal_time_conditional_unetwork(
             image_shape=self.image_shape,
-            n_frames=self.n_frames,
             widths=self.widths,
             block_depth=self.block_depth,
             temporal_scope=self.temporal_scope,
@@ -477,6 +460,7 @@ class UNetTemporalTimeConditional(BaseModel):
             embedding_min_frequency=self.embedding_min_frequency,
             embedding_max_frequency=self.embedding_max_frequency,
             embedding_dims=self.embedding_dims,
+            embedding_conditioning=self.embedding_conditioning,
         )
 
     def get_config(self):
@@ -507,46 +491,48 @@ class UNetTemporalTimeConditional(BaseModel):
         return self.network(*args, **kwargs)
 
 
+def _maybe_temporal_conv(x, temporal_conv_kwargs):
+    """Optionally apply a residual TemporalConv. Returns x unchanged if None."""
+    if temporal_conv_kwargs is None:
+        return x
+    return x + TemporalConv(**temporal_conv_kwargs)(x)
+
+
 def get_temporal_time_conditional_unetwork(
     image_shape,
-    n_frames,
     widths=None,
     block_depth=None,
     temporal_scope="bottleneck",
     temporal_kernel_size=3,
-    temporal_depthwise=False,
+    temporal_depthwise=True,
     temporal_attention_bottleneck=True,
     temporal_attention_heads=4,
     embedding_min_frequency=1.0,
     embedding_max_frequency=1000.0,
     embedding_dims=32,
+    embedding_conditioning="add",  # | "concat"
 ):
     """Build a temporal UNet with time-conditional sinusoidal embeddings.
 
-    The ``temporal_scope`` parameter determines where ``(1,1,k)`` temporal
-    Conv3D layers are injected:
+    Uses standard 2D ``DownBlock`` / ``UpBlock`` / ``ResidualBlock`` throughout.
+    Temporal mixing is introduced by optionally appending a shape-preserving
+    depthwise ``(1, 1, k)`` Conv3D (as a residual addition) after each block.
 
-    - ``"bottleneck"``: encoder/decoder are standard spatial blocks; only the
-      bottleneck has temporal convolutions (+ optional temporal attention).
-    - ``"all"``: every residual block is followed by a temporal convolution;
-      encoder/decoder use temporal down/up blocks.
-    - ``"none"``: purely spatial — equivalent to :func:`get_time_conditional_unetwork`
-      but with the ``Add``-based embedding combination (safe for packed-channel
-      inputs whose widths must be divisible by ``n_frames``).
+    The ``temporal_scope`` parameter determines where these are inserted:
 
-    When ``temporal_scope`` is ``"all"``, every width in ``widths`` must be
-    divisible by ``n_frames`` (required by :class:`TemporalConv`).  When
-    ``temporal_scope`` is ``"bottleneck"``, only ``widths[-1]`` must satisfy
-    this constraint.
+    - ``"none"``: Purely spatial — no temporal convolutions.
+    - ``"bottleneck"``: Temporal convs only after bottleneck residual blocks
+      (+ optional temporal self-attention).
+    - ``"all"``: Temporal convs after every residual block in encoder,
+      bottleneck, and decoder.
 
     Args:
         image_shape: ``(H, W, T*C)`` — spatial dims + packed frame channels.
-        n_frames: Number of temporal frames ``T``.
         widths: Filter counts per resolution level.
         block_depth: Residual blocks per down/up stage.
-        temporal_scope: One of ``"bottleneck"``, ``"all"``, ``"none"``.
+        temporal_scope: One of ``"none"``, ``"bottleneck"``, ``"all"``.
         temporal_kernel_size: Temporal conv kernel size.
-        temporal_depthwise: Use depthwise temporal convs.
+        temporal_depthwise: Use depthwise temporal convs (default ``True``).
         temporal_attention_bottleneck: Add temporal attention at bottleneck.
         temporal_attention_heads: Number of attention heads.
         embedding_min_frequency: Min freq for sinusoidal embedding.
@@ -569,26 +555,13 @@ def get_temporal_time_conditional_unetwork(
         block_depth = 2
 
     image_height, image_width, n_channels = image_shape
-    assert n_channels % n_frames == 0, (
-        f"Total channels ({n_channels}) must be divisible by n_frames ({n_frames}). "
-        f"Expected image_shape = (H, W, T*C) where T={n_frames}."
+    # Build temporal conv kwargs (or None when not needed)
+    _tc_kwargs = dict(
+        temporal_kernel_size=temporal_kernel_size,
+        depthwise=temporal_depthwise,
     )
-
-    # Validate temporal divisibility constraints
-    if temporal_scope == "all":
-        for w in widths:
-            assert w % n_frames == 0, (
-                f"temporal_scope='all' requires every width to be divisible by "
-                f"n_frames ({n_frames}), but got width={w}."
-            )
-    elif temporal_scope == "bottleneck":
-        assert widths[-1] % n_frames == 0, (
-            f"temporal_scope='bottleneck' requires widths[-1] to be divisible by "
-            f"n_frames ({n_frames}), but got widths[-1]={widths[-1]}."
-        )
-
-    use_temporal_enc_dec = temporal_scope == "all"
-    use_temporal_bottleneck = temporal_scope in ("bottleneck", "all")
+    enc_dec_tc = _tc_kwargs if temporal_scope == "all" else None
+    bottleneck_tc = _tc_kwargs if temporal_scope in ("bottleneck", "all") else None
 
     noisy_images = keras.Input(shape=(image_height, image_width, n_channels))
     noise_variances = keras.Input(shape=(1, 1, 1))
@@ -601,46 +574,39 @@ def get_temporal_time_conditional_unetwork(
         )
 
     e = layers.Lambda(_sinusoidal_embedding, output_shape=(1, 1, embedding_dims))(noise_variances)
-    e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(e)
-
     x = layers.Conv2D(widths[0], kernel_size=1)(noisy_images)
-    x = layers.Concatenate()([x, e])
-    # e_proj = layers.Conv2D(widths[0], kernel_size=1, padding="same")(e)
-    # x = layers.Add()([x, e_proj])
+
+    if embedding_conditioning == "concat":
+        e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(e)
+        x = layers.Concatenate()([x, e])
+    elif embedding_conditioning == "add":
+        e_proj = layers.Conv2D(widths[0], kernel_size=1, padding="same")(e)
+        x = layers.Add()([x, e_proj])
+    else:
+        raise ValueError(
+            f"Invalid embedding_conditioning '{embedding_conditioning}', expected 'add' or 'concat'"
+        )
 
     # ---- Encoder ----
     skips = []
-    temporal_kwargs = dict(
-        n_frames=n_frames,
-        temporal_kernel_size=temporal_kernel_size,
-        temporal_depthwise=temporal_depthwise,
-    )
-
     for width in widths[:-1]:
-        if use_temporal_enc_dec:
-            x = _temporal_down(x, skips, width, block_depth, **temporal_kwargs)
-        else:
-            x, skips = DownBlock(width, block_depth)([x, skips])
+        x, skips = DownBlock(width, block_depth)([x, skips])
+        x = _maybe_temporal_conv(x, enc_dec_tc)
 
     # ---- Bottleneck ----
     for _ in range(block_depth):
-        if use_temporal_bottleneck:
-            x = _temporal_residual_block(x, widths[-1], **temporal_kwargs)
-        else:
-            x = ResidualBlock(widths[-1])(x)
+        x = ResidualBlock(widths[-1])(x)
+        x = _maybe_temporal_conv(x, bottleneck_tc)
 
-    if use_temporal_bottleneck and temporal_attention_bottleneck:
+    if bottleneck_tc is not None and temporal_attention_bottleneck:
         x = x + TemporalAttention(
-            n_frames=n_frames,
             num_heads=temporal_attention_heads,
         )(x)
 
     # ---- Decoder ----
     for width in reversed(widths[:-1]):
-        if use_temporal_enc_dec:
-            x = _temporal_up(x, skips, width, block_depth, **temporal_kwargs)
-        else:
-            x, skips = UpBlock(width, block_depth)([x, skips])
+        x, skips = UpBlock(width, block_depth)([x, skips])
+        x = _maybe_temporal_conv(x, enc_dec_tc)
 
     x = layers.Conv2D(n_channels, kernel_size=1, kernel_initializer="zeros")(x)
 
