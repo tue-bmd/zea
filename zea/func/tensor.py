@@ -1627,7 +1627,69 @@ def correlate(x, y, mode="full"):
         return ops.real(complex_tensor)
 
 
-def find_contour(binary_mask):
+def _sort_contour(contour_unordered):
+    """Sort contour points by adjacency."""
+
+    def search_neighbours(cur_point, unused_points, r):
+        neighbours = []
+        for x in range(cur_point[0] - r, cur_point[0] + r + 1):
+            for y in range(cur_point[1] - r, cur_point[1] + r + 1):
+                if (x, y) in unused_points:
+                    neighbours.append((x, y))
+        neighbours = sorted(
+            neighbours, key=lambda p: (p[0] - cur_point[0]) ** 2 + (p[1] - cur_point[1]) ** 2
+        )
+        return neighbours
+
+    contour = []
+    contour_points = [tuple(pt.astype(int)) for pt in ops.convert_to_numpy(contour_unordered)]
+    unused_points = set(contour_points)
+    current_index = 0
+    current_point = contour_points[current_index]
+    while current_point in unused_points:
+        contour.append(current_point)
+        current_index += 1
+        unused_points.remove(current_point)
+        if len(unused_points) == 0:
+            break
+
+        unused_neighbours = []
+        for backtracknum in range(5):
+            current_point = contour[-(1 + backtracknum)]
+            radius = 1
+            while len(unused_neighbours) == 0 and radius < 3:
+                unused_neighbours = search_neighbours(current_point, unused_points, r=radius)
+                radius += 1
+            if len(unused_neighbours) > 0:
+                break
+
+        if len(unused_neighbours) > 0:
+            current_point = unused_neighbours[0]
+        else:
+            break
+
+    def insert_points(contour, unused_points, distance):
+        for upt in unused_points.copy():
+            for i in range(len(contour)):
+                if (
+                    abs(contour[i][0] - upt[0]) <= distance
+                    and abs(contour[i][1] - upt[1]) <= distance
+                ):
+                    contour.insert(i + 1, upt)
+                    unused_points.remove(upt)
+                    break
+        return contour, unused_points
+
+    insert_distance = 1
+    while len(unused_points) > 0 and insert_distance <= 5:
+        contour, unused_points = insert_points(contour, unused_points, distance=insert_distance)
+        insert_distance += 1
+
+    contour = ops.array(contour)
+    return contour
+
+
+def find_contour(binary_mask, adjacent_sort=False):
     """Extract contour/boundary points from a binary mask using edge detection.
 
     This function finds the boundary pixels of objects in a binary mask by detecting
@@ -1635,6 +1697,7 @@ def find_contour(binary_mask):
 
     Args:
         binary_mask: Binary mask tensor of shape (H, W) with values 0 or 1.
+        adjacent_sort (bool, optional): If True, tries to sort the boundary points by adjacency.
 
     Returns:
         Boundary points as tensor of shape (N, 2) in (row, col) format.
