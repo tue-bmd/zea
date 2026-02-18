@@ -239,7 +239,6 @@ class TemporalConv(layers.Layer):
     input (shape-preserving).
 
     Args:
-        n_frames: Number of temporal frames ``T`` (equals the channel dimension).
         temporal_kernel_size: Kernel size along the temporal axis.
         depthwise: If ``True``, use depthwise convolution (minimal params).
     """
@@ -343,37 +342,6 @@ class TemporalAttention(layers.Layer):
 # ===========================================================================
 
 
-def _temporal_residual_block(x, width, n_frames, temporal_kernel_size, temporal_depthwise):
-    """Apply a spatial ResidualBlock followed by a residual TemporalConv (inline)."""
-    x = ResidualBlock(width)(x)
-    x = x + TemporalConv(
-        n_frames=n_frames,
-        temporal_kernel_size=temporal_kernel_size,
-        depthwise=temporal_depthwise,
-    )(x)
-    return x
-
-
-def _temporal_down(
-    x, skips, width, block_depth, n_frames, temporal_kernel_size, temporal_depthwise
-):
-    """Temporal encoder stage: temporal residual blocks + average pooling."""
-    for _ in range(block_depth):
-        x = _temporal_residual_block(x, width, n_frames, temporal_kernel_size, temporal_depthwise)
-        skips.append(x)
-    x = layers.AveragePooling2D(pool_size=2)(x)
-    return x
-
-
-def _temporal_up(x, skips, width, block_depth, n_frames, temporal_kernel_size, temporal_depthwise):
-    """Temporal decoder stage: upsample + concat skips + temporal residual blocks."""
-    x = layers.UpSampling2D(size=2, interpolation="bilinear")(x)
-    for _ in range(block_depth):
-        x = layers.Concatenate()([x, skips.pop()])
-        x = _temporal_residual_block(x, width, n_frames, temporal_kernel_size, temporal_depthwise)
-    return x
-
-
 @model_registry(name="unet_temporal_time_conditional")
 class UNetTemporalTimeConditional(BaseModel):
     """Temporal UNet with (2+1)D factorized convolutions and time-conditional
@@ -396,7 +364,6 @@ class UNetTemporalTimeConditional(BaseModel):
 
     Args:
         image_shape: ``(H, W, T*C)`` — height, width, frames×channels.
-        n_frames: Number of temporal frames ``T``.
         widths: Filter counts per resolution level.
         block_depth: Number of residual blocks per down/up stage.
         image_range: Value range of input images.
@@ -468,7 +435,6 @@ class UNetTemporalTimeConditional(BaseModel):
         config.update(
             {
                 "image_shape": self.image_shape,
-                "n_frames": self.n_frames,
                 "image_range": self.image_range,
                 "widths": self.widths,
                 "block_depth": self.block_depth,
