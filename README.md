@@ -22,6 +22,7 @@ Welcome to the `zea` package: *A Toolbox for Cognitive Ultrasound Imaging.*
 - A flexible ultrasound signal processing and image reconstruction [Pipeline](https://zea.readthedocs.io/en/latest/pipeline.html) written in your favorite deep learning framework.
 - A complete set of [Data](https://zea.readthedocs.io/en/latest/data-acquisition.html) loading tools for ultrasound data and acquisition parameters, designed for deep learning workflows.
 - A collection of pretrained [Models](https://zea.readthedocs.io/en/latest/models.html) for ultrasound image and signal processing.
+- A set of action selection functions for cognitive ultrasound in the [Agent](https://zea.readthedocs.io/en/latest/agent.html) module.
 - **Multi-Backend Support via [Keras3](https://keras.io/keras_3/):** You can use [PyTorch](https://github.com/pytorch/pytorch), [TensorFlow](https://github.com/tensorflow/tensorflow), or [JAX](https://github.com/google/jax).
 
 Check out the [About](https://zea.readthedocs.io/en/latest/about.html) page for more information and the motivation behind `zea`. For any questions or suggestions, please feel free to open an [issue on GitHub](https://github.com/tue-bmd/zea/issues). If you want to contribute, check out the [Contributing](https://zea.readthedocs.io/en/latest/contributing.html) guide.

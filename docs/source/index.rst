@@ -8,6 +8,7 @@ Welcome to the documentation for the ``zea`` package: *A Toolbox for Cognitive U
 - A flexible ultrasound signal processing and image reconstruction :doc:`pipeline` written in your favorite deep learning framework.
 - A complete set of :doc:`data-acquisition` loading tools for ultrasound data and acquisition parameters, designed for deep learning workflows.
 - A collection of pretrained :doc:`models` for ultrasound image and signal processing.
+- A set of action selection functions for cognitive ultrasound in the :doc:`agent` module.
 - Multi-Backend Support via `Keras3 <https://keras.io/keras_3/>`_: You can use `PyTorch <https://github.com/pytorch/pytorch>`_, `TensorFlow <https://github.com/tensorflow/tensorflow>`_, or `JAX <https://github.com/google/jax>`_.
 
 Check out the :doc:`about` page for more information and the motivation behind ``zea``. For any questions or suggestions, please feel free to open an `issue on GitHub <https://github.com/tue-bmd/zea/issues>`_. If you want to contribute, check out the :doc:`contributing` guide.
@@ -46,6 +47,7 @@ Check out the :doc:`about` page for more information and the motivation behind `
    parameters
    pipeline
    models
+   agent
    environment
    cli
 

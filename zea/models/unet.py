@@ -169,21 +169,21 @@ def get_time_conditional_unetwork(
     Args:
         image_shape: tuple, (height, width, channels)
         widths: list, number of filters in each layer
-        block_depth: int, number of residual blocks in each down/up block
+        block_depth: int, number of residual blocks in each down/up block (defaults to 2 if None)
         embedding_min_frequency: float, minimum frequency for sinusoidal embeddings
         embedding_max_frequency: float, maximum frequency for sinusoidal embeddings
-        embedding_dims: int, number of dimensions for sinusoidal embeddings
+        embedding_dims: int, number of dimensions for sinusoidal embeddings (must be even)
 
     Returns:
         keras.Model
     """
     assert len(image_shape) == 3, "image_shape must be a tuple of (height, width, channels)"
+    assert embedding_dims % 2 == 0, "embedding_dims must be even! (sin + cos)"
 
     if widths is None:
         log.warning("No widths provided, using default widths [32, 64, 96, 128]")
         widths = [32, 64, 96, 128]
     if block_depth is None:
-        log.warning("No block_depth provided, using default block_depth 2")
         block_depth = 2
 
     image_height, image_width, n_channels = image_shape
@@ -196,7 +196,7 @@ def get_time_conditional_unetwork(
             x, embedding_min_frequency, embedding_max_frequency, embedding_dims
         )
 
-    e = layers.Lambda(_sinusoidal_embedding, output_shape=(1, 1, 32))(noise_variances)
+    e = layers.Lambda(_sinusoidal_embedding, output_shape=(1, 1, embedding_dims))(noise_variances)
     e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(e)
 
     x = layers.Conv2D(widths[0], kernel_size=1)(noisy_images)

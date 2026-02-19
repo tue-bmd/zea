@@ -91,14 +91,16 @@ def test_greedy_entropy():
     particles = np.expand_dims(particles, axis=0)  # add batch dim
     particles = np.squeeze(particles, axis=-1)  # remove channel dim --> (batch, n_particles, h, w)
 
+    particles = ops.convert_to_tensor(particles)
+
     n_actions = 1
     agent = selection.GreedyEntropy(n_actions, w, h, w)
     selected_lines, mask = agent.sample(particles)
     assert mask.shape == (1, h, w)
     assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
-    assert np.count_nonzero(first_row) == n_actions
-    assert np.count_nonzero(selected_lines[0]) == n_actions
+    assert ops.count_nonzero(first_row) == n_actions
+    assert ops.count_nonzero(selected_lines[0]) == n_actions
 
     n_actions = 2
     agent = selection.GreedyEntropy(n_actions, w, h, w)
@@ -106,8 +108,8 @@ def test_greedy_entropy():
     assert mask.shape == (1, h, w)
     assert selected_lines.shape == (1, w)
     first_row = mask[0, 0]
-    assert np.count_nonzero(first_row) == n_actions
-    assert np.count_nonzero(selected_lines[0]) == n_actions
+    assert ops.count_nonzero(first_row) == n_actions
+    assert ops.count_nonzero(selected_lines[0]) == n_actions
 
     # Test that the algorithm hasn't changed by comparing to a correct hard-coded value
     h, w = 64, 64
@@ -121,6 +123,7 @@ def test_greedy_entropy():
     particles = np.stack([rand_img_1, rand_img_2], axis=0)
     particles = np.expand_dims(particles, axis=0)
     particles = np.squeeze(particles, axis=-1)
+    particles = ops.convert_to_tensor(particles)
 
     n_actions = 1
     agent = selection.GreedyEntropy(n_actions, w, h, w)
@@ -129,8 +132,8 @@ def test_greedy_entropy():
     correct_line_index = 17
     correct_selected_lines = [False] * 64
     correct_selected_lines[correct_line_index] = True
-    correct_selected_lines = [correct_selected_lines]
-    assert np.all(selected_lines == correct_selected_lines)
+    correct_selected_lines = ops.convert_to_tensor([correct_selected_lines])
+    assert ops.all(selected_lines == correct_selected_lines)
 
     # Test compute_pairwise_pixel_gaussian_error with n_possible_actions = None
     _ = agent.compute_pairwise_pixel_gaussian_error(particles, n_possible_actions=None)

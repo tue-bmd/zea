@@ -71,7 +71,9 @@ jobs:
             INSTALL_TF=cpu
             DEV=true
           push: true
-          tags: ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
+          tags: |
+            ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
+            ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}:latest', env.BASE_IMAGE) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

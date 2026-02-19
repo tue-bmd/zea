@@ -137,6 +137,9 @@ class GreedyEntropy(LinesActionModel):
         )
         self.upside_down_gaussian = upside_down_gaussian(points_to_evaluate)
         self.entropy_sigma = entropy_sigma
+        self.select_line_and_reweight_entropy_vmap = tensor.vmap(
+            self.select_line_and_reweight_entropy
+        )
 
     @staticmethod
     def compute_pairwise_pixel_gaussian_error(
@@ -218,7 +221,7 @@ class GreedyEntropy(LinesActionModel):
         pixelwise_entropy = -ops.sum((1 / n_particles) * log_pixelwise_entropy_sum_j, axis=1)
         return pixelwise_entropy
 
-    def select_line_and_reweight_entropy(self, entropy_per_line):
+    def select_line_and_reweight_entropy(self, entropy_per_line, max_entropy_line):
         """Select the line with maximum entropy and reweight the entropies.
 
         Selected the max entropy line and reweights the entropy values around it,
@@ -231,9 +234,6 @@ class GreedyEntropy(LinesActionModel):
         Returns:
             Tuple: The selected line index and the updated entropies per line
         """
-
-        # Find the line with maximum entropy
-        max_entropy_line = ops.argmax(entropy_per_line)
 
         ## The rest of this function updates the entropy values around max_entropy_line
         ## by multiplying them with an upside-down Gaussian function centered at
@@ -265,7 +265,7 @@ class GreedyEntropy(LinesActionModel):
             (self.num_lines_to_update // 2,),
             (self.n_possible_actions,),
         )
-        return max_entropy_line, updated_entropy_per_line
+        return updated_entropy_per_line
 
     def sample(self, particles):
         """Sample the action using the greedy entropy method.
@@ -287,8 +287,9 @@ class GreedyEntropy(LinesActionModel):
         # Greedily select best line, reweight entropies, and repeat
         all_selected_lines = []
         for _ in range(self.n_actions):
-            max_entropy_line, linewise_entropy = ops.vectorized_map(
-                self.select_line_and_reweight_entropy, linewise_entropy
+            max_entropy_line = ops.argmax(linewise_entropy, axis=1)
+            linewise_entropy = self.select_line_and_reweight_entropy_vmap(
+                linewise_entropy, max_entropy_line
             )
             all_selected_lines.append(max_entropy_line)
 
@@ -653,9 +654,9 @@ class TaskBasedLines(GreedyEntropy):
         # Greedily select best line, reweight entropies, and repeat
         all_selected_lines = []
         for _ in range(self.n_actions):
-            max_contribution_line, actionwise_contribution_to_var_dst = ops.vectorized_map(
-                self.select_line_and_reweight_entropy,
-                actionwise_contribution_to_var_dst,
+            max_contribution_line = ops.argmax(actionwise_contribution_to_var_dst, axis=1)
+            actionwise_contribution_to_var_dst = self.select_line_and_reweight_entropy_vmap(
+                actionwise_contribution_to_var_dst, max_contribution_line
             )
             all_selected_lines.append(max_contribution_line)
 
