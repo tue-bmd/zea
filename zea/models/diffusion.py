@@ -66,6 +66,10 @@ class DiffusionModel(DeepGenerativeModel):
         max_t=1.0,
         noise_correlation_across_channels=None,
         noise_correlation_alpha=1.0,
+        use_frame_time_conditioning=False,
+        frame_time_embedding_min_frequency=1.0,
+        frame_time_embedding_max_frequency=None,
+        frame_time_embedding_dims=None,
         **kwargs,
     ):
         """Initialize a diffusion model.
@@ -105,6 +109,16 @@ class DiffusionModel(DeepGenerativeModel):
         self.ema_val = ema_val
         self.noise_correlation_across_channels = noise_correlation_across_channels
         self.noise_correlation_alpha = noise_correlation_alpha
+        self.use_frame_time_conditioning = use_frame_time_conditioning
+
+        if self.use_frame_time_conditioning:
+            # Ensure the underlying UNet accepts the extra frame_times input
+            self.network_kwargs = dict(self.network_kwargs)
+            self.network_kwargs.setdefault("use_frame_time_conditioning", True)
+
+        # Frame-time conditioning is now handled inside the UNet when enabled.
+        # We keep the flag to control dataset plumbing but do not instantiate
+        # separate projection layers here.
 
         # reverse diffusion (i.e. sampling) goes from t = max_t to t = min_t
         self.min_t = min_t
@@ -147,6 +161,7 @@ class DiffusionModel(DeepGenerativeModel):
                 "network_name": self.network_name,
                 "network_kwargs": self.network_kwargs,
                 "ema_val": self.ema_val,
+                "use_frame_time_conditioning": self.use_frame_time_conditioning,
             }
         )
         return config
@@ -209,7 +224,7 @@ class DiffusionModel(DeepGenerativeModel):
 
         return network(inputs, training=training, **kwargs)
 
-    def sample(self, n_samples=1, n_steps=20, seed=None, **kwargs):
+    def sample(self, n_samples=1, n_steps=20, seed=None, frame_times=None, **kwargs):
         """Sample from the model.
 
         Args:
@@ -230,7 +245,11 @@ class DiffusionModel(DeepGenerativeModel):
         )
         # Reverse diffusion process
         return self.reverse_diffusion(
-            initial_noise=initial_noise, diffusion_steps=n_steps, seed=seed, **kwargs
+            initial_noise=initial_noise,
+            diffusion_steps=n_steps,
+            seed=seed,
+            frame_times=frame_times,
+            **kwargs,
         )
 
     def posterior_sample(
@@ -241,6 +260,7 @@ class DiffusionModel(DeepGenerativeModel):
         initial_step=0,
         initial_samples=None,
         seed=None,
+        frame_times=None,
         **kwargs,
     ):
         """Sample from the posterior distribution given measurements.
@@ -284,6 +304,8 @@ class DiffusionModel(DeepGenerativeModel):
             initial_samples = ops.reshape(initial_samples, (-1, *self.input_shape))
         if "mask" in kwargs:
             kwargs["mask"] = _tile_with_sample_dim(kwargs["mask"])
+        if frame_times is not None:
+            frame_times = _tile_with_sample_dim(frame_times)
 
         seed1, seed2 = split_seed(seed, 2)
 
@@ -298,6 +320,7 @@ class DiffusionModel(DeepGenerativeModel):
             initial_samples=initial_samples,
             initial_step=initial_step,
             seed=seed2,
+            frame_times=frame_times,
             **kwargs,
         )  # ( batch_size * n_samples, *self.input_shape)
 
@@ -320,6 +343,23 @@ class DiffusionModel(DeepGenerativeModel):
     def metrics(self):
         """Metrics for training."""
         return [*self.noise_loss_tracker, *self.image_loss_tracker]
+
+    def _split_data_and_frame_times(self, data):
+        """Accept either `images` or `(images, frame_times)` batches."""
+        if isinstance(data, (tuple, list)):
+            images = data[0]
+            frame_times = data[1] if len(data) > 1 else None
+            return images, frame_times
+        return data, None
+
+    def _default_frame_times(self, images):
+        """Create default linearly spaced frame times in [0, 1]."""
+        n_frames = ops.shape(images)[-1]
+        batch_size = ops.shape(images)[0]
+        base = ops.linspace(0.0, 1.0, n_frames)
+        return ops.expand_dims(
+            ops.expand_dims(ops.broadcast_to(base[None, :], (batch_size, n_frames)), axis=1), axis=1
+        )
 
     def generate_noise(self, shape, seed=None):
         """
@@ -380,6 +420,8 @@ class DiffusionModel(DeepGenerativeModel):
                 "DiffusionModel.train_step is only implemented for the TensorFlow backend."
             )
 
+        data, frame_times = self._split_data_and_frame_times(data)
+
         # Get batch size and image shape
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
@@ -400,13 +442,18 @@ class DiffusionModel(DeepGenerativeModel):
 
         with tf.GradientTape() as tape:
             pred_noises, pred_images = self.denoise(
-                noisy_data, noise_rates, signal_rates, training=True
+                noisy_data,
+                noise_rates,
+                signal_rates,
+                training=True,
+                frame_times=frame_times,
             )
             noise_loss = self.loss(noises, pred_noises)
             image_loss = self.loss(data, pred_images)
 
-        gradients = tape.gradient(noise_loss, self.network.trainable_weights)
-        self.optimizer.apply_gradients(zip(gradients, self.network.trainable_weights))
+        trainable_weights = self.trainable_weights
+        gradients = tape.gradient(noise_loss, trainable_weights)
+        self.optimizer.apply_gradients(zip(gradients, trainable_weights))
 
         self.noise_loss_tracker.update_state(noise_loss)
         self.image_loss_tracker.update_state(image_loss)
@@ -422,6 +469,8 @@ class DiffusionModel(DeepGenerativeModel):
         """
         Custom test step so we can call model.fit() on the diffusion model.
         """
+        data, frame_times = self._split_data_and_frame_times(data)
+
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
 
@@ -439,7 +488,11 @@ class DiffusionModel(DeepGenerativeModel):
 
         # use the network to separate noisy images to their components
         pred_noises, pred_images = self.denoise(
-            noisy_images, noise_rates, signal_rates, training=False
+            noisy_images,
+            noise_rates,
+            signal_rates,
+            training=False,
+            frame_times=frame_times,
         )
 
         noise_loss = self.loss(noises, pred_noises)
@@ -506,10 +559,18 @@ class DiffusionModel(DeepGenerativeModel):
         signal_rates,
         training,
         network=None,
+        frame_times=None,
     ):
         """Predict noise component and calculate the image component using it."""
 
-        pred_noises = self([noisy_images, noise_rates**2], training=training, network=network)
+        if self.use_frame_time_conditioning:
+            if frame_times is None:
+                frame_times = self._default_frame_times(noisy_images)
+            inputs = [noisy_images, noise_rates**2, frame_times]
+        else:
+            inputs = [noisy_images, noise_rates**2]
+
+        pred_noises = self(inputs, training=training, network=network)
         pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
 
         return pred_noises, pred_images
@@ -569,6 +630,7 @@ class DiffusionModel(DeepGenerativeModel):
         disable_jit: bool = False,
         training: bool = False,
         network_type: Literal[None, "main", "ema"] = None,
+        frame_times=None,
     ):
         """Reverse diffusion process to generate images from noise.
 
@@ -629,6 +691,7 @@ class DiffusionModel(DeepGenerativeModel):
                 signal_rates,
                 training=training,
                 network=network,
+                frame_times=frame_times,
             )
 
             seed, seed1 = split_seed(seed, 2)
@@ -681,6 +744,7 @@ class DiffusionModel(DeepGenerativeModel):
         verbose: bool = False,
         track_progress_type: Literal[None, "x_0", "x_t"] = "x_0",
         disable_jit=False,
+        frame_times=None,
         **kwargs,
     ):
         """Reverse diffusion process conditioned on some measurement.
@@ -738,6 +802,7 @@ class DiffusionModel(DeepGenerativeModel):
                 measurements=measurements,
                 noise_rates=noise_rates,
                 signal_rates=signal_rates,
+                frame_times=frame_times,
                 **kwargs,
             )
 
@@ -949,6 +1014,7 @@ class DPS(DiffusionGuidance):
         noise_rates,
         signal_rates,
         omega,
+        frame_times=None,
         **kwargs,
     ):
         """
@@ -970,6 +1036,7 @@ class DPS(DiffusionGuidance):
             noise_rates,
             signal_rates,
             training=False,
+            frame_times=frame_times,
         )
 
         # Note that while the DPS paper specifies a squared L2 here, we follow their
@@ -1059,6 +1126,7 @@ class DDS(DiffusionGuidance):
         n_inner,
         eps,
         verbose,
+        frame_times=None,
         **op_kwargs,
     ):
         """
@@ -1080,6 +1148,7 @@ class DDS(DiffusionGuidance):
             noise_rates,
             signal_rates,
             training=False,
+            frame_times=frame_times,
         )
         measurements_cg = self.operator.transpose(measurements, **op_kwargs)
         r = measurements_cg - self.Acg(pred_images, **op_kwargs)  # residual
@@ -1114,6 +1183,7 @@ class DDS(DiffusionGuidance):
         n_inner=5,
         eps=1e-5,
         verbose=False,
+        frame_times=None,
         **op_kwargs,
     ):
         """
@@ -1139,5 +1209,6 @@ class DDS(DiffusionGuidance):
             n_inner,
             eps,
             verbose,
+            frame_times,
             **op_kwargs,
         )
