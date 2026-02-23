@@ -31,6 +31,7 @@ from zea.ops.ultrasound import (
     Demodulate,
     EnvelopeDetect,
     LogCompress,
+    MachBeamform,
     PfieldWeighting,
     ReshapeGrid,
     TOFCorrection,

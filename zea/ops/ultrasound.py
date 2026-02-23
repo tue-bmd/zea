@@ -203,6 +203,235 @@ class TOFCorrection(Operation):
         return {self.output_key: tof_corrected}
 
 
+@ops_registry("mach_beamform")
+class MachBeamform(Operation):
+    """Mach-based delay-and-sum beamforming for RF or IQ data."""
+
+    STATIC_PARAMS = ["interp_type", "tukey_alpha"]
+
+    def __init__(self, interp_type: str = "linear", tukey_alpha: float = 0.5, **kwargs):
+        super().__init__(
+            input_data_type=DataTypes.RAW_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            jittable=False,
+            **kwargs,
+        )
+        self.interp_type = interp_type
+        self.tukey_alpha = float(tukey_alpha)
+
+    def call(
+        self,
+        flatgrid,
+        probe_geometry,
+        tx_wave_arrivals_s,
+        sampling_frequency,
+        sound_speed,
+        f_number,
+        demodulation_frequency=None,
+        initial_times=None,
+        rx_start_s=None,
+        **kwargs,
+    ):
+        """Beamform input data with mach.experimental.beamform.
+
+        Args:
+            flatgrid: Flattened grid points of shape (n_pix, 3).
+            probe_geometry: Receive element positions of shape (n_el, 3).
+            tx_wave_arrivals_s: Transmit arrivals of shape (n_tx, n_pix) or (n_pix,).
+            sampling_frequency: Sampling frequency in Hz.
+            sound_speed: Speed of sound in m/s.
+            f_number: F-number for dynamic aperture.
+            demodulation_frequency: Center frequency in Hz for IQ data.
+            initial_times: Optional per-transmit receive start times (n_tx,).
+            rx_start_s: Optional scalar receive start time in seconds.
+        """
+        try:
+            from mach import experimental
+        except ImportError as err:
+            raise ImportError(
+                "mach is required for MachBeamform. Install with: pip install mach-beamform"
+            ) from err
+
+        data = kwargs[self.key]
+
+        if data.shape[-1] == 1:
+            data = ops.squeeze(data, axis=-1)
+            is_iq = False
+        elif data.shape[-1] == 2:
+            data = channels_to_complex(data)
+            is_iq = True
+        else:
+            is_iq = np.issubdtype(data.dtype, np.complexfloating)
+            if not is_iq:
+                raise ValueError(
+                    "MachBeamform expects RF (n_ch=1) or IQ (n_ch=2) data. "
+                    f"Got last dimension {data.shape[-1]}."
+                )
+
+        import cupy as cp
+        import jax
+        import jax.dlpack as jdlpack
+
+        use_cupy = True
+
+        def _to_cupy(arr):
+            if isinstance(arr, cp.ndarray):
+                return arr
+            if isinstance(arr, jax.Array):
+                return cp.from_dlpack(jdlpack.to_dlpack(arr))
+            return cp.asarray(arr)
+
+        data = _to_cupy(data)
+        flatgrid = _to_cupy(flatgrid)
+        probe_geometry = _to_cupy(probe_geometry)
+        tx_wave_arrivals_s = _to_cupy(tx_wave_arrivals_s)
+
+        if is_iq:
+            if demodulation_frequency is None:
+                raise ValueError(
+                    "demodulation_frequency is required for IQ data. Set it to 0 if data is baseband."
+                )
+            modulation_freq_hz = float(demodulation_frequency)
+        else:
+            modulation_freq_hz = (
+                0.0 if demodulation_frequency is None else float(demodulation_frequency)
+            )
+
+        if self.with_batch_dim:
+            data_frames = data
+        else:
+            data_frames = cp.expand_dims(data, axis=0) if use_cupy else np.expand_dims(data, axis=0)
+
+        if data_frames.ndim == 4:
+            has_tx = True
+            n_tx = data_frames.shape[1]
+        elif data_frames.ndim == 3:
+            has_tx = False
+            n_tx = 1
+        else:
+            raise ValueError(
+                "MachBeamform expects data with shape (frames, n_tx, n_ax, n_el, n_ch) "
+                "or (frames, n_ax, n_el, n_ch) when with_batch_dim=True."
+            )
+
+        if rx_start_s is None:
+            if initial_times is not None:
+                initial_times = ops.convert_to_numpy(initial_times)
+                if np.ndim(initial_times) > 0:
+                    rx_start_s = float(initial_times.flat[0])
+                else:
+                    rx_start_s = float(initial_times)
+            else:
+                rx_start_s = 0.0
+
+        if has_tx:
+            channel_data = (
+                cp.transpose(data_frames, (1, 3, 2, 0))
+                if use_cupy
+                else np.transpose(data_frames, (1, 3, 2, 0))
+            )
+        else:
+            channel_data = (
+                cp.transpose(data_frames, (2, 1, 0))
+                if use_cupy
+                else np.transpose(data_frames, (2, 1, 0))
+            )
+            channel_data = (
+                cp.expand_dims(channel_data, axis=0)
+                if use_cupy
+                else np.expand_dims(channel_data, axis=0)
+            )
+
+        if use_cupy:
+            channel_data = cp.ascontiguousarray(channel_data)
+            flatgrid = cp.ascontiguousarray(flatgrid)
+            probe_geometry = cp.ascontiguousarray(probe_geometry)
+            tx_wave_arrivals_s = cp.ascontiguousarray(tx_wave_arrivals_s)
+        else:
+            channel_data = np.ascontiguousarray(channel_data)
+            flatgrid = np.ascontiguousarray(flatgrid)
+            probe_geometry = np.ascontiguousarray(probe_geometry)
+            tx_wave_arrivals_s = np.ascontiguousarray(tx_wave_arrivals_s)
+
+        if has_tx:
+            if tx_wave_arrivals_s.ndim == 1:
+                if use_cupy:
+                    tx_wave_arrivals_s = cp.tile(tx_wave_arrivals_s[None, :], (n_tx, 1))
+                else:
+                    tx_wave_arrivals_s = np.tile(tx_wave_arrivals_s[None, :], (n_tx, 1))
+            elif tx_wave_arrivals_s.ndim == 2 and tx_wave_arrivals_s.shape[0] != n_tx:
+                raise ValueError(
+                    "tx_wave_arrivals_s must have shape (n_tx, n_pix) or (n_pix,) when data includes transmits."
+                )
+        else:
+            if tx_wave_arrivals_s.ndim == 2:
+                if tx_wave_arrivals_s.shape[0] != 1:
+                    raise ValueError(
+                        "tx_wave_arrivals_s must have shape (n_pix,) or (1, n_pix) when data has no transmit axis."
+                    )
+                tx_wave_arrivals_s = tx_wave_arrivals_s[0]
+
+        if isinstance(self.interp_type, str):
+            interp_type = self.interp_type.lower()
+            if interp_type not in {"nearest", "linear", "quadratic"}:
+                raise ValueError(
+                    f"Unsupported interp_type '{self.interp_type}'. "
+                    "Use 'nearest', 'linear', or 'quadratic'."
+                )
+        else:
+            interp_type = self.interp_type
+
+        beamform_kwargs = {
+            "channel_data": channel_data,
+            "rx_coords_m": probe_geometry,
+            "scan_coords_m": flatgrid,
+            "tx_wave_arrivals_s": tx_wave_arrivals_s,
+            "rx_start_s": rx_start_s,
+            "sampling_freq_hz": float(sampling_frequency),
+            "f_number": float(f_number),
+            "sound_speed_m_s": float(sound_speed),
+            "modulation_freq_hz": modulation_freq_hz,
+            "tukey_alpha": self.tukey_alpha,
+            "interp_type": interp_type,
+        }
+
+        import inspect
+
+        valid_keys = set(inspect.signature(experimental.beamform).parameters)
+        beamform_kwargs = {
+            key: value for key, value in beamform_kwargs.items() if key in valid_keys
+        }
+
+        output = experimental.beamform(**beamform_kwargs)
+        if output.ndim == 3 and output.shape[0] == n_tx:
+            output = output.sum(axis=0)
+
+        if self.with_batch_dim:
+            output = output.transpose(1, 0)
+        else:
+            if output.ndim > 1:
+                output = output.squeeze(axis=-1)
+
+        if is_iq:
+            output = (
+                cp.stack([output.real, output.imag], axis=-1)
+                if use_cupy
+                else np.stack([output.real, output.imag], axis=-1)
+            )
+        else:
+            output = (
+                cp.expand_dims(output, axis=-1) if use_cupy else np.expand_dims(output, axis=-1)
+            )
+
+        output = cp.nan_to_num(output) if use_cupy else np.nan_to_num(output)
+
+        if use_cupy:
+            output = jdlpack.from_dlpack(output)
+            return {self.output_key: ops.convert_to_tensor(output)}
+
+        return {self.output_key: ops.convert_to_tensor(output)}
+
+
 @ops_registry("pfield_weighting")
 class PfieldWeighting(Operation):
     """Weighting aligned data with the pressure field."""
