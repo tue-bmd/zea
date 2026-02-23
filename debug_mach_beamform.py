@@ -6,6 +6,10 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 
+# =========================
+# Generic helpers
+# =========================
+
 
 def _block_until_ready(value):
     if hasattr(value, "block_until_ready"):
@@ -136,6 +140,30 @@ def _save_comparison_image(
     plt.close(fig)
 
 
+def _build_tx_wave_arrivals(scan):
+    import mach
+
+    origin = np.array([0.0, 0.0, 0.0], dtype="float32")
+    if scan.polar_angles is None:
+        directions = np.array([[0.0, 0.0, 1.0]], dtype="float32")
+    else:
+        angles = np.asarray(scan.polar_angles, dtype="float32")
+        directions = np.stack(
+            [np.array([np.sin(angle), 0.0, np.cos(angle)], dtype="float32") for angle in angles],
+            axis=0,
+        )
+
+    tx_wave_arrivals_s = np.stack(
+        [
+            mach.wavefront.plane(origin_m=origin, points_m=scan.flatgrid, direction=direction)
+            / scan.sound_speed
+            for direction in directions
+        ],
+        axis=0,
+    )
+    return tx_wave_arrivals_s
+
+
 def _load_picmus_sample():
     from zea.data import load_file
 
@@ -156,6 +184,11 @@ def _load_picmus_sample():
     scan.set_transmits(3)
     data_frame = data[0][scan.selected_transmits]
     return data_frame, scan, probe
+
+
+# =========================
+# Zea pipeline
+# =========================
 
 
 def run_pipeline_zea_example(data_frame, scan, probe):
@@ -200,30 +233,17 @@ def run_pipeline_zea_example(data_frame, scan, probe):
     return result, title
 
 
+# =========================
+# Zea + Mach pipeline
+# =========================
+
+
 def run_pipeline_mach_example(data_frame, scan, probe):
     import keras
 
-    import mach
     from zea.ops import EnvelopeDetect, LogCompress, MachBeamform, Normalize, Pipeline, ReshapeGrid
 
-    origin = np.array([0.0, 0.0, 0.0], dtype="float32")
-    if scan.polar_angles is None:
-        directions = np.array([[0.0, 0.0, 1.0]], dtype="float32")
-    else:
-        angles = np.asarray(scan.polar_angles, dtype="float32")
-        directions = np.stack(
-            [np.array([np.sin(angle), 0.0, np.cos(angle)], dtype="float32") for angle in angles],
-            axis=0,
-        )
-
-    tx_wave_arrivals_s = np.stack(
-        [
-            mach.wavefront.plane(origin_m=origin, points_m=scan.flatgrid, direction=direction)
-            / scan.sound_speed
-            for direction in directions
-        ],
-        axis=0,
-    )
+    tx_wave_arrivals_s = _build_tx_wave_arrivals(scan)
 
     pipeline = Pipeline(
         [
@@ -281,6 +301,11 @@ def run_pipeline_mach_example(data_frame, scan, probe):
         points_per_second,
     )
     return result, title
+
+
+# =========================
+# Mach API only
+# =========================
 
 
 def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
@@ -353,42 +378,39 @@ def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
     return mach_api_image, title
 
 
-if __name__ == "__main__":
-    data_frame, scan, probe = _load_picmus_sample()
-    zea_out, zea_title = run_pipeline_zea_example(data_frame, scan, probe)
-    mach_out, mach_title = run_pipeline_mach_example(data_frame, scan, probe)
-    origin = np.array([0.0, 0.0, 0.0], dtype="float32")
-    import mach
-
-    if scan.polar_angles is None:
-        directions = np.array([[0.0, 0.0, 1.0]], dtype="float32")
-    else:
-        angles = np.asarray(scan.polar_angles, dtype="float32")
-        directions = np.stack(
-            [np.array([np.sin(angle), 0.0, np.cos(angle)], dtype="float32") for angle in angles],
-            axis=0,
-        )
-
-    tx_wave_arrivals_s = np.stack(
-        [
-            mach.wavefront.plane(origin_m=origin, points_m=scan.flatgrid, direction=direction)
-            / scan.sound_speed
-            for direction in directions
-        ],
-        axis=0,
-    )
-    mach_api_out, mach_api_title = run_mach_api_example(data_frame, scan, tx_wave_arrivals_s)
+def _report_and_save_diffs(zea_out, mach_out, mach_api_out, scan):
     diff = np.abs(zea_out - mach_out)
     _save_image("pipeline_abs_diff.png", diff, scan, "Pipeline abs diff")
+
     diff_mach_api = np.abs(zea_out - mach_api_out)
     _save_image(
         "pipeline_abs_diff_mach_api.png", diff_mach_api, scan, "Pipeline abs diff (Mach API)"
     )
+
+    rel_error = np.linalg.norm(zea_out - mach_out) / (np.linalg.norm(zea_out) + 1e-12)
+    rel_error_api = np.linalg.norm(zea_out - mach_api_out) / (np.linalg.norm(zea_out) + 1e-12)
+    print(f"Pipeline relative error (mach vs zea): {rel_error:.3e}")
+    print(f"Pipeline relative error (mach api vs zea): {rel_error_api:.3e}")
+    return rel_error, rel_error_api
+
+
+def main():
+    data_frame, scan, probe = _load_picmus_sample()
+
+    zea_out, zea_title = run_pipeline_zea_example(data_frame, scan, probe)
+    mach_out, mach_title = run_pipeline_mach_example(data_frame, scan, probe)
+
+    tx_wave_arrivals_s = _build_tx_wave_arrivals(scan)
+    mach_api_out, mach_api_title = run_mach_api_example(data_frame, scan, tx_wave_arrivals_s)
+
     full_title = f"PICMUS pipeline comparison | GPU: {_get_gpu_info()}"
     stats_text = (
-        f"Zea vs Mach pipeline rel error: {np.linalg.norm(zea_out - mach_out) / (np.linalg.norm(zea_out) + 1e-12):.3e} | "
-        f"Zea vs Mach API rel error: {np.linalg.norm(zea_out - mach_api_out) / (np.linalg.norm(zea_out) + 1e-12):.3e}"
+        "Zea vs Mach pipeline rel error: "
+        f"{np.linalg.norm(zea_out - mach_out) / (np.linalg.norm(zea_out) + 1e-12):.3e} | "
+        "Zea vs Mach API rel error: "
+        f"{np.linalg.norm(zea_out - mach_api_out) / (np.linalg.norm(zea_out) + 1e-12):.3e}"
     )
+
     _save_comparison_image(
         "pipeline_outputs_side_by_side.png",
         zea_out,
@@ -401,7 +423,9 @@ if __name__ == "__main__":
         full_title,
         stats_text,
     )
-    rel_error = np.linalg.norm(zea_out - mach_out) / (np.linalg.norm(zea_out) + 1e-12)
-    rel_error_api = np.linalg.norm(zea_out - mach_api_out) / (np.linalg.norm(zea_out) + 1e-12)
-    print(f"Pipeline relative error (mach vs zea): {rel_error:.3e}")
-    print(f"Pipeline relative error (mach api vs zea): {rel_error_api:.3e}")
+
+    _report_and_save_diffs(zea_out, mach_out, mach_api_out, scan)
+
+
+if __name__ == "__main__":
+    main()
