@@ -1,8 +1,8 @@
 """Standalone MachBeamform debug script."""
 
+import gc
 import subprocess
 import time
-import gc
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -106,9 +106,7 @@ def _vram_checkpoint(label):
         return
     parts = []
     for idx, gpu in enumerate(stats):
-        parts.append(
-            f"GPU{idx} {gpu['used']}MB/{gpu['total']}MB (free {gpu['free']}MB)"
-        )
+        parts.append(f"GPU{idx} {gpu['used']}MB/{gpu['total']}MB (free {gpu['free']}MB)")
     print(f"VRAM {label}: " + " | ".join(parts))
 
 
@@ -240,7 +238,7 @@ def _load_picmus_sample():
     scan.xlims = probe.xlims
     scan.zlims = (0.0, 0.06)
 
-    scan.set_transmits(2)
+    scan.set_transmits(3)
     data_frame = data[0][scan.selected_transmits]
     return data_frame, scan, probe
 
@@ -417,11 +415,12 @@ def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
         "rx_coords_m": rx_coords_m,
         "scan_coords_m": scan_coords_m,
         "tx_wave_arrivals_s": tx_wave_arrivals_s,
-        "rx_start_s": float(scan.initial_times.flat[0]) if scan.initial_times is not None else 0.0,
+        "rx_start_s": 0.0,
         "sampling_freq_hz": float(scan.sampling_frequency),
         "f_number": float(scan.f_number),
         "sound_speed_m_s": float(scan.sound_speed),
         "modulation_freq_hz": float(scan.demodulation_frequency),
+        "tukey_alpha": 0.0,
     }
 
     _flush_vram()

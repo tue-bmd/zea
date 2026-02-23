@@ -228,7 +228,7 @@ class MachBeamform(Operation):
 
     STATIC_PARAMS = ["interp_type", "tukey_alpha"]
 
-    def __init__(self, interp_type: str = "linear", tukey_alpha: float = 0.5, **kwargs):
+    def __init__(self, interp_type: str = "linear", tukey_alpha: float = 0, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.BEAMFORMED_DATA,
@@ -238,7 +238,7 @@ class MachBeamform(Operation):
         self.interp_type = interp_type
         self.tukey_alpha = float(tukey_alpha)
         if keras.backend.backend() == "jax":
-            self._calculate_delays = backend_jit(calculate_delays, static_argnums=(7, 8))
+            self._calculate_delays = backend_jit(calculate_delays, static_argnums=(7, 8, 14))
         else:
             self._calculate_delays = backend_jit(calculate_delays)
 
@@ -335,14 +335,35 @@ class MachBeamform(Operation):
                 "Missing Zea scan parameters required to compute tx_wave_arrivals_s: "
                 f"{missing_str}."
             )
+        if not isinstance(apply_lens_correction, (bool, np.bool_)):
+            log.warning(
+                "apply_lens_correction must be a Python bool for MachBeamform; "
+                "defaulting to False for delay computation."
+            )
+            apply_lens_correction = False
+
+        initial_times_for_tx = initial_times
+        if rx_start_s is None:
+            # calculate_delays already subtracts initial_times, so keep rx_start_s at 0
+            # to avoid double offsetting sample times.
+            rx_start_s = 0.0
+        else:
+            if initial_times is not None:
+                log.warning(
+                    "rx_start_s provided; ignoring initial_times in tx delay computation "
+                    "to avoid double offsets."
+                )
+                initial_times_for_tx = ops.zeros_like(initial_times)
         n_tx = int(t0_delays.shape[0])
         n_el = int(probe_geometry.shape[0])
-        tx_delays, _ = self._calculate_delays(
+        use_jitted = isinstance(apply_lens_correction, (bool, np.bool_))
+        calculate_delays_fn = self._calculate_delays if use_jitted else calculate_delays
+        tx_delays, _ = calculate_delays_fn(
             flatgrid,
             t0_delays,
             tx_apodizations,
             probe_geometry,
-            initial_times,
+            initial_times_for_tx,
             sampling_frequency,
             sound_speed,
             n_tx,
@@ -390,16 +411,6 @@ class MachBeamform(Operation):
                 "MachBeamform expects data with shape (frames, n_tx, n_ax, n_el, n_ch) "
                 "or (frames, n_ax, n_el, n_ch) when with_batch_dim=True."
             )
-
-        if rx_start_s is None:
-            if initial_times is not None:
-                initial_times = ops.convert_to_numpy(initial_times)
-                if np.ndim(initial_times) > 0:
-                    rx_start_s = float(initial_times.flat[0])
-                else:
-                    rx_start_s = float(initial_times)
-            else:
-                rx_start_s = 0.0
 
         if has_tx:
             channel_data = cp.transpose(data_frames, (1, 3, 2, 0))
