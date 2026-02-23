@@ -96,18 +96,22 @@ def _save_comparison_image(
     path,
     zea_image,
     mach_image,
+    mach_api_image,
     scan,
     zea_title,
     mach_title,
+    mach_api_title,
     full_title,
+    stats_text,
     dynamic_range=(-60, 0),
 ):
     from zea.display import to_8bit
 
     zea_8bit = to_8bit(zea_image, dynamic_range=dynamic_range, pillow=False)
     mach_8bit = to_8bit(mach_image, dynamic_range=dynamic_range, pillow=False)
+    mach_api_8bit = to_8bit(mach_api_image, dynamic_range=dynamic_range, pillow=False)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), dpi=200)
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=200)
     extent = scan.extent
 
     axes[0].imshow(zea_8bit, cmap="gray", extent=extent)
@@ -120,7 +124,13 @@ def _save_comparison_image(
     axes[1].set_xlabel("X (m)")
     axes[1].set_ylabel("Z (m)")
 
+    axes[2].imshow(mach_api_8bit, cmap="gray", extent=extent)
+    axes[2].set_title(mach_api_title)
+    axes[2].set_xlabel("X (m)")
+    axes[2].set_ylabel("Z (m)")
+
     fig.suptitle(full_title)
+    fig.text(0.5, 0.01, stats_text, ha="center", va="bottom")
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -171,7 +181,7 @@ def run_pipeline_zea_example(data_frame, scan, probe):
     result, per_iter_s = _time_call(
         "Zea pipeline",
         lambda: pipeline(**inputs)["data"],
-        iterations=10,
+        iterations=100,
     )
     result = keras.ops.convert_to_numpy(result)
     _nan_stats("Zea pipeline output", result)
@@ -251,20 +261,20 @@ def run_pipeline_mach_example(data_frame, scan, probe):
     _nan_stats("Mach beamformed (flat)", beamformed_np)
 
     result, per_iter_s = _time_call(
-        "Mach pipeline",
+        "mach+zea",
         lambda: pipeline(**inputs)["data"],
-        iterations=10,
+        iterations=100,
     )
     result = keras.ops.convert_to_numpy(result)
-    _nan_stats("Mach pipeline output", result)
-    print("Mach pipeline input shape:", data_frame.shape)
-    print("Mach pipeline tx arrivals shape:", tx_wave_arrivals_s.shape)
-    print("Mach pipeline output shape:", result.shape)
-    print("Mach pipeline output dtype:", result.dtype)
-    _save_image("mach_pipeline_output.png", result, scan, "Mach pipeline output")
+    _nan_stats("mach+zea output", result)
+    print("mach+zea input shape:", data_frame.shape)
+    print("mach+zea tx arrivals shape:", tx_wave_arrivals_s.shape)
+    print("mach+zea output shape:", result.shape)
+    print("mach+zea output dtype:", result.dtype)
+    _save_image("mach_pipeline_output.png", result, scan, "mach+zea output")
     points_per_second = _calculate_points_per_second(data_frame, result, per_iter_s)
     title = _format_pipeline_title(
-        "Mach pipeline",
+        "mach+zea",
         data_frame.shape,
         result.shape,
         per_iter_s,
@@ -273,21 +283,125 @@ def run_pipeline_mach_example(data_frame, scan, probe):
     return result, title
 
 
+def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
+    import mach
+
+    try:
+        import cupy as cp
+    except ImportError:
+        cp = None
+
+    if data_frame.shape[-1] == 2:
+        data_complex = data_frame[..., 0] + 1j * data_frame[..., 1]
+    else:
+        data_complex = np.squeeze(data_frame, axis=-1)
+
+    channel_data = np.transpose(data_complex, (0, 2, 1))
+    channel_data = np.ascontiguousarray(channel_data[..., None])
+    scan_coords_m = np.ascontiguousarray(scan.flatgrid)
+    rx_coords_m = np.ascontiguousarray(scan.probe_geometry)
+
+    if cp is not None:
+        channel_data = cp.asarray(channel_data)
+        scan_coords_m = cp.asarray(scan_coords_m)
+        rx_coords_m = cp.asarray(rx_coords_m)
+        tx_wave_arrivals_s = cp.asarray(tx_wave_arrivals_s)
+
+    beamform_kwargs = {
+        "channel_data": channel_data,
+        "rx_coords_m": rx_coords_m,
+        "scan_coords_m": scan_coords_m,
+        "tx_wave_arrivals_s": tx_wave_arrivals_s,
+        "rx_start_s": float(scan.initial_times.flat[0]) if scan.initial_times is not None else 0.0,
+        "sampling_freq_hz": float(scan.sampling_frequency),
+        "f_number": float(scan.f_number),
+        "sound_speed_m_s": float(scan.sound_speed),
+        "modulation_freq_hz": float(scan.demodulation_frequency),
+    }
+
+    result, per_iter_s = _time_call(
+        "Mach API",
+        lambda: mach.experimental.beamform(**beamform_kwargs),
+        iterations=100,
+    )
+
+    if cp is not None:
+        result = cp.asnumpy(result)
+
+    if result.ndim == 2 and result.shape[1] == 1:
+        result = result[:, 0]
+
+    if result.ndim == 1:
+        result = result.reshape(scan.grid.shape[:-1])
+
+    result = np.nan_to_num(result)
+    envelope = np.abs(result)
+    max_val = np.max(envelope) if envelope.size else 1.0
+    envelope = envelope / (max_val + 1e-12)
+    mach_api_image = 20.0 * np.log10(envelope + 1e-12)
+    mach_api_image = np.clip(mach_api_image, -60.0, 0.0)
+    mach_api_image = np.nan_to_num(mach_api_image, nan=-60.0, posinf=0.0, neginf=-60.0)
+
+    points_per_second = _calculate_points_per_second(data_frame, mach_api_image, per_iter_s)
+    title = _format_pipeline_title(
+        "Mach API",
+        data_frame.shape,
+        mach_api_image.shape,
+        per_iter_s,
+        points_per_second,
+    )
+    return mach_api_image, title
+
+
 if __name__ == "__main__":
     data_frame, scan, probe = _load_picmus_sample()
     zea_out, zea_title = run_pipeline_zea_example(data_frame, scan, probe)
     mach_out, mach_title = run_pipeline_mach_example(data_frame, scan, probe)
+    origin = np.array([0.0, 0.0, 0.0], dtype="float32")
+    import mach
+
+    if scan.polar_angles is None:
+        directions = np.array([[0.0, 0.0, 1.0]], dtype="float32")
+    else:
+        angles = np.asarray(scan.polar_angles, dtype="float32")
+        directions = np.stack(
+            [np.array([np.sin(angle), 0.0, np.cos(angle)], dtype="float32") for angle in angles],
+            axis=0,
+        )
+
+    tx_wave_arrivals_s = np.stack(
+        [
+            mach.wavefront.plane(origin_m=origin, points_m=scan.flatgrid, direction=direction)
+            / scan.sound_speed
+            for direction in directions
+        ],
+        axis=0,
+    )
+    mach_api_out, mach_api_title = run_mach_api_example(data_frame, scan, tx_wave_arrivals_s)
     diff = np.abs(zea_out - mach_out)
     _save_image("pipeline_abs_diff.png", diff, scan, "Pipeline abs diff")
+    diff_mach_api = np.abs(zea_out - mach_api_out)
+    _save_image(
+        "pipeline_abs_diff_mach_api.png", diff_mach_api, scan, "Pipeline abs diff (Mach API)"
+    )
     full_title = f"PICMUS pipeline comparison | GPU: {_get_gpu_info()}"
+    stats_text = (
+        f"Zea vs Mach pipeline rel error: {np.linalg.norm(zea_out - mach_out) / (np.linalg.norm(zea_out) + 1e-12):.3e} | "
+        f"Zea vs Mach API rel error: {np.linalg.norm(zea_out - mach_api_out) / (np.linalg.norm(zea_out) + 1e-12):.3e}"
+    )
     _save_comparison_image(
         "pipeline_outputs_side_by_side.png",
         zea_out,
         mach_out,
+        mach_api_out,
         scan,
         zea_title,
         mach_title,
+        mach_api_title,
         full_title,
+        stats_text,
     )
     rel_error = np.linalg.norm(zea_out - mach_out) / (np.linalg.norm(zea_out) + 1e-12)
+    rel_error_api = np.linalg.norm(zea_out - mach_api_out) / (np.linalg.norm(zea_out) + 1e-12)
     print(f"Pipeline relative error (mach vs zea): {rel_error:.3e}")
+    print(f"Pipeline relative error (mach api vs zea): {rel_error_api:.3e}")
