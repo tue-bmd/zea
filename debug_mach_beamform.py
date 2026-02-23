@@ -2,6 +2,7 @@
 
 import subprocess
 import time
+import gc
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -68,6 +69,64 @@ def _get_gpu_info():
         return lines[0] if lines else "Unknown GPU"
     except Exception:
         return "Unknown GPU"
+
+
+def _query_vram():
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        stats = []
+        for line in lines:
+            used, free, total = [value.strip() for value in line.split(",")]
+            stats.append(
+                {
+                    "used": int(used),
+                    "free": int(free),
+                    "total": int(total),
+                }
+            )
+        return stats
+    except Exception:
+        return None
+
+
+def _vram_checkpoint(label):
+    stats = _query_vram()
+    if not stats:
+        print(f"VRAM {label}: unavailable")
+        return
+    parts = []
+    for idx, gpu in enumerate(stats):
+        parts.append(
+            f"GPU{idx} {gpu['used']}MB/{gpu['total']}MB (free {gpu['free']}MB)"
+        )
+    print(f"VRAM {label}: " + " | ".join(parts))
+
+
+def _flush_vram():
+    try:
+        import cupy as cp
+
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.get_default_pinned_memory_pool().free_all_blocks()
+    except Exception:
+        pass
+    try:
+        import jax
+
+        jax.clear_caches()
+    except Exception:
+        pass
+    gc.collect()
 
 
 def _format_pipeline_title(label, input_shape, output_shape, per_iter_s, points_per_second):
@@ -161,7 +220,7 @@ def _build_tx_wave_arrivals(scan):
         ],
         axis=0,
     )
-    return tx_wave_arrivals_s
+    return tx_wave_arrivals_s.T
 
 
 def _load_picmus_sample():
@@ -181,7 +240,7 @@ def _load_picmus_sample():
     scan.xlims = probe.xlims
     scan.zlims = (0.0, 0.06)
 
-    scan.set_transmits(3)
+    scan.set_transmits(2)
     data_frame = data[0][scan.selected_transmits]
     return data_frame, scan, probe
 
@@ -210,6 +269,12 @@ def run_pipeline_zea_example(data_frame, scan, probe):
     inputs = pipeline.prepare_parameters(probe=probe, scan=scan)
     inputs["data"] = data_frame
     inputs["demodulation_frequency"] = scan.demodulation_frequency
+
+    _flush_vram()
+    _vram_checkpoint("Zea pipeline (before)")
+    one_pass = pipeline(**inputs)["data"]
+    _block_until_ready(one_pass)
+    _vram_checkpoint("Zea pipeline (after)")
 
     result, per_iter_s = _time_call(
         "Zea pipeline",
@@ -243,8 +308,6 @@ def run_pipeline_mach_example(data_frame, scan, probe):
 
     from zea.ops import EnvelopeDetect, LogCompress, MachBeamform, Normalize, Pipeline, ReshapeGrid
 
-    tx_wave_arrivals_s = _build_tx_wave_arrivals(scan)
-
     pipeline = Pipeline(
         [
             MachBeamform(),
@@ -259,23 +322,36 @@ def run_pipeline_mach_example(data_frame, scan, probe):
 
     inputs = pipeline.prepare_parameters(probe=probe, scan=scan)
     inputs["data"] = data_frame
-    inputs["tx_wave_arrivals_s"] = tx_wave_arrivals_s
     inputs["demodulation_frequency"] = scan.demodulation_frequency
 
     _nan_stats("Mach input data", data_frame)
-    _nan_stats("Mach tx arrivals", tx_wave_arrivals_s)
+
+    _flush_vram()
+    _vram_checkpoint("mach+zea pipeline (before)")
+    one_pass = pipeline(**inputs)["data"]
+    _block_until_ready(one_pass)
+    _vram_checkpoint("mach+zea pipeline (after)")
 
     mach_beamform = MachBeamform(with_batch_dim=False)
     beamformed = mach_beamform(
         data=data_frame,
         flatgrid=scan.flatgrid,
         probe_geometry=probe.probe_geometry,
-        tx_wave_arrivals_s=tx_wave_arrivals_s,
         sampling_frequency=scan.sampling_frequency,
         sound_speed=scan.sound_speed,
         f_number=scan.f_number,
         demodulation_frequency=scan.demodulation_frequency,
         initial_times=scan.initial_times,
+        t0_delays=scan.t0_delays,
+        tx_apodizations=scan.tx_apodizations,
+        focus_distances=scan.focus_distances,
+        polar_angles=scan.polar_angles,
+        t_peak=scan.t_peak,
+        tx_waveform_indices=scan.tx_waveform_indices,
+        transmit_origins=scan.transmit_origins,
+        apply_lens_correction=getattr(scan, "apply_lens_correction", False),
+        lens_thickness=getattr(scan, "lens_thickness", None),
+        lens_sound_speed=getattr(scan, "lens_sound_speed", None),
     )["data"]
     beamformed_np = keras.ops.convert_to_numpy(beamformed)
     _nan_stats("Mach beamformed (flat)", beamformed_np)
@@ -288,7 +364,6 @@ def run_pipeline_mach_example(data_frame, scan, probe):
     result = keras.ops.convert_to_numpy(result)
     _nan_stats("mach+zea output", result)
     print("mach+zea input shape:", data_frame.shape)
-    print("mach+zea tx arrivals shape:", tx_wave_arrivals_s.shape)
     print("mach+zea output shape:", result.shape)
     print("mach+zea output dtype:", result.dtype)
     _save_image("mach_pipeline_output.png", result, scan, "mach+zea output")
@@ -325,6 +400,11 @@ def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
     channel_data = np.ascontiguousarray(channel_data[..., None])
     scan_coords_m = np.ascontiguousarray(scan.flatgrid)
     rx_coords_m = np.ascontiguousarray(scan.probe_geometry)
+    tx_wave_arrivals_s = np.asarray(tx_wave_arrivals_s)
+    if tx_wave_arrivals_s.ndim == 2 and tx_wave_arrivals_s.shape[0] == scan_coords_m.shape[0]:
+        tx_wave_arrivals_s = tx_wave_arrivals_s.T
+    elif tx_wave_arrivals_s.ndim == 1 and data_frame.shape[0] > 1:
+        tx_wave_arrivals_s = np.tile(tx_wave_arrivals_s[None, :], (data_frame.shape[0], 1))
 
     if cp is not None:
         channel_data = cp.asarray(channel_data)
@@ -343,6 +423,12 @@ def run_mach_api_example(data_frame, scan, tx_wave_arrivals_s):
         "sound_speed_m_s": float(scan.sound_speed),
         "modulation_freq_hz": float(scan.demodulation_frequency),
     }
+
+    _flush_vram()
+    _vram_checkpoint("Mach API (before)")
+    one_pass = mach.experimental.beamform(**beamform_kwargs)
+    _block_until_ready(one_pass)
+    _vram_checkpoint("Mach API (after)")
 
     result, per_iter_s = _time_call(
         "Mach API",

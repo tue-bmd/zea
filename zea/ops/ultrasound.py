@@ -1,3 +1,4 @@
+import inspect
 import uuid
 from typing import Tuple
 
@@ -6,7 +7,8 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.beamformer import tof_correction
+from zea.backend import jit as backend_jit
+from zea.beamform.beamformer import calculate_delays, tof_correction
 from zea.display import scan_convert
 from zea.func.tensor import (
     apply_along_axis,
@@ -33,6 +35,23 @@ from zea.internal.registry import ops_registry
 from zea.ops.base import Filter, Operation
 from zea.simulator import simulate_rf
 from zea.utils import canonicalize_axis
+
+try:
+    from mach import experimental as mach_experimental
+except ImportError:
+    mach_experimental = None
+
+try:
+    import cupy as cp
+except ImportError:
+    cp = None
+
+try:
+    import jax
+    import jax.dlpack as jdlpack
+except ImportError:
+    jax = None
+    jdlpack = None
 
 
 @ops_registry("simulate_rf")
@@ -218,17 +237,30 @@ class MachBeamform(Operation):
         )
         self.interp_type = interp_type
         self.tukey_alpha = float(tukey_alpha)
+        if keras.backend.backend() == "jax":
+            self._calculate_delays = backend_jit(calculate_delays, static_argnums=(7, 8))
+        else:
+            self._calculate_delays = backend_jit(calculate_delays)
 
     def call(
         self,
         flatgrid,
         probe_geometry,
-        tx_wave_arrivals_s,
         sampling_frequency,
         sound_speed,
         f_number,
         demodulation_frequency=None,
         initial_times=None,
+        t0_delays=None,
+        tx_apodizations=None,
+        focus_distances=None,
+        polar_angles=None,
+        t_peak=None,
+        tx_waveform_indices=None,
+        transmit_origins=None,
+        apply_lens_correction=False,
+        lens_thickness=None,
+        lens_sound_speed=None,
         rx_start_s=None,
         **kwargs,
     ):
@@ -237,20 +269,31 @@ class MachBeamform(Operation):
         Args:
             flatgrid: Flattened grid points of shape (n_pix, 3).
             probe_geometry: Receive element positions of shape (n_el, 3).
-            tx_wave_arrivals_s: Transmit arrivals of shape (n_tx, n_pix) or (n_pix,).
             sampling_frequency: Sampling frequency in Hz.
             sound_speed: Speed of sound in m/s.
             f_number: F-number for dynamic aperture.
             demodulation_frequency: Center frequency in Hz for IQ data.
             initial_times: Optional per-transmit receive start times (n_tx,).
+            t0_delays: Transmit delays in seconds of shape (n_tx, n_el).
+            tx_apodizations: Transmit apodizations of shape (n_tx, n_el).
+            focus_distances: Focus distances of shape (n_tx,).
+            polar_angles: Polar angles of shape (n_tx,).
+            t_peak: Time of the transmit peak of shape (n_waveforms,).
+            tx_waveform_indices: Waveform indices of shape (n_tx,).
+            transmit_origins: Transmit origins of shape (n_tx, 3).
+            apply_lens_correction: Whether to apply lens correction to delays.
+            lens_thickness: Lens thickness in meters.
+            lens_sound_speed: Lens sound speed in m/s.
             rx_start_s: Optional scalar receive start time in seconds.
         """
-        try:
-            from mach import experimental
-        except ImportError as err:
+        if mach_experimental is None:
             raise ImportError(
                 "mach is required for MachBeamform. Install with: pip install mach-beamform"
-            ) from err
+            )
+        if cp is None:
+            raise ImportError("cupy is required for MachBeamform. Install with: pip install cupy")
+        if jax is None or jdlpack is None:
+            raise ImportError("jax is required for MachBeamform. Install with: pip install jax")
 
         data = kwargs[self.key]
 
@@ -268,18 +311,52 @@ class MachBeamform(Operation):
                     f"Got last dimension {data.shape[-1]}."
                 )
 
-        import cupy as cp
-        import jax
-        import jax.dlpack as jdlpack
-
-        use_cupy = True
-
         def _to_cupy(arr):
             if isinstance(arr, cp.ndarray):
                 return arr
-            if isinstance(arr, jax.Array):
+            if jax is not None and isinstance(arr, jax.Array):
                 return cp.from_dlpack(jdlpack.to_dlpack(arr))
             return cp.asarray(arr)
+
+        required = {
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "focus_distances": focus_distances,
+            "polar_angles": polar_angles,
+            "initial_times": initial_times,
+            "t_peak": t_peak,
+            "tx_waveform_indices": tx_waveform_indices,
+            "transmit_origins": transmit_origins,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            missing_str = ", ".join(missing)
+            raise ValueError(
+                "Missing Zea scan parameters required to compute tx_wave_arrivals_s: "
+                f"{missing_str}."
+            )
+        n_tx = int(t0_delays.shape[0])
+        n_el = int(probe_geometry.shape[0])
+        tx_delays, _ = self._calculate_delays(
+            flatgrid,
+            t0_delays,
+            tx_apodizations,
+            probe_geometry,
+            initial_times,
+            sampling_frequency,
+            sound_speed,
+            n_tx,
+            n_el,
+            focus_distances,
+            polar_angles,
+            t_peak,
+            tx_waveform_indices,
+            transmit_origins,
+            apply_lens_correction,
+            lens_thickness,
+            lens_sound_speed,
+        )
+        tx_wave_arrivals_s = tx_delays / sampling_frequency
 
         data = _to_cupy(data)
         flatgrid = _to_cupy(flatgrid)
@@ -300,7 +377,7 @@ class MachBeamform(Operation):
         if self.with_batch_dim:
             data_frames = data
         else:
-            data_frames = cp.expand_dims(data, axis=0) if use_cupy else np.expand_dims(data, axis=0)
+            data_frames = cp.expand_dims(data, axis=0)
 
         if data_frames.ndim == 4:
             has_tx = True
@@ -325,51 +402,52 @@ class MachBeamform(Operation):
                 rx_start_s = 0.0
 
         if has_tx:
-            channel_data = (
-                cp.transpose(data_frames, (1, 3, 2, 0))
-                if use_cupy
-                else np.transpose(data_frames, (1, 3, 2, 0))
-            )
+            channel_data = cp.transpose(data_frames, (1, 3, 2, 0))
         else:
-            channel_data = (
-                cp.transpose(data_frames, (2, 1, 0))
-                if use_cupy
-                else np.transpose(data_frames, (2, 1, 0))
-            )
-            channel_data = (
-                cp.expand_dims(channel_data, axis=0)
-                if use_cupy
-                else np.expand_dims(channel_data, axis=0)
-            )
+            channel_data = cp.transpose(data_frames, (2, 1, 0))
+            channel_data = cp.expand_dims(channel_data, axis=0)
 
-        if use_cupy:
-            channel_data = cp.ascontiguousarray(channel_data)
-            flatgrid = cp.ascontiguousarray(flatgrid)
-            probe_geometry = cp.ascontiguousarray(probe_geometry)
-            tx_wave_arrivals_s = cp.ascontiguousarray(tx_wave_arrivals_s)
-        else:
-            channel_data = np.ascontiguousarray(channel_data)
-            flatgrid = np.ascontiguousarray(flatgrid)
-            probe_geometry = np.ascontiguousarray(probe_geometry)
-            tx_wave_arrivals_s = np.ascontiguousarray(tx_wave_arrivals_s)
+        channel_data = cp.ascontiguousarray(channel_data)
+        flatgrid = cp.ascontiguousarray(flatgrid)
+        probe_geometry = cp.ascontiguousarray(probe_geometry)
+        tx_wave_arrivals_s = cp.ascontiguousarray(tx_wave_arrivals_s)
 
+        n_pix = flatgrid.shape[0]
         if has_tx:
             if tx_wave_arrivals_s.ndim == 1:
-                if use_cupy:
-                    tx_wave_arrivals_s = cp.tile(tx_wave_arrivals_s[None, :], (n_tx, 1))
-                else:
-                    tx_wave_arrivals_s = np.tile(tx_wave_arrivals_s[None, :], (n_tx, 1))
-            elif tx_wave_arrivals_s.ndim == 2 and tx_wave_arrivals_s.shape[0] != n_tx:
-                raise ValueError(
-                    "tx_wave_arrivals_s must have shape (n_tx, n_pix) or (n_pix,) when data includes transmits."
-                )
-        else:
-            if tx_wave_arrivals_s.ndim == 2:
-                if tx_wave_arrivals_s.shape[0] != 1:
+                if tx_wave_arrivals_s.shape[0] != n_pix:
                     raise ValueError(
-                        "tx_wave_arrivals_s must have shape (n_pix,) or (1, n_pix) when data has no transmit axis."
+                        "tx_wave_arrivals_s must have shape (n_pix,) when data includes transmits."
                     )
-                tx_wave_arrivals_s = tx_wave_arrivals_s[0]
+                tx_wave_arrivals_s = cp.tile(tx_wave_arrivals_s[None, :], (n_tx, 1))
+            elif tx_wave_arrivals_s.ndim == 2:
+                if tx_wave_arrivals_s.shape == (n_pix, n_tx):
+                    tx_wave_arrivals_s = cp.transpose(tx_wave_arrivals_s, (1, 0))
+                elif tx_wave_arrivals_s.shape == (n_tx, n_pix):
+                    log.warning(
+                        "tx_wave_arrivals_s expected shape (n_pix, n_tx); got (n_tx, n_pix)."
+                    )
+                else:
+                    raise ValueError(
+                        "tx_wave_arrivals_s must have shape (n_pix, n_tx) or (n_pix,) when data includes transmits."
+                    )
+        else:
+            if tx_wave_arrivals_s.ndim == 1:
+                if tx_wave_arrivals_s.shape[0] != n_pix:
+                    raise ValueError(
+                        "tx_wave_arrivals_s must have shape (n_pix,) when data has no transmit axis."
+                    )
+            elif tx_wave_arrivals_s.ndim == 2:
+                if tx_wave_arrivals_s.shape == (n_pix, 1):
+                    tx_wave_arrivals_s = tx_wave_arrivals_s[:, 0]
+                elif tx_wave_arrivals_s.shape == (1, n_pix):
+                    log.warning("tx_wave_arrivals_s expected shape (n_pix, 1); got (1, n_pix).")
+                    tx_wave_arrivals_s = tx_wave_arrivals_s[0]
+                else:
+                    raise ValueError(
+                        "tx_wave_arrivals_s must have shape (n_pix,) or (n_pix, 1) when data has no transmit axis."
+                    )
+        tx_wave_arrivals_s = cp.ascontiguousarray(tx_wave_arrivals_s)
 
         if isinstance(self.interp_type, str):
             interp_type = self.interp_type.lower()
@@ -395,14 +473,12 @@ class MachBeamform(Operation):
             "interp_type": interp_type,
         }
 
-        import inspect
-
-        valid_keys = set(inspect.signature(experimental.beamform).parameters)
+        valid_keys = set(inspect.signature(mach_experimental.beamform).parameters)
         beamform_kwargs = {
             key: value for key, value in beamform_kwargs.items() if key in valid_keys
         }
 
-        output = experimental.beamform(**beamform_kwargs)
+        output = mach_experimental.beamform(**beamform_kwargs)
         if output.ndim == 3 and output.shape[0] == n_tx:
             output = output.sum(axis=0)
 
@@ -413,22 +489,12 @@ class MachBeamform(Operation):
                 output = output.squeeze(axis=-1)
 
         if is_iq:
-            output = (
-                cp.stack([output.real, output.imag], axis=-1)
-                if use_cupy
-                else np.stack([output.real, output.imag], axis=-1)
-            )
+            output = cp.stack([output.real, output.imag], axis=-1)
         else:
-            output = (
-                cp.expand_dims(output, axis=-1) if use_cupy else np.expand_dims(output, axis=-1)
-            )
+            output = cp.expand_dims(output, axis=-1)
 
-        output = cp.nan_to_num(output) if use_cupy else np.nan_to_num(output)
-
-        if use_cupy:
-            output = jdlpack.from_dlpack(output)
-            return {self.output_key: ops.convert_to_tensor(output)}
-
+        output = cp.nan_to_num(output)
+        output = jdlpack.from_dlpack(output)
         return {self.output_key: ops.convert_to_tensor(output)}
 
 
