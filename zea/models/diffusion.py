@@ -128,8 +128,8 @@ class DiffusionModel(DeepGenerativeModel):
             f"Invalid network name: {network_name}. Valid options are: {VALID_NETWORK_MODELS}"
         )
         self.network = model_registry[network_name](
-            image_shape=self.input_shape,
-            image_range=self.input_range,
+            # image_shape=self.input_shape,
+            # image_range=self.input_range,
             **self.network_kwargs,
         )
 
@@ -163,6 +163,8 @@ class DiffusionModel(DeepGenerativeModel):
                 "network_kwargs": self.network_kwargs,
                 "ema_val": self.ema_val,
                 "use_frame_time_conditioning": self.use_frame_time_conditioning,
+                "noise_correlation_across_channels": self.noise_correlation_across_channels,
+                "noise_correlation_alpha": self.noise_correlation_alpha,
             }
         )
         return config
@@ -262,6 +264,7 @@ class DiffusionModel(DeepGenerativeModel):
         initial_samples=None,
         seed=None,
         frame_times=None,
+        initial_noise=None,
         **kwargs,
     ):
         """Sample from the posterior distribution given measurements.
@@ -310,9 +313,10 @@ class DiffusionModel(DeepGenerativeModel):
 
         seed1, seed2 = split_seed(seed, 2)
 
-        initial_noise = self.generate_noise(
-            shape=(batch_size * n_samples, *self.input_shape), seed=seed1
-        )
+        if initial_noise is None:
+            initial_noise = self.generate_noise(
+                shape=(batch_size * n_samples, *self.input_shape), seed=seed1
+            )
 
         out = self.reverse_conditional_diffusion(
             measurements=measurements,
