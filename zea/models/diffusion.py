@@ -128,7 +128,8 @@ class DiffusionModel(DeepGenerativeModel):
             f"Invalid network name: {network_name}. Valid options are: {VALID_NETWORK_MODELS}"
         )
         self.network = model_registry[network_name](
-            input_shape=self.input_shape,
+            image_shape=self.input_shape,
+            image_range=self.input_range,
             **self.network_kwargs,
         )
 

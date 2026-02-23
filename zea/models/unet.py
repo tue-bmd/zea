@@ -140,7 +140,6 @@ class UNetTimeConditional(BaseModel):
             self.embedding_min_frequency,
             self.embedding_max_frequency,
             self.embedding_dims,
-            use_frame_time_conditioning=self.use_frame_time_conditioning,
         )
 
     def get_config(self):
@@ -154,7 +153,6 @@ class UNetTimeConditional(BaseModel):
                 "embedding_min_frequency": self.embedding_min_frequency,
                 "embedding_max_frequency": self.embedding_max_frequency,
                 "embedding_dims": self.embedding_dims,
-                "use_frame_time_conditioning": self.use_frame_time_conditioning,
             }
         )
         return config
@@ -170,7 +168,6 @@ def get_time_conditional_unetwork(
     embedding_min_frequency=1.0,
     embedding_max_frequency=1000.0,
     embedding_dims=32,
-    use_frame_time_conditioning=False,
 ):
     """Get a basic UNet architecture with time-conditional sinusoidal embeddings
 
@@ -199,10 +196,6 @@ def get_time_conditional_unetwork(
     image_height, image_width, n_channels = image_shape
     noisy_images = keras.Input(shape=(image_height, image_width, n_channels))
     noise_variances = keras.Input(shape=(1, 1, 1))
-    if use_frame_time_conditioning:
-        frame_times = keras.Input(shape=(None,))  # (B, T)
-    else:
-        frame_times = None
 
     @keras.saving.register_keras_serializable()
     def _sinusoidal_embedding(x):
@@ -212,20 +205,6 @@ def get_time_conditional_unetwork(
 
     e = layers.Lambda(_sinusoidal_embedding, output_shape=(1, 1, embedding_dims))(noise_variances)
     e = layers.UpSampling2D(size=(image_height, image_width), interpolation="nearest")(e)
-
-    if frame_times is not None:
-        # frame_times: (B, T) where T == n_channels (packed frames)
-        ft = keras.ops.expand_dims(frame_times, axis=-1)  # (B, T, 1)
-        ft_emb = layers.Lambda(
-            lambda x: sinusoidal_embedding(
-                x, embedding_min_frequency, embedding_max_frequency, embedding_dims
-            ),
-            output_shape=(None, embedding_dims),
-        )(ft)
-        ft_bias = layers.Dense(1, name="frame_time_proj")(ft_emb)  # (B, T, 1)
-        ft_bias = keras.ops.squeeze(ft_bias, axis=-1)  # (B, T)
-        ft_bias = ft_bias[:, None, None, :]  # (B, 1, 1, T)
-        noisy_images = layers.Add(name="add_frame_time_bias")([noisy_images, ft_bias])
 
     x = layers.Conv2D(widths[0], kernel_size=1)(noisy_images)
     x = layers.Concatenate()([x, e])
@@ -242,11 +221,7 @@ def get_time_conditional_unetwork(
 
     x = layers.Conv2D(n_channels, kernel_size=1, kernel_initializer="zeros")(x)
 
-    inputs = [noisy_images, noise_variances]
-    if frame_times is not None:
-        inputs.append(frame_times)
-
-    return keras.Model(inputs, x, name="residual_unet")
+    return keras.Model([noisy_images, noise_variances], x, name="residual_unet")
 
 
 # ===========================================================================
