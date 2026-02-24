@@ -241,15 +241,11 @@ def compute_pfield(
     def _compute_pfield_single_tx(delays_tx, tx_apodization):
         # Render pressure field for all relevant frequencies and sum them up
         pressure_squared = _pfield_freq_loop(
-            freq,
-            delays_tx,
-            tx_apodization,
-            exp_arr,
-            exp_freq_step,
-            pulse_spect,
-            probe_spect,
-            grid_z,
+            freq, delays_tx, tx_apodization, exp_arr, exp_freq_step, pulse_spect, probe_spect
         )
+
+        # Zero out pressure behind the transducer (z < 0)
+        pressure_squared = ops.where(grid_z < 0, 0, pressure_squared)
 
         # RMS acoustic pressure
         pressure = ops.reshape(ops.sqrt(pressure_squared), size_downsampled)
@@ -304,13 +300,7 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
 
 
 def _pfield_freq_step(
-    freq,
-    delays_tx,
-    tx_apodization,
-    monochromatic_pressure,
-    pulse_spect,
-    probe_spect,
-    z,
+    freq, delays_tx, tx_apodization, monochromatic_pressure, pulse_spect, probe_spect
 ):
     """
     Calculates the pressure field for a single frequency step.
@@ -326,17 +316,15 @@ def _pfield_freq_step(
             at the current frequency sample.
         probe_spect (complex64): Complex frequency response of the pulse and probe
             at the current frequency sample.
-        z (Tensor): Array of z-coordinates of shape (num_points,).
 
     Returns:
-        pressure_squared_k (Tensor): Pressure field for this frequency.
+        pressure_squared_k (Tensor): Pressure field for this frequency of shape (num_points,).
     """
     angular_frequency = 2 * np.pi * freq
     delay_apodization = (
         ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
     )
     pressure_k = ops.matmul(monochromatic_pressure, delay_apodization) * pulse_spect * probe_spect
-    pressure_k = ops.where(z < 0, 0, pressure_k)
     return ops.abs(pressure_k) ** 2
 
 
@@ -348,7 +336,6 @@ def _pfield_freq_loop(
     exp_freq_step,
     pulse_spect,
     probe_spect,
-    z,
 ):
     """Calculates the pressure field using frequency loop method.
 
@@ -360,7 +347,6 @@ def _pfield_freq_loop(
         exp_freq_step (list): List of complex exponential frequency shifts.
         pulse_spect (Tensor): List of pulse spectra at the frequency samples.
         probe_spect (Tensor): List of probe spectra at the frequency samples.
-        z (Tensor): Array of z-coordinates of shape (num_points,).
 
     Returns:
         (Tensor): Pressure field.
@@ -369,6 +355,7 @@ def _pfield_freq_loop(
     tx_apodization = ops.cast(tx_apodization, "complex64")
     probe_spect = ops.cast(probe_spect, "complex64")
     monochromatic_pressure = exp_arr / exp_freq_step
+    num_points, _ = ops.shape(monochromatic_pressure)
 
     def scan_fn(carry, k):
         monochromatic_pressure, total_pressure_squared = carry
@@ -380,14 +367,13 @@ def _pfield_freq_loop(
             ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
             pulse_spect[k],
             probe_spect[k],
-            z,
         )
         total_pressure_squared += pressure_squared_k
         return (monochromatic_pressure, total_pressure_squared), None
 
     (_, total_pressure_squared), _ = ops.scan(
         scan_fn,
-        (monochromatic_pressure, ops.zeros_like(z, dtype="float32")),
+        (monochromatic_pressure, ops.zeros((num_points,), dtype="float32")),
         ops.arange(len(freq)),
     )
 
