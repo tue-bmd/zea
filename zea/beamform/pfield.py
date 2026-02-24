@@ -355,7 +355,7 @@ def _pfield_freq_loop(
     tx_apodization = ops.cast(tx_apodization, "complex64")
     probe_spect = ops.cast(probe_spect, "complex64")
     monochromatic_pressure = exp_arr / exp_freq_step
-    num_points, _ = ops.shape(monochromatic_pressure)
+    num_points, _, _ = ops.shape(monochromatic_pressure)
 
     def scan_fn(carry, k):
         monochromatic_pressure, total_pressure_squared = carry
