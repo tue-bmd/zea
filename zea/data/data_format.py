@@ -30,8 +30,11 @@ def generate_zea_dataset_from_scan_probe(
     beamformed_data=None,
     image=None,
     image_sc=None,
-    description="No description was supplied",
-    overwrite=False,
+    description: str = "No description was supplied",
+    overwrite: bool = False,
+    additional_elements: list[DatasetElement] | None = None,
+    additional_attributes: dict | None = None,
+    enable_compression: bool = True,
 ):
     generate_zea_dataset(
         path=path,
@@ -62,10 +65,12 @@ def generate_zea_dataset_from_scan_probe(
         tx_waveform_indices=scan.tx_waveform_indices,
         waveforms_one_way=scan.waveforms_one_way,
         waveforms_two_way=scan.waveforms_two_way,
-        additional_elements=None,
+        additional_elements=additional_elements,
         event_structure=False,
         cast_to_float=True,
         overwrite=overwrite,
+        enable_compression=enable_compression,
+        additional_attributes=additional_attributes,
     )
 
 
@@ -118,6 +123,7 @@ def generate_zea_dataset(
     cast_to_float=True,
     overwrite=False,
     enable_compression=True,
+    additional_attributes=None,
 ):
     """Generates a dataset in the zea format.
 
@@ -183,6 +189,9 @@ def generate_zea_dataset(
         enable_compression (bool): Whether to enable gzip compression for datasets.
             Defaults to True. Compression reduces disk space at the cost of increased
             write time.
+        additional_attributes (dict): A dictionary of additional attributes to add to the dataset.
+            The keys are the attribute names and the values are the attribute values. These
+            attributes are added to the root of the dataset.
 
     """
     # check if all args are lists
@@ -219,6 +228,7 @@ def generate_zea_dataset(
         "waveforms_one_way": waveforms_one_way,
         "waveforms_two_way": waveforms_two_way,
         "additional_elements": additional_elements,
+        "additional_attributes": additional_attributes,
     }
 
     # make sure input arguments of func is same length as data_and_parameters
@@ -280,9 +290,13 @@ def generate_zea_dataset(
         dataset.attrs["probe"] = probe_name
         dataset.attrs["description"] = description
         dataset.attrs["event_structure"] = event_structure
+        if additional_attributes is not None:
+            for key, value in additional_attributes.items():
+                dataset.attrs[key] = value
         # remove probe and description from data_and_parameters
         data_and_parameters.pop("probe_name")
         data_and_parameters.pop("description")
+        data_and_parameters.pop("additional_attributes")
 
         if event_structure:
             for i in range(num_events):
