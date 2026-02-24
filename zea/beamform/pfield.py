@@ -198,7 +198,7 @@ def compute_pfield(
 
     # FREQUENCY SAMPLES
     num_freq = 2 * ops.cast(ops.ceil(center_frequency / freq_step), "int32") + 1
-    freq = ops.arange(0, num_freq) * freq_step
+    freq = ops.arange(0, num_freq, dtype="float32") * freq_step
 
     # keep the significant components only by using db_thresh
     spectrum = ops.abs(
