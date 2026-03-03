@@ -32,7 +32,7 @@ Examples usage
     ...     probe = file.probe()
 
     >>> # Work with a dataset (folder or list of files)
-    >>> dataset = Dataset("hf://zeahub/picmus", key="raw_data")
+    >>> dataset = Dataset("hf://zeahub/picmus")
     >>> files = []
     >>> for file in dataset:
     ...     files.append(file)  # process each file as needed

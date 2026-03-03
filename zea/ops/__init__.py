@@ -138,6 +138,7 @@ from .ultrasound import (
     ScanConvert,
     Simulate,
     TOFCorrection,
+    CommonMidpointPhaseError,
     UpMix,
 )
 
@@ -185,6 +186,7 @@ __all__ = [
     "Simulate",
     "TOFCorrection",
     "UpMix",
+    "CommonMidpointPhaseError",
     # Keras operations
     "keras_ops",
 ]

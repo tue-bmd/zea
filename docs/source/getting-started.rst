@@ -50,7 +50,7 @@ Similarly, we can easily load one of the pretrained models from the :mod:`zea.mo
    model = EchoNetDynamic.from_preset("echonet-dynamic")
 
    # we'll load a single file from the dataset
-   with zea.Dataset("hf://zeahub/camus-sample/", "image_sc") as dataset:
+   with zea.Dataset("hf://zeahub/camus-sample/") as dataset:
       file = dataset[0]
       image = file.load_data("image_sc", indices=0)
 

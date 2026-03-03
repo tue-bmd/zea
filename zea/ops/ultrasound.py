@@ -141,6 +141,9 @@ class TOFCorrection(Operation):
         apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
+        sos_map=None,
+        sos_grid_x=None,
+        sos_grid_z=None,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -165,6 +168,9 @@ class TOFCorrection(Operation):
             apply_lens_correction (bool): Whether to apply lens correction
             lens_thickness (float): Lens thickness
             lens_sound_speed (float): Sound speed in the lens
+            sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s.
+            sos_grid_x (Tensor): x-coordinates of ``sos_map`` rows.
+            sos_grid_z (Tensor): z-coordinates of ``sos_map`` columns.
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -190,6 +196,9 @@ class TOFCorrection(Operation):
             "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
+            "sos_map": sos_map,
+            "sos_grid_x": sos_grid_x,
+            "sos_grid_z": sos_grid_z,
         }
 
         if not self.with_batch_dim:
@@ -1035,3 +1044,110 @@ class ApplyWindow(Operation):
         mask = ops.reshape(mask, shape)
 
         return {self.output_key: data * mask}
+
+
+@ops_registry("common_midpoint_phase_error")
+class CommonMidpointPhaseError(Operation):
+    """Calculates the Common Midpoint Phase Error (CMPE)
+
+    Computes CMPE between translated transmit and receive apertures with a common midpoint.
+
+    .. important::
+        Only works for multistatic datasets, e.g. synthetic aperture data.
+
+    .. note::
+        This was directly adapted from the Differentiable Beamforming for Ultrasound Autofocusing (DBUA)
+        paper, see `original paper and code <https://waltersimson.com/dbua/>`_.
+
+    """  # noqa: E501
+
+    def _init_(
+        self,
+        reshape_grid=True,
+        **kwargs,
+    ):
+        super()._init_(
+            input_data_type=None,
+            # DataTypes.IMAGE, because we have an image of the phase map
+            output_data_type=DataTypes.IMAGE,
+            **kwargs,
+        )
+        self.reshape_grid = reshape_grid
+
+    def create_subapertures(self, data, halfsa, dx):
+        """Create subapertures from the data.
+
+        Args:
+            data (ops.Tensor): The data to create subapertures from.
+            halfsa (int): Half of the subaperture.
+            dx (float): The spacing between the subapertures.
+
+        Returns:
+            transmit_subap (ops.Tensor): The transmit subapertures.
+            receive_subap (ops.Tensor): The receive subapertures.
+        """
+        n_tx, n_pix, n_rx, n_ch = data.shape
+        receive_subaps = ops.zeros((n_rx, n_tx))
+        for diag in range(-halfsa, halfsa + 1):
+            receive_subaps = receive_subaps + ops.diag(ops.ones((n_rx - abs(diag),)), diag)
+        receive_subaps = receive_subaps[halfsa : receive_subaps.shape[0] - halfsa : dx]
+        transmit_subaps = ops.flip(receive_subaps, axis=0)
+        return transmit_subaps, receive_subaps
+
+    def process_phase_map(self, data, **kwargs):
+        """Create the common midpoint subaperture phase error map.
+
+        Args:
+            data (ops.Tensor): The data to create the phase error map from.
+
+        Returns:
+            phase_error_map (ops.Tensor): The phase error map.
+        """
+
+        transmit_subaps, receive_subaps = self.create_subapertures(data, 8, 1)
+        complex_data = ops.view_as_complex(data)  # [n_tx, n_pix, n_rx, n_ch] -> [n_rtx, n_pix, r_x]
+        complex_data = ops.transpose(complex_data, (2, 0, 1))  # [n_rx, n_tx, n_pix]
+        rx_zero_count = ops.matmul(receive_subaps, ops.cast(complex_data == 0, "int32"))
+
+        # Mask out subapertures with point outside fov in receive
+        rx_valid = rx_zero_count <= 1
+        complex_data_rx = ops.matmul(receive_subaps, complex_data)
+        complex_data_rx = ops.where(rx_valid, complex_data_rx, 0)
+        complex_data_rx = ops.transpose(complex_data_rx, (1, 0, 2))  # [n_tx, n_subap_rx, n_pix]
+        tx_zero_count = ops.matmul(transmit_subaps, ops.cast(complex_data_rx == 0, "int32"))
+
+        # Mask out subapertures with point outside fov in transmit
+        tx_valid = tx_zero_count <= 1
+
+        data = ops.matmul(transmit_subaps, complex_data_rx)
+        data = ops.where(tx_valid, data, 0)
+        data = ops.transpose(data, (1, 0, 2))  # [n_subap_tx, n_subap, n_pix]
+
+        # take diagonals
+        a = data[:-1, :-1]
+        b = data[1:, 1:]
+        valid = (a != 0) & (b != 0)
+
+        # compute phase difference between cmp neighbours
+        # This only works if the array is regularly spaced
+        xy = a * ops.conj(b)
+        xy = ops.where(valid, xy, 0)
+        dphi = ops.angle(xy)
+        dphi = ops.abs(dphi)
+
+        dphi = ops.sum(dphi, (0, 1)) / ops.cast(ops.sum(valid, (0, 1)), dphi.dtype)
+        return dphi
+
+    def call(
+        self,
+        **kwargs,
+    ):
+        data = kwargs[self.key]
+        if not self.with_batch_dim:
+            pemap = self.process_phase_map(data)
+        else:
+            pemap = ops.map(
+                lambda d: self.process_phase_map(d),
+                data,
+            )
+        return {self.output_key: pemap}

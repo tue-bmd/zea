@@ -19,6 +19,7 @@ from zea.data.file import File
 from zea.data.layers import Resizer
 from zea.data.utils import json_loads
 from zea.tools.hf import HFPath
+
 from .. import DEFAULT_TEST_SEED
 
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
@@ -177,7 +178,7 @@ def test_dataloader(
     else:
         raise ValueError("Invalid directory for testing")
 
-    with Dataset(directory, key=key) as dataset_test:
+    with Dataset(directory) as dataset_test:
         file_lengths = [len(file[key]) for file in dataset_test]
 
     expected_len_dataset = sum(

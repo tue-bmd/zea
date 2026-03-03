@@ -5,7 +5,14 @@ are a bit heavy, so we mark the tests with the `notebook` marker, and also run
 only on self-hosted runners. Run with:
 
 .. code-block:: bash
+
     pytest -s -m 'notebook'
+
+Or to run a specific notebook:
+
+.. code-block:: bash
+
+    pytest -s -m 'notebook' --notebook dbua_example.ipynb
 
 """
 
@@ -78,6 +85,10 @@ NOTEBOOK_PARAMETERS = {
         "n_samples": 2,
         "batch_size": 1,
     },
+    "dbua_example.ipynb": {
+        "num_iterations": 2,
+        "step_size": 1,
+    },
     # Add more notebooks and their parameters here as needed
     # "other_notebook.ipynb": {
     #     "param1": value1,
@@ -100,7 +111,12 @@ def pytest_sessionstart(session):
 
 @pytest.mark.notebook
 @pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda x: x.name)
-def test_notebook_runs(notebook, tmp_path):
+def test_notebook_runs(notebook, tmp_path, request):
+    # Filter by --notebook CLI option if provided
+    notebook_filter = request.config.getoption("--notebook")
+    if notebook_filter and notebook_filter not in notebook.name:
+        pytest.skip(f"Skipped (--notebook={notebook_filter})")
+
     print(f"\n📘 Starting notebook: {notebook.name}")
 
     output_path = tmp_path / notebook.name
