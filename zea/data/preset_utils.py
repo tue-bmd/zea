@@ -32,21 +32,22 @@ def _hf_parse_path(hf_path: str):
     return repo_id, subpath
 
 
-def _hf_list_files(repo_id):
+def _hf_list_files(repo_id, repo_type="dataset", **kwargs):
     try:
-        files = list_repo_files(repo_id, repo_type="dataset")
+        files = list_repo_files(repo_id, repo_type=repo_type, **kwargs)
     except (RepositoryNotFoundError, HFValidationError, EntryNotFoundError):
         login(new_session=False)
-        files = list_repo_files(repo_id, repo_type="dataset")
+        files = list_repo_files(repo_id, repo_type=repo_type, **kwargs)
     return files
 
 
-def _hf_download(repo_id, filename, cache_dir=HF_DATASETS_DIR):
+def _hf_download(repo_id, filename, cache_dir=HF_DATASETS_DIR, repo_type="dataset", **kwargs):
     return hf_hub_download(
         repo_id=repo_id,
         filename=filename,
         cache_dir=cache_dir,
-        repo_type="dataset",
+        repo_type=repo_type,
+        **kwargs,
     )
 
 
@@ -74,19 +75,32 @@ def _get_snapshot_dir_from_downloaded_file(downloaded_file_path: str | Path) -> 
 
 
 def _download_files_in_path(
-    repo_id: str, files: list, path_filter: str = None, cache_dir=HF_DATASETS_DIR
+    repo_id: str,
+    files: list,
+    path_filter: str = None,
+    cache_dir=HF_DATASETS_DIR,
+    repo_type="dataset",
+    **kwargs,
 ) -> list[str]:
     """Download all files matching the path filter."""
     downloaded_files = []
     for f in files:
         if path_filter is None or f.startswith(path_filter):
-            downloaded_path = _hf_download(repo_id, f, cache_dir)
+            downloaded_path = _hf_download(
+                repo_id,
+                f,
+                cache_dir=cache_dir,
+                repo_type=repo_type,
+                **kwargs,
+            )
             downloaded_files.append(downloaded_path)
 
     return downloaded_files
 
 
-def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR) -> Path:
+def _hf_resolve_path(
+    hf_path: str, cache_dir=HF_DATASETS_DIR, repo_type="dataset", **kwargs
+) -> Path:
     """Resolve a Hugging Face path to a local cache directory path.
 
     Downloads files from a HuggingFace dataset repository and returns
@@ -96,12 +110,23 @@ def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR) -> Path:
     - hf://org/repo - Downloads all files in repo
     """
     repo_id, subpath = _hf_parse_path(hf_path)
-    files = _hf_list_files(repo_id)
+    files = _hf_list_files(
+        repo_id,
+        repo_type=repo_type,
+        **kwargs,
+    )
 
     if subpath:
         # Directory case
         if any(f.startswith(subpath + "/") for f in files):
-            downloaded_files = _download_files_in_path(repo_id, files, subpath + "/", cache_dir)
+            downloaded_files = _download_files_in_path(
+                repo_id,
+                files,
+                subpath + "/",
+                cache_dir=cache_dir,
+                repo_type=repo_type,
+                **kwargs,
+            )
             if not downloaded_files:
                 raise FileNotFoundError(f"No files found in directory {subpath}")
 
@@ -110,13 +135,26 @@ def _hf_resolve_path(hf_path: str, cache_dir=HF_DATASETS_DIR) -> Path:
 
         # File case
         elif subpath in files:
-            downloaded_file = _hf_download(repo_id, subpath, cache_dir)
+            downloaded_file = _hf_download(
+                repo_id,
+                subpath,
+                cache_dir=cache_dir,
+                repo_type=repo_type,
+                **kwargs,
+            )
             return Path(downloaded_file)
         else:
             raise FileNotFoundError(f"{subpath} not found in {repo_id}")
     else:
         # All files in repo
-        downloaded_files = _download_files_in_path(repo_id, files, None, cache_dir)
+        downloaded_files = _download_files_in_path(
+            repo_id,
+            files,
+            None,
+            cache_dir=cache_dir,
+            repo_type=repo_type,
+            **kwargs,
+        )
         if not downloaded_files:
             raise FileNotFoundError(f"No files found in repository {repo_id}")
 

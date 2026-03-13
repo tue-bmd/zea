@@ -16,7 +16,7 @@ import SimpleITK as sitk
 import yaml
 
 from zea.data.convert.images import convert_image_dataset
-from zea.data.convert.utils import load_avi, unzip
+from zea.data.convert.utils import load_avi, sitk_load, unzip
 from zea.data.convert.verasonics import VerasonicsFile
 from zea.data.file import File
 from zea.data.preset_utils import _hf_resolve_path
@@ -25,7 +25,9 @@ from zea.io_lib import _SUPPORTED_IMG_TYPES
 from .. import DEFAULT_TEST_SEED
 
 
-@pytest.mark.parametrize("dataset", ["echonet", "echonetlvh", "camus", "picmus", "verasonics"])
+@pytest.mark.parametrize(
+    "dataset", ["echonet", "echonetlvh", "camus", "cetus", "picmus", "verasonics"]
+)
 @pytest.mark.heavy
 def test_conversion_script(tmp_path_factory, dataset):
     """
@@ -101,7 +103,9 @@ def create_test_data_for_dataset(dataset, src):
     elif dataset == "echonetlvh":
         extra_args = create_echonetlvh_test_data(src)
     elif dataset == "camus":
-        create_camus_test_data(src)
+        extra_args = create_camus_test_data(src)
+    elif dataset == "cetus":
+        extra_args = create_cetus_test_data(src)
     elif dataset == "picmus":
         create_picmus_test_data(src)
     elif dataset == "verasonics":
@@ -129,6 +133,8 @@ def verify_converted_test_dataset(dataset, src, dst):
         verify_converted_echonetlvh_test_data(dst)
     elif dataset == "camus":
         verify_converted_camus_test_data(dst)
+    elif dataset == "cetus":
+        verify_converted_cetus_test_data(dst)
     elif dataset == "picmus":
         verify_converted_picmus_test_data(dst)
     elif dataset == "verasonics":
@@ -416,6 +422,40 @@ def create_camus_test_data(src):
         image.SetMetaData("StudyDate", "01011970")
         sitk.WriteImage(image, str(filepath))
 
+    return ["--no_hyperthreading"]  # for code coverage to hit
+
+
+def create_cetus_test_data(src):
+    """Create CETUS-like NIfTI test data.
+
+    Creates 3 patients (IDs 1, 31, 39) to cover train/val/test splits,
+    each with ED, ES B-mode volumes and corresponding ground truth masks.
+    """
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    for pid in [1, 31, 39]:
+        patient_name = f"patient{pid:02d}"
+        patient_dir = src / patient_name
+        os.makedirs(patient_dir)
+
+        for tp in ["ED", "ES"]:
+            # Small 3D volume with a background padding value (~10) and data region
+            vol = np.full((16, 16, 16), 10.0, dtype=np.float32)
+            vol[4:12, 4:12, 4:12] = rng.uniform(30, 255, (8, 8, 8)).astype(np.float32)
+
+            image = sitk.GetImageFromArray(vol)
+            image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
+            sitk.WriteImage(image, str(patient_dir / f"{patient_name}_{tp}.nii.gz"))
+
+            # Ground truth segmentation
+            gt = np.zeros((16, 16, 16), dtype=np.float32)
+            gt[5:11, 5:11, 5:11] = 255.0
+            gt_image = sitk.GetImageFromArray(gt)
+            gt_image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
+            sitk.WriteImage(gt_image, str(patient_dir / f"{patient_name}_{tp}_gt.nii.gz"))
+
+    return ["--no_hyperthreading"]  # for code coverage to hit
+
 
 def create_picmus_test_data(src):
     """
@@ -643,6 +683,38 @@ def verify_converted_camus_test_data(dst):
                 f.validate()
 
 
+def verify_converted_cetus_test_data(dst):
+    """Verify CETUS conversion produced correct train/val/test HDF5 files."""
+    from zea.data.convert.cetus import get_split
+
+    expected = {
+        "train": ["patient01_ED.hdf5", "patient01_ES.hdf5"],
+        "val": ["patient31_ED.hdf5", "patient31_ES.hdf5"],
+        "test": ["patient39_ED.hdf5", "patient39_ES.hdf5"],
+    }
+    for split, filenames in expected.items():
+        split_dir = dst / split
+        assert split_dir.exists(), f"Missing directory: {split_dir}"
+        h5_files = [f.name for f in split_dir.rglob("*.hdf5")]
+        assert set(h5_files) == set(filenames), (
+            f"Mismatch in converted hdf5 files for split {split}"
+        )
+
+    # Spot-check one file
+    sample = dst / "train" / "patient01" / "patient01_ED.hdf5"
+    with File(sample, "r") as f:
+        assert "data" in f, "Missing 'data' group"
+        img = f.load_data("image_sc")
+        assert img.ndim == 4, f"Expected 4-D image_sc, got {img.ndim}"
+        f.validate()
+        assert "non_standard_elements/segmentation" in f
+        assert "non_standard_elements/voxel_spacing" in f
+
+    # Exercise the error branch of get_split (not reachable via normal conversion)
+    with pytest.raises(ValueError):
+        get_split(0)
+
+
 def verify_converted_picmus_test_data(dst):
     """
     Verify that 2/3 of the created hdf5 files were converted to zea format.
@@ -730,6 +802,27 @@ def test_load_avi(tmp_path):
     assert loaded_frames.shape == (10, 32, 32)
     for i in range(10):
         np.testing.assert_allclose(loaded_frames[i], frames[i], atol=1)
+
+
+def test_sitk_load(tmp_path):
+    """Direct test of sitk_load from zea.data.convert.utils."""
+    # Create a small 3-D NIfTI file
+    vol = np.arange(8, dtype=np.float32).reshape(2, 2, 2)
+    image = sitk.GetImageFromArray(vol)
+    image.SetSpacing((0.5, 0.5, 0.5))
+    nii_path = tmp_path / "test_vol.nii.gz"
+    sitk.WriteImage(image, str(nii_path))
+
+    # Load without squeeze (default)
+    arr, meta = sitk_load(nii_path)
+    assert arr.shape == (2, 2, 2)
+    assert "spacing" in meta
+    assert meta["spacing"] == (0.5, 0.5, 0.5)
+    assert "metadata" in meta
+
+    # Load with squeeze (no-op for a full 3-D volume, but exercises the path)
+    arr_sq, _ = sitk_load(nii_path, squeeze=True)
+    assert arr_sq.shape == arr.shape
 
 
 @pytest.mark.parametrize(

@@ -206,8 +206,9 @@ class H5Generator(Dataset):
         validate: bool = True,
         **kwargs,
     ):
-        super().__init__(file_paths, key, validate=validate, **kwargs)
+        super().__init__(file_paths, validate=validate, **kwargs)
 
+        self.key = key
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
@@ -228,7 +229,8 @@ class H5Generator(Dataset):
         assert self.n_frames > 0, f"`n_frames` must be greater than 0, got {self.n_frames}"
 
         # Extract some general information about the dataset
-        image_shapes = np.array(self.file_shapes)
+        file_shapes = self.load_file_shapes(key)
+        image_shapes = np.array(file_shapes)
         image_shapes = np.delete(
             image_shapes, (self.initial_frame_axis, *self.additional_axes_iter), axis=1
         )
@@ -255,7 +257,7 @@ class H5Generator(Dataset):
 
         self.indices = generate_h5_indices(
             file_paths=self.file_paths,
-            file_shapes=self.file_shapes,
+            file_shapes=file_shapes,
             n_frames=self.n_frames,
             frame_index_stride=self.frame_index_stride,
             key=self.key,

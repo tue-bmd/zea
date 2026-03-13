@@ -1,4 +1,3 @@
-import uuid
 from typing import Tuple
 
 import keras
@@ -41,11 +40,11 @@ class Simulate(Operation):
 
     # Define operation-specific static parameters
     STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
+    ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
-            additional_output_keys=["n_ch"],
             **kwargs,
         )
 
@@ -141,6 +140,9 @@ class TOFCorrection(Operation):
         apply_lens_correction=None,
         lens_thickness=None,
         lens_sound_speed=None,
+        sos_map=None,
+        sos_grid_x=None,
+        sos_grid_z=None,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -165,6 +167,9 @@ class TOFCorrection(Operation):
             apply_lens_correction (bool): Whether to apply lens correction
             lens_thickness (float): Lens thickness
             lens_sound_speed (float): Sound speed in the lens
+            sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s.
+            sos_grid_x (Tensor): x-coordinates of ``sos_map`` rows.
+            sos_grid_z (Tensor): z-coordinates of ``sos_map`` columns.
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -190,6 +195,9 @@ class TOFCorrection(Operation):
             "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
+            "sos_map": sos_map,
+            "sos_grid_x": sos_grid_x,
+            "sos_grid_z": sos_grid_z,
         }
 
         if not self.with_batch_dim:
@@ -251,6 +259,18 @@ class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
     STATIC_PARAMS = ["fill_value"]
+    ADD_OUTPUT_KEYS = [
+        "resolution",
+        "x_lim",
+        "y_lim",
+        "z_lim",
+        "rho_range",
+        "theta_range",
+        "phi_range",
+        "d_rho",
+        "d_theta",
+        "d_phi",
+    ]
 
     def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
@@ -271,18 +291,6 @@ class ScanConvert(Operation):
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
             jittable=jittable,
-            additional_output_keys=[
-                "resolution",
-                "x_lim",
-                "y_lim",
-                "z_lim",
-                "rho_range",
-                "theta_range",
-                "phi_range",
-                "d_rho",
-                "d_theta",
-                "d_phi",
-            ],
             **kwargs,
         )
         self.order = order
@@ -345,12 +353,13 @@ class Demodulate(Operation):
     """Demodulates the input data to baseband. After this operation, the carrier frequency
     is removed (0 Hz) and the data is in IQ format stored in two real valued channels."""
 
+    ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
+
     def __init__(self, axis=-3, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
             jittable=True,
-            additional_output_keys=["center_frequency", "n_ch"],
             **kwargs,
         )
         self.axis = axis
@@ -432,7 +441,7 @@ class FirFilter(Operation):
 
         def _convolve(signal):
             """Apply the filter to the signal using correlation."""
-            return correlate(signal, fir_filter_taps[::-1], mode="same")
+            return correlate(signal, ops.flip(fir_filter_taps, axis=0), mode="same")
 
         filtered_signal = apply_along_axis(_convolve, axis, signal)
 
@@ -453,7 +462,9 @@ class LowPassFilterIQ(FirFilter):
     Uses :func:`get_low_pass_iq_filter` to compute the filter taps.
     """
 
-    def __init__(self, axis: int = -3, num_taps: int = 127, **kwargs):
+    def __init__(
+        self, axis: int = -3, num_taps: int = 127, filter_key: str = "low_pass_filter", **kwargs
+    ):
         """Initialize the LowPassFilterIQ operation.
 
         Args:
@@ -463,14 +474,18 @@ class LowPassFilterIQ(FirFilter):
             num_taps (int): Number of taps in the FIR filter. Default is 127.
                 Odd will result in a type I filter, even in a type II filter.
         """
-        self._random_suffix = str(uuid.uuid4())
-        kwargs.pop("filter_key", None)
+        if "jittable" in kwargs:
+            raise ValueError("LowPassFilterIQ is not jittable, so jittable must be set to False.")
+        if "complex_channels" in kwargs and not kwargs["complex_channels"]:
+            raise ValueError(
+                "LowPassFilterIQ operates on IQ data, so complex_channels must be True."
+            )
         kwargs.pop("jittable", None)
         kwargs.pop("complex_channels", None)
         super().__init__(
             axis=axis,
             complex_channels=True,
-            filter_key=f"low_pass_{self._random_suffix}",
+            filter_key=filter_key,
             jittable=False,
             **kwargs,
         )
@@ -501,7 +516,9 @@ class BandPassFilter(FirFilter):
     filter taps.
     """
 
-    def __init__(self, axis: int = -3, num_taps: int = 127, **kwargs):
+    def __init__(
+        self, axis: int = -3, num_taps: int = 127, filter_key: str = "band_pass_filter", **kwargs
+    ):
         """Initialize the BandPassFilter operation.
 
         Args:
@@ -510,13 +527,15 @@ class BandPassFilter(FirFilter):
             num_taps (int): Number of taps in the FIR filter. Default is 127.
                 Odd will result in a type I filter, even in a type II filter.
         """
-        self._random_suffix = str(uuid.uuid4())
-        kwargs.pop("filter_key", None)
+        if "complex_channels" in kwargs and kwargs["complex_channels"]:
+            raise ValueError(
+                "BandPassFilter operates on a real signal, so complex_channels must be False."
+            )
         kwargs.pop("complex_channels", None)
         super().__init__(
             axis=axis,
             complex_channels=False,
-            filter_key=f"band_pass_{self._random_suffix}",
+            filter_key=filter_key,
             **kwargs,
         )
         self.num_taps = num_taps
@@ -725,9 +744,10 @@ class Companding(Operation):
 class Downsample(Operation):
     """Downsample data along a specific axis."""
 
+    ADD_OUTPUT_KEYS = ["sampling_frequency", "n_ax"]
+
     def __init__(self, factor: int = 1, phase: int = 0, axis: int = -3, **kwargs):
         super().__init__(
-            additional_output_keys=["sampling_frequency", "n_ax"],
             **kwargs,
         )
         if factor < 1:
@@ -1008,7 +1028,7 @@ class ApplyWindow(Operation):
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        dtype = data.dtype
+        dtype = ops.dtype(data)
         axis = canonicalize_axis(self.axis, ops.ndim(data))
 
         length = ops.shape(data)[axis]
@@ -1035,3 +1055,110 @@ class ApplyWindow(Operation):
         mask = ops.reshape(mask, shape)
 
         return {self.output_key: data * mask}
+
+
+@ops_registry("common_midpoint_phase_error")
+class CommonMidpointPhaseError(Operation):
+    """Calculates the Common Midpoint Phase Error (CMPE)
+
+    Computes CMPE between translated transmit and receive apertures with a common midpoint.
+
+    .. important::
+        Only works for multistatic datasets, e.g. synthetic aperture data.
+
+    .. note::
+        This was directly adapted from the Differentiable Beamforming for Ultrasound Autofocusing (DBUA)
+        paper, see `original paper and code <https://waltersimson.com/dbua/>`_.
+
+    """  # noqa: E501
+
+    def _init_(
+        self,
+        reshape_grid=True,
+        **kwargs,
+    ):
+        super()._init_(
+            input_data_type=None,
+            # DataTypes.IMAGE, because we have an image of the phase map
+            output_data_type=DataTypes.IMAGE,
+            **kwargs,
+        )
+        self.reshape_grid = reshape_grid
+
+    def create_subapertures(self, data, halfsa, dx):
+        """Create subapertures from the data.
+
+        Args:
+            data (ops.Tensor): The data to create subapertures from.
+            halfsa (int): Half of the subaperture.
+            dx (float): The spacing between the subapertures.
+
+        Returns:
+            transmit_subap (ops.Tensor): The transmit subapertures.
+            receive_subap (ops.Tensor): The receive subapertures.
+        """
+        n_tx, n_pix, n_rx, n_ch = data.shape
+        receive_subaps = ops.zeros((n_rx, n_tx))
+        for diag in range(-halfsa, halfsa + 1):
+            receive_subaps = receive_subaps + ops.diag(ops.ones((n_rx - abs(diag),)), diag)
+        receive_subaps = receive_subaps[halfsa : receive_subaps.shape[0] - halfsa : dx]
+        transmit_subaps = ops.flip(receive_subaps, axis=0)
+        return transmit_subaps, receive_subaps
+
+    def process_phase_map(self, data, **kwargs):
+        """Create the common midpoint subaperture phase error map.
+
+        Args:
+            data (ops.Tensor): The data to create the phase error map from.
+
+        Returns:
+            phase_error_map (ops.Tensor): The phase error map.
+        """
+
+        transmit_subaps, receive_subaps = self.create_subapertures(data, 8, 1)
+        complex_data = ops.view_as_complex(data)  # [n_tx, n_pix, n_rx, n_ch] -> [n_rtx, n_pix, r_x]
+        complex_data = ops.transpose(complex_data, (2, 0, 1))  # [n_rx, n_tx, n_pix]
+        rx_zero_count = ops.matmul(receive_subaps, ops.cast(complex_data == 0, "int32"))
+
+        # Mask out subapertures with point outside fov in receive
+        rx_valid = rx_zero_count <= 1
+        complex_data_rx = ops.matmul(receive_subaps, complex_data)
+        complex_data_rx = ops.where(rx_valid, complex_data_rx, 0)
+        complex_data_rx = ops.transpose(complex_data_rx, (1, 0, 2))  # [n_tx, n_subap_rx, n_pix]
+        tx_zero_count = ops.matmul(transmit_subaps, ops.cast(complex_data_rx == 0, "int32"))
+
+        # Mask out subapertures with point outside fov in transmit
+        tx_valid = tx_zero_count <= 1
+
+        data = ops.matmul(transmit_subaps, complex_data_rx)
+        data = ops.where(tx_valid, data, 0)
+        data = ops.transpose(data, (1, 0, 2))  # [n_subap_tx, n_subap, n_pix]
+
+        # take diagonals
+        a = data[:-1, :-1]
+        b = data[1:, 1:]
+        valid = (a != 0) & (b != 0)
+
+        # compute phase difference between cmp neighbours
+        # This only works if the array is regularly spaced
+        xy = a * ops.conj(b)
+        xy = ops.where(valid, xy, 0)
+        dphi = ops.angle(xy)
+        dphi = ops.abs(dphi)
+
+        dphi = ops.sum(dphi, (0, 1)) / ops.cast(ops.sum(valid, (0, 1)), dphi.dtype)
+        return dphi
+
+    def call(
+        self,
+        **kwargs,
+    ):
+        data = kwargs[self.key]
+        if not self.with_batch_dim:
+            pemap = self.process_phase_map(data)
+        else:
+            pemap = ops.map(
+                lambda d: self.process_phase_map(d),
+                data,
+            )
+        return {self.output_key: pemap}

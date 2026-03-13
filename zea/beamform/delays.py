@@ -5,8 +5,11 @@ import numpy as np
 
 
 def compute_t0_delays_planewave(probe_geometry, polar_angles, azimuth_angles=0, sound_speed=1540):
-    """Computes the transmit delays for a planewave, shifted such that the
-    first element fires at t=0.
+    """Computes the transmit delays for a planewave.
+
+    .. note::
+
+        The transmit delays are shifted such that the first element fires at ``t=0``.
 
     Args:
         probe_geometry (np.ndarray): The positions of the elements in the array of
@@ -59,8 +62,11 @@ def compute_t0_delays_focused(
     azimuth_angles=None,
     sound_speed=1540,
 ):
-    """Computes the transmit delays for a focused transmit, shifted such that
-    the first element fires at t=0.
+    """Computes the transmit delays for a focused transmit.
+
+    .. note::
+
+        The transmit delays are shifted such that the first element fires at ``t=0``.
 
     Args:
         transmit_origins (np.ndarray): The origin of the focused transmit of shape (n_tx, 3,).

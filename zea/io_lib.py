@@ -501,6 +501,10 @@ def preprocess_for_saving(images):
             or (n_frames, height, width).
     """
     images = np.array(images)
+
+    if len(images) == 0:
+        raise ValueError("Received empty list of images. Cannot save an empty video.")
+
     _assert_uint8_images(images)
 
     # Remove channel axis if it is 1 (grayscale image)

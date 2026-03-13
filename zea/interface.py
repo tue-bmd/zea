@@ -76,7 +76,7 @@ class Interface:
         )
 
         self.process = Pipeline.from_config(
-            self.config.pipeline,
+            self.config,
             with_batch_dim=False,
             jit_options=None,
         )

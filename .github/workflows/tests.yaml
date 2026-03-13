@@ -158,7 +158,7 @@ jobs:
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
-      - name: Build documentation with Sphinx (fail on warnings)
+      - name: Build documentation with Sphinx (fails on warnings)
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/zea" \
