@@ -1,3 +1,7 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
 [project]
 name = "zea"
 version = "0.0.10"
@@ -15,7 +19,7 @@ authors = [
     { name = "Ruud van Sloun", email = "r.j.g.v.sloun@tue.nl" },
 ]
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
 keywords = ["ultrasound", "machine learning", "beamforming"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -25,6 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Natural Language :: English",
     "Topic :: Scientific/Engineering",
 ]
@@ -68,6 +73,7 @@ dev = [
     "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
     "sphinxcontrib-bibtex",
+    "setuptools<82",
     "myst-parser",
     "nbsphinx",
     "furo",
@@ -99,6 +105,7 @@ docs = [
     "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
     "sphinxcontrib-bibtex",
+    "setuptools<82",
     "myst-parser",
     "nbsphinx",
     "furo",
@@ -130,10 +137,6 @@ Repository = "https://github.com/tue-bmd/zea/"
 
 [project.scripts]
 zea = "zea.__main__:main"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 # We use ruff to lint and auto-format code

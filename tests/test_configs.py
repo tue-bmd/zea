@@ -8,6 +8,7 @@ import yaml
 from schema import SchemaError
 
 from zea.config import Config, check_config
+from zea.internal.setup_zea import setup_config
 
 wd = Path(__file__).parent.parent
 sys.path.append(str(wd))
@@ -122,7 +123,7 @@ def test_yaml_saving_loading(tmp_path, request, dictionary):
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Save the config to a yaml file
-    config.save_to_yaml(path)
+    config.to_yaml(path)
 
     # Load the config from the yaml file
     config2 = Config.from_yaml(path)
@@ -144,6 +145,66 @@ def test_serialize(dictionary):
 
     # Check if the config is the same
     config_check_equal_recursive(config, serialized)
+
+
+def test_config_from_path_forwards_hf_kwargs(tmp_path, monkeypatch):
+    """Config.from_path should forward repo_type and other HF kwargs to the resolver."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("a: 1\n", encoding="utf-8")
+
+    calls = []
+
+    def fake_resolve(path, **kwargs):
+        calls.append((path, kwargs))
+        return config_path
+
+    monkeypatch.setattr("zea.config._hf_resolve_path", fake_resolve)
+
+    config = Config.from_path(
+        "hf://org/repo/config.yaml",
+        repo_type="model",
+        revision="my-branch",
+    )
+
+    assert config.a == 1
+    assert calls == [
+        (
+            "hf://org/repo/config.yaml",
+            {"repo_type": "model", "revision": "my-branch"},
+        )
+    ]
+
+
+def test_setup_config_forwards_hf_kwargs(monkeypatch):
+    """setup_config should pass HF kwargs through to Config.from_path."""
+    calls = []
+
+    def fake_from_path(path, **kwargs):
+        calls.append((path, kwargs))
+        return Config({"device": "cpu", "hide_devices": None, "data": {"local": True}})
+
+    monkeypatch.setattr("zea.internal.setup_zea.Config.from_path", fake_from_path)
+    monkeypatch.setattr("zea.internal.setup_zea.get_git_summary", lambda verbose: {"sha": "abc"})
+
+    config = setup_config(
+        "hf://org/repo/config.yaml",
+        verbose=False,
+        disable_config_check=True,
+        repo_type="model",
+        revision="my-branch",
+    )
+
+    assert config.git == {"sha": "abc"}
+    assert calls == [
+        (
+            "hf://org/repo/config.yaml",
+            {
+                "loader": yaml.FullLoader,
+                "repo_type": "model",
+                "revision": "my-branch",
+            },
+        )
+    ]
 
 
 def test_check_equal():

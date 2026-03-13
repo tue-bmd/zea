@@ -21,6 +21,7 @@ from zea.internal.core import (
 )
 from zea.internal.core import Object as ZEAObject
 from zea.internal.registry import ops_registry
+from zea.internal.utils import deprecated
 from zea.ops.base import (
     Operation,
     get_ops,
@@ -119,8 +120,16 @@ class Pipeline:
         if jit_kwargs is None:
             jit_kwargs = {}
 
+        self._user_jit_kwargs = jit_kwargs.copy()
+
         if keras.backend.backend() == "jax" and self.static_params != []:
-            jit_kwargs = {"static_argnames": self.static_params}
+            existing = jit_kwargs.get("static_argnames", [])
+            if isinstance(existing, str):
+                existing = [existing]
+            jit_kwargs = {
+                **jit_kwargs,
+                "static_argnames": list(set(existing) | set(self.static_params)),
+            }
 
         self.jit_kwargs = jit_kwargs
         self.jit_options = jit_options  # will handle the jit compilation
@@ -276,7 +285,7 @@ class Pipeline:
         self.reinitialize()
 
     @property
-    def operations(self):
+    def operations(self) -> List[Union[Operation, "Pipeline"]]:
         """Alias for self.layers to match the zea naming convention"""
         return self._pipeline_layers
 
@@ -493,28 +502,66 @@ class Pipeline:
                 json_str = f.read()
             return pipeline_from_json(json_str, **kwargs)
         elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
-            return pipeline_from_yaml(file_path, **kwargs)
+            return cls.from_path(file_path, **kwargs)
         else:
             raise ValueError("File must have extension .json, .yaml, or .yml")
 
-    def get_dict(self) -> dict:
-        """Convert the pipeline to a dictionary."""
-        config = {}
-        config["name"] = ops_registry.get_name(self)
-        config["operations"] = self._pipeline_to_list(self)
-        config["params"] = {
-            "with_batch_dim": self.with_batch_dim,
-            "jit_options": self.jit_options,
-            "jit_kwargs": self.jit_kwargs,
-        }
+    def get_dict(self, compact=True) -> dict:
+        """Convert the pipeline to a dictionary.
+
+        Args:
+            compact (bool): If True (default), only include
+                parameters that differ from their defaults.
+                If False, include all parameters for full reproducibility.
+        """
+        config = {"name": ops_registry.get_name(self)}
+        config["operations"] = self._pipeline_to_list(self, compact=compact)
+
+        if compact:
+            params = {}
+            if not self.with_batch_dim:
+                params["with_batch_dim"] = self.with_batch_dim
+            if self.jit_options != "ops":
+                params["jit_options"] = self.jit_options
+            if self._user_jit_kwargs:
+                params["jit_kwargs"] = self._user_jit_kwargs
+            if params:
+                config["params"] = params
+        else:
+            config["params"] = {
+                "with_batch_dim": self.with_batch_dim,
+                "jit_options": self.jit_options,
+                "jit_kwargs": self._user_jit_kwargs,
+            }
+
         return config
 
     @staticmethod
-    def _pipeline_to_list(pipeline):
+    def _pipeline_to_list(pipeline: "Pipeline", compact=True):
         """Convert the pipeline to a list of operations."""
         ops_list = []
         for op in pipeline.operations:
-            ops_list.append(op.get_dict())
+            if isinstance(op, Pipeline):
+                ops_list.append(op.get_dict(compact=compact))
+            else:
+                d = op.get_dict(compact=compact)
+                if compact:
+                    params = d.get("params", {})
+                    # Strip with_batch_dim when it is merely inherited from the pipeline
+                    if params.get("with_batch_dim") == pipeline.with_batch_dim:
+                        params.pop("with_batch_dim", None)
+                    # Strip jit_compile=False when it is implied by pipeline-level JIT
+                    if not params.get("jit_compile", True) and pipeline.jit_options in (
+                        None,
+                        "pipeline",
+                    ):
+                        params.pop("jit_compile", None)
+                    if not params:
+                        d.pop("params", None)
+                    # Name-only dict → bare string shorthand
+                    if list(d.keys()) == ["name"]:
+                        d = d["name"]
+                ops_list.append(d)
         return ops_list
 
     @classmethod
@@ -523,10 +570,8 @@ class Pipeline:
 
         Args:
             config (dict or Config): Configuration dictionary or ``zea.Config`` object.
+                Must have a ``pipeline`` key with a subkey ``operations``.
             **kwargs: Additional keyword arguments to be passed to the pipeline.
-
-        Note:
-            Must have a ``pipeline`` key with a subkey ``operations``.
 
         Example:
             .. doctest::
@@ -534,9 +579,11 @@ class Pipeline:
                 >>> from zea import Config, Pipeline
                 >>> config = Config(
                 ...     {
-                ...         "operations": [
-                ...             "identity",
-                ...         ],
+                ...         "pipeline": {
+                ...             "operations": [
+                ...                 "identity",
+                ...             ],
+                ...         }
                 ...     }
                 ... )
                 >>> pipeline = Pipeline.from_config(config)
@@ -544,32 +591,37 @@ class Pipeline:
         return pipeline_from_config(Config(config), **kwargs)
 
     @classmethod
-    def from_yaml(cls, file_path: str, **kwargs) -> "Pipeline":
-        """Create a pipeline from a YAML file.
+    def from_path(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Create a pipeline from a YAML/config file path.
 
         Args:
-            file_path (str): Path to the YAML file.
+            file_path (str): Path to the config file (local or ``hf://`` URI).
+                Must have a ``pipeline`` key with a subkey ``operations``.
             **kwargs: Additional keyword arguments to be passed to the pipeline.
-
-        Note:
-            Must have the a `pipeline` key with a subkey `operations`.
 
         Example:
             .. doctest::
 
-                >>> import yaml
-                >>> from zea import Config
-                >>> # Create a sample pipeline YAML file
-                >>> pipeline_dict = {
-                ...     "operations": [
-                ...         "identity",
-                ...     ],
-                ... }
-                >>> with open("pipeline.yaml", "w") as f:
-                ...     yaml.dump(pipeline_dict, f)
-                >>> from zea.ops import Pipeline
-                >>> pipeline = Pipeline.from_yaml("pipeline.yaml", jit_options=None)
+                >>> from zea import Config, Pipeline
+                >>> config = Config(
+                ...     {
+                ...         "pipeline": {
+                ...             "operations": [
+                ...                 "identity",
+                ...             ],
+                ...         }
+                ...     }
+                ... )
+                >>> config.to_yaml("pipeline.yaml")
+                >>> pipeline = Pipeline.from_path("pipeline.yaml")
         """
+        config = Config.from_path(file_path)
+        return pipeline_from_config(config, **kwargs)
+
+    @classmethod
+    @deprecated(replacement="Pipeline.from_path")
+    def from_yaml(cls, file_path: str, **kwargs) -> "Pipeline":
+        """Deprecated. Use :meth:`from_path` instead."""
         return pipeline_from_yaml(file_path, **kwargs)
 
     @classmethod
@@ -578,30 +630,28 @@ class Pipeline:
 
         Args:
             json_string (str): JSON string representing the pipeline.
+                Must have a ``pipeline`` key with a subkey ``operations``.
             **kwargs: Additional keyword arguments to be passed to the pipeline.
-
-        Note:
-            Must have the `operations` key.
 
         Example:
         ```python
-        json_string = '{"operations": ["identity"]}'
+        json_string = '{"pipeline": {"operations": ["identity"]}}'
         pipeline = Pipeline.from_json(json_string)
         ```
         """
         return pipeline_from_json(json_string, **kwargs)
 
-    def to_config(self) -> Config:
+    def to_config(self, compact=True) -> Config:
         """Convert the pipeline to a `zea.Config` object."""
-        return pipeline_to_config(self)
+        return pipeline_to_config(self, compact=compact)
 
-    def to_json(self) -> str:
+    def to_json(self, compact=True) -> str:
         """Convert the pipeline to a JSON string."""
-        return pipeline_to_json(self)
+        return pipeline_to_json(self, compact=compact)
 
-    def to_yaml(self, file_path: str) -> None:
+    def to_yaml(self, file_path: str, compact=True) -> None:
         """Convert the pipeline to a YAML file."""
-        pipeline_to_yaml(self, file_path)
+        pipeline_to_yaml(self, file_path, compact=compact)
 
     @property
     def key(self) -> str:
@@ -691,171 +741,6 @@ class Pipeline:
         }
 
         return inputs
-
-
-@ops_registry("branched_pipeline")
-class BranchedPipeline(Operation):
-    """Operation that processes data through multiple branches.
-
-    This operation takes input data, processes it through multiple parallel branches,
-    and then merges the results from those branches using the specified merge strategy.
-    """
-
-    def __init__(self, branches=None, merge_strategy="nested", **kwargs):
-        """Initialize a branched pipeline.
-
-        Args:
-            branches (List[Union[List, Pipeline, Operation]]): List of branch operations
-            merge_strategy (str or callable): How to merge the outputs from branches:
-                - "nested" (default): Return outputs as a dictionary keyed by branch name
-                - "flatten": Flatten outputs by prefixing keys with the branch name
-                - "suffix": Flatten outputs by suffixing keys with the branch name
-                - callable: A custom merge function that accepts the branch outputs dict
-            **kwargs: Additional arguments for the Operation base class
-        """
-        super().__init__(**kwargs)
-
-        # Convert branch specifications to operation chains
-        if branches is None:
-            branches = []
-
-        self.branches = {}
-        for i, branch in enumerate(branches, start=1):
-            branch_name = f"branch_{i}"
-            # Convert different branch specification types
-            if isinstance(branch, list):
-                # Convert list to operation chain
-                self.branches[branch_name] = make_operation_chain(branch)
-            elif isinstance(branch, (Pipeline, Operation)):
-                # Already a pipeline or operation
-                self.branches[branch_name] = branch
-            else:
-                raise ValueError(
-                    f"Branch must be a list, Pipeline, or Operation, got {type(branch)}"
-                )
-
-        # Set merge strategy
-        self.merge_strategy = merge_strategy
-        if isinstance(merge_strategy, str):
-            if merge_strategy == "nested":
-                self._merge_function = lambda outputs: outputs
-            elif merge_strategy == "flatten":
-                self._merge_function = self.flatten_outputs
-            elif merge_strategy == "suffix":
-                self._merge_function = self.suffix_merge_outputs
-            else:
-                raise ValueError(f"Unknown merge_strategy: {merge_strategy}")
-        elif callable(merge_strategy):
-            self._merge_function = merge_strategy
-        else:
-            raise ValueError("Invalid merge_strategy type provided.")
-
-    def call(self, **kwargs):
-        """Process input through branches and merge results.
-
-        Args:
-            **kwargs: Input keyword arguments
-
-        Returns:
-            dict: Merged outputs from all branches according to merge strategy
-        """
-        branch_outputs = {}
-        for branch_name, branch in self.branches.items():
-            # Each branch gets a fresh copy of kwargs to avoid interference
-            branch_kwargs = kwargs.copy()
-
-            # Process through the branch
-            branch_result = branch(**branch_kwargs)
-
-            # Store branch outputs
-            branch_outputs[branch_name] = branch_result
-
-        # Apply merge strategy to combine outputs
-        merged_outputs = self._merge_function(branch_outputs)
-
-        return merged_outputs
-
-    def flatten_outputs(self, outputs: dict) -> dict:
-        """
-        Flatten a nested dictionary by prefixing keys with the branch name.
-        For each branch, the resulting key is "{branch_name}_{original_key}".
-        """
-        flat = {}
-        for branch_name, branch_dict in outputs.items():
-            for key, value in branch_dict.items():
-                new_key = f"{branch_name}_{key}"
-                if new_key in flat:
-                    raise ValueError(f"Key collision detected for {new_key}")
-                flat[new_key] = value
-        return flat
-
-    def suffix_merge_outputs(self, outputs: dict) -> dict:
-        """
-        Flatten a nested dictionary by suffixing keys with the branch name.
-        For each branch, the resulting key is "{original_key}_{branch_name}".
-        """
-        flat = {}
-        for branch_name, branch_dict in outputs.items():
-            for key, value in branch_dict.items():
-                new_key = f"{key}_{branch_name}"
-                if new_key in flat:
-                    raise ValueError(f"Key collision detected for {new_key}")
-                flat[new_key] = value
-        return flat
-
-    def get_config(self):
-        """Return the config dictionary for serialization."""
-        config = super().get_config()
-
-        # Add branch configurations
-        branch_configs = {}
-        for branch_name, branch in self.branches.items():
-            if isinstance(branch, Pipeline):
-                # Get the operations list from the Pipeline
-                branch_configs[branch_name] = branch.get_config()
-            elif isinstance(branch, list):
-                # Convert list of operations to list of operation configs
-                branch_op_configs = []
-                for op in branch:
-                    branch_op_configs.append(op.get_config())
-                branch_configs[branch_name] = {"operations": branch_op_configs}
-            else:
-                # Single operation
-                branch_configs[branch_name] = branch.get_config()
-
-        # Add merge strategy
-        if isinstance(self.merge_strategy, str):
-            merge_strategy_config = self.merge_strategy
-        else:
-            # For custom functions, use the name if available
-            merge_strategy_config = getattr(self.merge_strategy, "__name__", "custom")
-
-        config.update(
-            {
-                "branches": branch_configs,
-                "merge_strategy": merge_strategy_config,
-            }
-        )
-
-        return config
-
-    def get_dict(self):
-        """Get the configuration of the operation."""
-        config = super().get_dict()
-        config.update({"name": "branched_pipeline"})
-
-        # Add branches (recursively) to the config
-        branches = {}
-        for branch_name, branch in self.branches.items():
-            if isinstance(branch, Pipeline):
-                branches[branch_name] = branch.get_dict()
-            elif isinstance(branch, list):
-                branches[branch_name] = [op.get_dict() for op in branch]
-            else:
-                branches[branch_name] = branch.get_dict()
-        config["branches"] = branches
-        config["merge_strategy"] = self.merge_strategy
-        return config
 
 
 @ops_registry("map")
@@ -1042,20 +927,22 @@ class Map(Pipeline):
         inputs.update(output)
         return inputs
 
-    def get_dict(self):
+    def get_dict(self, compact=True):
         """Get the configuration of the pipeline."""
-        config = super().get_dict()
-        config.update({"name": "map"})
+        config = super().get_dict(compact=compact)
+        config["name"] = "map"
 
-        config["params"].update(
-            {
-                "argnames": self.argnames,
-                "in_axes": self.in_axes,
-                "out_axes": self.out_axes,
-                "chunks": self.chunks,
-                "batch_size": self.batch_size,
-            }
-        )
+        params = config.get("params", {})
+        params["argnames"] = self.argnames
+        if not compact or self.in_axes != 0:
+            params["in_axes"] = self.in_axes
+        if not compact or self.out_axes != 0:
+            params["out_axes"] = self.out_axes
+        if not compact or self.chunks is not None:
+            params["chunks"] = self.chunks
+        if not compact or self.batch_size is not None:
+            params["batch_size"] = self.batch_size
+        config["params"] = params
         return config
 
 
@@ -1073,14 +960,16 @@ class PatchedGrid(Map):
         super().__init__(*args, argnames=["flatgrid", "flat_pfield"], chunks=num_patches, **kwargs)
         self.num_patches = num_patches
 
-    def get_dict(self):
+    def get_dict(self, compact=True):
         """Get the configuration of the pipeline."""
-        config = super().get_dict()
-        config.update({"name": "patched_grid"})
+        config = super().get_dict(compact=compact)
+        config["name"] = "patched_grid"
 
-        config["params"].pop("argnames")
-        config["params"].pop("chunks")
-        config["params"].update({"num_patches": self.num_patches})
+        params = config.get("params", {})
+        params.pop("argnames", None)
+        params.pop("chunks", None)
+        params["num_patches"] = self.num_patches
+        config["params"] = params
         return config
 
 
@@ -1171,17 +1060,39 @@ class Beamform(Pipeline):
                 operations.append(operation.__class__.__name__)
         return f"<Beamform {self.name}=({', '.join(operations)})>"
 
-    def get_dict(self) -> dict:
-        """Convert the pipeline to a dictionary."""
-        config = super().get_dict()
-        config.update({"name": "beamform"})
-        config["params"].update(
-            {
-                "beamformer": self.beamformer_type,
-                "num_patches": self.num_patches,
-                "enable_pfield": self.enable_pfield,
-            }
-        )
+    def get_dict(self, compact=True) -> dict:
+        """Convert the pipeline to a dictionary.
+
+        Unlike Pipeline.get_dict(), this does NOT include the internal
+        operations list, since Beamform auto-generates its operations
+        from ``beamformer``, ``num_patches``, and ``enable_pfield``.
+        """
+        config = {"name": "beamform"}
+
+        params = {}
+        if not compact or self.beamformer_type != "delay_and_sum":
+            params["beamformer"] = self.beamformer_type
+        if not compact or self.num_patches != 100:
+            params["num_patches"] = self.num_patches
+        if not compact or self.enable_pfield:
+            params["enable_pfield"] = self.enable_pfield
+
+        # Pipeline-level params
+        if compact:
+            if not self.with_batch_dim:
+                params["with_batch_dim"] = self.with_batch_dim
+            if self.jit_options != "ops":
+                params["jit_options"] = self.jit_options
+            if self._user_jit_kwargs:
+                params["jit_kwargs"] = self._user_jit_kwargs
+        else:
+            params["with_batch_dim"] = self.with_batch_dim
+            params["jit_options"] = self.jit_options
+            params["jit_kwargs"] = self._user_jit_kwargs
+
+        if params:
+            config["params"] = params
+
         return config
 
 
@@ -1348,31 +1259,8 @@ def make_operation_chain(
             op_name = operation.get("name")
             operation_cls = get_ops(op_name)
 
-            # Handle branches for branched pipeline
-            if op_name == "branched_pipeline" and "branches" in operation:
-                branch_configs = operation.get("branches", {})
-                branches = []
-
-                # Convert each branch configuration to an operation chain
-                for _, branch_config in branch_configs.items():
-                    if isinstance(branch_config, (list, np.ndarray)):
-                        # This is a list of operations
-                        branch = make_operation_chain(branch_config)
-                    elif "operations" in branch_config:
-                        # This is a pipeline-like branch
-                        branch = make_operation_chain(branch_config["operations"])
-                    else:
-                        # This is a single operation branch
-                        branch_op_cls = get_ops(branch_config["name"])
-                        branch_params = branch_config.get("params", {})
-                        branch = branch_op_cls(**branch_params)
-
-                    branches.append(branch)
-
-                # Create the branched pipeline instance
-                operation_instance = operation_cls(branches=branches, **params)
             # Check for nested operations at the same level as params
-            elif "operations" in operation:
+            if "operations" in operation:
                 nested_operations = make_operation_chain(operation["operations"])
                 # Instantiate pipeline-type operations with nested operations
                 if issubclass(operation_cls, Beamform):
@@ -1386,9 +1274,6 @@ def make_operation_chain(
                     operation_instance = operation_cls(operations=nested_operations, **params)
                 else:
                     operation_instance = operation_cls(operations=nested_operations, **params)
-            elif operation["name"] in ["patched_grid"]:
-                nested_operations = make_operation_chain(operation["params"].pop("operations"))
-                operation_instance = operation_cls(operations=nested_operations, **params)
             else:
                 operation_instance = operation_cls(**params)
 
@@ -1400,13 +1285,41 @@ def make_operation_chain(
 def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
     """
     Create a Pipeline instance from a Config object.
+
+    The config must have a top-level ``pipeline`` key containing an ``operations`` list.
     """
-    assert "operations" in config, (
-        "Config object must have an 'operations' key for pipeline creation."
-    )
-    assert isinstance(config.operations, (list, np.ndarray)), (
-        "Config object must have a list or numpy array of operations for pipeline creation."
-    )
+    if "pipeline" not in config:
+        top_keys = list(config.keys()) if hasattr(config, "keys") else []
+        raise ValueError(
+            f"Cannot build Pipeline: missing top-level 'pipeline' key.\n"
+            f"Expected a config with the format:\n"
+            f"  pipeline:\n"
+            f"    operations:\n"
+            f"      - <operation_name>\n"
+            f"      - ...\n"
+            f"Found top-level keys: {top_keys}"
+        )
+
+    # Unwrap the pipeline subsection from a full config
+    config = Config(config["pipeline"])
+
+    if "operations" not in config:
+        top_keys = list(config.keys()) if hasattr(config, "keys") else []
+        raise ValueError(
+            f"Cannot build Pipeline: missing 'operations' key.\n"
+            f"Expected a config with the format:\n"
+            f"  pipeline:\n"
+            f"    operations:\n"
+            f"      - <operation_name>\n"
+            f"      - ...\n"
+            f"Found top-level keys: {top_keys}"
+        )
+
+    if not isinstance(config.operations, (list, np.ndarray)):
+        raise ValueError(
+            f"Cannot build Pipeline: 'operations' must be a list, "
+            f"got {type(config.operations).__name__}."
+        )
 
     operations = make_operation_chain(config.operations)
 
@@ -1426,57 +1339,76 @@ def pipeline_from_json(json_string: str, **kwargs) -> Pipeline:
     return pipeline_from_config(pipeline_config, **kwargs)
 
 
-def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:
+@deprecated(replacement="Pipeline.from_path")
+def pipeline_from_yaml(yaml_path: str, **kwargs) -> Pipeline:  # pragma: no cover
     """
     Create a Pipeline instance from a YAML file.
+
+    .. deprecated::
+        Use :meth:`Pipeline.from_path` instead.
     """
     with open(yaml_path, "r", encoding="utf-8") as f:
         pipeline_config = yaml.safe_load(f)
-    operations = pipeline_config["operations"]
-    return pipeline_from_config(Config({"operations": operations}), **kwargs)
+    return pipeline_from_config(Config(pipeline_config), **kwargs)
 
 
-def pipeline_to_config(pipeline: Pipeline) -> Config:
+def _pipeline_to_serializable_dict(pipeline: Pipeline, compact=True) -> dict:
+    """Convert a Pipeline to a dict suitable for serialization.
+
+    The output format is ``{"pipeline": {"operations": [...], ...pipeline_kwargs}}``
+    which can be loaded back via ``pipeline_from_config``.
+    """
+    pipeline_dict = {
+        "operations": Pipeline._pipeline_to_list(pipeline, compact=compact),
+    }
+
+    if compact:
+        if not pipeline.with_batch_dim:
+            pipeline_dict["with_batch_dim"] = pipeline.with_batch_dim
+        if pipeline.jit_options != "ops":
+            pipeline_dict["jit_options"] = pipeline.jit_options
+        if pipeline._user_jit_kwargs:
+            pipeline_dict["jit_kwargs"] = pipeline._user_jit_kwargs
+        if pipeline.name != "pipeline":
+            pipeline_dict["name"] = pipeline.name
+    else:
+        pipeline_dict.update(
+            {
+                "with_batch_dim": pipeline.with_batch_dim,
+                "jit_options": pipeline.jit_options,
+                "jit_kwargs": pipeline._user_jit_kwargs,
+                "name": pipeline.name,
+            }
+        )
+
+    return {"pipeline": pipeline_dict}
+
+
+def pipeline_to_config(pipeline: Pipeline, compact=True) -> Config:
     """
     Convert a Pipeline instance into a Config object.
     """
-    # TODO: we currently add the full pipeline as 1 operation to the config.
-    # In another PR we should add a "pipeline" entry to the config instead of the "operations"
-    # entry. This allows us to also have non-default pipeline classes as top level op.
-    pipeline_dict = {"operations": [pipeline.get_dict()]}
-
-    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
-    ops = pipeline_dict["operations"]
-    if ops[0]["name"] == "pipeline" and len(ops) == 1:
-        pipeline_dict = {"operations": ops[0]["operations"]}
-
-    return Config(pipeline_dict)
+    return Config(_pipeline_to_serializable_dict(pipeline, compact=compact))
 
 
-def pipeline_to_json(pipeline: Pipeline) -> str:
+def pipeline_to_json(pipeline: Pipeline, compact=True) -> str:
     """
     Convert a Pipeline instance into a JSON string.
     """
-    pipeline_dict = {"operations": [pipeline.get_dict()]}
-
-    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
-    ops = pipeline_dict["operations"]
-    if ops[0]["name"] == "pipeline" and len(ops) == 1:
-        pipeline_dict = {"operations": ops[0]["operations"]}
-
-    return json.dumps(pipeline_dict, cls=ZEAEncoderJSON, indent=4)
+    return json.dumps(
+        _pipeline_to_serializable_dict(pipeline, compact=compact),
+        cls=ZEAEncoderJSON,
+        indent=4,
+    )
 
 
-def pipeline_to_yaml(pipeline: Pipeline, file_path: str) -> None:
+def pipeline_to_yaml(pipeline: Pipeline, file_path: str, compact=True) -> None:
     """
     Convert a Pipeline instance into a YAML file.
     """
-    pipeline_dict = pipeline.get_dict()
-
-    # HACK: If the top level operation is a single pipeline, collapse it into the operations list.
-    ops = pipeline_dict["operations"]
-    if ops[0]["name"] == "pipeline" and len(ops) == 1:
-        pipeline_dict = {"operations": ops[0]["operations"]}
-
     with open(file_path, "w", encoding="utf-8") as f:
-        yaml.dump(pipeline_dict, f, Dumper=yaml.Dumper, indent=4)
+        yaml.safe_dump(
+            _pipeline_to_serializable_dict(pipeline, compact=compact),
+            f,
+            indent=4,
+        )

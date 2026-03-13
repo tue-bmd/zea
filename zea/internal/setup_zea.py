@@ -53,7 +53,6 @@ Function Details
 import copy
 import importlib
 import sys
-from pathlib import Path
 from typing import Union
 
 import keras
@@ -61,7 +60,6 @@ import yaml
 
 from zea import Config, log
 from zea.config import check_config
-from zea.data.preset_utils import HF_PREFIX, _hf_parse_path
 from zea.datapaths import create_new_user, set_data_paths
 from zea.internal.device import init_device
 from zea.internal.git_info import get_git_summary
@@ -111,6 +109,7 @@ def setup(
     disable_config_check: bool = False,
     loader=yaml.FullLoader,
     create_user: bool = False,
+    **kwargs,
 ):
     """General setup function for zea. Loads config, sets data paths and
     initializes gpu if available. Will return config object.
@@ -127,6 +126,8 @@ def setup(
         loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
         create_user (bool, optional): whether to create a new user. Defaults to False.
             If True, it will prompt the user to enter their datapaths.
+        **kwargs: Additional keyword arguments forwarded to ``Config.from_path`` for
+            ``hf://`` configs, for example ``repo_type`` or ``revision``.
     Returns:
         config (dict): config object / dict.
     """
@@ -137,6 +138,7 @@ def setup(
         verbose=verbose,
         disable_config_check=disable_config_check,
         loader=loader,
+        **kwargs,
     )
 
     # Prompt user to enter datapath information
@@ -161,7 +163,7 @@ def setup_config(
     verbose: bool = True,
     disable_config_check: bool = False,
     loader=yaml.FullLoader,
-    repo_type: str = "dataset",
+    **kwargs,
 ):
     """Setup function for config. Retrieves config file and checks for validity.
 
@@ -178,9 +180,8 @@ def setup_config(
             does not have to adhere to zea config standards.
         loader (yaml.Loader, optional): yaml loader. Defaults to yaml.FullLoader.
             for custom objects, you might want to use yaml.UnsafeLoader.
-        repo_type (str, optional): type of the Hugging Face repository.
-            Defaults to "dataset". Only used when `config_path` starts with
-            `HF_PREFIX`. Can be "model", "dataset", or "space".
+        **kwargs: Additional keyword arguments forwarded to ``Config.from_path`` for
+            ``hf://`` configs, for example ``repo_type`` or ``revision``.
     Returns:
         config (dict): config object / dict.
 
@@ -201,15 +202,7 @@ def setup_config(
                 "(usually on headless servers)."
             ) from e
 
-    if str(config_path).startswith(HF_PREFIX):
-        repo_id, path = _hf_parse_path(config_path)
-        config = Config.from_hf(
-            repo_id=repo_id,
-            path=path,
-            repo_type=repo_type,
-        )
-    else:
-        config = Config.from_yaml(Path(config_path), loader=loader)
+    config = Config.from_path(config_path, loader=loader, **kwargs)
 
     if verbose:
         log.info(f"Using config file: {log.yellow(config_path)}")

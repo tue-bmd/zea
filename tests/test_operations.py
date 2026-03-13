@@ -620,6 +620,7 @@ def test_beamformers(beamformer, expected_shape):
         (1, 32, 32, 16, "linear"),
     ],
 )
+@backend_equality_check(decimal=5)
 def test_apply_window(axis, size, start, end, window_type):
     """Test ApplyWindow operation."""
 
@@ -634,11 +635,42 @@ def test_apply_window(axis, size, start, end, window_type):
     data = keras.ops.ones((256, 128, 64))
     data_out = operation(data=data)["data"]
     if axis == 0:
-        assert data_out[:start, :, :].numpy().sum() == 0.0, "Start region not zeroed correctly."
-        assert data_out[-end:, :, :].numpy().sum() == 0.0, "End region not zeroed correctly."
+        assert keras.ops.convert_to_numpy(data_out[:start, :, :]).sum() == 0.0, (
+            "Start region not zeroed correctly."
+        )
+        assert keras.ops.convert_to_numpy(data_out[-end:, :, :]).sum() == 0.0, (
+            "End region not zeroed correctly."
+        )
     elif axis == 1:
-        assert data_out[:, :start, :].numpy().sum() == 0.0, "Start region not zeroed correctly."
-        assert data_out[:, -end:, :].numpy().sum() == 0.0, "End region not zeroed correctly."
+        assert keras.ops.convert_to_numpy(data_out[:, :start, :]).sum() == 0.0, (
+            "Start region not zeroed correctly."
+        )
+        assert keras.ops.convert_to_numpy(data_out[:, -end:, :]).sum() == 0.0, (
+            "End region not zeroed correctly."
+        )
+    return data_out
+
+
+@backend_equality_check(decimal=4)
+def test_band_pass_filter():
+    """Test BandPassFilter operation."""
+
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    data = rng.standard_normal((2, 1, 128, 16, 1)).astype("float32")
+    data = keras.ops.convert_to_tensor(data)
+
+    operation = ops.BandPassFilter(axis=-3, with_batch_dim=True)
+    result = operation(
+        data=data,
+        sampling_frequency=40e6,
+        demodulation_frequency=5e6,
+        bandwidth=3e6,
+    )["data"]
+    return result
 
 
 def test_make_tgc_curve():

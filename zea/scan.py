@@ -52,7 +52,7 @@ Example Usage
     >>> scan = Scan(**probe.get_parameters(), grid_size_z=256, n_tx=11)
 
     >>> # Or initialize from a Config object
-    >>> config = Config.from_hf("zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset")
+    >>> config = Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
     >>> scan = Scan(n_tx=11, **config.scan)
 
     >>> # Or manually specify parameters

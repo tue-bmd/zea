@@ -16,9 +16,7 @@ Let's take a quick look at how to use ``zea`` to load and process ultrasound dat
    zea.init_device()
 
    # loading a config file from Hugging Face, but can also load a local config file
-   config = zea.Config.from_hf(
-      "zeahub/configs", "config_picmus_rf.yaml", repo_type="dataset",
-   )
+   config = zea.Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml")
 
    path = config.data.dataset_folder + "/" + config.data.file_path
    with zea.File(path) as file:

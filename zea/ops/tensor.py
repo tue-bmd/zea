@@ -81,8 +81,10 @@ class GaussianBlur(Filter):
 class Normalize(Operation):
     """Normalize data to a given range."""
 
+    ADD_OUTPUT_KEYS = ["minval", "maxval"]
+
     def __init__(self, output_range=None, input_range=None, **kwargs):
-        super().__init__(additional_output_keys=["minval", "maxval"], **kwargs)
+        super().__init__(**kwargs)
         if output_range is None:
             output_range = (0, 1)
         self.output_range = self.to_float32(output_range)
@@ -270,7 +272,7 @@ class Threshold(Operation):
             raise ValueError("threshold_type must be 'hard' or 'soft'")
         self.threshold_type = threshold_type
         self.below_threshold = below_threshold
-        self._fill_value_type = fill_value
+        self.fill_value = fill_value
 
         # Define threshold function at init
         if threshold_type == "hard":
@@ -294,7 +296,7 @@ class Threshold(Operation):
 
     def _resolve_fill_value(self, data, threshold):
         """Get the fill value based on the fill_value_type."""
-        fv = self._fill_value_type
+        fv = self.fill_value
         if isinstance(fv, (int, float)):
             return ops.convert_to_tensor(fv, dtype=data.dtype)
         elif fv == "min":

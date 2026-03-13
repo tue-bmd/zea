@@ -83,8 +83,9 @@ def test_is_file_and_is_dir(file, folder, fake_files, monkeypatch):
             return REPO_ID, path_str[len(FOLDER_STR) + 1 :]
         return REPO_ID, ""
 
-    def fake_list_files(repo_id):
+    def fake_list_files(repo_id, repo_type="dataset", **kwargs):
         assert repo_id == REPO_ID
+        assert repo_type == "dataset"
         return fake_files
 
     monkeypatch.setattr("zea.data.preset_utils._hf_parse_path", fake_parse_path)
@@ -118,11 +119,13 @@ def test_hf_resolve_path(folder, fake_files, monkeypatch):
             return REPO_ID, path_str[len(FOLDER_STR) + 1 :]
         return REPO_ID, None
 
-    def fake_list_files(repo_id):
+    def fake_list_files(repo_id, repo_type="dataset", **kwargs):
         assert repo_id == REPO_ID
+        assert repo_type == "dataset"
         return fake_files
 
-    def fake_download(repo_id, filename, cache_dir):
+    def fake_download(repo_id, filename, cache_dir, repo_type="dataset", **kwargs):
+        assert repo_type == "dataset"
         # Simulate HF Hub download path structure
         mock_path = (
             cache_dir
@@ -175,7 +178,8 @@ def test_download_files_in_path(fake_files, monkeypatch):
 
     downloaded_files = []
 
-    def fake_download(repo_id, filename, cache_dir):
+    def fake_download(repo_id, filename, cache_dir, repo_type="dataset", **kwargs):
+        assert repo_type == "dataset"
         downloaded_files.append(filename)
         return f"/mock/path/{filename}"
 
