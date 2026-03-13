@@ -137,14 +137,10 @@ class GreedyEntropy(LinesActionModel):
         )
         self.upside_down_gaussian = upside_down_gaussian(points_to_evaluate)
         self.entropy_sigma = entropy_sigma
-        self.select_line_and_reweight_entropy_vmap = tensor.vmap(
-            self.select_line_and_reweight_entropy
-        )
+        self.reweight_entropies_around_line_vmap = tensor.vmap(self.reweight_entropies_around_line)
 
     @staticmethod
-    def compute_pairwise_pixel_gaussian_error(
-        particles, stack_n_cols=1, n_possible_actions=None, entropy_sigma=1
-    ):
+    def compute_pairwise_pixel_gaussian_error(particles, entropy_sigma=1.0):
         """Compute the pairwise pixelwise Gaussian error.
 
         This function computes the Gaussian error between each pair of pixels in the
@@ -153,16 +149,15 @@ class GreedyEntropy(LinesActionModel):
         For more details see Section 4 here: https://arxiv.org/abs/2406.14388
 
         Args:
-            particles (Tensor): Particles of shape (batch_size, n_particles, height, width)
+            particles (Tensor): Particles of shape (batch_size, n_particles, \*pixels)
+            entropy_sigma (float, optional): The standard deviation of the Gaussian
+                Mixture components used to approximate the posterior. Defaults to 1.0.
 
         Returns:
             Tensor: batch of pixelwise pairwise Gaussian errors,
-            of shape (n_particles, n_particles, batch, height, width)
+            of shape (batch_size, n_particles, n_particles, \*pixels)
         """
         assert particles.shape[1] > 1, "The entropy cannot be approximated using a single particle."
-
-        if n_possible_actions is None:
-            n_possible_actions = ops.shape(particles)[-1]
 
         # TODO: I think we only need to compute the lower triangular
         # of this matrix, since it's symmetric
@@ -170,62 +165,46 @@ class GreedyEntropy(LinesActionModel):
         gaussian_error_per_pixel_i_j = ops.exp(
             -(squared_l2_error_matrices) / (2 * entropy_sigma**2)
         )
-        # Vertically stack all columns corresponding with the same line
-        # This way we can just sum across the height axis and get the entropy
-        # for each pixel in a given line
-        batch_size, n_particles, _, height, _ = ops.shape(gaussian_error_per_pixel_i_j)
+        # [batch_size, n_particles, n_particles, *pixels]
+        return gaussian_error_per_pixel_i_j
 
-        gaussian_error_per_pixel_stacked = ops.transpose(
-            ops.reshape(
-                ops.transpose(gaussian_error_per_pixel_i_j, (0, 1, 2, 4, 3)),
-                [
-                    batch_size,
-                    n_particles,
-                    n_particles,
-                    n_possible_actions,
-                    height * stack_n_cols,
-                ],
-            ),
-            (0, 1, 2, 4, 3),
-        )
-        # [n_particles, n_particles, batch, height, width]
-        return gaussian_error_per_pixel_stacked
-
-    def compute_pixelwise_entropy(self, particles):
+    @staticmethod
+    def compute_pixelwise_entropy(particles, entropy_sigma=1.0):
         """
-        This function computes the entropy for each line using a Gaussian Mixture Model
+        This function computes the entropy for each pixel using a Gaussian Mixture Model
         approximation of the posterior distribution.
         For more details see Section VI. B here: https://arxiv.org/pdf/2410.13310
 
         Args:
-            particles (Tensor): Particles of shape (batch_size, n_particles, height, width)
+            particles (Tensor): Particles of shape (batch_size, n_particles, \*pixels)
+            entropy_sigma (float, optional): The standard deviation of the Gaussian
+                Mixture components used to approximate the posterior. Defaults to 1.0.
 
         Returns:
-            Tensor: batch of entropies per pixel, of shape (batch, height, width)
+            Tensor: batch of entropies per pixel, of shape (batch_size, \*pixels)
         """
         n_particles = ops.shape(particles)[1]
-        gaussian_error_per_pixel_stacked = self.compute_pairwise_pixel_gaussian_error(
-            particles,
-            self.stack_n_cols,
-            self.n_possible_actions,
-            self.entropy_sigma,
+        gaussian_error_per_pixel_stacked = GreedyEntropy.compute_pairwise_pixel_gaussian_error(
+            particles, entropy_sigma
         )
         # sum out first dimension of (n_particles x n_particles) error matrix
-        # [n_particles, batch, height, width]
+        # [batch_size, n_particles, *pixels]
         pixelwise_entropy_sum_j = ops.sum(
             (1 / n_particles) * gaussian_error_per_pixel_stacked, axis=1
         )
         log_pixelwise_entropy_sum_j = ops.log(pixelwise_entropy_sum_j)
         # sum out second dimension of (n_particles x n_particles) error matrix
-        # [batch, height, width]
+        # [batch_size, *pixels]
         pixelwise_entropy = -ops.sum((1 / n_particles) * log_pixelwise_entropy_sum_j, axis=1)
         return pixelwise_entropy
 
-    def select_line_and_reweight_entropy(self, entropy_per_line, max_entropy_line):
-        """Select the line with maximum entropy and reweight the entropies.
+    def reweight_entropies_around_line(self, entropy_per_line, line_index):
+        """Reweight the entropy around a selected line.
 
-        Selected the max entropy line and reweights the entropy values around it,
-        approximating the decrease in entropy that would occur from observing that line.
+        This approximates the decrease in entropy that would occur from observing that line.
+        It works by multiplying the entropy values around the selected line by an upside-down
+        Gaussian function centered at the selected line, setting the entropy of the selected
+        line to 0, and decreasing the entropies of neighbouring lines.
 
         .. note::
 
@@ -233,17 +212,12 @@ class GreedyEntropy(LinesActionModel):
             See `Issue #268 <https://github.com/tue-bmd/zea/issues/268>`_
 
         Args:
-            entropy_per_line (Tensor): Entropy per line of shape
-                (batch_size, n_possible_actions)
+            entropy_per_line (Tensor): Entropy per line of shape (n_possible_actions,)
+            line_index (int): Index of the line with maximum entropy
 
         Returns:
-            Tuple: The selected line index and the updated entropies per line
+            Tuple: The reweighted entropy per line, of shape (n_possible_actions,)
         """
-
-        ## The rest of this function updates the entropy values around max_entropy_line
-        ## by multiplying them with an upside-down Gaussian function centered at
-        ## max_entropy_line, setting the entropy of the selected line to 0, and decreasing
-        ## the entropies of neighbouring lines.
 
         # Pad the entropy per line to allow for re-weighting with fixed
         # size RBF, which is necessary for tracing.
@@ -251,15 +225,14 @@ class GreedyEntropy(LinesActionModel):
             entropy_per_line,
             (self.num_lines_to_update // 2, self.num_lines_to_update // 2),
         )
-        # because the entropy per line has now been padded, the start index
-        # of the set of lines to update is simply the index of the max_entropy_line
-        start_index = max_entropy_line
 
         # Create the re-weighting vector
+        # because the entropy per line has now been padded, the start index
+        # of the set of lines to update is simply the line_index
         reweighting = ops.ones_like(padded_entropy_per_line)
         reweighting = ops.slice_update(
             reweighting,
-            (start_index,),
+            (line_index,),
             ops.cast(self.upside_down_gaussian, dtype=reweighting.dtype),
         )
 
@@ -284,8 +257,19 @@ class GreedyEntropy(LinesActionModel):
             - Masks of shape (batch_size, img_height, img_width)
         """
 
-        pixelwise_entropy = self.compute_pixelwise_entropy(particles)
-        linewise_entropy = ops.sum(pixelwise_entropy, axis=1)
+        pixelwise_entropy = self.compute_pixelwise_entropy(particles, self.entropy_sigma)
+
+        # Sum over height to get column-wise entropy
+        column_wise_entropy = ops.sum(pixelwise_entropy, axis=1)  # shape (b, w)
+
+        # Reshape columns into lines and sum to get line-wise entropy
+        linewise_entropy = ops.sum(
+            ops.reshape(column_wise_entropy, (-1, self.n_possible_actions, self.stack_n_cols)),
+            axis=2,
+        )  # shape (b, n_possible_actions)
+
+        # Optionally average entropy across batch dimension, which can be useful when selecting
+        # planes in 3D imaging
         if self.average_entropy_across_batch:
             linewise_entropy = ops.expand_dims(ops.mean(linewise_entropy, axis=0), axis=0)
 
@@ -293,14 +277,13 @@ class GreedyEntropy(LinesActionModel):
         all_selected_lines = []
         for _ in range(self.n_actions):
             max_entropy_line = ops.argmax(linewise_entropy, axis=1)
-            linewise_entropy = self.select_line_and_reweight_entropy_vmap(
+            linewise_entropy = self.reweight_entropies_around_line_vmap(
                 linewise_entropy, max_entropy_line
             )
             all_selected_lines.append(max_entropy_line)
 
-        selected_lines_k_hot = ops.any(
-            ops.one_hot(all_selected_lines, self.n_possible_actions, dtype=masks._DEFAULT_DTYPE),
-            axis=0,
+        selected_lines_k_hot = masks.indices_to_k_hot(
+            ops.stack(all_selected_lines, axis=1), self.n_possible_actions
         )
         return selected_lines_k_hot, self.lines_to_im_size(selected_lines_k_hot)
 
@@ -660,14 +643,13 @@ class TaskBasedLines(GreedyEntropy):
         all_selected_lines = []
         for _ in range(self.n_actions):
             max_contribution_line = ops.argmax(actionwise_contribution_to_var_dst, axis=1)
-            actionwise_contribution_to_var_dst = self.select_line_and_reweight_entropy_vmap(
+            actionwise_contribution_to_var_dst = self.reweight_entropies_around_line_vmap(
                 actionwise_contribution_to_var_dst, max_contribution_line
             )
             all_selected_lines.append(max_contribution_line)
 
-        selected_lines_k_hot = ops.any(
-            ops.one_hot(all_selected_lines, self.n_possible_actions, dtype=masks._DEFAULT_DTYPE),
-            axis=0,
+        selected_lines_k_hot = masks.indices_to_k_hot(
+            ops.stack(all_selected_lines, axis=1), self.n_possible_actions
         )
         return (
             selected_lines_k_hot,
