@@ -191,7 +191,7 @@ class FunctionTimer:
 
     def __init__(self):
         self.timings = {}
-        self.last_append = 0
+        self.last_append = {}
         self.decorated_functions = {}  # Track decorated functions
 
     def __call__(self, func, name=None):
@@ -218,6 +218,7 @@ class FunctionTimer:
 
         # Initialize timing storage for this function
         self.timings[_name] = []
+        self.last_append[_name] = 0
 
         # Track this decorated function
         self.decorated_functions[func_id] = _name
@@ -271,12 +272,17 @@ class FunctionTimer:
 
     def append_to_yaml(self, filename, func_name):
         """Append the timing data to a YAML file."""
-        cropped_timings = self.timings[func_name][self.last_append :]
+
+        start_idx = self.last_append.get(func_name, 0)
+        cropped_timings = self.timings[func_name][start_idx:]
+
+        if not cropped_timings:
+            return
 
         with open(filename, "a", encoding="utf-8") as f:
             yaml.dump(cropped_timings, f, default_flow_style=False)
 
-        self.last_append = len(self.timings[func_name])
+        self.last_append[func_name] = len(self.timings[func_name])
 
     def print(self, drop_first: bool | int = False, total_time: bool = False):
         """Print timing statistics for all recorded functions using formatted output."""
