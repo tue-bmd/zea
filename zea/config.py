@@ -443,7 +443,7 @@ class Config(dict):
                         v._recursive_setattr(set_key, set_value)
 
     @classmethod
-    def from_path(cls, path, loader=yaml.FullLoader, **kwargs):
+    def from_path(cls, path, loader=yaml.FullLoader, **kwargs) -> "Config":
         """Load config object from a file path.
 
         Args:
