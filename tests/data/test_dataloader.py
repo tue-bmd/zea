@@ -14,7 +14,6 @@ from zea.data.dataloader import Dataloader, H5DataSource
 from zea.data.datasets import Dataset
 from zea.data.file import File
 from zea.data.layers import Resizer
-from zea.data.utils import json_loads
 from zea.tools.hf import HFPath
 
 from .. import DEFAULT_TEST_SEED
@@ -239,6 +238,7 @@ def test_h5_dataset_return_filename(
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
+    N_AXIS = 3  # n_frames, height, width
     dataset = Dataloader(
         directory,
         key=key,
@@ -259,18 +259,31 @@ def test_h5_dataset_return_filename(
 
     _, file_dict = batch
 
-    assert len(file_dict) == batch_size, (
-        "The file_dict should contain the same number of elements as the batch size"
+    # Check keys
+    keys = ["filename", "fullpath", "indices"]
+    for key in keys:
+        assert key in file_dict, f"The file_dict should contain the key '{key}'"
+
+    # Check batch size and types
+    keys = ["filename", "fullpath"]
+    for key in keys:
+        assert len(file_dict[key]) == batch_size, (
+            f"The file_dict['{key}'] should contain the same number of elements as the batch size"
+        )
+        for path in file_dict[key]:
+            assert isinstance(path, str), f"Each path in file_dict['{key}'] should be a string"
+
+    # indices nests one deeper, because it has one element per axis (n_frames, height, width)
+    indices = file_dict["indices"]
+    assert len(indices) == N_AXIS, (
+        f"The file_dict['indices'] should contain {N_AXIS} elements in this test"
     )
 
-    file_dict = file_dict[0]  # get the first file_dict of the batch
-    file_dict = json_loads(file_dict)
-
-    filename = file_dict["filename"]
-    assert isinstance(filename, str), "The filename should be a string"
-    fullpath = file_dict["fullpath"]
-    assert isinstance(fullpath, str), "The fullpath should be a string"
-    assert "indices" in file_dict, "The file_dict should contain indices"
+    for idx in indices:
+        assert len(idx) == batch_size, (
+            "Each axis in file_dict['indices'] should contain the same number of elements "
+            "as the batch size"
+        )
 
 
 @pytest.mark.parametrize(
@@ -448,7 +461,7 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
     )
 
     images = next(iter(dataset))
-    images_np = np.array(images)
+    images_np = ops.convert_to_numpy(images)
 
     # Output shape should match input shape
     assert images_np.shape == (
@@ -483,10 +496,154 @@ def test_resize_with_different_shapes(multi_shape_dataset):
 
     # Get the first batch
     images = next(iter(dataset))
-    images_np = np.array(images)
+    images_np = ops.convert_to_numpy(images)
 
     # Output shape should match input shape
     assert images_np.shape[-3:-1] == (
         16,
         16,
     ), f"Output shape {images_np.shape} does not match expected (16, 16)"
+
+
+def test_skipped_files_warning(tmp_path):
+    """Test warning when files have too few frames for n_frames * frame_index_stride."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    # Create file with only 1 frame — requesting n_frames=5 should skip it
+    with h5py.File(tmp_path / "small_0.hdf5", "w") as f:
+        f.create_dataset("data", data=rng.standard_normal((1, 28, 28)))
+
+    source = H5DataSource(
+        file_paths=tmp_path,
+        key="data",
+        n_frames=5,
+        frame_index_stride=1,
+        validate=False,
+    )
+    assert len(source) == 0
+
+
+def test_limit_n_samples(dummy_hdf5):
+    """Test H5DataSource with limit_n_samples caps samples."""
+    source = H5DataSource(
+        file_paths=dummy_hdf5,
+        key="data",
+        n_frames=1,
+        limit_n_samples=5,
+        validate=False,
+    )
+    assert len(source) == 5
+
+
+def test_cache_hit_and_store(dummy_hdf5):
+    """Test caching: first access stores in cache, second access hits cache."""
+    source = H5DataSource(
+        file_paths=dummy_hdf5,
+        key="data",
+        n_frames=1,
+        cache=True,
+        validate=False,
+    )
+    # First access stores in cache
+    result1 = source[0]
+    assert 0 in source._data_cache
+
+    # Second access hits cache
+    result2 = source[0]
+    np.testing.assert_array_equal(result1, result2)
+
+
+def test_normalization_without_image_range_raises(dummy_hdf5):
+    """Test that setting normalization_range without image_range raises."""
+    with pytest.raises(AssertionError, match="image_range must be set"):
+        Dataloader(
+            dummy_hdf5,
+            key="data",
+            normalization_range=(0, 1),
+            image_range=None,
+            validate=False,
+        )
+
+
+def test_num_shards_without_shard_index_raises(dummy_hdf5):
+    """Test that num_shards > 1 without shard_index raises."""
+    with pytest.raises(AssertionError, match="shard_index must be specified"):
+        Dataloader(
+            dummy_hdf5,
+            key="data",
+            num_shards=2,
+            validate=False,
+        )
+
+
+def test_auto_seed_generation(dummy_hdf5):
+    """Test that seed is auto-generated when shuffle=True and seed=None."""
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=True,
+        seed=None,
+        validate=False,
+    )
+    assert loader.seed is not None
+
+
+def test_dataset_property(dummy_hdf5):
+    """Test the .dataset property returns the underlying MapDataset."""
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+    )
+    assert loader.dataset is not None
+
+
+def test_dataloader_repr(dummy_hdf5):
+    """Test Dataloader __repr__ includes key information."""
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+        batch_size=4,
+    )
+    repr_str = repr(loader)
+    assert "<Dataloader:" in repr_str
+    assert "batch_size=4" in repr_str
+    assert "key='data'" in repr_str
+
+
+def test_assert_image_range_below():
+    """Test _assert_image_range raises when min is below range."""
+    image = np.array([-1.0, 0.5, 1.0])
+    with pytest.raises(ValueError, match="below image_range lower bound"):
+        Dataloader._assert_image_range(image, (0, 1))
+
+
+def test_assert_image_range_above():
+    """Test _assert_image_range raises when max is above range."""
+    image = np.array([0.0, 0.5, 2.0])
+    with pytest.raises(ValueError, match="above image_range upper bound"):
+        Dataloader._assert_image_range(image, (0, 1))
+
+
+def test_normalize():
+    """Test _normalize maps values from image_range to normalization_range."""
+    image = np.array([0.0, 0.5, 1.0])
+    result = np.array(Dataloader._normalize(image, (0, 1), (0, 10)))
+    expected = np.array([0.0, 5.0, 10.0])
+    np.testing.assert_allclose(result, expected)
+
+
+def test_summary(dummy_hdf5, capsys):
+    """Test summary() prints dataset statistics."""
+    loader = Dataloader(
+        dummy_hdf5,
+        key="data",
+        shuffle=False,
+        validate=False,
+    )
+    loader.summary()
+    captured = capsys.readouterr()
+    assert "Dataloader with" in captured.out
+    assert "samples" in captured.out

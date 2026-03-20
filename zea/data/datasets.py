@@ -104,6 +104,15 @@ class H5FileHandleCache:
 
         return self._file_handle_cache[file_path]
 
+    def pop(self, file_path):
+        """Pop a file from the cache and close it."""
+        file = self._file_handle_cache.pop(file_path, None)
+        if file is not None:
+            try:
+                file.close()
+            except Exception:
+                pass  # swallow exceptions during close
+
     def close(self):
         """Close all cached file handles."""
         cache: OrderedDict = getattr(self, "_file_handle_cache", None)
