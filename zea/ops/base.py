@@ -20,8 +20,30 @@ from zea.utils import (
 )
 
 
-def get_ops(ops_name):
-    """Get the operation from the registry."""
+def get_ops(ops_name: str):
+    """Get the operation from the registry.
+
+    Also supports importing operations from a module if the ops_name is specified in
+    the format "module.submodule.registered_name".
+    """
+
+    # Check for module specification in ops_name and attempt to import if not already in registry
+    if ops_name not in ops_registry and "." in ops_name:
+        # Support for specifying operations from a module
+        # e.g. "my_module.my_submodule.MyOp" or "my_module.MyOp"
+        module_name, class_name = ops_name.rsplit(".", 1)
+        __import__(module_name, fromlist=[class_name])
+
+    # After attempting import, check if the operation is now in the registry
+    if ops_name not in ops_registry and "." in ops_name:
+        shortname = ops_name.split(".")[-1]
+        if shortname not in ops_registry:
+            raise ValueError(
+                f"Operation '{ops_name}' or '{shortname}' not found in registry, "
+                "even after attempting to import module."
+            )
+        else:
+            ops_name = shortname
     return ops_registry[ops_name]
 
 
