@@ -72,9 +72,6 @@ def run_processing(
     keep_keys=("maxval",),
     timings=False,
 ) -> None:
-    def parse_metadata(metadata: list[str]) -> dict:
-        return zea.data.utils.json_loads(metadata[0])
-
     def to_8bit(data, scan):
         data = ops.convert_to_numpy(data)
         data = np.nan_to_num(data, copy=False, nan=scan.dynamic_range[0])
@@ -99,7 +96,7 @@ def run_processing(
     dataloader = zea.Dataloader(
         dataset_path,
         key=data_type,
-        batch_size=1,
+        batch_size=None,
         shuffle=False,
         return_filename=True,
         limit_n_frames=n_frames,
@@ -134,7 +131,6 @@ def run_processing(
     for i in range(total_batches + 1):
         if i < total_batches:
             frame, metadata = get_data()
-            metadata = parse_metadata(metadata)
             file_path = metadata["fullpath"]
         else:
             # To trigger saving of the last video after the loop
@@ -159,7 +155,6 @@ def run_processing(
 
         # Select the right transmits
         # TODO: this can be optimized by only loading the selected transmits from disk
-        frame = np.squeeze(frame, axis=0)  # Remove batch dimension
         frame = frame[scan.selected_transmits]
 
         # Run the pipeline, store output frame, and forward keys to the next iteration
