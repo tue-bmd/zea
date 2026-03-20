@@ -28,8 +28,8 @@ def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True
         dynamic_range = (-60, 0)
 
     image = ops.convert_to_numpy(image)
-    image = np.clip(image, *dynamic_range)
     image = translate(image, dynamic_range, (0, 255))
+    image = np.clip(image, 0, 255)
     image = image.astype(np.uint8)
     if pillow:
         image = Image.fromarray(image)
