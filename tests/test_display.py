@@ -206,7 +206,7 @@ def test_converting_to_image(size, dynamic_range):
         _dynamic_range = dynamic_range
 
     data = rng.standard_normal(size) * (_dynamic_range[1] - _dynamic_range[0]) + _dynamic_range[0]
-    _data = display.to_8bit(data, dynamic_range, pillow=False)
+    _data = display.to_8bit(data, dynamic_range)
     assert np.all(np.logical_and(_data >= 0, _data <= 255))
     assert _data.dtype == "uint8"
 

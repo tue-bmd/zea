@@ -6,33 +6,41 @@ from typing import Tuple, Union
 import numpy as np
 import scipy
 from keras import ops
-from PIL import Image
 
 from zea.func.tensor import translate
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 
-def to_8bit(image, dynamic_range: Union[None, tuple] = None, pillow: bool = True):
+def to_8bit(image, dynamic_range: Tuple[float, float], to_numpy: bool = True):
     """Convert image to 8 bit image [0, 255]. Clip between dynamic range.
+
+    Has the option to return as numpy array, which will also do the translation and clipping
+    on the cpu.
 
     Args:
         image (ndarray): Input image(s). Should be in between dynamic range.
         dynamic_range (tuple, optional): Dynamic range of input image(s).
-        pillow (bool, optional): Whether to return PIL image. Defaults to True.
+        to_numpy (bool, optional): Whether to convert the output to a numpy array.
+            If False, the output will be a tensor. Defaults to True.
 
     Returns:
         image (ndarray): Output 8 bit image(s) [0, 255].
 
     """
-    if dynamic_range is None:
-        dynamic_range = (-60, 0)
+    if to_numpy:
+        backend = np
+        image = ops.convert_to_numpy(image)
+    else:
+        backend = ops
 
-    image = ops.convert_to_numpy(image)
     image = translate(image, dynamic_range, (0, 255))
-    image = np.clip(image, 0, 255)
-    image = image.astype(np.uint8)
-    if pillow:
-        image = Image.fromarray(image)
+    image = backend.clip(image, 0, 255)
+
+    if to_numpy:
+        image = image.astype(np.uint8)
+    else:
+        image = ops.cast(image, "uint8")
+
     return image
 
 

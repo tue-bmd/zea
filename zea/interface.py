@@ -258,7 +258,8 @@ class Interface:
             self.image = np.fliplr(self.image)
         # opencv requires 8 bit images
         if self.plot_lib == "opencv":
-            self.image = to_8bit(self.image, self.config.data.dynamic_range)
+            image = to_8bit(self.image, self.config.data.dynamic_range)
+            self.image = Image.fromarray(image)
         return self.image
 
     def run(self, plot=False, block=True):
