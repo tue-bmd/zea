@@ -11,6 +11,13 @@ File reading and visualization
    :prog: zea
 
 -------------------------------
+Process dataset to videos
+-------------------------------
+
+.. autoprogram:: zea.data.process:get_parser()
+   :prog: python -m zea.data.process
+
+-------------------------------
 Convert datasets
 -------------------------------
 
@@ -21,8 +28,8 @@ Convert datasets
 Data copying
 -------------------------------
 
-.. autoprogram:: zea.data.__main__:get_parser()
-   :prog: python -m zea.data
+.. autoprogram:: zea.data.copy:get_parser()
+   :prog: python -m zea.data.copy
 
 -------------------------------
 Data file manipulation

@@ -1,7 +1,7 @@
 """Command-line interface for copying a zea.Folder to a new location.
 
 Usage:
-    python -m zea.data <source_folder> <destination_folder> <key>
+    python -m zea.data.copy <source_folder> <destination_folder> <key>
 """
 
 import argparse
