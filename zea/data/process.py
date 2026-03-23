@@ -59,6 +59,12 @@ def get_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Whether to time dataloader and pipeline operations and save timings to a yaml file.",
     )
+    parser.add_argument(
+        "--num_threads",
+        type=int,
+        default=8,
+        help="Number of threads to use for dataloader. Default is 8.",
+    )
     return parser
 
 
@@ -71,6 +77,7 @@ def run_processing(
     save_as: str = "gif",
     keep_keys=("maxval",),
     timings=False,
+    num_threads=8,
 ) -> None:
     def to_8bit(data, scan):
         data = ops.convert_to_numpy(data)
@@ -101,7 +108,7 @@ def run_processing(
         return_filename=True,
         limit_n_frames=n_frames,
         n_frames=1,
-        num_threads=4,
+        num_threads=num_threads,
         insert_frame_axis=False,
         sort_files=True,
     )
@@ -196,6 +203,7 @@ def main() -> None:
         args.save_as,
         args.keep_keys,
         args.timings,
+        args.num_threads,
     )
 
 
