@@ -131,7 +131,8 @@ def run_processing(
     data_output = []
     filestem = None
     scan = None
-    fps = None
+    _DEFAULT_FPS = 20
+    fps = _DEFAULT_FPS
 
     # Start iterating through all frames in dataset
     pbar = keras.utils.Progbar(total_batches)
@@ -157,7 +158,7 @@ def run_processing(
                 # Get original frame-rate before scan transmits are subsampled.
                 filestem = file.stem
                 scan: zea.Scan = file.scan(**config.scan.as_dict())
-                fps = scan.frames_per_second
+                fps = scan.frames_per_second or _DEFAULT_FPS
 
                 # Filter config scan to only include keys the pipeline needs.
                 # This avoids the warning that the pipeline would print otherwise.
