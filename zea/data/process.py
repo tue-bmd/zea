@@ -151,7 +151,13 @@ def run_processing(
                 filestem = file.stem
                 scan: zea.Scan = file.scan(**config.scan.as_dict())
                 fps = scan.frames_per_second
-                params = prepare_parameters(scan=scan, **config.scan.as_dict())
+
+                # Filter config scan to only include keys the pipeline needs.
+                # This avoids the warning that the pipeline would print otherwise.
+                to_pipeline_scan_dict = {
+                    k: v for k, v in config.scan.as_dict().items() if pipeline.needs(k)
+                }
+                params = prepare_parameters(scan=scan, **to_pipeline_scan_dict)
 
         # Select the right transmits
         # TODO: this can be optimized by only loading the selected transmits from disk
