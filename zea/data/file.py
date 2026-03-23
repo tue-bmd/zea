@@ -762,6 +762,8 @@ def _assert_scan_keys_present(file: File):
             shape_file = None
         else:
             shape_file = file["scan"][key].shape
+            if shape_file == (1,):
+                shape_file = ()
 
         if key == "probe_geometry":
             correct_shape = (file["scan"]["n_el"][()], 3)
@@ -819,7 +821,6 @@ def _assert_scan_keys_present(file: File):
             "lens_correction",
         ):
             correct_shape = ()
-            shape_file = file["scan"][key].shape
 
         else:
             correct_shape = None
