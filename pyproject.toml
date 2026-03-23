@@ -1,6 +1,10 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
 [project]
 name = "zea"
-version = "0.0.10"
+version = "0.0.11"
 description = "A Toolbox for Cognitive Ultrasound Imaging. Provides a set of tools for processing of ultrasound data, all built in your favorite machine learning framework."
 authors = [
     { name = "Tristan Stevens", email = "t.s.w.stevens@tue.nl" },
@@ -15,7 +19,7 @@ authors = [
     { name = "Ruud van Sloun", email = "r.j.g.v.sloun@tue.nl" },
 ]
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
 keywords = ["ultrasound", "machine learning", "beamforming"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -25,6 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Natural Language :: English",
     "Topic :: Scientific/Engineering",
 ]
@@ -43,6 +48,7 @@ dependencies = [
     "wandb >=0.18",
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
+    "grain >= 0.2",
     # can we make these optional or remove?
     "scikit-image >=0.23",
     "scikit-learn >=1.4",
@@ -68,6 +74,7 @@ dev = [
     "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
     "sphinxcontrib-bibtex",
+    "setuptools<82",
     "myst-parser",
     "nbsphinx",
     "furo",
@@ -99,6 +106,7 @@ docs = [
     "sphinxcontrib-autoprogram",
     "sphinx-reredirects",
     "sphinxcontrib-bibtex",
+    "setuptools<82",
     "myst-parser",
     "nbsphinx",
     "furo",
@@ -130,10 +138,6 @@ Repository = "https://github.com/tue-bmd/zea/"
 
 [project.scripts]
 zea = "zea.__main__:main"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 # We use ruff to lint and auto-format code

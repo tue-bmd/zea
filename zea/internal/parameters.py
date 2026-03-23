@@ -30,16 +30,32 @@ def cache_with_dependencies(*deps):
             self._assert_dependencies_met(func.__name__)
 
             if func.__name__ in self._cache:
-                # Check if dependencies changed for mutable parameters
-                current_hash = self._current_dependency_hash(func.__name__)
-                if current_hash == self._dependency_versions.get(func.__name__):
-                    return self._cache[func.__name__]
-                else:
+                # Check if dependencies changed for mutable parameters. If
+                # computing the dependency hash fails (e.g. due to
+                # non-picklable local objects), invalidate the cache and
+                # proceed to recompute.
+                try:
+                    current_hash = self._current_dependency_hash(func.__name__)
+                except Exception:
                     self._invalidate(func.__name__)
+                else:
+                    if current_hash == self._dependency_versions.get(func.__name__):
+                        return self._cache[func.__name__]
+                    else:
+                        self._invalidate(func.__name__)
 
             result = func(self)
             self._cache[func.__name__] = result
-            self._dependency_versions[func.__name__] = self._current_dependency_hash(func.__name__)
+            # Attempt to compute and store a dependency hash version. If
+            # hashing fails (e.g. objects that cannot be pickled), store
+            # None so that future checks will conservatively treat the
+            # dependency as changed.
+            try:
+                self._dependency_versions[func.__name__] = self._current_dependency_hash(
+                    func.__name__
+                )
+            except Exception:
+                self._dependency_versions[func.__name__] = None
             return result
 
         return property(wrapper)
@@ -317,6 +333,15 @@ class Parameters(ZeaObject):
         if self._has_param(item):
             return self._params[item]
 
+        # If a class-level property exists (e.g. a computed property),
+        # call its descriptor to compute and return the value. This
+        # provides a safe fallback in cases where normal attribute
+        # lookup didn't resolve the property but the descriptor is
+        # still present on the class.
+        cls_attr = getattr(self.__class__, item, None)
+        if isinstance(cls_attr, property):
+            return cls_attr.__get__(self, self.__class__)
+
         # Attribute not found
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
 
@@ -350,6 +375,52 @@ class Parameters(ZeaObject):
 
         # Invalidate cache for this parameter if it is also a computed property
         self._invalidate(key)
+
+    def update(self, force=False, **kwargs):
+        """Update parameters, skipping values that haven't changed unless forced.
+
+        Only valid parameters (those listed in ``VALID_PARAMS``) are considered;
+        unknown keys are silently ignored.
+
+        Args:
+            force: If True, set every parameter unconditionally (triggers cache
+                invalidation even when the value is unchanged).  Default is False,
+                which skips unchanged values.
+        """
+        for key, new_val in kwargs.items():
+            if key not in self.VALID_PARAMS:
+                continue
+
+            if not force:
+                old_exists = key in self._params
+                old_val = self._params[key] if old_exists else None
+                if old_exists and old_val is None and new_val is None:
+                    continue
+                if old_exists and old_val is not None and new_val is not None:
+                    if isinstance(old_val, np.ndarray) and isinstance(new_val, np.ndarray):
+                        try:
+                            if np.array_equal(old_val, new_val):
+                                continue
+                        except (TypeError, ValueError):
+                            pass  # fall through to setattr
+                    else:
+                        try:
+                            eq = old_val == new_val
+                        except (TypeError, ValueError):
+                            eq = None
+
+                        if isinstance(eq, (bool, np.bool_)):
+                            if eq:
+                                continue
+                        elif eq is not None:
+                            try:
+                                if np.all(eq):
+                                    continue
+                            except Exception:
+                                # If np.all fails (non-array-like result), fall through
+                                pass
+
+            setattr(self, key, new_val)
 
     def __delattr__(self, name):
         # Allow deletion of parameters, but not properties

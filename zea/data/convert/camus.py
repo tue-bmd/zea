@@ -1,11 +1,19 @@
-"""Functionality to convert the camus dataset to the zea format.
+"""Functionality to convert the CAMUS dataset to the zea format.
 
 .. note::
-    Requires SimpleITK to be installed: `pip install SimpleITK`.
+    Requires SimpleITK to be installed: ``pip install SimpleITK``.
 
-For more information about the dataset, resort to the following links:
+The CAMUS (Cardiac Acquisitions for Multi-structure Ultrasound Segmentation)
+dataset contains 2D echocardiographic sequences from 500 patients.
+The sequences are stored in NIfTI (.nii.gz) format.
 
-- The original dataset can be found at `this link <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8>`_.
+The dataset can be downloaded automatically using the ``--download`` flag::
+
+    python -m zea.data.convert camus <source_folder> <destination_folder> --download
+
+**Links**:
+
+- `Original dataset <https://humanheart-project.creatis.insa-lyon.fr/database/#collection/6373703d73e9f0047faa1bc8>`_
 
 """
 
@@ -15,7 +23,6 @@ import logging
 import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Tuple
 
 import numpy as np
 import scipy
@@ -23,10 +30,13 @@ from skimage.transform import resize
 from tqdm import tqdm
 
 from zea import log
-from zea.data.convert.utils import unzip
+from zea.data.convert.utils import download_from_girder, sitk_load, unzip
 from zea.data.data_format import generate_zea_dataset
 from zea.func.tensor import translate
 from zea.internal.utils import find_first_nonzero_index
+
+# Girder collection ID for the CAMUS dataset
+_CAMUS_COLLECTION_ID = "6373703d73e9f0047faa1bc8"
 
 
 def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
@@ -120,45 +130,6 @@ def transform_sc_image_to_polar(image_sc, output_size=None, fit_outline=True):
 
     # Resize image to output_size
     return resize(polar_image, output_size, preserve_range=True)
-
-
-def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """Loads an image using SimpleITK and returns the image and its metadata.
-
-    Args:
-        filepath: Path to the image.
-
-    Returns:
-        - Image array of shape (num_frames, height, width).
-        - Collection of metadata.
-    """
-    # Load image and save info
-    try:
-        import SimpleITK as sitk
-    except ImportError as exc:
-        raise ImportError(
-            "SimpleITK is not installed. "
-            "Please install it with `pip install SimpleITK` to convert CAMUS dataset."
-        ) from exc
-
-    image = sitk.ReadImage(str(filepath))
-
-    all_metadata = {}
-    for k in image.GetMetaDataKeys():
-        all_metadata[k] = image.GetMetaData(k)
-
-    metadata = {
-        "origin": image.GetOrigin(),
-        "ElementSpacing": image.GetSpacing(),
-        "direction": image.GetDirection(),
-        "NDims": image.GetDimension(),
-        "metadata": all_metadata,
-    }
-
-    # Extract numpy array from the SimpleITK image object
-    im_array = sitk.GetArrayFromImage(image)
-
-    return im_array, metadata
 
 
 def process_camus(source_path, output_path, overwrite=False):
@@ -256,29 +227,69 @@ def _process_task(task):
         raise
 
 
-def convert_camus(args):
-    """
-    Converts the CAMUS dataset into ZEA HDF5 files across dataset splits.
+def download_camus(  # pragma: no cover
+    destination: str | Path, patients: list[int] | None = None
+) -> Path:
+    """Download the CAMUS dataset from the Girder server.
 
-    Processes files found under the CAMUS source folder (after unzipping if needed),
-    assigns each patient to a train/val/test split, creates matching output paths,
-    and executes per-file conversion tasks either serially or in parallel.
-    Ensures output directories do not pre-exist, and logs progress and failures.
+    Downloads NIfTI files for each patient.
+
+    Args:
+        destination: Directory where the dataset will be downloaded.
+        patients: List of patient IDs to download (1-500).
+            If None, all patients are downloaded.
+
+    Returns:
+        Path to the downloaded dataset directory.
+    """
+    return download_from_girder(
+        collection_id=_CAMUS_COLLECTION_ID,
+        destination=destination,
+        dataset_name="CAMUS",
+        patients=patients,
+        top_folder_name="database_nifti",
+    )
+
+
+def convert_camus(args):
+    """Convert the CAMUS dataset into zea HDF5 files across dataset splits.
+
+    Processes files found under the CAMUS source folder (after unzipping or
+    downloading if needed), assigns each patient to a train/val/test split,
+    creates matching output paths, and executes per-file conversion tasks
+    either serially or in parallel.
+
+    Usage::
+
+        python -m zea.data.convert camus <source_folder> <destination_folder>
+        python -m zea.data.convert camus <source_folder> <destination_folder> --download
 
     Args:
         args (argparse.Namespace): An object with attributes:
 
-            - src (str | Path): Path to the CAMUS archive or extracted folder.
+            - src (str | Path): Path to the CAMUS archive or extracted folder,
+              or a directory to download into when ``--download`` is set.
             - dst (str | Path): Root destination folder for ZEA HDF5 outputs;
               split subfolders will be created.
+            - download (bool, optional): If True, download the dataset first from the
+              Girder server.
             - no_hyperthreading (bool, optional): If True, run tasks serially instead
               of using a process pool.
     """
     camus_source_folder = Path(args.src)
     camus_output_folder = Path(args.dst)
 
-    # Look for either CAMUS_public.zip or folders database_nifti, database_split
-    camus_source_folder = unzip(camus_source_folder, "camus")
+    # Optionally download the dataset
+    if getattr(args, "download", False):
+        camus_source_folder = download_camus(camus_source_folder)
+    elif not camus_source_folder.exists():
+        raise FileNotFoundError(
+            f"Source folder does not exist: {camus_source_folder}. "
+            "Use --download to download the CAMUS dataset automatically."
+        )
+    else:
+        # Look for either CAMUS_public.zip or folders database_nifti, database_split
+        camus_source_folder = unzip(camus_source_folder, "camus")
 
     # check if output folders already exist
     for split in splits:
@@ -290,10 +301,6 @@ def convert_camus(args):
     files = list(camus_source_folder.glob("**/*_half_sequence.nii.gz"))
     tasks = []
     for source_file in files:
-        # check if source file in camus database (ignore other files)
-        if "database_nifti" not in source_file.parts:
-            continue
-
         patient = source_file.stem.split("_")[0]
         patient_id = int(patient.removeprefix("patient"))
         split = get_split(patient_id)

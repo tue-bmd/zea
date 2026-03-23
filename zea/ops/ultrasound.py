@@ -1,4 +1,3 @@
-import uuid
 from typing import Tuple
 
 import keras
@@ -41,11 +40,11 @@ class Simulate(Operation):
 
     # Define operation-specific static parameters
     STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
+    ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
         super().__init__(
             output_data_type=DataTypes.RAW_DATA,
-            additional_output_keys=["n_ch"],
             **kwargs,
         )
 
@@ -260,6 +259,18 @@ class ScanConvert(Operation):
     """Scan convert images to cartesian coordinates."""
 
     STATIC_PARAMS = ["fill_value"]
+    ADD_OUTPUT_KEYS = [
+        "resolution",
+        "x_lim",
+        "y_lim",
+        "z_lim",
+        "rho_range",
+        "theta_range",
+        "phi_range",
+        "d_rho",
+        "d_theta",
+        "d_phi",
+    ]
 
     def __init__(self, order=1, **kwargs):
         """Initialize the ScanConvert operation.
@@ -280,18 +291,6 @@ class ScanConvert(Operation):
             input_data_type=DataTypes.IMAGE,
             output_data_type=DataTypes.IMAGE_SC,
             jittable=jittable,
-            additional_output_keys=[
-                "resolution",
-                "x_lim",
-                "y_lim",
-                "z_lim",
-                "rho_range",
-                "theta_range",
-                "phi_range",
-                "d_rho",
-                "d_theta",
-                "d_phi",
-            ],
             **kwargs,
         )
         self.order = order
@@ -354,12 +353,13 @@ class Demodulate(Operation):
     """Demodulates the input data to baseband. After this operation, the carrier frequency
     is removed (0 Hz) and the data is in IQ format stored in two real valued channels."""
 
+    ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
+
     def __init__(self, axis=-3, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
             jittable=True,
-            additional_output_keys=["center_frequency", "n_ch"],
             **kwargs,
         )
         self.axis = axis
@@ -441,7 +441,7 @@ class FirFilter(Operation):
 
         def _convolve(signal):
             """Apply the filter to the signal using correlation."""
-            return correlate(signal, fir_filter_taps[::-1], mode="same")
+            return correlate(signal, ops.flip(fir_filter_taps, axis=0), mode="same")
 
         filtered_signal = apply_along_axis(_convolve, axis, signal)
 
@@ -462,7 +462,9 @@ class LowPassFilterIQ(FirFilter):
     Uses :func:`get_low_pass_iq_filter` to compute the filter taps.
     """
 
-    def __init__(self, axis: int = -3, num_taps: int = 127, **kwargs):
+    def __init__(
+        self, axis: int = -3, num_taps: int = 127, filter_key: str = "low_pass_filter", **kwargs
+    ):
         """Initialize the LowPassFilterIQ operation.
 
         Args:
@@ -472,14 +474,18 @@ class LowPassFilterIQ(FirFilter):
             num_taps (int): Number of taps in the FIR filter. Default is 127.
                 Odd will result in a type I filter, even in a type II filter.
         """
-        self._random_suffix = str(uuid.uuid4())
-        kwargs.pop("filter_key", None)
+        if "jittable" in kwargs:
+            raise ValueError("LowPassFilterIQ is not jittable, so jittable must be set to False.")
+        if "complex_channels" in kwargs and not kwargs["complex_channels"]:
+            raise ValueError(
+                "LowPassFilterIQ operates on IQ data, so complex_channels must be True."
+            )
         kwargs.pop("jittable", None)
         kwargs.pop("complex_channels", None)
         super().__init__(
             axis=axis,
             complex_channels=True,
-            filter_key=f"low_pass_{self._random_suffix}",
+            filter_key=filter_key,
             jittable=False,
             **kwargs,
         )
@@ -510,7 +516,9 @@ class BandPassFilter(FirFilter):
     filter taps.
     """
 
-    def __init__(self, axis: int = -3, num_taps: int = 127, **kwargs):
+    def __init__(
+        self, axis: int = -3, num_taps: int = 127, filter_key: str = "band_pass_filter", **kwargs
+    ):
         """Initialize the BandPassFilter operation.
 
         Args:
@@ -519,13 +527,15 @@ class BandPassFilter(FirFilter):
             num_taps (int): Number of taps in the FIR filter. Default is 127.
                 Odd will result in a type I filter, even in a type II filter.
         """
-        self._random_suffix = str(uuid.uuid4())
-        kwargs.pop("filter_key", None)
+        if "complex_channels" in kwargs and kwargs["complex_channels"]:
+            raise ValueError(
+                "BandPassFilter operates on a real signal, so complex_channels must be False."
+            )
         kwargs.pop("complex_channels", None)
         super().__init__(
             axis=axis,
             complex_channels=False,
-            filter_key=f"band_pass_{self._random_suffix}",
+            filter_key=filter_key,
             **kwargs,
         )
         self.num_taps = num_taps
@@ -734,9 +744,10 @@ class Companding(Operation):
 class Downsample(Operation):
     """Downsample data along a specific axis."""
 
+    ADD_OUTPUT_KEYS = ["sampling_frequency", "n_ax"]
+
     def __init__(self, factor: int = 1, phase: int = 0, axis: int = -3, **kwargs):
         super().__init__(
-            additional_output_keys=["sampling_frequency", "n_ax"],
             **kwargs,
         )
         if factor < 1:
@@ -1017,7 +1028,7 @@ class ApplyWindow(Operation):
 
     def call(self, **kwargs):
         data = kwargs[self.key]
-        dtype = data.dtype
+        dtype = ops.dtype(data)
         axis = canonicalize_axis(self.axis, ops.ndim(data))
 
         length = ops.shape(data)[axis]

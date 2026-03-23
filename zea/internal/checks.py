@@ -217,13 +217,18 @@ def _check_image(data=None, shape=None, with_batch_dim=None):
     If data is provided, shape is derived from data.
     If shape is provided, data is ignored. Only supply one of data or shape.
 
+    Supports both 2D images ``(grid_size_z, grid_size_x)`` and 3D volumes
+    ``(grid_size_z, grid_size_x, grid_size_y)``.  When *with_batch_dim* is
+    ``True`` the leading axis is the frame dimension.
+
     Args:
         data (np.ndarray, optional): image data. Defaults to None.
             either data or shape must be provided.
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 3 dimensions. Defaults to None.
+            Setting this to True requires the data to have 3 or 4 dimensions.
+            Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape.
@@ -233,25 +238,32 @@ def _check_image(data=None, shape=None, with_batch_dim=None):
         shape = data.shape
 
     if with_batch_dim is None:
-        with_batch_dim = len(shape) == 3
+        with_batch_dim = len(shape) in (3, 4)
 
     if not with_batch_dim:
-        assert len(shape) == 2, (
-            f"image data must be 2D, with expected shape [grid_size_z, grid_size_x], got {shape}"
+        assert len(shape) in (2, 3), (
+            f"image data must be 2D or 3D, with expected shape "
+            f"[grid_size_z, grid_size_x] or [grid_size_z, grid_size_x, grid_size_y], "
+            f"got {shape}"
         )
     else:
-        assert len(shape) == 3, (
-            f"image data must be 3D, with expected shape [n_fr, grid_size_z, grid_size_x]"
-            f", got {shape}"
+        assert len(shape) in (3, 4), (
+            f"image data must be 3D or 4D, with expected shape "
+            f"[n_frames, grid_size_z, grid_size_x] or "
+            f"[n_frames, grid_size_z, grid_size_x, grid_size_y], got {shape}"
         )
 
 
 @checks_registry("image_sc")
 def _check_image_sc(data=None, shape=None, with_batch_dim=None):
-    """Check image data shape.
+    """Check scan-converted image data shape.
 
     If data is provided, shape is derived from data.
     If shape is provided, data is ignored. Only supply one of data or shape.
+
+    Supports both 2D images ``(output_size_z, output_size_x)`` and 3D volumes
+    ``(output_size_z, output_size_x, output_size_y)``.  When *with_batch_dim* is
+    ``True`` the leading axis is the frame dimension.
 
     Args:
         data (np.ndarray, optional): scan-converted data. Defaults to None.
@@ -259,7 +271,8 @@ def _check_image_sc(data=None, shape=None, with_batch_dim=None):
         shape (tuple, optional): shape of the data. Defaults to None.
             either data or shape must be provided.
         with_batch_dim (bool, optional): whether data has frame dimension at the start.
-            Setting this to True requires the data to have 3 dimensions. Defaults to None.
+            Setting this to True requires the data to have 3 or 4 dimensions.
+            Defaults to None.
 
     Raises:
         AssertionError: if data does not have expected shape.
@@ -269,16 +282,19 @@ def _check_image_sc(data=None, shape=None, with_batch_dim=None):
         shape = data.shape
 
     if with_batch_dim is None:
-        with_batch_dim = len(shape) == 3
+        with_batch_dim = len(shape) in (3, 4)
 
     if not with_batch_dim:
-        assert len(shape) == 2, (
-            f"image data must be 2D, with expected shape [grid_size_z, grid_size_x], got {shape}"
+        assert len(shape) in (2, 3), (
+            f"image data must be 2D or 3D, with expected shape "
+            f"[output_size_z, output_size_x] or "
+            f"[output_size_z, output_size_x, output_size_y], got {shape}"
         )
     else:
-        assert len(shape) == 3, (
-            f"image data must be 3D, with expected shape [n_frames, grid_size_z, grid_size_x], "
-            f"got {shape}"
+        assert len(shape) in (3, 4), (
+            f"image data must be 3D or 4D, with expected shape "
+            f"[n_frames, output_size_z, output_size_x] or "
+            f"[n_frames, output_size_z, output_size_x, output_size_y], got {shape}"
         )
 
 

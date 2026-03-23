@@ -646,7 +646,7 @@ def generate_zea_dataset(
         description (str): The description of the dataset.
         focus_distances (np.ndarray): The focus distances of shape (n_tx,).
         transmit_origins (np.ndarray): The transmit origins of shape (n_tx, 3).
-        polar_angles (np.ndarray): The polar angles (radians) of shape (n_el,).
+        polar_angles (np.ndarray): The polar angles (radians) of shape (n_tx,).
         azimuth_angles (np.ndarray): The azimuth angles (radians) of shape (n_tx,).
         tx_apodizations (np.ndarray): The transmit delays for each element defining
             the wavefront in seconds of shape (n_tx, n_elem).

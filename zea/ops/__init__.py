@@ -51,7 +51,7 @@ One can also load a pipeline from a config or yaml/json file:
     >>> from zea import Pipeline
 
     >>> # From JSON string
-    >>> json_string = '{"operations": ["identity"]}'
+    >>> json_string = '{"pipeline": {"operations": ["identity"]}}'
     >>> pipeline = Pipeline.from_json(json_string)
 
     >>> # from yaml file
@@ -59,14 +59,16 @@ One can also load a pipeline from a config or yaml/json file:
     >>> from zea import Config
     >>> # Create a sample pipeline YAML file
     >>> pipeline_dict = {
-    ...     "operations": [
-    ...         {"name": "identity"},
-    ...     ]
+    ...     "pipeline": {
+    ...         "operations": [
+    ...             {"name": "identity"},
+    ...         ],
+    ...     }
     ... }
     >>> with open("pipeline.yaml", "w") as f:
     ...     yaml.dump(pipeline_dict, f)
     >>> yaml_file = "pipeline.yaml"
-    >>> pipeline = Pipeline.from_yaml(yaml_file)
+    >>> pipeline = Pipeline.from_path(yaml_file)
 
 .. testcleanup::
 
@@ -99,14 +101,11 @@ from .base import (
     Identity,
     Lambda,
     Mean,
-    Merge,
     Operation,
-    Stack,
     get_ops,
 )
 from .pipeline import (
     Beamform,
-    BranchedPipeline,
     DelayAndSum,
     DelayMultiplyAndSum,
     Map,
@@ -124,6 +123,7 @@ from .ultrasound import (
     ApplyWindow,
     BandPassFilter,
     ChannelsToComplex,
+    CommonMidpointPhaseError,
     Companding,
     ComplexToChannels,
     Demodulate,
@@ -138,7 +138,6 @@ from .ultrasound import (
     ScanConvert,
     Simulate,
     TOFCorrection,
-    CommonMidpointPhaseError,
     UpMix,
 )
 
@@ -149,15 +148,12 @@ __all__ = [
     "Identity",
     "Lambda",
     "Mean",
-    "Merge",
     "Operation",
-    "Stack",
     "get_ops",
     # Pipeline
     "DelayAndSum",
     "DelayMultiplyAndSum",
     "Beamform",
-    "BranchedPipeline",
     "Map",
     "PatchedGrid",
     "Pipeline",

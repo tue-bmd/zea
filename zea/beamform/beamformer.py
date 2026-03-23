@@ -310,13 +310,15 @@ def _validate_delay_inputs(data, grid, t0_delays, probe_geometry, tx_apodization
 
     assert ops.shape(grid)[1] == 3, f"Expected grid to have shape (n_pix, 3), got {grid.shape}."
     assert ops.shape(probe_geometry) == (n_el, 3), (
-        f"Expected probe_geometry to have shape (n_el, 3), got {probe_geometry.shape}."
+        f"Expected probe_geometry to have shape (n_el, 3), "
+        f"got {probe_geometry.shape} != {(n_el, 3)}."
     )
     assert ops.shape(t0_delays) == (n_tx, n_el), (
-        f"Expected t0_delays to have shape (n_tx, n_el), got {t0_delays.shape}."
+        f"Expected t0_delays to have shape (n_tx, n_el), got {t0_delays.shape} != {(n_tx, n_el)}."
     )
     assert ops.shape(tx_apodizations) == (n_tx, n_el), (
-        f"Expected tx_apodizations to have shape (n_tx, n_el), got {tx_apodizations.shape}."
+        "Expected tx_apodizations to have shape (n_tx, n_el), "
+        f"got {tx_apodizations.shape} != {(n_tx, n_el)}."
     )
 
 

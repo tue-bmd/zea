@@ -25,10 +25,25 @@ def get_ops(ops_name):
     return ops_registry[ops_name]
 
 
+def _to_native(value):
+    """Convert non-serializable types (e.g. numpy) to native Python equivalents."""
+    if hasattr(value, "ndim") and callable(getattr(value, "tolist", None)):
+        return value.tolist()
+    if isinstance(value, tuple):
+        return tuple(_to_native(v) for v in value)
+    if isinstance(value, list):
+        return [_to_native(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_native(v) for k, v in value.items()}
+    return value
+
+
 class Operation(keras.Operation):
     """
     A base abstract class for operations in the pipeline with caching functionality.
     """
+
+    ADD_OUTPUT_KEYS: List[str] = []
 
     def __init__(
         self,
@@ -75,7 +90,11 @@ class Operation(keras.Operation):
         self.output_key = output_key  # Key for output data
         if self.output_key is None:
             self.output_key = self.key
-        self.additional_output_keys = additional_output_keys or []
+        if additional_output_keys is None:
+            additional_output_keys = getattr(self.__class__, "ADD_OUTPUT_KEYS", [])
+        self.additional_output_keys = (
+            list(additional_output_keys) if additional_output_keys is not None else []
+        )
 
         self.inputs = []  # Source(s) of input data (name of a previous operation)
         self.allow_multiple_inputs = False  # Only single input allowed by default
@@ -92,6 +111,8 @@ class Operation(keras.Operation):
 
         if jit_kwargs is None:
             jit_kwargs = {}
+
+        self._user_jit_kwargs = jit_kwargs.copy()
 
         if keras.backend.backend() == "jax" and self.static_params:
             jit_kwargs |= {"static_argnames": self.static_params}
@@ -260,19 +281,84 @@ class Operation(keras.Operation):
 
         return combined_kwargs
 
-    def get_dict(self):
-        """Get the configuration of the operation. Inherit from keras.Operation."""
-        config = {}
-        config.update({"name": ops_registry.get_name(self)})
-        config["params"] = {
-            "key": self.key,
-            "output_key": self.output_key,
-            "cache_inputs": self.cache_inputs,
-            "cache_outputs": self.cache_outputs,
-            "jit_compile": self._jit_compile,
-            "with_batch_dim": self.with_batch_dim,
-            "jit_kwargs": self.jit_kwargs,
-        }
+    def get_dict(self, compact=True):
+        """Get the configuration of the operation.
+
+        Args:
+            compact (bool): If True (default), only include
+                parameters that differ from their defaults.
+                If False, include all parameters for full reproducibility.
+        """
+        config = {"name": ops_registry.get_name(self)}
+        params = {}
+
+        # Collect subclass-specific params from the MRO (excluding Operation base)
+        base_param_names = set(inspect.signature(Operation.__init__).parameters.keys())
+        seen = set()
+
+        for cls in type(self).__mro__:
+            if not issubclass(cls, Operation) or cls is Operation:
+                continue
+            init_fn = cls.__dict__.get("__init__")
+            if init_fn is None:
+                continue
+            for name, param in inspect.signature(init_fn).parameters.items():
+                if name == "self" or name in base_param_names or name in seen:
+                    continue
+                if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+                    continue
+                seen.add(name)
+
+                value = _to_native(getattr(self, name, None))
+                if callable(value):
+                    if name == "func":
+                        op_name = ops_registry.get_name(self)
+                        if op_name == "lambda":
+                            raise TypeError(
+                                "Cannot serialize generic 'lambda' operation with an arbitrary "
+                                "callable. Use a registered operation class instead (e.g. "
+                                "zea.ops.keras_ops wrappers) or create a custom Operation "
+                                "subclass."
+                            )
+                        continue
+                    raise TypeError(
+                        f"Parameter '{name}' of '{type(self).__name__}' is callable and cannot "
+                        "be serialized to config. Override get_dict() to skip it."
+                    )
+                if compact:
+                    if param.default is inspect.Parameter.empty or value != param.default:
+                        params[name] = value
+                else:
+                    params[name] = value
+
+        # Base Operation parameters
+        if compact:
+            if self.key != "data":
+                params["key"] = self.key
+            if self.output_key != self.key:
+                params["output_key"] = self.output_key
+            if self.cache_inputs:
+                params["cache_inputs"] = self.cache_inputs
+            if self.cache_outputs:
+                params["cache_outputs"] = self.cache_outputs
+            if not self._jit_compile:
+                params["jit_compile"] = self._jit_compile
+            if not self.with_batch_dim:
+                params["with_batch_dim"] = self.with_batch_dim
+            if self._user_jit_kwargs:
+                params["jit_kwargs"] = self._user_jit_kwargs
+        else:
+            params["key"] = self.key
+            params["output_key"] = self.output_key
+            params["cache_inputs"] = self.cache_inputs
+            params["cache_outputs"] = self.cache_outputs
+            params["jit_compile"] = self._jit_compile
+            params["with_batch_dim"] = self.with_batch_dim
+            params["jit_kwargs"] = self._user_jit_kwargs
+
+        if params:
+            config["params"] = params
+
         return config
 
     def __eq__(self, other):
@@ -378,6 +464,36 @@ class Lambda(Operation):
             data = self.func(data)
         return {self.output_key: data}
 
+    def get_dict(self, compact=True):
+        """Serialize lambda-based operations.
+
+        Generic ``zea.ops.Lambda`` instances are intentionally rejected because
+        arbitrary callables cannot be reliably serialized. Registered subclasses
+        (e.g. ``zea.ops.keras_ops`` wrappers) are serialized by operation name and
+        the callable keyword arguments.
+        """
+        config = super().get_dict(compact=compact)
+
+        func = self.func.func if isinstance(self.func, partial) else self.func
+        func_sig = inspect.signature(func)
+        func_kwargs = self.func.keywords or {}
+
+        serialized_func_params = {}
+        for name, param in func_sig.parameters.items():
+            if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+                continue
+            if name in func_kwargs:
+                serialized_func_params[name] = _to_native(func_kwargs[name])
+            elif not compact and param.default is not inspect.Parameter.empty:
+                serialized_func_params[name] = _to_native(param.default)
+
+        if serialized_func_params:
+            existing_params = config.get("params", {})
+            existing_params.update(serialized_func_params)
+            config["params"] = existing_params
+
+        return config
+
 
 @ops_registry("mean")
 class Mean(Operation):
@@ -392,50 +508,4 @@ class Mean(Operation):
         for key, axis in zip(self.keys, self.axes):
             kwargs[key] = ops.mean(kwargs[key], axis=axis)
 
-        return kwargs
-
-
-@ops_registry("merge")
-class Merge(Operation):
-    """Operation that merges sets of input dictionaries."""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.allow_multiple_inputs = True
-
-    def call(self, *args, **kwargs) -> Dict:
-        """
-        Merges the input dictionaries. Priority is given to the last input.
-        """
-        merged = {}
-        for arg in args:
-            if not isinstance(arg, dict):
-                raise TypeError("All inputs must be dictionaries.")
-            merged.update(arg)
-        return merged
-
-
-@ops_registry("stack")
-class Stack(Operation):
-    """Stack multiple data arrays along a new axis.
-    Useful to merge data from parallel pipelines.
-    """
-
-    def __init__(
-        self,
-        keys: Union[str, List[str], None],
-        axes: Union[int, List[int], None],
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-
-        self.keys, self.axes = _assert_keys_and_axes(keys, axes)
-
-    def call(self, **kwargs) -> Dict:
-        """
-        Stacks the inputs corresponding to the specified keys along the specified axis.
-        If a list of axes is provided, the length must match the number of keys.
-        """
-        for key, axis in zip(self.keys, self.axes):
-            kwargs[key] = keras.ops.stack([kwargs[key] for key in self.keys], axis=axis)
         return kwargs

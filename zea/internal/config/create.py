@@ -156,6 +156,6 @@ if __name__ == "__main__":
     custom_configs_folder.mkdir(exist_ok=True)
     filename = custom_configs_folder / f"{timestamp}_{name}.yaml"
 
-    Config(config).save_to_yaml(filename)
+    Config(config).to_yaml(filename)
 
     print(f"Find your config at {str(filename)}")

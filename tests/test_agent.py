@@ -135,8 +135,11 @@ def test_greedy_entropy():
     correct_selected_lines = ops.convert_to_tensor([correct_selected_lines])
     assert ops.all(selected_lines == correct_selected_lines)
 
-    # Test compute_pairwise_pixel_gaussian_error with n_possible_actions = None
-    _ = agent.compute_pairwise_pixel_gaussian_error(particles, n_possible_actions=None)
+    # test with n_possible_actions == w // 2
+    agent = selection.GreedyEntropy(n_actions, w // 2, h, w)
+    selected_lines, mask = agent.sample(particles)
+    assert mask.shape == (1, h, w)
+    assert selected_lines.shape == (1, w // 2)
 
 
 def test_greedy_entropy_average_across_batch():
