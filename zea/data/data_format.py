@@ -428,7 +428,11 @@ def _write_datasets(
         group_name=scan_group_name,
         name="t0_delays",
         data=t0_delays,
-        description="The t0_delays of shape (n_tx, n_el).",
+        description=(
+            "The transmit delays for each element in seconds of shape (n_tx, n_el). "
+            "This is the time at which each element fires, shifted such that the "
+            "first element fires at t=0."
+        ),
         unit="s",
     )
 
@@ -437,10 +441,11 @@ def _write_datasets(
         name="tx_apodizations",
         data=tx_apodizations,
         description=(
-            "The transmit delays for each element defining the"
-            " wavefront in seconds of shape (n_tx, n_elem). This is"
-            " the time at which each element fires shifted such that"
-            " the first element fires at t=0."
+            "The apodization values that were applied to each element during transmit "
+            "of shape (n_tx, n_el). This is a value between -1 and 1 that indicates how much "
+            "each element contributed to the transmit beam, with 0 meaning no contribution "
+            "and 1 meaning full contribution. Negative values indicate that the element was "
+            "fired with opposite polarity."
         ),
         unit="unitless",
     )
