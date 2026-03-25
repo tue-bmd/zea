@@ -1,0 +1,119 @@
+scan:
+  us_machine:
+    description: The ultrasound machine used to acquire the data.
+    type: string
+    unit: "-"
+    required: true
+  probe_name:
+    description: The name of the probe used to acquire the data.
+    type: string
+    unit: "-"
+    required: true
+  n_ax:
+    description: The number of axial samples.
+    type: int
+    unit: "-"
+    required: true
+  n_el:
+    description: The number of elements in the probe.
+    type: int
+    unit: "-"
+    required: true
+  n_tx:
+    description: The number of transmits per frame.
+    type: int
+    unit: "-"
+    required: true
+  n_ch:
+    description: The number of channels (real/complex). For RF data this is 1. For IQ data this is 2.
+    type: int
+    unit: "-"
+    required: true
+  n_frames:
+    description: The number of frames.
+    type: int
+    unit: "-"
+    required: true
+  sound_speed:
+    description: The speed of sound.
+    type: float
+    unit: m/s
+    required: false
+  probe_geometry:
+    description: The probe geometry of shape (n_el, 3), represented as (x, y, z) coordinates.
+    type: float32
+    unit: m
+    required: true
+  sampling_frequency:
+    description: The sampling frequency.
+    type: float32
+    unit: Hz
+    required: true
+  center_frequency:
+    description: The center frequency of the transmit pulse. Single scalar if all transmits share the same center frequency; otherwise an array of shape (n_tx,) with one frequency per transmit.
+    type: float32
+    unit: Hz
+    required: true
+  demodulation_frequency:
+    description: The frequency at which the data should be demodulated. Usually the same as center_frequency, but different when doing harmonic imaging. Single scalar if all transmits share the same center frequency; otherwise an array of shape (n_tx,) with one frequency per transmit.
+    type: float32
+    unit: Hz
+    required: true
+  initial_times:
+    description: The times when the A/D converter starts sampling of shape (n_tx,). This is the time between the first element firing and the first recorded sample.
+    type: float32
+    unit: s
+    required: false
+  t0_delays:
+    description: The transmit delays for each element of shape (n_tx, n_el). This is the time at which each element fires, shifted such that the first element fires at t=0.
+    type: float32
+    unit: s
+    required: false
+  tx_apodizations:
+    description: The apodization values that were applied to each element during transmit of shape (n_tx, n_el). This is a value between -1 and 1 that indicates how much each element contributed to the transmit beam, with 0 meaning no contribution and 1 meaning full contribution. Negative values indicate that the element was fired with opposite polarity.
+    type: float32
+    unit: "-"
+    required: false
+  focus_distances:
+    description: The transmit focus distances of shape (n_tx,). This is the distance from the origin point on the transducer to where the beam comes to focus. For planewaves this is set to infinity or zero.
+    type: float32
+    unit: m
+    required: false
+  transmit_origins:
+    description: The transmit origins of the transmit beams of shape (n_tx, 3). This is the (x, y, z) position from which the beam is transmitted.
+    type: float32
+    unit: m
+    required: false
+  polar_angles:
+    description: The polar angles of the transmit beams of shape (n_tx,).
+    type: float32
+    unit: rad
+    required: false
+  azimuth_angles:
+    description: The azimuthal angles of the transmit beams of shape (n_tx,).
+    type: float32
+    unit: rad
+    required: false
+  time_to_next_transmit:
+    description: The time between subsequent transmit events of shape (n_frames, n_tx).
+    type: float32
+    unit: s
+    required: false
+  tgc_gain_curve:
+    description: The time-gain-compensation that was applied to every sample in the raw_data of shape (n_ax,). Divide by this curve to undo the TGC.
+    type: float32
+    unit: "-"
+    required: false
+  element_width:
+    description: The width of the elements in the probe.
+    type: float32
+    unit: m
+    required: false
+  waveforms_one_way:
+    description: One-way waveforms of shape (n_tx, 500) as simulated by the Verasonics system. This is the waveform after being filtered by the transducer bandwidth once.
+    type: float32
+    required: false
+  waveforms_two_way:
+    description: Two-way waveforms of shape (n_tx, 500) as simulated by the Verasonics system. This is the waveform after being filtered by the transducer bandwidth twice.
+    type: float32
+    required: false
