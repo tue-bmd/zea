@@ -431,6 +431,9 @@ class Metrics:
             device (str): The device to run the metric calculations on. If None, will use the
                 default device.
         """
+        assert y_true.shape == y_pred.shape, "y_true and y_pred must have the same shape"
+        assert ops.ndim(y_true) >= 3, "Input tensors must have at least 3 dimensions (..., h, w, c)"
+
         results = {}
         for name, metric in self.metrics.items():
             results[name] = self._call_metric_fn(
