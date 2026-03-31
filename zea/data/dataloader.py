@@ -1,24 +1,41 @@
-"""
-H5 dataloader for loading images from zea datasets.
+"""H5 dataloader for loading images from zea datasets.
+
+Example:
+    .. code-block:: python
+
+        from zea import Dataloader
+
+        loader = Dataloader(
+            file_paths="/path/to/dataset",
+            key="data/image",
+            batch_size=16,
+            image_range=(-60, 0),
+            normalization_range=(0, 1),
+            image_size=(256, 256),
+            num_threads=16,
+        )
+
+        for batch in loader:
+            # batch is a numpy array of shape (batch_size, 256, 256, 1)
+            ...
 """
 
 import re
+import threading
 from itertools import product
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List
 
+import grain
+import keras
 import numpy as np
 
 from zea import log
 from zea.data.datasets import Dataset, H5FileHandleCache, count_samples_per_directory
-from zea.data.file import File
-from zea.data.utils import json_dumps
-from zea.io_lib import retry_on_io_error
-from zea.utils import map_negative_indices
+from zea.data.layers import Resizer
+from zea.utils import canonicalize_axis, map_negative_indices
 
 DEFAULT_NORMALIZATION_RANGE = (0, 1)
-MAX_RETRY_ATTEMPTS = 3
-INITIAL_RETRY_DELAY = 0.1
 
 
 def generate_h5_indices(
@@ -65,18 +82,20 @@ def generate_h5_indices(
                 (
                     "/folder/path_to_file.hdf5",
                     "data/image",
-                    (range(0, 1), slice(None, 256, None), slice(None, 256, None)),
+                    (slice(0, 1, 1), slice(None, 256, None), slice(None, 256, None)),
                 ),
                 (
                     "/folder/path_to_file.hdf5",
                     "data/image",
-                    (range(1, 2), slice(None, 256, None), slice(None, 256, None)),
+                    (slice(1, 2, 1), slice(None, 256, None), slice(None, 256, None)),
                 ),
                 ...,
             ]
     """
-    if not limit_n_frames:
+    if limit_n_frames is None:
         limit_n_frames = np.inf
+    else:
+        assert limit_n_frames > 0, f"limit_n_frames must be > 0, got {limit_n_frames}"
 
     assert len(file_paths) == len(file_shapes), "file_paths and file_shapes must have same length"
 
@@ -99,7 +118,7 @@ def generate_h5_indices(
             file_paths = [file_paths[i] for i in indices_sorting_file_paths]
             file_shapes = [file_shapes[i] for i in indices_sorting_file_paths]
         except Exception:
-            log.warning("H5Generator: Could not sort file_paths by number.")
+            log.warning("Could not sort file_paths by number.")
 
     # block size with stride included
     block_size = n_frames * frame_index_stride
@@ -117,7 +136,7 @@ def generate_h5_indices(
             # Optionally limit frames to load from each file
             n_frames_in_file = min(n_frames_in_file, limit_n_frames)
             indices = [
-                list(range(i, i + block_size, frame_index_stride))
+                slice(i, i + block_size, frame_index_stride)
                 for i in range(0, n_frames_in_file - block_size + 1, block_step_size)
             ]
             yield [indices]
@@ -144,7 +163,7 @@ def generate_h5_indices(
 
     if skipped_files > 0:
         log.warning(
-            f"H5Generator: Skipping {skipped_files} files with not enough frames "
+            f"Skipping {skipped_files} files with not enough frames "
             f"which is about {skipped_files / len(file_paths) * 100:.2f}% of the "
             f"dataset. This can be fine if you expect set `n_frames` and "
             "`frame_index_stride` to be high. Minimum frames in a file needs to be at "
@@ -154,263 +173,519 @@ def generate_h5_indices(
     return indices
 
 
-def _h5_reopen_on_io_error(
-    dataloader_obj: H5FileHandleCache,
-    file,
-    key,
-    indices,
-    retry_count,
-    **kwargs,
-):
-    """Reopen the file if an I/O error occurs.
-    Also removes the file from the cache and try to close file.
-    """
-    file_name = indices[0]
-    try:
-        file_handle = dataloader_obj._file_handle_cache.pop(file_name, None)
-        if file_handle is not None:
-            file_handle.close()
-    except Exception:
-        pass
+class H5DataSource:
+    """Thread-safe random-access data source for HDF5 files.
 
-    log.warning(
-        f"H5Generator: I/O error occurred while reading file {file_name}. "
-        f"Retry opening file. Retry count: {retry_count}."
-    )
+    Implements ``grain.RandomAccessDataSource`` protocol (``__getitem__``
+    and ``__len__``) so it can be plugged directly into a
+    ``grain.MapDataset`` pipeline.
 
+    Each worker thread gets its own ``H5FileHandleCache`` via
+    ``threading.local()`` so ``h5py`` file handles are never shared across
+    threads.
 
-class H5Generator(Dataset):
-    """H5Generator class for iterating over hdf5 files in an advanced way.
-    Mostly used internally, you might want to use the Dataloader class instead.
-    Loads one item at a time. Always outputs numpy arrays.
+    Args:
+        file_paths: Path(s) to HDF5 directory(ies) or file(s).
+        key: HDF5 dataset key, e.g. ``"data/image"``.
+        n_frames: Number of consecutive frames per sample.
+        frame_index_stride: Stride between frames.
+        frame_axis: Axis along which frames are stacked in the output.
+        insert_frame_axis: Whether to insert a new axis for frames.
+        initial_frame_axis: Source axis that stores frames in the file.
+        additional_axes_iter: Extra axes to iterate over.
+        sort_files: Sort files numerically.
+        overlapping_blocks: Allow overlapping frame blocks.
+        limit_n_samples: Cap the number of samples.
+        limit_n_frames: Cap frames loaded per file.
+        return_filename: Return filename metadata with each sample.
+        cache: Cache loaded samples to RAM.
+        validate: Validate dataset against the zea format.
     """
 
     def __init__(
         self,
-        file_paths: List[str],
+        file_paths: List[str] | str,
         key: str = "data/image",
         n_frames: int = 1,
-        shuffle: bool = True,
-        return_filename: bool = False,
-        limit_n_samples: int | None = None,
-        limit_n_frames: int | None = None,
-        seed: int | None = None,
-        cache: bool = False,
+        frame_index_stride: int = 1,
+        frame_axis: int = -1,
+        insert_frame_axis: bool = True,
+        initial_frame_axis: int = 0,
         additional_axes_iter: tuple | None = None,
         sort_files: bool = True,
         overlapping_blocks: bool = False,
-        initial_frame_axis: int = 0,
-        insert_frame_axis: bool = True,
-        frame_index_stride: int = 1,
-        frame_axis: int = -1,
+        limit_n_samples: int | None = None,
+        limit_n_frames: int | None = None,
+        return_filename: bool = False,
+        cache: bool = False,
         validate: bool = True,
         **kwargs,
     ):
-        super().__init__(file_paths, validate=validate, **kwargs)
+        self.return_filename = return_filename
+        self.cache = cache
+        self._data_cache = {}
 
         self.key = key
         self.n_frames = int(n_frames)
         self.frame_index_stride = int(frame_index_stride)
         self.frame_axis = int(frame_axis)
         self.insert_frame_axis = insert_frame_axis
-        self.initial_frame_axis = int(initial_frame_axis)
-        self.return_filename = return_filename
-        self.shuffle = shuffle
-        self.sort_files = sort_files
-        self.overlapping_blocks = overlapping_blocks
-        self.limit_n_samples = limit_n_samples
-        self.limit_n_frames = limit_n_frames
-        self.seed = seed
-        self.additional_axes_iter = additional_axes_iter or []
 
         assert self.frame_index_stride > 0, (
-            f"`frame_index_stride` must be greater than 0, got {self.frame_index_stride}"
+            f"`frame_index_stride` must be > 0, got {self.frame_index_stride}"
         )
-        assert self.n_frames > 0, f"`n_frames` must be greater than 0, got {self.n_frames}"
+        assert self.n_frames > 0, f"`n_frames` must be > 0, got {self.n_frames}"
 
-        # Extract some general information about the dataset
-        file_shapes = self.load_file_shapes(key)
-        image_shapes = np.array(file_shapes)
-        image_shapes = np.delete(
-            image_shapes, (self.initial_frame_axis, *self.additional_axes_iter), axis=1
-        )
-        n_dims = len(image_shapes[0])
+        # Discover files and shapes (reuses Dataset machinery)
+        _dataset = Dataset(file_paths, validate=validate, **kwargs)
+        self.file_paths = _dataset.file_paths
+        self.file_shapes = _dataset.load_file_shapes(key)
+        _dataset.close()
 
-        self.equal_file_shapes = np.all(image_shapes == image_shapes[0])
-        if not self.equal_file_shapes:
-            log.warning(
-                "H5Generator: Not all files have the same shape. "
-                "This can lead to issues when resizing images later...."
-            )
-            self.shape = np.array([None] * n_dims)
-        else:
-            self.shape = np.array(image_shapes[0])
+        num_dims = len(self.file_shapes[0])
+        self.initial_frame_axis = canonicalize_axis(int(initial_frame_axis), num_dims)
+        self.additional_axes_iter = map_negative_indices(list(additional_axes_iter or []), num_dims)
 
-        if insert_frame_axis:
-            _frame_axis = map_negative_indices([frame_axis], len(self.shape) + 1)
-            self.shape = np.insert(self.shape, _frame_axis, 1)
-        if self.shape[frame_axis]:
-            self.shape[frame_axis] = self.shape[frame_axis] * n_frames
-
-        # Set random number generator
-        self.rng = np.random.default_rng(self.seed)
-
+        # Compute per-sample index table
         self.indices = generate_h5_indices(
             file_paths=self.file_paths,
-            file_shapes=file_shapes,
+            file_shapes=self.file_shapes,
             n_frames=self.n_frames,
             frame_index_stride=self.frame_index_stride,
             key=self.key,
             initial_frame_axis=self.initial_frame_axis,
             additional_axes_iter=self.additional_axes_iter,
-            sort_files=self.sort_files,
-            overlapping_blocks=self.overlapping_blocks,
-            limit_n_frames=self.limit_n_frames,
+            sort_files=sort_files,
+            overlapping_blocks=overlapping_blocks,
+            limit_n_frames=limit_n_frames,
         )
 
-        if not self.shuffle:
-            log.warning("H5Generator: Not shuffling data.")
-
-        if limit_n_samples:
-            log.warning(
-                f"H5Generator: Limiting number of samples to {limit_n_samples} "
-                f"out of {len(self.indices)}"
-            )
+        if limit_n_samples is not None:
+            log.info(f"H5DataSource: Limiting to {limit_n_samples} / {len(self.indices)} samples.")
             self.indices = self.indices[:limit_n_samples]
 
-        self.shuffled_items = list(range(len(self.indices)))
+        # Thread-local file handle caches (one per thread)
+        self._local = threading.local()
+        self._all_caches: set[H5FileHandleCache] = set()
+        self._all_caches_lock = threading.Lock()
 
-        # Retry count for I/O errors
-        self.retry_count = 0
+    def __len__(self) -> int:
+        return len(self.indices)
 
-        # Create a cache for the data
-        self.cache = cache
-        self._data_cache = {}
+    def __getitem__(self, index: int):
+        """Return a single sample as a numpy array. Thread-safe."""
+        if self.cache and index in self._data_cache:
+            return self._data_cache[index]
 
-    def _get_single_item(self, idx):
-        # Check if the item is already in the cache
-        if self.cache and idx in self._data_cache:
-            return self._data_cache[idx]
+        file_name, key, indices = self.indices[index]
+        file_handle_cache = self._get_file_handle_cache()
+        file = file_handle_cache.get_file(file_name)
 
-        # Get the data
-        file_name, key, indices = self.indices[idx]
-        file = self.get_file(file_name)
-        image = self.load(file, key, indices)
-        file_data = json_dumps(
-            {
-                "fullpath": file.filename,
-                "filename": file.stem,
-                "indices": indices,
-            }
-        )
-
-        if self.cache:
-            # Store the image and file data in the cache
-            self._data_cache[idx] = [image, file_data]
-
-        return image, file_data
-
-    def __getitem__(self, index):
-        image, file_data = self._get_single_item(self.shuffled_items[index])
-
-        if self.return_filename:
-            return image, file_data
-        else:
-            return image
-
-    @retry_on_io_error(
-        max_retries=MAX_RETRY_ATTEMPTS,
-        initial_delay=INITIAL_RETRY_DELAY,
-        retry_action=_h5_reopen_on_io_error,
-    )
-    def load(
-        self,
-        file: File,
-        key: str,
-        indices: Tuple[Union[list, slice, int], ...] | List[int] | int | None = None,
-    ):
-        """Extract data from hdf5 file.
-        Args:
-            file_name (str): name of the file to extract image from.
-            key (str): key of the hdf5 dataset to grab data from.
-            indices (tuple): indices to extract image from (tuple of slices)
-        Returns:
-            np.ndarray: image extracted from hdf5 file and indexed by indices.
-        """
         try:
             images = file.load_data(key, indices)
         except (OSError, IOError):
-            # Let the decorator handle I/O errors
-            raise
-        except Exception as exc:
-            # For non-I/O errors, provide detailed context
-            raise ValueError(
-                f"Could not load image at index {indices} "
-                f"and file {file.name} of shape {file[key].shape}"
-            ) from exc
+            # Invalidate cache entry and retry once
+            file_handle_cache.pop(file_name)
+            file = file_handle_cache.get_file(file_name)
+            images = file.load_data(key, indices)
 
-        # stack frames along frame_axis
         if self.insert_frame_axis:
-            # move frames axis to self.frame_axis
-            initial_frame_axis = self.initial_frame_axis
+            initial = self.initial_frame_axis
             if self.additional_axes_iter:
-                # offset initial_frame_axis if we have additional axes that are before
-                # the initial_frame_axis
-                additional_axes_before = sum(
-                    axis < self.initial_frame_axis for axis in self.additional_axes_iter
-                )
-                initial_frame_axis = initial_frame_axis - additional_axes_before
-
-            images = np.moveaxis(images, initial_frame_axis, self.frame_axis)
+                initial -= sum(ax < self.initial_frame_axis for ax in self.additional_axes_iter)
+            images = np.moveaxis(images, initial, self.frame_axis)
         else:
-            # append frames to existing axis
             images = np.concatenate(images, axis=self.frame_axis)
 
-        return images
+        if self.return_filename:
+            file_data = {
+                "fullpath": file.filename,  # same as file.path, but str type
+                "filename": file.stem,
+                "indices": indices,
+            }
+            result = (images, file_data)
+        else:
+            result = images
 
-    def _shuffle(self):
-        self.rng.shuffle(self.shuffled_items)
-        log.info("H5Generator: Shuffled data.")
+        if self.cache:
+            self._data_cache[index] = result
 
-    def __len__(self):
-        return len(self.indices)
+        return result
 
-    def iterator(self):
-        """Generator that yields images from the hdf5 files."""
+    def __repr__(self) -> str:
+        return (
+            f"H5DataSource(n_samples={len(self)}, n_files={len(self.file_paths)}, key='{self.key}')"
+        )
+
+    def _get_file_handle_cache(self) -> H5FileHandleCache:
+        """Return the file-handle cache for the current thread."""
+        if not hasattr(self._local, "cache"):
+            self._local.cache = H5FileHandleCache()
+            with self._all_caches_lock:
+                self._all_caches.add(self._local.cache)
+        return self._local.cache
+
+    def close(self):
+        """Close all file handles across all threads."""
+        with self._all_caches_lock:
+            for c in self._all_caches:
+                c.close()
+            self._all_caches.clear()
+
+
+class Dataloader:
+    """High-performance HDF5 dataloader built on `Grain <https://github.com/google/grain>`_.
+
+    .. code-block:: text
+
+        grain threads (N) → h5py (thread-local handles) → numpy → user
+
+    The entire pipeline runs in numpy — no framework dependency until
+    you feed tensors to your model.
+
+    Does the following in order to load a dataset:
+
+        - Find all .hdf5 files in the director(ies)
+        - Load the data from each file using the specified key
+        - Apply the following transformations in order (if specified):
+
+            - shuffle
+            - shard
+            - add channel dim
+            - clip_image_range
+            - assert_image_range
+            - resize
+            - repeat
+            - batch
+            - normalize
+            - augmentation
+
+    Args:
+        file_paths: Path(s) to directory(ies) and/or HDF5 file(s).
+        key: HDF5 dataset key. Default is ``"data/image"``.
+        batch_size: Batch size. Set to ``None`` to disable batching.
+            Default is ``16``.
+        n_frames: Number of consecutive frames per sample. Default is ``1``.
+            When ``n_frames > 1``, frames are grouped into blocks.
+        shuffle: Shuffle dataset each epoch. Default is ``True``.
+        return_filename: Return filename metadata together with each sample.
+            Default is ``False``.
+        seed: Random seed used for shuffling. Default is ``None``.
+            If ``None`` and ``shuffle=True``, a random seed is generated.
+        limit_n_samples: Limit total number of samples (useful for debugging).
+            Default is ``None`` (no limit).
+        limit_n_frames: Limit frames loaded per file to the first N frames.
+            Default is ``None`` (no limit).
+        drop_remainder: Drop the final incomplete batch. Default is ``False``.
+        image_size: Target ``(height, width)``. Default is ``None`` (no resizing).
+        resize_type: Resize strategy. One of ``"resize"``, ``"center_crop"``,
+            ``"random_crop"`` or ``"crop_or_pad"``. Default is ``None``,
+            which resolves to ``"resize"`` when `image_size` is set.
+        resize_axes: Axes to resize along, must have length 2 (height, width).
+            Only needed when data has more than ``(h, w, c)`` dimensions.
+            Axes are interpreted after frame-axis insertion/reordering.
+            Default is ``None``.
+        resize_kwargs: Extra keyword arguments passed to ``Resizer``.
+            Default is ``None``.
+        image_range: Source value range of images, e.g. ``(-60, 0)``.
+            Used for clipping/asserting/normalization. Default is ``None``.
+        normalization_range: Target value range, e.g. ``(0, 1)``.
+            If set, ``image_range`` must also be set. Default is ``None``.
+        clip_image_range: Clip values to ``image_range`` before normalization.
+            Default is ``False``.
+        assert_image_range: Assert values stay within ``image_range``.
+            Default is ``True``.
+        dataset_repetitions: Repeat dataset this many times. Repetition happens
+            after sharding. Default is ``None`` (no repetition).
+        cache: Cache loaded samples in RAM. Default is ``False``.
+            Note that with ``overlapping_blocks=True``, the same frame can be part of multiple
+            samples, so caching will consume more memory.
+        additional_axes_iter: Additional axes to iterate over in addition to
+            ``initial_frame_axis``. Default is ``None``.
+        sort_files: Sort files numerically before indexing. Default is ``True``.
+        overlapping_blocks: If ``True``, frame blocks overlap by ``n_frames - 1``.
+            Has no effect when ``n_frames == 1``. Default is ``False``.
+        augmentation: Callable applied to each batch after normalization.
+            Default is ``None``.
+        initial_frame_axis: Axis in file data that represents frames.
+            Default is ``0``.
+        insert_frame_axis: If ``True``, keep per-frame samples and move/insert
+            the frame dimension at ``frame_axis``. If ``False``, loaded frames
+            are concatenated along ``frame_axis``. Default is ``True``.
+        frame_index_stride: Step between selected frames in a block.
+            Default is ``1``.
+        frame_axis: Axis along which frames are stacked/placed in output.
+            Default is ``-1``.
+        validate: Validate discovered files against the zea format.
+            Default is ``True``.
+        prefetch: Enable Grain prefetching for iteration. Default is ``True``.
+        shard_index: Shard index to select when ``num_shards > 1``.
+            Must satisfy ``0 <= shard_index < num_shards``.
+        num_shards: Total number of shards for distributed loading.
+            Sharding happens before downstream transforms. Default is ``1``.
+        num_threads: Number of Grain read threads (``0`` means main thread only).
+            Default is ``16``.
+        prefetch_buffer_size: Size of the Grain buffer for reading elements per Python
+            process (not per thread). Useful when reading from a distributed file
+            system. Default is ``500``.
+
+    Example:
+        .. code-block:: python
+
+            loader = Dataloader(
+                file_paths="/data/camus",
+                key="data/image_sc",
+                batch_size=32,
+                image_range=(-60, 0),
+                normalization_range=(0, 1),
+                image_size=(256, 256),
+            )
+            for batch in loader:
+                ...  # batch.shape == (32, 256, 256, 1)
+    """
+
+    def __init__(
+        self,
+        file_paths: List[str] | str,
+        key: str = "data/image",
+        batch_size: int | None = 16,
+        n_frames: int = 1,
+        shuffle: bool = True,
+        return_filename: bool = False,
+        seed: int | None = None,
+        limit_n_samples: int | None = None,
+        limit_n_frames: int | None = None,
+        drop_remainder: bool = False,
+        image_size: tuple | None = None,
+        resize_type: str | None = None,
+        resize_axes: tuple | None = None,
+        resize_kwargs: dict | None = None,
+        image_range: tuple | None = None,
+        normalization_range: tuple | None = None,
+        clip_image_range: bool = False,
+        assert_image_range: bool = True,
+        dataset_repetitions: int | None = None,
+        cache: bool = False,
+        additional_axes_iter: tuple | None = None,
+        sort_files: bool = True,
+        overlapping_blocks: bool = False,
+        augmentation: callable = None,
+        initial_frame_axis: int = 0,
+        insert_frame_axis: bool = True,
+        frame_index_stride: int = 1,
+        frame_axis: int = -1,
+        validate: bool = True,
+        prefetch: bool = True,
+        shard_index: int | None = None,
+        num_shards: int = 1,
+        num_threads: int = 16,
+        prefetch_buffer_size: int = 500,
+        **kwargs,
+    ):
+        # ── Validation ────────────────────────────────────────────────
+        if normalization_range is not None:
+            assert image_range is not None, (
+                "If normalization_range is set, image_range must be set too."
+            )
+        if num_shards > 1:
+            assert shard_index is not None, "shard_index must be specified"
+            assert 0 <= shard_index < num_shards
+
+        resize_kwargs = resize_kwargs or {}
+
+        # ── Store config ──────────────────────────────────────────────
+        self.batch_size = batch_size
+        self.return_filename = return_filename
+        self.num_threads = num_threads
+        self.prefetch_buffer_size = prefetch_buffer_size
+        self.prefetch = prefetch
+        self.shuffle = shuffle
+
+        # Grain requires a concrete seed for shuffle — generate one if needed
+        if seed is None and shuffle:
+            seed = int(np.random.default_rng().integers(0, 2**31))
+        self.seed = seed
+        self._rng = np.random.default_rng(seed)
+
+        # ── Data source ───────────────────────────────────────────────
+        self.source = H5DataSource(
+            file_paths=file_paths,
+            key=key,
+            n_frames=n_frames,
+            frame_index_stride=frame_index_stride,
+            frame_axis=frame_axis,
+            insert_frame_axis=insert_frame_axis,
+            initial_frame_axis=initial_frame_axis,
+            additional_axes_iter=additional_axes_iter,
+            sort_files=sort_files,
+            overlapping_blocks=overlapping_blocks,
+            limit_n_samples=limit_n_samples,
+            limit_n_frames=limit_n_frames,
+            return_filename=return_filename,
+            cache=cache,
+            validate=validate,
+            **kwargs,
+        )
+
+        # ── Store pipeline config for rebuilding per epoch ────────────
+        self._pipeline_cfg = dict(
+            num_shards=num_shards,
+            shard_index=shard_index,
+            clip_image_range=clip_image_range,
+            assert_image_range=assert_image_range,
+            image_range=image_range,
+            normalization_range=normalization_range,
+            dataset_repetitions=dataset_repetitions,
+            drop_remainder=drop_remainder,
+            augmentation=augmentation,
+            resizer=None,
+        )
+
+        # Pre-build the resizer (stateless, reusable across epochs)
+        if image_size or resize_type:
+            resize_type = resize_type or "resize"
+            if frame_axis != -1:
+                assert resize_axes is not None, (
+                    "Resizing only works with frame_axis = -1. Alternatively, "
+                    "you can specify resize_axes."
+                )
+            self._pipeline_cfg["resizer"] = Resizer(
+                image_size=image_size,
+                resize_type=resize_type,
+                resize_axes=resize_axes,
+                seed=seed,
+                **resize_kwargs,
+            )
+
+        self._map_dataset = self._build_pipeline(seed)
+
+    def _build_pipeline(self, seed: int):
+        """Build the Grain MapDataset pipeline with the given shuffle seed."""
+        cfg = self._pipeline_cfg
+
+        def _ds_map(ds, fn):
+            if self.return_filename:
+                return ds.map(lambda item: (fn(item[0]), item[1]))
+            return ds.map(fn)
+
+        ds = grain.MapDataset.source(self.source)
+
         if self.shuffle:
-            self._shuffle()
-        for idx in range(len(self)):
-            yield self[idx]
+            ds = ds.shuffle(seed=seed)
+
+        if cfg["num_shards"] > 1:
+            ds = ds[cfg["shard_index"] :: cfg["num_shards"]]
+
+        ds = _ds_map(ds, self._ensure_channel_dim)
+
+        if cfg["clip_image_range"] and cfg["image_range"] is not None:
+            lo, hi = cfg["image_range"]
+            ds = _ds_map(ds, lambda x, _lo=lo, _hi=hi: keras.ops.clip(x, _lo, _hi))
+
+        if cfg["assert_image_range"] and cfg["image_range"] is not None:
+            _ir = cfg["image_range"]
+            ds = _ds_map(ds, lambda x, _r=_ir: Dataloader._assert_image_range(x, _r))
+
+        if cfg["resizer"] is not None:
+            ds = _ds_map(ds, cfg["resizer"])
+
+        if cfg["dataset_repetitions"] is not None:
+            ds = ds.repeat(num_epochs=cfg["dataset_repetitions"])
+
+        if self.batch_size is not None:
+            ds = ds.batch(batch_size=self.batch_size, drop_remainder=cfg["drop_remainder"])
+
+        if cfg["normalization_range"] is not None:
+            _ir, _nr = cfg["image_range"], cfg["normalization_range"]
+            ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: Dataloader._normalize(x, _a, _b))
+
+        if cfg["augmentation"] is not None:
+            ds = _ds_map(ds, cfg["augmentation"])
+
+        return ds
+
+    @property
+    def dataset(self):
+        """The underlying ``grain.MapDataset``."""
+        return self._map_dataset
+
+    def to_iter_dataset(self):
+        """Convert to a ``grain.IterDataset`` with prefetching.
+
+        This is called automatically when you iterate, but you can call
+        it explicitly if you want to hold onto the ``IterDataset`` object.
+        """
+
+        return self._map_dataset.to_iter_dataset(
+            grain.ReadOptions(
+                num_threads=self.num_threads,
+                prefetch_buffer_size=self.prefetch_buffer_size if self.prefetch else 0,
+            )
+        )
 
     def __iter__(self):
-        """
-        Generator that yields images from the hdf5 files.
-        """
-        return self.iterator()
+        # Rebuild the pipeline with a fresh seed so each epoch sees a different order
+        if self.shuffle:
+            self._map_dataset = self._build_pipeline(seed=int(self._rng.integers(0, 2**31)))
+        return iter(self.to_iter_dataset())
+
+    def __len__(self):
+        """Number of batches (or samples if unbatched)."""
+        return len(self._map_dataset)
 
     def __repr__(self):
         return (
-            f"<{self.__class__.__name__} at 0x{id(self):x}: "
-            f"{len(self)} batches, n_frames={self.n_frames}, key='{self.key}', "
-            f"shuffle={self.shuffle}, file_paths={len(self.file_paths)}>"
+            f"<Dataloader: {len(self.source)} samples, "
+            f"batch_size={self.batch_size}, "
+            f"key='{self.source.key}', "
+            f"threads={self.num_threads}>"
         )
 
-    def __str__(self):
-        return (
-            f"H5Generator with {len(self)} batches from {len(self.file_paths)} files "
-            f"(key='{self.key}')"
-        )
+    @staticmethod
+    def _ensure_channel_dim(image):
+        """Ensure at least 3-D (H, W, C) so batching produces uniform shapes."""
+        if len(keras.ops.shape(image)) < 3:
+            return keras.ops.expand_dims(image, axis=-1)
+        return image
+
+    @staticmethod
+    def _assert_image_range(image, image_range):
+        """Assert that image values are within the specified range."""
+        minval = float(keras.ops.min(image))
+        maxval = float(keras.ops.max(image))
+        if minval < image_range[0]:
+            raise ValueError(
+                f"Image min {minval} is below image_range lower bound {image_range[0]}"
+            )
+        if maxval > image_range[1]:
+            raise ValueError(
+                f"Image max {maxval} is above image_range upper bound {image_range[1]}"
+            )
+        return image
+
+    @staticmethod
+    def _normalize(image, image_range, normalization_range):
+        """Normalize image from image_range to normalization_range."""
+        left_min, left_max = image_range
+        right_min, right_max = normalization_range
+        scale = (right_max - right_min) / (left_max - left_min)
+        offset = right_min - scale * left_min
+        return keras.ops.add(keras.ops.multiply(image, scale), offset)
 
     def summary(self):
-        """Return a string with dataset statistics and per-directory breakdown."""
-        total_samples = len(self.indices)
-        file_names = [idx[0] for idx in self.indices]
-        # Try to infer directories from file_names
+        """Print dataset statistics and per-directory breakdown."""
+        src = self.source
+        total_samples = len(src)
+        file_names = [idx[0] for idx in src.indices]
         directories = sorted({str(Path(f).parent) for f in file_names})
         samples_per_dir = count_samples_per_directory(file_names, directories)
 
-        parts = [f"H5Generator with {total_samples} total samples:"]
+        parts = [f"Dataloader with {total_samples} total samples:"]
         for dir_path, count in samples_per_dir.items():
-            percentage = (count / total_samples) * 100 if total_samples else 0
-            parts.append(f"  {dir_path}: {count} samples ({percentage:.1f}%)")
+            pct = (count / total_samples) * 100 if total_samples else 0
+            parts.append(f"  {dir_path}: {count} samples ({pct:.1f}%)")
         print("\n".join(parts))
+
+    def close(self):
+        """Release file handles."""
+        self.source.close()
