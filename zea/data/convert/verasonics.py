@@ -759,8 +759,11 @@ class VerasonicsFile(h5py.File):
         """
         initial_times = []
         for n in rcv_order:
+            # The Receive.startDepth attribute determines the range at which A/D sampling begins
             start_depth = self.dereference_index(self["Receive"]["startDepth"], n).item()
 
+            # The initial time is the time it takes for the sound to travel from the probe
+            # to the start depth and back
             initial_times.append(2 * start_depth * self.wavelength / self.sound_speed)
 
         return np.stack(initial_times).astype(np.float32)
