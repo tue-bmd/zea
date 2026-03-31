@@ -14,7 +14,8 @@ from zea.data.data_format import (
 )
 from zea.data.file import File, validate_file
 from zea.internal.checks import _REQUIRED_SCAN_KEYS
-from . import DEFAULT_TEST_SEED
+
+from .. import DEFAULT_TEST_SEED
 
 n_frames = 2
 n_tx = 4

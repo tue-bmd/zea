@@ -43,7 +43,6 @@ Examples usage
 from .convert.camus import sitk_load
 from .data_format import (
     DatasetElement,
-    generate_example_dataset,
     generate_zea_dataset,
     validate_input_data,
 )
