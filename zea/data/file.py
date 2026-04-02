@@ -391,7 +391,10 @@ class File(h5py.File):
         ans = {}
         for key, item in self[path].items():
             if isinstance(item, h5py.Dataset):
-                ans[key] = item[()]
+                if h5py.check_string_dtype(item.dtype) is not None:
+                    ans[key] = item.asstr()[()]
+                else:
+                    ans[key] = item[()]
             elif isinstance(item, h5py.Group):
                 ans[key] = self.recursively_load_dict_contents_from_group(path + "/" + key + "/")
         return ans

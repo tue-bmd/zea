@@ -151,6 +151,37 @@ class Spec:
                         f"dimension '{dim_name}'={actual_size}"
                     )
 
+    @staticmethod
+    def _is_string_value(value: Any) -> bool:
+        """Return True for scalar/array values that should be stored as HDF5 strings."""
+        if isinstance(value, (str, np.str_, bytes, np.bytes_)):
+            return True
+
+        if isinstance(value, np.ndarray):
+            return value.dtype.kind in {"U", "S", "O"}
+
+        return False
+
+    @staticmethod
+    def create_dataset(
+        group: h5py.Group, field_name: str, value: Any, compression: str = "gzip"
+    ) -> None:
+        """Create a dataset in the given group for the specified field and value,
+        handling string and scalar values appropriately."""
+        dataset_is_scalar = np.isscalar(value) or value.ndim == 0
+        compression = None if dataset_is_scalar else compression
+        if Spec._is_string_value(value):
+            string_dtype = h5py.string_dtype(encoding="utf-8")
+            string_value = np.asarray(value, dtype=object)
+            group.create_dataset(
+                field_name,
+                data=string_value,
+                dtype=string_dtype,
+                compression=compression,
+            )
+        else:
+            group.create_dataset(field_name, data=value, compression=compression)
+
     def store_in_group(self, group: h5py.Group, compression: str = "gzip") -> None:
         """Store the data in the given group (e.g. hdf5 group)."""
 
@@ -167,7 +198,7 @@ class Spec:
                 value.store_in_group(subgroup)
             else:
                 # TODO: store description and unit as h5 attrs (like zea does)
-                group.create_dataset(field_name, data=value, compression=compression)
+                self.create_dataset(group, field_name, value, compression=compression)
 
 
 @dataclass

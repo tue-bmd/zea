@@ -131,7 +131,7 @@ def test_saving_and_loading(tmp_path, dataset_spec: DatasetBuilder):
         assert np.array_equal(loaded_dataset["data"]["raw_data"], dataset_spec.data.raw_data)
         assert np.array_equal(loaded_dataset["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
         assert np.array_equal(
-            loaded_dataset["metadata"]["annotations"]["view"],
+            loaded_dataset["metadata"]["annotations"]["view"].asstr()[()],
             dataset_spec.metadata.annotations.view,
         )
         assert np.array_equal(
