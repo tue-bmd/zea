@@ -7,7 +7,14 @@ from zea import log
 
 
 class Spec:
-    SCHEMA = {}
+    """Base class for data specifications with schema validation.
+
+    Subclasses should define a SCHEMA class variable that specifies the expected dtype and shape
+    for each field. The __post_init__ method will validate that the actual fields match the schema,
+    including checking that dimensions with the same name have consistent sizes across fields.
+    """
+
+    SCHEMA: dict
 
     def __post_init__(self):
         dim_to_fields = defaultdict(set)
@@ -16,13 +23,12 @@ class Spec:
         for field_name, field_info in self.SCHEMA.items():
             field_value = getattr(self, field_name)
             expected_dtype = field_info["dtype"]
-            expected_shape = field_info["shape"]
+            shape_spec = field_info["shape"]
 
-            # Track dimension names and sizes for consistency checks
-            for i, dim_name in enumerate(expected_shape):
-                if isinstance(dim_name, str):
-                    dim_to_fields[dim_name].add(field_name)
-                    dim_to_sizes[dim_name].add(field_value.shape[i])
+            if shape_spec and isinstance(shape_spec[0], tuple):
+                expected_shapes = shape_spec
+            else:
+                expected_shapes = (shape_spec,)
 
             # Check dtype
             try:
@@ -43,22 +49,31 @@ class Spec:
                         f"{field_name} must be of type {expected_dtype}, got {field_value.dtype}"
                     )
 
-            # Check ndims
-            if len(field_value.shape) != len(expected_shape):
+            matched_shape = None
+            for expected_shape in expected_shapes:
+                if len(field_value.shape) != len(expected_shape):
+                    continue
+
+                for dim_size, expected_dim in zip(field_value.shape, expected_shape):
+                    if isinstance(expected_dim, str):
+                        continue
+                    if dim_size != expected_dim:
+                        break
+                else:
+                    matched_shape = expected_shape
+                    break
+
+            if matched_shape is None:
+                allowed_shapes = ", ".join(str(shape) for shape in expected_shapes)
                 raise ValueError(
-                    f"{field_name} must have {len(expected_shape)} dimensions, "
-                    f"got {len(field_value.shape)} dimensions with shape {field_value.shape}"
+                    f"{field_name} has shape {field_value.shape}, expected one of: {allowed_shapes}"
                 )
 
-            # Check static shape dimensions
-            for dim_size, expected_dim in zip(field_value.shape, expected_shape):
-                if isinstance(expected_dim, str):
-                    continue  # skip literal dimensions
-                if dim_size != expected_dim:
-                    raise ValueError(
-                        f"{field_name} dimension size mismatch: expected {expected_dim}, "
-                        f"got {dim_size} with shape {field_value.shape}"
-                    )
+            # Track dimension names and sizes for consistency checks
+            for i, dim_name in enumerate(matched_shape):
+                if isinstance(dim_name, str):
+                    dim_to_fields[dim_name].add(field_name)
+                    dim_to_sizes[dim_name].add(field_value.shape[i])
 
         # Check that dimensions with the same name have consistent sizes across fields
         for dim_name, sizes in dim_to_sizes.items():
@@ -71,26 +86,22 @@ class Spec:
 
 
 @dataclass
-class Segmentation(Spec):
-    """Segmentation data and spatial extent metadata.
+class Map(Spec):
+    """Map data and spatial extent metadata.
 
     Args:
-        pixels: The segmentation pixels of shape (n_frames, h, w, d) of type uint8.
-        labels: The labels corresponding to the segmentation pixels, where each unique value
-            in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
-        extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
+        pixels: The map pixels of shape (n_frames, h, w, d) of type uint8.
+        extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
     """
 
     pixels: np.ndarray
-    labels: np.ndarray
     extent: np.ndarray
 
     SCHEMA = {
         "pixels": {"dtype": np.uint8, "shape": ("n_frames", "h", "w", "d")},
-        "labels": {"dtype": np.str_, "shape": ("n_labels",)},
-        "extent": {"dtype": np.float32, "shape": ("n_frames", 6)},
+        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
     }
 
     def __post_init__(self):
@@ -104,16 +115,40 @@ class Segmentation(Spec):
 
         # Check sensible values
         if np.any(self.extent[:, 0] >= self.extent[:, 1]):
-            raise ValueError("Segmentation extent xlims must have xmin < xmax")
+            raise ValueError("Map extent xlims must have xmin < xmax")
         if np.any(self.extent[:, 2] >= self.extent[:, 3]):
-            raise ValueError("Segmentation extent ylims must have ymin < ymax")
+            raise ValueError("Map extent ylims must have ymin < ymax")
         if np.any(self.extent[:, 4] >= self.extent[:, 5]):
-            raise ValueError("Segmentation extent zlims must have zmax < zmin")
+            raise ValueError("Map extent zlims must have zmax < zmin")
         if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
             log.warning(
-                "Segmentation extent values are unusually large, extending beyond +/- 1.0 meters. "
+                "Map extent values are unusually large, extending beyond +/- 1.0 meters. "
                 "Please verify that the extent values are correct and in meters."
             )
+
+
+@dataclass
+class Segmentation(Map):
+    """Segmentation data and spatial extent metadata.
+
+    Args:
+        pixels: The segmentation pixels of shape (n_frames, h, w, d) of type uint8.
+        labels: The labels corresponding to the segmentation pixels, where each unique value
+            in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
+        extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+    """
+
+    labels: np.ndarray
+
+    SCHEMA = {
+        **Map.SCHEMA,
+        "labels": {"dtype": np.str_, "shape": ("n_labels",)},
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
 
         # Check every pixel value corresponds to a label
         unique_pixel_values = np.unique(self.pixels)
