@@ -1,9 +1,51 @@
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 
 from zea import log
+
+
+def check_dtype(value: np.ndarray, expected_dtype: type) -> None:
+    """Check if the dtype of a numpy array matches the expected dtype,
+    allowing for compatible types."""
+    try:
+        expected_np_dtype = np.dtype(expected_dtype)
+        is_numpy_dtype = True
+    except TypeError:
+        is_numpy_dtype = False
+
+    if is_numpy_dtype:
+        if not np.issubdtype(value.dtype, expected_np_dtype):
+            raise TypeError(
+                f"Expected dtype compatible with {expected_np_dtype}, got {value.dtype}"
+            )
+    else:
+        if value.dtype != expected_dtype:
+            raise TypeError(f"Expected type {expected_dtype}, got {value.dtype}")
+
+
+def match_shape(value: np.ndarray, expected_shape: tuple) -> bool:
+    """Check if the shape of a numpy array matches the expected shape specification."""
+    if len(value.shape) != len(expected_shape):
+        return False
+
+    for dim_size, expected_dim in zip(value.shape, expected_shape):
+        if isinstance(expected_dim, str):
+            continue
+        if dim_size != expected_dim:
+            return False
+
+    return True
+
+
+def find_matched_shape(value: np.ndarray, expected_shapes: List[tuple]) -> tuple | None:
+    """Find the first expected shape specification that matches the shape of the value."""
+    for expected_shape in expected_shapes:
+        if match_shape(value, expected_shape):
+            return expected_shape
+    return None
 
 
 class Spec:
@@ -30,39 +72,9 @@ class Spec:
             else:
                 expected_shapes = (shape_spec,)
 
-            # Check dtype
-            try:
-                expected_np_dtype = np.dtype(expected_dtype)
-                is_numpy_dtype = True
-            except TypeError:
-                is_numpy_dtype = False
+            check_dtype(field_value, expected_dtype)
 
-            if is_numpy_dtype:
-                if not np.issubdtype(field_value.dtype, expected_np_dtype):
-                    raise TypeError(
-                        f"{field_name} must be of dtype compatible with {expected_np_dtype}, "
-                        f"got {field_value.dtype}"
-                    )
-            else:
-                if field_value.dtype != expected_dtype:
-                    raise TypeError(
-                        f"{field_name} must be of type {expected_dtype}, got {field_value.dtype}"
-                    )
-
-            matched_shape = None
-            for expected_shape in expected_shapes:
-                if len(field_value.shape) != len(expected_shape):
-                    continue
-
-                for dim_size, expected_dim in zip(field_value.shape, expected_shape):
-                    if isinstance(expected_dim, str):
-                        continue
-                    if dim_size != expected_dim:
-                        break
-                else:
-                    matched_shape = expected_shape
-                    break
-
+            matched_shape = find_matched_shape(field_value, expected_shapes)
             if matched_shape is None:
                 allowed_shapes = ", ".join(str(shape) for shape in expected_shapes)
                 raise ValueError(
@@ -105,20 +117,14 @@ class Map(Spec):
     }
 
     def __post_init__(self):
-        if self.extent.ndim == 1:
-            self.extent = np.broadcast_to(
-                self.extent,
-                (self.pixels.shape[0], self.extent.shape[0]),
-            ).copy()
-
         super().__post_init__()
 
         # Check sensible values
-        if np.any(self.extent[:, 0] >= self.extent[:, 1]):
+        if np.any(self.extent[..., 0] >= self.extent[..., 1]):
             raise ValueError("Map extent xlims must have xmin < xmax")
-        if np.any(self.extent[:, 2] >= self.extent[:, 3]):
+        if np.any(self.extent[..., 2] >= self.extent[..., 3]):
             raise ValueError("Map extent ylims must have ymin < ymax")
-        if np.any(self.extent[:, 4] >= self.extent[:, 5]):
+        if np.any(self.extent[..., 4] >= self.extent[..., 5]):
             raise ValueError("Map extent zlims must have zmax < zmin")
         if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
             log.warning(
@@ -174,15 +180,3 @@ class Scan:
 class DataSpec:
     data: Data
     scan: Scan
-
-
-if __name__ == "__main__":
-    import zea
-
-    zea.init_device("cpu")
-    # Example usage
-    pixels = np.zeros((10, 256, 256, 1), dtype=np.uint8)
-    labels = np.array(["background", "label1", "label2", "label3"], dtype=np.str_)
-    extent = np.array([0.0, 1.0, 0.0, 1.0, -1.0, 0.0], dtype=np.float32)
-
-    segmentation = Segmentation(pixels=pixels, labels=labels, extent=extent)
