@@ -196,9 +196,58 @@ class Metrics:
     pass
 
 
+# TODO: Neatly integrate this with zea.File
 @dataclass
 class Dataset:
+    """A dataset containing all the data, scan parameters, metadata,
+    and metrics for a single acquisition.
+
+    This class can be used to create a new dataset, which is validated upon initialization.
+    Afterwards, it can be saved to disk as hdf5 file.
+
+    Args:
+        data: The data for the acquisition.
+        scan: The scan parameters.
+        metadata: Additional metadata about the acquisition.
+        metrics: Metrics computed from the acquisition.
+
+    Example usage::
+
+        dataset = Dataset(
+            data={
+                "raw_data": np.random.rand(100, 32, 64, 128, 8).astype(np.float32),
+                "segmentation": {
+                    "pixels": np.random.randint(0, 5, size=(100, 256, 256, 1)).astype(np.uint8),
+                    "labels": np.array(["background", "tissue", "vessel", "bone", "artifact"]),
+                    "extent": np.array([[-0.1, 0.1, -0.1, 0.1, -0.05, 0.05]], dtype=np.float32),
+                },
+            }
+            scan={
+                "t0_delays": np.random.rand(32, 64).astype(np.float32),
+            }
+        )
+    """
+
     data: Data
     scan: Scan
     metadata: Metadata
     metrics: Metrics
+
+    def __post_init__(self):
+        if not isinstance(self.data, Data):
+            self.data = Data(**self.data)
+        if not isinstance(self.scan, Scan):
+            self.scan = Scan(**self.scan)
+        if not isinstance(self.metadata, Metadata):
+            self.metadata = Metadata(**self.metadata)
+        if not isinstance(self.metrics, Metrics):
+            self.metrics = Metrics(**self.metrics)
+
+    @classmethod
+    def load(cls, path: str) -> "Dataset":
+        """Load a dataset from the specified path."""
+        pass
+
+    def save(self, path: str) -> None:
+        """Save the dataset to the specified path."""
+        pass
