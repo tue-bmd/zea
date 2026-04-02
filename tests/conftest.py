@@ -10,14 +10,13 @@ _tmp_cache_dir = tempfile.TemporaryDirectory(prefix="zea_test_cache_")
 
 os.environ["ZEA_CACHE_DIR"] = _tmp_cache_dir.name  # set before importing zea
 
-from zea.data.data_format import generate_example_dataset  # noqa: E402
-
 from . import (  # noqa: E402
     DUMMY_DATASET_GRID_SIZE_X,
     DUMMY_DATASET_GRID_SIZE_Z,
     DUMMY_DATASET_N_FRAMES,
     backend_workers,
 )
+from .data import generate_example_dataset  # noqa: E402
 
 plt.rcParams["backend"] = "agg"
 
