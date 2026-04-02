@@ -1,37 +1,50 @@
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field
+from typing import Any, List
 
 import numpy as np
 
 from zea import log
 
 
-def check_dtype(value: np.ndarray, expected_dtype: type) -> None:
-    """Check if the dtype of a numpy array matches the expected dtype,
-    allowing for compatible types."""
+def check_dtype(value: Any, expected_dtype: type) -> None:
+    """Check if the dtype of a value matches the expected dtype,
+    allowing for compatible types.
+
+    Works for numpy arrays and scalar values.
+    """
     try:
         expected_np_dtype = np.dtype(expected_dtype)
         is_numpy_dtype = True
     except TypeError:
         is_numpy_dtype = False
 
+    value_dtype = value.dtype if isinstance(value, np.ndarray) else np.asarray(value).dtype
+
     if is_numpy_dtype:
-        if not np.issubdtype(value.dtype, expected_np_dtype):
+        if not np.issubdtype(value_dtype, expected_np_dtype):
             raise TypeError(
-                f"Expected dtype compatible with {expected_np_dtype}, got {value.dtype}"
+                f"Expected dtype compatible with {expected_np_dtype}, got {value_dtype}"
             )
     else:
-        if value.dtype != expected_dtype:
-            raise TypeError(f"Expected type {expected_dtype}, got {value.dtype}")
+        if value_dtype != expected_dtype:
+            raise TypeError(f"Expected type {expected_dtype}, got {value_dtype}")
 
 
-def match_shape(value: np.ndarray, expected_shape: tuple) -> bool:
-    """Check if the shape of a numpy array matches the expected shape specification."""
-    if len(value.shape) != len(expected_shape):
+def value_shape(value: Any) -> tuple:
+    """Return the shape tuple for numpy arrays and scalar values."""
+    if isinstance(value, np.ndarray):
+        return value.shape
+    return ()
+
+
+def match_shape(value: Any, expected_shape: tuple) -> bool:
+    """Check if the shape of a value matches the expected shape specification."""
+    shape = value_shape(value)
+    if len(shape) != len(expected_shape):
         return False
 
-    for dim_size, expected_dim in zip(value.shape, expected_shape):
+    for dim_size, expected_dim in zip(shape, expected_shape):
         if isinstance(expected_dim, str):
             continue
         if dim_size != expected_dim:
@@ -40,7 +53,7 @@ def match_shape(value: np.ndarray, expected_shape: tuple) -> bool:
     return True
 
 
-def find_matched_shape(value: np.ndarray, expected_shapes: List[tuple]) -> tuple | None:
+def find_matched_shape(value: Any, expected_shapes: List[tuple]) -> tuple | None:
     """Find the first expected shape specification that matches the shape of the value."""
     for expected_shape in expected_shapes:
         if match_shape(value, expected_shape):
@@ -61,9 +74,29 @@ class Spec:
     def __post_init__(self):
         dim_to_fields = defaultdict(set)
         dim_to_sizes = defaultdict(set)
+        dim_to_count_fields = {}
 
         for field_name, field_info in self.SCHEMA.items():
             field_value = getattr(self, field_name)
+            required = field_info.get("required", True)
+
+            if field_value is None:
+                if required:
+                    raise ValueError(f"Missing required field '{field_name}'")
+                continue
+
+            nested_spec = field_info.get("spec")
+            if nested_spec is not None:
+                if isinstance(field_value, dict):
+                    field_value = nested_spec(**field_value)
+                    setattr(self, field_name, field_value)
+                if not isinstance(field_value, nested_spec):
+                    raise TypeError(
+                        f"Expected field '{field_name}' to be {nested_spec.__name__}, "
+                        f"got {type(field_value).__name__}"
+                    )
+                continue
+
             expected_dtype = field_info["dtype"]
             shape_spec = field_info["shape"]
 
@@ -78,14 +111,19 @@ class Spec:
             if matched_shape is None:
                 allowed_shapes = ", ".join(str(shape) for shape in expected_shapes)
                 raise ValueError(
-                    f"{field_name} has shape {field_value.shape}, expected one of: {allowed_shapes}"
+                    f"{field_name} has shape {value_shape(field_value)}, "
+                    f"expected one of: {allowed_shapes}"
                 )
 
             # Track dimension names and sizes for consistency checks
             for i, dim_name in enumerate(matched_shape):
                 if isinstance(dim_name, str):
                     dim_to_fields[dim_name].add(field_name)
-                    dim_to_sizes[dim_name].add(field_value.shape[i])
+                    dim_to_sizes[dim_name].add(value_shape(field_value)[i])
+
+            defines_dim = field_info.get("defines_dim")
+            if defines_dim is not None:
+                dim_to_count_fields[defines_dim] = (field_name, int(field_value))
 
         # Check that dimensions with the same name have consistent sizes across fields
         for dim_name, sizes in dim_to_sizes.items():
@@ -95,6 +133,16 @@ class Spec:
                     f"Dimension '{dim_name}' has inconsistent sizes across "
                     f"fields {field_names}: {sorted(sizes)}"
                 )
+
+        # Check explicit dimension count fields (e.g. n_tx, n_el)
+        for dim_name, (field_name, count) in dim_to_count_fields.items():
+            if dim_name in dim_to_sizes and dim_to_sizes[dim_name]:
+                actual_size = next(iter(dim_to_sizes[dim_name]))
+                if count != actual_size:
+                    raise ValueError(
+                        f"Field '{field_name}'={count} is inconsistent with "
+                        f"dimension '{dim_name}'={actual_size}"
+                    )
 
 
 @dataclass
@@ -168,32 +216,323 @@ class Segmentation(Map):
 
 
 @dataclass
-class Data(Spec):
-    raw_data: np.ndarray
-    segmentation: Segmentation
+class FloatMap(Spec):
+    """Map data with float32 pixel values and spatial extent metadata.
+
+    Args:
+        pixels: The map pixels of shape (n_frames, h, w, d) and type float32.
+        extent: The map extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+    """
+
+    pixels: np.ndarray
+    extent: np.ndarray
 
     SCHEMA = {
-        "raw_data": {"dtype": np.float32, "shape": ("n_frames", "n_tx", "n_el", "n_ax", "n_ch")},
+        "pixels": {"dtype": np.float32, "shape": ("n_frames", "h", "w", "d")},
+        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if np.any(self.extent[..., 0] >= self.extent[..., 1]):
+            raise ValueError("Map extent xlims must have xmin < xmax")
+        if np.any(self.extent[..., 2] >= self.extent[..., 3]):
+            raise ValueError("Map extent ylims must have ymin < ymax")
+        if np.any(self.extent[..., 4] >= self.extent[..., 5]):
+            raise ValueError("Map extent zlims must have zmax < zmin")
+
+
+@dataclass
+class Image(Map):
+    """Reconstructed (log-compressed) image data and spatial extent metadata.
+
+    Args:
+        pixels: The image pixels of shape (n_frames, h, w, d) and type uint8.
+        extent: The image extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+    """
+
+
+@dataclass
+class SosMap(FloatMap):
+    """Speed-of-sound map data and spatial extent metadata.
+
+    Args:
+        pixels: The speed-of-sound map pixels in m/s of shape (n_frames, h, w, d)
+            and type float32.
+        extent: The speed-of-sound map extent in meters of shape (n_frames, 6) or (6,).
+    """
+
+
+@dataclass
+class StrainMap(FloatMap):
+    """Strain map data and spatial extent metadata.
+
+    Args:
+        pixels: The strain pixels in % of shape (n_frames, h, w, d) and type float32.
+        extent: The strain extent in meters of shape (n_frames, 6) or (6,).
+    """
+
+
+@dataclass
+class SweMap(FloatMap):
+    """Shear-wave elastography data and spatial extent metadata.
+
+    Args:
+        pixels: The shear-wave elastography pixels in m/s of shape
+            (n_frames, h, w, d) and type float32.
+        extent: The SWE extent in meters of shape (n_frames, 6) or (6,).
+    """
+
+
+@dataclass
+class TissueDopplerMap(FloatMap):
+    """Tissue Doppler data and spatial extent metadata.
+
+    Args:
+        pixels: The tissue Doppler pixels in m/s of shape (n_frames, h, w, d)
+            and type float32.
+        extent: The tissue Doppler extent in meters of shape (n_frames, 6) or (6,).
+    """
+
+
+@dataclass
+class Data(Spec):
+    """Data group containing raw channels and optional derived data products.
+
+    Args:
+        raw_data: Raw channel data of shape (n_frames, n_tx, n_el, n_ax, n_ch)
+            and type float32.
+        image: Reconstructed image data and extent metadata.
+        segmentation: Segmentation data and extent metadata.
+        sos_map: Speed-of-sound map data and extent metadata.
+        strain: Strain map data and extent metadata.
+        swe: Shear-wave elastography data and extent metadata.
+        tissue_doppler: Tissue Doppler data and extent metadata.
+    """
+
+    raw_data: np.ndarray | None = None
+    image: Image | dict | None = None
+    segmentation: Segmentation | dict | None = None
+    sos_map: SosMap | dict | None = None
+    strain: StrainMap | dict | None = None
+    swe: SweMap | dict | None = None
+    tissue_doppler: TissueDopplerMap | dict | None = None
+
+    SCHEMA = {
+        "raw_data": {
+            "dtype": np.float32,
+            "shape": ("n_frames", "n_tx", "n_el", "n_ax", "n_ch"),
+            "required": False,
+        },
+        "image": {"spec": Image, "required": False},
+        "segmentation": {"spec": Segmentation, "required": False},
+        "sos_map": {"spec": SosMap, "required": False},
+        "strain": {"spec": StrainMap, "required": False},
+        "swe": {"spec": SweMap, "required": False},
+        "tissue_doppler": {"spec": TissueDopplerMap, "required": False},
     }
 
 
 @dataclass
 class Scan(Spec):
-    t0_delays: np.ndarray
+    """Scan group with acquisition and transmit metadata.
+
+    All fields are aligned with the data format specification.
+    """
+
+    us_machine: np.ndarray | str | None = None
+    probe_name: np.ndarray | str | None = None
+    n_ax: np.ndarray | int | None = None
+    n_el: np.ndarray | int | None = None
+    n_tx: np.ndarray | int | None = None
+    n_ch: np.ndarray | int | None = None
+    n_frames: np.ndarray | int | None = None
+    sound_speed: np.ndarray | float | None = None
+    probe_geometry: np.ndarray | None = None
+    sampling_frequency: np.ndarray | float | None = None
+    center_frequency: np.ndarray | float | None = None
+    demodulation_frequency: np.ndarray | float | None = None
+    initial_times: np.ndarray | None = None
+    t0_delays: np.ndarray | None = None
+    tx_apodizations: np.ndarray | None = None
+    focus_distances: np.ndarray | None = None
+    transmit_origins: np.ndarray | None = None
+    polar_angles: np.ndarray | None = None
+    azimuth_angles: np.ndarray | None = None
+    time_to_next_transmit: np.ndarray | None = None
+    tgc_gain_curve: np.ndarray | None = None
+    element_width: np.ndarray | float | None = None
+    waveforms_one_way: np.ndarray | None = None
+    waveforms_two_way: np.ndarray | None = None
 
     SCHEMA = {
+        "us_machine": {"dtype": np.str_, "shape": (), "required": False},
+        "probe_name": {"dtype": np.str_, "shape": (), "required": False},
+        "n_ax": {"dtype": int, "shape": (), "defines_dim": "n_ax"},
+        "n_el": {"dtype": int, "shape": (), "defines_dim": "n_el"},
+        "n_tx": {"dtype": int, "shape": (), "defines_dim": "n_tx"},
+        "n_ch": {"dtype": int, "shape": (), "defines_dim": "n_ch"},
+        "n_frames": {"dtype": int, "shape": (), "defines_dim": "n_frames"},
+        "sound_speed": {"dtype": float, "shape": (), "required": False},
+        "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
+        "sampling_frequency": {"dtype": np.float32, "shape": ()},
+        "center_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
+        "demodulation_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
+        "initial_times": {"dtype": np.float32, "shape": ("n_tx",)},
         "t0_delays": {"dtype": np.float32, "shape": ("n_tx", "n_el")},
+        "tx_apodizations": {"dtype": np.float32, "shape": ("n_tx", "n_el")},
+        "focus_distances": {"dtype": np.float32, "shape": ("n_tx",)},
+        "transmit_origins": {"dtype": np.float32, "shape": ("n_tx", 3)},
+        "polar_angles": {"dtype": np.float32, "shape": ("n_tx",)},
+        "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
+        "time_to_next_transmit": {"dtype": np.float32, "shape": ("n_frames", "n_tx")},
+        "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",), "required": False},
+        "element_width": {"dtype": np.float32, "shape": (), "required": False},
+        "waveforms_one_way": {"dtype": np.float32, "shape": ("n_tx", 500), "required": False},
+        "waveforms_two_way": {"dtype": np.float32, "shape": ("n_tx", 500), "required": False},
     }
 
 
 @dataclass
-class Metadata:
-    pass
+class Subject(Spec):
+    """Subject metadata associated with the study.
+
+    Args:
+        type: Subject type, e.g. human, phantom, animal.
+        age: Subject age in years.
+        sex: Subject sex.
+        fat: Subject fat percentage.
+    """
+
+    type: np.ndarray | str | None = None
+    age: np.ndarray | int | None = None
+    sex: np.ndarray | str | None = None
+    fat: np.ndarray | float | None = None
+
+    SCHEMA = {
+        "type": {"dtype": np.str_, "shape": (), "required": False},
+        "age": {"dtype": np.uint8, "shape": (), "required": False},
+        "sex": {"dtype": np.str_, "shape": (), "required": False},
+        "fat": {"dtype": np.float32, "shape": (), "required": False},
+    }
 
 
 @dataclass
-class Metrics:
-    pass
+class ProbeOrientation(Spec):
+    """Probe pose and timing metadata.
+
+    Args:
+        pose: Probe pose in meters of shape (T, 6), ordered as
+            (x, y, z, az, el, roll).
+        offset: Time offset in seconds relative to frame timing.
+        sampling_frequency: Sampling frequency in Hz for probe orientation samples.
+    """
+
+    pose: np.ndarray
+    offset: np.ndarray | float | None = None
+    sampling_frequency: np.ndarray | float | None = None
+
+    SCHEMA = {
+        "pose": {"dtype": np.float32, "shape": ("T", 6)},
+        "offset": {"dtype": np.float32, "shape": (), "required": False},
+        "sampling_frequency": {"dtype": np.float32, "shape": (), "required": False},
+    }
+
+
+@dataclass
+class TimedSignal(Spec):
+    """One-dimensional sampled signal with timing metadata.
+
+    Args:
+        samples: Signal samples of shape (T, 1) and type uint8.
+        offset: Time offset in seconds relative to frame timing.
+        sampling_frequency: Sampling frequency in Hz for signal samples.
+    """
+
+    samples: np.ndarray
+    offset: np.ndarray | float | None = None
+    sampling_frequency: np.ndarray | float | None = None
+
+    SCHEMA = {
+        "samples": {"dtype": np.uint8, "shape": ("T", 1)},
+        "offset": {"dtype": np.float32, "shape": (), "required": False},
+        "sampling_frequency": {"dtype": np.float32, "shape": (), "required": False},
+    }
+
+
+@dataclass
+class Annotations(Spec):
+    """Frame-level annotations, either per frame or broadcast labels.
+
+    Args:
+        anatomy: Anatomy label.
+        view: View label of shape (n_frames,).
+        label: Pathology or classification label of shape (n_frames,).
+        image_quality: Image quality label, e.g. low, mid, high.
+    """
+
+    anatomy: np.ndarray | str | None = None
+    view: np.ndarray | None = None
+    label: np.ndarray | None = None
+    image_quality: np.ndarray | str | None = None
+
+    SCHEMA = {
+        "anatomy": {"dtype": np.str_, "shape": (("n_frames",), ()), "required": False},
+        "view": {"dtype": np.str_, "shape": ("n_frames",), "required": False},
+        "label": {"dtype": np.str_, "shape": ("n_frames",), "required": False},
+        "image_quality": {"dtype": np.str_, "shape": (("n_frames",), ()), "required": False},
+    }
+
+
+@dataclass
+class Metadata(Spec):
+    """Metadata group with subject, acquisition context, and annotations."""
+
+    subject: Subject | dict | None = None
+    credit: np.ndarray | str | None = None
+    probe_orientation: ProbeOrientation | dict | None = None
+    voice_narration: TimedSignal | dict | None = None
+    ecg: TimedSignal | dict | None = None
+    text_report: np.ndarray | str | None = None
+    annotations: Annotations | dict | None = None
+
+    SCHEMA = {
+        "subject": {"spec": Subject, "required": False},
+        "credit": {"dtype": np.str_, "shape": (), "required": False},
+        "probe_orientation": {"spec": ProbeOrientation, "required": False},
+        "voice_narration": {"spec": TimedSignal, "required": False},
+        "ecg": {"spec": TimedSignal, "required": False},
+        "text_report": {"dtype": np.str_, "shape": (), "required": False},
+        "annotations": {"spec": Annotations, "required": False},
+    }
+
+
+@dataclass
+class Metrics(Spec):
+    """Metrics group for acquisition-level quality/performance metrics.
+
+    Args:
+        common_midpoint_phase_error: Common midpoint phase error in radians of
+            shape (n_frames,) and type float32.
+        coherence_factor: Coherence factor of shape (n_frames,) and type float32.
+    """
+
+    common_midpoint_phase_error: np.ndarray | None = None
+    coherence_factor: np.ndarray | None = None
+
+    SCHEMA = {
+        "common_midpoint_phase_error": {
+            "dtype": np.float32,
+            "shape": ("n_frames",),
+            "required": False,
+        },
+        "coherence_factor": {"dtype": np.float32, "shape": ("n_frames",), "required": False},
+    }
 
 
 # TODO: Neatly integrate this with zea.File
@@ -228,10 +567,10 @@ class Dataset:
         )
     """
 
-    data: Data
-    scan: Scan
-    metadata: Metadata
-    metrics: Metrics
+    data: Data | dict
+    scan: Scan | dict
+    metadata: Metadata | dict = field(default_factory=Metadata)
+    metrics: Metrics | dict = field(default_factory=Metrics)
 
     def __post_init__(self):
         if not isinstance(self.data, Data):
