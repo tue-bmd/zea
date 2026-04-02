@@ -136,9 +136,11 @@ def test_saving_and_loading(tmp_path, dataset_spec: DatasetBuilder):
 
 def test_scan_requires_required_fields():
     scan = _scan_minimal()
-    scan.pop("n_tx")
+    scan.pop("demodulation_frequency")
 
-    with pytest.raises(TypeError, match="missing 1 required positional argument: 'n_tx'"):
+    with pytest.raises(
+        TypeError, match="missing 1 required positional argument: 'demodulation_frequency'"
+    ):
         Scan(**scan)
 
 

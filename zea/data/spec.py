@@ -7,6 +7,8 @@ import numpy as np
 
 from zea import File, log
 
+CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch"}
+
 
 def check_dtype(value: Any, expected_dtype: type) -> None:
     """Check if the dtype of a value matches the expected dtype,
@@ -105,7 +107,7 @@ class Spec:
         shape: tuple,
     ) -> None:
         for i, dim_name in enumerate(matched_shape):
-            if isinstance(dim_name, str):
+            if isinstance(dim_name, str) and dim_name in CONSISTENCY_DIMENSIONS:
                 dim_to_fields[dim_name].add(field_path)
                 dim_to_sizes[dim_name].add(shape[i])
 
@@ -144,7 +146,10 @@ class Spec:
         expected_dtype = field_info["dtype"]
         expected_shapes = self._expected_shapes(field_info["shape"])
 
-        check_dtype(field_value, expected_dtype)
+        try:
+            check_dtype(field_value, expected_dtype)
+        except TypeError as e:
+            raise TypeError(f"Field '{field_name}' has invalid dtype: {e}")
 
         matched_shape = find_matched_shape(field_value, expected_shapes)
         if matched_shape is None:
@@ -558,9 +563,39 @@ class Subject(Spec):
         "fat": {"dtype": np.float32, "shape": ()},
     }
 
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.fat is not None and (self.fat < 0 or self.fat > 100):
+            raise ValueError(f"Subject fat percentage must be between 0 and 100, got {self.fat}")
+
 
 @dataclass
-class ProbeOrientation(Spec):
+class AdditionalSignals(Spec):
+    """Additional signals related to the scan, such as voice narration or ECG.
+
+    Args:
+        offset: Time offset in seconds relative to frame timing.
+        sampling_frequency: Sampling frequency in Hz for the additional signal samples.
+    """
+
+    offset: np.ndarray | float
+    sampling_frequency: np.ndarray | float
+
+    SCHEMA = {
+        "offset": {"dtype": np.float32, "shape": ()},
+        "sampling_frequency": {"dtype": np.float32, "shape": ()},
+    }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.sampling_frequency <= 0:
+            raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
+
+
+@dataclass
+class ProbeOrientation(AdditionalSignals):
     """Probe pose and timing metadata.
 
     Args:
@@ -570,34 +605,28 @@ class ProbeOrientation(Spec):
     """
 
     pose: np.ndarray
-    offset: np.ndarray | float | None = None
-    sampling_frequency: np.ndarray | float | None = None
 
     SCHEMA = {
         "pose": {"dtype": np.float32, "shape": ("T", 6)},
-        "offset": {"dtype": np.float32, "shape": ()},
-        "sampling_frequency": {"dtype": np.float32, "shape": ()},
+        **AdditionalSignals.SCHEMA,
     }
 
 
 @dataclass
-class TimedSignal(Spec):
+class TimedSignal(AdditionalSignals):
     """One-dimensional sampled signal with timing metadata.
 
     Args:
-        samples: Signal samples of shape (T, 1) and type uint8.
+        samples: Signal samples of shape (T, 1) and type float32.
         offset: Time offset in seconds relative to frame timing.
         sampling_frequency: Sampling frequency in Hz for signal samples.
     """
 
     samples: np.ndarray
-    offset: np.ndarray | float | None = None
-    sampling_frequency: np.ndarray | float | None = None
 
     SCHEMA = {
         "samples": {"dtype": np.uint8, "shape": ("T", 1)},
-        "offset": {"dtype": np.float32, "shape": ()},
-        "sampling_frequency": {"dtype": np.float32, "shape": ()},
+        **AdditionalSignals.SCHEMA,
     }
 
 
