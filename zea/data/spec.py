@@ -1,5 +1,5 @@
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, List
 
 import numpy as np
@@ -75,13 +75,19 @@ class Spec:
         dim_to_fields = defaultdict(set)
         dim_to_sizes = defaultdict(set)
         dim_to_count_fields = {}
+        dataclass_fields = {f.name: f for f in fields(self)}
 
         for field_name, field_info in self.SCHEMA.items():
             field_value = getattr(self, field_name)
-            required = field_info.get("required", True)
+            field_def = dataclass_fields.get(field_name)
+            is_optional = False
+            if field_def is not None:
+                is_optional = (
+                    field_def.default is not MISSING or field_def.default_factory is not MISSING
+                )
 
             if field_value is None:
-                if required:
+                if not is_optional:
                     raise ValueError(f"Missing required field '{field_name}'")
                 continue
 
@@ -327,14 +333,13 @@ class Data(Spec):
         "raw_data": {
             "dtype": np.float32,
             "shape": ("n_frames", "n_tx", "n_el", "n_ax", "n_ch"),
-            "required": False,
         },
-        "image": {"spec": Image, "required": False},
-        "segmentation": {"spec": Segmentation, "required": False},
-        "sos_map": {"spec": SosMap, "required": False},
-        "strain": {"spec": StrainMap, "required": False},
-        "swe": {"spec": SweMap, "required": False},
-        "tissue_doppler": {"spec": TissueDopplerMap, "required": False},
+        "image": {"spec": Image},
+        "segmentation": {"spec": Segmentation},
+        "sos_map": {"spec": SosMap},
+        "strain": {"spec": StrainMap},
+        "swe": {"spec": SweMap},
+        "tissue_doppler": {"spec": TissueDopplerMap},
     }
 
 
@@ -345,40 +350,37 @@ class Scan(Spec):
     All fields are aligned with the data format specification.
     """
 
+    n_ax: np.ndarray | int
+    n_el: np.ndarray | int
+    n_tx: np.ndarray | int
+    n_ch: np.ndarray | int
+    n_frames: np.ndarray | int
+    probe_geometry: np.ndarray
+    sampling_frequency: np.ndarray | float
+    center_frequency: np.ndarray | float
+    demodulation_frequency: np.ndarray | float
+    initial_times: np.ndarray
+    t0_delays: np.ndarray
+    tx_apodizations: np.ndarray
+    focus_distances: np.ndarray
+    transmit_origins: np.ndarray
+    polar_angles: np.ndarray
+    azimuth_angles: np.ndarray
+    time_to_next_transmit: np.ndarray
     us_machine: np.ndarray | str | None = None
     probe_name: np.ndarray | str | None = None
-    n_ax: np.ndarray | int | None = None
-    n_el: np.ndarray | int | None = None
-    n_tx: np.ndarray | int | None = None
-    n_ch: np.ndarray | int | None = None
-    n_frames: np.ndarray | int | None = None
     sound_speed: np.ndarray | float | None = None
-    probe_geometry: np.ndarray | None = None
-    sampling_frequency: np.ndarray | float | None = None
-    center_frequency: np.ndarray | float | None = None
-    demodulation_frequency: np.ndarray | float | None = None
-    initial_times: np.ndarray | None = None
-    t0_delays: np.ndarray | None = None
-    tx_apodizations: np.ndarray | None = None
-    focus_distances: np.ndarray | None = None
-    transmit_origins: np.ndarray | None = None
-    polar_angles: np.ndarray | None = None
-    azimuth_angles: np.ndarray | None = None
-    time_to_next_transmit: np.ndarray | None = None
     tgc_gain_curve: np.ndarray | None = None
     element_width: np.ndarray | float | None = None
     waveforms_one_way: np.ndarray | None = None
     waveforms_two_way: np.ndarray | None = None
 
     SCHEMA = {
-        "us_machine": {"dtype": np.str_, "shape": (), "required": False},
-        "probe_name": {"dtype": np.str_, "shape": (), "required": False},
         "n_ax": {"dtype": int, "shape": (), "defines_dim": "n_ax"},
         "n_el": {"dtype": int, "shape": (), "defines_dim": "n_el"},
         "n_tx": {"dtype": int, "shape": (), "defines_dim": "n_tx"},
         "n_ch": {"dtype": int, "shape": (), "defines_dim": "n_ch"},
         "n_frames": {"dtype": int, "shape": (), "defines_dim": "n_frames"},
-        "sound_speed": {"dtype": float, "shape": (), "required": False},
         "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "sampling_frequency": {"dtype": np.float32, "shape": ()},
         "center_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
@@ -391,10 +393,13 @@ class Scan(Spec):
         "polar_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "time_to_next_transmit": {"dtype": np.float32, "shape": ("n_frames", "n_tx")},
-        "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",), "required": False},
-        "element_width": {"dtype": np.float32, "shape": (), "required": False},
-        "waveforms_one_way": {"dtype": np.float32, "shape": ("n_tx", 500), "required": False},
-        "waveforms_two_way": {"dtype": np.float32, "shape": ("n_tx", 500), "required": False},
+        "us_machine": {"dtype": np.str_, "shape": ()},
+        "probe_name": {"dtype": np.str_, "shape": ()},
+        "sound_speed": {"dtype": float, "shape": ()},
+        "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
+        "element_width": {"dtype": np.float32, "shape": ()},
+        "waveforms_one_way": {"dtype": np.float32, "shape": ("n_tx", 500)},
+        "waveforms_two_way": {"dtype": np.float32, "shape": ("n_tx", 500)},
     }
 
 
@@ -415,10 +420,10 @@ class Subject(Spec):
     fat: np.ndarray | float | None = None
 
     SCHEMA = {
-        "type": {"dtype": np.str_, "shape": (), "required": False},
-        "age": {"dtype": np.uint8, "shape": (), "required": False},
-        "sex": {"dtype": np.str_, "shape": (), "required": False},
-        "fat": {"dtype": np.float32, "shape": (), "required": False},
+        "type": {"dtype": np.str_, "shape": ()},
+        "age": {"dtype": np.uint8, "shape": ()},
+        "sex": {"dtype": np.str_, "shape": ()},
+        "fat": {"dtype": np.float32, "shape": ()},
     }
 
 
@@ -439,8 +444,8 @@ class ProbeOrientation(Spec):
 
     SCHEMA = {
         "pose": {"dtype": np.float32, "shape": ("T", 6)},
-        "offset": {"dtype": np.float32, "shape": (), "required": False},
-        "sampling_frequency": {"dtype": np.float32, "shape": (), "required": False},
+        "offset": {"dtype": np.float32, "shape": ()},
+        "sampling_frequency": {"dtype": np.float32, "shape": ()},
     }
 
 
@@ -460,8 +465,8 @@ class TimedSignal(Spec):
 
     SCHEMA = {
         "samples": {"dtype": np.uint8, "shape": ("T", 1)},
-        "offset": {"dtype": np.float32, "shape": (), "required": False},
-        "sampling_frequency": {"dtype": np.float32, "shape": (), "required": False},
+        "offset": {"dtype": np.float32, "shape": ()},
+        "sampling_frequency": {"dtype": np.float32, "shape": ()},
     }
 
 
@@ -482,10 +487,10 @@ class Annotations(Spec):
     image_quality: np.ndarray | str | None = None
 
     SCHEMA = {
-        "anatomy": {"dtype": np.str_, "shape": (("n_frames",), ()), "required": False},
-        "view": {"dtype": np.str_, "shape": ("n_frames",), "required": False},
-        "label": {"dtype": np.str_, "shape": ("n_frames",), "required": False},
-        "image_quality": {"dtype": np.str_, "shape": (("n_frames",), ()), "required": False},
+        "anatomy": {"dtype": np.str_, "shape": (("n_frames",), ())},
+        "view": {"dtype": np.str_, "shape": ("n_frames",)},
+        "label": {"dtype": np.str_, "shape": ("n_frames",)},
+        "image_quality": {"dtype": np.str_, "shape": (("n_frames",), ())},
     }
 
 
@@ -502,13 +507,13 @@ class Metadata(Spec):
     annotations: Annotations | dict | None = None
 
     SCHEMA = {
-        "subject": {"spec": Subject, "required": False},
-        "credit": {"dtype": np.str_, "shape": (), "required": False},
-        "probe_orientation": {"spec": ProbeOrientation, "required": False},
-        "voice_narration": {"spec": TimedSignal, "required": False},
-        "ecg": {"spec": TimedSignal, "required": False},
-        "text_report": {"dtype": np.str_, "shape": (), "required": False},
-        "annotations": {"spec": Annotations, "required": False},
+        "subject": {"spec": Subject},
+        "credit": {"dtype": np.str_, "shape": ()},
+        "probe_orientation": {"spec": ProbeOrientation},
+        "voice_narration": {"spec": TimedSignal},
+        "ecg": {"spec": TimedSignal},
+        "text_report": {"dtype": np.str_, "shape": ()},
+        "annotations": {"spec": Annotations},
     }
 
 
@@ -529,9 +534,8 @@ class Metrics(Spec):
         "common_midpoint_phase_error": {
             "dtype": np.float32,
             "shape": ("n_frames",),
-            "required": False,
         },
-        "coherence_factor": {"dtype": np.float32, "shape": ("n_frames",), "required": False},
+        "coherence_factor": {"dtype": np.float32, "shape": ("n_frames",)},
     }
 
 
