@@ -72,6 +72,147 @@ class Spec:
 
     SCHEMA: dict
 
+    @staticmethod
+    def _is_optional_dataclass_field(field_def: Any) -> bool:
+        if field_def is None:
+            return False
+        return field_def.default is not MISSING or field_def.default_factory is not MISSING
+
+    @staticmethod
+    def _expected_shapes(shape_spec: Any) -> tuple[tuple, ...]:
+        if shape_spec and isinstance(shape_spec[0], tuple):
+            return tuple(shape_spec)
+        return (shape_spec,)
+
+    @staticmethod
+    def _merge_dimension_info(
+        dim_to_fields: defaultdict[str, set[str]],
+        dim_to_sizes: defaultdict[str, set[int]],
+        nested_dim_to_fields: defaultdict[str, set[str]],
+        nested_dim_to_sizes: defaultdict[str, set[int]],
+    ) -> None:
+        for dim_name, nested_fields in nested_dim_to_fields.items():
+            dim_to_fields[dim_name].update(nested_fields)
+        for dim_name, nested_sizes in nested_dim_to_sizes.items():
+            dim_to_sizes[dim_name].update(nested_sizes)
+
+    @staticmethod
+    def _track_named_dimensions(
+        dim_to_fields: defaultdict[str, set[str]],
+        dim_to_sizes: defaultdict[str, set[int]],
+        field_path: str,
+        matched_shape: tuple,
+        shape: tuple,
+    ) -> None:
+        for i, dim_name in enumerate(matched_shape):
+            if isinstance(dim_name, str):
+                dim_to_fields[dim_name].add(field_path)
+                dim_to_sizes[dim_name].add(shape[i])
+
+    @staticmethod
+    def _raise_if_shape_mismatch(
+        field_name: str, value: Any, expected_shapes: tuple[tuple, ...]
+    ) -> None:
+        allowed_shapes = ", ".join(str(shape) for shape in expected_shapes)
+        raise ValueError(
+            f"{field_name} has shape {value_shape(value)}, expected one of: {allowed_shapes}"
+        )
+
+    def _validate_nested_field(
+        self, field_name: str, nested_spec: type, field_value: Any
+    ) -> "Spec":
+        if isinstance(field_value, dict):
+            field_value = nested_spec(**field_value)
+            setattr(self, field_name, field_value)
+
+        if not isinstance(field_value, nested_spec):
+            raise TypeError(
+                f"Expected field '{field_name}' to be {nested_spec.__name__}, "
+                f"got {type(field_value).__name__}"
+            )
+
+        return field_value
+
+    def _validate_and_track_primitive_field(
+        self,
+        field_name: str,
+        field_info: dict,
+        field_value: Any,
+        dim_to_fields: defaultdict[str, set[str]],
+        dim_to_sizes: defaultdict[str, set[int]],
+    ) -> None:
+        expected_dtype = field_info["dtype"]
+        expected_shapes = self._expected_shapes(field_info["shape"])
+
+        check_dtype(field_value, expected_dtype)
+
+        matched_shape = find_matched_shape(field_value, expected_shapes)
+        if matched_shape is None:
+            self._raise_if_shape_mismatch(field_name, field_value, expected_shapes)
+
+        self._track_named_dimensions(
+            dim_to_fields=dim_to_fields,
+            dim_to_sizes=dim_to_sizes,
+            field_path=field_name,
+            matched_shape=matched_shape,
+            shape=value_shape(field_value),
+        )
+
+    @staticmethod
+    def _raise_if_inconsistent_dimensions(
+        dim_to_fields: defaultdict[str, set[str]],
+        dim_to_sizes: defaultdict[str, set[int]],
+    ) -> None:
+        for dim_name, sizes in dim_to_sizes.items():
+            if len(sizes) > 1:
+                field_names = sorted(dim_to_fields[dim_name])
+                raise ValueError(
+                    f"Dimension '{dim_name}' has inconsistent sizes across "
+                    f"fields {field_names}: {sorted(sizes)}"
+                )
+
+    def _collect_dimension_info(
+        self, prefix: str = ""
+    ) -> tuple[defaultdict[str, set[str]], defaultdict[str, set[int]]]:
+        """Collect named dimension usage and observed sizes for this spec subtree."""
+        dim_to_fields = defaultdict(set)
+        dim_to_sizes = defaultdict(set)
+
+        for field_name, field_info in self.SCHEMA.items():
+            field_value = getattr(self, field_name)
+            if field_value is None:
+                continue
+
+            nested_spec = field_info.get("spec")
+            if nested_spec is not None:
+                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
+                    prefix=f"{prefix}{field_name}."
+                )
+                self._merge_dimension_info(
+                    dim_to_fields,
+                    dim_to_sizes,
+                    nested_dim_to_fields,
+                    nested_dim_to_sizes,
+                )
+                continue
+
+            expected_shapes = self._expected_shapes(field_info["shape"])
+
+            matched_shape = find_matched_shape(field_value, expected_shapes)
+            if matched_shape is None:
+                # Child specs are already validated; skip defensively if no shape can be matched.
+                continue
+
+            self._track_named_dimensions(
+                dim_to_fields=dim_to_fields,
+                dim_to_sizes=dim_to_sizes,
+                field_path=f"{prefix}{field_name}",
+                matched_shape=matched_shape,
+                shape=value_shape(field_value),
+            )
+
+        return dim_to_fields, dim_to_sizes
+
     def __post_init__(self):
         dim_to_fields = defaultdict(set)
         dim_to_sizes = defaultdict(set)
@@ -80,11 +221,7 @@ class Spec:
         for field_name, field_info in self.SCHEMA.items():
             field_value = getattr(self, field_name)
             field_def = dataclass_fields.get(field_name)
-            is_optional = False
-            if field_def is not None:
-                is_optional = (
-                    field_def.default is not MISSING or field_def.default_factory is not MISSING
-                )
+            is_optional = self._is_optional_dataclass_field(field_def)
 
             if field_value is None:
                 if not is_optional:
@@ -93,48 +230,28 @@ class Spec:
 
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
-                if isinstance(field_value, dict):
-                    field_value = nested_spec(**field_value)
-                    setattr(self, field_name, field_value)
-                if not isinstance(field_value, nested_spec):
-                    raise TypeError(
-                        f"Expected field '{field_name}' to be {nested_spec.__name__}, "
-                        f"got {type(field_value).__name__}"
-                    )
+                field_value = self._validate_nested_field(field_name, nested_spec, field_value)
+
+                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
+                    prefix=f"{field_name}."
+                )
+                self._merge_dimension_info(
+                    dim_to_fields,
+                    dim_to_sizes,
+                    nested_dim_to_fields,
+                    nested_dim_to_sizes,
+                )
                 continue
 
-            expected_dtype = field_info["dtype"]
-            shape_spec = field_info["shape"]
+            self._validate_and_track_primitive_field(
+                field_name=field_name,
+                field_info=field_info,
+                field_value=field_value,
+                dim_to_fields=dim_to_fields,
+                dim_to_sizes=dim_to_sizes,
+            )
 
-            if shape_spec and isinstance(shape_spec[0], tuple):
-                expected_shapes = shape_spec
-            else:
-                expected_shapes = (shape_spec,)
-
-            check_dtype(field_value, expected_dtype)
-
-            matched_shape = find_matched_shape(field_value, expected_shapes)
-            if matched_shape is None:
-                allowed_shapes = ", ".join(str(shape) for shape in expected_shapes)
-                raise ValueError(
-                    f"{field_name} has shape {value_shape(field_value)}, "
-                    f"expected one of: {allowed_shapes}"
-                )
-
-            # Track dimension names and sizes for consistency checks
-            for i, dim_name in enumerate(matched_shape):
-                if isinstance(dim_name, str):
-                    dim_to_fields[dim_name].add(field_name)
-                    dim_to_sizes[dim_name].add(value_shape(field_value)[i])
-
-        # Check that dimensions with the same name have consistent sizes across fields
-        for dim_name, sizes in dim_to_sizes.items():
-            if len(sizes) > 1:
-                field_names = sorted(dim_to_fields[dim_name])
-                raise ValueError(
-                    f"Dimension '{dim_name}' has inconsistent sizes across "
-                    f"fields {field_names}: {sorted(sizes)}"
-                )
+        self._raise_if_inconsistent_dimensions(dim_to_fields, dim_to_sizes)
 
     @staticmethod
     def _is_string_value(value: Any) -> bool:
