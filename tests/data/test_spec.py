@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 
-from zea.data.spec import Dataset, Scan, Segmentation
+from zea.data.file import File
+from zea.data.spec import DatasetBuilder, Scan, Segmentation
 
 
 def test_segmentation_spec():
@@ -44,10 +45,11 @@ def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4, n_ax: int = 8
     }
 
 
-def test_dataset_full_new_spec_from_dicts():
+@pytest.fixture
+def dataset_spec():
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
-    dataset = Dataset(
+    return DatasetBuilder(
         data={
             "raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float32),
             "image": {
@@ -109,10 +111,32 @@ def test_dataset_full_new_spec_from_dicts():
         },
     )
 
-    assert dataset.data.raw_data.shape == (n_frames, n_tx, n_el, n_ax, n_ch)
-    assert dataset.scan.t0_delays.shape == (n_tx, n_el)
-    assert dataset.metadata.annotations.view.shape == (n_frames,)
-    assert dataset.metrics.coherence_factor.shape == (n_frames,)
+
+def test_dataset_spec(dataset_spec):
+    n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
+
+    assert dataset_spec.data.raw_data.shape == (n_frames, n_tx, n_el, n_ax, n_ch)
+    assert dataset_spec.scan.t0_delays.shape == (n_tx, n_el)
+    assert dataset_spec.metadata.annotations.view.shape == (n_frames,)
+    assert dataset_spec.metrics.coherence_factor.shape == (n_frames,)
+
+
+def test_saving_and_loading(tmp_path, dataset_spec: DatasetBuilder):
+    # Save the dataset
+    save_path = tmp_path / "test_dataset.hdf5"
+    dataset_spec.save(save_path)
+
+    with File(save_path) as loaded_dataset:
+        # Check that the loaded data matches the original
+        assert np.array_equal(loaded_dataset["data"]["raw_data"], dataset_spec.data.raw_data)
+        assert np.array_equal(loaded_dataset["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+        assert np.array_equal(
+            loaded_dataset["metadata"]["annotations"]["view"],
+            dataset_spec.metadata.annotations.view,
+        )
+        assert np.array_equal(
+            loaded_dataset["metrics"]["coherence_factor"], dataset_spec.metrics.coherence_factor
+        )
 
 
 def test_scan_requires_required_fields():
@@ -134,7 +158,7 @@ def test_scan_dimension_count_consistency():
 def test_optional_fields_can_be_omitted():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    dataset = Dataset(
+    dataset = DatasetBuilder(
         data={"raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float32)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el, n_ax=n_ax, n_ch=n_ch),
         metadata={},

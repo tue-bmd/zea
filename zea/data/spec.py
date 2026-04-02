@@ -2,9 +2,10 @@ from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, List
 
+import h5py
 import numpy as np
 
-from zea import log
+from zea import File, log
 
 
 def check_dtype(value: Any, expected_dtype: type) -> None:
@@ -149,6 +150,24 @@ class Spec:
                         f"Field '{field_name}'={count} is inconsistent with "
                         f"dimension '{dim_name}'={actual_size}"
                     )
+
+    def store_in_group(self, group: h5py.Group, compression: str = "gzip") -> None:
+        """Store the data in the given group (e.g. hdf5 group)."""
+
+        assert isinstance(group, h5py.Group), "group must be an h5py Group"
+
+        for field_name, field_info in self.SCHEMA.items():
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+
+            nested_spec = field_info.get("spec")
+            if nested_spec is not None:
+                subgroup = group.create_group(field_name)
+                value.store_in_group(subgroup)
+            else:
+                # TODO: store description and unit as h5 attrs (like zea does)
+                group.create_dataset(field_name, data=value, compression=compression)
 
 
 @dataclass
@@ -539,9 +558,8 @@ class Metrics(Spec):
     }
 
 
-# TODO: Neatly integrate this with zea.File
 @dataclass
-class Dataset(Spec):
+class DatasetBuilder(Spec):
     """A dataset containing all the data, scan parameters, metadata,
     and metrics for a single acquisition.
 
@@ -583,11 +601,12 @@ class Dataset(Spec):
         "metrics": {"spec": Metrics},
     }
 
-    @classmethod
-    def load(cls, path: str) -> "Dataset":
-        """Load a dataset from the specified path."""
-        pass
-
     def save(self, path: str) -> None:
         """Save the dataset to the specified path."""
-        pass
+        with File(path, "w") as f:
+            for group_name in self.SCHEMA.keys():
+                # Create group
+                group = f.create_group(group_name)
+
+                value: Spec = getattr(self, group_name)
+                value.store_in_group(group)
