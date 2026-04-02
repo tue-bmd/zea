@@ -126,6 +126,8 @@ class Map(Spec):
             raise ValueError("Map extent ylims must have ymin < ymax")
         if np.any(self.extent[..., 4] >= self.extent[..., 5]):
             raise ValueError("Map extent zlims must have zmax < zmin")
+
+        # Ultrasound specific warning: if extent values are unusually large, log a warning
         if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
             log.warning(
                 "Map extent values are unusually large, extending beyond +/- 1.0 meters. "
@@ -166,17 +168,37 @@ class Segmentation(Map):
 
 
 @dataclass
-class Data:
+class Data(Spec):
     raw_data: np.ndarray
     segmentation: Segmentation
 
+    SCHEMA = {
+        "raw_data": {"dtype": np.float32, "shape": ("n_frames", "n_tx", "n_el", "n_ax", "n_ch")},
+    }
+
 
 @dataclass
-class Scan:
+class Scan(Spec):
     t0_delays: np.ndarray
 
+    SCHEMA = {
+        "t0_delays": {"dtype": np.float32, "shape": ("n_tx", "n_el")},
+    }
+
 
 @dataclass
-class DataSpec:
+class Metadata:
+    pass
+
+
+@dataclass
+class Metrics:
+    pass
+
+
+@dataclass
+class Dataset:
     data: Data
     scan: Scan
+    metadata: Metadata
+    metrics: Metrics
