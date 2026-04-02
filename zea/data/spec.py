@@ -541,7 +541,7 @@ class Metrics(Spec):
 
 # TODO: Neatly integrate this with zea.File
 @dataclass
-class Dataset:
+class Dataset(Spec):
     """A dataset containing all the data, scan parameters, metadata,
     and metrics for a single acquisition.
 
@@ -576,15 +576,12 @@ class Dataset:
     metadata: Metadata | dict = field(default_factory=Metadata)
     metrics: Metrics | dict = field(default_factory=Metrics)
 
-    def __post_init__(self):
-        if not isinstance(self.data, Data):
-            self.data = Data(**self.data)
-        if not isinstance(self.scan, Scan):
-            self.scan = Scan(**self.scan)
-        if not isinstance(self.metadata, Metadata):
-            self.metadata = Metadata(**self.metadata)
-        if not isinstance(self.metrics, Metrics):
-            self.metrics = Metrics(**self.metrics)
+    SCHEMA = {
+        "data": {"spec": Data},
+        "scan": {"spec": Scan},
+        "metadata": {"spec": Metadata},
+        "metrics": {"spec": Metrics},
+    }
 
     @classmethod
     def load(cls, path: str) -> "Dataset":
