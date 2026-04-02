@@ -420,6 +420,16 @@ class SosMap(FloatMap):
         extent: The speed-of-sound map extent in meters of shape (n_frames, 6) or (6,).
     """
 
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Check sensible values for speed of sound
+        if np.any(self.pixels < 300):
+            log.warning(
+                "Speed-of-sound map contains values below 300 m/s, which is unusually low. "
+                "Please verify that the speed-of-sound values are correct and in m/s."
+            )
+
 
 @dataclass
 class StrainMap(FloatMap):
@@ -495,6 +505,56 @@ class Scan(Spec):
     """Scan group with acquisition and transmit metadata.
 
     All fields are aligned with the data format specification.
+
+    Args:
+        probe_geometry: The probe geometry in meters of shape (n_el, 3),
+            represented as (x, y, z) coordinates.
+        sampling_frequency: The sampling frequency in Hz.
+        center_frequency: The center frequency in Hz of the transmit pulse.
+            Single scalar if all transmits share the same center frequency;
+            otherwise an array of shape (n_tx,) with one frequency per transmit.
+        demodulation_frequency: The frequency in Hz at which the data should
+            be demodulated. Usually the same as center_frequency, but different
+            when doing harmonic imaging. Single scalar if all transmits share
+            the same center frequency; otherwise an array of shape (n_tx,) with
+            one frequency per transmit.
+        initial_times: The times in seconds when the A/D converter starts sampling
+            of shape (n_tx,). This is the time between the first element firing
+            and the first recorded sample.
+        t0_delays: The transmit delays in seconds for each element of shape
+            (n_tx, n_el). This is the time at which each element fires, shifted
+            such that the first element fires at t=0.
+        tx_apodizations: The apodization values that were applied to each
+            element during transmit of shape (n_tx, n_el). This is a value
+            between -1 and 1 that indicates how much each element contributed
+            to the transmit beam, with 0 meaning no contribution and 1 meaning
+            full contribution. Negative values indicate that the element was
+            fired with opposite polarity.
+        focus_distances: The transmit focus distances in meters of shape (n_tx,).
+            This is the distance from the origin point on the transducer to
+            where the beam comes to focus. For planewaves this is set to
+            infinity or zero.
+        transmit_origins: The transmit origins of the transmit beams in meters of
+            shape (n_tx, 3). This is the (x, y, z) position from which the beam
+            is transmitted.
+        polar_angles: The polar angles in radians of the transmit beams of shape (n_tx,).
+        time_to_next_transmit: The time in s between subsequent transmit events
+            of shape (n_frames, n_tx).
+        azimuth_angles: The azimuthal angles in radians of the transmit beams of
+            shape (n_tx,).
+        us_machine: The ultrasound machine used to acquire the data.
+        probe_name: The name of the probe used to acquire the data.
+        sound_speed: The speed of sound in meters per second.
+        tgc_gain_curve: The time-gain-compensation that was applied to every
+            sample in the raw_data of shape (n_ax,). Divide by this curve to
+            undo the TGC.
+        element_width: The width of the elements in the probe in meters.
+        waveforms_one_way: One-way waveforms of shape (n_tx, 500) as simulated
+            by the Verasonics system. This is the waveform after being filtered
+            by the transducer bandwidth once.
+        waveforms_two_way: Two-way waveforms of shape (n_tx, 500) as simulated
+            by the Verasonics system. This is the waveform after being filtered
+            by the transducer bandwidth twice.
     """
 
     probe_geometry: np.ndarray
@@ -538,6 +598,54 @@ class Scan(Spec):
         "waveforms_one_way": {"dtype": np.float32, "shape": ("n_tx", 500)},
         "waveforms_two_way": {"dtype": np.float32, "shape": ("n_tx", 500)},
     }
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if np.any(self.probe_geometry > 1.0) or np.any(self.probe_geometry < -1.0):
+            log.warning(
+                "Probe geometry values are unusually large, extending beyond +/- 1.0 meters. "
+                "Please verify that the probe geometry values are correct and in meters."
+            )
+        if self.sampling_frequency <= 0:
+            raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
+        if self.center_frequency < 0:
+            raise ValueError(f"Center frequency cannot be negative, got {self.center_frequency}")
+        if self.demodulation_frequency < 0:
+            raise ValueError(
+                f"Demodulation frequency cannot be negative, got {self.demodulation_frequency}"
+            )
+        if np.any(self.t0_delays < 0):
+            raise ValueError(f"Transmit delays cannot be negative, got {self.t0_delays}")
+        if np.any(np.logical_and(self.focus_distances >= 1, self.ffocus_distances != np.inf)):
+            log.warning(
+                "Focus distances greater than or equal to 1 meter may be unusually large. "
+                "Maybe you have to convert to meters?"
+            )
+        if np.any(self.transmit_origins > 1.0) or np.any(self.transmit_origins < -1.0):
+            log.warning(
+                "Transmit origin values are unusually large, extending beyond +/- 1.0 meters. "
+                "Please verify that the transmit origin values are correct and in meters."
+            )
+        if np.any(self.polar_angles < -np.pi) or np.any(self.polar_angles > np.pi):
+            raise ValueError(
+                f"Polar angles should be between -pi and pi radians, got values between "
+                f"{np.min(self.polar_angles)} and {np.max(self.polar_angles)}"
+            )
+        if np.any(self.azimuth_angles < -np.pi) or np.any(self.azimuth_angles > np.pi):
+            raise ValueError(
+                f"Azimuth angles should be between -pi and pi radians, got values between "
+                f"{np.min(self.azimuth_angles)} and {np.max(self.azimuth_angles)}"
+            )
+        if self.sound_speed is not None and self.sound_speed <= 0:
+            raise ValueError(f"Sound speed must be positive, got {self.sound_speed}")
+        if self.tgc_gain_curve is not None and np.any(self.tgc_gain_curve < 0):
+            raise ValueError(
+                f"TGC gain curve values must be non-negative, got values between "
+                f"{np.min(self.tgc_gain_curve)} and {np.max(self.tgc_gain_curve)}"
+            )
+        if self.element_width is not None and self.element_width <= 0:
+            raise ValueError(f"Element width must be positive, got {self.element_width}")
 
 
 @dataclass
