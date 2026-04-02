@@ -75,7 +75,6 @@ class Spec:
     def __post_init__(self):
         dim_to_fields = defaultdict(set)
         dim_to_sizes = defaultdict(set)
-        dim_to_count_fields = {}
         dataclass_fields = {f.name: f for f in fields(self)}
 
         for field_name, field_info in self.SCHEMA.items():
@@ -128,10 +127,6 @@ class Spec:
                     dim_to_fields[dim_name].add(field_name)
                     dim_to_sizes[dim_name].add(value_shape(field_value)[i])
 
-            defines_dim = field_info.get("defines_dim")
-            if defines_dim is not None:
-                dim_to_count_fields[defines_dim] = (field_name, int(field_value))
-
         # Check that dimensions with the same name have consistent sizes across fields
         for dim_name, sizes in dim_to_sizes.items():
             if len(sizes) > 1:
@@ -140,16 +135,6 @@ class Spec:
                     f"Dimension '{dim_name}' has inconsistent sizes across "
                     f"fields {field_names}: {sorted(sizes)}"
                 )
-
-        # Check explicit dimension count fields (e.g. n_tx, n_el)
-        for dim_name, (field_name, count) in dim_to_count_fields.items():
-            if dim_name in dim_to_sizes and dim_to_sizes[dim_name]:
-                actual_size = next(iter(dim_to_sizes[dim_name]))
-                if count != actual_size:
-                    raise ValueError(
-                        f"Field '{field_name}'={count} is inconsistent with "
-                        f"dimension '{dim_name}'={actual_size}"
-                    )
 
     @staticmethod
     def _is_string_value(value: Any) -> bool:
@@ -390,11 +375,6 @@ class Scan(Spec):
     All fields are aligned with the data format specification.
     """
 
-    n_ax: np.ndarray | int
-    n_el: np.ndarray | int
-    n_tx: np.ndarray | int
-    n_ch: np.ndarray | int
-    n_frames: np.ndarray | int
     probe_geometry: np.ndarray
     sampling_frequency: np.ndarray | float
     center_frequency: np.ndarray | float
@@ -416,11 +396,6 @@ class Scan(Spec):
     waveforms_two_way: np.ndarray | None = None
 
     SCHEMA = {
-        "n_ax": {"dtype": int, "shape": (), "defines_dim": "n_ax"},
-        "n_el": {"dtype": int, "shape": (), "defines_dim": "n_el"},
-        "n_tx": {"dtype": int, "shape": (), "defines_dim": "n_tx"},
-        "n_ch": {"dtype": int, "shape": (), "defines_dim": "n_ch"},
-        "n_frames": {"dtype": int, "shape": (), "defines_dim": "n_frames"},
         "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "sampling_frequency": {"dtype": np.float32, "shape": ()},
         "center_frequency": {"dtype": np.float32, "shape": ((), ("n_tx",))},
