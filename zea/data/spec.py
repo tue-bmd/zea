@@ -502,8 +502,8 @@ class Scan(Spec):
     focus_distances: np.ndarray
     transmit_origins: np.ndarray
     polar_angles: np.ndarray
-    azimuth_angles: np.ndarray
-    time_to_next_transmit: np.ndarray
+    time_to_next_transmit: np.ndarray = None
+    azimuth_angles: np.ndarray = None
     us_machine: np.ndarray | str | None = None
     probe_name: np.ndarray | str | None = None
     sound_speed: np.ndarray | float | None = None
@@ -523,8 +523,8 @@ class Scan(Spec):
         "focus_distances": {"dtype": np.float32, "shape": ("n_tx",)},
         "transmit_origins": {"dtype": np.float32, "shape": ("n_tx", 3)},
         "polar_angles": {"dtype": np.float32, "shape": ("n_tx",)},
-        "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "time_to_next_transmit": {"dtype": np.float32, "shape": ("n_frames", "n_tx")},
+        "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "us_machine": {"dtype": np.str_, "shape": ()},
         "probe_name": {"dtype": np.str_, "shape": ()},
         "sound_speed": {"dtype": float, "shape": ()},
@@ -564,8 +564,7 @@ class ProbeOrientation(Spec):
     """Probe pose and timing metadata.
 
     Args:
-        pose: Probe pose in meters of shape (T, 6), ordered as
-            (x, y, z, az, el, roll).
+        pose: Probe pose in meters of shape (T, 6), ordered as (x, y, z, az, el, roll).
         offset: Time offset in seconds relative to frame timing.
         sampling_frequency: Sampling frequency in Hz for probe orientation samples.
     """
@@ -685,21 +684,33 @@ class DatasetBuilder(Spec):
         metadata: Additional metadata about the acquisition.
         metrics: Metrics computed from the acquisition.
 
-    Example usage::
+    Example:
+        .. doctest::
+            >>> from zea.data.spec import DatasetBuilder
+            >>> import numpy as np
 
-        dataset = Dataset(
-            data={
-                "raw_data": np.random.rand(100, 32, 64, 128, 8).astype(np.float32),
-                "segmentation": {
-                    "pixels": np.random.randint(0, 5, size=(100, 256, 256, 1)).astype(np.uint8),
-                    "labels": np.array(["background", "tissue", "vessel", "bone", "artifact"]),
-                    "extent": np.array([[-0.1, 0.1, -0.1, 0.1, -0.05, 0.05]], dtype=np.float32),
-                },
-            }
-            scan={
-                "t0_delays": np.random.rand(32, 64).astype(np.float32),
-            }
-        )
+            >>> dataset = DatasetBuilder(
+            ...    data={
+            ...        "raw_data": np.random.rand(100, 32, 64, 128, 1).astype(np.float32),
+            ...        "segmentation": {
+            ...            "pixels": np.random.randint(0, 4, size=(100, 64, 64, 1), dtype=np.uint8),
+            ...            "labels": np.array(["background", "tissue", "vessel", "bone"]),
+            ...            "extent": np.array([-0.1, 0.1, -0.1, 0.1, -0.1, 0.1], dtype=np.float32),
+            ...        },
+            ...    }
+            ...    scan={
+            ...        "probe_geometry": np.zeros((64, 3), dtype=np.float32),
+            ...        "sampling_frequency": np.float32(30e6),
+            ...        "center_frequency": np.linspace(5e6, 6e6, 32, dtype=np.float32),
+            ...        "demodulation_frequency": np.linspace(5e6, 6e6, 32, dtype=np.float32),
+            ...        "initial_times": np.linspace(0, 1e-6, 32, dtype=np.float32),
+            ...        "t0_delays": np.random.rand(32, 64).astype(np.float32),
+            ...        "tx_apodizations": np.random.rand(32, 64).astype(np.float32),
+            ...        "focus_distances": np.linspace(0.01, 0.1, 32, dtype=np.float32),
+            ...        "transmit_origins": np.zeros((32, 3), dtype=np.float32),
+            ...        "polar_angles": np.linspace(-0.1, 0.1, 32, dtype=np.float32),
+            ...    }
+            ... )
     """
 
     data: Data | dict
