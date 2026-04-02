@@ -272,7 +272,7 @@ class Segmentation(Map):
 
 
 @dataclass
-class FloatMap(Spec):
+class FloatMap(Map):
     """Map data with float32 pixel values and spatial extent metadata.
 
     Args:
@@ -289,16 +289,6 @@ class FloatMap(Spec):
         "pixels": {"dtype": np.float32, "shape": ("n_frames", "h", "w", "d")},
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
     }
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        if np.any(self.extent[..., 0] >= self.extent[..., 1]):
-            raise ValueError("Map extent xlims must have xmin < xmax")
-        if np.any(self.extent[..., 2] >= self.extent[..., 3]):
-            raise ValueError("Map extent ylims must have ymin < ymax")
-        if np.any(self.extent[..., 4] >= self.extent[..., 5]):
-            raise ValueError("Map extent zlims must have zmax < zmin")
 
 
 @dataclass
