@@ -434,13 +434,23 @@ class VerasonicsFile(h5py.File):
 
         return sampling_frequency
 
-    def read_waveforms(self, tx_order, event=None):
-        """
-        Read the waveforms from the file.
+    def read_tx_waveform_indices(self, tx_order, event=None):
+        tx_waveform_indices = []
+        for n in tx_order:
+            # Read the waveform
+            if event is None:
+                waveform_index = self.dereference_index(self["TX"]["waveform"], n)[:]
+            else:
+                waveform_index = self.dereference_index(self["TX_Agent"]["waveform"], n, event)[:]
+            # Subtract one to make the indices 0-based
+            waveform_index -= 1
+            # Turn into integer
+            waveform_index = int(waveform_index.item())
+            tx_waveform_indices.append(waveform_index)
+        return tx_waveform_indices
 
-        Returns:
-            waveforms (np.ndarray): The waveforms of shape (n_tx, n_samples).
-        """
+    def read_waveforms(self):
+        """Read the waveforms from the file."""
         waveforms_one_way_list = []
         waveforms_two_way_list = []
 
@@ -460,21 +470,7 @@ class VerasonicsFile(h5py.File):
             waveforms_one_way_list.append(waveform_one_way)
             waveforms_two_way_list.append(waveform_two_way)
 
-        tx_waveform_indices = []
-
-        for n in tx_order:
-            # Read the waveform
-            if event is None:
-                waveform_index = self.dereference_index(self["TX"]["waveform"], n)[:]
-            else:
-                waveform_index = self.dereference_index(self["TX_Agent"]["waveform"], n, event)[:]
-            # Subtract one to make the indices 0-based
-            waveform_index -= 1
-            # Turn into integer
-            waveform_index = int(waveform_index.item())
-            tx_waveform_indices.append(waveform_index)
-
-        return tx_waveform_indices, waveforms_one_way_list, waveforms_two_way_list
+        return waveforms_one_way_list, waveforms_two_way_list
 
     def read_beamsteering_angles(self, tx_order, event=None):
         """Beam steering angles in radians (theta, alpha) for each transmit.
@@ -719,14 +715,7 @@ class VerasonicsFile(h5py.File):
             center_frequency = self.read_center_frequency(waveform_index)
             center_frequencies.append(center_frequency)
 
-        center_frequencies = np.stack(center_frequencies)
-        center_frequencies = np.unique(center_frequencies)
-        if center_frequencies.size != 1:
-            raise ValueError(
-                "Multiple center frequencies found in file: "
-                f"{center_frequencies}. We do not support this case at the moment."
-            )
-        return center_frequencies.item()
+        return np.stack(center_frequencies)
 
     @property
     def demodulation_frequency(self):
@@ -1057,9 +1046,13 @@ class VerasonicsFile(h5py.File):
         focus_distances = self.read_focus_distances(tx_order, event)
         transmit_origins = self.read_transmit_origins(tx_order, event)
 
-        tx_waveform_indices, waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms(
-            tx_order, event
-        )
+        waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms()
+        tx_waveform_indices = self.read_tx_waveform_indices(tx_order, event)
+
+        # stack waveforms to (n_tx, n_samples) using the tx_waveform_indices
+        waveforms_one_way = np.stack([waveforms_one_way_list[i] for i in tx_waveform_indices])
+        waveforms_two_way = np.stack([waveforms_two_way_list[i] for i in tx_waveform_indices])
+
         center_frequency = self.read_center_frequencies(tx_waveform_indices)
         focus_distances = self.planewave_focal_distance_to_inf(
             focus_distances, t0_delays, tx_apodizations
@@ -1081,8 +1074,8 @@ class VerasonicsFile(h5py.File):
             "focus_distances": focus_distances,
             "transmit_origins": transmit_origins,
             "tx_waveform_indices": tx_waveform_indices,
-            "waveforms_one_way": waveforms_one_way_list,
-            "waveforms_two_way": waveforms_two_way_list,
+            "waveforms_one_way": waveforms_one_way,
+            "waveforms_two_way": waveforms_two_way,
             "tgc_gain_curve": self.tgc_gain_curve,
             "element_width": self.element_width,
         }

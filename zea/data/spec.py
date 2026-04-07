@@ -553,10 +553,10 @@ class Scan(Spec):
             sample in the raw_data of shape (n_ax,). Divide by this curve to
             undo the TGC.
         element_width: The width of the elements in the probe in meters.
-        waveforms_one_way: One-way waveforms of shape (n_tx, 500) as simulated
+        waveforms_one_way: One-way waveforms of shape (n_tx, .) as simulated
             by the Verasonics system. This is the waveform after being filtered
             by the transducer bandwidth once.
-        waveforms_two_way: Two-way waveforms of shape (n_tx, 500) as simulated
+        waveforms_two_way: Two-way waveforms of shape (n_tx, .) as simulated
             by the Verasonics system. This is the waveform after being filtered
             by the transducer bandwidth twice.
     """
@@ -599,8 +599,8 @@ class Scan(Spec):
         "sound_speed": {"dtype": float, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
         "element_width": {"dtype": np.float32, "shape": ()},
-        "waveforms_one_way": {"dtype": np.float32, "shape": ("n_tx", 500)},
-        "waveforms_two_way": {"dtype": np.float32, "shape": ("n_tx", 500)},
+        "waveforms_one_way": {"dtype": np.float32, "shape": ("n_tx", "n_samples_one_way")},
+        "waveforms_two_way": {"dtype": np.float32, "shape": ("n_tx", "n_samples_two_way")},
     }
 
     def __post_init__(self):
