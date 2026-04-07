@@ -10,28 +10,30 @@ from zea import File, log
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch"}
 
 
-def check_dtype(value: Any, expected_dtype: type) -> None:
+def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     """Check if the dtype of a value matches the expected dtype,
     allowing for compatible types.
 
     Works for numpy arrays and scalar values.
     """
-    try:
-        expected_np_dtype = np.dtype(expected_dtype)
-        is_numpy_dtype = True
-    except TypeError:
-        is_numpy_dtype = False
+    for dt in expected_dtype:
+        try:
+            expected_np_dtype = np.dtype(dt)
+            is_numpy_dtype = True
+        except TypeError:
+            is_numpy_dtype = False
 
-    value_dtype = value.dtype if isinstance(value, np.ndarray) else np.asarray(value).dtype
+        if is_numpy_dtype:
+            if np.issubdtype(value.dtype, expected_np_dtype):
+                return
+        else:
+            if isinstance(value, dt):
+                return
 
-    if is_numpy_dtype:
-        if not np.issubdtype(value_dtype, expected_np_dtype):
-            raise TypeError(
-                f"Expected dtype compatible with {expected_np_dtype}, got {value_dtype}"
-            )
-    else:
-        if value_dtype != expected_dtype:
-            raise TypeError(f"Expected type {expected_dtype}, got {value_dtype}")
+    expected_dtypes_str = ", ".join(str(dt) for dt in expected_dtype)
+    raise TypeError(
+        f"Expected dtype compatible with one of ({expected_dtypes_str}), got {value.dtype}"
+    )
 
 
 def value_shape(value: Any) -> tuple:
@@ -144,6 +146,8 @@ class Spec:
         dim_to_sizes: defaultdict[str, set[int]],
     ) -> None:
         expected_dtype = field_info["dtype"]
+        if not isinstance(expected_dtype, (list, tuple)):
+            expected_dtype = [expected_dtype]
         expected_shapes = self._expected_shapes(field_info["shape"])
 
         try:
@@ -488,7 +492,7 @@ class Data(Spec):
 
     SCHEMA = {
         "raw_data": {
-            "dtype": np.float32,
+            "dtype": (np.float32, np.int16),
             "shape": ("n_frames", "n_tx", "n_el", "n_ax", "n_ch"),
         },
         "image": {"spec": Image},
