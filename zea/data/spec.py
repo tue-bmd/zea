@@ -662,20 +662,24 @@ class Subject(Spec):
     type: np.ndarray | str | None = None
     age: np.ndarray | int | None = None
     sex: np.ndarray | str | None = None
-    fat: np.ndarray | float | None = None
+    fat_percentage: np.ndarray | float | None = None
 
     SCHEMA = {
         "type": {"dtype": np.str_, "shape": ()},
         "age": {"dtype": np.uint8, "shape": ()},
         "sex": {"dtype": np.str_, "shape": ()},
-        "fat": {"dtype": np.float32, "shape": ()},
+        "fat_percentage": {"dtype": np.float32, "shape": ()},
     }
 
     def __post_init__(self):
         super().__post_init__()
 
-        if self.fat is not None and (self.fat < 0 or self.fat > 100):
-            raise ValueError(f"Subject fat percentage must be between 0 and 100, got {self.fat}")
+        if self.fat_percentage is not None and (
+            self.fat_percentage < 0 or self.fat_percentage > 100
+        ):
+            raise ValueError(
+                f"Subject fat percentage must be between 0 and 100, got {self.fat_percentage}"
+            )
 
 
 @dataclass
