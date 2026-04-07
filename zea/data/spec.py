@@ -14,7 +14,7 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     """Check if the dtype of a value matches the expected dtype,
     allowing for compatible types.
 
-    Works for numpy arrays and scalar values.
+    Works for numpy arrays, numpy scalars, and Python native types.
     """
     for dt in expected_dtype:
         try:
@@ -24,15 +24,21 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
             is_numpy_dtype = False
 
         if is_numpy_dtype:
-            if np.issubdtype(value.dtype, expected_np_dtype):
-                return
+            if hasattr(value, "dtype"):
+                if np.issubdtype(value.dtype, expected_np_dtype):
+                    return
         else:
             if isinstance(value, dt):
                 return
 
+    actual_type = (
+        f"dtype {value.dtype}" if hasattr(value, "dtype") else f"Python {type(value).__name__}"
+    )
     expected_dtypes_str = ", ".join(str(dt) for dt in expected_dtype)
     raise TypeError(
-        f"Expected dtype compatible with one of ({expected_dtypes_str}), got {value.dtype}"
+        f"Expected dtype compatible with one of ({expected_dtypes_str}), got {actual_type}. "
+        f"Hint: wrap the value with the appropriate numpy type, "
+        f"e.g. np.float32(...), np.str_(...), np.uint8(...)."
     )
 
 
@@ -137,6 +143,28 @@ class Spec:
 
         return field_value
 
+    @staticmethod
+    def _cast_native_to_numpy(value: Any, expected_dtype: list) -> Any:
+        """Cast Python native types (str, int, float) to numpy equivalents.
+
+        If the value already has a ``.dtype`` attribute (numpy array or scalar),
+        it is returned unchanged.  Otherwise, each dtype in *expected_dtype* is
+        tried as a cast target; the first successful conversion wins.  If none
+        succeed the original value is returned so that downstream validation
+        can produce a clear error.
+        """
+        if hasattr(value, "dtype"):
+            return value  # already a numpy type
+
+        for dt in expected_dtype:
+            try:
+                target_dtype = np.dtype(dt)
+                return target_dtype.type(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+
+        return value
+
     def _validate_and_track_primitive_field(
         self,
         field_name: str,
@@ -149,6 +177,10 @@ class Spec:
         if not isinstance(expected_dtype, (list, tuple)):
             expected_dtype = [expected_dtype]
         expected_shapes = self._expected_shapes(field_info["shape"])
+
+        # Auto-cast Python native types (str, int, float) to numpy equivalents
+        field_value = self._cast_native_to_numpy(field_value, expected_dtype)
+        setattr(self, field_name, field_value)
 
         try:
             check_dtype(field_value, expected_dtype)
@@ -468,6 +500,19 @@ class TissueDopplerMap(FloatMap):
 
 
 @dataclass
+class ColorDopplerMap(FloatMap):
+    """Color Doppler (velocity) data and spatial extent metadata.
+
+    Args:
+        pixels: The color Doppler velocity pixels in m/s of shape
+            (n_frames, h, w, d) and type float32. Positive values
+            indicate flow towards the transducer, negative values
+            indicate flow away from the transducer.
+        extent: The color Doppler extent in meters of shape (n_frames, 6) or (6,).
+    """
+
+
+@dataclass
 class Data(Spec):
     """Data group containing raw channels and optional derived data products.
 
@@ -480,6 +525,7 @@ class Data(Spec):
         strain: Strain map data and extent metadata.
         swe: Shear-wave elastography data and extent metadata.
         tissue_doppler: Tissue Doppler data and extent metadata.
+        color_doppler: Color Doppler velocity data and extent metadata.
     """
 
     raw_data: np.ndarray | None = None
@@ -489,6 +535,7 @@ class Data(Spec):
     strain: StrainMap | dict | None = None
     swe: SweMap | dict | None = None
     tissue_doppler: TissueDopplerMap | dict | None = None
+    color_doppler: ColorDopplerMap | dict | None = None
 
     SCHEMA = {
         "raw_data": {
@@ -501,6 +548,7 @@ class Data(Spec):
         "strain": {"spec": StrainMap},
         "swe": {"spec": SweMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
+        "color_doppler": {"spec": ColorDopplerMap},
     }
 
 
