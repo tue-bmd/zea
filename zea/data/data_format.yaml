@@ -216,7 +216,7 @@ metadata:
     sex:
       description: Subject sex.
       type: string
-    fat:
+    fat_percentage:
       description: Subject fat percentage.
       type: float32
       unit: "%"
