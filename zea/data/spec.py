@@ -683,8 +683,8 @@ class Subject(Spec):
 
 
 @dataclass
-class AdditionalSignals(Spec):
-    """Additional signals related to the scan, such as voice narration or ECG.
+class AdditionalSignal(Spec):
+    """Additional signal related to the scan, such as voice narration or ECG.
 
     Args:
         offset: Time offset in seconds relative to frame timing.
@@ -707,7 +707,7 @@ class AdditionalSignals(Spec):
 
 
 @dataclass
-class ProbeOrientation(AdditionalSignals):
+class ProbeOrientation(AdditionalSignal):
     """Probe pose and timing metadata.
 
     Args:
@@ -720,12 +720,12 @@ class ProbeOrientation(AdditionalSignals):
 
     SCHEMA = {
         "pose": {"dtype": np.float32, "shape": ("T", 6)},
-        **AdditionalSignals.SCHEMA,
+        **AdditionalSignal.SCHEMA,
     }
 
 
 @dataclass
-class TimedSignal(AdditionalSignals):
+class TimedSignal(AdditionalSignal):
     """One-dimensional sampled signal with timing metadata.
 
     Args:
@@ -738,7 +738,7 @@ class TimedSignal(AdditionalSignals):
 
     SCHEMA = {
         "samples": {"dtype": np.uint8, "shape": ("T", 1)},
-        **AdditionalSignals.SCHEMA,
+        **AdditionalSignal.SCHEMA,
     }
 
 
