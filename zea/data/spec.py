@@ -609,15 +609,15 @@ class Scan(Spec):
             )
         if self.sampling_frequency <= 0:
             raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
-        if self.center_frequency < 0:
+        if np.any(self.center_frequency < 0):
             raise ValueError(f"Center frequency cannot be negative, got {self.center_frequency}")
-        if self.demodulation_frequency < 0:
+        if np.any(self.demodulation_frequency < 0):
             raise ValueError(
                 f"Demodulation frequency cannot be negative, got {self.demodulation_frequency}"
             )
         if np.any(self.t0_delays < 0):
             raise ValueError(f"Transmit delays cannot be negative, got {self.t0_delays}")
-        if np.any(np.logical_and(self.focus_distances >= 1, self.ffocus_distances != np.inf)):
+        if np.any(np.logical_and(self.focus_distances >= 1, self.focus_distances != np.inf)):
             log.warning(
                 "Focus distances greater than or equal to 1 meter may be unusually large. "
                 "Maybe you have to convert to meters?"
