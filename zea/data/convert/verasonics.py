@@ -1028,6 +1028,69 @@ class VerasonicsFile(h5py.File):
 
         return element_width
 
+    def read_scan(self, event=None, frames=None, allow_accumulate=False, buffer_index=0) -> dict:
+        """Reads all scan parameters from the file and returns them in a dictionary.
+
+        Args:
+            event (int, optional): The event index. Defaults to None in this case we assume
+                the data file is stored without event structure.
+            frames (str or list of int, optional): The frames to add to the file. This can be
+                a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
+                None, which means all frames, unless specified in a `convert.yaml` file.
+            allow_accumulate (bool, optional): Sometimes, some transmits are already accumulated
+                on the Verasonics system (e.g. harmonic imaging through pulse inversion).
+                In this case, the mode in the Receive structure is set to 1 (accumulate).
+                If this flag is set to False, an error is raised when such a mode is detected.
+            buffer_index (int, optional): The buffer index to read from. Defaults to 0.
+        """
+
+        convert_config = self.load_convert_config()
+
+        if frames is None:
+            frames = convert_config.get("frames", "all")
+
+        tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
+            frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
+        )
+        initial_times = self.read_initial_times(rcv_order)
+
+        polar_angles = self.read_polar_angles(tx_order, event)
+        azimuth_angles = self.read_azimuth_angles(tx_order, event)
+        t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order, event)
+        focus_distances = self.read_focus_distances(tx_order, event)
+        transmit_origins = self.read_transmit_origins(tx_order, event)
+
+        tx_waveform_indices, waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms(
+            tx_order, event
+        )
+        center_frequency = self.read_center_frequencies(tx_waveform_indices)
+        focus_distances = self.planewave_focal_distance_to_inf(
+            focus_distances, t0_delays, tx_apodizations
+        )
+
+        return {
+            "probe_geometry": self.probe_geometry,
+            "time_to_next_transmit": time_to_next_transmit,
+            "t0_delays": t0_delays,
+            "tx_apodizations": tx_apodizations,
+            "sampling_frequency": self.sampling_frequency,
+            "polar_angles": polar_angles,
+            "azimuth_angles": azimuth_angles,
+            "bandwidth_percent": self.bandwidth_percent,
+            "center_frequency": center_frequency,
+            "demodulation_frequency": self.demodulation_frequency,
+            "sound_speed": self.sound_speed,
+            "initial_times": initial_times,
+            "probe_name": self.probe_name,
+            "focus_distances": focus_distances,
+            "transmit_origins": transmit_origins,
+            "tx_waveform_indices": tx_waveform_indices,
+            "waveforms_one_way": waveforms_one_way_list,
+            "waveforms_two_way": waveforms_two_way_list,
+            "tgc_gain_curve": self.tgc_gain_curve,
+            "element_width": self.element_width,
+        }
+
     def read_verasonics_file(
         self,
         event=None,
@@ -1062,28 +1125,18 @@ class VerasonicsFile(h5py.File):
         if frames is None:
             frames = convert_config.get("frames", "all")
 
-        first_frame_idx = convert_config.get("first_frame", None)
-
-        tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
-            frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
+        scan_dict = self.read_scan(
+            event=event,
+            frames=frames,
+            allow_accumulate=allow_accumulate,
+            buffer_index=buffer_index,
         )
-        initial_times = self.read_initial_times(rcv_order)
 
-        # these are capable of handling multiple events
-        raw_data = self.read_raw_data(event, frames=frames, first_frame_idx=first_frame_idx)
-
-        polar_angles = self.read_polar_angles(tx_order, event)
-        azimuth_angles = self.read_azimuth_angles(tx_order, event)
-        t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order, event)
-        focus_distances = self.read_focus_distances(tx_order, event)
-        transmit_origins = self.read_transmit_origins(tx_order, event)
-
-        tx_waveform_indices, waveforms_one_way_list, waveforms_two_way_list = self.read_waveforms(
-            tx_order, event
-        )
-        center_frequency = self.read_center_frequencies(tx_waveform_indices)
-        focus_distances = self.planewave_focal_distance_to_inf(
-            focus_distances, t0_delays, tx_apodizations
+        raw_data = self.read_raw_data(
+            event,
+            frames=frames,
+            buffer_index=buffer_index,
+            first_frame_idx=convert_config.get("first_frame", None),
         )
 
         if event is None:
@@ -1128,32 +1181,11 @@ class VerasonicsFile(h5py.File):
         for additional_function in additional_functions:
             additional_elements.append(additional_function(self))
 
-        data = {
-            "probe_geometry": self.probe_geometry,
-            "time_to_next_transmit": time_to_next_transmit,
-            "t0_delays": t0_delays,
-            "tx_apodizations": tx_apodizations,
-            "sampling_frequency": self.sampling_frequency,
-            "polar_angles": polar_angles,
-            "azimuth_angles": azimuth_angles,
-            "bandwidth_percent": self.bandwidth_percent,
+        return {
             "raw_data": raw_data,
-            "center_frequency": center_frequency,
-            "demodulation_frequency": self.demodulation_frequency,
-            "sound_speed": self.sound_speed,
-            "initial_times": initial_times,
-            "probe_name": self.probe_name,
-            "focus_distances": focus_distances,
-            "transmit_origins": transmit_origins,
-            "tx_waveform_indices": tx_waveform_indices,
-            "waveforms_one_way": waveforms_one_way_list,
-            "waveforms_two_way": waveforms_two_way_list,
-            "tgc_gain_curve": self.tgc_gain_curve,
-            "element_width": self.element_width,
+            **scan_dict,
             "additional_elements": additional_elements,
         }
-
-        return data
 
     def _parse_frames_argument(self, frames, n_frames):
         value_error = ValueError(
