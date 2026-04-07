@@ -1073,7 +1073,6 @@ class VerasonicsFile(h5py.File):
             "probe_name": self.probe_name,
             "focus_distances": focus_distances,
             "transmit_origins": transmit_origins,
-            "tx_waveform_indices": tx_waveform_indices,
             "waveforms_one_way": waveforms_one_way,
             "waveforms_two_way": waveforms_two_way,
             "tgc_gain_curve": self.tgc_gain_curve,
