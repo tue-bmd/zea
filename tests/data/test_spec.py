@@ -1,8 +1,11 @@
+from dataclasses import fields, is_dataclass
+
 import numpy as np
 import pytest
 
+from zea.data import spec as spec_module
 from zea.data.file import File
-from zea.data.spec import DatasetBuilder, Scan, Segmentation
+from zea.data.spec import DatasetBuilder, Scan, Segmentation, Spec
 
 
 def test_segmentation_spec():
@@ -209,4 +212,32 @@ def test_metadata_dict_with_unknown_field():
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata={"custom_field": "this field does not exist in Metadata spec"},
             metrics={},
+        )
+
+
+def test_schema_keys_match_dataclass_fields_for_all_specs():
+    """Test that all Spec subclasses have SCHEMA keys that exactly match their dataclass fields."""
+    spec_classes = []
+    for obj in vars(spec_module).values():
+        if (
+            isinstance(obj, type)
+            and issubclass(obj, Spec)
+            and obj is not Spec
+            and is_dataclass(obj)
+        ):
+            spec_classes.append(obj)
+
+    assert spec_classes, "No dataclass Spec subclasses found in zea.data.spec"
+
+    for cls in spec_classes:
+        dataclass_field_names = {field.name for field in fields(cls)}
+        schema_field_names = set(cls.SCHEMA.keys())
+
+        missing_in_schema = dataclass_field_names - schema_field_names
+        extra_in_schema = schema_field_names - dataclass_field_names
+
+        assert not missing_in_schema and not extra_in_schema, (
+            f"{cls.__name__} SCHEMA mismatch. "
+            f"Missing in SCHEMA: {sorted(missing_in_schema)}; "
+            f"Extra in SCHEMA: {sorted(extra_in_schema)}"
         )

@@ -609,9 +609,9 @@ class Scan(Spec):
             )
         if self.sampling_frequency <= 0:
             raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
-        if self.center_frequency < 0:
+        if np.any(self.center_frequency < 0):
             raise ValueError(f"Center frequency cannot be negative, got {self.center_frequency}")
-        if self.demodulation_frequency < 0:
+        if np.any(self.demodulation_frequency < 0):
             raise ValueError(
                 f"Demodulation frequency cannot be negative, got {self.demodulation_frequency}"
             )
