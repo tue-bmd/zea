@@ -872,29 +872,26 @@ class VerasonicsFile(h5py.File):
         return focus_distances
 
     @property
-    def bandwidth_percent(self):
+    def sample_mode(self):
         """Receive bandwidth as a percentage of center frequency."""
         SUPPORTED_SAMPLE_MODES = ["NS200BW", "BS100BW", "BS67BW", "BS50BW"]
 
         # For all unique sample modes
-        bandwidth_percent = self.dereference_all(
-            self["Receive"]["sampleMode"], func=self.decode_string
-        )
-        bandwidth_percent = set(bandwidth_percent)
+        sample_mode = self.dereference_all(self["Receive"]["sampleMode"], func=self.decode_string)
+        sample_mode = set(sample_mode)
 
-        # Ensure only a single bandwidth mode is used
-        assert len(bandwidth_percent) == 1, (
-            f"Multiple bandwidth modes found in file: {bandwidth_percent}. "
-            "We do not support this case."
+        # Ensure only a single sample mode is used
+        assert len(sample_mode) == 1, (
+            f"Multiple sample modes found in file: {sample_mode}. We do not support this case."
         )
-        bandwidth_percent = bandwidth_percent.pop()
+        sample_mode = sample_mode.pop()
 
-        # Check if the bandwidth mode is supported, and extract the percentage
-        assert bandwidth_percent in SUPPORTED_SAMPLE_MODES, (
-            f"Unexpected bandwidth mode '{bandwidth_percent}' in file."
+        # Check if the sample mode is supported, and extract the percentage
+        assert sample_mode in SUPPORTED_SAMPLE_MODES, (
+            f"Unexpected sample mode '{sample_mode}' in file."
             f"Expected one of {SUPPORTED_SAMPLE_MODES}"
         )
-        return int(bandwidth_percent[2:-2])
+        return int(sample_mode[2:-2])
 
     @property
     def is_baseband_mode(self):
@@ -905,7 +902,7 @@ class VerasonicsFile(h5py.File):
         - Two sequential samples are interpreted as a single complex sample.
           Therefore, we need to halve the sampling frequency.
         """
-        return self.bandwidth_percent in (50, 100)
+        return self.sample_mode in (50, 100)
 
     @property
     def lens_correction(self):
@@ -1076,7 +1073,6 @@ class VerasonicsFile(h5py.File):
             "sampling_frequency": self.sampling_frequency,
             "polar_angles": polar_angles,
             "azimuth_angles": azimuth_angles,
-            "bandwidth_percent": self.bandwidth_percent,
             "center_frequency": center_frequency,
             "demodulation_frequency": self.demodulation_frequency,
             "sound_speed": self.sound_speed,

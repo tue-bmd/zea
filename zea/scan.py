@@ -208,7 +208,7 @@ class Scan(Parameters):
         "n_tx": {"type": int},
         "n_ax": {"type": int},
         "n_ch": {"type": int},
-        "bandwidth_percent": {"type": float, "default": 200.0},
+        "bandwidth_percent": {"type": float, "default": 100.0},
         "demodulation_frequency": {"type": float},
         "element_width": {"type": float},
         "attenuation_coef": {"type": float, "default": 0.0},
@@ -736,12 +736,12 @@ class Scan(Parameters):
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
             center_frequency=self.center_frequency,
-            bandwidth_percent=self.bandwidth_percent,
             n_el=self.n_el,
             probe_geometry=self.probe_geometry,
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
+            bandwidth_percent=self.bandwidth_percent,
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)
