@@ -32,7 +32,9 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
                 return
 
     actual_type = (
-        f"dtype {value.dtype}" if hasattr(value, "dtype") else f"Python {type(value).__name__}"
+        f"dtype {value.dtype}"
+        if hasattr(value, "dtype")
+        else f"Python {type(value).__name__}"
     )
     expected_dtypes_str = ", ".join(str(dt) for dt in expected_dtype)
     raise TypeError(
@@ -86,7 +88,9 @@ class Spec:
     def _is_optional_dataclass_field(field_def: Any) -> bool:
         if field_def is None:
             return False
-        return field_def.default is not MISSING or field_def.default_factory is not MISSING
+        return (
+            field_def.default is not MISSING or field_def.default_factory is not MISSING
+        )
 
     @staticmethod
     def _expected_shapes(shape_spec: Any) -> tuple[tuple, ...]:
@@ -226,8 +230,8 @@ class Spec:
 
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
-                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
-                    prefix=f"{prefix}{field_name}."
+                nested_dim_to_fields, nested_dim_to_sizes = (
+                    field_value._collect_dimension_info(prefix=f"{prefix}{field_name}.")
                 )
                 self._merge_dimension_info(
                     dim_to_fields,
@@ -271,10 +275,12 @@ class Spec:
 
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
-                field_value = self._validate_nested_field(field_name, nested_spec, field_value)
+                field_value = self._validate_nested_field(
+                    field_name, nested_spec, field_value
+                )
 
-                nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
-                    prefix=f"{field_name}."
+                nested_dim_to_fields, nested_dim_to_sizes = (
+                    field_value._collect_dimension_info(prefix=f"{field_name}.")
                 )
                 self._merge_dimension_info(
                     dim_to_fields,
@@ -647,8 +653,14 @@ class Scan(Spec):
         "sound_speed": {"dtype": float, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
         "element_width": {"dtype": np.float32, "shape": ()},
-        "waveforms_one_way": {"dtype": np.float32, "shape": ("n_tx", "n_samples_one_way")},
-        "waveforms_two_way": {"dtype": np.float32, "shape": ("n_tx", "n_samples_two_way")},
+        "waveforms_one_way": {
+            "dtype": np.float32,
+            "shape": ("n_tx", "n_samples_one_way"),
+        },
+        "waveforms_two_way": {
+            "dtype": np.float32,
+            "shape": ("n_tx", "n_samples_two_way"),
+        },
     }
 
     def __post_init__(self):
@@ -660,16 +672,24 @@ class Scan(Spec):
                 "Please verify that the probe geometry values are correct and in meters."
             )
         if self.sampling_frequency <= 0:
-            raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
+            raise ValueError(
+                f"Sampling frequency must be positive, got {self.sampling_frequency}"
+            )
         if np.any(self.center_frequency < 0):
-            raise ValueError(f"Center frequency cannot be negative, got {self.center_frequency}")
+            raise ValueError(
+                f"Center frequency cannot be negative, got {self.center_frequency}"
+            )
         if np.any(self.demodulation_frequency < 0):
             raise ValueError(
                 f"Demodulation frequency cannot be negative, got {self.demodulation_frequency}"
             )
         if np.any(self.t0_delays < 0):
-            raise ValueError(f"Transmit delays cannot be negative, got {self.t0_delays}")
-        if np.any(np.logical_and(self.focus_distances >= 1, self.focus_distances != np.inf)):
+            raise ValueError(
+                f"Transmit delays cannot be negative, got {self.t0_delays}"
+            )
+        if np.any(
+            np.logical_and(self.focus_distances >= 1, self.focus_distances != np.inf)
+        ):
             log.warning(
                 "Focus distances greater than or equal to 1 meter may be unusually large. "
                 "Maybe you have to convert to meters?"
@@ -697,7 +717,9 @@ class Scan(Spec):
                 f"{np.min(self.tgc_gain_curve)} and {np.max(self.tgc_gain_curve)}"
             )
         if self.element_width is not None and self.element_width <= 0:
-            raise ValueError(f"Element width must be positive, got {self.element_width}")
+            raise ValueError(
+                f"Element width must be positive, got {self.element_width}"
+            )
 
 
 @dataclass
@@ -755,7 +777,9 @@ class AdditionalSignal(Spec):
         super().__post_init__()
 
         if self.sampling_frequency <= 0:
-            raise ValueError(f"Sampling frequency must be positive, got {self.sampling_frequency}")
+            raise ValueError(
+                f"Sampling frequency must be positive, got {self.sampling_frequency}"
+            )
 
 
 @dataclass
