@@ -27,8 +27,8 @@ def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4):
     return {
         "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(30e6),
-        "center_frequency": np.linspace(5e6, 6e6, n_tx, dtype=np.float32),
-        "demodulation_frequency": np.linspace(5e6, 6e6, n_tx, dtype=np.float32),
+        "center_frequency": np.float32(5e6),
+        "demodulation_frequency": np.float32(5e6),
         "initial_times": np.zeros((n_tx,), dtype=np.float32),
         "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
         "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
@@ -75,7 +75,12 @@ def dataset_spec():
         },
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         metadata={
-            "subject": {"type": "human", "age": np.uint8(42), "sex": "f", "fat": np.float32(17.5)},
+            "subject": {
+                "type": "human",
+                "age": np.uint8(42),
+                "sex": "f",
+                "fat_percentage": np.float32(17.5),
+            },
             "credit": "example-lab",
             "probe_orientation": {
                 "pose": np.zeros((25, 6), dtype=np.float32),
@@ -173,8 +178,8 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
     scan = {
         "probe_geometry": np.zeros((n_el, 3), dtype=np.float32),
         "sampling_frequency": np.float32(30e6),
-        "center_frequency": np.linspace(5e6, 6e6, n_tx, dtype=np.float32),
-        "demodulation_frequency": np.linspace(5e6, 6e6, n_tx, dtype=np.float32),
+        "center_frequency": np.float32(5e6),
+        "demodulation_frequency": np.float32(5e6),
         "initial_times": np.zeros((n_tx,), dtype=np.float32),
         "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
         "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
@@ -190,5 +195,18 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
             data={"raw_data": np.zeros((n_frames_data, n_tx, n_el, n_ax, n_ch), dtype=np.float32)},
             scan=scan,
             metadata={},
+            metrics={},
+        )
+
+
+def test_metadata_dict_with_unknown_field():
+    """Test that passing a metadata dict with a custom/unknown field raises TypeError."""
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        DatasetBuilder(
+            data={"raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            metadata={"custom_field": "this field does not exist in Metadata spec"},
             metrics={},
         )

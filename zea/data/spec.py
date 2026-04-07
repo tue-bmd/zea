@@ -617,7 +617,7 @@ class Scan(Spec):
             )
         if np.any(self.t0_delays < 0):
             raise ValueError(f"Transmit delays cannot be negative, got {self.t0_delays}")
-        if np.any(np.logical_and(self.focus_distances >= 1, self.ffocus_distances != np.inf)):
+        if np.any(np.logical_and(self.focus_distances >= 1, self.focus_distances != np.inf)):
             log.warning(
                 "Focus distances greater than or equal to 1 meter may be unusually large. "
                 "Maybe you have to convert to meters?"
