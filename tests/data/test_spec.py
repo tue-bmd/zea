@@ -174,6 +174,40 @@ def test_optional_fields_can_be_omitted():
     assert dataset.metrics.common_midpoint_phase_error is None
 
 
+def test_scan_accepts_float_inputs_and_casts_to_float32():
+    scan = _scan_minimal()
+    scan["sampling_frequency"] = np.float64(30e6)
+    scan["center_frequency"] = np.array([5e6, 6e6], dtype=np.float64)
+    scan["demodulation_frequency"] = np.float64(5e6)
+    scan["initial_times"] = np.zeros((2,), dtype=np.float64)
+    scan["t0_delays"] = np.zeros((2, 4), dtype=np.float64)
+
+    scan_spec = Scan(**scan)
+
+    assert np.dtype(scan_spec.sampling_frequency.dtype) == np.dtype(
+        Scan.SCHEMA["sampling_frequency"]["dtype"]
+    )
+    assert scan_spec.center_frequency.dtype == np.dtype(Scan.SCHEMA["center_frequency"]["dtype"])
+    assert np.dtype(scan_spec.demodulation_frequency.dtype) == np.dtype(
+        Scan.SCHEMA["demodulation_frequency"]["dtype"]
+    )
+    assert scan_spec.initial_times.dtype == np.dtype(Scan.SCHEMA["initial_times"]["dtype"])
+    assert scan_spec.t0_delays.dtype == np.dtype(Scan.SCHEMA["t0_delays"]["dtype"])
+
+
+def test_dataset_builder_accepts_float_raw_data_and_casts_to_float32():
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+
+    dataset = DatasetBuilder(
+        data={"raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float64)},
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        metadata={},
+        metrics={},
+    )
+
+    assert dataset.data.raw_data.dtype == np.float32
+
+
 def test_dataset_builder_dimension_consistency_across_nested_specs():
     n_frames_data, n_frames_scan = 3, 4
     n_tx, n_el, n_ax, n_ch = 2, 4, 8, 1
