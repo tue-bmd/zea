@@ -434,7 +434,11 @@ class File(h5py.File):
         Returns:
             dict: A dictionary with the validation results.
         """
-        return validate_file(file=self)
+        try:
+            return validate_file(file=self)
+        except Exception as e:
+            log.error(f"File {self.path} is not a valid zea file.\n{e}\n")
+            raise
 
     def __repr__(self):
         return (
