@@ -5,7 +5,7 @@ from typing import Any, List
 import h5py
 import numpy as np
 
-from zea import File, log
+from zea import log
 
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch"}
 
@@ -137,8 +137,7 @@ class Spec:
 
         if not isinstance(field_value, nested_spec):
             raise TypeError(
-                f"Expected field '{field_name}' to be {nested_spec.__name__}, "
-                f"got {type(field_value).__name__}"
+                f"Expected field '{field_name}' to be {nested_spec}, got {type(field_value)}"
             )
 
         return field_value
@@ -613,8 +612,6 @@ class Scan(Spec):
             of shape (n_frames, n_tx).
         azimuth_angles: The azimuthal angles in radians of the transmit beams of
             shape (n_tx,).
-        us_machine: The ultrasound machine used to acquire the data.
-        probe_name: The name of the probe used to acquire the data.
         sound_speed: The speed of sound in meters per second.
         tgc_gain_curve: The time-gain-compensation that was applied to every
             sample in the raw_data of shape (n_ax,). Divide by this curve to
@@ -640,8 +637,6 @@ class Scan(Spec):
     polar_angles: np.ndarray
     time_to_next_transmit: np.ndarray = None
     azimuth_angles: np.ndarray = None
-    us_machine: np.ndarray | str | None = None
-    probe_name: np.ndarray | str | None = None
     sound_speed: np.ndarray | float | None = None
     tgc_gain_curve: np.ndarray | None = None
     element_width: np.ndarray | float | None = None
@@ -661,8 +656,6 @@ class Scan(Spec):
         "polar_angles": {"dtype": np.float32, "shape": ("n_tx",)},
         "time_to_next_transmit": {"dtype": np.float32, "shape": ("n_frames", "n_tx")},
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
-        "us_machine": {"dtype": np.str_, "shape": ()},
-        "probe_name": {"dtype": np.str_, "shape": ()},
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
         "element_width": {"dtype": np.float32, "shape": ()},
@@ -901,6 +894,8 @@ class DatasetBuilder(Spec):
         scan: The scan parameters.
         metadata: Additional metadata about the acquisition.
         metrics: Metrics computed from the acquisition.
+        probe_name: The name of the probe used to acquire the data.
+        us_machine: The ultrasound machine used to acquire the data.
 
     Example:
         .. doctest::
@@ -935,16 +930,24 @@ class DatasetBuilder(Spec):
     scan: Scan | dict
     metadata: Metadata | dict = field(default_factory=Metadata)
     metrics: Metrics | dict = field(default_factory=Metrics)
+    probe_name: str | None = None
+    us_machine: str | None = None
+    description: str | None = None
 
     SCHEMA = {
         "data": {"spec": Data},
         "scan": {"spec": Scan},
         "metadata": {"spec": Metadata},
         "metrics": {"spec": Metrics},
+        "probe_name": {"dtype": np.str_, "shape": ()},
+        "us_machine": {"dtype": np.str_, "shape": ()},
+        "description": {"dtype": np.str_, "shape": ()},
     }
 
     def save(self, path: str, compression: str = "gzip") -> None:
         """Save the dataset to the specified path."""
+        from zea import File
+
         with File(path, "w") as f:
             for group_name in self.SCHEMA.keys():
                 # Create group

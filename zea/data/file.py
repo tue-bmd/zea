@@ -229,13 +229,24 @@ class File(h5py.File):
     @property
     def probe_name(self):
         """Reads the probe name from the data file and returns it."""
-        assert "probe" in self.attrs, (
+        assert "probe_name" in self.attrs, (
             "Probe name not found in file attributes. "
             "Make sure you are using a zea file. "
             f"Found attributes: {list(self.attrs)}"
         )
-        probe_name = self.attrs["probe"]
+        probe_name = self.attrs["probe_name"]
         return probe_name
+
+    @property
+    def us_machine(self):
+        """Reads the ultrasound machine name from the data file and returns it."""
+        assert "us_machine" in self.attrs, (
+            "Ultrasound machine name not found in file attributes. "
+            "Make sure you are using a zea file. "
+            f"Found attributes: {list(self.attrs)}"
+        )
+        us_machine = self.attrs["us_machine"]
+        return us_machine
 
     @property
     def description(self):
