@@ -27,6 +27,8 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
             if hasattr(value, "dtype"):
                 if np.issubdtype(value.dtype, expected_np_dtype):
                     return
+            elif np.issubdtype(expected_np_dtype, np.character) and isinstance(value, (str, bytes)):
+                return
         else:
             if isinstance(value, dt):
                 return
@@ -161,6 +163,10 @@ class Spec:
             (dt for dt in expected_np_dtypes if np.issubdtype(dt, np.floating)),
             None,
         )
+
+        # Keep native string/bytes values as-is instead of converting to numpy string scalars.
+        if isinstance(value, (str, bytes)):
+            return value
 
         if hasattr(value, "dtype"):
             value_dtype = np.dtype(value.dtype)
@@ -729,15 +735,15 @@ class Subject(Spec):
         fat: Subject fat percentage.
     """
 
-    type: np.ndarray | str | None = None
-    age: np.ndarray | int | None = None
-    sex: np.ndarray | str | None = None
-    fat_percentage: np.ndarray | float | None = None
+    type: str | None = None
+    age: np.uint8 | None = None
+    sex: str | None = None
+    fat_percentage: np.float32 | None = None
 
     SCHEMA = {
-        "type": {"dtype": np.str_, "shape": ()},
+        "type": {"dtype": str, "shape": ()},
         "age": {"dtype": np.uint8, "shape": ()},
-        "sex": {"dtype": np.str_, "shape": ()},
+        "sex": {"dtype": str, "shape": ()},
         "fat_percentage": {"dtype": np.float32, "shape": ()},
     }
 
@@ -841,20 +847,20 @@ class Metadata(Spec):
     """Metadata group with subject, acquisition context, and annotations."""
 
     subject: Subject | dict | None = None
-    credit: np.ndarray | str | None = None
+    credit: str | None = None
     probe_orientation: ProbeOrientation | dict | None = None
     voice_narration: TimedSignal | dict | None = None
     ecg: TimedSignal | dict | None = None
-    text_report: np.ndarray | str | None = None
+    text_report: str | None = None
     annotations: Annotations | dict | None = None
 
     SCHEMA = {
         "subject": {"spec": Subject},
-        "credit": {"dtype": np.str_, "shape": ()},
+        "credit": {"dtype": str, "shape": ()},
         "probe_orientation": {"spec": ProbeOrientation},
         "voice_narration": {"spec": TimedSignal},
         "ecg": {"spec": TimedSignal},
-        "text_report": {"dtype": np.str_, "shape": ()},
+        "text_report": {"dtype": str, "shape": ()},
         "annotations": {"spec": Annotations},
     }
 
@@ -939,9 +945,9 @@ class DatasetBuilder(Spec):
         "scan": {"spec": Scan},
         "metadata": {"spec": Metadata},
         "metrics": {"spec": Metrics},
-        "probe_name": {"dtype": np.str_, "shape": ()},
-        "us_machine": {"dtype": np.str_, "shape": ()},
-        "description": {"dtype": np.str_, "shape": ()},
+        "probe_name": {"dtype": str, "shape": ()},
+        "us_machine": {"dtype": str, "shape": ()},
+        "description": {"dtype": str, "shape": ()},
     }
 
     def save(self, path: str, compression: str = "gzip") -> None:
@@ -949,9 +955,11 @@ class DatasetBuilder(Spec):
         from zea import File
 
         with File(path, "w") as f:
-            for group_name in self.SCHEMA.keys():
-                # Create group
-                group = f.create_group(group_name)
-
-                value: Spec = getattr(self, group_name)
-                value.store_in_group(group, compression=compression)
+            for group_name, schema in self.SCHEMA.items():
+                if "spec" in schema:
+                    group = f.create_group(group_name)
+                    value: Spec = getattr(self, group_name)
+                    value.store_in_group(group, compression=compression)
+                else:
+                    value = getattr(self, group_name)
+                    f.attrs[group_name] = value

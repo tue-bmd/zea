@@ -1070,7 +1070,6 @@ class VerasonicsFile(h5py.File):
             "demodulation_frequency": self.demodulation_frequency,
             "sound_speed": self.sound_speed,
             "initial_times": initial_times,
-            "probe_name": self.probe_name,
             "focus_distances": focus_distances,
             "transmit_origins": transmit_origins,
             "waveforms_one_way": waveforms_one_way,
