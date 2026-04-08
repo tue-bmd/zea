@@ -367,6 +367,30 @@ class Spec:
                 # TODO: store description and unit as h5 attrs (like zea does)
                 self.create_dataset(group, field_name, value, compression=compression)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return this spec as a nested dictionary based on ``SCHEMA`` fields.
+
+        Nested specs are converted recursively.
+        """
+        result = {}
+        for field_name, field_info in self.SCHEMA.items():
+            value = getattr(self, field_name)
+            nested_spec = field_info.get("spec")
+
+            if nested_spec is not None and value is not None:
+                if isinstance(value, Spec):
+                    result[field_name] = value.to_dict()
+                elif isinstance(value, dict):
+                    result[field_name] = {
+                        k: v.to_dict() if isinstance(v, Spec) else v for k, v in value.items()
+                    }
+                else:
+                    result[field_name] = value
+            else:
+                result[field_name] = value
+
+        return result
+
 
 @dataclass
 class Map(Spec):
@@ -683,11 +707,6 @@ class Scan(Spec):
     @property
     def n_el(self) -> int:
         """Number of elements."""
-        return self.t0_delays.shape[1]
-
-    @property
-    def n_ax(self) -> int:
-        """Number of axial samples."""
         return self.t0_delays.shape[1]
 
     def __post_init__(self):

@@ -124,6 +124,41 @@ def test_dataset_spec(dataset_spec):
     assert dataset_spec.metrics.coherence_factor.shape == (n_frames,)
 
 
+def test_spec_to_dict_is_recursive(dataset_spec: FileSpec):
+    result = dataset_spec.to_dict()
+
+    assert isinstance(result, dict)
+    assert isinstance(result["data"], dict)
+    assert isinstance(result["scan"], dict)
+    assert isinstance(result["metadata"], dict)
+    assert isinstance(result["metrics"], dict)
+
+    assert np.array_equal(result["data"]["raw_data"], dataset_spec.data.raw_data)
+    assert np.array_equal(result["scan"]["t0_delays"], dataset_spec.scan.t0_delays)
+    assert np.array_equal(
+        result["metadata"]["annotations"]["view"],
+        dataset_spec.metadata.annotations.view,
+    )
+
+
+def test_spec_to_dict_keeps_optional_fields():
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+
+    dataset = FileSpec(
+        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        metadata={},
+        metrics={},
+    )
+
+    result = dataset.to_dict()
+
+    assert "subject" in result["metadata"]
+    assert result["metadata"]["subject"] is None
+    assert "common_midpoint_phase_error" in result["metrics"]
+    assert result["metrics"]["common_midpoint_phase_error"] is None
+
+
 def test_saving_and_loading(tmp_path, dataset_spec: FileSpec):
     # Save the dataset
     save_path = tmp_path / "test_dataset.hdf5"

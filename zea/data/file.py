@@ -333,6 +333,15 @@ class File(h5py.File):
         """Returns a dictionary of scan parameters stored in the file."""
         return self.get_parameters(event)
 
+    @property
+    def n_ax(self) -> int:
+        """Number of axial samples."""
+        assert "data" in self, "Cannot determine n_ax because there is no data group in the file."
+        assert "raw_data" in self["data"], (
+            "Cannot determine n_ax because there is no raw_data in the data group."
+        )
+        return self["data"]["raw_data"].shape[2]
+
     def scan(self, event=None, safe=True, **kwargs) -> Scan:
         """Returns a Scan object initialized with the parameters from the file.
 
@@ -355,7 +364,16 @@ class File(h5py.File):
         Returns:
             Scan: The scan object.
         """
-        return Scan.merge(_reformat_waveforms(self.get_scan_parameters(event)), kwargs, safe=safe)
+        from zea.data.spec import Scan as ScanSpec
+
+        scan_dict = self.get_scan_parameters(event)
+        scan_spec = ScanSpec(**scan_dict)  # will validate
+        scan_dict = scan_spec.to_dict()
+        scan_dict["n_el"] = scan_spec.n_el
+        scan_dict["n_ax"] = self.n_ax
+        scan_dict["n_tx"] = scan_spec.n_tx
+
+        return Scan.merge(_reformat_waveforms(scan_dict), kwargs, safe=safe)
 
     def get_probe_parameters(self, event=None) -> dict:
         """Returns a dictionary of probe parameters to initialize a probe
