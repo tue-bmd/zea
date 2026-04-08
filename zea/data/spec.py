@@ -559,7 +559,7 @@ class Data(Spec):
     SCHEMA = {
         "raw_data": {
             "dtype": (np.float32, np.int16),
-            "shape": ("n_frames", "n_tx", "n_el", "n_ax", "n_ch"),
+            "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
         },
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
@@ -943,7 +943,7 @@ class DatasetBuilder(Spec):
         "metrics": {"spec": Metrics},
     }
 
-    def save(self, path: str) -> None:
+    def save(self, path: str, compression: str = "gzip") -> None:
         """Save the dataset to the specified path."""
         with File(path, "w") as f:
             for group_name in self.SCHEMA.keys():
@@ -951,4 +951,4 @@ class DatasetBuilder(Spec):
                 group = f.create_group(group_name)
 
                 value: Spec = getattr(self, group_name)
-                value.store_in_group(group)
+                value.store_in_group(group, compression=compression)
