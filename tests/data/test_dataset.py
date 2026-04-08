@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 
 from zea.config import Config, check_config
-from zea.data.data_format import generate_example_dataset
 from zea.data.datasets import Dataset, Folder, split_files_by_directory
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
 
 from .. import DUMMY_DATASET_GRID_SIZE_X, DUMMY_DATASET_GRID_SIZE_Z, DUMMY_DATASET_N_FRAMES
+from . import generate_example_dataset
 
 _ALL_DATA_TYPES = _IMAGE_DATA_TYPES + _NON_IMAGE_DATA_TYPES
 

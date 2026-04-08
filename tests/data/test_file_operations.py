@@ -8,7 +8,6 @@ import h5py
 import pytest
 
 from zea.data.data_format import (
-    generate_example_dataset,
     load_additional_elements,
     load_description,
 )
@@ -20,6 +19,8 @@ from zea.data.file_operations import (
     resave,
     sum_data,
 )
+
+from . import generate_example_dataset
 
 
 @pytest.fixture

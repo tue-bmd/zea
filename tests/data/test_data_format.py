@@ -8,7 +8,6 @@ import pytest
 
 from zea.data.data_format import (
     DatasetElement,
-    generate_example_dataset,
     generate_zea_dataset,
     load_additional_elements,
 )
@@ -16,6 +15,7 @@ from zea.data.file import File, validate_file
 from zea.internal.checks import _REQUIRED_SCAN_KEYS
 
 from .. import DEFAULT_TEST_SEED
+from . import generate_example_dataset
 
 n_frames = 2
 n_tx = 4
