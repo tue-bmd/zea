@@ -193,7 +193,7 @@ class Folder:
     def __init__(
         self,
         folder_path: str | Path | HFPath,
-        validate: bool = True,
+        validate: bool = False,
         hf_cache_dir: str = HF_DATASETS_DIR,
     ):
         single_file_error_msg = (
@@ -443,7 +443,7 @@ class Dataset(H5FileHandleCache):
     def __init__(
         self,
         file_paths: List[str] | str,
-        validate: bool = True,
+        validate: bool = False,
         directory_splits: list | None = None,
         **kwargs,
     ):
