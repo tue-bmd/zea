@@ -989,4 +989,5 @@ class FileSpec(Spec):
                     value.store_in_group(group, compression=compression)
                 else:
                     value = getattr(self, group_name)
-                    f.attrs[group_name] = value
+                    if value is not None:
+                        f.attrs[group_name] = value
