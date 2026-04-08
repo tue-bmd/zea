@@ -47,6 +47,5 @@ from .data_format import (
     generate_zea_dataset,
     validate_input_data,
 )
-from .dataloader import H5Generator
 from .datasets import Dataset, Folder
 from .file import File, load_file

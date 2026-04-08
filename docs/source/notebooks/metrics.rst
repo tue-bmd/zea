@@ -1,5 +1,5 @@
 Metrics
-=======
+========
 
 .. toctree::
     :maxdepth: 1

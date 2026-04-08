@@ -226,6 +226,68 @@ files = [
 ]
 
 [[package]]
+name = "array-record"
+version = "0.8.1"
+description = "A file format that achieves a new frontier of IO efficiency"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "python_version == \"3.10\" and sys_platform != \"win32\""
+files = [
+    {file = "array_record-0.8.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:1bf3fcf0a23591667dbd1fe3d32983e8c864781cef5bfd070885ebd3e39e4594"},
+    {file = "array_record-0.8.1-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:39a69d8b8259bce043a8218f2defd46eb44cba0c2f60b7254fd1daaf26e0ea67"},
+    {file = "array_record-0.8.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b63f02209bdd3acbb175248d04e0f3f827950eae72f010e6ec14e2732aaf008e"},
+    {file = "array_record-0.8.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e5e8e610f59f5a7958dd5672d4b8e505213195594150fdabb7cc0fa725518ed0"},
+    {file = "array_record-0.8.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:66516d7a9ef64a9f4c47e1d0d1cfe52b3a507c6835697ec43718ab6115ce8db5"},
+    {file = "array_record-0.8.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:090d82858a931e3754e1062f5c62c20ae764f3e5f24e79ea9054393804383a8d"},
+    {file = "array_record-0.8.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:959ee895dfce9decd514d7516f27e1b07660624b239f80987a6f430845acbe6f"},
+    {file = "array_record-0.8.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:b1d0236d4fa93fc7fa721ba7897a49ee38a758fca4aec79f8824ff4dee1056b8"},
+    {file = "array_record-0.8.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:005fb6f4f4e833b2de1c4e51c620ad6a30a893b46dc168039d9bb31b71466070"},
+    {file = "array_record-0.8.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:a753f10fb9b76a895ef4fd8467848221a75a5d006355e0ec781d1dd7ca69eff6"},
+    {file = "array_record-0.8.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:86478265c96df1ec5cf2e124aa4a416e033eef9da9f72b05a776cee9871fb00a"},
+    {file = "array_record-0.8.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:37bb802e1fdc98edb60a859552c7e7d494e141cf390bfb7350acfd63467daeae"},
+]
+
+[package.dependencies]
+absl-py = "*"
+etils = {version = "*", extras = ["epath"]}
+
+[package.extras]
+beam = ["apache-beam[gcp] (>=2.53.0)", "google-cloud-storage (>=2.11.0)", "tensorflow (>=2.20.0)"]
+test = ["grain", "jax", "tensorflow (>=2.20.0)"]
+
+[[package]]
+name = "array-record"
+version = "0.8.3"
+description = "A file format that achieves a new frontier of IO efficiency"
+optional = false
+python-versions = ">=3.11"
+groups = ["main"]
+markers = "python_version >= \"3.11\" and sys_platform != \"win32\""
+files = [
+    {file = "array_record-0.8.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:8a0caee17d2583638391fb9f90c9c12a43f9665576f18ec3604ba49d62bd2dcc"},
+    {file = "array_record-0.8.3-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:9f91636366038afea55061cc539601e353d04ebf32608ae8717df4a4edbd31df"},
+    {file = "array_record-0.8.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f4004fcceb7961a2cc0090028e68a3eeb91d3f5b38c00d60b533f7004d1d3f7b"},
+    {file = "array_record-0.8.3-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:dada305fa0dfa3fd6f5f263c43ed37546f815e4f33ce30b066175384dead752e"},
+    {file = "array_record-0.8.3-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:718403dc9a364519a5fc440ed9e2784077e965489d5a44c96970d3101101e1cd"},
+    {file = "array_record-0.8.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:458f6658de86c9369b23ffe64dcb31393a919b91ae2f15147ee2beb2010b122a"},
+    {file = "array_record-0.8.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:fa94fa053c1afaecc183a1c31463fd89d1b7b148cc526095bfc50ab58967e47c"},
+    {file = "array_record-0.8.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:adfe6c92918363747539c0caa579f568f75aac079ad7bbd4ebcf7fdb02e5461b"},
+    {file = "array_record-0.8.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:13df1aec9b38afe98973bf5fe3cf523f83ca904b0423d85319930877145b8f28"},
+    {file = "array_record-0.8.3-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:14facb713fc55ea612cf853c0abbc602032ae619eb85037af3aa41dc4e27eed6"},
+    {file = "array_record-0.8.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:06b17a0a90bc74a80c4ebad0b99f0e039adb01746b673db3d7a5632d8b138ddd"},
+    {file = "array_record-0.8.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:89d2cf5f4709be3c6c2b30c0d366005223375633ffce66dcb13d927a0bdc5228"},
+]
+
+[package.dependencies]
+absl-py = "*"
+etils = {version = "*", extras = ["epath"]}
+
+[package.extras]
+beam = ["apache-beam[gcp] (>=2.53.0)", "google-cloud-storage (>=2.11.0)", "tensorflow (>=2.20.0)"]
+test = ["grain", "jax", "tensorflow (>=2.20.0)"]
+
+[[package]]
 name = "astor"
 version = "0.8.1"
 description = "Read/rewrite/write Python ASTs"
@@ -262,7 +324,7 @@ description = "Classes Without Boilerplate"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"dev\" or extra == \"tests\" or extra == \"docs\""
+markers = "extra == \"dev\" or extra == \"tests\" or extra == \"docs\" or python_version == \"3.10\""
 files = [
     {file = "attrs-25.3.0-py3-none-any.whl", hash = "sha256:427318ce031701fea540783410126f03899a97ffc6f61596ad581ac2e40e3bc3"},
     {file = "attrs-25.3.0.tar.gz", hash = "sha256:75d7cefc7fb576747b2c81b4442d4d4a1ce0900973527c011d1030fd3bf4af1b"},
@@ -589,10 +651,9 @@ colorama = {version = "*", markers = "platform_system == \"Windows\""}
 name = "cloudpickle"
 version = "3.1.1"
 description = "Pickler class to extend the standard pickle.Pickler functionality"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"dev\" or extra == \"tests\""
 files = [
     {file = "cloudpickle-3.1.1-py3-none-any.whl", hash = "sha256:c8c5a44295039331ee9dad40ba100a9c7297b6f988e50e87ccdf3765a668350e"},
     {file = "cloudpickle-3.1.1.tar.gz", hash = "sha256:b216fa8ae4019d5482a8ac3c95d8f6346115d8835911fd4aefd1a445e4242c64"},
@@ -902,6 +963,43 @@ files = [
 ]
 
 [[package]]
+name = "dm-tree"
+version = "0.1.9"
+description = "Tree is a library for working with nested data structures."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "python_version == \"3.10\""
+files = [
+    {file = "dm_tree-0.1.9-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:5d5b28ee2e461b6af65330c143806a6d0945dcabbb8d22d2ba863e6dabd9254e"},
+    {file = "dm_tree-0.1.9-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:54d5616015412311df154908069fcf2c2d8786f6088a2ae3554d186cdf2b1e15"},
+    {file = "dm_tree-0.1.9-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:831699d2c60a1b38776a193b7143ae0acad0a687d87654e6d3342584166816bc"},
+    {file = "dm_tree-0.1.9-cp310-cp310-win_amd64.whl", hash = "sha256:1ae3cbff592bb3f2e197f5a8030de4a94e292e6cdd85adeea0b971d07a1b85f2"},
+    {file = "dm_tree-0.1.9-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:7d7d784afaeb4b67d87d858261aaf02503939ddc1f09c4cca70728f9892ab004"},
+    {file = "dm_tree-0.1.9-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e660d1779ddcbd1348410d08f67db4870d413a3ec4ba8b4b045bd5ce4bd8f35c"},
+    {file = "dm_tree-0.1.9-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:294dc1cecf87552a45cdd5ddb215e7f5295a5a47c46f1f0a0463c3dd02a527d7"},
+    {file = "dm_tree-0.1.9-cp311-cp311-win_amd64.whl", hash = "sha256:12f4cc6cd52a39aa38ff31577b6d79b6136a9a89273a876bf62335c9f65c27bf"},
+    {file = "dm_tree-0.1.9-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:a8d20eeab7fde77a3ed71f07716021eb0edfb4812a128eb381d108af3a310257"},
+    {file = "dm_tree-0.1.9-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:80c43417814b1181d3367b335460bfdd30b79ee187a64220e11f6ddd093a4b15"},
+    {file = "dm_tree-0.1.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2334cfe9d2ed4293f9f1c7aefba0657deaab9ea74b5fadd966f6d01d9b6b42d9"},
+    {file = "dm_tree-0.1.9-cp312-cp312-win_amd64.whl", hash = "sha256:9020a5ce256fcc83aa4bc190cc96dd66e87685db0a6e501b0c06aa492c2e38fc"},
+    {file = "dm_tree-0.1.9-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:cfa33c2e028155810ad1b4e11928707bf47489516763a86e79cab2954d23bf68"},
+    {file = "dm_tree-0.1.9-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d05622d074353cf434049206e53c12147903a048c4bd7d77f2800d427413ad78"},
+    {file = "dm_tree-0.1.9-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f68b0efad76703dd4648586c75618a48cdd671b68c3266fe980e323c15423607"},
+    {file = "dm_tree-0.1.9-cp313-cp313-win_amd64.whl", hash = "sha256:e97c34fcb44941c36b7ee81dcdbceba0fbe728bddcc77e5837ab2eb665bcbff8"},
+    {file = "dm_tree-0.1.9-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:b06e7a5da1c31a82521a60060573527e8d24b9920fdd20b2ec86f08412737598"},
+    {file = "dm_tree-0.1.9-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6893fcdc5cf1a4f459cfc383526d35d42e7c671ae565d7e429a2f2cb2cb93e89"},
+    {file = "dm_tree-0.1.9-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e1f5d1e96b3a7de22b25b13a5eb30f41f8cf9c02dd4479a24920de99e780903c"},
+    {file = "dm_tree-0.1.9.tar.gz", hash = "sha256:a4c7db3d3935a5a2d5e4b383fc26c6b0cd6f78c6d4605d3e7b518800ecd5342b"},
+]
+
+[package.dependencies]
+absl-py = ">=0.6.1"
+attrs = ">=18.2.0"
+numpy = {version = ">=1.21.2", markers = "python_version >= \"3.10\""}
+wrapt = ">=1.11.2"
+
+[[package]]
 name = "docutils"
 version = "0.21.2"
 description = "Docutils -- Python Documentation Utilities"
@@ -926,6 +1024,44 @@ files = [
     {file = "entrypoints-0.4-py3-none-any.whl", hash = "sha256:f174b5ff827504fd3cd97cc3f8649f3693f51538c7e4bdf3ef002c8429d42f9f"},
     {file = "entrypoints-0.4.tar.gz", hash = "sha256:b706eddaa9218a19ebcd67b56818f05bb27589b1ca9e8d797b74affad4ccacd4"},
 ]
+
+[[package]]
+name = "etils"
+version = "1.13.0"
+description = "Collection of common python utils"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "etils-1.13.0-py3-none-any.whl", hash = "sha256:d9cd4f40fbe77ad6613b7348a18132cc511237b6c076dbb89105c0b520a4c6bb"},
+    {file = "etils-1.13.0.tar.gz", hash = "sha256:a5b60c71f95bcd2d43d4e9fb3dc3879120c1f60472bb5ce19f7a860b1d44f607"},
+]
+
+[package.dependencies]
+fsspec = {version = "*", optional = true, markers = "extra == \"epath\""}
+importlib_resources = {version = "*", optional = true, markers = "extra == \"epath\""}
+typing_extensions = {version = "*", optional = true, markers = "extra == \"epath\" or extra == \"epy\""}
+zipp = {version = "*", optional = true, markers = "extra == \"epath\""}
+
+[package.extras]
+all = ["etils[array-types]", "etils[eapp]", "etils[ecolab]", "etils[edc]", "etils[enp]", "etils[epath-gcs]", "etils[epath-s3]", "etils[epath]", "etils[epy]", "etils[etqdm]", "etils[etree-dm]", "etils[etree-jax]", "etils[etree-tf]", "etils[etree]"]
+array-types = ["etils[enp]"]
+dev = ["chex", "fiddle", "optree", "pydantic", "pyink", "pylint (>=2.6.0)", "pytest", "pytest-subtests", "pytest-xdist", "tensorflow_datasets", "torch"]
+docs = ["etils[all,dev]", "sphinx-apitree[ext]"]
+eapp = ["absl-py", "etils[epy]", "simple_parsing"]
+ecolab = ["etils[enp]", "etils[epy]", "etils[etree]", "jupyter", "mediapy", "numpy", "packaging", "protobuf"]
+edc = ["etils[epy]"]
+enp = ["einops", "etils[epy]", "numpy"]
+epath = ["etils[epy]", "fsspec", "importlib_resources", "typing_extensions", "zipp"]
+epath-gcs = ["etils[epath]", "gcsfs"]
+epath-s3 = ["etils[epath]", "s3fs"]
+epy = ["typing_extensions"]
+etqdm = ["absl-py", "etils[epy]", "tqdm"]
+etree = ["etils[array-types]", "etils[enp]", "etils[epy]", "etils[etqdm]"]
+etree-dm = ["dm-tree", "etils[etree]"]
+etree-jax = ["etils[etree]", "jax[cpu]"]
+etree-tf = ["etils[etree]", "tensorflow"]
+lazy-imports = ["etils[ecolab]"]
 
 [[package]]
 name = "exceptiongroup"
@@ -1357,6 +1493,85 @@ files = [
 six = "*"
 
 [[package]]
+name = "grain"
+version = "0.2.13"
+description = "Grain: A library for loading and transforming data for ML training."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "python_version == \"3.10\""
+files = [
+    {file = "grain-0.2.13-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:08eccde723cf5f0548beb9ebc9401b641c853b4a9e1ef184005635d3c561c106"},
+    {file = "grain-0.2.13-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:aedca377a5c85a4776bbd7ba6e742805933193ec84d79232764a86025e2eb9d8"},
+    {file = "grain-0.2.13-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:d92434255aa385d5548d85d606cf3a79cb587f8deb9281c9fc5b144694b32b92"},
+    {file = "grain-0.2.13-cp310-cp310-win_amd64.whl", hash = "sha256:5356bd0491f736ce84a9e70e8475aa582d4b4053072777d849f9fcb625f36299"},
+    {file = "grain-0.2.13-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:2f02a449fbbbfa006690f32a5305b73c048061b9744b86d391d713aed3b52952"},
+    {file = "grain-0.2.13-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:8227a0f81d200c71cb006dbcb268c490b560058283f9f761e9f5090c98f90d56"},
+    {file = "grain-0.2.13-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:a059266b51682cc96fd138a566ac8d5474adda1e8954bccbe6b3558c85c8fb65"},
+    {file = "grain-0.2.13-cp311-cp311-win_amd64.whl", hash = "sha256:11425b5ae59340d62b784b28a47f98eff1a360435c9cde58198b4f56855f97c5"},
+    {file = "grain-0.2.13-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:9a8dc2bbf53920af14b833b0125d3c64247b00947c44d37ae8dcfc96e40a8469"},
+    {file = "grain-0.2.13-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:97f231969f9f305dd37edbb11a58d1f51b335f5cfefbb9418488a52affab428f"},
+    {file = "grain-0.2.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:21de2a003a2d7971bb2d56f667d66eb9a74f4b1c533157000d8dc42cab1af80c"},
+    {file = "grain-0.2.13-cp312-cp312-win_amd64.whl", hash = "sha256:2e994930573fec940a1836f2d0ae679dbf0a3f0c0d7696068fa2c354db12444e"},
+    {file = "grain-0.2.13-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:00a3befab959d46e559b31482ddbc1044b4afddd2e95ad36b3e11924133333f8"},
+    {file = "grain-0.2.13-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:94e92790fc2f09d54ac9dedbaf16761cfd505bdf022d936dfca46ce3ff7558c8"},
+    {file = "grain-0.2.13-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:e877ca7ed8ae32508e1264385d659969e3492e1138949dfaf6410572203300ae"},
+    {file = "grain-0.2.13-cp313-cp313-win_amd64.whl", hash = "sha256:496017e4485ea4643364d08e4ba96c0a3f433f09a10c89e62c0555c5afc7211e"},
+]
+
+[package.dependencies]
+absl-py = "*"
+array-record = {version = ">=0.8.0a1", markers = "sys_platform != \"win32\""}
+cloudpickle = "*"
+dm-tree = "*"
+etils = {version = "*", extras = ["epath", "epy"]}
+more-itertools = ">=9.1.0"
+numpy = "*"
+protobuf = ">=5.28.3"
+
+[package.extras]
+parquet = ["pyarrow"]
+testing = ["attrs", "dill", "jax", "jaxlib", "jaxtyping", "pyarrow", "pytest", "tensorflow-datasets"]
+
+[[package]]
+name = "grain"
+version = "0.2.15"
+description = "Grain: A library for loading and transforming data for ML training."
+optional = false
+python-versions = ">=3.11"
+groups = ["main"]
+markers = "python_version >= \"3.11\""
+files = [
+    {file = "grain-0.2.15-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:63b90d0719a97c25a8b30057e224436dfaf3ba975e5baadaf8b3417235a09631"},
+    {file = "grain-0.2.15-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:60f5ded548e58251af4a7429779c472cdb5ab716a448c32e500e6eb79957c5e9"},
+    {file = "grain-0.2.15-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fcac68693f539f5421560250fe906c62b00daeb58a28a56ac7b8d9dad2ba7483"},
+    {file = "grain-0.2.15-cp311-cp311-win_amd64.whl", hash = "sha256:7e8d7114f079cb3cfa9953e699cb44a44b179e9fb2ca4f61e8b7ac8ca90c33ce"},
+    {file = "grain-0.2.15-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:149b195ebd2a2e06e00019af5e83d7d6fef18b6149471ba0baaf6bdfac1a0558"},
+    {file = "grain-0.2.15-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:9bbf2c57a92fae5d883e04bda35d373202f026cbd9952b9bdd831bda2c60ddd7"},
+    {file = "grain-0.2.15-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fecc1553e539b946ed7f3508261f98309d07f899c06af1954186cf7d6a4613b2"},
+    {file = "grain-0.2.15-cp312-cp312-win_amd64.whl", hash = "sha256:cc58394bdddd5db1b1e1e2878899a1e78014f60046ead82415011eca36475287"},
+    {file = "grain-0.2.15-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:df0c4af1442f71effc80a5b44bb33fe5aabb7b3d82d5a3ac035ae40431935c77"},
+    {file = "grain-0.2.15-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4766dc1355448cf7b3bdd3cc4f4639bc3433c66c5502954380b9a8f4c2b3fc94"},
+    {file = "grain-0.2.15-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ae2635e3bd18b77a7add7152ee91b22aba553fa44a066aefa009d1b923ade4f2"},
+    {file = "grain-0.2.15-cp313-cp313-win_amd64.whl", hash = "sha256:9d3cc6edfa4d0de341de0d03ba4a8612d94639bed97fe63af3951db8305c96c0"},
+    {file = "grain-0.2.15-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:36e1413c275741712918e528f3f65ca254ce51d60160a2b9558c020147f38e98"},
+    {file = "grain-0.2.15-cp314-cp314-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:fedbb410486890c6e410c8d78934097b2755aa2363fbd6137b920ea5be104530"},
+    {file = "grain-0.2.15-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e1a5e20ffc29391c48b5d8f818742f4ecce957fe59ccff971c139721d31a0bf4"},
+    {file = "grain-0.2.15-cp314-cp314-win_amd64.whl", hash = "sha256:d57493fa4361316755cb0564f87e62d1da1dedae4eed53acf179ec029668dee5"},
+]
+
+[package.dependencies]
+absl-py = "*"
+array-record = {version = ">=0.8.1", markers = "sys_platform != \"win32\""}
+cloudpickle = "*"
+etils = {version = "*", extras = ["epath", "epy"]}
+numpy = "*"
+protobuf = ">=5.28.3"
+
+[package.extras]
+parquet = ["pyarrow"]
+
+[[package]]
 name = "grpcio"
 version = "1.73.0"
 description = "HTTP/2-based RPC framework"
@@ -1646,6 +1861,26 @@ files = [
     {file = "imagesize-1.4.1-py2.py3-none-any.whl", hash = "sha256:0d8d18d08f840c19d0ee7ca1fd82490fdc3729b7ac93f49870406ddde8ef8d8b"},
     {file = "imagesize-1.4.1.tar.gz", hash = "sha256:69150444affb9cb0d5cc5a92b3676f0b2fb7cd9ae39e947a5e11a36b4497cd4a"},
 ]
+
+[[package]]
+name = "importlib-resources"
+version = "6.5.2"
+description = "Read resources from Python packages"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "importlib_resources-6.5.2-py3-none-any.whl", hash = "sha256:789cfdc3ed28c78b67a06acb8126751ced69a3d5f79c095a98298cd8a760ccec"},
+    {file = "importlib_resources-6.5.2.tar.gz", hash = "sha256:185f87adef5bcc288449d98fb4fba07cea78bc036455dd44c5fc4a2fe78fed2c"},
+]
+
+[package.extras]
+check = ["pytest-checkdocs (>=2.4)", "pytest-ruff (>=0.2.1) ; sys_platform != \"cygwin\""]
+cover = ["pytest-cov"]
+doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linker (>=1.9)", "sphinx (>=3.5)", "sphinx-lint"]
+enabler = ["pytest-enabler (>=2.2)"]
+test = ["jaraco.test (>=5.4)", "pytest (>=6,!=8.1.*)", "zipp (>=3.17)"]
+type = ["pytest-mypy"]
 
 [[package]]
 name = "iniconfig"
@@ -2655,6 +2890,19 @@ numpy = [
 
 [package.extras]
 dev = ["absl-py", "pyink", "pylint (>=2.6.0)", "pytest", "pytest-xdist"]
+
+[[package]]
+name = "more-itertools"
+version = "10.8.0"
+description = "More routines for operating on iterables, beyond itertools"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "python_version == \"3.10\""
+files = [
+    {file = "more_itertools-10.8.0-py3-none-any.whl", hash = "sha256:52d4362373dcf7c52546bc4af9a86ee7c4579df9a8dc268be0a2f949d376cc9b"},
+    {file = "more_itertools-10.8.0.tar.gz", hash = "sha256:f638ddf8a1a0d134181275fb5d58b086ead7c6a72429ad725c67503f13ba30bd"},
+]
 
 [[package]]
 name = "mpmath"
@@ -6449,7 +6697,7 @@ description = "Module for decorators, wrappers and monkey patching."
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"backends\""
+markers = "extra == \"backends\" or python_version == \"3.10\""
 files = [
     {file = "wrapt-1.17.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:3d57c572081fed831ad2d26fd430d565b76aa277ed1d30ff4d40670b1c0dd984"},
     {file = "wrapt-1.17.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:b5e251054542ae57ac7f3fba5d10bfff615b6c2fb09abeb37d2f1463f841ae22"},
@@ -6652,6 +6900,26 @@ idna = ">=2.0"
 multidict = ">=4.0"
 propcache = ">=0.2.1"
 
+[[package]]
+name = "zipp"
+version = "3.23.0"
+description = "Backport of pathlib-compatible object wrapper for zip files"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "zipp-3.23.0-py3-none-any.whl", hash = "sha256:071652d6115ed432f5ce1d34c336c0adfd6a884660d1e9712a256d3d3bd4b14e"},
+    {file = "zipp-3.23.0.tar.gz", hash = "sha256:a07157588a12518c9d4034df3fbbee09c814741a33ff63c05fa29d26a2404166"},
+]
+
+[package.extras]
+check = ["pytest-checkdocs (>=2.4)", "pytest-ruff (>=0.2.1) ; sys_platform != \"cygwin\""]
+cover = ["pytest-cov"]
+doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linker (>=1.9)", "sphinx (>=3.5)", "sphinx-lint"]
+enabler = ["pytest-enabler (>=2.2)"]
+test = ["big-O", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more_itertools", "pytest (>=6,!=8.1.*)", "pytest-ignore-flaky"]
+type = ["pytest-mypy"]
+
 [extras]
 backends = ["jax", "tensorflow", "torch"]
 dev = ["IPython", "PyStemmer", "cloudpickle", "furo", "ipykernel", "ipywidgets", "myst-parser", "nbsphinx", "onnxruntime", "opencv-python-headless", "papermill", "pre-commit", "pytest", "pytest-cov", "ruff", "setuptools", "simpleitk", "sphinx", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-copybutton", "sphinx-reredirects", "sphinx_design", "sphinxcontrib-autoprogram", "sphinxcontrib-bibtex"]
@@ -6665,4 +6933,4 @@ tests = ["cloudpickle", "ipykernel", "ipywidgets", "papermill", "pre-commit", "p
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "1becbaba428eb2be827a5f718b4499ce043bfa6f34bc8b42e57aab12e3de88f3"
+content-hash = "a9a95f36adeafeff2728bcea96c45a7fed44fd1fc0f222f20c71dd129a50f69c"
