@@ -1010,3 +1010,4 @@ class FileSpec(Spec):
                     value = getattr(self, group_name)
                     if value is not None:
                         f.attrs[group_name] = value
+        log.info(f"File saved to {log.yellow(path)}")
