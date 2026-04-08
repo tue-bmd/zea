@@ -49,7 +49,7 @@ def dataset_spec():
 
     return DatasetBuilder(
         data={
-            "raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float32),
+            "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
             "image": {
                 "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
                 "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
@@ -118,7 +118,7 @@ def dataset_spec():
 def test_dataset_spec(dataset_spec):
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
-    assert dataset_spec.data.raw_data.shape == (n_frames, n_tx, n_el, n_ax, n_ch)
+    assert dataset_spec.data.raw_data.shape == (n_frames, n_tx, n_ax, n_el, n_ch)
     assert dataset_spec.scan.t0_delays.shape == (n_tx, n_el)
     assert dataset_spec.metadata.annotations.view.shape == (n_frames,)
     assert dataset_spec.metrics.coherence_factor.shape == (n_frames,)
@@ -164,7 +164,7 @@ def test_optional_fields_can_be_omitted():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
     dataset = DatasetBuilder(
-        data={"raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float32)},
+        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         metadata={},
         metrics={},
@@ -199,7 +199,7 @@ def test_dataset_builder_accepts_float_raw_data_and_casts_to_float32():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
     dataset = DatasetBuilder(
-        data={"raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float64)},
+        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float64)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         metadata={},
         metrics={},
@@ -229,7 +229,7 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
 
     with pytest.raises(ValueError, match="Dimension 'n_frames' has inconsistent sizes"):
         DatasetBuilder(
-            data={"raw_data": np.zeros((n_frames_data, n_tx, n_el, n_ax, n_ch), dtype=np.float32)},
+            data={"raw_data": np.zeros((n_frames_data, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=scan,
             metadata={},
             metrics={},
@@ -242,7 +242,7 @@ def test_metadata_dict_with_unknown_field():
 
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         DatasetBuilder(
-            data={"raw_data": np.zeros((n_frames, n_tx, n_el, n_ax, n_ch), dtype=np.float32)},
+            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata={"custom_field": "this field does not exist in Metadata spec"},
             metrics={},
