@@ -723,6 +723,18 @@ class Scan(Spec):
         if self.element_width is not None and self.element_width <= 0:
             raise ValueError(f"Element width must be positive, got {self.element_width}")
 
+        # Try to simplify the data by squeezing out any singleton dimensions,
+        # e.g. if center_frequency is an array with all the same value
+        if isinstance(self.center_frequency, np.ndarray) and self.center_frequency.ndim == 1:
+            if np.all(self.center_frequency == self.center_frequency[0]):
+                self.center_frequency = self.center_frequency[0]
+        if (
+            isinstance(self.demodulation_frequency, np.ndarray)
+            and self.demodulation_frequency.ndim == 1
+        ):
+            if np.all(self.demodulation_frequency == self.demodulation_frequency[0]):
+                self.demodulation_frequency = self.demodulation_frequency[0]
+
 
 @dataclass
 class Subject(Spec):
