@@ -5,7 +5,7 @@ import pytest
 
 from zea.data import spec as spec_module
 from zea.data.file import File
-from zea.data.spec import DatasetBuilder, Scan, Segmentation, Spec
+from zea.data.spec import FileSpec, Scan, Segmentation, Spec
 
 
 def test_segmentation_spec():
@@ -47,7 +47,7 @@ def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4):
 def dataset_spec():
     n_frames, n_tx, n_el, n_ax, n_ch = 3, 2, 4, 8, 1
 
-    return DatasetBuilder(
+    return FileSpec(
         data={
             "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
             "image": {
@@ -124,7 +124,7 @@ def test_dataset_spec(dataset_spec):
     assert dataset_spec.metrics.coherence_factor.shape == (n_frames,)
 
 
-def test_saving_and_loading(tmp_path, dataset_spec: DatasetBuilder):
+def test_saving_and_loading(tmp_path, dataset_spec: FileSpec):
     # Save the dataset
     save_path = tmp_path / "test_dataset.hdf5"
     dataset_spec.save(save_path)
@@ -163,7 +163,7 @@ def test_scan_dimension_count_consistency():
 def test_optional_fields_can_be_omitted():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    dataset = DatasetBuilder(
+    dataset = FileSpec(
         data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         metadata={},
@@ -198,7 +198,7 @@ def test_scan_accepts_float_inputs_and_casts_to_float32():
 def test_dataset_builder_accepts_float_raw_data_and_casts_to_float32():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    dataset = DatasetBuilder(
+    dataset = FileSpec(
         data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float64)},
         scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
         metadata={},
@@ -228,7 +228,7 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
     }
 
     with pytest.raises(ValueError, match="Dimension 'n_frames' has inconsistent sizes"):
-        DatasetBuilder(
+        FileSpec(
             data={"raw_data": np.zeros((n_frames_data, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=scan,
             metadata={},
@@ -241,7 +241,7 @@ def test_metadata_dict_with_unknown_field():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
     with pytest.raises(TypeError, match="unexpected keyword argument"):
-        DatasetBuilder(
+        FileSpec(
             data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata={"custom_field": "this field does not exist in Metadata spec"},

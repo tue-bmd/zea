@@ -675,6 +675,21 @@ class Scan(Spec):
         },
     }
 
+    @property
+    def n_tx(self) -> int:
+        """Number of transmits."""
+        return self.t0_delays.shape[0]
+
+    @property
+    def n_el(self) -> int:
+        """Number of elements."""
+        return self.t0_delays.shape[1]
+
+    @property
+    def n_ax(self) -> int:
+        """Number of axial samples."""
+        return self.t0_delays.shape[1]
+
     def __post_init__(self):
         super().__post_init__()
 
@@ -900,7 +915,7 @@ class Metrics(Spec):
 
 
 @dataclass
-class DatasetBuilder(Spec):
+class FileSpec(Spec):
     """A dataset containing all the data, scan parameters, metadata,
     and metrics for a single acquisition.
 
@@ -917,10 +932,10 @@ class DatasetBuilder(Spec):
 
     Example:
         .. doctest::
-            >>> from zea.data.spec import DatasetBuilder
+            >>> from zea.data.spec import FileSpec
             >>> import numpy as np
 
-            >>> dataset = DatasetBuilder(
+            >>> dataset = FileSpec(
             ...    data={
             ...        "raw_data": np.random.rand(100, 32, 64, 128, 1).astype(np.float32),
             ...        "segmentation": {
