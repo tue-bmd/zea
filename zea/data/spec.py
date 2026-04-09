@@ -415,12 +415,12 @@ class Map(Spec):
         super().__post_init__()
 
         # Check sensible values
-        if np.any(self.extent[..., 0] >= self.extent[..., 1]):
-            raise ValueError("Map extent xlims must have xmin < xmax")
-        if np.any(self.extent[..., 2] >= self.extent[..., 3]):
-            raise ValueError("Map extent ylims must have ymin < ymax")
-        if np.any(self.extent[..., 4] >= self.extent[..., 5]):
-            raise ValueError("Map extent zlims must have zmax < zmin")
+        if np.any(self.extent[..., 0] > self.extent[..., 1]):
+            raise ValueError("Map extent xlims must have xmin <= xmax")
+        if np.any(self.extent[..., 2] > self.extent[..., 3]):
+            raise ValueError("Map extent ylims must have ymin <= ymax")
+        if np.any(self.extent[..., 4] > self.extent[..., 5]):
+            raise ValueError("Map extent zlims must have zmax <= zmin")
 
         # Ultrasound specific warning: if extent values are unusually large, log a warning
         if np.any(self.extent >= 1.0) or np.any(self.extent <= -1.0):
