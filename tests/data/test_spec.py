@@ -5,7 +5,7 @@ import pytest
 
 from zea.data import spec as spec_module
 from zea.data.file import File
-from zea.data.spec import FileSpec, Scan, Segmentation, Spec
+from zea.data.spec import Data, FileSpec, Map, Scan, Segmentation, Spec
 
 
 def test_segmentation_spec():
@@ -280,6 +280,50 @@ def test_metadata_dict_with_unknown_field():
             data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata={"custom_field": "this field does not exist in Metadata spec"},
+            metrics={},
+        )
+
+
+def test_data_accepts_custom_map_keys_and_warns(monkeypatch):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    warnings = []
+
+    monkeypatch.setattr(
+        spec_module.log,
+        "warning",
+        lambda message, *args, **kwargs: warnings.append(message),
+    )
+
+    dataset = FileSpec(
+        data={
+            "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+            "custom_map": {
+                "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+            },
+        },
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        metadata={},
+        metrics={},
+    )
+
+    assert isinstance(dataset.data, Data)
+    assert isinstance(dataset.data.custom_map, Map)
+    assert "custom_map" in dataset.to_dict()["data"]
+    assert any("Custom keys were added to 'data'" in message for message in warnings)
+
+
+def test_data_custom_key_requires_map_spec():
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+
+    with pytest.raises(TypeError, match="Expected field 'custom_scalar' to be"):
+        FileSpec(
+            data={
+                "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+                "custom_scalar": 123,
+            },
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            metadata={},
             metrics={},
         )
 

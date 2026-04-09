@@ -131,13 +131,16 @@ class Spec:
         )
 
     def _validate_nested_field(
-        self, field_name: str, nested_spec: type, field_value: Any
+        self, field_name: str, nested_spec: "Spec", field_value: Any
     ) -> "Spec":
+        """Validate a nested spec field, recursively validating its contents."""
         if isinstance(field_value, dict):
             field_value = nested_spec(**field_value)
             setattr(self, field_name, field_value)
 
-        if not isinstance(field_value, nested_spec):
+        # Check that the nested spec field is now an instance of the expected Spec subclass
+        # E.g. Segmentation if nested_spec is Map
+        if not issubclass(type(field_value), nested_spec):
             raise TypeError(
                 f"Expected field '{field_name}' to be {nested_spec}, got {type(field_value)}"
             )
@@ -397,7 +400,7 @@ class Map(Spec):
     """Map data and spatial extent metadata.
 
     Args:
-        pixels: The map pixels of shape (n_frames, h, w, d) of type uint8.
+        pixels: The map pixels of shape (n_frames, h, w, d) of type uint8 or float32
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
@@ -407,7 +410,7 @@ class Map(Spec):
     extent: np.ndarray
 
     SCHEMA = {
-        "pixels": {"dtype": np.uint8, "shape": ("n_frames", "h", "w", "d")},
+        "pixels": {"dtype": (np.uint8, np.float32), "shape": ("n_frames", "h", "w", "d")},
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
     }
 
@@ -431,7 +434,47 @@ class Map(Spec):
 
 
 @dataclass
-class Segmentation(Map):
+class FloatMap(Map):
+    """Map data with float32 pixel values and spatial extent metadata.
+
+    Args:
+        pixels: The map pixels of shape (n_frames, h, w, d) and type float32.
+        extent: The map extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+    """
+
+    pixels: np.ndarray
+    extent: np.ndarray
+
+    SCHEMA = {
+        "pixels": {"dtype": np.float32, "shape": ("n_frames", "h", "w", "d")},
+        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
+    }
+
+
+@dataclass
+class UnsignedIntMap(Map):
+    """Map data with uint8 pixel values and spatial extent metadata.
+
+    Args:
+        pixels: The map pixels of shape (n_frames, h, w, d) and type uint8.
+        extent: The map extent in meters of shape (n_frames, 6) or (6,).
+            A shape of (6,) is broadcast to all frames. Values are ordered as
+            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+    """
+
+    pixels: np.ndarray
+    extent: np.ndarray
+
+    SCHEMA = {
+        "pixels": {"dtype": np.uint8, "shape": ("n_frames", "h", "w", "d")},
+        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
+    }
+
+
+@dataclass
+class Segmentation(UnsignedIntMap):
     """Segmentation data and spatial extent metadata.
 
     Args:
@@ -463,27 +506,7 @@ class Segmentation(Map):
 
 
 @dataclass
-class FloatMap(Map):
-    """Map data with float32 pixel values and spatial extent metadata.
-
-    Args:
-        pixels: The map pixels of shape (n_frames, h, w, d) and type float32.
-        extent: The map extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
-    """
-
-    pixels: np.ndarray
-    extent: np.ndarray
-
-    SCHEMA = {
-        "pixels": {"dtype": np.float32, "shape": ("n_frames", "h", "w", "d")},
-        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
-    }
-
-
-@dataclass
-class Image(Map):
+class Image(UnsignedIntMap):
     """Reconstructed (log-compressed) image data and spatial extent metadata.
 
     Args:
@@ -560,7 +583,7 @@ class ColorDopplerMap(FloatMap):
     """
 
 
-@dataclass
+@dataclass(init=False)
 class Data(Spec):
     """Data group containing raw channels and optional derived data products.
 
@@ -574,9 +597,10 @@ class Data(Spec):
         swe: Shear-wave elastography data and extent metadata.
         tissue_doppler: Tissue Doppler data and extent metadata.
         color_doppler: Color Doppler velocity data and extent metadata.
+        **kwargs: Any other spatially aligned map data and extent metadata.
     """
 
-    raw_data: np.ndarray | None = None
+    raw_data: np.ndarray
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
@@ -598,6 +622,61 @@ class Data(Spec):
         "tissue_doppler": {"spec": TissueDopplerMap},
         "color_doppler": {"spec": ColorDopplerMap},
     }
+
+    def __init__(
+        self,
+        raw_data: np.ndarray,
+        image: Image | dict | None = None,
+        segmentation: Segmentation | dict | None = None,
+        sos_map: SosMap | dict | None = None,
+        strain: StrainMap | dict | None = None,
+        swe: SweMap | dict | None = None,
+        tissue_doppler: TissueDopplerMap | dict | None = None,
+        color_doppler: ColorDopplerMap | dict | None = None,
+        **extra_maps,
+    ):
+        self.raw_data = raw_data
+        self.image = image
+        self.segmentation = segmentation
+        self.sos_map = sos_map
+        self.strain = strain
+        self.swe = swe
+        self.tissue_doppler = tissue_doppler
+        self.color_doppler = color_doppler
+
+        reserved_keys = set(self.SCHEMA) | set(self.__dataclass_fields__) | set(dir(Spec))
+        for key, value in extra_maps.items():
+            if key in reserved_keys:
+                raise TypeError(f"Invalid custom data key '{key}': reserved name")
+            setattr(self, key, value)
+
+        self._extra_map_keys = tuple(extra_maps.keys())
+        if getattr(self, "_extra_map_keys", ()):
+            self.SCHEMA = {
+                **self.SCHEMA,
+                **{key: {"spec": Map} for key in self._extra_map_keys},
+            }
+
+        self.__post_init__()
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        suggested_map_keys = ", ".join(
+            sorted(
+                key
+                for key, value in type(self).SCHEMA.items()
+                if "spec" in value and issubclass(value["spec"], Map)
+            )
+        )
+
+        if getattr(self, "_extra_map_keys", ()):
+            custom_keys = ", ".join(sorted(self._extra_map_keys))
+            log.warning(
+                "Custom keys were added to 'data' and validated as generic Map specs: "
+                f"{custom_keys}. If these keys match standard categories, consider using: "
+                f"{suggested_map_keys}"
+            )
 
 
 @dataclass
