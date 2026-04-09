@@ -583,9 +583,7 @@ class SosMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(
-                f"Speed-of-sound map unit must be 'm/s' if specified, got '{self.unit}'"
-            )
+            raise ValueError(f"Speed-of-sound map unit should be 'm/s', got '{self.unit}'")
 
         # Check sensible values for speed of sound
         if np.any(self.pixels < 300):
@@ -608,7 +606,7 @@ class StrainPercentageMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "%":
-            raise ValueError(f"Strain map unit must be '%' if specified, got '{self.unit}'")
+            raise ValueError(f"Strain map unit should be '%', got '{self.unit}'")
 
 
 @dataclass
@@ -625,7 +623,7 @@ class ShearWaveElastographyMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(f"SWE map unit must be 'm/s' if specified, got '{self.unit}'")
+            raise ValueError(f"SWE map unit should be 'm/s', got '{self.unit}'")
 
 
 @dataclass
@@ -642,7 +640,7 @@ class TissueDopplerMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(f"SWE map unit must be 'm/s' if specified, got '{self.unit}'")
+            raise ValueError(f"SWE map unit should be 'm/s', got '{self.unit}'")
 
 
 @dataclass
@@ -661,7 +659,7 @@ class ColorDopplerMap(FloatMap):
         super().__post_init__()
 
         if self.unit is not None and self.unit != "m/s":
-            raise ValueError(f"SWE map unit must be 'm/s' if specified, got '{self.unit}'")
+            raise ValueError(f"SWE map unit should be 'm/s', got '{self.unit}'")
 
 
 @dataclass(init=False)

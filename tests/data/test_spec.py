@@ -332,6 +332,8 @@ def test_data_accepts_custom_map_keys_and_warns():
                 "custom_map": {
                     "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
                     "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                    "description": "This is a custom map",
+                    "unit": "mm",
                 },
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
