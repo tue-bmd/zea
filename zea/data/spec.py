@@ -1,3 +1,4 @@
+import warnings
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, List
@@ -7,7 +8,7 @@ import numpy as np
 
 from zea import log
 
-CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch"}
+CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
 
 UNITS = {
     "m/s": "meters per second",
@@ -333,7 +334,10 @@ class Spec:
 
             nested_spec = field_info.get("spec")
             if nested_spec is not None:
-                field_value = self._validate_nested_field(field_name, nested_spec, field_value)
+                try:
+                    field_value = self._validate_nested_field(field_name, nested_spec, field_value)
+                except (TypeError, ValueError) as e:
+                    raise type(e)(f"In field '{field_name}': {e}") from e
 
                 nested_dim_to_fields, nested_dim_to_sizes = field_value._collect_dimension_info(
                     prefix=f"{field_name}."
@@ -442,7 +446,7 @@ class Map(Spec):
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
-        channel_labels: The labels corresponding to the `n_ch` channels in the pixels.
+        labels: The labels corresponding to the `n_ch` channels in the pixels.
             This is required when pixels have an n_ch dimension, and should be None otherwise.
             For IQ data, this would typically be ["I", "Q"].
         description: An optional free-text description of the map.
@@ -452,7 +456,7 @@ class Map(Spec):
 
     pixels: np.ndarray
     extent: np.ndarray
-    channel_labels: np.ndarray | None = None
+    labels: np.ndarray | None = None
     description: str | None = None
     unit: str | None = None
 
@@ -460,12 +464,12 @@ class Map(Spec):
         "pixels": {
             "dtype": (np.uint8, np.float32, np.int16, np.complex64),
             "shape": (
-                ("n_frames", "x", "z", "y", "n_ch"),
+                ("n_frames", "x", "z", "y", "n_spatial_ch"),
                 ("n_frames", "x", "z", "y"),
             ),
         },
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
-        "channel_labels": {"dtype": np.str_, "shape": ("n_ch",)},
+        "labels": {"dtype": np.str_, "shape": ("n_spatial_ch",)},
         "description": {"dtype": str, "shape": ()},
         "unit": {"dtype": str, "shape": ()},
     }
@@ -474,8 +478,8 @@ class Map(Spec):
         super().__post_init__()
 
         if self.pixels.ndim == 5:
-            assert self.channel_labels is not None, (
-                "channel_labels must be provided when pixels have n_ch dimension"
+            assert self.labels is not None, (
+                "labels must be provided when pixels have n_ch dimension"
             )
 
         # Check sensible values
@@ -498,27 +502,39 @@ class Map(Spec):
 class FloatMap(Map):
     """Map data with float32 pixel values and spatial extent metadata."""
 
-    def __post_init__(self):
-        self.SCHEMA["pixels"]["dtype"] = np.float32
-        return super().__post_init__()
+    SCHEMA = {
+        **Map.SCHEMA,
+        "pixels": {
+            **Map.SCHEMA["pixels"],
+            "dtype": np.float32,
+        },
+    }
 
 
 @dataclass
 class BooleanMap(Map):
     """Map data with bool pixel values and spatial extent metadata."""
 
-    def __post_init__(self):
-        self.SCHEMA["pixels"]["dtype"] = np.bool
-        return super().__post_init__()
+    SCHEMA = {
+        **Map.SCHEMA,
+        "pixels": {
+            **Map.SCHEMA["pixels"],
+            "dtype": np.bool_,
+        },
+    }
 
 
 @dataclass
 class UnsignedIntMap(Map):
     """Map data with uint8 pixel values and spatial extent metadata."""
 
-    def __post_init__(self):
-        self.SCHEMA["pixels"]["dtype"] = np.uint8
-        return super().__post_init__()
+    SCHEMA = {
+        **Map.SCHEMA,
+        "pixels": {
+            **Map.SCHEMA["pixels"],
+            "dtype": np.uint8,
+        },
+    }
 
 
 @dataclass
@@ -530,20 +546,15 @@ class Segmentation(BooleanMap):
         extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
-        channel_labels: The labels corresponding to the segmentation pixels, where each unique value
+        labels: The labels corresponding to the segmentation pixels, where each unique value
             in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
     """
 
     def __post_init__(self):
+        assert self.pixels.ndim == 5, (
+            "Segmentation pixels must have 5 dimensions (n_frames, x, z, y, n_labels)"
+        )
         super().__post_init__()
-
-        # Check every pixel value corresponds to a label
-        unique_pixel_values = np.unique(self.pixels)
-        if not np.all(np.isin(unique_pixel_values, np.arange(len(self.labels)))):
-            raise ValueError(
-                "Segmentation pixels contain values that do not correspond to any label. "
-                f"Unique pixel values: {unique_pixel_values}, number of labels: {len(self.labels)}"
-            )
 
 
 @dataclass
@@ -663,7 +674,7 @@ class Data(Spec):
         image: Reconstructed image data and extent metadata.
         segmentation: Segmentation data and extent metadata.
         sos_map: Speed-of-sound map data and extent metadata.
-        strain: Strain map data and extent metadata.
+        strain_percentage_map: Strain map data and extent metadata.
         shear_wave_elastograhy_map: Shear-wave elastography data and extent metadata.
         tissue_doppler: Tissue Doppler data and extent metadata.
         color_doppler: Color Doppler velocity data and extent metadata.
@@ -687,8 +698,8 @@ class Data(Spec):
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
-        "strain": {"spec": StrainPercentageMap},
-        "swe": {"spec": ShearWaveElastographyMap},
+        "strain_percentage_map": {"spec": StrainPercentageMap},
+        "shear_wave_elastograhy_map": {"spec": ShearWaveElastographyMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
         "color_doppler": {"spec": ColorDopplerMap},
     }
@@ -699,8 +710,8 @@ class Data(Spec):
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
-        strain: StrainPercentageMap | dict | None = None,
-        swe: ShearWaveElastographyMap | dict | None = None,
+        strain_percentage_map: StrainPercentageMap | dict | None = None,
+        shear_wave_elastograhy_map: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
         color_doppler: ColorDopplerMap | dict | None = None,
         **extra_maps,
@@ -709,8 +720,8 @@ class Data(Spec):
         self.image = image
         self.segmentation = segmentation
         self.sos_map = sos_map
-        self.strain = strain
-        self.swe = swe
+        self.strain_percentage_map = strain_percentage_map
+        self.shear_wave_elastograhy_map = shear_wave_elastograhy_map
         self.tissue_doppler = tissue_doppler
         self.color_doppler = color_doppler
 
@@ -742,10 +753,12 @@ class Data(Spec):
 
         if getattr(self, "_extra_map_keys", ()):
             custom_keys = ", ".join(sorted(self._extra_map_keys))
-            log.warning(
-                "Custom keys were added to 'data' and validated as generic Map specs: "
-                f"{custom_keys}. If these keys match standard categories, consider using: "
-                f"{suggested_map_keys}"
+            warnings.warn(
+                log.warning(
+                    "Custom keys were added to 'data' and validated as generic Map specs: "
+                    f"{custom_keys}. If these keys match standard categories, consider using: "
+                    f"{suggested_map_keys}"
+                )
             )
 
 
@@ -1124,10 +1137,12 @@ class Metadata(Spec):
 
         if getattr(self, "_extra_signal_keys", ()):
             custom_keys = ", ".join(sorted(self._extra_signal_keys))
-            log.warning(
-                "Custom keys were added to 'metadata' and validated as SignalND specs: "
-                f"{custom_keys}. If these keys match standard categories, consider using: "
-                f"{suggested_signal_keys}"
+            warnings.warn(
+                log.warning(
+                    "Custom keys were added to 'metadata' and validated as SignalND specs: "
+                    f"{custom_keys}. If these keys match standard categories, consider using: "
+                    f"{suggested_signal_keys}"
+                )
             )
 
 

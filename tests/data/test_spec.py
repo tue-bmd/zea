@@ -10,20 +10,19 @@ from zea.data.spec import Data, FileSpec, Map, Scan, Segmentation, SignalND, Spe
 
 def test_segmentation_spec():
     # Correct usage
-    pixels = np.zeros((10, 256, 256, 1), dtype=np.uint8)
+    pixels = np.zeros((10, 256, 256, 1, 4), dtype=np.bool_)
     labels = np.array(["background", "label1", "label2", "label3"], dtype=np.str_)
     extent = np.array([0.0, 1.0, 0.0, 1.0, -1.0, 0.0], dtype=np.float32)
     segmentation = Segmentation(pixels=pixels, labels=labels, extent=extent)
-    assert segmentation.pixels.shape == (10, 256, 256, 1)
+    assert segmentation.pixels.shape == (10, 256, 256, 1, 4)
     assert segmentation.labels.shape == (4,)
     assert segmentation.extent.shape == (6,)
 
-    # Incorrect usage: pixel values do not correspond to labels
-    pixels_invalid = np.array([[[[0], [1]], [[2], [3]]], [[[4], [5]], [[6], [7]]]], dtype=np.uint8)
-    with pytest.raises(
-        ValueError, match="Segmentation pixels contain values that do not correspond to any label"
-    ):
-        Segmentation(pixels=pixels_invalid, labels=labels, extent=extent)
+    # Incorrect usage: labels shape mismatch
+    with pytest.raises(ValueError):
+        Segmentation(
+            pixels=pixels, labels=np.array(["background", "label1"], dtype=np.str_), extent=extent
+        )
 
 
 def _scan_minimal(n_frames: int = 3, n_tx: int = 2, n_el: int = 4):
@@ -55,7 +54,7 @@ def dataset_spec():
                 "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
             },
             "segmentation": {
-                "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                "pixels": np.zeros((n_frames, 16, 12, 1, 2), dtype=np.bool_),
                 "labels": np.array(["background", "tissue"], dtype=np.str_),
                 "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
             },
@@ -91,12 +90,12 @@ def dataset_spec():
                 "sampling_frequency": np.float32(50.0),
             },
             "voice_narration": {
-                "samples": np.zeros((100, 1), dtype=np.uint8),
+                "samples": np.zeros((100), dtype=np.uint8),
                 "offset": np.float32(0.0),
                 "sampling_frequency": np.float32(8000.0),
             },
             "ecg": {
-                "samples": np.zeros((100, 1), dtype=np.uint8),
+                "samples": np.zeros((100), dtype=np.uint8),
                 "offset": np.float32(0.0),
                 "sampling_frequency": np.float32(250.0),
             },
@@ -290,32 +289,25 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
         )
 
 
-def test_metadata_accepts_custom_signal_nd_keys_and_warns(monkeypatch):
+def test_metadata_accepts_custom_signal_nd_keys_and_warns():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
-    warnings = []
 
-    monkeypatch.setattr(
-        spec_module.log,
-        "warning",
-        lambda message, *args, **kwargs: warnings.append(message),
-    )
-
-    dataset = FileSpec(
-        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
-        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-        metadata={
-            "custom_signal": {
-                "samples": np.zeros((32, 3), dtype=np.float32),
-                "offset": np.float32(0.0),
-                "sampling_frequency": np.float32(120.0),
-            }
-        },
-        metrics={},
-    )
+    with pytest.warns(match="Custom keys were added to 'metadata'"):
+        dataset = FileSpec(
+            data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            metadata={
+                "custom_signal": {
+                    "samples": np.zeros((32, 3), dtype=np.float16),
+                    "offset": np.float32(0.0),
+                    "sampling_frequency": np.float32(120.0),
+                }
+            },
+            metrics={},
+        )
 
     assert isinstance(dataset.metadata.custom_signal, SignalND)
     assert "custom_signal" in dataset.to_dict()["metadata"]
-    assert any("Custom keys were added to 'metadata'" in message for message in warnings)
 
 
 def test_metadata_custom_key_requires_signal_nd_spec():
@@ -330,33 +322,24 @@ def test_metadata_custom_key_requires_signal_nd_spec():
         )
 
 
-def test_data_accepts_custom_map_keys_and_warns(monkeypatch):
+def test_data_accepts_custom_map_keys_and_warns():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
-    warnings = []
 
-    monkeypatch.setattr(
-        spec_module.log,
-        "warning",
-        lambda message, *args, **kwargs: warnings.append(message),
-    )
-
-    dataset = FileSpec(
-        data={
-            "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
-            "custom_map": {
-                "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
-                "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+    with pytest.warns(match="Custom keys were added to 'data'"):
+        dataset = FileSpec(
+            data={
+                "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+                "custom_map": {
+                    "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.uint8),
+                    "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                },
             },
-        },
-        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-        metadata={},
-        metrics={},
-    )
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        )
 
     assert isinstance(dataset.data, Data)
     assert isinstance(dataset.data.custom_map, Map)
     assert "custom_map" in dataset.to_dict()["data"]
-    assert any("Custom keys were added to 'data'" in message for message in warnings)
 
 
 def test_data_custom_key_requires_map_spec():
@@ -367,6 +350,24 @@ def test_data_custom_key_requires_map_spec():
             data={
                 "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
                 "custom_scalar": 123,
+            },
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            metadata={},
+            metrics={},
+        )
+
+
+def test_data_custom_map_dtype_error_includes_map_key_context():
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+
+    with pytest.raises(TypeError, match="In field 'custom_map':"):
+        FileSpec(
+            data={
+                "raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32),
+                "custom_map": {
+                    "pixels": np.zeros((n_frames, 16, 12, 1), dtype=np.bool_),
+                    "extent": np.array([0.0, 0.05, 0.0, 0.04, -0.04, -0.01], dtype=np.float32),
+                },
             },
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
             metadata={},
