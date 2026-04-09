@@ -121,6 +121,9 @@ jobs:
     needs: [image]
     runs-on: self-hosted
     timeout-minutes: 100
+    concurrency:
+      group: heavy-tests-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
