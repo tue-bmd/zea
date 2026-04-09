@@ -66,10 +66,33 @@ def value_shape(value: Any) -> tuple:
 def match_shape(value: Any, expected_shape: tuple) -> bool:
     """Check if the shape of a value matches the expected shape specification."""
     shape = value_shape(value)
-    if len(shape) != len(expected_shape):
-        return False
+    ellipsis_positions = [i for i, dim in enumerate(expected_shape) if dim == "..."]
 
-    for dim_size, expected_dim in zip(shape, expected_shape):
+    if len(ellipsis_positions) > 1:
+        raise ValueError("Expected shape can contain at most one '...' wildcard")
+
+    if not ellipsis_positions:
+        if len(shape) != len(expected_shape):
+            return False
+        comparisons = zip(shape, expected_shape)
+    else:
+        ellipsis_pos = ellipsis_positions[0]
+        prefix_expected = expected_shape[:ellipsis_pos]
+        suffix_expected = expected_shape[ellipsis_pos + 1 :]
+
+        # '...' matches any number of dimensions (including zero).
+        min_required_dims = len(prefix_expected) + len(suffix_expected)
+        if len(shape) < min_required_dims:
+            return False
+
+        prefix_shape = shape[: len(prefix_expected)]
+        suffix_shape = shape[len(shape) - len(suffix_expected) :] if suffix_expected else ()
+        comparisons = zip(
+            prefix_shape + suffix_shape,
+            prefix_expected + suffix_expected,
+        )
+
+    for dim_size, expected_dim in comparisons:
         if isinstance(expected_dim, str):
             continue
         if dim_size != expected_dim:
@@ -1032,9 +1055,9 @@ class Annotations(Spec):
     }
 
 
-@dataclass
+@dataclass(init=False)
 class Metadata(Spec):
-    """Metadata group with subject, acquisition context, and annotations."""
+    """Metadata group with subject, acquisition context, annotations, and extra signals."""
 
     subject: Subject | dict | None = None
     credit: str | None = None
@@ -1053,6 +1076,59 @@ class Metadata(Spec):
         "text_report": {"dtype": str, "shape": ()},
         "annotations": {"spec": Annotations},
     }
+
+    def __init__(
+        self,
+        subject: Subject | dict | None = None,
+        credit: str | None = None,
+        probe_orientation: ProbeOrientation | dict | None = None,
+        voice_narration: Signal1D | dict | None = None,
+        ecg: Signal1D | dict | None = None,
+        text_report: str | None = None,
+        annotations: Annotations | dict | None = None,
+        **extra_signals,
+    ):
+        self.subject = subject
+        self.credit = credit
+        self.probe_orientation = probe_orientation
+        self.voice_narration = voice_narration
+        self.ecg = ecg
+        self.text_report = text_report
+        self.annotations = annotations
+
+        reserved_keys = set(self.SCHEMA) | set(self.__dataclass_fields__) | set(dir(Spec))
+        for key, value in extra_signals.items():
+            if key in reserved_keys:
+                raise TypeError(f"Invalid custom metadata key '{key}': reserved name")
+            setattr(self, key, value)
+
+        self._extra_signal_keys = tuple(extra_signals.keys())
+        if getattr(self, "_extra_signal_keys", ()):
+            self.SCHEMA = {
+                **self.SCHEMA,
+                **{key: {"spec": SignalND} for key in self._extra_signal_keys},
+            }
+
+        self.__post_init__()
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        suggested_signal_keys = ", ".join(
+            sorted(
+                key
+                for key, value in type(self).SCHEMA.items()
+                if "spec" in value and issubclass(value["spec"], Signal)
+            )
+        )
+
+        if getattr(self, "_extra_signal_keys", ()):
+            custom_keys = ", ".join(sorted(self._extra_signal_keys))
+            log.warning(
+                "Custom keys were added to 'metadata' and validated as SignalND specs: "
+                f"{custom_keys}. If these keys match standard categories, consider using: "
+                f"{suggested_signal_keys}"
+            )
 
 
 @dataclass

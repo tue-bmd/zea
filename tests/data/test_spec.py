@@ -5,7 +5,7 @@ import pytest
 
 from zea.data import spec as spec_module
 from zea.data.file import File
-from zea.data.spec import Data, FileSpec, Map, Scan, Segmentation, Spec
+from zea.data.spec import Data, FileSpec, Map, Scan, Segmentation, SignalND, Spec
 
 
 def test_segmentation_spec():
@@ -195,6 +195,25 @@ def test_scan_dimension_count_consistency():
         Scan(**scan)
 
 
+def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
+    signal = SignalND(
+        samples=np.zeros((10, 3, 4, 5), dtype=np.float32),
+        offset=np.float32(0.0),
+        sampling_frequency=np.float32(1000.0),
+    )
+
+    assert signal.samples.shape == (10, 3, 4, 5)
+
+
+def test_signal_nd_rejects_missing_time_dimension_for_ellipsis_shape():
+    with pytest.raises(ValueError, match=r"samples has shape \(\), expected one of"):
+        SignalND(
+            samples=np.array(1.0, dtype=np.float32),
+            offset=np.float32(0.0),
+            sampling_frequency=np.float32(1000.0),
+        )
+
+
 def test_optional_fields_can_be_omitted():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
@@ -271,15 +290,42 @@ def test_dataset_builder_dimension_consistency_across_nested_specs():
         )
 
 
-def test_metadata_dict_with_unknown_field():
-    """Test that passing a metadata dict with a custom/unknown field raises TypeError."""
+def test_metadata_accepts_custom_signal_nd_keys_and_warns(monkeypatch):
+    n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
+    warnings = []
+
+    monkeypatch.setattr(
+        spec_module.log,
+        "warning",
+        lambda message, *args, **kwargs: warnings.append(message),
+    )
+
+    dataset = FileSpec(
+        data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
+        scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+        metadata={
+            "custom_signal": {
+                "samples": np.zeros((32, 3), dtype=np.float32),
+                "offset": np.float32(0.0),
+                "sampling_frequency": np.float32(120.0),
+            }
+        },
+        metrics={},
+    )
+
+    assert isinstance(dataset.metadata.custom_signal, SignalND)
+    assert "custom_signal" in dataset.to_dict()["metadata"]
+    assert any("Custom keys were added to 'metadata'" in message for message in warnings)
+
+
+def test_metadata_custom_key_requires_signal_nd_spec():
     n_frames, n_tx, n_el, n_ax, n_ch = 2, 2, 4, 8, 1
 
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
+    with pytest.raises(TypeError, match="Expected field 'custom_signal' to be"):
         FileSpec(
             data={"raw_data": np.zeros((n_frames, n_tx, n_ax, n_el, n_ch), dtype=np.float32)},
             scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
-            metadata={"custom_field": "this field does not exist in Metadata spec"},
+            metadata={"custom_signal": 123},
             metrics={},
         )
 
