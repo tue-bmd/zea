@@ -18,6 +18,9 @@ jobs:
   image:
     needs: [tag]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     outputs:
       docker_image: ${{ steps.set-image.outputs.docker_image }}
     steps:
