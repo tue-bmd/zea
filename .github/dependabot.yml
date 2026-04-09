@@ -1,0 +1,39 @@
+## Dependabot configuration file
+# Please see the documentation for all configuration options:
+# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-packages:
+        patterns:
+          - "*"
+    assignees:
+       - "tristan-deep"
+    labels:
+       - "dev"
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "setuptools"
+        versions:
+          - ">=82"
+          # https://setuptools.pypa.io/en/latest/history.html#v82-0-0
+          # currently sphinxcontrib.bibtex depends on setuptools<82
+          # TODO: replace with a better maintained bibtex extension
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    assignees:
+       - "tristan-deep"
+    labels:
+       - "dev"
+    open-pull-requests-limit: 3

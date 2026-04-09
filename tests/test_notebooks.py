@@ -83,7 +83,8 @@ NOTEBOOK_PARAMETERS = {
     "hvae_model_example.ipynb": {
         "inference_fractions": [0.03],
         "n_samples": 2,
-        "batch_size": 1,
+        "batch_size": 2,
+        "load_weights": False,
     },
     "dbua_example.ipynb": {
         "num_iterations": 2,

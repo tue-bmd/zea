@@ -21,7 +21,7 @@ jobs:
       - name: Install Ruff
         run: |
           pip install -U pip setuptools wheel
-          pip install ruff
+          pip install ruff==0.15.10
 
       - name: Run Linter
         run: ruff check --config pyproject.toml --verbose
