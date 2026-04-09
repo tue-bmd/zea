@@ -9,6 +9,18 @@ from zea import log
 
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch"}
 
+UNITS = {
+    "m/s": "meters per second",
+    "m": "meters",
+    "Hz": "Hertz",
+    "s": "seconds",
+    "-": "unitless",
+    "rad": "radians",
+    "dB": "decibels",
+    "#": "count",
+    "%": "percent",
+}
+
 
 def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     """Check if the dtype of a value matches the expected dtype,
@@ -399,23 +411,49 @@ class Spec:
 class Map(Spec):
     """Map data and spatial extent metadata.
 
+    The most flexible map spec, which can be used for any spatially aligned data product.
+
     Args:
-        pixels: The map pixels of shape (n_frames, x, z, y) of type uint8 or float32
+        pixels: The map pixels of shape (n_frames, x, z, y, n_ch) or (n_frames, x, z, y)
+            and type uint8 or float32 or int16.
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+        channel_labels: The labels corresponding to the `n_ch` channels in the pixels.
+            This is required when pixels have an n_ch dimension, and should be None otherwise.
+            For IQ data, this would typically be ["I", "Q"].
+        description: An optional free-text description of the map.
+        unit: An optional string specifying the physical unit of the map values,
+            e.g. "m/s", "%", etc.
     """
 
     pixels: np.ndarray
     extent: np.ndarray
+    channel_labels: np.ndarray | None = None
+    description: str | None = None
+    unit: str | None = None
 
     SCHEMA = {
-        "pixels": {"dtype": (np.uint8, np.float32), "shape": ("n_frames", "x", "z", "y")},
+        "pixels": {
+            "dtype": (np.uint8, np.float32, np.int16, np.complex64),
+            "shape": (
+                ("n_frames", "x", "z", "y", "n_ch"),
+                ("n_frames", "x", "z", "y"),
+            ),
+        },
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
+        "channel_labels": {"dtype": np.str_, "shape": ("n_ch",)},
+        "description": {"dtype": str, "shape": ()},
+        "unit": {"dtype": str, "shape": ()},
     }
 
     def __post_init__(self):
         super().__post_init__()
+
+        if self.pixels.ndim == 5:
+            assert self.channel_labels is not None, (
+                "channel_labels must be provided when pixels have n_ch dimension"
+            )
 
         # Check sensible values
         if np.any(self.extent[..., 0] > self.extent[..., 1]):
@@ -435,63 +473,43 @@ class Map(Spec):
 
 @dataclass
 class FloatMap(Map):
-    """Map data with float32 pixel values and spatial extent metadata.
+    """Map data with float32 pixel values and spatial extent metadata."""
 
-    Args:
-        pixels: The map pixels of shape (n_frames, x, z, y) and type float32.
-        extent: The map extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
-    """
+    def __post_init__(self):
+        self.SCHEMA["pixels"]["dtype"] = np.float32
+        return super().__post_init__()
 
-    pixels: np.ndarray
-    extent: np.ndarray
 
-    SCHEMA = {
-        "pixels": {"dtype": np.float32, "shape": ("n_frames", "x", "z", "y")},
-        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
-    }
+@dataclass
+class BooleanMap(Map):
+    """Map data with bool pixel values and spatial extent metadata."""
+
+    def __post_init__(self):
+        self.SCHEMA["pixels"]["dtype"] = np.bool
+        return super().__post_init__()
 
 
 @dataclass
 class UnsignedIntMap(Map):
-    """Map data with uint8 pixel values and spatial extent metadata.
+    """Map data with uint8 pixel values and spatial extent metadata."""
 
-    Args:
-        pixels: The map pixels of shape (n_frames, x, z, y) and type uint8.
-        extent: The map extent in meters of shape (n_frames, 6) or (6,).
-            A shape of (6,) is broadcast to all frames. Values are ordered as
-            (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
-    """
-
-    pixels: np.ndarray
-    extent: np.ndarray
-
-    SCHEMA = {
-        "pixels": {"dtype": np.uint8, "shape": ("n_frames", "x", "z", "y")},
-        "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
-    }
+    def __post_init__(self):
+        self.SCHEMA["pixels"]["dtype"] = np.uint8
+        return super().__post_init__()
 
 
 @dataclass
-class Segmentation(UnsignedIntMap):
+class Segmentation(BooleanMap):
     """Segmentation data and spatial extent metadata.
 
     Args:
-        pixels: The segmentation pixels of shape (n_frames, x, z, y) of type uint8.
-        labels: The labels corresponding to the segmentation pixels, where each unique value
-            in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
+        pixels: The segmentation pixels of shape (n_frames, x, z, y, n_labels) and type bool.
         extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
+        channel_labels: The labels corresponding to the segmentation pixels, where each unique value
+            in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
     """
-
-    labels: np.ndarray
-
-    SCHEMA = {
-        **Map.SCHEMA,
-        "labels": {"dtype": np.str_, "shape": ("n_labels",)},
-    }
 
     def __post_init__(self):
         super().__post_init__()
@@ -530,6 +548,11 @@ class SosMap(FloatMap):
     def __post_init__(self):
         super().__post_init__()
 
+        if self.unit is not None and self.unit != "m/s":
+            raise ValueError(
+                f"Speed-of-sound map unit must be 'm/s' if specified, got '{self.unit}'"
+            )
+
         # Check sensible values for speed of sound
         if np.any(self.pixels < 300):
             log.warning(
@@ -539,7 +562,7 @@ class SosMap(FloatMap):
 
 
 @dataclass
-class StrainMap(FloatMap):
+class StrainPercentageMap(FloatMap):
     """Strain map data and spatial extent metadata.
 
     Args:
@@ -547,9 +570,15 @@ class StrainMap(FloatMap):
         extent: The strain extent in meters of shape (n_frames, 6) or (6,).
     """
 
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "%":
+            raise ValueError(f"Strain map unit must be '%' if specified, got '{self.unit}'")
+
 
 @dataclass
-class SweMap(FloatMap):
+class ShearWaveElastographyMap(FloatMap):
     """Shear-wave elastography data and spatial extent metadata.
 
     Args:
@@ -557,6 +586,12 @@ class SweMap(FloatMap):
             (n_frames, x, z, y) and type float32.
         extent: The SWE extent in meters of shape (n_frames, 6) or (6,).
     """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "m/s":
+            raise ValueError(f"SWE map unit must be 'm/s' if specified, got '{self.unit}'")
 
 
 @dataclass
@@ -568,6 +603,12 @@ class TissueDopplerMap(FloatMap):
             and type float32.
         extent: The tissue Doppler extent in meters of shape (n_frames, 6) or (6,).
     """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "m/s":
+            raise ValueError(f"SWE map unit must be 'm/s' if specified, got '{self.unit}'")
 
 
 @dataclass
@@ -582,6 +623,12 @@ class ColorDopplerMap(FloatMap):
         extent: The color Doppler extent in meters of shape (n_frames, 6) or (6,).
     """
 
+    def __post_init__(self):
+        super().__post_init__()
+
+        if self.unit is not None and self.unit != "m/s":
+            raise ValueError(f"SWE map unit must be 'm/s' if specified, got '{self.unit}'")
+
 
 @dataclass(init=False)
 class Data(Spec):
@@ -594,7 +641,7 @@ class Data(Spec):
         segmentation: Segmentation data and extent metadata.
         sos_map: Speed-of-sound map data and extent metadata.
         strain: Strain map data and extent metadata.
-        swe: Shear-wave elastography data and extent metadata.
+        shear_wave_elastograhy_map: Shear-wave elastography data and extent metadata.
         tissue_doppler: Tissue Doppler data and extent metadata.
         color_doppler: Color Doppler velocity data and extent metadata.
         **kwargs: Any other spatially aligned map data and extent metadata.
@@ -604,8 +651,8 @@ class Data(Spec):
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
-    strain: StrainMap | dict | None = None
-    swe: SweMap | dict | None = None
+    strain_percentage_map: StrainPercentageMap | dict | None = None
+    shear_wave_elastograhy_map: ShearWaveElastographyMap | dict | None = None
     tissue_doppler: TissueDopplerMap | dict | None = None
     color_doppler: ColorDopplerMap | dict | None = None
 
@@ -617,8 +664,8 @@ class Data(Spec):
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
-        "strain": {"spec": StrainMap},
-        "swe": {"spec": SweMap},
+        "strain": {"spec": StrainPercentageMap},
+        "swe": {"spec": ShearWaveElastographyMap},
         "tissue_doppler": {"spec": TissueDopplerMap},
         "color_doppler": {"spec": ColorDopplerMap},
     }
@@ -629,8 +676,8 @@ class Data(Spec):
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
-        strain: StrainMap | dict | None = None,
-        swe: SweMap | dict | None = None,
+        strain: StrainPercentageMap | dict | None = None,
+        swe: ShearWaveElastographyMap | dict | None = None,
         tissue_doppler: TissueDopplerMap | dict | None = None,
         color_doppler: ColorDopplerMap | dict | None = None,
         **extra_maps,
@@ -884,8 +931,8 @@ class Subject(Spec):
 
 
 @dataclass
-class AdditionalSignal(Spec):
-    """Additional signal related to the scan, such as voice narration or ECG.
+class Signal(Spec):
+    """Base class for additional signals with timing offset and sampling frequency metadata.
 
     Args:
         offset: Time offset in seconds relative to frame timing.
@@ -908,7 +955,7 @@ class AdditionalSignal(Spec):
 
 
 @dataclass
-class ProbeOrientation(AdditionalSignal):
+class ProbeOrientation(Signal):
     """Probe pose and timing metadata.
 
     Args:
@@ -921,16 +968,16 @@ class ProbeOrientation(AdditionalSignal):
 
     SCHEMA = {
         "pose": {"dtype": np.float32, "shape": ("T", 6)},
-        **AdditionalSignal.SCHEMA,
+        **Signal.SCHEMA,
     }
 
 
 @dataclass
-class TimedSignal(AdditionalSignal):
+class Signal1D(Signal):
     """One-dimensional sampled signal with timing metadata.
 
     Args:
-        samples: Signal samples of shape (T, 1) and type float32.
+        samples: Signal samples of shape (T) and type uint8 or float32 or int16 or complex64.
         offset: Time offset in seconds relative to frame timing.
         sampling_frequency: Sampling frequency in Hz for signal samples.
     """
@@ -938,8 +985,26 @@ class TimedSignal(AdditionalSignal):
     samples: np.ndarray
 
     SCHEMA = {
-        "samples": {"dtype": np.uint8, "shape": ("T", 1)},
-        **AdditionalSignal.SCHEMA,
+        "samples": {"dtype": (np.uint8, np.float32, np.int16, np.complex64), "shape": ("T",)},
+        **Signal.SCHEMA,
+    }
+
+
+@dataclass
+class SignalND(Signal):
+    """N-dimensional sampled signal with timing metadata.
+
+    Args:
+        samples: Signal samples of shape (T, ...) and type uint8 or float32 or int16 or complex64.
+        offset: Time offset in seconds relative to frame timing.
+        sampling_frequency: Sampling frequency in Hz for signal samples.
+    """
+
+    samples: np.ndarray
+
+    SCHEMA = {
+        "samples": {"dtype": (np.uint8, np.float32, np.int16, np.complex64), "shape": ("T", "...")},
+        **Signal.SCHEMA,
     }
 
 
@@ -974,8 +1039,8 @@ class Metadata(Spec):
     subject: Subject | dict | None = None
     credit: str | None = None
     probe_orientation: ProbeOrientation | dict | None = None
-    voice_narration: TimedSignal | dict | None = None
-    ecg: TimedSignal | dict | None = None
+    voice_narration: Signal1D | dict | None = None
+    ecg: Signal1D | dict | None = None
     text_report: str | None = None
     annotations: Annotations | dict | None = None
 
@@ -983,8 +1048,8 @@ class Metadata(Spec):
         "subject": {"spec": Subject},
         "credit": {"dtype": str, "shape": ()},
         "probe_orientation": {"spec": ProbeOrientation},
-        "voice_narration": {"spec": TimedSignal},
-        "ecg": {"spec": TimedSignal},
+        "voice_narration": {"spec": Signal1D},
+        "ecg": {"spec": Signal1D},
         "text_report": {"dtype": str, "shape": ()},
         "annotations": {"spec": Annotations},
     }
