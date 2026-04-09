@@ -400,7 +400,7 @@ class Map(Spec):
     """Map data and spatial extent metadata.
 
     Args:
-        pixels: The map pixels of shape (n_frames, h, w, d) of type uint8 or float32
+        pixels: The map pixels of shape (n_frames, x, z, y) of type uint8 or float32
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
@@ -410,7 +410,7 @@ class Map(Spec):
     extent: np.ndarray
 
     SCHEMA = {
-        "pixels": {"dtype": (np.uint8, np.float32), "shape": ("n_frames", "h", "w", "d")},
+        "pixels": {"dtype": (np.uint8, np.float32), "shape": ("n_frames", "x", "z", "y")},
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
     }
 
@@ -438,7 +438,7 @@ class FloatMap(Map):
     """Map data with float32 pixel values and spatial extent metadata.
 
     Args:
-        pixels: The map pixels of shape (n_frames, h, w, d) and type float32.
+        pixels: The map pixels of shape (n_frames, x, z, y) and type float32.
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
@@ -448,7 +448,7 @@ class FloatMap(Map):
     extent: np.ndarray
 
     SCHEMA = {
-        "pixels": {"dtype": np.float32, "shape": ("n_frames", "h", "w", "d")},
+        "pixels": {"dtype": np.float32, "shape": ("n_frames", "x", "z", "y")},
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
     }
 
@@ -458,7 +458,7 @@ class UnsignedIntMap(Map):
     """Map data with uint8 pixel values and spatial extent metadata.
 
     Args:
-        pixels: The map pixels of shape (n_frames, h, w, d) and type uint8.
+        pixels: The map pixels of shape (n_frames, x, z, y) and type uint8.
         extent: The map extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
@@ -468,7 +468,7 @@ class UnsignedIntMap(Map):
     extent: np.ndarray
 
     SCHEMA = {
-        "pixels": {"dtype": np.uint8, "shape": ("n_frames", "h", "w", "d")},
+        "pixels": {"dtype": np.uint8, "shape": ("n_frames", "x", "z", "y")},
         "extent": {"dtype": np.float32, "shape": (("n_frames", 6), (6,))},
     }
 
@@ -478,7 +478,7 @@ class Segmentation(UnsignedIntMap):
     """Segmentation data and spatial extent metadata.
 
     Args:
-        pixels: The segmentation pixels of shape (n_frames, h, w, d) of type uint8.
+        pixels: The segmentation pixels of shape (n_frames, x, z, y) of type uint8.
         labels: The labels corresponding to the segmentation pixels, where each unique value
             in the pixels corresponds to a label in this list of shape (n_labels,) and type str.
         extent: The segmentation extent in meters of shape (n_frames, 6) or (6,).
@@ -510,7 +510,7 @@ class Image(UnsignedIntMap):
     """Reconstructed (log-compressed) image data and spatial extent metadata.
 
     Args:
-        pixels: The image pixels of shape (n_frames, h, w, d) and type uint8.
+        pixels: The image pixels of shape (n_frames, x, z, y) and type uint8.
         extent: The image extent in meters of shape (n_frames, 6) or (6,).
             A shape of (6,) is broadcast to all frames. Values are ordered as
             (xmin, xmax, ymin, ymax, zmax, zmin) and stored as float32.
@@ -522,7 +522,7 @@ class SosMap(FloatMap):
     """Speed-of-sound map data and spatial extent metadata.
 
     Args:
-        pixels: The speed-of-sound map pixels in m/s of shape (n_frames, h, w, d)
+        pixels: The speed-of-sound map pixels in m/s of shape (n_frames, x, z, y)
             and type float32.
         extent: The speed-of-sound map extent in meters of shape (n_frames, 6) or (6,).
     """
@@ -543,7 +543,7 @@ class StrainMap(FloatMap):
     """Strain map data and spatial extent metadata.
 
     Args:
-        pixels: The strain pixels in % of shape (n_frames, h, w, d) and type float32.
+        pixels: The strain pixels in % of shape (n_frames, x, z, y) and type float32.
         extent: The strain extent in meters of shape (n_frames, 6) or (6,).
     """
 
@@ -554,7 +554,7 @@ class SweMap(FloatMap):
 
     Args:
         pixels: The shear-wave elastography pixels in m/s of shape
-            (n_frames, h, w, d) and type float32.
+            (n_frames, x, z, y) and type float32.
         extent: The SWE extent in meters of shape (n_frames, 6) or (6,).
     """
 
@@ -564,7 +564,7 @@ class TissueDopplerMap(FloatMap):
     """Tissue Doppler data and spatial extent metadata.
 
     Args:
-        pixels: The tissue Doppler pixels in m/s of shape (n_frames, h, w, d)
+        pixels: The tissue Doppler pixels in m/s of shape (n_frames, x, z, y)
             and type float32.
         extent: The tissue Doppler extent in meters of shape (n_frames, 6) or (6,).
     """
@@ -576,7 +576,7 @@ class ColorDopplerMap(FloatMap):
 
     Args:
         pixels: The color Doppler velocity pixels in m/s of shape
-            (n_frames, h, w, d) and type float32. Positive values
+            (n_frames, x, z, y) and type float32. Positive values
             indicate flow towards the transducer, negative values
             indicate flow away from the transducer.
         extent: The color Doppler extent in meters of shape (n_frames, 6) or (6,).
