@@ -941,12 +941,14 @@ class Subject(Spec):
         fat: Subject fat percentage.
     """
 
+    id: str | None = None
     type: str | None = None
     age: np.uint8 | None = None
     sex: str | None = None
     fat_percentage: np.float32 | None = None
 
     SCHEMA = {
+        "id": {"dtype": str, "shape": ()},
         "type": {"dtype": str, "shape": ()},
         "age": {"dtype": np.uint8, "shape": ()},
         "sex": {"dtype": str, "shape": ()},
@@ -955,6 +957,16 @@ class Subject(Spec):
 
     def __post_init__(self):
         super().__post_init__()
+
+        if self.id is not None and not self.id.strip():
+            raise ValueError("Subject ID cannot be an empty string")
+        if self.id is None:
+            warnings.warn(
+                log.warning(
+                    "Subject ID is not provided; please consider adding an ID for "
+                    "better traceability"
+                )
+            )
 
         if self.fat_percentage is not None and (
             self.fat_percentage < 0 or self.fat_percentage > 100
@@ -1070,7 +1082,7 @@ class Annotations(Spec):
 class Metadata(Spec):
     """Metadata group with subject, acquisition context, annotations, and extra signals."""
 
-    subject: Subject | dict | None = None
+    subject: Subject | dict = field(default_factory=Subject)
     credit: str | None = None
     probe_orientation: ProbeOrientation | dict | None = None
     voice_narration: Signal1D | dict | None = None
