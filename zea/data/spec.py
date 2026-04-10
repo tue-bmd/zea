@@ -664,11 +664,22 @@ class ColorDopplerMap(FloatMap):
 
 @dataclass(init=False)
 class Data(Spec):
-    """Data group containing raw channels and optional derived data products.
+    """Data group containing raw channels, derived pipeline products, and optional spatial maps.
 
-    Args:
-        raw_data: Raw channel data of shape (n_frames, n_tx, n_el, n_ax, n_ch)
+    Pipeline data products (plain arrays):
+        raw_data: Raw channel data of shape (n_frames, n_tx, n_ax, n_el, n_ch)
+            and type float32 or int16.
+        aligned_data: Time-of-flight corrected data of shape
+            (n_frames, n_tx, n_ax, n_el, n_ch) and type float32 or int16.
+        beamformed_data: Beamformed (beamsummed) data of shape
+            (n_frames, grid_z, grid_x, n_ch) and type float32.
+        envelope_data: Envelope-detected data of shape
+            (n_frames, grid_z, grid_x) and type float32.
+        image_sc: Scan-converted image data of shape
+            (n_frames, output_z, output_x) or (n_frames, output_z, output_x, output_y)
             and type float32.
+
+    Spatial map data products (with extent metadata):
         image: Reconstructed image data and extent metadata.
         segmentation: Segmentation data and extent metadata.
         sos_map: Speed-of-sound map data and extent metadata.
@@ -677,9 +688,17 @@ class Data(Spec):
         tissue_doppler: Tissue Doppler data and extent metadata.
         color_doppler: Color Doppler velocity data and extent metadata.
         **kwargs: Any other spatially aligned map data and extent metadata.
+
+    At least one data field (pipeline or spatial map) must be provided.
     """
 
-    raw_data: np.ndarray
+    # Pipeline data products (plain arrays)
+    raw_data: np.ndarray | None = None
+    aligned_data: np.ndarray | None = None
+    beamformed_data: np.ndarray | None = None
+    envelope_data: np.ndarray | None = None
+    image_sc: np.ndarray | None = None
+    # Spatial map data products (with extent metadata)
     image: Image | dict | None = None
     segmentation: Segmentation | dict | None = None
     sos_map: SosMap | dict | None = None
@@ -689,10 +708,31 @@ class Data(Spec):
     color_doppler: ColorDopplerMap | dict | None = None
 
     SCHEMA = {
+        # Pipeline data products
         "raw_data": {
             "dtype": (np.float32, np.int16),
             "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
         },
+        "aligned_data": {
+            "dtype": (np.float32, np.int16),
+            "shape": ("n_frames", "n_tx", "n_ax", "n_el", "n_ch"),
+        },
+        "beamformed_data": {
+            "dtype": np.float32,
+            "shape": ("n_frames", "grid_z", "grid_x", "n_ch"),
+        },
+        "envelope_data": {
+            "dtype": np.float32,
+            "shape": ("n_frames", "grid_z", "grid_x"),
+        },
+        "image_sc": {
+            "dtype": np.float32,
+            "shape": (
+                ("n_frames", "grid_z_sc", "grid_x_sc"),
+                ("n_frames", "grid_z_sc", "grid_x_sc", "grid_y_sc"),
+            ),
+        },
+        # Spatial map data products
         "image": {"spec": Image},
         "segmentation": {"spec": Segmentation},
         "sos_map": {"spec": SosMap},
@@ -704,7 +744,11 @@ class Data(Spec):
 
     def __init__(
         self,
-        raw_data: np.ndarray,
+        raw_data: np.ndarray | None = None,
+        aligned_data: np.ndarray | None = None,
+        beamformed_data: np.ndarray | None = None,
+        envelope_data: np.ndarray | None = None,
+        image_sc: np.ndarray | None = None,
         image: Image | dict | None = None,
         segmentation: Segmentation | dict | None = None,
         sos_map: SosMap | dict | None = None,
@@ -715,6 +759,10 @@ class Data(Spec):
         **extra_maps,
     ):
         self.raw_data = raw_data
+        self.aligned_data = aligned_data
+        self.beamformed_data = beamformed_data
+        self.envelope_data = envelope_data
+        self.image_sc = image_sc
         self.image = image
         self.segmentation = segmentation
         self.sos_map = sos_map
@@ -739,6 +787,15 @@ class Data(Spec):
         self.__post_init__()
 
     def __post_init__(self):
+        # Ensure at least one data field is present
+        all_data_keys = [k for k in self.SCHEMA]
+        has_any = any(getattr(self, k, None) is not None for k in all_data_keys)
+        if not has_any:
+            raise ValueError(
+                "At least one data field must be provided. "
+                f"Available fields: {', '.join(all_data_keys)}"
+            )
+
         super().__post_init__()
 
         suggested_map_keys = ", ".join(
