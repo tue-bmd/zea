@@ -1,6 +1,8 @@
 import warnings
 from collections import defaultdict
 from dataclasses import MISSING, dataclass, field, fields
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
 from typing import Any, List
 
@@ -819,6 +821,18 @@ class Data(Spec):
 
         super().__post_init__()
 
+        # n_ch must be 1 (RF) or 2 (IQ) for data types that carry a channel axis.
+        _N_CH_FIELDS = ("raw_data", "aligned_data", "beamformed_data")
+        for fname in _N_CH_FIELDS:
+            arr = getattr(self, fname, None)
+            if arr is not None and isinstance(arr, np.ndarray):
+                n_ch = arr.shape[-1]
+                if n_ch not in (1, 2):
+                    raise ValueError(
+                        f"'{fname}' must have n_ch ∈ {{1, 2}} (RF or IQ), "
+                        f"got n_ch={n_ch} (shape {arr.shape})."
+                    )
+
         suggested_map_keys = ", ".join(
             sorted(
                 key
@@ -839,7 +853,7 @@ class Data(Spec):
 
 
 @dataclass
-class Scan(Spec):
+class ScanSpec(Spec):
     """Scan group with acquisition and transmit metadata.
 
     All fields are aligned with the data format specification.
@@ -1180,7 +1194,7 @@ class Annotations(Spec):
 
 
 @dataclass(init=False)
-class Metadata(Spec):
+class MetadataSpec(Spec):
     """Metadata group with subject, acquisition context, annotations, and extra signals."""
 
     subject: Subject | dict = field(default_factory=Subject)
@@ -1258,7 +1272,7 @@ class Metadata(Spec):
 
 
 @dataclass
-class Metrics(Spec):
+class MetricsSpec(Spec):
     """Metrics group for acquisition-level quality/performance metrics.
 
     Args:
@@ -1325,18 +1339,18 @@ class FileSpec(Spec):
     """
 
     data: Data | dict
-    scan: Scan | dict
-    metadata: Metadata | dict = field(default_factory=Metadata)
-    metrics: Metrics | dict = field(default_factory=Metrics)
+    scan: ScanSpec | dict
+    metadata: MetadataSpec | dict = field(default_factory=MetadataSpec)
+    metrics: MetricsSpec | dict = field(default_factory=MetricsSpec)
     probe_name: str | None = None
     us_machine: str | None = None
     description: str | None = None
 
     SCHEMA = {
         "data": {"spec": Data},
-        "scan": {"spec": Scan},
-        "metadata": {"spec": Metadata},
-        "metrics": {"spec": Metrics},
+        "scan": {"spec": ScanSpec},
+        "metadata": {"spec": MetadataSpec},
+        "metrics": {"spec": MetricsSpec},
         "probe_name": {"dtype": str, "shape": ()},
         "us_machine": {"dtype": str, "shape": ()},
         "description": {"dtype": str, "shape": ()},
@@ -1344,12 +1358,20 @@ class FileSpec(Spec):
 
     def save(self, path: str, compression: str = "gzip") -> None:
         """Save the dataset to the specified path."""
+        # Lazy import to avoid circular dependency (spec.py is imported by file.py)
         from zea import File
+
+        try:
+            _zea_version = _get_pkg_version("zea")
+        except PackageNotFoundError:
+            _zea_version = "dev"
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with File(str(path), "w") as f:
+            f.attrs["zea_version"] = _zea_version
+
             for group_name, schema in self.SCHEMA.items():
                 if "spec" in schema:
                     group = f.create_group(group_name)
@@ -1423,7 +1445,7 @@ class FileSpec(Spec):
         #    that legacy scalar fields (n_frames, n_ax, n_el, n_tx, n_ch,
         #    bandwidth_percent, …) don't cause unexpected-keyword errors.
         if "scan" in kwargs and isinstance(kwargs["scan"], dict):
-            scan_schema_keys = set(Scan.SCHEMA.keys())
+            scan_schema_keys = set(ScanSpec.SCHEMA.keys())
             kwargs["scan"] = {k: v for k, v in kwargs["scan"].items() if k in scan_schema_keys}
 
         # 3. Handle legacy flat `data/image` datasets.  In old files

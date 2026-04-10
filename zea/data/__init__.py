@@ -46,6 +46,6 @@ from .data_format import (
     generate_zea_dataset,
     validate_input_data,
 )
+from .dataloader import Dataloader
 from .datasets import Dataset, Folder
-from .file import File, GroupProxy, load_file
-from .spec import FileSpec
+from .file import File, load_file

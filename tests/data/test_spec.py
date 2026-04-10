@@ -5,7 +5,20 @@ import pytest
 
 from zea.data import spec as spec_module
 from zea.data.file import File
-from zea.data.spec import Data, FileSpec, Image, Map, Scan, Segmentation, SignalND, Spec
+from zea.data.spec import (
+    Data,
+    FileSpec,
+    Image,
+    Map,
+    MetricsSpec,
+    ScanSpec,
+    Segmentation,
+    Signal1D,
+    SignalND,
+    SosMap,
+    Spec,
+    Subject,
+)
 
 
 def test_segmentation_spec():
@@ -189,7 +202,7 @@ def test_scan_requires_required_fields():
     with pytest.raises(
         TypeError, match="missing 1 required positional argument: 'demodulation_frequency'"
     ):
-        Scan(**scan)
+        ScanSpec(**scan)
 
 
 def test_scan_dimension_count_consistency():
@@ -197,7 +210,7 @@ def test_scan_dimension_count_consistency():
     scan["initial_times"] = np.zeros((3,), dtype=np.float32)
 
     with pytest.raises(ValueError, match="Dimension 'n_tx' has inconsistent sizes"):
-        Scan(**scan)
+        ScanSpec(**scan)
 
 
 def test_signal_nd_accepts_variable_trailing_dimensions_with_ellipsis():
@@ -239,17 +252,19 @@ def test_scan_accepts_float_inputs_and_casts_to_float32():
     scan["initial_times"] = np.zeros((2,), dtype=np.float64)
     scan["t0_delays"] = np.zeros((2, 4), dtype=np.float64)
 
-    scan_spec = Scan(**scan)
+    scan_spec = ScanSpec(**scan)
 
     assert np.dtype(scan_spec.sampling_frequency.dtype) == np.dtype(
-        Scan.SCHEMA["sampling_frequency"]["dtype"]
+        ScanSpec.SCHEMA["sampling_frequency"]["dtype"]
     )
-    assert scan_spec.center_frequency.dtype == np.dtype(Scan.SCHEMA["center_frequency"]["dtype"])
+    assert scan_spec.center_frequency.dtype == np.dtype(
+        ScanSpec.SCHEMA["center_frequency"]["dtype"]
+    )
     assert np.dtype(scan_spec.demodulation_frequency.dtype) == np.dtype(
-        Scan.SCHEMA["demodulation_frequency"]["dtype"]
+        ScanSpec.SCHEMA["demodulation_frequency"]["dtype"]
     )
-    assert scan_spec.initial_times.dtype == np.dtype(Scan.SCHEMA["initial_times"]["dtype"])
-    assert scan_spec.t0_delays.dtype == np.dtype(Scan.SCHEMA["t0_delays"]["dtype"])
+    assert scan_spec.initial_times.dtype == np.dtype(ScanSpec.SCHEMA["initial_times"]["dtype"])
+    assert scan_spec.t0_delays.dtype == np.dtype(ScanSpec.SCHEMA["t0_delays"]["dtype"])
 
 
 def test_dataset_builder_accepts_float_raw_data_and_casts_to_float32():
@@ -432,26 +447,26 @@ class TestScanValidationErrors:
         scan = _scan_minimal()
         scan["probe_geometry"] = np.zeros((4, 3), dtype=np.int32)
         with pytest.raises(TypeError, match="probe_geometry"):
-            Scan(**scan)
+            ScanSpec(**scan)
 
     def test_probe_geometry_wrong_shape_raises(self):
         """probe_geometry must be (n_el, 3) — literal 3 is enforced."""
         scan = _scan_minimal(n_el=4)
         scan["probe_geometry"] = np.zeros((4, 2), dtype=np.float32)
         with pytest.raises(ValueError, match="probe_geometry"):
-            Scan(**scan)
+            ScanSpec(**scan)
 
     def test_t0_delays_dimension_mismatch_raises(self):
         """n_el in t0_delays doesn't match probe_geometry n_el."""
         scan = _scan_minimal(n_tx=3, n_el=4)
         scan["t0_delays"] = np.zeros((3, 6), dtype=np.float32)  # 6 ≠ n_el=4
         with pytest.raises(ValueError, match="n_el"):
-            Scan(**scan)
+            ScanSpec(**scan)
 
     def test_unknown_keyword_raises(self):
         scan = _scan_minimal()
         with pytest.raises(TypeError):
-            Scan(**scan, this_key_does_not_exist=42)
+            ScanSpec(**scan, this_key_does_not_exist=42)
 
 
 class TestDataValidationErrors:
@@ -473,8 +488,6 @@ class TestDataValidationErrors:
 
     def test_map_wrong_pixel_dtype_raises(self):
         """SosMap inherits FloatMap – pixels must be float32, not uint8."""
-        from zea.data.spec import SosMap
-
         with pytest.raises(TypeError, match="pixels"):
             SosMap(
                 pixels=np.zeros((2, 16, 12, 1), dtype=np.uint8),
@@ -506,30 +519,42 @@ class TestDataValidationErrors:
                 extent=np.zeros(3, dtype=np.float32),
             )
 
+    def test_n_ch_3_raises_for_raw_data(self):
+        """raw_data n_ch must be 1 or 2, 3 channels should be rejected."""
+        with pytest.raises(ValueError, match="n_ch"):
+            Data(raw_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
+
+    def test_n_ch_3_raises_for_aligned_data(self):
+        with pytest.raises(ValueError, match="n_ch"):
+            Data(aligned_data=np.zeros((2, 3, 8, 4, 3), dtype=np.float32))
+
+    def test_n_ch_3_raises_for_beamformed_data(self):
+        with pytest.raises(ValueError, match="n_ch"):
+            Data(beamformed_data=np.zeros((2, 8, 6, 3), dtype=np.float32))
+
+    def test_n_ch_1_and_2_are_valid(self):
+        """Both n_ch=1 (RF) and n_ch=2 (IQ) must pass."""
+        Data(raw_data=np.zeros((2, 3, 8, 4, 1), dtype=np.float32))
+        Data(raw_data=np.zeros((2, 3, 8, 4, 2), dtype=np.float32))
+
 
 class TestMetadataAndMetricsValidationErrors:
     """TypeError / ValueError raised by Metadata / Metrics / Subject validation."""
 
     def test_subject_age_wrong_dtype_raises(self):
         """age must be uint8, not str."""
-        from zea.data.spec import Subject
-
         with pytest.raises(TypeError, match="age"):
             Subject(age="forty two")
 
     def test_signal_missing_required_field_raises(self):
         """Signal1D requires both offset and sampling_frequency."""
-        from zea.data.spec import Signal1D
-
         with pytest.raises(TypeError, match="sampling_frequency"):
             Signal1D(samples=np.zeros(100, dtype=np.float32), offset=np.float32(0.0))
 
     def test_metrics_wrong_shape_raises(self):
         """coherence_factor must be 1-D (n_frames,), not 2-D."""
-        from zea.data.spec import Metrics
-
         with pytest.raises(ValueError, match="coherence_factor"):
-            Metrics(coherence_factor=np.ones((3, 2), dtype=np.float32))
+            MetricsSpec(coherence_factor=np.ones((3, 2), dtype=np.float32))
 
     def test_annotations_n_frames_mismatch_raises(self):
         """view n_frames in Annotations must match Data n_frames across FileSpec."""

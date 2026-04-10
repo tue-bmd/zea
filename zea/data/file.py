@@ -2,7 +2,7 @@
 
 import enum
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import List, Tuple, Union
 
 import h5py
 import numpy as np
@@ -10,19 +10,12 @@ from keras.utils import pad_sequences
 
 from zea import log
 from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
-from zea.internal.checks import (
-    _DATA_TYPES,
-    _NON_IMAGE_DATA_TYPES,
-    _REQUIRED_SCAN_KEYS,
-    get_check,
-)
+from zea.data.spec import Data, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
+from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
 from zea.internal.utils import reduce_to_signature
 from zea.probes import Probe
 from zea.scan import Scan
-
-if TYPE_CHECKING:
-    from zea.data.spec import FileSpec, Metadata, Metrics
 
 
 class GroupProxy:
@@ -114,6 +107,15 @@ class File(h5py.File):
         """Return the path of the file."""
         return Path(self.filename)
 
+    @property
+    def zea_version(self) -> str | None:
+        """Return the zea version that wrote this file, or ``None`` for legacy files.
+
+        Files created with zea 0.0.12 and later store a ``zea_version``
+        root attribute.  Files written before zea 0.0.12 return ``None``.
+        """
+        return self.attrs.get("zea_version", None)
+
     @classmethod
     def create(
         cls,
@@ -137,11 +139,11 @@ class File(h5py.File):
         Args:
             path: Destination file path.
             data: Data dict accepted by :class:`~zea.data.spec.Data`.
-            scan: Scan-parameter dict accepted by :class:`~zea.data.spec.Scan`.
+            scan: Scan-parameter dict accepted by :class:`~zea.data.spec.ScanSpec`.
             metadata: Optional metadata dict accepted by
-                :class:`~zea.data.spec.Metadata`.
+                :class:`~zea.data.spec.MetadataSpec`.
             metrics: Optional metrics dict accepted by
-                :class:`~zea.data.spec.Metrics`.
+                :class:`~zea.data.spec.MetricsSpec`.
             probe_name: Name of the probe.
             us_machine: Name of the ultrasound machine.
             description: Free-text description of the acquisition.
@@ -152,17 +154,38 @@ class File(h5py.File):
             File: The closed :class:`File` handle (re-open with
             ``File(path)`` to read).
 
-        Example::
+        .. doctest::
 
-            File.create(
-                "my_acquisition.hdf5",
-                data={"raw_data": raw},
-                scan={"probe_geometry": geom, ...},
-                probe_name="L11-4v",
-            )
+            >>> import os, tempfile
+            >>> import numpy as np
+            >>> from zea import File
+
+            >>> n_frames, n_tx, n_el, n_ax = 2, 4, 8, 64
+            >>> raw = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
+            >>> geom = np.zeros((n_el, 3), dtype=np.float32)
+            >>> scan = {
+            ...     "probe_geometry": geom,
+            ...     "sampling_frequency": np.float32(40e6),
+            ...     "center_frequency": np.float32(5e6),
+            ...     "demodulation_frequency": np.float32(5e6),
+            ...     "initial_times": np.zeros(n_tx, dtype=np.float32),
+            ...     "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
+            ...     "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
+            ...     "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
+            ...     "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
+            ...     "polar_angles": np.zeros(n_tx, dtype=np.float32),
+            ...     "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
+            ... }
+
+            >>> _, path = tempfile.mkstemp(suffix=".hdf5")
+            >>> f = File.create(
+            ...     path, data={"raw_data": raw}, scan=scan, probe_name="L11-4v", overwrite=True
+            ... )
+            >>> f.probe_name
+            'L11-4v'
+            >>> f.close()
+            >>> os.unlink(path)
         """
-        from zea.data.spec import FileSpec
-
         path = Path(path)
 
         if path.exists() and not overwrite:
@@ -180,7 +203,6 @@ class File(h5py.File):
         if description is not None:
             kwargs["description"] = description
 
-        # Validate everything before touching the filesystem
         spec = FileSpec(**kwargs)
         spec.save(str(path), compression=compression)
 
@@ -505,9 +527,19 @@ class File(h5py.File):
 
         Returns:
             Scan: The scan object.
-        """
-        from zea.data.spec import Scan as ScanSpec
 
+        .. doctest::
+
+            >>> from zea import File
+            >>> path = (
+            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+            ... )
+            >>> with File(path) as f:
+            ...     scan = f.scan()
+            >>> type(scan).__name__
+            'Scan'
+        """
         scan_dict = self.get_scan_parameters(event)
 
         # Try spec-based validation; fall back gracefully for legacy files
@@ -556,37 +588,57 @@ class File(h5py.File):
 
         Returns:
             Probe: The probe object.
+
+        .. doctest::
+
+            >>> from zea import File
+            >>> path = (
+            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
+            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
+            ... )
+            >>> with File(path) as f:
+            ...     probe = f.probe()
+            >>> type(probe).__name__
+            'Probe'
         """
         probe_parameters_file = self.get_probe_parameters(event)
         return Probe.from_parameters(self.probe_name, probe_parameters_file)
 
-    def metadata(self) -> "Metadata":
-        """Return a validated :class:`~zea.data.spec.Metadata` object from the file.
+    def metadata(self) -> MetadataSpec:
+        """Return a validated :class:`~zea.data.spec.MetadataSpec` object from the file.
 
         Returns:
-            Metadata: The validated metadata spec.
+            MetadataSpec: The validated metadata spec.
 
         Raises:
             KeyError: If the file has no ``metadata`` group.
-        """
-        from zea.data.spec import Metadata as MetadataSpec
 
+        Example::
+
+            >>> with File("my_file.hdf5") as f:  # doctest: +SKIP
+            ...     meta = f.metadata()
+            ...     print(meta.subject.id)
+        """
         if "metadata" not in self:
             raise KeyError("No 'metadata' group in this file.")
         raw = self.recursively_load_dict_contents_from_group("metadata")
         return MetadataSpec(**raw)
 
-    def metrics(self) -> "Metrics":
-        """Return a validated :class:`~zea.data.spec.Metrics` object from the file.
+    def metrics(self) -> MetricsSpec:
+        """Return a validated :class:`~zea.data.spec.MetricsSpec` object from the file.
 
         Returns:
-            Metrics: The validated metrics spec.
+            MetricsSpec: The validated metrics spec.
 
         Raises:
             KeyError: If the file has no ``metrics`` group.
-        """
-        from zea.data.spec import Metrics as MetricsSpec
 
+        Example::
+
+            >>> with File("my_file.hdf5") as f:  # doctest: +SKIP
+            ...     met = f.metrics()
+            ...     print(met.coherence_factor.shape)
+        """
         if "metrics" not in self:
             raise KeyError("No 'metrics' group in this file.")
         raw = self.recursively_load_dict_contents_from_group("metrics")
@@ -649,10 +701,23 @@ class File(h5py.File):
             return file.shape(key)
 
     def validate(self):
-        """Validate the file structure.
+        """Lightweight structural validation — no array data is loaded into RAM.
+
+        Checks that the file has a ``data`` group and that all keys within it
+        are recognised zea data types.  For files written before zea 0.0.12
+        (produced by :func:`~zea.data.data_format.generate_zea_dataset`) a minimal key-name
+        check is performed.  For files created with zea 0.0.12 and later
+        the keys are checked against the :class:`~zea.data.spec.Data` schema.
+
+        Use :meth:`validate_spec` for a **full** validation that loads all data
+        and checks dtypes, shapes, and cross-field dimension consistency.
 
         Returns:
-            dict: A dictionary with the validation results.
+            dict: ``{"status": "success"}`` on success.
+
+        Raises:
+            AssertionError: If the file is missing required groups or contains
+                unrecognised data keys.
         """
         try:
             return validate_file(file=self)
@@ -660,21 +725,35 @@ class File(h5py.File):
             log.error(f"File {self.path} is not a valid zea file.\n{e}\n")
             raise
 
-    def validate_spec(self) -> "FileSpec":
-        """Validate the file against the full :class:`FileSpec` schema.
+    def validate_spec(self) -> FileSpec:
+        """Full schema validation — loads all data into RAM.
 
-        Loads all data into RAM and runs dtype, shape, and cross-dimension
-        consistency checks.  Use :meth:`validate` for lightweight structural
-        checks that do not require loading data.
+        Reads every dataset in the file and runs dtype, shape, and
+        cross-dimension consistency checks as defined by :class:`~zea.data.spec.FileSpec`.
+        Use this to confirm a file is fully spec-compliant before sharing or
+        processing it.
+
+        For a fast, zero-IO structural check use :meth:`validate` instead.
+
+        .. note::
+            This method only works on files created with zea 0.0.12 and later.
+            Files written before zea 0.0.12 should be migrated with
+            :func:`~zea.data.data_format.generate_zea_dataset`
+            or re-saved through :meth:`File.create`.
 
         Returns:
-            FileSpec: The validated spec object.
+            FileSpec: The fully validated spec object, with all data accessible
+            as typed attributes (e.g. ``spec.data.raw_data``, ``spec.scan.n_tx``).
 
         Raises:
             TypeError, ValueError: If the file does not conform to the spec.
-        """
-        from zea.data.spec import FileSpec
 
+        .. doctest::
+
+            >>> with File("my_file.hdf5") as f:  # doctest: +SKIP
+            ...     spec = f.validate_spec()
+            ...     print(spec.scan.n_tx)
+        """
         return FileSpec.from_hdf5(self)
 
     def __repr__(self):
@@ -873,228 +952,78 @@ def _print_hdf5_attrs(hdf5_obj, prefix=""):
 
 
 def validate_file(path: str = None, file: File = None):
-    """Reads the hdf5 file at the given path and validates its structure.
+    """Validate the structure and data of a zea HDF5 file.
 
-    Provide either the path or the file, but not both.
+    For files created with zea 0.0.12 and later this runs the full
+    :class:`~zea.data.spec.FileSpec` schema validation (dtypes, shapes, and
+    dimension consistency).  Files written before zea 0.0.12
+    (produced by :func:`~zea.data.data_format.generate_zea_dataset`) are detected by the
+    presence of scalar dataset ``scan/n_frames``; for those only a lightweight
+    structural ``data`` group check is performed.
+
+    Provide either *path* or *file*, but not both.
 
     Args:
-        path (str, pathlike): The path to the hdf5 file.
-        file (File): The hdf5 file.
+        path (str | pathlike): Path to the HDF5 file.
+        file (File): An already-open :class:`File` instance.
 
+    Returns:
+        dict: ``{"status": "success"}`` on success.
+
+    Raises:
+        AssertionError: If the file is missing the ``data`` group.
+        TypeError, ValueError: If spec validation fails on files created with zea 0.0.12 and later.
     """
     assert (path is not None) ^ (file is not None), (
         "Provide either the path or the file, but not both."
     )
 
     if path is not None:
-        path = Path(path)
         with File(path, "r") as _file:
-            event_structure, num_events = _validate_hdf5_file(_file)
+            _validate_file_impl(_file)
     else:
-        event_structure, num_events = _validate_hdf5_file(file)
+        _validate_file_impl(file)
 
-    return {
-        "status": "success",
-        "event_structure": event_structure,
-        "num_events": num_events,
-    }
+    return {"status": "success"}
 
 
-def _validate_hdf5_file(file: File):
-    all_keys = list(file.keys())
+def _is_legacy_file(file: File) -> bool:
+    """Return ``True`` when *file* pre-dates the dataspec format.
 
-    if file.has_events:
-        num_events = len(all_keys)
-        for event_no in range(num_events):
-            assert_key(file, f"event_{event_no}")
-            _validate_structure(file[f"event_{event_no}"])
-    else:
-        num_events = 0
-        _validate_structure(file)
-
-    return file.has_events, num_events
+    Files created with zea 0.0.12 and later always store a
+    ``zea_version`` root attribute.  Files that lack it were produced by
+    the old ``generate_zea_dataset`` path and are treated as legacy.
+    """
+    return "zea_version" not in file.attrs
 
 
-def _validate_structure(file: File):
-    # Validate the root group
+def _validate_file_impl(file: File) -> None:
+    """Lightweight structural validation — no array data is loaded.
+
+    Checks that:
+    - a ``data`` group is present and is an HDF5 Group
+    - for legacy files, every key in ``data`` is a recognised zea data type
+    - for files created with zea 0.0.12 and later, every key in ``data``
+    is in :class:`~zea.data.spec.Data`\'s schema
+    """
     assert_key(file, "data")
-
-    # Assert file["data"] is a group
     assert isinstance(file["data"], h5py.Group), (
-        "The data group is not a group. Please check the file structure. "
-        "Maybe this is not a zea file?"
+        "'data' is not a group - this may not be a zea file."
     )
 
-    # Check if there is only image data
-    not_only_image_data = len([i for i in _NON_IMAGE_DATA_TYPES if i in file["data"].keys()]) > 0
-
-    # Only check scan group if there is non-image data
-    if not_only_image_data:
-        assert_key(file, "scan")
-
-        for key in _REQUIRED_SCAN_KEYS:
-            assert_key(file["scan"], key)
-
-    # validate the data group
-    for key in file["data"].keys():
-        assert key in _DATA_TYPES, "The data group contains an unexpected key."
-
-        # Validate data shape
-        data_shape = file["data"][key].shape
-        if key == "raw_data":
-            get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert data_shape[0] == file["scan"]["n_frames"][()], (
-                "n_frames does not match the first dimension of raw_data."
-            )
-            assert data_shape[1] == file["scan"]["n_tx"][()], (
-                "n_tx does not match the second dimension of raw_data."
-            )
-            assert data_shape[2] == file["scan"]["n_ax"][()], (
-                "n_ax does not match the third dimension of raw_data."
-            )
-            assert data_shape[3] == file["scan"]["n_el"][()], (
-                "n_el does not match the fourth dimension of raw_data."
-            )
-        elif key == "aligned_data":
-            get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert data_shape[0] == file["scan"]["n_frames"][()], (
-                "n_frames does not match the first dimension of aligned_data."
-            )
-        elif key == "beamformed_data":
-            get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert data_shape[0] == file["scan"]["n_frames"][()], (
-                "n_frames does not match the first dimension of beamformed_data."
-            )
-        elif key == "envelope_data":
-            get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert data_shape[0] == file["scan"]["n_frames"][()], (
-                "n_frames does not match the first dimension of envelope_data."
-            )
-        elif key == "image":
-            get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert data_shape[0] == file["scan"]["n_frames"][()], (
-                "n_frames does not match the first dimension of image."
-            )
-        elif key == "image_sc":
-            get_check(key)(shape=data_shape, with_batch_dim=True)
-            assert data_shape[0] == file["scan"]["n_frames"][()], (
-                "n_frames does not match the first dimension of image_sc."
-            )
-
-    if not_only_image_data:
-        _assert_scan_keys_present(file)
-
-    _assert_unit_and_description_present(file)
-
-
-def _assert_scan_keys_present(file: File):
-    """Ensure that all required keys are present.
-
-    Args:
-        file (h5py.File): The file instance to check.
-
-    Raises:
-        AssertionError: If a required key is missing or does not have the right shape.
-    """
-    for required_key in _REQUIRED_SCAN_KEYS:
-        assert required_key in file["scan"].keys(), (
-            f"The scan group does not contain the required key {required_key}."
-        )
-
-    # Ensure that all keys have the correct shape
-    for key in file["scan"].keys():
-        if isinstance(file["scan"][key], h5py.Group):
-            shape_file = None
-        else:
-            shape_file = file["scan"][key].shape
-
-        if key == "probe_geometry":
-            correct_shape = (file["scan"]["n_el"][()], 3)
-
-        elif key == "t0_delays":
-            correct_shape = (
-                file["scan"]["n_tx"][()],
-                file["scan"]["n_el"][()],
-            )
-        elif key == "tx_apodizations":
-            correct_shape = (
-                file["scan"]["n_tx"][()],
-                file["scan"]["n_el"][()],
-            )
-
-        elif key == "focus_distances":
-            correct_shape = (file["scan"]["n_tx"][()],)
-
-        elif key == "transmit_origins":
-            correct_shape = (file["scan"]["n_tx"][()], 3)
-
-        elif key == "polar_angles":
-            correct_shape = (file["scan"]["n_tx"][()],)
-
-        elif key == "azimuth_angles":
-            correct_shape = (file["scan"]["n_tx"][()],)
-
-        elif key == "initial_times":
-            correct_shape = (file["scan"]["n_tx"][()],)
-
-        elif key == "time_to_next_transmit":
-            correct_shape = (
-                file["scan"]["n_frames"][()],
-                file["scan"]["n_tx"][()],
-            )
-        elif key == "tgc_gain_curve":
-            correct_shape = (file["scan"]["n_ax"][()],)
-        elif key == "tx_waveform_indices":
-            correct_shape = (file["scan"]["n_tx"][()],)
-        elif key in ("waveforms_one_way", "waveforms_two_way"):
-            correct_shape = None
-
-        elif key in (
-            "sampling_frequency",
-            "center_frequency",
-            "demodulation_frequency",
-            "n_frames",
-            "n_tx",
-            "n_el",
-            "n_ax",
-            "n_ch",
-            "sound_speed",
-            "bandwidth_percent",
-            "element_width",
-            "lens_correction",
-        ):
-            correct_shape = ()
-            shape_file = file["scan"][key].shape
-
-        else:
-            correct_shape = None
-            log.debug(f"No validation has been defined for {log.orange(key)}.")
-
-        if correct_shape is not None:
-            assert shape_file == correct_shape, (
-                f"`{key}` does not have the correct shape. "
-                f"Expected shape: {correct_shape}, got shape: {shape_file}"
-            )
-
-
-def _assert_unit_and_description_present(hdf5_file, _prefix=""):
-    """Checks that all keys have a unit and description attribute.
-
-    Args:
-        hdf5_file (h5py.File): The hdf5 file to check.
-
-    Raises:
-        AssertionError: If a file does not have a unit or description attribute.
-    """
-    for key in hdf5_file.keys():
-        if isinstance(hdf5_file[key], h5py.Group):
-            _assert_unit_and_description_present(hdf5_file[key], _prefix=_prefix + key + "/")
-        else:
-            assert "unit" in hdf5_file[key].attrs.keys(), (
-                f"The file {_prefix}/{key} does not have a unit attribute."
-            )
-            assert "description" in hdf5_file[key].attrs.keys(), (
-                f"The file {_prefix}/{key} does not have a description attribute."
+    if _is_legacy_file(file):
+        # For legacy files: accepted keys are the flat _DATA_TYPES list.
+        has_raw = any(k in file["data"] for k in _NON_IMAGE_DATA_TYPES)
+        if has_raw:
+            assert "scan" in file, "Legacy file is missing the 'scan' group."
+        for key in file["data"].keys():
+            assert key in _DATA_TYPES, f"'data/{key}' is not a recognised zea data type."
+    else:
+        # For new-format files: accepted keys are Data.SCHEMA keys.
+        known = set(Data.SCHEMA.keys())
+        for key in file["data"].keys():
+            assert key in known, (
+                f"'data/{key}' is not in the Data schema. Known keys: {sorted(known)}"
             )
 
 

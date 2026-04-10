@@ -108,7 +108,6 @@ from .config import Config
 from .data.dataloader import Dataloader
 from .data.datasets import Dataset, Folder
 from .data.file import File, load_file
-from .data.spec import FileSpec
 from .datapaths import set_data_paths
 from .interface import Interface
 from .internal.device import init_device

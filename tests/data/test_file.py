@@ -705,3 +705,79 @@ class TestMetadataMetricsAccessors:
         with File(path) as f:
             with pytest.raises(KeyError, match="metrics"):
                 f.metrics()
+
+
+class TestZeaVersion:
+    """Tests for the zea_version attribute written by File.create()."""
+
+    def test_version_written_on_create(self, tmp_path):
+        """File.create() stores a non-empty zea_version root attribute."""
+        import zea
+
+        path = tmp_path / "versioned.hdf5"
+        File.create(
+            path,
+            data={"envelope_data": np.ones((2, 8, 6), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=2),
+        ).close()
+
+        with File(path) as f:
+            assert f.zea_version == zea.__version__
+
+    def test_legacy_file_has_no_version(self, tmp_path):
+        """A hand-crafted file without the zea_version attr is treated as legacy."""
+        import h5py
+
+        path = tmp_path / "no_version.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_group("data")
+
+        with File(path) as f:
+            assert f.zea_version is None
+
+    def test_validate_does_not_load_data(self, tmp_path):
+        """validate() succeeds without loading array data (lightweight path)."""
+        path = tmp_path / "validate_light.hdf5"
+        File.create(
+            path,
+            data={"envelope_data": np.ones((2, 8, 6), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=2),
+        ).close()
+
+        with File(path) as f:
+            result = f.validate()
+        assert result["status"] == "success"
+
+    def test_validate_and_validate_spec_are_independent(self, tmp_path):
+        """validate() does structural check; validate_spec() does full schema check."""
+        path = tmp_path / "both.hdf5"
+        n_frames, n_tx, n_el = 2, 3, 4
+        File.create(
+            path,
+            data={"raw_data": np.ones((n_frames, n_tx, 8, n_el, 1), dtype=np.float32)},
+            scan=_scan_minimal(n_frames=n_frames, n_tx=n_tx, n_el=n_el),
+            probe_name="test_probe",
+        ).close()
+
+        with File(path) as f:
+            # validate() returns a simple status dict
+            assert f.validate() == {"status": "success"}
+            # validate_spec() returns a rich FileSpec object
+            spec = f.validate_spec()
+            assert isinstance(spec, FileSpec)
+            assert spec.data.raw_data.shape[0] == n_frames
+
+    def test_legacy_file_validate_passes(self, tmp_path):
+        """validate() works on a legacy file (no zea_version) that has image-only data
+        (no scan group required for image-only legacy files)."""
+        import h5py
+
+        path = tmp_path / "legacy.hdf5"
+        with h5py.File(path, "w") as f:
+            f.attrs["probe"] = "legacy_probe"
+            g = f.create_group("data")
+            # image-only legacy file: no scan group needed
+            g.create_dataset("image_sc", data=np.zeros((2, 8, 6), dtype=np.float32))
+
+        with File(path) as f:
+            assert f.validate() == {"status": "success"}
