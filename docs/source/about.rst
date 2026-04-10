@@ -74,6 +74,8 @@ Citation
 
 Please see the :ref:`citation` guide for citation information of ``zea``.
 
+.. _papers:
+
 Papers
 ------
 

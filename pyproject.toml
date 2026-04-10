@@ -63,7 +63,7 @@ dev = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff",
+    "ruff==0.15.10",
     "pytest-cov",
     # docs
     "sphinx",
@@ -94,7 +94,7 @@ tests = [
     "simpleitk>=2.2.1",
     "ipywidgets",
     "pre-commit",
-    "ruff",
+    "ruff==0.15.10",
     "pytest-cov",
 ]
 docs = [
@@ -238,3 +238,8 @@ docstring-code-format = true
 # This only has an effect when the `docstring-code-format` setting is
 # enabled.
 docstring-code-line-length = "dynamic"
+
+[tool.coverage.report]
+omit = [
+    "zea/ops/keras_ops.py",
+]

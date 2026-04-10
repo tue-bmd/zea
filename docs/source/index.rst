@@ -16,7 +16,7 @@ Check out the :doc:`about` page for more information and the motivation behind `
 .. admonition:: Beta!
    :class: warning
 
-   This package is highly experimental and under active development. It is mainly used to support `our research <https://www.tue.nl/en/research/research-groups/signal-processing-systems/biomedical-diagnostics-lab>`_ and as a basis for our publications. That being said, we are happy to share it with the ultrasound community and hope it will be useful for your research as well.
+   This package is under active development. It is mainly used to support :ref:`our research <papers>`. That being said, we are happy to share it with the ultrasound community and hope it will be useful for your research as well.
 
 .. note::
 

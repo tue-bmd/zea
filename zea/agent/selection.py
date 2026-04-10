@@ -141,7 +141,7 @@ class GreedyEntropy(LinesActionModel):
 
     @staticmethod
     def compute_pairwise_pixel_gaussian_error(particles, entropy_sigma=1.0):
-        """Compute the pairwise pixelwise Gaussian error.
+        r"""Compute the pairwise pixelwise Gaussian error.
 
         This function computes the Gaussian error between each pair of pixels in the
         set of particles provided. This can be used to approximate the entropy of
@@ -170,7 +170,7 @@ class GreedyEntropy(LinesActionModel):
 
     @staticmethod
     def compute_pixelwise_entropy(particles, entropy_sigma=1.0):
-        """
+        r"""
         This function computes the entropy for each pixel using a Gaussian Mixture Model
         approximation of the posterior distribution.
         For more details see Section VI. B here: https://arxiv.org/pdf/2410.13310
