@@ -964,7 +964,7 @@ class Subject(Spec):
             warnings.warn(
                 log.warning(
                     "Subject ID is not provided; please consider adding an ID for "
-                    "better traceability"
+                    "better traceability and to enable subject-wise splits."
                 )
             )
 
