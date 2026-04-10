@@ -7,15 +7,25 @@ This page covers the ``zea`` data format, how files are structured, how to creat
 read files, and where to get existing datasets. More detail data handling classes can
 be found in :mod:`zea.data` module documentation.
 
-For the configuration system (model, pipeline, and scan parameters in YAML), see
-:doc:`Config <config>`.  Example notebooks on data handling live in :doc:`Examples <examples>`.
+.. note::
+   For the configuration system (model, pipeline, and scan parameters in YAML), see
+   :doc:`Config <config>`.  Example notebooks on data handling live in :doc:`Examples <examples>`.
+
+The philosophy behind the zea data format is to store data alongside all necessary parameters to
+process it (e.g. :class:`~zea.Scan` parameters), and additional metadata (e.g. acquisition conditions, patient info, etc.)
+in a single file. This makes it easy to manage and share data, and ensures that all necessary information
+is always available when loading a file.
+
+Additionally, to support the :ref:`cognitive ultrasound framework <about>`, the zea data format is designed to
+allow for flexible and efficient access to a part of the data (e.g. a single frame or transmit) without the need
+to load the entire file into memory.
 
 -------------------------------
 Working with zea data files
 -------------------------------
 
 ``zea`` stores each acquisition as a single HDF5 file following the
-schema :ref:`data-spec`.  The primary API is :class:`zea.File`.
+schema :ref:`data-spec`.  The primary API is :class:`zea.File`. It operates similarly to `h5py.File <https://docs.h5py.org/en/latest/high/file.html>`_, but with an additional interface of parsing parameters into :class:`~zea.Scan` and :class:`~zea.Probe` objects, and validating the file against the zea data spec.
 
 **Open and read an existing file**
 
@@ -34,7 +44,6 @@ schema :ref:`data-spec`.  The primary API is :class:`zea.File`.
         raw0 = f.data.raw_data[0]         # first frame
 
 See :class:`zea.File` for the full API reference.
-
 
 **Create a new file**
 
