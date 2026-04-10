@@ -13,7 +13,7 @@ from zea.data.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.data.spec import Data, FileSpec, MetadataSpec, MetricsSpec, ScanSpec
 from zea.internal.checks import _DATA_TYPES, _NON_IMAGE_DATA_TYPES
 from zea.internal.core import DataTypes
-from zea.internal.utils import reduce_to_signature
+from zea.internal.utils import deprecated, reduce_to_signature
 from zea.probes import Probe
 from zea.scan import Scan
 
@@ -331,6 +331,7 @@ class File(h5py.File):
         indices = (slice(None), np.array(selected_transmits))
         return self.load_data(key, indices)
 
+    @deprecated(replacement="File.data.<key> with h5py slice indexing")
     def load_data(
         self,
         data_type,
@@ -338,35 +339,20 @@ class File(h5py.File):
     ):
         """Load data from the file.
 
+        .. deprecated::
+           Use ``file.data.<key>`` with standard h5py slice indexing instead::
+
+               with File(path) as f:
+                   raw = f.data.raw_data[:]  # all frames
+                   raw = f.data.raw_data[0]  # first frame
+                   raw = f.data.raw_data[0, [0, 2]]  # frame 0, transmits 0 and 2
+
         .. include:: ../common/file_indexing.rst
-
-        .. doctest::
-
-            >>> from zea import File
-
-            >>> path_to_file = (
-            ...     "hf://zeahub/picmus/database/experiments/contrast_speckle/"
-            ...     "contrast_speckle_expe_dataset_iq/contrast_speckle_expe_dataset_iq.hdf5"
-            ... )
-
-            >>> with File(path_to_file, mode="r") as file:
-            ...     # data has shape (n_frames, n_tx, n_el, n_ax, n_ch)
-            ...     data = file.load_data("raw_data")
-            ...     data.shape
-            ...     # load first frame only
-            ...     data = file.load_data("raw_data", indices=0)
-            ...     data.shape
-            ...     # load frame 0 and transmits 0, 2 and 4
-            ...     data = file.load_data("raw_data", indices=(0, [0, 2, 4]))
-            ...     data.shape
-            (1, 75, 832, 128, 2)
-            (75, 832, 128, 2)
-            (3, 832, 128, 2)
 
         Args:
             data_type (str): The type of data to load. Options are 'raw_data', 'aligned_data',
                 'beamformed_data', 'envelope_data', 'image' and 'image_sc'.
-            indices (optional): The indices to load. Defaults to `None` in
+            indices (optional): The indices to load. Defaults to ``None`` in
                 which case all data is loaded.
         """
         key = self.format_key(data_type)

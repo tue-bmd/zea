@@ -702,7 +702,7 @@ class Data(Spec):
         shear_wave_elastograhy_map: Shear-wave elastography data and extent metadata.
         tissue_doppler: Tissue Doppler data and extent metadata.
         color_doppler: Color Doppler velocity data and extent metadata.
-        **kwargs: Any other spatially aligned map data and extent metadata.
+        \\*\\*kwargs: Any other spatially aligned map data and extent metadata.
 
     At least one data field (pipeline or spatial map) must be provided.
     """
